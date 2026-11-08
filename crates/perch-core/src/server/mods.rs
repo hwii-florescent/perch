@@ -424,10 +424,8 @@ fn cut_output(bytes: Vec<u8>) -> String {
     String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_OUTPUT)]).into_owned()
 }
 
-/// `fs` on another computer over ssh. Writes travel in the command line, so they stop at 256 KiB.
+/// `fs` on another computer over ssh (a write goes down ssh's stdin, up to 5 MiB like a read).
 async fn remote_fs(app: &AppState, host: &str, body: &Value) -> axum::response::Response {
-    use crate::ssh::shell_quote;
-    use base64::Engine;
     let target = match ssh_target(app, host) {
         Ok(target) => target,
         Err(error) => return plain_error(StatusCode::BAD_REQUEST, error),
@@ -444,14 +442,17 @@ async fn remote_fs(app: &AppState, host: &str, body: &Value) -> axum::response::
         ),
         "write" => {
             let text = body["text"].as_str().unwrap_or_default();
-            if text.len() > 256 * 1024 {
-                return plain_error(StatusCode::BAD_REQUEST, "a write to another computer is at most 256 KiB");
+            if text.len() as u64 > MAX_FILE {
+                return plain_error(StatusCode::BAD_REQUEST, "larger than 5 MiB");
             }
-            let data = base64::engine::general_purpose::STANDARD.encode(text);
-            format!(
-                "p={path}; mkdir -p \"$(dirname \"$p\")\" && printf %s {} | base64 -d > \"$p\"",
-                shell_quote(&data)
-            )
+            // The text goes down ssh's stdin, so the command line does not limit it.
+            let script = format!("p={path}; mkdir -p \"$(dirname \"$p\")\" && cat > \"$p\"");
+            let input = text.as_bytes().to_vec();
+            return match crate::ssh::run_remote_with_input(&target, &script, input, 60).await {
+                Ok(out) if out.status.success() => Json(json!({})).into_response(),
+                Ok(out) => plain_error(StatusCode::BAD_REQUEST, String::from_utf8_lossy(&out.stderr).trim()),
+                Err(error) => plain_error(StatusCode::BAD_REQUEST, error),
+            };
         }
         "stat" => format!(
             "p={path}; if [ -e \"$p\" ]; then d=false; [ -d \"$p\" ] && d=true; m=$(stat -c %Y \"$p\" 2>/dev/null || stat -f %m \"$p\"); s=$(wc -c < \"$p\" 2>/dev/null || echo 0); echo \"$d $m $s\"; else echo missing; fi"
@@ -721,6 +722,49 @@ mod tests {
     use super::*;
     use crate::agent_fleet::AgentKey;
     use crate::agent_identity::IdentityStore;
+
+    /// A stand-in `ssh` that runs the remote command line here, so the remote scripts and the stdin
+    /// write are exercised for real (what a host would see, minus the network).
+    #[tokio::test]
+    async fn a_write_to_another_computer_streams_over_stdin_and_reads_back() {
+        let dir = std::env::temp_dir().join(format!("perch-fake-ssh-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shim = dir.join("ssh");
+        std::fs::write(
+            &shim,
+            "#!/bin/sh\nwhile [ \"$1\" = -o ]; do shift 2; done\nshift\nexec sh -c \"$1\"\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let old = std::env::var_os("PATH").unwrap_or_default();
+        let mut paths = vec![dir.clone()];
+        paths.extend(std::env::split_paths(&old));
+        std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+
+        let target = dir.join("nested/out.txt");
+        let big = "x".repeat(600 * 1024); // past what a command line carries
+        let script = format!(
+            "p={}; mkdir -p \"$(dirname \"$p\")\" && cat > \"$p\"",
+            crate::ssh::shell_quote(&target.display().to_string())
+        );
+        let wrote =
+            crate::ssh::run_remote_with_input("host", &script, big.clone().into_bytes(), 20).await;
+        let run = crate::ssh::run_remote(
+            "host",
+            &format!(
+                "cat {}",
+                crate::ssh::shell_quote(&target.display().to_string())
+            ),
+            20,
+            "t",
+        )
+        .await;
+        std::env::set_var("PATH", old);
+        assert!(wrote.unwrap().status.success());
+        assert_eq!(run.unwrap().len(), big.len());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_path_on_another_computer_is_quoted_and_must_be_absolute() {

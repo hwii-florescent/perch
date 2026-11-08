@@ -283,6 +283,39 @@ pub async fn run_remote(
     }
 }
 
+/// Runs `command` on the remote with `input` on its stdin (a file's bytes, say), bounded by
+/// `timeout_secs`. Unlike [`run_remote`] it hands back the whole output so the caller reads the exit code.
+pub async fn run_remote_with_input(
+    ssh_host: &str,
+    command: &str,
+    input: Vec<u8>,
+    timeout_secs: u64,
+) -> Result<std::process::Output, String> {
+    use tokio::io::AsyncWriteExt;
+    let mut args = base_args(ssh_host);
+    args.push(format!("{REMOTE_PATH_PREFIX} {command}"));
+    let mut child = tokio::process::Command::new("ssh")
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("could not start ssh: {e}"))?;
+    let mut stdin = child.stdin.take().ok_or("no ssh stdin")?;
+    let run = async move {
+        // The remote may exit before reading it all (a failed mkdir): that is its exit code's story.
+        let _ = stdin.write_all(&input).await;
+        drop(stdin);
+        child.wait_with_output().await
+    };
+    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), run).await {
+        Ok(Ok(out)) => Ok(out),
+        Ok(Err(e)) => Err(format!("ssh failed: {e}")),
+        Err(_) => Err("ssh timed out (mod fs write)".into()),
+    }
+}
+
 /// Single-quote `s` for safe interpolation into a remote `sh -c` command line.
 /// (`'` is closed, escaped, and reopened — the standard POSIX trick.)
 pub fn shell_quote(s: &str) -> String {

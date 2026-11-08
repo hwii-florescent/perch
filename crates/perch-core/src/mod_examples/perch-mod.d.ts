@@ -66,7 +66,7 @@ interface ModApi {
   // The computer
   /** Runs a program (timeout ms, default 30 s, at most 10 min; output past 1 MiB is cut). A nonzero `code` is a result; it rejects if the program cannot start or runs out of time. `host` is an id from `hosts()`: it runs there over ssh instead of on this computer. */
   exec(cmd: string, args?: string[], options?: { cwd?: string; timeout?: number; host?: string }): Promise<{ code: number | null; stdout: string; stderr: string }>;
-  /** Files anywhere by absolute or ~/ path (reads stop at 5 MiB). The last argument `{host}` acts on that host over ssh (writes there stop at 256 KiB). */
+  /** Files anywhere by absolute or ~/ path (reads stop at 5 MiB). The last argument `{host}` acts on that host over ssh. */
   readTextFile(path: string, on?: { host?: string }): Promise<string>;
   writeTextFile(path: string, text: string, on?: { host?: string }): Promise<void>;
   statFile(path: string, on?: { host?: string }): Promise<{ exists: boolean; isDir?: boolean; size?: number; modified?: number }>;
