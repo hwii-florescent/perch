@@ -106,6 +106,8 @@ interface ModApi {
   watch(path: string, changed: () => void, on?: { host?: string }): () => void;
   /** Resolves with the paths that changed in `dir` (its entries, one level down; polled every 2 s) the next time any does: loop `for (;;) { await api.watchFolder(dir); refresh(); }`. Rejects when the mod is replaced. */
   watchFolder(dir: string, on?: { host?: string }): Promise<string[]>;
+  /** A folder chooser (Perch's own, over `listDir`, since there is no system picker): resolves with the chosen folder, or null if closed. Starts at `start` or the home folder. */
+  pickFolder(options?: { prompt?: string; start?: string; host?: string }): Promise<string | null>;
   /** The agents a computer can start (Settings > Agents): `{id, name, installed, isDefault}`. Start one with `store.getState().createSession{ host?: string }(host, cwd, id)`. */
   knownAgents(on?: { host?: string }): Promise<{ id: string; name: string; installed: boolean; isDefault: boolean }[]>;
   /** A text file of the open local project (relative path). */

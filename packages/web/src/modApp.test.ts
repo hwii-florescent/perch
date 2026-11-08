@@ -181,6 +181,32 @@ describe("an app module's versions", () => {
     vi.unstubAllGlobals();
   });
 
+  it("pickFolder walks folders with listDir and resolves with the chosen one; watchFolder reports a changed entry", async () => {
+    let stamp = 1;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: { body: string }) => {
+      const { op, path } = JSON.parse(init.body) as { op: string; path: string };
+      const body = op === "list" ? { entries: path === "/w" ? [{ name: "a", isDir: true }, { name: "f.txt", isDir: false }] : [] } : { exists: true, isDir: false, size: 1, modified: stamp };
+      return new Response(JSON.stringify(body), { status: 200 });
+    }));
+    let api!: ModApi;
+    await createSwapper(document.createElement("div"), vi.fn(), async () => (_el, a) => { api = a; }).load("x", "m");
+    const picked = api.pickFolder({ start: "/w", prompt: "Pick" });
+    await vi.waitFor(() => expect(document.body.textContent).toContain("a/"));
+    expect(document.body.textContent).not.toContain("f.txt"); // folders only
+    [...document.querySelectorAll("button")].find((b) => b.textContent === "a/")!.click();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Pick: /w/a"));
+    [...document.querySelectorAll("button")].find((b) => b.textContent === "Choose this folder")!.click();
+    expect(await picked).toBe("/w/a");
+    vi.useFakeTimers();
+    const changed = api.watchFolder("/w");
+    await vi.advanceTimersByTimeAsync(10); // first scan is the baseline
+    stamp = 2;
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(await changed).toEqual(["/w/a", "/w/f.txt"]);
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
   it("loop calls a frame function at most fps times a second, with elapsed time, until the mod goes", async () => {
     let queued: ((now: number) => void) | undefined;
     vi.stubGlobal("requestAnimationFrame", (fn: (now: number) => void) => { queued = fn; return 1; });

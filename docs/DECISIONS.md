@@ -119,7 +119,7 @@ approval not mattering much.
 - **Mod panes and app data.** `tab.new {mod, props}` and `pane.split {direction, mod, props}` open a mod's view as a top-row
   tab (`FileTab` kind `mod`: restored on reload, never remembered as a closed tab) or tile it beside the active tab;
   `agents()`, `terminals()`, `panes()`, `machines()`, `knownAgents()` and `watchFolder(dir)` (a 2 s poll of the folder's
-  entries) read the app. Not ported: `pickFolder` (no system picker plugin in the desktop shell), `mod.json focusable` and
+  entries) read the app. `pickFolder` is Perch's own folder chooser over `listDir` (no system picker plugin in the desktop shell). Not ported: `mod.json focusable` and
   `nextCommand()` (a DOM mod takes focus and keys natively), `hc` (Perch's own `perch` CLI covers it).
 - **Data a mod reads.** `props()` (a `mod:` block's `props` object, at most 4 KiB, reloads the copy when it changes),
   `theme()` (colors by herdr's names, read from the page's custom properties so a layout look or theme file shows),

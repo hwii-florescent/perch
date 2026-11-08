@@ -51,6 +51,8 @@ export interface ModApi {
   watch(path: string, changed: () => void, on?: OnHost): () => void;
   /** Resolves with the paths that changed in `dir` (its entries, one level down; polled every 2 s) the next time any does: loop `for (;;) { await api.watchFolder(dir); refresh(); }`. Rejects when the mod is replaced. */
   watchFolder(dir: string, on?: OnHost): Promise<string[]>;
+  /** A folder chooser (Perch's own, over `listDir`, since there is no system picker): resolves with the chosen folder, or null if closed. Starts at `start` or the home folder. */
+  pickFolder(options?: { prompt?: string; start?: string; host?: string }): Promise<string | null>;
   /** The agents a computer can start (Settings > Agents): `{id, name, installed, isDefault}`. Start one with `store.getState().createSessionOnHost(host, cwd, id)`. */
   knownAgents(on?: OnHost): Promise<{ id: string; name: string; installed: boolean; isDefault: boolean }[]>;
   /** State every mod sees, kept across reloads on this screen: `shared(key)`, `setShared(key,
@@ -181,6 +183,7 @@ function theme(): ModTheme {
 /** The API for one load of a mod, and `dispose` for what it left open (overlays). */
 export function modApi(modId: string, given: Record<string, unknown> = {}): ModApi & { dispose(): void } {
   const open = new Set<() => void>();
+  const ui = modUi(modId, open);
   /** Things the mod started that its replacement must stop (watchers, subscriptions). */
   const track = (stop: () => void) => {
     const gone = () => { open.delete(gone); stop(); };
@@ -236,6 +239,39 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
       void scan().catch(() => {});
       open.add(entry.stop);
     }),
+    pickFolder: ({ prompt = "Choose a folder", start, host } = {}) => new Promise<string | null>((resolve) => {
+      let closeIt = () => {};
+      const finish = (folder: string | null) => { resolve(folder); closeIt(); };
+      closeIt = ui.overlay((box, close) => {
+        const on = { host };
+        let here = start ?? (host ? "~" : layoutInfo.home || "~");
+        const title = document.createElement("div");
+        const list = document.createElement("div");
+        const choose = document.createElement("button");
+        title.textContent = prompt;
+        title.style.cssText = "font-weight:600;margin-bottom:6px";
+        list.style.cssText = "max-height:50vh;overflow:auto;min-width:22rem;margin:6px 0";
+        choose.textContent = "Choose this folder";
+        const show = async (path: string) => {
+          here = path.replace(/(.)\/+$/, "$1");
+          list.textContent = "";
+          const row = (label: string, to: string) => {
+            const b = document.createElement("button");
+            b.textContent = label;
+            b.style.cssText = "display:block;width:100%;text-align:left;padding:3px 6px;background:none;border:0;color:inherit;cursor:pointer";
+            b.onclick = () => void show(to);
+            list.append(b);
+          };
+          if (here !== "/" && here !== "~") row("../", here.lastIndexOf("/") > 0 ? here.slice(0, here.lastIndexOf("/")) : here.startsWith("/") ? "/" : "~");
+          try { for (const item of (await listDir(here, on)).filter((entry) => entry.isDir).sort((a, b) => a.name.localeCompare(b.name))) row(`${item.name.replace(/\/$/, "")}/`, `${here}/${item.name.replace(/\/$/, "")}`); } catch (error) { list.textContent = String(error instanceof Error ? error.message : error); }
+          title.textContent = `${prompt}: ${here}`;
+        };
+        choose.onclick = () => finish(here);
+        box.append(title, list, choose);
+        void show(here);
+        return () => resolve(null);
+      });
+    }),
     knownAgents: async (on) => {
       const host = on?.host ?? "local";
       const read = () => usePerchStore.getState().agentManifestsByHost[host]?.manifests;
@@ -271,7 +307,7 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
       return { sessionId: s.sessionId, projectId: s.activeProjectId, workspaceId: s.activeWorkspaceId };
     },
     subscribe: (changed) => track(usePerchStore.subscribe(changed)),
-    ...modUi(modId, open),
+    ...ui,
     bind: (command, keys) => bridge.bind(command, keys),
     slot: (name, render) => {
       const release = claimSlot(name, modId, render);
