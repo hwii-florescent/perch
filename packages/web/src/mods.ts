@@ -46,7 +46,7 @@ socket.onMessage((message) => {
     const { type: _type, requestId, ...state } = message;
     latest = state;
     registerThemes(state.themes ?? []);
-    setLayoutInfo({ layout: state.layout || null, layouts: (state.layouts ?? []).filter((l) => l.root).map((l) => l.id), home: state.home ?? "", folder: state.folder });
+    setLayoutInfo({ layout: state.layout || null, layouts: (state.layouts ?? []).filter((l) => l.root).map((l) => l.id), home: state.home ?? "", folder: state.folder, programs: state.programs });
     loadFonts(state);
     watchers.forEach((watch) => watch());
     settle(requestId, state);
@@ -82,6 +82,8 @@ export function answerCommand(requestId: string, command: string, args?: unknown
       layout: latest?.layout || null,
       layouts: (latest?.layouts ?? []).map((l) => ({ id: l.id, error: l.error })),
       mods: (latest?.mods ?? []).map((m) => ({ id: m.id, enabled: m.enabled, error: m.error })),
+      keys: { sections: Object.keys(latest?.keys ?? {}), error: latest?.keysError ?? null },
+      programs: { entries: Object.keys(latest?.programs?.programs ?? {}).length, error: latest?.programsError ?? null },
       safeMode: latest?.safeMode ?? false,
       focused: { sessionId: state.sessionId, projectId: state.activeProject?.cwd ?? null, workspaceId: state.activeWorkspaceId },
       theme: state.settings?.theme ?? null,

@@ -111,7 +111,11 @@ interface ModApi {
   /** A folder chooser: the system's picker in the desktop app (for this computer), else Perch's own over `listDir`: resolves with the chosen folder, or null if closed. Starts at `start` or the home folder. */
   pickFolder(options?: { prompt?: string; start?: string; host?: string }): Promise<string | null>;
   /** The agents a computer can start (Settings > Agents): `{id, name, installed, isDefault}`. Start one with `store.getState().createSession{ host?: string }(host, cwd, id)`. */
-  knownAgents(on?: { host?: string }): Promise<{ id: string; name: string; installed: boolean; isDefault: boolean }[]>;
+  knownAgents(on?: { host?: string }): Promise<{ id: string; name: string; installed: boolean; isDefault: boolean; run?: string[] }[]>;
+  /** The program table (built-ins changed or added to by `programs.json`): `{id, name, tile, color?, icon?, tint?, match?, run?}`. */
+  programs(): { id: string; name: string; tile: string; color?: string; icon?: string; tint?: boolean; match?: string[]; run?: string[] }[];
+  /** What a command line is: `program("npx vitest run")` is Vitest, `["node", "x/vite.js"]` Vite, a shell is `shell`, else `program`. */
+  program(command: string | string[]): { id: string; name: string; tile: string; color?: string; icon?: string; tint?: boolean };
   /** A text file of the open local project (relative path). */
   readFile(path: string): Promise<string>;
 

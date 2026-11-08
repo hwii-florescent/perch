@@ -2543,6 +2543,15 @@ pub enum ServerMessage {
         /// The core computer's home folder (`home()` for a mod); empty when unknown.
         #[serde(default)]
         home: String,
+        /// `keys.json` and `programs.json` beside `mods/` (checked), and why one was refused.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keys: Option<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keys_error: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        programs: Option<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        programs_error: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

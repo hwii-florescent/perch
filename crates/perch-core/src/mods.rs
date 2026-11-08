@@ -797,6 +797,104 @@ pub fn clone_example(root: &Path, example: &str, new_id: Option<&str>) -> Result
     Ok(id.to_string())
 }
 
+/// `keys.json` and `programs.json` in the folder that holds `mods/`: read and checked here, applied by
+/// the page (key bindings by section, the program table for names, icons and tiles). A bad file is
+/// reported (`perch mod status`, Settings) and ignored; the last good one is not kept.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UserFiles {
+    pub keys: Option<serde_json::Value>,
+    pub keys_error: Option<String>,
+    pub programs: Option<serde_json::Value>,
+    pub programs_error: Option<String>,
+}
+
+const USER_FILE_MAX: u64 = 256 * 1024;
+
+fn read_json(root: &Path, name: &str) -> Option<Result<serde_json::Value, String>> {
+    let path = root.join(name);
+    let meta = std::fs::metadata(&path).ok()?;
+    if meta.len() > USER_FILE_MAX {
+        return Some(Err("larger than 256 KiB".into()));
+    }
+    Some(
+        std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| serde_json::from_str(&text).map_err(|e| e.to_string())),
+    )
+}
+
+/// Sections are `global`, `terminal`, `layout:<id>` and `mod:<id>`, each an object of key → action.
+/// An action's own shape is judged when its key is pressed (a bad one shows a toast), so a typo in
+/// one binding does not take the others down.
+fn keys_ok(value: &serde_json::Value) -> Result<(), String> {
+    let sections = value
+        .as_object()
+        .ok_or("keys.json is an object of sections")?;
+    for (section, bindings) in sections {
+        let named = |prefix: &str| section.strip_prefix(prefix).is_some_and(plain_id);
+        if !(section == "global" || section == "terminal" || named("layout:") || named("mod:")) {
+            return Err(format!(
+                "section \"{section}\" is not global, terminal, layout:<name> or mod:<name>"
+            ));
+        }
+        if !bindings.is_object() {
+            return Err(format!("section \"{section}\" is an object of key: action"));
+        }
+    }
+    Ok(())
+}
+
+fn programs_ok(value: &serde_json::Value) -> Result<(), String> {
+    let top = value.as_object().ok_or("programs.json is an object")?;
+    let strings = |v: &serde_json::Value| {
+        v.as_array()
+            .is_some_and(|a| a.iter().all(|s| s.is_string()))
+    };
+    for key in ["shells", "interpreters"] {
+        if top.get(key).is_some_and(|v| !strings(v)) {
+            return Err(format!("\"{key}\" is a list of program names"));
+        }
+    }
+    let Some(programs) = top.get("programs") else {
+        return Ok(());
+    };
+    for (id, entry) in programs.as_object().ok_or("\"programs\" is an object")? {
+        let entry = entry
+            .as_object()
+            .ok_or_else(|| format!("programs.{id} is an object"))?;
+        for (field, value) in entry {
+            let ok = match field.as_str() {
+                "name" | "icon" | "tile" | "color" => value.is_string(),
+                "tint" => value.is_boolean(),
+                "match" | "run" => strings(value),
+                _ => true,
+            };
+            if !ok {
+                return Err(format!("programs.{id}.{field} has the wrong type"));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn scan_user_files(root: &Path, policy: &Policy) -> UserFiles {
+    if policy.is_off() {
+        return UserFiles::default();
+    }
+    let mut files = UserFiles::default();
+    match read_json(root, "keys.json").map(|r| r.and_then(|v| keys_ok(&v).map(|()| v))) {
+        Some(Ok(value)) => files.keys = Some(value),
+        Some(Err(error)) => files.keys_error = Some(error),
+        None => {}
+    }
+    match read_json(root, "programs.json").map(|r| r.and_then(|v| programs_ok(&v).map(|()| v))) {
+        Some(Ok(value)) => files.programs = Some(value),
+        Some(Err(error)) => files.programs_error = Some(error),
+        None => {}
+    }
+    files
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -983,6 +1081,46 @@ mod tests {
         assert!(install_from_url(&one.0, url, Some("nope"), &[], "o/r").is_err());
         assert!(install_from_url(&one.0, "/no/such/repo", None, &[], "o/r").is_err());
         let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn keys_and_programs_files_are_read_checked_and_reported() {
+        let root = std::env::temp_dir().join(format!("perch-user-files-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let on = Policy { off: false };
+        assert_eq!(scan_user_files(&root, &on), UserFiles::default());
+        std::fs::write(
+            root.join("keys.json"),
+            r#"{"global":{"ctrl-shift-t":"tab.new"},"layout:terminals":{},"mod:editor":{"ctrl-s":"editor.save"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("programs.json"),
+            r#"{"programs":{"mytool":{"name":"My Tool","tint":true,"match":["mytool-dev"],"run":["mytool"]}},"shells":["xonsh"]}"#,
+        )
+        .unwrap();
+        let files = scan_user_files(&root, &on);
+        assert!(files.keys.is_some() && files.keys_error.is_none());
+        assert!(files.programs.is_some() && files.programs_error.is_none());
+        // An unknown section, a wrong field type and broken JSON are reported, not applied.
+        std::fs::write(root.join("keys.json"), r#"{"sidebar":{}}"#).unwrap();
+        std::fs::write(
+            root.join("programs.json"),
+            r#"{"programs":{"a":{"run":"a"}}}"#,
+        )
+        .unwrap();
+        let files = scan_user_files(&root, &on);
+        assert!(files.keys.is_none() && files.keys_error.unwrap().contains("sidebar"));
+        assert!(
+            files.programs.is_none() && files.programs_error.unwrap().contains("programs.a.run")
+        );
+        std::fs::write(root.join("keys.json"), "{").unwrap();
+        assert!(scan_user_files(&root, &on).keys_error.is_some());
+        assert_eq!(
+            scan_user_files(&root, &Policy { off: true }),
+            UserFiles::default()
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

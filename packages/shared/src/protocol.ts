@@ -3011,6 +3011,11 @@ export interface ModsStateMessage {
   folder: string;
   /** The core computer's home folder (empty when unknown). */
   home?: string;
+  /** `keys.json` and `programs.json` beside `mods/` (checked), and why one was refused. */
+  keys?: Record<string, Record<string, unknown>>;
+  keysError?: string;
+  programs?: { programs?: Record<string, Record<string, unknown>>; shells?: string[]; interpreters?: string[] };
+  programsError?: string;
   error?: string;
 }
 

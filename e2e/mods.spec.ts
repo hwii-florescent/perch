@@ -22,6 +22,8 @@ test.afterEach(() => {
   fs.rmSync(FLOAT, { force: true });
   fs.rmSync(THEME, { force: true });
   fs.rmSync(path.join(HOME, "layout-state.json"), { force: true });
+  fs.rmSync(path.join(HOME, "keys.json"), { force: true });
+  fs.rmSync(path.join(HOME, "programs.json"), { force: true });
   fs.rmSync(path.join(HOME, "mods-removed"), { recursive: true, force: true });
 });
 
@@ -225,4 +227,33 @@ test("pane.split {mod, props} tiles a mod beside the tab, and panes()/agents()/m
   expect(data.machines[0]).toBe("local");
   expect(data.agents && data.terminals).toBe(true);
   await expect(page.locator('[data-testid="split-pane-mod-e2e-hello"] [data-pane]')).toHaveAttribute("data-pane", '{"pane":1}', { timeout: 15000 });
+});
+
+test("keys.json binds a key to a mod's command and programs.json reaches api.program()", async ({ page }) => {
+  fs.mkdirSync(MOD, { recursive: true });
+  fs.writeFileSync(path.join(MOD, "main.js"), `export default (el, api) => {
+    el.textContent = 'keys';
+    api.command({ name: 'hit', description: 'hit' }); // no run: delivered to nextCommand()
+    api.nextCommand().then((c) => { el.dataset.hit = c.name; });
+    const show = () => { el.dataset.program = JSON.stringify({ vitest: api.program('npx vitest run').id, shell: api.program('/bin/zsh -l').id, mine: api.program('mytool-dev').name, count: api.programs().length > 40 }); };
+    show();
+    const timer = setInterval(show, 500);
+    return () => clearInterval(timer);
+  };`);
+  fs.mkdirSync(path.dirname(LAYOUT), { recursive: true });
+  fs.writeFileSync(LAYOUT, JSON.stringify({ name: "E2E look", type: "row", children: [
+    { type: "block", content: "canvas" },
+    { type: "block", content: "mod:e2e-hello", size: { px: 200 } },
+  ] }));
+  fs.writeFileSync(path.join(HOME, "keys.json"), JSON.stringify({ global: { "ctrl-shift-y": "e2e-hello.hit" } }));
+  fs.writeFileSync(path.join(HOME, "programs.json"), JSON.stringify({ programs: { mytool: { name: "My Tool", match: ["mytool-dev"] } } }));
+  await openMods(page);
+  await expect(page.locator('[data-testid="layout-e2e-look"]')).toBeVisible({ timeout: 15000 });
+  await page.locator('[data-testid="layout-e2e-look"]').getByRole("button", { name: "Use" }).click();
+  await page.keyboard.press("Escape");
+  const holder = page.locator('[data-testid="layout-mod:e2e-hello"] [data-program]');
+  await expect(holder).toHaveAttribute("data-program", /My Tool/, { timeout: 20000 });
+  expect(JSON.parse((await holder.getAttribute("data-program"))!)).toEqual({ vitest: "vitest", shell: "shell", mine: "My Tool", count: true });
+  await page.keyboard.press("Control+Shift+Y");
+  await expect(holder).toHaveAttribute("data-hit", "hit", { timeout: 5000 });
 });

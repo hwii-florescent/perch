@@ -6,6 +6,7 @@ import { prefersDark } from "./themes";
 import { zoomFactor } from "./zoom";
 import { nodeIds, shownLayout } from "./layoutState";
 import { playBlockedTone, playDoneTone } from "./sound";
+import { programFor, programTable, type ProgramsFile } from "./programs";
 import { exec, getShared, listDir, onShared, readTextFile, setShared, statFile, watchPath, writeTextFile, type ExecResult, type FileStat, type OnHost } from "./modHost";
 import { modUi } from "./modUi";
 import type { WorkspaceProject, WorkspaceRecord } from "./store";
@@ -56,7 +57,11 @@ export interface ModApi {
   /** A folder chooser: the system's picker in the desktop app (for this computer), else Perch's own over `listDir`: resolves with the chosen folder, or null if closed. Starts at `start` or the home folder. */
   pickFolder(options?: { prompt?: string; start?: string; host?: string }): Promise<string | null>;
   /** The agents a computer can start (Settings > Agents): `{id, name, installed, isDefault}`. Start one with `store.getState().createSessionOnHost(host, cwd, id)`. */
-  knownAgents(on?: OnHost): Promise<{ id: string; name: string; installed: boolean; isDefault: boolean }[]>;
+  knownAgents(on?: OnHost): Promise<{ id: string; name: string; installed: boolean; isDefault: boolean; run?: string[] }[]>;
+  /** The program table (built-ins changed or added to by `programs.json`): `{id, name, tile, color?, icon?, tint?, match?, run?}`. */
+  programs(): { id: string; name: string; tile: string; color?: string; icon?: string; tint?: boolean; match?: string[]; run?: string[] }[];
+  /** What a command line is: `program("npx vitest run")` is Vitest, `["node", "x/vite.js"]` Vite, a shell is `shell`, else `program`. */
+  program(command: string | string[]): { id: string; name: string; tile: string; color?: string; icon?: string; tint?: boolean };
   /** State every mod sees, kept across reloads on this screen: `shared(key)`, `setShared(key,
    * value)` (JSON values; `undefined` removes) and `onShared(fn)` for changes. */
   shared(key: string): unknown;
@@ -148,7 +153,7 @@ export const bindKey = (command: string, keys: string | null) => bridge.bind(com
 export const commandList = () => bridge.list();
 
 /** Which layout is shown and which load; `mods.ts` sets it as the core reports (this file cannot import it). */
-let layoutInfo: { layout: string | null; layouts: string[]; home: string; folder: string } = { layout: null, layouts: [], home: "", folder: "" };
+let layoutInfo: { layout: string | null; layouts: string[]; home: string; folder: string; programs?: ProgramsFile } = { layout: null, layouts: [], home: "", folder: "" };
 export const setLayoutInfo = (next: typeof layoutInfo) => { layoutInfo = next; };
 
 /** A mod's default export: draws into `el` and may return what to undo when it is replaced. */
@@ -285,6 +290,8 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
         return () => resolve(null);
       });
     }),
+    programs: () => programTable(layoutInfo.programs),
+    program: (command) => programFor(command, layoutInfo.programs),
     knownAgents: async (on) => {
       const host = on?.host ?? "local";
       const read = () => usePerchStore.getState().agentManifestsByHost[host]?.manifests;
@@ -292,7 +299,13 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
         usePerchStore.getState().fetchAgentManifests(host);
         await new Promise<void>((done) => { const stop = usePerchStore.subscribe(() => { if (read()) { stop(); clearTimeout(timer); done(); } }); const timer = setTimeout(() => { stop(); done(); }, 5000); });
       }
-      return (read() ?? []).filter((m) => m.enabled !== false && m.supportedModes.includes("cli")).map((m) => ({ id: m.id, name: m.displayName, installed: m.available, isDefault: m.isDefault === true }));
+      const found = (read() ?? []).filter((m) => m.enabled !== false && m.supportedModes.includes("cli")).map((m) => ({ id: m.id, name: m.displayName, installed: m.available, isDefault: m.isDefault === true } as { id: string; name: string; installed: boolean; isDefault: boolean; run?: string[] }));
+      // programs.json entries with a `run` are agents a menu can start; installed means the program is on that computer's login PATH.
+      for (const entry of programTable(layoutInfo.programs).filter((p) => p.run?.length && !found.some((m) => m.id === p.id))) {
+        const probe = await exec("sh", ["-lc", `command -v '${entry.run![0]!.replace(/'/g, "'\\''")}'`], on).catch(() => null);
+        found.push({ id: entry.id, name: entry.name, installed: probe?.code === 0, isDefault: false, run: entry.run });
+      }
+      return found;
     },
     shared: getShared,
     setShared,

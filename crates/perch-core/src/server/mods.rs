@@ -635,6 +635,7 @@ pub(super) async fn fs(
 
 fn state_message(app: &AppState, request_id: String, error: Option<String>) -> ServerMessage {
     let policy = app.settings.get().mods;
+    let files = mods::scan_user_files(&app.memory_root, &policy);
     ServerMessage::ModsState {
         request_id,
         mods: mods::scan(&app.memory_root, &policy),
@@ -645,6 +646,10 @@ fn state_message(app: &AppState, request_id: String, error: Option<String>) -> S
         policy,
         folder: app.memory_root.join("mods").display().to_string(),
         home: std::env::var("HOME").unwrap_or_default(),
+        keys: files.keys,
+        keys_error: files.keys_error,
+        programs: files.programs,
+        programs_error: files.programs_error,
         error,
     }
 }
@@ -700,6 +705,7 @@ pub(super) fn spawn_watch(app: AppState) {
             Vec<layouts::LayoutInfo>,
             Option<String>,
             Vec<layouts::ThemeInfo>,
+            mods::UserFiles,
         );
         let mut seen: Option<Seen> = None;
         let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
@@ -712,6 +718,7 @@ pub(super) fn spawn_watch(app: AppState) {
                     layouts::scan(&root, &policy),
                     layouts::current(&root),
                     layouts::scan_themes(&root, &policy),
+                    mods::scan_user_files(&root, &policy),
                 )
             })
             .await

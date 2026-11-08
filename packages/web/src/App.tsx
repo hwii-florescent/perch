@@ -22,6 +22,7 @@ import { useIsMobileWidth } from "./responsive";
 import { SHORTCUTS, bindableCombo, dispatchShortcut, registerCommand, shortcutLabel, useLeaderKey } from "./keybinds";
 import { setCommandBridge } from "./modApp";
 import { TYPED_COMMANDS } from "./modCommands";
+import { installKeysFile } from "./keysFile";
 import { usePerchStore } from "./store";
 import { MobilePaneShell, type MobilePaneKind } from "./components/MobilePaneShell";
 import { LaptopUnreachable, PairingGate } from "./components/PairingGate";
@@ -164,6 +165,7 @@ export default function App() {
     setKeybindHelpOpen(true);
   }, []);
   useLeaderKey({ openNavigator, openKeybindHelp, toggleDrawer: toggleTerminal });
+  useEffect(() => installKeysFile(), []); // keys.json
   // Mods run the same commands a key does.
   useEffect(() => {
     setCommandBridge({
