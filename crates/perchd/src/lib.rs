@@ -7,6 +7,7 @@ pub mod permissions;
 pub mod proto;
 pub mod screen;
 pub mod server;
+mod terminal_cli;
 
 use std::path::Path;
 use std::process::Command;
@@ -40,7 +41,19 @@ pub fn cli_main(args: &[String], exe_prefix: Vec<String>) -> i32 {
     raise_fd_limit();
     if matches!(
         args.first().map(String::as_str),
-        Some("ps" | "list" | "cleanup" | "release")
+        Some("run" | "read" | "send" | "wait" | "kill")
+    ) {
+        return match terminal_cli::run(&args[0], &args[1..]) {
+            Ok(()) => 0,
+            Err(error) => {
+                eprintln!("perch: {error}");
+                1
+            }
+        };
+    }
+    if matches!(
+        args.first().map(String::as_str),
+        Some("ps" | "ls" | "list" | "cleanup" | "release")
     ) {
         return match cleanup_cli::run(&args[0], &args[1..]) {
             Ok(()) => 0,

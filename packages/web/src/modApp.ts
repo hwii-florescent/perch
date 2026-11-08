@@ -45,7 +45,7 @@ export interface ModApi {
   /** Runs a program on this computer (`timeout` ms, default 30 s; output past 1 MiB is cut). A
    * nonzero `code` is a result; it rejects if the program cannot start or runs out of time. */
   exec(cmd: string, args?: string[], options?: { cwd?: string; timeout?: number; host?: string }): Promise<ExecResult>;
-  /** Runs Perch's own `perch` command line (what herdr's `hc(args)` is to herdr-core): `perch(["ps"])`. Same results as `exec`. */
+  /** Runs Perch's own `perch` command line (what herdr's `hc(args)` is to herdr-core). `perch(["daemon", "ls", "--json"])` lists every terminal the daemon runs, `["daemon", "read", id, "--lines", "50"]` reads one's screen (on screen or not), `["daemon", "send", id, text, "--enter"]` types into it, `["daemon", "run", "--cwd", dir, "--", cmd]` starts one and prints its id, `["daemon", "wait", id, "--timeout", "30"]` (or `--quiet 5`) waits for it, and `["daemon", "kill", id]` stops one `run` started. Same results as `exec`. */
   perch(args?: string[], options?: { cwd?: string; timeout?: number }): Promise<ExecResult>;
   /** Files anywhere on this computer by absolute or `~/` path (reads stop at 5 MiB). */
   readTextFile(path: string, on?: OnHost): Promise<string>;

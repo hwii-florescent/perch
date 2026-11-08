@@ -133,7 +133,9 @@ approval not mattering much.
   changes a built-in table of about 120 programs (herdr ships 120) field by field and feeds `api.program()`, `programs()`,
   `knownAgents()` (entries with `run`), the sidebar icons (a program `icon` is served from inside the folder by
   `GET /mods/file?icon=`, 1 MiB, svg/png/jpg/webp) and the "<Program> finished" toast. `api.readTerminal(id, lines)` and
-  `api.sendText(id, text)` are the mod-facing half of herdr's `hc`; Perch's `perch` CLI covers the rest.
+  `api.sendText(id, text)` read and type into a terminal on screen; `api.perch(args)` runs the `perch` CLI, whose `perch daemon
+  ls|read|send|run|wait|kill` are herdr's `hc ls|read|send|run|wait|kill` against perchd (no core, window or agent needed; `read`
+  works on off-screen terminals; `kill` only stops terminals `run` started, the rest belong to their app).
 - **Data a mod reads.** `props()` (a `mod:` block's `props` object, at most 4 KiB, reloads the copy when it changes),
   `theme()` (colors by herdr's names, read from the page's custom properties so a layout look or theme file shows),
   `settings()` (+ `dark`, `zoom`), `keys()`, `layout()`/`layouts()`, and `notify({icon, timeout})`.

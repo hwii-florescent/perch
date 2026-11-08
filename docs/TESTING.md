@@ -284,7 +284,8 @@ target/debug/perch cleanup                  # confirms the exact preview
 # Noninteractive execution requires explicit --yes.
 ```
 
-`perch daemon ps` and `perch daemon cleanup` are the same commands under their new home; only
+`perch daemon ls|read|send|run|wait|kill` drive terminals from any program (`crates/perchd/tests/terminal_cli.rs`; the
+`api.perch` path through a real core is the mods e2e `hc` test). `perch daemon ps` and `perch daemon cleanup` are the same commands under their new home; only
 `ps`, `cleanup` and `release` keep a bare alias (`perch list` is the agent's own run, and `perch
 daemon list` the daemon's). `perch whoami`, `report`, `guide`, `spawn`, `list` and `stop` are for agents; the e2e that exercises them
 (`instructions.spec.ts`) needs `perch` built beside the core (`cargo build --workspace`, or

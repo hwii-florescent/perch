@@ -229,6 +229,45 @@ test("pane.split {mod, props} tiles a mod beside the tab, and panes()/agents()/m
   await expect(page.locator('[data-testid="split-pane-mod-e2e-hello"] [data-pane]')).toHaveAttribute("data-pane", '{"pane":1}', { timeout: 15000 });
 });
 
+test("a mod drives the app's own terminals through api.perch, like herdr's hc ls/send/read", async ({ page }) => {
+  fs.mkdirSync(MOD, { recursive: true });
+  fs.writeFileSync(path.join(MOD, "main.js"), `export default (el, api) => {
+    el.textContent = 'hc';
+    let live = true;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    (async () => {
+      await sleep(800);
+      api.run('pane.split', { direction: 'right' });
+      let session;
+      for (let i = 0; i < 40 && !session; i++) {
+        await sleep(500);
+        const ls = JSON.parse((await api.perch(['daemon', 'ls', '--json'])).stdout || '[]');
+        session = ls.find((s) => s.alive);
+      }
+      if (!session) { el.dataset.read = 'NO SESSION'; return; }
+      await api.perch(['daemon', 'send', session.id, 'echo PERCH_MOD_$((6*7))', '--enter']);
+      for (let i = 0; i < 20 && live; i++) {
+        await sleep(500);
+        const out = (await api.perch(['daemon', 'read', session.id])).stdout;
+        if (out.includes('PERCH_MOD_42')) { el.dataset.read = out; return; }
+      }
+      el.dataset.read = 'NOT SEEN';
+    })().catch((e) => { el.dataset.read = 'ERR ' + e.message; });
+    return () => { live = false; };
+  };`);
+  fs.mkdirSync(path.dirname(LAYOUT), { recursive: true });
+  fs.writeFileSync(LAYOUT, JSON.stringify({ name: "E2E look", type: "row", children: [
+    { type: "block", content: "canvas" },
+    { type: "block", content: "mod:e2e-hello", size: { px: 200 } },
+  ] }));
+  await openMods(page);
+  await expect(page.locator('[data-testid="layout-e2e-look"]')).toBeVisible({ timeout: 15000 });
+  await page.locator('[data-testid="layout-e2e-look"]').getByRole("button", { name: "Use" }).click();
+  await page.keyboard.press("Escape");
+  const holder = page.locator('[data-testid="layout-mod:e2e-hello"] [data-read]');
+  await expect(holder).toHaveAttribute("data-read", /PERCH_MOD_42/, { timeout: 40000 });
+});
+
 test("keys.json binds a key to a mod's command and programs.json reaches api.program()", async ({ page }) => {
   fs.mkdirSync(MOD, { recursive: true });
   fs.writeFileSync(path.join(MOD, "main.js"), `export default (el, api) => {

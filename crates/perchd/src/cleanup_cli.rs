@@ -59,7 +59,7 @@ pub fn run(command: &str, args: &[String]) -> Result<(), String> {
             if json {
                 println!(
                     "{}",
-                    if command == "ps" || command == "list" {
+                    if matches!(command, "ps" | "ls" | "list") {
                         "[]"
                     } else {
                         "{\"candidates\":[],\"stopped\":[]}"
@@ -74,7 +74,7 @@ pub fn run(command: &str, args: &[String]) -> Result<(), String> {
     };
     let mut sessions = client.list().map_err(|e| e.to_string())?;
     sessions.sort_by(|a, b| a.id.cmp(&b.id));
-    if command == "ps" || command == "list" {
+    if matches!(command, "ps" | "ls" | "list") {
         if json {
             println!("{}", serde_json::to_string(&sessions).unwrap());
         } else {
