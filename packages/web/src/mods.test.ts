@@ -6,6 +6,7 @@ vi.mock("./ws", () => ({ socket: { send: (message: unknown) => sent.push(message
 vi.mock("./store", () => ({ usePerchStore: { getState: () => ({}), setState: () => {}, subscribe: () => () => {} } }));
 import { setCommandBridge } from "./modApp";
 import { answerCommand } from "./mods";
+import { TYPED_COMMANDS } from "./modCommands";
 
 beforeEach(() => { sent.length = 0; });
 
@@ -27,5 +28,12 @@ describe("perch mod do", () => {
     run.mockImplementationOnce(() => { throw new Error("session s9 is gone"); });
     answerCommand("r4", "session.open", { session: "s9" });
     expect((sent[3] as { error: string }).error).toBe("session s9 is gone");
+  });
+});
+
+describe("the window's own controls", () => {
+  it("are listed for a layout that draws its title bar, and say so in a plain browser", () => {
+    expect(Object.keys(TYPED_COMMANDS)).toEqual(expect.arrayContaining(["window.minimize", "window.maximize", "window.close"]));
+    expect(() => TYPED_COMMANDS["window.close"]!.run({})).toThrow("desktop app");
   });
 });

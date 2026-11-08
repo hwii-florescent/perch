@@ -102,6 +102,9 @@ approval not mattering much.
   folder; `resolve_backgrounds` turns both into CSS, an image into a data URI, so the page fetches nothing).
   Not built: looks reaching menus opened from a themed subtree (they use the root's). `perch mod clone <id>`
   also duplicates one of your own mods or layouts (as `<id>-copy`).
+- **Window controls.** `window.minimize`, `window.maximize` (toggle) and `window.close` are typed commands that call
+  the desktop window's IPC (`capabilities/main.json` grants exactly those three beside start-dragging); in a browser they
+  throw "in the desktop app". A layout that hides the title bar draws its own buttons and runs these.
 - **Floating spots and movable panes.** A float has a grip along its top edge; on release it takes the nearest window
   edge and third (`snapSpot`), kept per layout in `layoutState` like the other clicks (`layout.float {id, edge?, align?}`
   sets or resets it; dropped on top/bottom a drawer's `peek` is dropped). A mod draws against `shared("layout.float.<id>")`
