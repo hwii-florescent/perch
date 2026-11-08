@@ -2,7 +2,7 @@ import { getWorkspaceFileUrl } from "./base";
 import { newId } from "./ids";
 import type { SessionSummary } from "@perch/shared";
 import { claimSlot, type SlotRender } from "./slots";
-import { exec, getShared, listDir, onShared, readTextFile, setShared, statFile, watchPath, writeTextFile, type ExecResult, type FileStat } from "./modHost";
+import { exec, getShared, listDir, onShared, readTextFile, setShared, statFile, watchPath, writeTextFile, type ExecResult, type FileStat, type OnHost } from "./modHost";
 import { modUi } from "./modUi";
 import type { WorkspaceProject, WorkspaceRecord } from "./store";
 import { isRelayMode, relayBlobUrl } from "./relay/transport";
@@ -33,14 +33,14 @@ export interface ModApi {
   command(def: { name: string; description: string; keys?: string; run: (args?: unknown) => void }): () => void;
   /** Runs a program on this computer (`timeout` ms, default 30 s; output past 1 MiB is cut). A
    * nonzero `code` is a result; it rejects if the program cannot start or runs out of time. */
-  exec(cmd: string, args?: string[], options?: { cwd?: string; timeout?: number }): Promise<ExecResult>;
+  exec(cmd: string, args?: string[], options?: { cwd?: string; timeout?: number; host?: string }): Promise<ExecResult>;
   /** Files anywhere on this computer by absolute or `~/` path (reads stop at 5 MiB). */
-  readTextFile(path: string): Promise<string>;
-  writeTextFile(path: string, text: string): Promise<void>;
-  statFile(path: string): Promise<FileStat>;
-  listDir(path: string): Promise<{ name: string; isDir: boolean }[]>;
+  readTextFile(path: string, on?: OnHost): Promise<string>;
+  writeTextFile(path: string, text: string, on?: OnHost): Promise<void>;
+  statFile(path: string, on?: OnHost): Promise<FileStat>;
+  listDir(path: string, on?: OnHost): Promise<{ name: string; isDir: boolean }[]>;
   /** Calls `changed` when a file or folder's size or modified time changes (polled every 2 s). */
-  watch(path: string, changed: () => void): () => void;
+  watch(path: string, changed: () => void, on?: OnHost): () => void;
   /** State every mod sees, kept across reloads on this screen: `shared(key)`, `setShared(key,
    * value)` (JSON values; `undefined` removes) and `onShared(fn)` for changes. */
   shared(key: string): unknown;
@@ -51,6 +51,8 @@ export interface ModApi {
   sessions(): SessionSummary[];
   projects(): WorkspaceProject[];
   workspaces(): WorkspaceRecord[];
+  /** The computers in Settings > Hosts; an `id` goes in `exec`/file calls as `host`. */
+  hosts(): { id: string; name: string; enabled: boolean }[];
   focused(): { sessionId: string | null; projectId: string | null; workspaceId: string | null };
   subscribe(changed: () => void): () => void;
   /** Draws one of Perch's own interface parts instead of the stock one (`SLOTS` in `slots.ts`:
@@ -142,13 +144,18 @@ export function modApi(modId: string): ModApi & { dispose(): void } {
       id = requestAnimationFrame(step);
       return track(() => { stopped = true; cancelAnimationFrame(id); });
     },
-    watch: (path, changed) => track(watchPath(path, changed)),
+    watch: (path, changed, on) => track(watchPath(path, changed, 2000, on)),
     shared: getShared,
     setShared,
     onShared: (watch) => track(onShared(watch)),
     sessions: () => usePerchStore.getState().sessions,
     projects: () => usePerchStore.getState().workspaceProjects,
     workspaces: () => usePerchStore.getState().workspaces,
+    hosts: () => {
+      const { hosts, fetchHosts } = usePerchStore.getState();
+      if (!hosts.length) fetchHosts(); // the list is only loaded once Settings has been opened
+      return hosts.map(({ id, name, enabled }) => ({ id, name, enabled }));
+    },
     focused: () => {
       const s = usePerchStore.getState();
       return { sessionId: s.sessionId, projectId: s.activeProjectId, workspaceId: s.activeWorkspaceId };

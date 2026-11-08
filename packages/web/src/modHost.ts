@@ -21,24 +21,27 @@ export interface ExecResult { code: number | null; stdout: string; stderr: strin
 export interface FileStat { exists: boolean; isDir?: boolean; size?: number; modified?: number }
 
 /** Runs `cmd args` (output past 1 MiB is cut; `timeout` ms, default 30 s, at most 10 min). It
- * rejects if the program cannot start or runs out of time; a nonzero `code` is a result. */
-export const exec = (cmd: string, args: string[] = [], options: { cwd?: string; timeout?: number } = {}) =>
+ * rejects if the program cannot start or runs out of time; a nonzero `code` is a result. `host` (an id from
+ * Settings > Hosts) runs it on that computer over ssh. */
+export const exec = (cmd: string, args: string[] = [], options: { cwd?: string; timeout?: number; host?: string } = {}) =>
   post<ExecResult>("mods/exec", { cmd, args, ...options });
 
-const fs = <T>(op: string, path: string, text?: string) => post<T>("mods/fs", { op, path, text });
-export const readTextFile = async (path: string) => (await fs<{ text: string }>("read", path)).text;
-export const writeTextFile = async (path: string, text: string) => void (await fs("write", path, text));
-export const statFile = (path: string) => fs<FileStat>("stat", path);
-export const listDir = async (path: string) => (await fs<{ entries: { name: string; isDir: boolean }[] }>("list", path)).entries;
+/** Where a file call acts: this computer, or a host's (an id from Settings > Hosts, over ssh). */
+export interface OnHost { host?: string }
+const fs = <T>(op: string, path: string, text?: string, host?: string) => post<T>("mods/fs", { op, path, text, host });
+export const readTextFile = async (path: string, on: OnHost = {}) => (await fs<{ text: string }>("read", path, undefined, on.host)).text;
+export const writeTextFile = async (path: string, text: string, on: OnHost = {}) => void (await fs("write", path, text, on.host));
+export const statFile = (path: string, on: OnHost = {}) => fs<FileStat>("stat", path, undefined, on.host);
+export const listDir = async (path: string, on: OnHost = {}) => (await fs<{ entries: { name: string; isDir: boolean }[] }>("list", path, undefined, on.host)).entries;
 
 /** Calls `changed` when the file or folder's size or modified time changes (checked every `every` ms,
  * 2 s by default). Returns the way to stop. */
-export function watchPath(path: string, changed: () => void, every = 2000): () => void {
+export function watchPath(path: string, changed: () => void, every = 2000, on: OnHost = {}): () => void {
   let last = "";
   let stopped = false;
   const check = async () => {
     try {
-      const now = JSON.stringify(await statFile(path));
+      const now = JSON.stringify(await statFile(path, on));
       if (last && now !== last && !stopped) changed();
       last = now;
     } catch { /* unreachable for now: try again next time */ }

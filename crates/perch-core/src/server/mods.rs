@@ -362,7 +362,145 @@ fn host_path(text: &str) -> Result<PathBuf, String> {
 const MAX_OUTPUT: usize = 1024 * 1024;
 const MAX_FILE: u64 = 5 * 1024 * 1024;
 
-/// `POST /mods/exec {cmd, args?, cwd?, timeout?}`: run a program in the person's environment. The
+/// The ssh destination of a host perch knows by id; a mod cannot name an arbitrary machine.
+fn ssh_target(app: &AppState, host: &str) -> Result<String, String> {
+    app.hosts
+        .get(host)
+        .filter(|h| h.enabled && !h.ssh_host.is_empty())
+        .map(|h| h.ssh_host)
+        .ok_or_else(|| format!("no host \"{host}\" (see Settings > Hosts)"))
+}
+
+/// A remote path as shell text: `~/x` follows the remote `$HOME`, otherwise absolute.
+fn remote_path(text: &str) -> Result<String, String> {
+    use crate::ssh::shell_quote;
+    match text.strip_prefix("~/") {
+        Some(rest) => Ok(format!("\"$HOME\"/{}", shell_quote(rest))),
+        None if text.starts_with('/') => Ok(shell_quote(text)),
+        None => Err("a path must be absolute or start with ~/".into()),
+    }
+}
+
+/// `exec` on another computer over the host's ssh login (same result shape as the local run).
+async fn remote_exec(
+    app: &AppState,
+    host: &str,
+    cmd: &str,
+    args: &[String],
+    cwd: Option<&str>,
+    wait: std::time::Duration,
+) -> axum::response::Response {
+    use crate::ssh::shell_quote;
+    let target = match ssh_target(app, host) {
+        Ok(target) => target,
+        Err(error) => return plain_error(StatusCode::BAD_REQUEST, error),
+    };
+    let cd = match cwd.map(remote_path).transpose() {
+        Ok(dir) => dir.map(|d| format!("cd {d} && ")).unwrap_or_default(),
+        Err(error) => return plain_error(StatusCode::BAD_REQUEST, error),
+    };
+    let words: Vec<String> = std::iter::once(cmd)
+        .chain(args.iter().map(String::as_str))
+        .map(shell_quote)
+        .collect();
+    let script = format!(
+        "{} {cd}exec {}",
+        crate::ssh::REMOTE_PATH_PREFIX,
+        words.join(" ")
+    );
+    match crate::ssh::exec_with_fallback(&target, &script, wait.as_secs().max(1), "mod exec").await
+    {
+        Err(error) => plain_error(StatusCode::REQUEST_TIMEOUT, error),
+        Ok(out) => Json(json!({
+            "code": out.status.code(),
+            "stdout": cut_output(out.stdout),
+            "stderr": cut_output(out.stderr),
+        }))
+        .into_response(),
+    }
+}
+
+fn cut_output(bytes: Vec<u8>) -> String {
+    String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_OUTPUT)]).into_owned()
+}
+
+/// `fs` on another computer over ssh. Writes travel in the command line, so they stop at 256 KiB.
+async fn remote_fs(app: &AppState, host: &str, body: &Value) -> axum::response::Response {
+    use crate::ssh::shell_quote;
+    use base64::Engine;
+    let target = match ssh_target(app, host) {
+        Ok(target) => target,
+        Err(error) => return plain_error(StatusCode::BAD_REQUEST, error),
+    };
+    let path = match body["path"].as_str().map(remote_path) {
+        Some(Ok(path)) => path,
+        Some(Err(error)) => return plain_error(StatusCode::BAD_REQUEST, error),
+        None => return plain_error(StatusCode::BAD_REQUEST, "fs needs `path`"),
+    };
+    let op = body["op"].as_str().unwrap_or_default();
+    let script = match op {
+        "read" => format!(
+            "p={path}; [ \"$(wc -c < \"$p\")\" -le {MAX_FILE} ] || {{ echo 'larger than 5 MiB' >&2; exit 1; }}; cat \"$p\""
+        ),
+        "write" => {
+            let text = body["text"].as_str().unwrap_or_default();
+            if text.len() > 256 * 1024 {
+                return plain_error(StatusCode::BAD_REQUEST, "a write to another computer is at most 256 KiB");
+            }
+            let data = base64::engine::general_purpose::STANDARD.encode(text);
+            format!(
+                "p={path}; mkdir -p \"$(dirname \"$p\")\" && printf %s {} | base64 -d > \"$p\"",
+                shell_quote(&data)
+            )
+        }
+        "stat" => format!(
+            "p={path}; if [ -e \"$p\" ]; then d=false; [ -d \"$p\" ] && d=true; m=$(stat -c %Y \"$p\" 2>/dev/null || stat -f %m \"$p\"); s=$(wc -c < \"$p\" 2>/dev/null || echo 0); echo \"$d $m $s\"; else echo missing; fi"
+        ),
+        "list" => format!("ls -1Ap {path} | head -5000"),
+        _ => return plain_error(StatusCode::BAD_REQUEST, "op is read, write, stat or list"),
+    };
+    let full = format!("{} {script}", crate::ssh::REMOTE_PATH_PREFIX);
+    let out = match crate::ssh::exec_with_fallback(&target, &full, 30, "mod fs").await {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
+        Ok(out) => {
+            let error = String::from_utf8_lossy(&out.stderr);
+            return plain_error(StatusCode::BAD_REQUEST, error.trim());
+        }
+        Err(error) => return plain_error(StatusCode::BAD_REQUEST, error),
+    };
+    // Only a read keeps its text exactly; the others are one short line each.
+    let out = if op == "read" {
+        out
+    } else {
+        out.trim().to_string()
+    };
+    Json(match op {
+        "read" => json!({ "text": out }),
+        "write" => json!({}),
+        "stat" if out == "missing" => json!({ "exists": false }),
+        "stat" => {
+            let mut parts = out.split_whitespace();
+            let is_dir = parts.next() == Some("true");
+            let modified = parts
+                .next()
+                .and_then(|m| m.parse::<u64>().ok())
+                .map(|s| s * 1000);
+            let size = parts
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0);
+            json!({ "exists": true, "isDir": is_dir, "size": size, "modified": modified })
+        }
+        _ => json!({ "entries": out.lines().map(|l| match l.strip_suffix('/') {
+            Some(name) => json!({ "name": name, "isDir": true }),
+            None => json!({ "name": l, "isDir": false }),
+        }).collect::<Vec<_>>() }),
+    })
+    .into_response()
+}
+
+/// `POST /mods/exec {cmd, args?, cwd?, timeout?, host?}`: run a program in the person's environment (or, with
+/// a `host` id from Settings > Hosts, on that computer over ssh). The
 /// timeout is milliseconds (default 30 s, at most 10 min); output past 1 MiB is cut.
 pub(super) async fn exec(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -384,6 +522,11 @@ pub(super) async fn exec(
                 .collect()
         })
         .unwrap_or_default();
+    let wait =
+        std::time::Duration::from_millis(body["timeout"].as_u64().unwrap_or(30_000).min(600_000));
+    if let Some(host) = body["host"].as_str().filter(|h| !h.is_empty()) {
+        return remote_exec(&app, host, cmd, &args, body["cwd"].as_str(), wait).await;
+    }
     let mut command = tokio::process::Command::new(cmd);
     command
         .args(&args)
@@ -395,8 +538,6 @@ pub(super) async fn exec(
             Err(error) => return plain_error(StatusCode::BAD_REQUEST, error),
         };
     }
-    let wait =
-        std::time::Duration::from_millis(body["timeout"].as_u64().unwrap_or(30_000).min(600_000));
     let cut = |bytes: Vec<u8>| {
         String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_OUTPUT)]).into_owned()
     };
@@ -418,7 +559,7 @@ pub(super) async fn exec(
     }
 }
 
-/// `POST /mods/fs {op: read|write|stat|list, path, text?}` on absolute or `~/` paths. Reads stop at
+/// `POST /mods/fs {op: read|write|stat|list, path, text?, host?}` on absolute or `~/` paths. Reads stop at
 /// 5 MiB. Write replaces the file (parent folders are made).
 pub(super) async fn fs(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -428,6 +569,9 @@ pub(super) async fn fs(
 ) -> axum::response::Response {
     if let Err((status, text)) = mod_host_gate(&app, &peer, &headers) {
         return (status, text).into_response();
+    }
+    if let Some(host) = body["host"].as_str().filter(|h| !h.is_empty()) {
+        return remote_fs(&app, host, &body).await;
     }
     let path = match body["path"].as_str().map(host_path) {
         Some(Ok(path)) => path,
@@ -577,6 +721,19 @@ mod tests {
     use super::*;
     use crate::agent_fleet::AgentKey;
     use crate::agent_identity::IdentityStore;
+
+    #[test]
+    fn a_path_on_another_computer_is_quoted_and_must_be_absolute() {
+        assert_eq!(
+            remote_path("~/a b/it's").unwrap(),
+            r#""$HOME"/'a b/it'\''s'"#
+        );
+        assert_eq!(
+            remote_path("/etc/x; rm -rf /").unwrap(),
+            "'/etc/x; rm -rf /'"
+        );
+        assert!(remote_path("relative/x").is_err());
+    }
 
     /// An agent lists, turns off and on, and opens a mod; opening reaches the person's screen only
     /// for an enabled one. A mod needs no approval: it is listed working the moment it is written.

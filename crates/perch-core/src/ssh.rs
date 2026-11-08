@@ -206,7 +206,7 @@ fn base_args_plain(ssh_host: &str) -> Vec<String> {
 /// is the one place the mux/no-mux choice is made for bounded one-shot
 /// commands, so `run_remote` and `write_remote_file` don't each reimplement
 /// the retry.
-async fn exec_with_fallback(
+pub async fn exec_with_fallback(
     ssh_host: &str,
     command: &str,
     timeout_secs: u64,

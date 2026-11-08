@@ -1498,7 +1498,7 @@ Mods
     projects(), focused(), subscribe()), commands (commands(), run(id, args), command({...}),
     bind()), floating surfaces (overlay, popup, window, notify), drawing Perch's own parts
     (slot(name, render): the toast, the sidebar's session-row, a tiled pane's pane-header and the
-    terminal-menu keep their behavior and come back if the mod throws; loop(frame) for animation), the computer (exec, readTextFile, writeTextFile, watch, ...) and shared
+    terminal-menu keep their behavior and come back if the mod throws; loop(frame) for animation), the computer (exec, readTextFile, writeTextFile, watch, ... each takes {host} from hosts() to act on a Settings > Hosts computer over ssh) and shared
     state between mods. It runs inside Perch's page with the person's full access, so it can do
     anything the app can; a bug in it can break the page.
   - A layout changes the whole window, as in herdr. `layouts/<id>.json` (next to `mods/`, the

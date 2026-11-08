@@ -160,6 +160,12 @@ describe("an app module's versions", () => {
     await api.writeTextFile("/tmp/x", "t");
     expect(calls.map((c) => [new URL(c.url).pathname.split("/").pop(), c.body.cmd ?? c.body.op])).toEqual([["exec", "echo"], ["fs", "read"], ["fs", "write"]]);
     await expect(api.exec("boom")).rejects.toThrow("could not start boom");
+    // A host id rides along so the core runs it over ssh there.
+    calls.length = 0;
+    await api.exec("uname", [], { host: "vps" });
+    await api.readTextFile("~/b", { host: "vps" });
+    await api.listDir("/etc");
+    expect(calls.map((c) => c.body.host)).toEqual(["vps", "vps", undefined]);
     vi.unstubAllGlobals();
   });
 

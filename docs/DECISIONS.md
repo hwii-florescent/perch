@@ -122,8 +122,12 @@ approval not mattering much.
   that uses `exec(`, `fetch(`, `WebSocket`, file read/write or `api.socket` (a text search, not a
   guarantee). `perch mod remove <id> [mod|layout]` and Settings > Mods > Remove move the folder or file
   to `mods-removed/<time>-<name>` instead of deleting it.
-- **Not built:** per-host handling (mods run on the local host's screen, and `exec`/files act on the
-  computer running the core), installing from anything but GitHub, pinning or updating an installed mod.
+- **Other computers.** `exec(cmd, args, {host})` and `readTextFile/writeTextFile/statFile/listDir/watch(path, …, {host})`
+  take a host id from Settings > Hosts (`api.hosts()`) and run over that host's ssh login (`ssh::exec_with_fallback`,
+  same result shape); a mod can only name a configured, enabled host, never an arbitrary address. Writes there stop at
+  256 KiB (they travel in the command line); reads/lists/stats are the same as local. Mods themselves still run on the
+  screen of the machine showing the app.
+- **Not built:** installing from anything but GitHub, pinning or updating an installed mod.
 
 ## 2026-11-08 — Project tree: explicit state labels, no idle hiding (owner)
 
