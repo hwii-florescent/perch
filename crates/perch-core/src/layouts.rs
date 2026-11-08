@@ -3,17 +3,39 @@
 //! `files`, `git`, `status`) or a mod (`mod:<id>`). Stock Perch is the default; one layout can be
 //! chosen (`layout-state.json` beside `layouts/`), and mods being off, or a layout that stops
 //! parsing, falls back to stock. The core only checks the shape (depth, size, known content); the
-//! page draws it. Look is a mod's business, so a node has only `size`, `hidden`, `gap` and `padding`.
-//! ponytail: structure only; a layout cannot yet set colors, borders or floating blocks, which a mod
-//! can draw itself. The upgrade path is herdr's cascading look properties on any node.
+//! page draws it. A node has `size`, `hidden`, `gap` and `padding`, and the cascading [`Look`]
+//! (`theme`, `colors`, `font`, `radius`, `border`).
+//! ponytail: no floating or terminal blocks, pane frames or terminal look (the terminal keeps the
+//! server's profile); a mod can draw floats itself.
 use crate::mods::{plain_id, Error, Policy};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 const MAX_DEPTH: usize = 8;
 const MAX_NODES: usize = 64;
 const MAX_BYTES: u64 = 256 * 1024;
 const BUILTIN: [&str; 6] = ["sidebar", "tabs", "canvas", "files", "git", "status"];
+/// The palette tokens of `themes.ts` (`Palette`) a layout may override, and the window `backdrop`.
+const COLORS: [&str; 17] = [
+    "accent",
+    "panelBg",
+    "surface0",
+    "surface1",
+    "surfaceDim",
+    "overlay0",
+    "overlay1",
+    "text",
+    "subtext0",
+    "mauve",
+    "green",
+    "yellow",
+    "red",
+    "blue",
+    "teal",
+    "peach",
+    "backdrop",
+];
 
 /// `{"px": 240}` (fixed) or `{"weight": 2}` (a share of what fixed siblings leave; the default is 1).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -24,9 +46,31 @@ pub struct Size {
     pub weight: Option<f32>,
 }
 
+/// How a node looks, as in herdr's cascading look properties: set on any node, and the nearest one up
+/// the tree wins. On the root it restyles the whole app; on a deeper node, that subtree.
+/// `theme` is a name from `themes.ts` (an unknown one shows as the default theme), `colors`
+/// overrides single palette tokens (`COLORS`) with `#rrggbb`, `font` is a CSS font-family for the
+/// interface, `radius` rounds the cards and `border` outlines them (px).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Look {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub colors: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub radius: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub border: Option<u32>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Group {
+    #[serde(flatten)]
+    pub look: Look,
     pub size: Option<Size>,
     pub hidden: bool,
     pub gap: u32,
@@ -37,6 +81,8 @@ pub struct Group {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Block {
+    #[serde(flatten)]
+    pub look: Look,
     pub size: Option<Size>,
     pub hidden: bool,
     pub padding: u32,
@@ -66,6 +112,33 @@ fn size_ok(size: &Option<Size>) -> bool {
     })
 }
 
+fn look_ok(look: &Look) -> Result<(), String> {
+    let hex = |text: &str| {
+        text.len() == 7 && text.starts_with('#') && text[1..].chars().all(|c| c.is_ascii_hexdigit())
+    };
+    if let Some((name, value)) = look
+        .colors
+        .iter()
+        .find(|(name, value)| !COLORS.contains(&name.as_str()) || !hex(value))
+    {
+        return Err(format!(
+            "color \"{name}\": \"{value}\" must be #rrggbb and the name one of {}",
+            COLORS.join(", ")
+        ));
+    }
+    let text_ok = |text: &Option<String>| {
+        text.as_ref()
+            .is_none_or(|t| t.len() <= 120 && !t.chars().any(char::is_control))
+    };
+    if !text_ok(&look.theme) || !text_ok(&look.font) {
+        return Err("theme and font must be short plain text".into());
+    }
+    if look.radius.is_some_and(|r| r > 48) || look.border.is_some_and(|b| b > 8) {
+        return Err("radius is at most 48 and border at most 8".into());
+    }
+    Ok(())
+}
+
 fn check(node: &Node, depth: usize, count: &mut usize) -> Result<(), String> {
     *count += 1;
     if depth > MAX_DEPTH || *count > MAX_NODES {
@@ -73,6 +146,10 @@ fn check(node: &Node, depth: usize, count: &mut usize) -> Result<(), String> {
             "too big: at most {MAX_DEPTH} levels and {MAX_NODES} nodes"
         ));
     }
+    look_ok(match node {
+        Node::Row(g) | Node::Column(g) => &g.look,
+        Node::Block(b) => &b.look,
+    })?;
     match node {
         Node::Row(g) | Node::Column(g) => {
             if g.children.is_empty() || g.gap > 200 || g.padding > 200 || !size_ok(&g.size) {
@@ -231,6 +308,44 @@ mod tests {
             );
         }
         assert!(scan(&root, &Policy { off: true }).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_look_cascades_from_any_node_and_bad_values_make_the_layout_unusable() {
+        let ok = r##"{"type":"row","theme":"nord","colors":{"accent":"#ff8800","backdrop":"#101010"},
+            "font":"Geist, sans-serif","radius":4,"border":1,"children":[
+            {"type":"block","content":"canvas","theme":"terminal","radius":0}]}"##;
+        let root = root_with(&[
+            ("ok.json", ok),
+            (
+                "name.json",
+                r##"{"type":"block","content":"tabs","colors":{"nope":"#000000"}}"##,
+            ),
+            (
+                "hex.json",
+                r#"{"type":"block","content":"tabs","colors":{"accent":"red"}}"#,
+            ),
+            (
+                "big.json",
+                r#"{"type":"block","content":"tabs","radius":500}"#,
+            ),
+        ]);
+        let found = scan(&root, &Policy::default());
+        let by = |id: &str| found.iter().find(|l| l.id == id).unwrap();
+        assert!(by("ok").error.is_none(), "{:?}", by("ok").error);
+        let Some(Node::Row(group)) = &by("ok").root else {
+            panic!("a row")
+        };
+        assert_eq!(group.look.theme.as_deref(), Some("nord"));
+        assert_eq!(group.look.colors["accent"], "#ff8800");
+        assert_eq!((group.look.radius, group.look.border), (Some(4), Some(1)));
+        for bad in ["name", "hex", "big"] {
+            assert!(by(bad).error.is_some(), "{bad}");
+        }
+        // The page reads the look off the node as camelCase-free flat keys.
+        let json = serde_json::to_value(&group.look).unwrap();
+        assert_eq!(json["font"], "Geist, sans-serif");
         let _ = std::fs::remove_dir_all(&root);
     }
 

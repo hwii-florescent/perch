@@ -49,8 +49,14 @@ approval not mattering much.
   Window layout and the watcher's `mods.changed` all see it. `App.tsx` draws `LayoutRoot` in place
   of the three stock cards (and drops the stock status bar) only when a layout is chosen and still
   parses; nothing chosen, a broken file, mods off or the reset key all give stock Perch.
-  Structure only: no colors, borders, floating blocks or terminal blocks (a mod draws those).
-- **Not built:** herdr's look properties on layouts, a trusted `exec`, removing a mod or layout
+  Any node may also carry a **look** that cascades (`theme`, `colors`, `font`, `radius`, `border`;
+  `layouts.rs` `Look`). The root's look goes on `<html>` through `setRootLook`, so menus and dialogs
+  follow it and it survives the settings theme being re-applied; a deeper node sets the same custom
+  properties inline (plus the ones `base.css` derives at `:root`), so only its subtree changes. A
+  layout that sets a theme keeps it over the Settings picker until the stock layout is chosen.
+  The terminal keeps the server's profile. No floating or terminal blocks, pane frames or
+  per-block looks outside the page's own tree (a menu opened from a themed subtree uses the root's).
+- **Not built:** a trusted `exec`, removing a mod or layout
   from Settings, install from GitHub, per-host handling (mods run on the local host's screen).
 
 ## 2026-11-08 — Project tree: explicit state labels, no idle hiding (owner)

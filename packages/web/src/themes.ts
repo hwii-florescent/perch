@@ -258,11 +258,53 @@ export function backdropFor(p: { panelBg: string; text: string }): string {
   return mix(p.panelBg, p.text, 40);
 }
 
+/** A layout's look (`crates/perch-core/src/layouts.rs` `Look`): set on any node, cascading down. */
+export interface Look {
+  theme?: string;
+  colors?: Record<string, string>;
+  font?: string;
+  radius?: number;
+  border?: number;
+}
+
+/** The CSS custom properties a look sets. Below `<html>` (`derived`) it also sets the ones
+ * `base.css` computes from the palette at `:root`, which would otherwise keep the root's colors. */
+export function lookVars(look: Look, derived: boolean): Record<string, string> {
+  const vars: Record<string, string> = {};
+  if (look.theme) {
+    const palette = resolveTheme(look.theme);
+    for (const key of Object.keys(TOKEN_CSS_VARS) as (keyof Palette)[]) vars[TOKEN_CSS_VARS[key]] = palette[key];
+    vars["--backdrop"] = backdropFor(palette);
+    vars["color-scheme"] = palette.colorScheme;
+  }
+  for (const [name, value] of Object.entries(look.colors ?? {})) {
+    if (name === "backdrop") vars["--backdrop"] = value;
+    else if (Object.hasOwn(TOKEN_CSS_VARS, name)) vars[TOKEN_CSS_VARS[name as keyof Palette]] = value;
+  }
+  if (derived) {
+    const glass = document.documentElement.hasAttribute("data-glass");
+    const panel = vars["--panel-bg"];
+    if (panel) Object.assign(vars, { "--bg": panel, "--card-bg": glass ? `color-mix(in srgb, ${panel} 86%, transparent)` : panel });
+    if (vars["--surface-0"]) vars["--surface"] = vars["--surface-0"];
+    if (vars["--surface-1"]) vars["--surface-alt"] = vars["--surface-1"];
+  }
+  if (look.font) vars["--font-ui"] = look.font;
+  if (look.radius != null) vars["--card-radius"] = `${look.radius}px`;
+  if (look.border != null) vars["--card-border"] = `${look.border}px`;
+  return vars;
+}
+
+// The chosen layout's root look, kept on top of whichever settings theme is applied: a settings
+// message re-applies the theme, which must not drop it.
+let rootLook: Record<string, string> = {};
+let appliedTheme = "perch";
+
 /** Set every semantic token as a CSS custom property on `<html>`. Falls
  * back to the default theme (perch) for an unknown/unset theme name so
  * a stale or corrupted `settings.theme` value never leaves the app
- * unstyled. */
+ * unstyled. The layout's root look, if any, goes on top. */
 export function applyTheme(name: string): void {
+  appliedTheme = name;
   const palette = resolveTheme(name);
   const root = document.documentElement.style;
   for (const key of Object.keys(TOKEN_CSS_VARS) as (keyof Palette)[]) {
@@ -270,4 +312,12 @@ export function applyTheme(name: string): void {
   }
   root.setProperty("--backdrop", backdropFor(palette));
   root.setProperty("color-scheme", palette.colorScheme);
+  for (const [name, value] of Object.entries(rootLook)) root.setProperty(name, value);
+}
+
+/** The window layout's root look (`lookVars(look, false)`); `{}` goes back to the settings theme. */
+export function setRootLook(vars: Record<string, string>): void {
+  for (const name of Object.keys(rootLook)) document.documentElement.style.removeProperty(name);
+  rootLook = vars;
+  applyTheme(appliedTheme);
 }

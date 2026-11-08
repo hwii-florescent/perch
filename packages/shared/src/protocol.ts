@@ -2862,8 +2862,21 @@ export interface LayoutSize {
 /** A window layout, as in herdr's desktop app: a tree of rows, columns and blocks. A block's
  * `content` is `sidebar`, `tabs`, `canvas`, `files`, `git`, `status` or `mod:<id>`. */
 export type LayoutNode =
-  | { type: "row" | "column"; size?: LayoutSize | null; hidden?: boolean; gap?: number; padding?: number; children: LayoutNode[] }
-  | { type: "block"; size?: LayoutSize | null; hidden?: boolean; padding?: number; content: string };
+  | (LayoutLook & { type: "row" | "column"; size?: LayoutSize | null; hidden?: boolean; gap?: number; padding?: number; children: LayoutNode[] })
+  | (LayoutLook & { type: "block"; size?: LayoutSize | null; hidden?: boolean; padding?: number; content: string });
+
+/** A node's look; the nearest one up the tree wins (the root's restyles the whole app). `theme` is a
+ * name from the app's themes, `colors` overrides palette tokens (`accent`, `panelBg`, `surface0`,
+ * `surface1`, `surfaceDim`, `overlay0`, `overlay1`, `text`, `subtext0`, `mauve`, `green`, `yellow`,
+ * `red`, `blue`, `teal`, `peach`, and the window `backdrop`) with `#rrggbb`, `font` is a CSS
+ * font-family, `radius` rounds cards and `border` outlines them (px). */
+export interface LayoutLook {
+  theme?: string;
+  colors?: Record<string, string>;
+  font?: string;
+  radius?: number;
+  border?: number;
+}
 
 export interface LayoutInfo {
   id: string;

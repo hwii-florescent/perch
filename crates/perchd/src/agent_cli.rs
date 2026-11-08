@@ -1365,7 +1365,13 @@ Mods
     where a node is 'row' or 'column' (with children) or {'type': 'block', 'content': ...}, and
     content is one of sidebar, tabs, canvas (the open session's panes), files, git, status, or
     mod:<id> (a mod's view). Any node may have 'size' ({'px': 240} or {'weight': 2}, default
-    weight 1), 'hidden', 'padding'; rows and columns also 'gap'. Example, an IDE: a row of
+    weight 1), 'hidden', 'padding'; rows and columns also 'gap'. Any node may also set a look,
+    and the nearest one up the tree wins (the root's restyles the whole app, a column's only its
+    subtree): 'theme' (a theme name from Settings, e.g. 'nord'), 'colors' ({'accent': '#ff8800',
+    'panelBg', 'surface0', 'surface1', 'surfaceDim', 'overlay0', 'overlay1', 'text', 'subtext0',
+    'mauve', 'green', 'yellow', 'red', 'blue', 'teal', 'peach', 'backdrop'}, each #rrggbb),
+    'font' (a CSS font-family for the interface), 'radius' (card corners, px) and 'border'
+    (card outline, px). The terminal keeps its own colors and font. Example, an IDE: a row of
     sidebar (220px), a column of canvas over mod:terminal-notes (160px), and files (320px). Write
     the file, then `perch mod layout <id>` applies it at once (a file that does not parse cannot
     be chosen, and one that breaks later falls back to Perch as shipped); edits show as you save.

@@ -44,6 +44,25 @@ describe("a layout on screen", () => {
   });
 });
 
+describe("a layout's look", () => {
+  it("puts the root's look on <html>, restyles a subtree from its node, and gives the root look back", async () => {
+    const tree: LayoutNode = { type: "row", colors: { accent: "#ff8800" }, radius: 2, children: [
+      { type: "block", content: "sidebar" },
+      { type: "block", content: "canvas", theme: "nord", font: "Geist", border: 1 },
+    ] };
+    await act(async () => root.render(<LayoutRoot root={tree} />));
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#ff8800");
+    const node = (id: string) => host.querySelector(`[data-testid="layout-${id}"]`) as HTMLElement;
+    expect(node("sidebar").style.getPropertyValue("--panel-bg")).toBe(""); // inherits the root's
+    expect(node("canvas").style.getPropertyValue("--card-bg")).not.toBe("");
+    expect(node("canvas").style.fontFamily).toBe("Geist");
+    expect(node("canvas").style.getPropertyValue("--card-border")).toBe("1px");
+    act(() => root.unmount());
+    expect(document.documentElement.style.getPropertyValue("--accent")).not.toBe("#ff8800");
+    root = createRoot(host);
+  });
+});
+
 describe("which layout is drawn", () => {
   const block: LayoutNode = { type: "block", content: "canvas" };
   const base = { mods: [], folder: "", policy: { off: false }, safeMode: false };

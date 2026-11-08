@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { applyTheme, backdropFor, PERCH_DEFAULT, resolveTheme, THEMES, THEME_NAMES } from "./themes";
+import { applyTheme, backdropFor, lookVars, PERCH_DEFAULT, resolveTheme, setRootLook, THEMES, THEME_NAMES } from "./themes";
 import catppuccin from "./palettes/catppuccin.json";
 import resolvedBeforePaletteImport from "./__fixtures__/themes.resolved.json";
 
@@ -117,4 +117,29 @@ it("the CSS defaults agree with the resolved neutral palette", () => {
     const token = key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`).replace(/([a-z])(\d)/g, "$1-$2");
     expect(css).toContain(`--${token}: ${value};`);
   }
+});
+
+it("a layout look sets the theme's tokens, single color overrides and the derived ones below <html>", () => {
+  const vars = lookVars({ theme: "nord", colors: { accent: "#ff8800", backdrop: "#101010", bogus: "#000000" }, font: "Geist", radius: 4, border: 1 }, true);
+  expect(vars["--accent"]).toBe("#ff8800");
+  expect(vars["--backdrop"]).toBe("#101010");
+  expect(vars["--panel-bg"]).toBe(resolveTheme("nord").panelBg);
+  expect(vars["--card-bg"]).toBe(vars["--panel-bg"]); // base.css derives it at :root, so a node must set it
+  expect(vars["--surface"]).toBe(vars["--surface-0"]);
+  expect([vars["--font-ui"], vars["--card-radius"], vars["--card-border"]]).toEqual(["Geist", "4px", "1px"]);
+  expect(Object.keys(vars).some((name) => name.includes("bogus"))).toBe(false);
+  expect(lookVars({ radius: 0 }, true)).toEqual({ "--card-radius": "0px" }); // no theme: nothing inherited is touched
+  expect(lookVars({ theme: "nord" }, false)["--card-bg"]).toBeUndefined();
+});
+
+it("the root look stays on top when the settings theme is applied again, and is undone", () => {
+  const root = document.documentElement.style;
+  applyTheme("perch");
+  setRootLook(lookVars({ colors: { accent: "#ff8800" }, radius: 2 }, false));
+  applyTheme("perch"); // any settings message does this
+  expect(root.getPropertyValue("--accent")).toBe("#ff8800");
+  expect(root.getPropertyValue("--card-radius")).toBe("2px");
+  setRootLook({});
+  expect(root.getPropertyValue("--accent")).toBe(resolveTheme("perch").accent);
+  expect(root.getPropertyValue("--card-radius")).toBe("");
 });
