@@ -594,7 +594,7 @@ function NotificationsSection() {
     </SettingsGroup>
     <SettingsGroup title="Sub-sessions">
       <SettingRow title="Let leads start sub-sessions without asking" description="Off: when an agent wants to start a sub-session it puts a suggested task in its chat, and nothing starts until you press Start. On: it starts one itself, during a turn you opened.">
-        <Switch label="Let leads start sub-sessions without asking" testId="settings-leads-start-without-asking" checked={settings?.leadsStartWithoutAsking ?? false} onChange={(checked) => updateSettings({ leadsStartWithoutAsking: checked })} />
+        <Switch label="Let leads start sub-sessions without asking" testId="settings-leads-start-without-asking" checked={settings?.leadsStartWithoutAsking ?? true} onChange={(checked) => updateSettings({ leadsStartWithoutAsking: checked })} />
       </SettingRow>
     </SettingsGroup>
     <SettingsGroup title="Sub-session summaries">

@@ -1095,6 +1095,12 @@ mod tests {
     async fn spawn_is_a_card_unless_the_person_let_leads_start_without_asking() {
         let run = run().await;
         let app = super::super::booted_state(run.address);
+        app.settings
+            .update(crate::settings::SettingsPatch {
+                leads_start_without_asking: Some(false),
+                ..Default::default()
+            })
+            .unwrap();
         let body = |key: &str| json!({"session": "lead", "agent": "codex", "model": "gpt-5.6-luna", "task": "fix the parser", "key": key});
         let before = run.db.sub_sessions_of("lead").unwrap().len();
         let (status, answer) = call(&run, "spawn", &run.lead_token, body("s1")).await;

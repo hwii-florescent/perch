@@ -110,10 +110,10 @@ pub struct Settings {
     /// The model the reporter asks of the Codex CLI.
     #[serde(default = "default_reporter_codex_model")]
     pub reporter_codex_model: String,
-    /// Lets a lead start sub-sessions with `perch spawn` without a person's click. Off (the
-    /// default): `perch spawn` puts a suggested-task card in the lead's chat instead
-    /// (`suggestions.rs`).
-    #[serde(default)]
+    /// Lets a lead start sub-sessions with `perch spawn` without a person's click (the
+    /// default, still only during a turn a person opened). Off: `perch spawn` puts a
+    /// suggested-task card in the lead's chat instead (`suggestions.rs`).
+    #[serde(default = "default_true")]
     pub leads_start_without_asking: bool,
     /// The model the reporter asks of Pi (`provider/id`); empty means Pi has no reporter.
     #[serde(default)]
@@ -151,7 +151,7 @@ impl Default for Settings {
             reporter_codex_model: default_reporter_codex_model(),
             reporter_pi_model: String::new(),
             reporter_omp_model: String::new(),
-            leads_start_without_asking: false,
+            leads_start_without_asking: true,
         }
     }
 }

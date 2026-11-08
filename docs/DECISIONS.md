@@ -178,7 +178,8 @@ Closes the gaps against Claude desktop's sub-sessions (desktop doc: "Work across
   **Do it here** (sends the task to the lead as a message), **Options** (provider, model,
   worktree, permissions) and **Start all** for several. A setting "Let leads start
   sub-sessions without asking" decides whether `perch spawn` starts directly (on a
-  person-opened turn, as today) or becomes a card; default: ask (card), like Claude.
+  person-opened turn, as today) or becomes a card. Default changed to start directly
+  (owner, 2026-11-08): a terminal-mode lead has no chat to show a card in.
 - **Sender cards.** An incoming message shows in the receiver as a card titled with the
   sending session and a link back, not plain text.
 - **`perch read <child>`.** The lead reads a bounded tail of its own child's transcript
