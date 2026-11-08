@@ -1,150 +1,51 @@
-import { useCallback, useEffect, useState } from "react";
-import type { ModInfo, ModRun, ModsPolicy } from "@perch/shared";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import type { ModInfo } from "@perch/shared";
 import { usePerchStore } from "../store";
-import { PanelOverlay } from "./ModPanelFrame";
-import { approveMod, enableMod, listMods, modPanelUrl, modsAvailable, runModAction, type ModsState } from "../mods";
+import { currentMods, enableMod, refreshMods, subscribeMods } from "../mods";
 import { SettingsGroup, SettingRow } from "./ui/setting-row";
-import { Select } from "./ui/select";
 import { Switch } from "./ui/switch";
 import { GHOST_BUTTON } from "./ui/icon-button";
-import { BTN_PRIMARY, MUTED, SELECT } from "./ui/settings";
+import { MUTED } from "./ui/settings";
 
-const NO_ANSWER = "No answer from Perch. Try again.";
+const statusText = (mod: ModInfo) => mod.error ? `Cannot load: ${mod.error}` : mod.enabled ? "On" : "Off";
 
-const MODES: { value: ModsPolicy["mode"]; label: string }[] = [
-  { value: "ask", label: "Ask me first" },
-  { value: "auto-safe", label: "Approve safe mods automatically" },
-  { value: "auto-all", label: "Approve every mod automatically" },
-];
-
-const statusText = (mod: ModInfo) => {
-  switch (mod.status.state) {
-    case "active": return `On${mod.approvedBy ? ` · approved by ${mod.approvedBy === "person" ? "you" : mod.approvedBy.replace("policy:", "your policy: ")}` : ""}`;
-    case "disabled": return "Off";
-    case "pending": return `Waiting for you to approve it: ${mod.status.reason}`;
-    case "invalid": return `Cannot load: ${mod.status.error}`;
-  }
-};
-
-function RunResult({ run }: { run: ModRun }) {
-  return (
-    <pre className="m-0 mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-ui bg-surface-1 p-2 text-[0.75rem] text-fg" data-testid="mod-run-result">
-      {run.ok ? "Done." : `Failed${run.error ? `: ${run.error}` : run.exitCode !== null ? ` (exit ${run.exitCode})` : ""}.`}
-      {run.output ? `\n${run.output}` : ""}
-      {run.truncated ? "\n[output cut]" : ""}
-    </pre>
-  );
-}
-
-function ModRow({ mod, busy, onApprove, onEnable, onRun, onOpen, run }: {
-  mod: ModInfo; busy: boolean; run?: ModRun;
-  onApprove: () => void; onEnable: (enabled: boolean) => void; onRun: (action: string) => void; onOpen: (panel: string, title: string) => void;
-}) {
-  const state = mod.status.state;
-  return (
-    <div className="border-b border-surface-1 py-[0.8rem] last:border-b-0" data-testid={`mod-${mod.id}`}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="text-[0.85rem] font-medium text-fg">{mod.name || mod.id} <span className={MUTED}>{mod.version}</span></div>
-          {mod.description && <div className={MUTED}>{mod.description}</div>}
-          <div className={MUTED} data-testid={`mod-${mod.id}-status`}>{statusText(mod)}</div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {state === "pending" && <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={onApprove}>Approve</button>}
-          {state === "active" && mod.actions.map((action) => (
-            <button key={action.id} type="button" className={GHOST_BUTTON} disabled={busy} onClick={() => onRun(action.id)}>{action.title}</button>
-          ))}
-          {state === "active" && mod.panels.map((panel) => (
-            <button key={panel.id} type="button" className={GHOST_BUTTON} onClick={() => onOpen(panel.id, `${mod.name}: ${panel.title}`)}>Open {panel.title}</button>
-          ))}
-          {(state === "active" || state === "disabled") && (
-            <button type="button" className={GHOST_BUTTON} disabled={busy} onClick={() => onEnable(state === "disabled")}>{state === "disabled" ? "Turn on" : "Turn off"}</button>
-          )}
-        </div>
-      </div>
-      {mod.preview.length > 0 && (
-        <details className="mt-2" open={state === "pending"}>
-          <summary className={MUTED}>{state === "pending" ? "Approving lets this run as you" : "What it runs"}</summary>
-          <ul className="m-0 mt-1 list-none p-0 font-mono text-[0.75rem] text-fg">
-            {mod.preview.map((line) => <li key={line} className="break-all">{line}</li>)}
-          </ul>
-          <div className={MUTED}>Needs: {mod.required.join(", ") || "nothing special"}</div>
-        </details>
-      )}
-      {run && <RunResult run={run} />}
-    </div>
-  );
-}
-
-/** Settings > Mods: how mods get approved, an off switch, and every mod with what approving it lets
- * run. The core decides; this lists, and a click here is a person's approval. */
+/** Settings > Mods: a list of the mods you have, an off switch, and Turn off/on for each. Mods show
+ * up where you work as soon as they are written; this is only for looking at them. */
 export function ModsSection() {
-  const settings = usePerchStore((s) => s.settings);
+  const off = usePerchStore((s) => s.settings?.mods?.off ?? false);
   const updateSettings = usePerchStore((s) => s.updateSettings);
-  const [state, setState] = useState<ModsState | null>(null);
-  const [loaded, setLoaded] = useState<"loading" | "ready" | "unavailable">("loading");
-  const [busy, setBusy] = useState<string | null>(null);
+  const state = useSyncExternalStore(subscribeMods, currentMods);
   const [message, setMessage] = useState<string | null>(null);
-  const [runs, setRuns] = useState<Record<string, ModRun>>({});
-  const [panel, setPanel] = useState<{ title: string; src: string; canRead: boolean } | null>(null);
 
-  const take = useCallback((next: ModsState | null) => {
-    if (!next) { setMessage(NO_ANSWER); return; }
-    setState(next);
-    setMessage(next.error ?? null);
-  }, []);
-
-  // Listed again whenever the policy changes, because it can approve what was waiting.
-  const policyKey = `${settings?.mods?.mode ?? "ask"}/${settings?.mods?.off ?? false}`;
-  useEffect(() => {
-    if (!modsAvailable()) { setLoaded("unavailable"); return; }
-    void listMods().then((next) => { take(next); setLoaded(next ? "ready" : "unavailable"); });
-  }, [policyKey, take]);
-
-  const policy: ModsPolicy = settings?.mods ?? { mode: "ask", off: false };
-  const act = async (id: string, work: () => Promise<ModsState | null>) => {
-    setBusy(id);
-    take(await work());
-    setBusy(null);
-  };
+  // Asked again when the switch flips: mods that were off are listed, and the reverse.
+  useEffect(() => refreshMods(), [off]);
 
   return (
     <>
       <SettingsGroup title="Mods">
-        <SettingRow title="When a mod is new or changed" description="A mod is a folder you or an agent wrote that adds panels, actions or reactions to Perch. Nothing of it runs until it is approved. Safe mods only show a panel, react to events and read project files; anything that builds, uses the network or writes project files still asks you.">
-          <Select className={SELECT} testId="settings-mods-mode" ariaLabel="When a mod is new or changed" disabled={!settings} value={policy.mode} onChange={(value) => updateSettings({ mods: { ...policy, mode: value as ModsPolicy["mode"] } })} options={MODES} />
-        </SettingRow>
-        <SettingRow title="Turn all mods off" description="Nothing is shown or run, and nothing can be approved, until you turn them back on. Starting Perch with PERCH_MODS=off does the same when the app will not open.">
-          <Switch label="Turn all mods off" testId="settings-mods-off" checked={policy.off} onChange={(checked) => updateSettings({ mods: { ...policy, off: checked } })} />
+        <SettingRow title="Turn all mods off" description="A mod is a folder you or an agent wrote that changes Perch and runs inside it with your full access. Turn this on if one breaks the page. Pressing ctrl+alt+shift+Escape or starting Perch with PERCH_MODS=off does the same.">
+          <Switch label="Turn all mods off" testId="settings-mods-off" checked={off} onChange={(checked) => updateSettings({ mods: { off: checked } })} />
         </SettingRow>
       </SettingsGroup>
       <SettingsGroup title="Installed mods">
-        {loaded === "unavailable" && <p className={`${MUTED} py-3`}>{modsAvailable() ? NO_ANSWER : "This Perch cannot manage mods."}</p>}
-        {loaded === "loading" && <p className={`${MUTED} py-3`}>Loading…</p>}
-        {state && loaded === "ready" && (
-          <>
-            {state.mods.length === 0 && <p className={`${MUTED} py-3`}>No mods yet. Ask an agent in a Perch session to make one, or add a folder with a perch-mod.toml to {state.folder}.</p>}
-            {state.mods.map((mod) => (
-              <ModRow
-                key={mod.id}
-                mod={mod}
-                busy={busy === mod.id}
-                run={runs[mod.id]}
-                onApprove={() => void act(mod.id, () => approveMod(mod.id, mod.hash))}
-                onEnable={(enabled) => void act(mod.id, () => enableMod(mod.id, enabled))}
-                onRun={(action) => void act(mod.id, async () => {
-                  const answer = await runModAction(mod.id, action);
-                  if (answer?.run) setRuns((all) => ({ ...all, [mod.id]: answer.run! }));
-                  return answer;
-                })}
-                onOpen={(panelId, title) => setPanel({ title, src: modPanelUrl(mod.id, panelId), canRead: mod.required.includes("read-project") })}
-              />
-            ))}
-          </>
-        )}
+        {!state && <p className={`${MUTED} py-3`}>Loading…</p>}
+        {state?.mods.length === 0 && <p className={`${MUTED} py-3`}>No mods yet. Ask an agent in a Perch session to make one, or add a folder with a main.js to {state.folder}.</p>}
+        {state?.mods.map((mod) => (
+          <div key={mod.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-surface-1 py-[0.8rem] last:border-b-0" data-testid={`mod-${mod.id}`}>
+            <div className="min-w-0">
+              <div className="text-[0.85rem] font-medium text-fg">{mod.name}</div>
+              {mod.description && <div className={MUTED}>{mod.description}</div>}
+              <div className={MUTED} data-testid={`mod-${mod.id}-status`}>{statusText(mod)}</div>
+            </div>
+            {!mod.error && (
+              <button type="button" className={GHOST_BUTTON} onClick={async () => setMessage((await enableMod(mod.id, !mod.enabled))?.error ?? null)}>
+                {mod.enabled ? "Turn off" : "Turn on"}
+              </button>
+            )}
+          </div>
+        ))}
         {message && <p className="py-2 text-[0.8rem] text-red" role="alert" data-testid="mods-message">{message}</p>}
       </SettingsGroup>
-      {panel && <PanelOverlay title={panel.title} src={panel.src} canRead={panel.canRead} onClose={() => setPanel(null)} />}
     </>
   );
 }

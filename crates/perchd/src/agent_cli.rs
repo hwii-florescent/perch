@@ -885,10 +885,9 @@ fn cancel(args: &[String]) -> Result<(), String> {
 }
 
 const MOD_USAGE: &str = "usage: perch mod [list] [--json] | perch mod enable <id> | \
-     perch mod disable <id> | perch mod run <id> <action> | perch mod runs [--json] | \
-     perch mod open <id> [panel] | perch mod approve <id> <hash>  (approve is a person's to type)";
+     perch mod disable <id> | perch mod open <id>";
 
-/// `perch mod`: the mods on this computer, turn one off or on, and (a person) approve one.
+/// `perch mod`: the mods on this computer, turn one off or on, and show one.
 fn mod_cmd(args: &[String]) -> Result<(), String> {
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     match words.as_slice() {
@@ -909,90 +908,22 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
             println!("{id} is {verb}d");
             Ok(())
         }
-        ["run", id, action] => {
-            let run = ask("mod/run", json!({ "id": id, "action": action }))?;
-            print!("{}", render_run(&run));
-            if run["ok"].as_bool() == Some(true) {
-                Ok(())
-            } else {
-                Err(format!("{id} {action} did not succeed"))
-            }
-        }
-        ["runs"] | ["runs", "--json"] => {
-            let answer = ask("mod/runs", json!({}))?;
-            if args.iter().any(|arg| arg == "--json") {
-                println!("{answer}");
-            } else {
-                let runs = answer["runs"]
-                    .as_array()
-                    .map(Vec::as_slice)
-                    .unwrap_or_default();
-                if runs.is_empty() {
-                    println!("No mod has run since Perch started.");
-                }
-                for run in runs {
-                    print!("{}", render_run(run));
-                }
-            }
-            Ok(())
-        }
-        ["approve", id, hash] => {
-            ask("mod/approve", json!({ "id": id, "hash": hash }))?;
-            println!("{id} is approved");
-            Ok(())
-        }
-        ["open", id] | ["open", id, _] => {
-            let panel = words.get(2);
-            let opened = ask("mod/open", json!({ "id": id, "panel": panel }))?;
-            println!(
-                "{id}: panel {} is shown on the person's screen",
-                opened["panel"].as_str().unwrap_or("")
-            );
+        ["open", id] => {
+            ask("mod/open", json!({ "id": id }))?;
+            println!("{id} is shown on the person's screen");
             Ok(())
         }
         _ => Err(MOD_USAGE.into()),
     }
 }
 
-/// One run: who ran what and how it ended, then what it printed.
-fn render_run(run: &Value) -> String {
-    let how = if run["ok"].as_bool() == Some(true) {
-        "ok".to_string()
-    } else if let Some(error) = run["error"].as_str() {
-        format!("failed: {error}")
-    } else {
-        format!("failed (exit {})", run["exitCode"])
-    };
-    let mut out = format!(
-        "{} {}  {how}  {} ms\n",
-        run["mod"].as_str().unwrap_or(""),
-        run["what"].as_str().unwrap_or(""),
-        run["millis"]
-    );
-    if let Some(text) = run["output"].as_str().filter(|text| !text.is_empty()) {
-        out += text;
-        if !text.ends_with('\n') {
-            out.push('\n');
-        }
-        if run["truncated"].as_bool() == Some(true) {
-            out += "[output cut]\n";
-        }
-    }
-    out
-}
-
-/// The mods in words: the policy, then one line per mod with what it needs and where it stands.
+/// The mods in words: where they live, then one line per mod.
 fn render_mods(answer: &Value) -> String {
-    let mode = answer["policy"]["mode"].as_str().unwrap_or("ask");
-    let mut out = format!(
-        "Mods in {} (approval: {mode}",
-        answer["folder"].as_str().unwrap_or("")
-    );
-    out += if answer["safeMode"].as_bool() == Some(true) {
-        "; MODS ARE OFF (Settings > Mods or PERCH_MODS=off): none are loaded)\n"
-    } else {
-        ")\n"
-    };
+    let mut out = format!("Mods in {}", answer["folder"].as_str().unwrap_or(""));
+    if answer["off"].as_bool() == Some(true) {
+        out += " (MODS ARE OFF: Settings > Mods or PERCH_MODS=off; none are loaded)";
+    }
+    out.push('\n');
     let mods = answer["mods"]
         .as_array()
         .map(Vec::as_slice)
@@ -1002,30 +933,16 @@ fn render_mods(answer: &Value) -> String {
     }
     for item in mods {
         let field = |name: &str| item[name].as_str().unwrap_or("");
-        let needs: Vec<&str> = item["required"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .collect();
-        let state = match item["status"]["state"].as_str().unwrap_or("") {
-            "pending" => format!(
-                "pending: {}",
-                item["status"]["reason"].as_str().unwrap_or("")
-            ),
-            "invalid" => format!(
-                "invalid: {}",
-                item["status"]["error"].as_str().unwrap_or("")
-            ),
-            other => other.to_string(),
+        let state = match (item["error"].as_str(), item["enabled"].as_bool()) {
+            (Some(error), _) => format!("cannot load: {error}"),
+            (None, Some(true)) => "on".to_string(),
+            _ => "off".to_string(),
         };
         out += &format!(
-            "{}  {} {}  [{}]  hash {}  {state}\n",
+            "{}  {}  {}  {state}\n",
             field("id"),
             field("name"),
-            field("version"),
-            needs.join(", "),
-            field("hash"),
+            field("place")
         );
     }
     out
@@ -1299,18 +1216,10 @@ Commands
   perch memory delete <name> --base <revision>
                           Delete a memory file, if it is still at the revision you read.
   perch mod [--json]      The mods on this computer (folders in the mods folder, each with a
-                          perch-mod.toml), what each needs, its hash and where it stands:
-                          active, disabled, pending (waiting for a person) or invalid.
-  perch mod enable <id>   Turn a mod on or off. Neither approves anything.
+                          main.js that Perch runs), and whether each is on, off or cannot load.
+  perch mod enable <id>   Turn a mod on or off.
   perch mod disable <id>
-  perch mod run <id> <action>
-                          Run one action of an approved, enabled mod (60 seconds at most) and
-                          print what it printed. `perch mod runs` shows the latest runs,
-                          events included (since Perch started).
-  perch mod approve <id> <hash>
-                          Person only, like `perch start`: a person types it themselves in
-                          this terminal (in Claude or Pi as `!perch mod approve ...`) with the
-                          hash `perch mod` shows; run by an agent it is refused. Never try it.
+  perch mod open <id>     Show a mod on the person's screen now.
   perch guide             This text.
 
 How it works
@@ -1393,30 +1302,21 @@ Project memory
     `perch memory` to change it, not the shell, so that who wrote what is recorded.
 
 Mods
-  - A mod is a folder in the mods folder (the path is in `perch mod`) holding perch-mod.toml:
-    id, name and version (the id is the folder's name), `capabilities`, and any of `[[actions]]`
-    and `[[events]]` (id/on, title, `command` = an argv list, run without a shell) and
-    `[[panels]]` (id, title, `entry` = a relative .html file, `placement` = 'overlay' (default) or
-    'dock', a pane in the workspace). `on` of an event is one of
-    session.needs-you, session.done, session.failed; the command gets PERCH_MOD_CONTEXT (JSON),
-    PERCH_MOD_DIR and PERCH_MOD_DATA (a private folder that keeps its files), runs in the mod's
-    folder with no shell, and is stopped after 30 seconds (60 for an action). Write it there with the shell,
-    then run `perch mod` to see whether it was accepted. Nothing runs until a person approves it
-    (or the person's own policy does): tell them it is waiting and what it needs. You cannot
-    approve it, and your own session's permissions are a separate matter: a mod never widens them.
-    The person sees a card to approve it in Perch itself (terminal or chat), and once it is
-    active its docked panels open by themselves; `perch mod open <id> [panel]` shows one now.
-  - A mod's command can run `perch` itself (PERCH_SESSION and PERCH_TOKEN are set, and `perch` is
-    on PATH) while it runs. That token opens only `perch mod`/`perch mod runs`, and `perch memory`
-    for the session an event or invocation was about: reading needs `read-project` and writing
-    `write-project` in the mod's `capabilities`, and the person approved those. It cannot spawn,
-    send, suggest, stop or approve, and it stops working when the command ends.
-  - A panel can read project files if the mod's `capabilities` has `read-project`: it posts
-    `parent.postMessage({perch:'read-file', id:1, path:'README.md'}, '*')` and listens for
-    `{perch:'reply', id:1, ok:true, text}` (or `ok:false, error`). Text only, up to 256 KiB, the
-    open local project only; it has no network and cannot write.
-  - To undo, `perch mod disable <id>` or delete the folder. Starting Perch with PERCH_MODS=off
-    loads none.
+  - A mod changes Perch itself, as in herdr's desktop app. It is a folder in the mods folder (the
+    path is in `perch mod`) holding main.js. Write it there with the shell: it loads within a
+    couple of seconds, with no approval and no restart, and each edit reloads it. A version that
+    fails to load leaves the last working one showing. An optional mod.json holds
+    {'name', 'description', 'place': 'dock' (a pane, the default) | 'overlay' | 'none' (no view,
+    it only runs), 'entry': 'main.js'}.
+  - main.js is an ES module whose default export is `(el, api) => cleanup?`: draw into `el` with
+    plain DOM, no build step. `api` is `modId`, `store` (Perch's own zustand store: getState() has
+    sessions, workspaces and the rest, subscribe() for live updates), `socket` (the app's client:
+    send any message, onMessage), `focusSession(id)` and `readFile(path)` (text of a file in the
+    open local project). It runs inside Perch's page with the person's full access, so it can do
+    anything the app can, including start terminals through `socket`; a bug in it can break the page.
+  - `perch mod open <id>` shows a mod now. To undo: `perch mod disable <id>`, delete the folder, or
+    the person presses ctrl+alt+shift+Escape (turns every mod off) or starts Perch with
+    PERCH_MODS=off.
 
 Showing results
   Perch's chat draws Markdown: use tables for comparisons, fenced code blocks with a language
@@ -1893,7 +1793,8 @@ mod tests {
             "Perch never puts its contents into a prompt",
             "perch memory write <name>",
             "perch memory delete <name> --base <revision>",
-            "perch mod approve <id> <hash>",
+            "perch mod open <id>",
+            "(el, api) => cleanup?",
             "PERCH_MODS=off",
             "Project memory",
             "Perch never puts it into a prompt",

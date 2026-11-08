@@ -1349,17 +1349,12 @@ pub enum ClientMessage {
     #[serde(rename = "mods.list", rename_all = "camelCase")]
     ModsList { request_id: String },
 
-    /// A person's change to one mod: `op` is `approve` (needs the `hash` they looked at),
-    /// `enable`, `disable` or `run` (needs `action`). Answered with `mods.state`.
+    /// A person's change to one mod: `op` is `enable` or `disable`. Answered with `mods.state`.
     #[serde(rename = "mods.set", rename_all = "camelCase")]
     ModsSet {
         request_id: String,
         id: String,
         op: String,
-        #[serde(default)]
-        hash: Option<String>,
-        #[serde(default)]
-        action: Option<String>,
     },
 
     /// The index of a Project's memory files on this core (capability `memory.v1`). Answered
@@ -2501,8 +2496,8 @@ pub enum ServerMessage {
         error: Option<String>,
     },
 
-    /// Reply to `mods.list` and `mods.set`: every mod with its status, the approval policy, whether
-    /// mods are off, the mods folder, and for `run` what the run did. `error` explains a refusal.
+    /// Reply to `mods.list` and `mods.set`: every mod, the setting, whether mods are off, and the mods
+    /// folder. `error` explains a refusal.
     #[serde(rename = "mods.state", rename_all = "camelCase")]
     ModsState {
         request_id: String,
@@ -2511,19 +2506,17 @@ pub enum ServerMessage {
         safe_mode: bool,
         folder: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        run: Option<crate::mods_run::RunRecord>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
 
-    /// Broadcast when the mods folder or a mod's status changed (written, edited, approved, turned
-    /// off). Clients ask again with `mods.list`.
+    /// Broadcast when the mods folder or a mod's state changed (written, edited, turned off).
+    /// Clients ask again with `mods.list`.
     #[serde(rename = "mods.changed")]
     ModsChanged {},
 
-    /// Broadcast when `perch mod open` asks the person's screen to show one of an Active mod's panels.
+    /// Broadcast when `perch mod open` asks the person's screen to show a mod.
     #[serde(rename = "mods.open", rename_all = "camelCase")]
-    ModsOpen { mod_id: String, panel_id: String },
+    ModsOpen { mod_id: String },
 
     /// Reply to `memory.list`, `memory.set` and `memory.delete`: the Project's memory index,
     /// by name, after the request. `name` repeats the file a set or delete was about;

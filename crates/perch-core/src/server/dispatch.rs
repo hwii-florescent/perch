@@ -291,13 +291,9 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             folders,
         } => super::instructions::handle_set(state, request_id, scope, id, text, folders),
         ClientMessage::ModsList { request_id } => super::mods::handle_list(state, request_id),
-        ClientMessage::ModsSet {
-            request_id,
-            id,
-            op,
-            hash,
-            action,
-        } => super::mods::handle_set(state, request_id, id, op, hash, action),
+        ClientMessage::ModsSet { request_id, id, op } => {
+            super::mods::handle_set(state, request_id, id, op)
+        }
         ClientMessage::MemoryList {
             request_id,
             project_id,

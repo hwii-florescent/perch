@@ -241,25 +241,20 @@ pub(super) fn agent_read(
     Ok(json!(file))
 }
 
-/// `author` is who is recorded; `None` is the calling agent session.
 pub(super) fn agent_write(
     app: &AppState,
     caller: &AgentIdentity,
     body: &Value,
-    author: Option<Author>,
 ) -> Result<Value, Failure> {
     let project_id = caller_project(app, caller)?;
-    let author = author.unwrap_or_else(|| {
-        let label = super::agent_mail::sender_label(app, &caller.session_id, &caller.provider_id);
-        Author::agent(&caller.session_id, &label)
-    });
+    let label = super::agent_mail::sender_label(app, &caller.session_id, &caller.provider_id);
     let entry = memory::write(
         &app.memory_root,
         &project_id,
         name_of(body)?,
         body["text"].as_str().unwrap_or_default(),
         body["base"].as_str().filter(|base| !base.is_empty()),
-        &author,
+        &Author::agent(&caller.session_id, &label),
     )
     .map_err(failure)?;
     Ok(json!({ "entry": entry }))

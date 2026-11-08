@@ -1,6 +1,6 @@
 import { createContext, useContext, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { currentMods, modPanelUrl, subscribeMods } from "../mods";
-import { ModPanelFrame } from "../components/ModPanelFrame";
+import { currentMods, subscribeMods } from "../mods";
+import { ModView } from "../components/ModView";
 import {
   DockviewDefaultTab,
   DockviewReact,
@@ -187,16 +187,13 @@ function GitReviewPanel(props: IDockviewPanelProps) {
   return <WorkspaceGitReviewPane workspaceId={workspaceId} />;
 }
 
-/** A mod's docked panel. Looks the mod up on every change, so a mod that was turned off or removed
- * stops showing its page at once (and a restored layout never serves a mod that is not Active). */
+/** A mod's docked view. Looks the mod up on every change, so a mod that was turned off or removed
+ * stops showing at once (and a restored layout never runs a mod that is off). */
 function ModPanel(props: IDockviewPanelProps) {
   const mods = useSyncExternalStore(subscribeMods, currentMods);
-  const { modId, panelId } = (props.params ?? {}) as { modId?: string; panelId?: string };
-  const mod = mods?.mods.find((candidate) => candidate.id === modId);
-  if (!modId || !panelId || mod?.status.state !== "active" || !mod.panels.some((panel) => panel.id === panelId)) {
-    return <div className="inactive-session-pane">{mods ? "This mod is off or gone." : "Loading…"}</div>;
-  }
-  return <ModPanelFrame key={mod.hash} title={props.api.title ?? modId} src={modPanelUrl(modId, panelId)} canRead={mod.required.includes("read-project")} />;
+  const mod = mods?.mods.find((candidate) => candidate.id === (props.params as { modId?: string } | undefined)?.modId);
+  if (!mod?.enabled || mod.error) return <div className="inactive-session-pane">{mods ? "This mod is off or gone." : "Loading…"}</div>;
+  return <ModView mod={mod} />;
 }
 
 const components = {

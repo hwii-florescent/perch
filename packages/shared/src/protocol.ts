@@ -441,15 +441,8 @@ export interface CommandEntry {
 
 export type BrowserSearchEngine = "google" | "duckduckgo" | "bing" | "brave";
 
-export type ModCapability = "panel" | "events" | "read-project" | "write-project" | "network" | "build";
-
-/**
- * Mods approval. `ask`: a person approves every new or changed mod. `auto-safe`: mods that only need
- * a panel, events and reading project files are approved automatically. `auto-all`: everything is.
- * `off`: every mod is off (same as starting Perch with PERCH_MODS=off).
- */
+/** `off`: every mod is off (same as starting Perch with PERCH_MODS=off). */
 export interface ModsPolicy {
-  mode: "ask" | "auto-safe" | "auto-all";
   off: boolean;
 }
 
@@ -1738,15 +1731,12 @@ export interface ModsListMessage {
   requestId: string;
 }
 
-/** A person's change to one mod: `approve` (names the `hash` they looked at), `enable`, `disable`
- * or `run` (names the `action`). Answered with `mods.state`. */
+/** A person's change to one mod: `enable` or `disable`. Answered with `mods.state`. */
 export interface ModsSetMessage {
   type: "mods.set";
   requestId: string;
   id: string;
-  op: "approve" | "enable" | "disable" | "run";
-  hash?: string;
-  action?: string;
+  op: "enable" | "disable";
 }
 
 /** The index of a Project's memory files on this core (capability `memory.v1`). Answered with
@@ -2838,57 +2828,33 @@ export interface BrowserSuggestResultMessage {
   suggestions: string[];
 }
 
-export type ModStatus =
-  | { state: "active" }
-  | { state: "disabled" }
-  /** Waiting for a person: nothing of it runs or is shown. */
-  | { state: "pending"; reason: string }
-  | { state: "invalid"; error: string };
-
+/** A mod: a folder with a `main.js` that Perch's own page runs with the person's full access. */
 export interface ModInfo {
   id: string;
   name: string;
-  version: string;
   description: string;
-  actions: { id: string; title: string }[];
-  panels: { id: string; title: string; placement: "overlay" | "dock" }[];
-  /** Everything approving it lets run or show, one line each. */
-  preview: string[];
-  /** Pins what was looked at; `mods.set` approve must name it. */
-  hash: string;
-  required: ModCapability[];
-  status: ModStatus;
-  /** `person` or `policy:<mode>`. */
-  approvedBy: string | null;
+  /** Where it shows: docked as a pane, over the app, or nowhere (it only runs). */
+  place: "dock" | "overlay" | "none";
+  enabled: boolean;
+  /** Changes whenever the mod's files do, so an open mod reloads when it is edited. */
+  revision: string;
+  /** Why the folder cannot be loaded, if it cannot. */
+  error: string | null;
 }
 
-/** Broadcast when the mods folder or a mod's status changed; clients ask again with `mods.list`. */
+/** Broadcast when the mods folder or a mod's state changed; clients ask again with `mods.list`. */
 export interface ModsChangedMessage {
   type: "mods.changed";
 }
 
-/** Broadcast when `perch mod open` asks this screen to show an Active mod's panel. */
+/** Broadcast when `perch mod open` asks this screen to show a mod. */
 export interface ModsOpenMessage {
   type: "mods.open";
   modId: string;
-  panelId: string;
 }
 
-export interface ModRun {
-  mod: string;
-  what: string;
-  ok: boolean;
-  exitCode: number | null;
-  timedOut: boolean;
-  error: string | null;
-  output: string;
-  truncated: boolean;
-  at: number;
-  millis: number;
-}
-
-/** Reply to `mods.list` and `mods.set`: every mod, the approval policy, whether mods are off, the
- * mods folder, and for `run` what the run did. `error` explains a refusal. */
+/** Reply to `mods.list` and `mods.set`: every mod, the setting, whether mods are off, and the mods
+ * folder. `error` explains a refusal. */
 export interface ModsStateMessage {
   type: "mods.state";
   requestId: string;
@@ -2896,7 +2862,6 @@ export interface ModsStateMessage {
   policy: ModsPolicy;
   safeMode: boolean;
   folder: string;
-  run?: ModRun;
   error?: string;
 }
 

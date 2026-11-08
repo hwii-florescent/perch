@@ -899,19 +899,7 @@ pub async fn run(
             &format!("{base_path}agent/mod/open"),
             post(agent::mod_open).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
-        .route(
-            &format!("{base_path}agent/mod/run"),
-            post(agent::mod_run).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
-        )
-        .route(
-            &format!("{base_path}agent/mod/runs"),
-            post(agent::mod_runs).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
-        )
-        .route(
-            &format!("{base_path}agent/mod/approve"),
-            post(agent::mod_approve).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
-        )
-        .route(&format!("{base_path}mods/panel"), get(mods::panel))
+        .route(&format!("{base_path}mods/file"), get(mods::file))
         .route(&format!("{base_path}workspace-file"), get(fs::file_content))
         .with_state(state);
 

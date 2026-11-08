@@ -7,85 +7,33 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
-## 2026-11-08 — Mods: folders a person or an agent writes, with their own approval policy (owner direction)
+## 2026-11-08 — Mods: trusted JavaScript that changes Perch itself, as in herdr-app (owner direction)
 
-Learned from herdr's plugins (manifest of actions, events and panes; argv commands that call back
-through the CLI) plus an iframe panel that herdr lacks. Built: `mods.rs` (manifest, approval policy,
-audit log), `settings.mods`, `mods_run.rs` (actions and events run), `perch mod
-list|enable|disable|approve|run|runs`, the person-plane messages `mods.list`/`mods.set` (capability
-`mods.v1`), `GET /mods/panel`, and Settings > Mods (policy, off switch, a preview of what approving
-runs, Approve, Run, Open, Turn on/off), a scoped `perch` token for a mod's own commands, and a
-panel's read-only file bridge (`modPanelBridge.ts`: the panel posts `read-file`, the page answers
-only that frame, only for a mod approved for `read-project`, text up to 256 KiB, through the same
-descriptor-confined `/workspace-file` route; local open project only).
-- **Mods show up where the person is, not in Settings.** Settings > Mods lists and turns off; it is
-  not the way in. The core rescans the mods folder every 2 s and broadcasts `mods.changed` when a
-  mod or its status differs (a ceiling of a 2 s delay; `notify` is the upgrade), and the web keeps
-  the latest list (`mods.ts`). `ModsHost` (mounted in `App.tsx`, so chat and terminal sessions alike)
-  shows a pill and card for each mod waiting on approval (the preview of what it runs, Approve,
-  Not now; a click is the person's approval, same as Settings). A panel with `placement = "dock"` in
-  the manifest opens as a pane (`modPanel` in the dock) the first time its mod is Active at that
-  hash, remembered in localStorage so a reload does not reopen what was closed and an edited mod
-  shows again; the default `overlay` opens only on request. `perch mod open <id> [panel]` (any
-  agent; it only shows a page the person already approved) sends `mods.open` to show one now. A
-  docked pane re-checks its mod on every change and shows "off or gone" instead of its page. Herdr's
-  desktop app (herdr-app) goes further than this: its whole window is files (layouts, keys, mods)
-  that an agent edits with live reload, a last-good fallback and a reset key, and a mod is trusted
-  JavaScript inside the app with the person's full access and no sandbox ("not a security
-  boundary"); its older terminal app only runs plugin commands in panes. Perch keeps panels
-  sandboxed and runs no mod code in the app; what a panel can see and do grows through approved
-  capabilities, not by trusting its code.
-  Not built: removing a mod from Settings, a layout a mod can declare out of Perch's own panes.
-- **Panels.** One self-contained `.html` file (no sub-assets: a sandboxed page has no cookie, so it
-  could not fetch them), served only for an Active mod from inside its folder (symlinks resolved,
-  2 MiB cap), to a person's token only, with `Content-Security-Policy: sandbox allow-scripts;
-  default-src 'none'` (no network, frames, forms or origin) and shown only in an iframe with
-  `sandbox="allow-scripts"`, never `allow-same-origin`.
-
-- **A mod is a folder** `<perch dir>/mods/<id>/perch-mod.toml` (folder name = id). It declares
-  `[[actions]]` and `[[events]]` (argv, no shell, calling back through the `perch` CLI, which is the
-  whole API) and `[[panels]]` (an `.html` page for a sandboxed iframe served by the core, so it
-  reaches the phone too), plus `capabilities`. Terminal panes, link handlers and install from
-  GitHub are later slices. No marketplace, no versioned SDK.
-- **Approval is its own policy (`Mode`), separate from Project and sub-session permissions.**
-  Three plain choices (a configurable "ceiling" was dropped as too hard to understand): `ask`
-  (default) waits for a person; `auto-safe` approves a mod that only needs a panel, events and
-  reading project files (build steps, network and writing project files still ask); `auto-all`
-  approves everything, logged. Only a person sets it. Approval pins the manifest hash; a changed manifest is
-  re-evaluated against the policy. Every approval is appended to `mod-audit.jsonl` with its source
-  (`person` or `policy:<mode>`); state lives beside `mods/`, not inside a mod.
-- **Running.** Only an Active mod (approved, enabled, manifest unchanged, mods not off) runs, and
-  `mods::active`/`load_active` is the one gate. Commands are argv without a shell, from the mod's
-  folder (a program is a bare name or a path inside it), killed with their process group after 30 s
-  (events) or 60 s (actions), output capped at 16 KiB, at most 4 at once, every outcome a record
-  (`perch mod runs`, in memory). Events: `session.needs-you`, `session.done`, `session.failed`
-  (from `server/attention.rs`); the manifest rejects any other name. A mod has `PERCH_MOD_DATA`, a
-  private folder outside `mods/` that survives updates.
-- **A mod's `perch` token.** Each run gets `PERCH_SESSION`/`PERCH_TOKEN` (prefix `perch_mod_`, in
-  memory, revoked when the command ends or after its time limit) and `perch` on `PATH`. It opens
-  only `mod list`, `mod runs` and `memory` for the session the event or invocation was about:
-  read needs `read-project`, write and delete need `write-project`, as approved. Entries it
-  writes are recorded as written by "mod <id>". Every other agent route refuses it, and so do the
-  person's routes. A run no session started (a person's click) has no Project memory to use.
-- **Spawning is not a mod capability.** A mod token cannot `perch spawn`, `send`, `suggest`, `stop`,
-  `steer` or approve at all, so no mod approval, however automatic, can start work or message an agent.
-- **Honest limit.** Capabilities are enforced for panels (iframe sandbox) and scoped core calls. A
-  mod's process runs as the user, so the manifest cannot stop it; the approval preview says so. The
-  hash covers the manifest, not the scripts it points at.
-- **Who may do what.** The policy is `settings.mods` (`{mode, off}`), changed only through the
-  settings route, which an agent token cannot reach. `perch mod enable|disable` is open to any
-  session (off is the safe direction; on approves nothing). `perch mod approve <id> <hash>` acts
-  only when a person typed that exact line in the session's terminal, like `perch start`.
-- **Reverting to stock Perch.** No bulk actions or groups: agents turn mods off one by one, and a
-  mod is a folder, so renaming the mods folder removes all of them. **Mods off** (`off` in the
-  policy, a switch in Settings > Mods; or `PERCH_MODS=off` in the core's environment for when the UI
-  cannot be used) loads none, writes nothing and refuses approve and enable.
-- **Regression tests pin containment:** broken or hostile folders (garbage, binary, oversized,
-  symlinked) are reported and never break the listing; only an approved, enabled mod with an
-  unchanged manifest is ever active; a mod cannot approve itself (state lives beside `mods/`);
-  a damaged state file means nothing is approved.
-- **Not yet decided:** per-Project "trust mods in this project" for mods inside a cloned repo (never
-  auto-approved until then), per-host policy.
+Copies herdr's desktop app, not its older plugins: a person prompts an agent, the agent writes a
+folder, and Perch changes at once. This replaces an earlier design (an approval policy with hash
+pinning, capabilities, a sandboxed iframe, a panel data bridge, argv actions and events, and a
+scoped `perch` token), dropped as too much code for what the owner wants: full native capability,
+approval not mattering much.
+- **A mod is a folder** `<perch dir>/mods/<id>/` with a `main.js` (an ES module whose default
+  export is `(el, api) => cleanup?`) and an optional `mod.json` (`name`, `description`, `place`:
+  `dock` (default) | `overlay` | `none`, `entry`). It is loaded by Perch's own page, with the
+  person's full access: `api.store` and `api.socket` are the real ones, so a mod can do anything
+  the app can, including start terminals. Herdr's own docs say the same of its mods ("not a
+  security boundary", "treat it like a shell script you would run yourself").
+- **No approval, no sandbox, no token.** A mod loads the moment it is written. The only gate is
+  who may fetch the code: `GET /mods/file` takes a person's token, never an agent's.
+- **Changes show right away.** The core rescans every 2 s (`notify` is the upgrade) and broadcasts
+  `mods.changed`; `ModInfo.revision` (size and mtime of its files) changes on every edit and the
+  page reloads that mod. A `dock` mod opens as a pane once per revision (localStorage, so a reload
+  does not reopen what was closed); `none` runs hidden; `perch mod open <id>` shows one now.
+- **A bad version never replaces a working one.** A new version is mounted beside the old and the
+  old is removed only after it mounted; a failure shows its message and keeps the last good one.
+- **Getting out.** `perch mod disable <id>` or Settings > Mods turns one off (off is kept in
+  `mod-state.json` beside `mods/`); deleting the folder removes it; **mods off** (a Settings switch,
+  `PERCH_MODS=off`, or ctrl+alt+shift+Escape, herdr's reset key) loads none, even when the page is
+  broken. Settings > Mods only lists, turns off and on, and holds that switch.
+- **Not built:** layouts a mod can declare (herdr's JSON layouts), a trusted `exec`, removing a
+  mod from Settings, install from GitHub, per-host handling (mods run on the local host's screen).
 
 ## 2026-11-08 — Project tree: explicit state labels, no idle hiding (owner)
 

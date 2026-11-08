@@ -178,9 +178,9 @@ export interface DockviewController {
    * in this shell — used to grey out / relabel already-open sessions in the
    * split-session picker rather than let it silently create a duplicate. */
   openSessionChatIds(): string[];
-  /** Show a mod's panel as a pane beside the active one, or re-activate it if already open. The
-   * id is stable, so a restored layout never holds the same panel twice. */
-  openModPanel(modId: string, panelId: string, title: string): void;
+  /** Show a mod as a pane beside the active one, or re-activate it if already open. The id is
+   * stable, so a restored layout never holds the same mod twice. */
+  openModPanel(modId: string, title: string): void;
 }
 
 /** Re-exported so callers (the split-session picker, DockviewShell's drag
@@ -251,8 +251,8 @@ export function createDockviewController(api: DockviewApi, endShell?: (shellPane
     openSessionChatIds() {
       return api.panels.map((p) => sessionChatPanelSessionId(p)).filter((id): id is string => id !== undefined);
     },
-    openModPanel(modId, panelId, title) {
-      const id = `mod-${modId}-${panelId}`;
+    openModPanel(modId, title) {
+      const id = `mod-${modId}`;
       const existing = api.panels.find((p) => p.id === id);
       if (existing) {
         existing.api.setActive();
@@ -262,7 +262,7 @@ export function createDockviewController(api: DockviewApi, endShell?: (shellPane
         id,
         component: MOD_PANEL_COMPONENT,
         title,
-        params: { modId, panelId },
+        params: { modId },
         position: { referencePanel: api.activePanel?.id ?? PRIMARY_CHAT_PANEL_ID, direction: "right" },
       });
     },
