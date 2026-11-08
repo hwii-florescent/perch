@@ -97,9 +97,10 @@ approval not mattering much.
   `terminalOpacity` (0.1..1, fades the whole terminal) for terminals, `paneRadius`/`paneBorder`/`paneFocus`
   for the canvas's pane frames (set as `--radius-pane`, `--pane-border`, `--pane-focus`), `size.min`/`max`
   along the parent's direction, and a `float` may dock to an `edge` (+ `align`) and, on a left or right
-  edge, `peek` as a hover drawer. The terminal's font and colors stay the server's profile. Not built:
-  looks reaching menus opened from a themed subtree (they use the root's), `stack` nodes, gradients as
-  images, light/dark theme pairs, per-pane header mods, and mod-fonts folders. `perch mod clone <id>`
+  edge, `peek` as a hover drawer. The terminal's font and colors stay the server's profile. `background` also takes
+  `{gradient: [2..8 #rrggbb], angle}` and `{image: "backgrounds/x.png", fit}` (a picture up to 1 MiB in the core's
+  folder; `resolve_backgrounds` turns both into CSS, an image into a data URI, so the page fetches nothing).
+  Not built: looks reaching menus opened from a themed subtree (they use the root's). `perch mod clone <id>`
   also duplicates one of your own mods or layouts (as `<id>-copy`).
 - **Floating spots and movable panes.** A float has a grip along its top edge; on release it takes the nearest window
   edge and third (`snapSpot`), kept per layout in `layoutState` like the other clicks (`layout.float {id, edge?, align?}`

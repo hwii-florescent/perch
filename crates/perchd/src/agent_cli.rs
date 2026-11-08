@@ -1513,7 +1513,8 @@ Mods
     'panelBg', 'surface0', 'surface1', 'surfaceDim', 'overlay0', 'overlay1', 'text', 'subtext0',
     'mauve', 'green', 'yellow', 'red', 'blue', 'teal', 'peach', 'backdrop'}, each #rrggbb),
     'font' (a CSS font-family for the interface), 'radius' (card corners, px) and 'border'
-    (card outline, px), plus 'background' (a CSS color or gradient, no url()). A node with
+    (card outline, px), plus 'background' (a CSS color or gradient, no url(); or {'gradient': [2 to 8 #rrggbb], 'angle': deg}; or
+    {'image': 'backgrounds/sky.jpg', 'fit': 'cover'|'contain'}, a picture up to 1 MiB in the core's folder). A node with
     'float': {'x', 'y', 'width', 'height'} (px) is drawn over the window instead of in the flow;
     add 'edge' ('top'|'right'|'bottom'|'left', 12px in) and 'align' ('start'|'center'|'end') to
     dock it to a side instead of x, y, and 'peek' (px, left or right edge) to make it a drawer that

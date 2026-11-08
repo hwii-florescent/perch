@@ -108,9 +108,11 @@ pub struct Look {
     pub radius: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub border: Option<u32>,
-    /// A CSS background for the node: a color or a gradient (no `url(`).
+    /// Behind the node: a CSS color or gradient (no `url(`), `{"gradient": [colors], "angle"}` or
+    /// `{"image": "backgrounds/sky.jpg", "fit": "cover"|"contain"}` (a picture in the core's folder). The
+    /// page only ever gets the CSS text: [`resolve_backgrounds`] turns the other two into it.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub background: Option<String>,
+    pub background: Option<Background>,
     /// `sm`, `md` or `lg`: a shadow under the cards.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shadow: Option<String>,
@@ -130,6 +132,23 @@ pub struct Look {
     /// `false` takes away the grip that drags a pane to another place in a split (default true).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub movable: Option<bool>,
+}
+
+/// What a layout file may say for `background`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Background {
+    Css(String),
+    Gradient {
+        gradient: Vec<String>,
+        #[serde(default)]
+        angle: Option<i32>,
+    },
+    Image {
+        image: String,
+        #[serde(default)]
+        fit: Option<String>,
+    },
 }
 
 /// A node taken out of the flow and drawn over the window at this place and size (px).
@@ -272,16 +291,39 @@ fn look_ok(look: &Look) -> Result<(), String> {
     if theme.iter().flatten().any(|t| !text_ok(&Some(t.clone()))) || !text_ok(&look.font) {
         return Err("theme and font must be short plain text".into());
     }
-    if let Some(background) = &look.background {
-        let lower = background.to_ascii_lowercase();
-        if background.len() > 200
-            || background
-                .chars()
-                .any(|c| c.is_control() || matches!(c, ';' | '{' | '}'))
-            || lower.contains("url(")
-            || lower.contains("expression")
-        {
-            return Err("background is a color or a gradient (no url())".into());
+    match &look.background {
+        None => {}
+        Some(Background::Css(background)) => {
+            let lower = background.to_ascii_lowercase();
+            if background.len() > 200
+                || background
+                    .chars()
+                    .any(|c| c.is_control() || matches!(c, ';' | '{' | '}'))
+                || lower.contains("url(")
+                || lower.contains("expression")
+            {
+                return Err("background is a color or a gradient (no url())".into());
+            }
+        }
+        Some(Background::Gradient { gradient, angle }) => {
+            if !(2..=8).contains(&gradient.len())
+                || !gradient.iter().all(|c| hex_color(c))
+                || angle.is_some_and(|a| !(-360..=360).contains(&a))
+            {
+                return Err(
+                    "a gradient background has 2 to 8 #rrggbb colors and an angle of -360 to 360"
+                        .into(),
+                );
+            }
+        }
+        Some(Background::Image { image, fit }) => {
+            if !image_path_ok(image)
+                || fit
+                    .as_deref()
+                    .is_some_and(|f| f != "cover" && f != "contain")
+            {
+                return Err("an image background is a plain picture path in the core's folder (png, jpg, webp, gif or svg), fit cover or contain".into());
+            }
         }
     }
     if look.radius.is_some_and(|r| r > 48) || look.border.is_some_and(|b| b > 8) {
@@ -436,6 +478,65 @@ fn hex_color(text: &str) -> bool {
     text.len() == 7 && text.starts_with('#') && text[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
+/// `backgrounds/sky.jpg`: plain names only, no dots up, no absolute path.
+fn image_path_ok(path: &str) -> bool {
+    let kinds = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"];
+    path.len() <= 120
+        && kinds.iter().any(|k| path.to_ascii_lowercase().ends_with(k))
+        && path.split('/').count() <= 4
+        && path.split('/').all(|part| {
+            !part.is_empty()
+                && !part.starts_with('.')
+                && part
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ' '))
+        })
+}
+
+/// Turns gradient and image backgrounds into the CSS text the page draws (an image becomes a data URI,
+/// so nothing is fetched). An image that is missing or over 1 MiB is no background.
+fn resolve_backgrounds(node: &mut Node, root: &Path) {
+    use base64::Engine;
+    let (look, children) = match node {
+        Node::Row(g) | Node::Column(g) => (&mut g.look, Some(&mut g.children)),
+        Node::Block(b) => (&mut b.look, None),
+        Node::Stack(s) => (&mut s.look, Some(&mut s.children)),
+    };
+    look.background = match look.background.take() {
+        Some(Background::Gradient { gradient, angle }) => Some(Background::Css(format!(
+            "linear-gradient({}deg, {})",
+            angle.unwrap_or(180),
+            gradient.join(", ")
+        ))),
+        Some(Background::Image { image, fit }) => {
+            let path = root.join(&image);
+            let bytes = std::fs::symlink_metadata(&path)
+                .ok()
+                .filter(|m| m.is_file() && m.len() <= 1024 * 1024)
+                .and_then(|_| std::fs::read(&path).ok());
+            bytes.map(|bytes| {
+                let lower = image.to_ascii_lowercase();
+                let kind = match lower.rsplit('.').next() {
+                    Some("svg") => "image/svg+xml",
+                    Some("jpg" | "jpeg") => "image/jpeg",
+                    Some("webp") => "image/webp",
+                    Some("gif") => "image/gif",
+                    _ => "image/png",
+                };
+                Background::Css(format!(
+                    "url(\"data:{kind};base64,{}\") center / {} no-repeat",
+                    base64::engine::general_purpose::STANDARD.encode(bytes),
+                    fit.as_deref().unwrap_or("cover")
+                ))
+            })
+        }
+        other => other,
+    };
+    for child in children.into_iter().flatten() {
+        resolve_backgrounds(child, root);
+    }
+}
+
 fn preview_name_ok(name: &str) -> bool {
     (name.ends_with(".svg") || name.ends_with(".png"))
         && name.len() <= 64
@@ -488,7 +589,7 @@ fn read(path: &Path, id: &str) -> LayoutInfo {
         })
         .and_then(|value| {
             let name = value["name"].as_str().unwrap_or(id).to_string();
-            let node: Node = serde_json::from_value(value).map_err(|e| e.to_string())?;
+            let mut node: Node = serde_json::from_value(value).map_err(|e| e.to_string())?;
             check(
                 &node,
                 1,
@@ -498,6 +599,9 @@ fn read(path: &Path, id: &str) -> LayoutInfo {
                 },
             )?;
             let preview = path.parent().and_then(|dir| read_preview(dir, &node));
+            if let Some(root) = path.parent().and_then(Path::parent) {
+                resolve_backgrounds(&mut node, root);
+            }
             Ok((name, node, preview))
         });
     match loaded {
@@ -909,6 +1013,75 @@ mod tests {
         // The page reads the look off the node as camelCase-free flat keys.
         let json = serde_json::to_value(&group.look).unwrap();
         assert_eq!(json["font"], "Geist, sans-serif");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn gradient_and_image_backgrounds_reach_the_page_as_css() {
+        let root = std::env::temp_dir().join(format!("perch-bg-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("layouts")).unwrap();
+        std::fs::create_dir_all(root.join("backgrounds")).unwrap();
+        std::fs::write(root.join("backgrounds/sky.png"), [137, 80, 78, 71]).unwrap();
+        let put = |name: &str, text: &str| {
+            std::fs::write(root.join("layouts").join(name), text).unwrap();
+        };
+        put(
+            "grad.json",
+            r##"{"type":"row","background":{"gradient":["#2a6cbd","#0b2a57"],"angle":165},"children":[
+              {"type":"block","content":"tabs","background":{"image":"backgrounds/sky.png","fit":"contain"}},
+              {"type":"block","content":"canvas","background":{"image":"backgrounds/gone.png"}}]}"##,
+        );
+        put(
+            "grad-one.json",
+            r##"{"type":"block","content":"tabs","background":{"gradient":["#2a6cbd"]}}"##,
+        );
+        put(
+            "grad-name.json",
+            r##"{"type":"block","content":"tabs","background":{"gradient":["red","blue"]}}"##,
+        );
+        put(
+            "img-up.json",
+            r#"{"type":"block","content":"tabs","background":{"image":"../secret.png"}}"#,
+        );
+        put(
+            "img-abs.json",
+            r#"{"type":"block","content":"tabs","background":{"image":"/etc/x.png"}}"#,
+        );
+        put(
+            "img-fit.json",
+            r#"{"type":"block","content":"tabs","background":{"image":"a.png","fit":"stretch"}}"#,
+        );
+        let found = scan(&root, &Policy::default());
+        let by = |id: &str| found.iter().find(|l| l.id == id).unwrap();
+        let Some(Node::Row(row)) = &by("grad").root else {
+            panic!("a row {:?}", by("grad").error)
+        };
+        assert_eq!(
+            row.look.background,
+            Some(Background::Css(
+                "linear-gradient(165deg, #2a6cbd, #0b2a57)".into()
+            ))
+        );
+        let Node::Block(sky) = &row.children[0] else {
+            panic!("a block")
+        };
+        let Some(Background::Css(css)) = &sky.look.background else {
+            panic!("css")
+        };
+        assert!(
+            css.starts_with("url(\"data:image/png;base64,iVBORw==\") center / contain no-repeat"),
+            "{css}"
+        );
+        let Node::Block(gone) = &row.children[1] else {
+            panic!("a block")
+        };
+        assert_eq!(
+            gone.look.background, None,
+            "a missing picture is no background"
+        );
+        for bad in ["grad-one", "grad-name", "img-up", "img-abs", "img-fit"] {
+            assert!(by(bad).error.is_some(), "{bad}");
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 
