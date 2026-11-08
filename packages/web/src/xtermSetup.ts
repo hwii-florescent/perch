@@ -197,10 +197,25 @@ export interface PerchTerminal {
 /** The live terminals by the element they draw in, so a mod can read one's text (`api.readTerminal`). */
 const liveTerminals = new Map<HTMLElement, Terminal>();
 
+const liveTerminalIn = (root: Element) => {
+  const host = [...liveTerminals.keys()].find((container) => root === container || root.contains(container));
+  return host && liveTerminals.get(host);
+};
+
+/** Moves the view of the terminal in or under `root` (not the program): `lines` or `pages` (negative: toward history), or `to` the top or bottom. False when none is drawn there. */
+export function scrollTerminal(root: Element, by: { lines?: number; pages?: number; to?: "top" | "bottom" }): boolean {
+  const term = liveTerminalIn(root);
+  if (!term) return false;
+  if (by.to === "top") term.scrollToTop();
+  else if (by.to === "bottom") term.scrollToBottom();
+  else if (by.pages !== undefined) term.scrollLines(Math.round(by.pages * term.rows));
+  else term.scrollLines(by.lines ?? 0);
+  return true;
+}
+
 /** The last `lines` lines (screen and scrollback, trailing blanks dropped) of the terminal drawn in or under `root`. */
 export function terminalText(root: Element, lines = 50): string | null {
-  const host = [...liveTerminals.keys()].find((container) => root === container || root.contains(container));
-  const term = host && liveTerminals.get(host);
+  const term = liveTerminalIn(root);
   if (!term) return null;
   const buffer = term.buffer.active;
   const out: string[] = [];

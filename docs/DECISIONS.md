@@ -109,6 +109,14 @@ approval not mattering much.
   `layout.reset`, `layout.clone`/`mod.clone {name, as?}` (the `clone` op of `mods.set`; a cloned layout is shown),
   `mod.open {name}`, `app.theme {name}`, `app.zoom_in|out|reset`, `tab.new|next|prev|close`, `pane.split {direction}`,
   `pane.zoom`, `pane.go {direction}` and `pane.swap {direction}`. They are the same typed commands a key or `api.run` uses.
+  herdr's tab, pane, terminal and agent commands map onto Perch's model: a pane of a tile strip is a tab, a herdr tab is a
+  session, a space is a workspace/project. `tab.select {index|id}`, `tab.rename {id?, name}`, `tab.move {id?, index}`,
+  `pane.close`, `pane.focus {pane|terminal}`, `terminal.kill {terminal?}`, `terminal.scroll {lines|pages|to, terminal?}`,
+  `agent.next|prev|focus {terminal}`, `session|workspace|project.rename {id, name}`, `app.settings|help|palette`, and
+  `tab.new {argv, task?}` (a terminal running the program in the shown workspace through the core's `workspace.run`,
+  `task` as its last argument). Not ported because Perch has no such thing: `terminal.keep|park|peek|show` (perchd keeps
+  every terminal), `terminal.pin`, `space.*` creation by argv, `layout.set` (a layout is a file a mod writes and hot reload
+  applies), and the updater, feedback and `app.reset` family.
 - **More of herdr's surface.** `home()`/`appHome()`, `placement()` (a floating mod's edge/align/dragging),
   `playSound("done"|"blocked")`, a block `agent:focused` (the focused session's terminal), `key.bind {command, keys}`
   (so an agent can set a key through `perch mod do`) and `perch mod status` (layout, focus, theme, dialogs, each mod's

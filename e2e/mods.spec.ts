@@ -268,6 +268,57 @@ test("a mod drives the app's own terminals through api.perch, like herdr's hc ls
   await expect(holder).toHaveAttribute("data-read", /PERCH_MOD_42/, { timeout: 40000 });
 });
 
+test("herdr's tab, pane, terminal and agent commands run against Perch's tabs and terminals", async ({ page }) => {
+  fs.mkdirSync(MOD, { recursive: true });
+  fs.writeFileSync(path.join(MOD, "main.js"), `export default (el, api) => {
+    el.textContent = 'cmds';
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    (async () => {
+      const seen = {};
+      await sleep(800);
+      api.run('tab.new', { argv: ['sh', '-c', 'echo ARGV_$((6*7)); sleep 60'] });
+      let id;
+      for (let i = 0; i < 40 && !id; i++) {
+        await sleep(500);
+        const focused = api.focused().sessionId;
+        try { if ((await api.readTerminal(focused, 10)).includes('ARGV_42')) id = focused; } catch {}
+      }
+      seen.started = !!id;
+      if (id) {
+        api.run('tab.rename', { id, name: 'Renamed by mod' });
+        await sleep(500);
+        seen.title = api.panes().find((p) => p.id === id)?.title;
+        api.run('terminal.scroll', { to: 'top' });
+        api.run('terminal.scroll', { pages: 1 });
+        seen.selected = api.run('tab.select', { index: 1 });
+        for (const bad of [{ to: 'middle' }, {}]) { try { api.run('terminal.scroll', bad); } catch (e) { (seen.bad ??= []).push(e.message); } }
+        seen.names = ['tab.select', 'tab.rename', 'tab.move', 'pane.close', 'pane.focus', 'terminal.kill', 'terminal.scroll', 'agent.next', 'agent.prev', 'agent.focus', 'app.settings', 'app.help', 'app.palette'].filter((n) => api.commands().some((c) => c.id === n));
+        api.run('terminal.kill', { terminal: id });
+      }
+      el.dataset.seen = JSON.stringify(seen);
+    })().catch((e) => { el.dataset.seen = JSON.stringify({ error: e.message }); });
+  };`);
+  fs.mkdirSync(path.dirname(LAYOUT), { recursive: true });
+  fs.writeFileSync(LAYOUT, JSON.stringify({ name: "E2E look", type: "row", children: [
+    { type: "block", content: "canvas" },
+    { type: "block", content: "mod:e2e-hello", size: { px: 200 } },
+  ] }));
+  await openMods(page);
+  await expect(page.locator('[data-testid="layout-e2e-look"]')).toBeVisible({ timeout: 15000 });
+  await page.locator('[data-testid="layout-e2e-look"]').getByRole("button", { name: "Use" }).click();
+  await page.keyboard.press("Escape");
+  const holder = page.locator('[data-testid="layout-mod:e2e-hello"] [data-seen]');
+  await expect(holder).toHaveAttribute("data-seen", /./, { timeout: 40000 });
+  const seen = JSON.parse((await holder.getAttribute("data-seen"))!);
+  expect(seen).toEqual({
+    started: true,
+    title: "Renamed by mod",
+    selected: true,
+    bad: ['{to} is "top" or "bottom".', "This command needs {lines}, {pages} or {to}."],
+    names: ['tab.select', 'tab.rename', 'tab.move', 'pane.close', 'pane.focus', 'terminal.kill', 'terminal.scroll', 'agent.next', 'agent.prev', 'agent.focus', 'app.settings', 'app.help', 'app.palette'],
+  });
+});
+
 test("keys.json binds a key to a mod's command and programs.json reaches api.program()", async ({ page }) => {
   fs.mkdirSync(MOD, { recursive: true });
   fs.writeFileSync(path.join(MOD, "main.js"), `export default (el, api) => {

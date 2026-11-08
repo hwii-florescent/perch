@@ -1,11 +1,12 @@
 import { placeFloat, resetLayoutState, resizeNode, showStackChild, toggleNode } from "./layoutState";
 import { cloneMod, currentMods, openMod, setLayout } from "./mods";
 import { bindKey, runCommand, setPanesSource, setTerminalReader } from "./modApp";
-import { terminalText } from "./xtermSetup";
+import { scrollTerminal, terminalText } from "./xtermSetup";
 import { focusedSplit, getPaneController, openModTab, splitActiveTab } from "./tiledPanes";
-import { currentTabs, entryLabel } from "./workspaceTabs";
+import { activateTab, currentTabs, entryLabel, moveChat } from "./workspaceTabs";
 import { zoomIn, zoomOut, zoomReset } from "./zoom";
 import { tauriInvoke } from "./links";
+import { runInWorkspace } from "./runs";
 import { usePerchStore } from "./store";
 
 /** App commands that take arguments, for `api.run(id, args)` (keys cannot run these, so they are not
@@ -74,6 +75,43 @@ function openModOrThrow(mod: string, args: unknown, side?: "right" | "below") {
   if (!openModTab(mod, props as Record<string, unknown> | undefined, side)) throw new Error("Open a project first.");
 }
 
+/** The tab named by `{id}` (default: the one shown). A pane of a tab strip is a tab here. */
+const tabOf = (args: unknown, key = "id") => {
+  const { tabs, activeId } = currentTabs();
+  const id = word(args, key) ?? activeId;
+  const entry = tabs.find((candidate) => candidate.id === id);
+  if (!entry) throw new Error(`No tab ${id ?? "shown"}.`);
+  return { entry, tabs };
+};
+const sessionTab = (args: unknown) => {
+  const { entry, tabs } = tabOf(args);
+  if (entry.kind !== "session") throw new Error("Only a session's tab can be renamed or moved.");
+  return { entry, tabs };
+};
+/** The terminal on screen named by `{terminal}` (a terminal or session id), else the one with the keyboard, else the first. */
+const terminalOnScreen = (args: unknown): Element => {
+  const id = word(args, "terminal");
+  const quoted = id && CSS.escape(id);
+  const found = id
+    ? document.querySelector(`[data-terminal-id="${quoted}"], [data-session-id="${quoted}"][data-terminal-id]`)
+    : document.activeElement?.closest("[data-terminal-id]") ?? document.querySelector("[data-terminal-id]");
+  if (!found) throw new Error(id ? `Terminal ${id} is not on screen.` : "No terminal is on screen.");
+  return found;
+};
+const numberArg = (args: unknown, key: string) => {
+  const value = (args as Record<string, unknown> | null | undefined)?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+};
+/** `agent.next` / `agent.prev`: the next session that is an agent (not a plain terminal), wrapping round. */
+const stepAgent = (step: 1 | -1) => () => {
+  const { sessions, sessionId, switchSession } = usePerchStore.getState();
+  const agents = sessions.filter((session) => session.cliProviderId !== "terminal");
+  if (!agents.length) throw new Error("There are no agents.");
+  const at = agents.findIndex((session) => session.id === sessionId);
+  switchSession(agents[(at + step + agents.length) % agents.length]!.id);
+};
+const sessionsByTab = (id: string) => usePerchStore.getState().sessions.find((session) => session.id === id)?.id;
+
 export const TYPED_COMMANDS: Record<string, { description: string; args: string; run: (args: unknown) => void }> = {
   "session.open": { description: "Go to a session", args: "{id}", run: (args) => usePerchStore.getState().switchSession(needsId(args)) },
   "session.close": { description: "Delete a session", args: "{id}", run: (args) => usePerchStore.getState().deleteSession(needsId(args)) },
@@ -94,7 +132,18 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
   "app.zoom_in": { description: "Zoom in", args: "{}", run: () => zoomIn() },
   "app.zoom_out": { description: "Zoom out", args: "{}", run: () => zoomOut() },
   "app.zoom_reset": { description: "Zoom back to 100%", args: "{}", run: () => zoomReset() },
-  "tab.new": { description: "A new tab; with `mod`, a tab that shows that mod (props reach it as props())", args: "{mod?, props?}", run: (args) => { const mod = word(args, "mod"); if (mod) openModOrThrow(mod, args); else void runCommand("tabs.new"); } },
+  "tab.new": { description: "A new tab; with `mod`, a tab that shows that mod (props reach it as props()); with `argv`, a terminal running that program (an agent from knownAgents().run) in the shown workspace, `task` as its last argument (most agents take it as the first message)", args: "{mod?, props?, argv?: string[], task?}", run: (args) => {
+    const mod = word(args, "mod");
+    const argv = (args as { argv?: unknown } | null)?.argv;
+    if (mod) return openModOrThrow(mod, args);
+    if (argv === undefined) return void runCommand("tabs.new");
+    if (!Array.isArray(argv) || !argv.length || argv.some((part) => typeof part !== "string" || !part)) throw new Error("argv is a list of strings: [program, ...arguments].");
+    const state = usePerchStore.getState();
+    if (!state.activeWorkspaceId) throw new Error("Open a project first.");
+    const quote = (part: string) => `'${part.replace(/'/g, "'\\''")}'`;
+    const command = [...argv as string[], ...(word(args, "task") ? [word(args, "task")!] : [])].map(quote).join(" ");
+    later(async () => usePerchStore.getState().switchSession(await runInWorkspace(state.activeWorkspaceId!, command)))(undefined);
+  } },
   "tab.next": { description: "The next tab", args: "{}", run: () => void runCommand("tabs.next") },
   "tab.prev": { description: "The previous tab", args: "{}", run: () => void runCommand("tabs.prev") },
   "tab.close": { description: "Close the tab", args: "{}", run: () => void runCommand("tabs.close") },
@@ -102,6 +151,53 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
   "pane.zoom": { description: "Zoom the focused pane (again: back)", args: "{}", run: () => getPaneController()?.toggleMaximizeActive() },
   "pane.go": { description: "Focus the neighbouring pane", args: "{direction}", run: (args) => getPaneController()?.focusPaneDirection?.(direction(args)) },
   "pane.swap": { description: "Swap the focused pane with its neighbour", args: "{direction}", run: (args) => getPaneController()?.swapPaneDirection?.(direction(args)) },
+  "tab.select": { description: "Show a tab by its number (1 is first) or id", args: "{index | id}", run: (args) => {
+    const index = numberArg(args, "index");
+    const { tabs } = currentTabs();
+    const entry = index !== undefined ? tabs[index - 1] : tabOf(args).entry;
+    if (!entry) throw new Error(`No tab ${index}: there are ${tabs.length}.`);
+    activateTab(entry);
+  } },
+  "tab.rename": { description: "Rename a session's tab (empty: its own title again)", args: "{id?, name}", run: (args) => {
+    const name = (args as { name?: unknown } | null)?.name;
+    if (typeof name !== "string") throw new Error('This command needs {name: "…"}.');
+    usePerchStore.getState().renameSession(sessionTab(args).entry.id, name);
+  } },
+  "tab.move": { description: "Move a session's tab to a number in the strip (1 is first)", args: "{id?, index}", run: (args) => {
+    const index = numberArg(args, "index");
+    const { entry, tabs } = sessionTab(args);
+    const target = index !== undefined ? tabs[index - 1] : undefined;
+    if (!target) throw new Error(`This command needs {index: 1-${tabs.length}}.`);
+    if (target.id !== entry.id) moveChat(entry.id, target.id, tabs.indexOf(entry) < tabs.indexOf(target), tabs.map((tab) => tab.id));
+  } },
+  "pane.close": { description: "Close the focused pane (its tab)", args: "{}", run: () => void runCommand("tabs.close") },
+  "pane.focus": { description: "Focus a pane by id, or the pane of a terminal", args: "{pane | terminal}", run: (args) => {
+    if (word(args, "pane")) return activateTab(tabOf(args, "pane").entry);
+    const session = terminalOnScreen(args).getAttribute("data-session-id");
+    if (!session || !sessionsByTab(session)) throw new Error("That terminal has no pane to focus.");
+    usePerchStore.getState().switchSession(session);
+  } },
+  "terminal.kill": { description: "Stop a terminal's process (the one on screen with the keyboard if none is named)", args: "{terminal?}", run: (args) => {
+    const id = terminalOnScreen(args).getAttribute("data-terminal-id");
+    if (!id) throw new Error("That terminal is still opening.");
+    usePerchStore.getState().killTerminal(id);
+  } },
+  "terminal.scroll": { description: "Move the view of a terminal's history, not the program: lines or pages (negative: toward history), or to top | bottom", args: "{lines | pages | to, terminal?}", run: (args) => {
+    const to = word(args, "to");
+    if (to !== undefined && to !== "top" && to !== "bottom") throw new Error('{to} is "top" or "bottom".');
+    const by = { lines: numberArg(args, "lines"), pages: numberArg(args, "pages"), to } as Parameters<typeof scrollTerminal>[1];
+    if (by.lines === undefined && by.pages === undefined && !to) throw new Error("This command needs {lines}, {pages} or {to}.");
+    scrollTerminal(terminalOnScreen(args), by);
+  } },
+  "agent.focus": { description: "Show an agent's session", args: "{terminal | id}", run: (args) => usePerchStore.getState().switchSession(word(args, "terminal") ?? needsId(args)) },
+  "agent.next": { description: "The next agent's session", args: "{}", run: stepAgent(1) },
+  "agent.prev": { description: "The previous agent's session", args: "{}", run: stepAgent(-1) },
+  "session.rename": { description: "Rename a session", args: "{id, name}", run: (args) => usePerchStore.getState().renameSession(needsId(args), word(args, "name") ?? "") },
+  "workspace.rename": { description: "Rename a workspace", args: "{id, name}", run: (args) => usePerchStore.getState().renameWorkspace(needsId(args), word(args, "name") ?? "") },
+  "project.rename": { description: "Rename a project", args: "{id, name}", run: (args) => usePerchStore.getState().renameWorkspaceProject(needsId(args), word(args, "name") ?? "") },
+  "app.settings": { description: "Open Settings", args: "{}", run: () => usePerchStore.getState().setSettingsOpen(true) },
+  "app.help": { description: "Show the keybind help", args: "{}", run: () => void runCommand("global.help") },
+  "app.palette": { description: "Open the Navigator (jump to any session or project)", args: "{}", run: () => void runCommand("global.navigator") },
   "window.minimize": { description: "Minimize the desktop window", args: "{}", run: windowControl("minimize") },
   "window.maximize": { description: "Maximize or restore the desktop window", args: "{}", run: windowControl("toggle_maximize") },
   "window.close": { description: "Close the desktop window", args: "{}", run: windowControl("close") },
