@@ -95,8 +95,15 @@ approval not mattering much.
   over the window) and a block may be `terminal:<session id>` (a live shell via `PersistentTerminal`;
   one place at a time, so not also in the canvas). Not built: terminal padding/opacity, pane frames,
   and looks reaching menus opened from a themed subtree (they use the root's).
-- **Not built:** a trusted `exec`, removing a mod or layout
-  from Settings, install from GitHub, per-host handling (mods run on the local host's screen).
+- **Install and remove.** `perch mod install <owner/repo[/folder]>` (or a github.com link, incl.
+  `/tree/<branch>/…`) shallow-clones a public repo and copies `mods/<name>/` and `layouts/<name>.json`
+  (or a lone `main.js` as one mod); it never overwrites, stops before copying anything if a name is
+  taken, skips dotfiles/symlinks/`node_modules`, caps 300 files / 8 MiB, and prints a warning for code
+  that uses `exec(`, `fetch(`, `WebSocket`, file read/write or `api.socket` (a text search, not a
+  guarantee). `perch mod remove <id> [mod|layout]` and Settings > Mods > Remove move the folder or file
+  to `mods-removed/<time>-<name>` instead of deleting it.
+- **Not built:** per-host handling (mods run on the local host's screen, and `exec`/files act on the
+  computer running the core), installing from anything but GitHub, pinning or updating an installed mod.
 
 ## 2026-11-08 — Project tree: explicit state labels, no idle hiding (owner)
 

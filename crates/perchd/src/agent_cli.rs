@@ -889,7 +889,8 @@ const MOD_API: &str = include_str!("../../perch-core/src/mod_examples/perch-mod.
 
 const MOD_USAGE: &str ="usage: perch mod [list] [--json] | perch mod enable <id> | \
      perch mod disable <id> | perch mod open <id> | perch mod check <id> | \
-     perch mod dom <id|app> | perch mod api | perch mod examples | perch mod clone <example> [id] | perch mod layout <id|stock>";
+     perch mod dom <id|app> | perch mod api | perch mod examples | perch mod clone <example> [id] | perch mod install <owner/repo[/folder]> | \
+     perch mod remove <id> [mod|layout] | perch mod layout <id|stock>";
 
 /// `perch mod`: the mods on this computer, turn one off or on, and show one.
 fn mod_cmd(args: &[String]) -> Result<(), String> {
@@ -960,6 +961,45 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
             println!(
                 "copied to {}; edit it and run `perch mod check {0}` (a layout: `perch mod layout {0}`)",
                 id["id"].as_str().unwrap_or(example)
+            );
+            Ok(())
+        }
+        ["install", source] => {
+            let done = ask("mod/install", json!({ "source": source }))?;
+            let names = |key: &str| {
+                done[key]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default()
+            };
+            println!(
+                "installed mods: [{}]  layouts: [{}]",
+                names("mods"),
+                names("layouts")
+            );
+            for warning in done["warnings"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|w| w.as_str())
+            {
+                println!("warning: {warning}");
+            }
+            println!(
+                "it runs with the person's full access: read the code, then `perch mod check <id>`"
+            );
+            Ok(())
+        }
+        ["remove", id] | ["remove", id, "mod" | "layout"] => {
+            let done = ask("mod/remove", json!({ "id": id, "kind": words.get(2) }))?;
+            println!(
+                "{} {id} moved to mods-removed/ (move it back to restore)",
+                done["kind"].as_str().unwrap_or("mod")
             );
             Ok(())
         }
@@ -1316,6 +1356,12 @@ Commands
   perch mod examples      The mods and layouts shipped inside Perch to start from.
   perch mod clone <example> [id]
                           Copy one into the mods or layouts folder (never overwrites), then edit it.
+  perch mod install <owner/repo[/folder]>
+                          Copy mods/<name>/ and layouts/<name>.json from a public GitHub repo (or one
+                          folder with a main.js) into place; never overwrites, and prints warnings for
+                          code that runs programs, reaches the network or touches files. Read it first.
+  perch mod remove <id> [mod|layout]
+                          Move a mod or layout to mods-removed/ (not deleted).
   perch mod layout <id|stock>
                           Change the whole window to a layout in the layouts folder, or back to
                           Perch as shipped.
@@ -1440,7 +1486,7 @@ Mods
   - After every edit run `perch mod check <id>`: it says whether the person's window loaded and
     mounted the new files, or why not (a slot function that throws counts). Then `perch mod dom <id>`
     shows what it drew, as text and HTML (`perch mod dom app` is the whole window).
-  - `perch mod open <id>` shows a mod now. To undo: `perch mod disable <id>`, delete the folder, or
+  - `perch mod open <id>` shows a mod now. To undo: `perch mod disable <id>`, `perch mod remove <id>`, or
     the person presses ctrl+alt+shift+Escape (turns every mod off) or starts Perch with
     PERCH_MODS=off.
 
@@ -1922,6 +1968,8 @@ mod tests {
             "perch mod open <id>",
             "perch mod check <id>",
             "perch mod clone <example> [id]",
+            "perch mod install <owner/repo[/folder]>",
+            "perch mod remove <id> [mod|layout]",
             "perch mod api",
             "perch mod dom <id|app>",
             "perch mod layout <id|stock>",

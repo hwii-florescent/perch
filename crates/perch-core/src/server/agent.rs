@@ -489,6 +489,32 @@ pub(super) async fn mod_clone(
     }
 }
 
+/// `POST {base}agent/mod/remove`: move a mod or layout to the trash folder (`server/mods.rs`).
+pub(super) async fn mod_remove(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(_) => answer(mods::agent_remove(&state, &body)),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
+/// `POST {base}agent/mod/install`: copy mods and layouts from a GitHub repo (`server/mods.rs`).
+pub(super) async fn mod_install(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(_) => answer(mods::agent_install(&state, &body).await),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
 /// `POST {base}agent/mod/check`: did the person's page load this mod's current files (`server/mods.rs`).
 pub(super) async fn mod_check(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,

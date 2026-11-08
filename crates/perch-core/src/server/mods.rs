@@ -60,6 +60,33 @@ pub(super) fn agent_clone(app: &AppState, body: &Value) -> Result<Value, Failure
     Ok(json!({ "id": id }))
 }
 
+/// `perch mod remove <id>`: move a mod folder or layout file to `mods-removed/` (never deleted).
+pub(super) fn agent_remove(app: &AppState, body: &Value) -> Result<Value, Failure> {
+    let id = id_of(body)?;
+    let kind = mods::remove(&app.memory_root, id, body["kind"].as_str()).map_err(failure)?;
+    Ok(json!({ "id": id, "kind": kind }))
+}
+
+/// `perch mod install <source>`: copy mods and layouts from a public GitHub repo; never overwrites.
+pub(super) async fn agent_install(app: &AppState, body: &Value) -> Result<Value, Failure> {
+    let source = body["source"]
+        .as_str()
+        .filter(|text| !text.is_empty())
+        .ok_or_else(|| {
+            fail(
+                StatusCode::BAD_REQUEST,
+                "name a GitHub repository to install from",
+            )
+        })?
+        .to_string();
+    let root = app.memory_root.clone();
+    let done = tokio::task::spawn_blocking(move || mods::install(&root, &source))
+        .await
+        .map_err(|_| fail(StatusCode::INTERNAL_SERVER_ERROR, "install was interrupted"))?
+        .map_err(failure)?;
+    Ok(json!(done))
+}
+
 /// `perch mod layout <id|stock>`: choose the window layout; `stock` (or an empty id) is Perch as shipped.
 pub(super) fn agent_set_layout(app: &AppState, body: &Value) -> Result<Value, Failure> {
     let id = body["id"]
@@ -431,7 +458,11 @@ pub(super) fn handle_set(state: &Arc<ConnState>, request_id: String, id: String,
             &policy,
             Some(id.as_str()).filter(|id| !id.is_empty()),
         ),
-        _ => Err(Error::Invalid("ops are enable, disable and layout".into())),
+        "remove-mod" => mods::remove(&app.memory_root, &id, Some("mod")).map(drop),
+        "remove-layout" => mods::remove(&app.memory_root, &id, Some("layout")).map(drop),
+        _ => Err(Error::Invalid(
+            "ops are enable, disable, layout, remove-mod and remove-layout".into(),
+        )),
     };
     let error = outcome.err().map(|error| error.to_string());
     let _ = state.out_tx.send(state_message(app, request_id, error));

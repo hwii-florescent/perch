@@ -80,6 +80,10 @@ export const listMods = () => ask((requestId) => ({ type: "mods.list", requestId
 export const enableMod = (id: string, enabled: boolean) =>
   ask((requestId) => ({ type: "mods.set", requestId, id, op: enabled ? "enable" : "disable" }));
 
+/** Moves a mod folder or a layout file to `mods-removed/` (never deleted). */
+export const removeMod = (id: string, kind: "mod" | "layout") =>
+  ask((requestId) => ({ type: "mods.set", requestId, id, op: kind === "mod" ? "remove-mod" : "remove-layout" }));
+
 /** Choose the window layout; `null` goes back to Perch as shipped. */
 export const setLayout = (id: string | null) =>
   ask((requestId) => ({ type: "mods.set", requestId, id: id ?? "", op: "layout" }));

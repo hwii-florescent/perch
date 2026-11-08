@@ -1350,7 +1350,8 @@ pub enum ClientMessage {
     ModsList { request_id: String },
 
     /// A person's change to one mod: `op` is `enable` or `disable`; `layout` chooses the layout named
-    /// `id` (an empty `id` goes back to stock Perch). Answered with `mods.state`.
+    /// `id` (an empty `id` goes back to stock Perch); `remove-mod` / `remove-layout` move it to
+    /// `mods-removed/`. Answered with `mods.state`.
     #[serde(rename = "mods.set", rename_all = "camelCase")]
     ModsSet {
         request_id: String,

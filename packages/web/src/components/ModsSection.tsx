@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { ModInfo } from "@perch/shared";
 import { usePerchStore } from "../store";
-import { currentMods, enableMod, refreshMods, setLayout, subscribeMods } from "../mods";
+import { currentMods, enableMod, refreshMods, removeMod, setLayout, subscribeMods } from "../mods";
 import { SettingsGroup, SettingRow } from "./ui/setting-row";
 import { Switch } from "./ui/switch";
 import { GHOST_BUTTON } from "./ui/icon-button";
@@ -37,11 +37,14 @@ export function ModsSection() {
               {mod.description && <div className={MUTED}>{mod.description}</div>}
               <div className={MUTED} data-testid={`mod-${mod.id}-status`}>{statusText(mod)}</div>
             </div>
-            {!mod.error && (
-              <button type="button" className={GHOST_BUTTON} onClick={async () => setMessage((await enableMod(mod.id, !mod.enabled))?.error ?? null)}>
-                {mod.enabled ? "Turn off" : "Turn on"}
-              </button>
-            )}
+            <div className="flex gap-2">
+              {!mod.error && (
+                <button type="button" className={GHOST_BUTTON} onClick={async () => setMessage((await enableMod(mod.id, !mod.enabled))?.error ?? null)}>
+                  {mod.enabled ? "Turn off" : "Turn on"}
+                </button>
+              )}
+              <button type="button" className={GHOST_BUTTON} title="Moves the folder to mods-removed/ beside mods/" data-testid={`mod-${mod.id}-remove`} onClick={async () => setMessage((await removeMod(mod.id, "mod"))?.error ?? null)}>Remove</button>
+            </div>
           </div>
         ))}
         {message && <p className="py-2 text-[0.8rem] text-red" role="alert" data-testid="mods-message">{message}</p>}
@@ -53,9 +56,14 @@ export function ModsSection() {
               <div className="text-[0.85rem] font-medium text-fg">{layout.name}</div>
               <div className={MUTED}>{layout.error ? `Cannot load: ${layout.error}` : (state?.layout ?? null) === layout.id ? "In use" : ""}</div>
             </div>
-            {!layout.error && (state?.layout ?? null) !== layout.id && (
-              <button type="button" className={GHOST_BUTTON} onClick={async () => setMessage((await setLayout(layout.id))?.error ?? null)}>Use</button>
-            )}
+            <div className="flex gap-2">
+              {!layout.error && (state?.layout ?? null) !== layout.id && (
+                <button type="button" className={GHOST_BUTTON} onClick={async () => setMessage((await setLayout(layout.id))?.error ?? null)}>Use</button>
+              )}
+              {layout.id && (
+                <button type="button" className={GHOST_BUTTON} title="Moves the file to mods-removed/ beside layouts/" data-testid={`layout-${layout.id}-remove`} onClick={async () => setMessage((await removeMod(layout.id!, "layout"))?.error ?? null)}>Remove</button>
+              )}
+            </div>
           </div>
         ))}
       </SettingsGroup>

@@ -261,6 +261,260 @@ pub fn source(root: &Path, policy: &Policy, id: &str) -> Result<String, Error> {
     Ok(std::fs::read_to_string(file)?)
 }
 
+/// `perch mod remove <id>`: takes a mod folder or a layout file out of use. It moves to
+/// `<root>/mods-removed/` (named with the time) instead of being deleted, so a mistake is one `mv`.
+/// `only` names which one when a mod and a layout share the id (`"mod"` or `"layout"`).
+pub fn remove(root: &Path, id: &str, only: Option<&str>) -> Result<String, Error> {
+    if !plain_id(id) {
+        return Err(Error::Invalid("an id is letters, digits, - and _".into()));
+    }
+    let (mod_dir, layout_file) = (
+        mods_dir(root).join(id),
+        root.join("layouts").join(format!("{id}.json")),
+    );
+    let (has_mod, has_layout) = (
+        mod_dir.is_dir() && only != Some("layout"),
+        layout_file.is_file() && only != Some("mod"),
+    );
+    let (from, kind) = match (has_mod, has_layout) {
+        (true, false) => (mod_dir, "mod"),
+        (false, true) => (layout_file, "layout"),
+        (true, true) => {
+            return Err(Error::Invalid(format!(
+                "\"{id}\" is both a mod and a layout; say which: perch mod remove {id} mod|layout"
+            )))
+        }
+        (false, false) => return Err(Error::NotFound(format!("no mod or layout \"{id}\""))),
+    };
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    let trash = root.join("mods-removed");
+    std::fs::create_dir_all(&trash)?;
+    let name = from.file_name().and_then(|n| n.to_str()).unwrap_or(id);
+    std::fs::rename(&from, trash.join(format!("{stamp}-{name}")))?;
+    if kind == "mod" {
+        let mut off = disabled(root);
+        off.retain(|other| other != id);
+        std::fs::write(
+            root.join(STATE),
+            serde_json::json!({ "disabled": off }).to_string(),
+        )?;
+    } else if crate::layouts::current(root).as_deref() == Some(id) {
+        std::fs::write(
+            root.join("layout-state.json"),
+            serde_json::json!({ "layout": null }).to_string(),
+        )?;
+    }
+    Ok(kind.to_string())
+}
+
+/// What `install` added, and what the person should know before trusting it.
+#[derive(Debug, Default, Serialize)]
+pub struct Installed {
+    pub mods: Vec<String>,
+    pub layouts: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+const MAX_INSTALL_FILES: usize = 300;
+const MAX_INSTALL_BYTES: u64 = 8 * 1024 * 1024;
+
+/// `owner/repo[/sub/path]` or a `https://github.com/owner/repo[/tree/<branch>/sub/path]` link.
+fn github_source(source: &str) -> Result<(String, Option<String>, Vec<String>), Error> {
+    let bad = || Error::Invalid("a source is owner/repo[/folder] or a github.com link".into());
+    let path = source
+        .strip_prefix("https://github.com/")
+        .unwrap_or(source)
+        .trim_end_matches('/');
+    let parts: Vec<&str> = path.split('/').collect();
+    let word = |text: &str| {
+        !text.is_empty()
+            && text.len() <= 100
+            && text
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            && !text.starts_with(['-', '.'])
+    };
+    if parts.len() < 2 || !word(parts[0]) || !word(parts[1].trim_end_matches(".git")) {
+        return Err(bad());
+    }
+    let repo = format!("{}/{}", parts[0], parts[1].trim_end_matches(".git"));
+    let (branch, sub) = match parts.get(2) {
+        Some(&"tree") if parts.len() > 3 => (Some(parts[3].to_string()), &parts[4..]),
+        _ => (None, &parts[2..]),
+    };
+    if !sub.iter().all(|s| word(s)) || branch.as_deref().is_some_and(|b| !word(b)) {
+        return Err(bad());
+    }
+    Ok((repo, branch, sub.iter().map(|s| s.to_string()).collect()))
+}
+
+fn copy_tree(from: &Path, to: &Path, files: &mut usize, bytes: &mut u64) -> Result<(), Error> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name_text = name.to_string_lossy();
+        let kind = entry.file_type()?;
+        if name_text.starts_with('.') || name_text == "node_modules" || kind.is_symlink() {
+            continue;
+        }
+        if kind.is_dir() {
+            copy_tree(&entry.path(), &to.join(&name), files, bytes)?;
+        } else {
+            *files += 1;
+            *bytes += entry.metadata()?.len();
+            if *files > MAX_INSTALL_FILES || *bytes > MAX_INSTALL_BYTES {
+                return Err(Error::Invalid(format!(
+                    "too big to install: at most {MAX_INSTALL_FILES} files and 8 MiB"
+                )));
+            }
+            std::fs::copy(entry.path(), to.join(&name))?;
+        }
+    }
+    Ok(())
+}
+
+/// What the code does that deserves a word to the person before it runs, found by plain text search.
+fn warnings_for(id: &str, dir: &Path) -> Vec<String> {
+    let mut text = String::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(next) = stack.pop() {
+        for entry in std::fs::read_dir(&next).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|e| e == "js") {
+                text.push_str(&std::fs::read_to_string(&path).unwrap_or_default());
+            }
+        }
+    }
+    [
+        ("exec(", "runs programs on this computer"),
+        ("fetch(", "reaches the network"),
+        ("WebSocket", "opens network connections"),
+        ("writeTextFile", "writes files on this computer"),
+        ("readTextFile", "reads files on this computer"),
+        (
+            "api.socket",
+            "sends messages to Perch itself (it can start terminals)",
+        ),
+    ]
+    .iter()
+    .filter(|(needle, _)| text.contains(needle))
+    .map(|(_, what)| format!("mod \"{id}\" {what}"))
+    .collect()
+}
+
+/// `perch mod install <source>`: copies mods and layouts from a public GitHub repo into the mods and
+/// layouts folders. A repo laid out like this home (`mods/<name>/`, `layouts/<name>.json`) gives all
+/// of them; a folder with a `main.js` at its top is one mod named after the folder. Never overwrites:
+/// a name already in use stops the install before anything is copied. Blocking (it runs `git`).
+pub fn install(root: &Path, source: &str) -> Result<Installed, Error> {
+    let (repo, branch, sub) = github_source(source)?;
+    let work = std::env::temp_dir().join(format!("perch-install-{}", uuid::Uuid::new_v4()));
+    let result = (|| {
+        let mut clone = std::process::Command::new("git");
+        clone.args(["clone", "--depth", "1", "--quiet"]);
+        if let Some(branch) = &branch {
+            clone.args(["--branch", branch]);
+        }
+        clone
+            .arg(format!("https://github.com/{repo}.git"))
+            .arg(&work)
+            .env("GIT_TERMINAL_PROMPT", "0");
+        let output = clone
+            .output()
+            .map_err(|e| Error::Invalid(format!("could not run git: {e}")))?;
+        if !output.status.success() {
+            return Err(Error::Invalid(format!(
+                "could not fetch {repo}: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        install_from(
+            root,
+            &sub.iter().fold(work.clone(), |dir, s| dir.join(s)),
+            &repo,
+        )
+    })();
+    let _ = std::fs::remove_dir_all(&work);
+    result
+}
+
+/// The copy half of `install`, from a folder already on disk.
+pub fn install_from(root: &Path, top: &Path, name_hint: &str) -> Result<Installed, Error> {
+    if !top.is_dir() {
+        return Err(Error::NotFound(
+            "that folder is not in the repository".into(),
+        ));
+    }
+    let mut found: Vec<(String, PathBuf, bool)> = Vec::new(); // (id, source, is layout)
+    for entry in std::fs::read_dir(top.join("mods"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let id = entry.file_name().to_string_lossy().into_owned();
+        if entry.path().join("main.js").is_file() && plain_id(&id) {
+            found.push((id, entry.path(), false));
+        }
+    }
+    for entry in std::fs::read_dir(top.join("layouts"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if let Some(id) = name.strip_suffix(".json").filter(|id| plain_id(id)) {
+            found.push((id.to_string(), entry.path(), true));
+        }
+    }
+    if found.is_empty() && top.join("main.js").is_file() {
+        let last = name_hint.rsplit('/').next().unwrap_or(name_hint);
+        let id = top
+            .file_name()
+            .and_then(|n| n.to_str())
+            .filter(|n| plain_id(n) && !n.starts_with("perch-install-"))
+            .unwrap_or(last)
+            .to_string();
+        found.push((id, top.to_path_buf(), false));
+    }
+    if found.is_empty() {
+        return Err(Error::Invalid(
+            "nothing to install: expected mods/<name>/main.js, layouts/<name>.json or a main.js at the top".into(),
+        ));
+    }
+    for (id, _, is_layout) in &found {
+        let taken = if *is_layout {
+            root.join("layouts").join(format!("{id}.json"))
+        } else {
+            mods_dir(root).join(id)
+        };
+        if !plain_id(id) || taken.exists() {
+            return Err(Error::Invalid(format!(
+                "\"{id}\" already exists; remove it first (perch mod remove {id}) or install nothing over it"
+            )));
+        }
+    }
+    let mut done = Installed::default();
+    let (mut files, mut bytes) = (0, 0);
+    for (id, from, is_layout) in found {
+        if is_layout {
+            std::fs::create_dir_all(root.join("layouts"))?;
+            std::fs::copy(&from, root.join("layouts").join(format!("{id}.json")))?;
+            done.layouts.push(id);
+        } else {
+            let to = mods_dir(root).join(&id);
+            copy_tree(&from, &to, &mut files, &mut bytes)?;
+            done.warnings.extend(warnings_for(&id, &to));
+            done.mods.push(id);
+        }
+    }
+    Ok(done)
+}
+
 /// A mod or layout that ships inside Perch to copy and change (herdr ships its defaults the same way).
 /// `files` are relative to `mods/<id>/` for a mod, or to `layouts/` for a layout.
 pub struct Example {
@@ -385,6 +639,93 @@ mod tests {
         assert!(layouts.iter().all(|l| l.error.is_none()), "{layouts:?}");
         // Cloning the layout under a new id keeps the shipped name inside the file.
         assert!(root.0.join("layouts/ide.json").is_file());
+    }
+
+    #[test]
+    fn remove_moves_to_the_trash_and_install_copies_without_overwriting() {
+        let root = Root::new();
+        root.put("keep", "main.js", "export default () => {}");
+        let src = std::env::temp_dir().join(format!("perch-src-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(src.join("mods/spy")).unwrap();
+        std::fs::create_dir_all(src.join("layouts")).unwrap();
+        std::fs::write(
+            src.join("mods/spy/main.js"),
+            "export default (el, api) => api.exec('ls')",
+        )
+        .unwrap();
+        std::fs::write(src.join("mods/spy/.hidden"), "x").unwrap();
+        std::fs::write(
+            src.join("layouts/wide.json"),
+            r#"{"name":"Wide","root":{"type":"block","content":"tabs"}}"#,
+        )
+        .unwrap();
+
+        let done = install_from(&root.0, &src, "o/r").unwrap();
+        assert_eq!(
+            (done.mods.as_slice(), done.layouts.as_slice()),
+            (&["spy".to_string()][..], &["wide".to_string()][..])
+        );
+        assert!(
+            done.warnings.iter().any(|w| w.contains("runs programs")),
+            "{:?}",
+            done.warnings
+        );
+        assert!(!mods_dir(&root.0).join("spy/.hidden").exists());
+        // A second install stops on the taken name and changes nothing.
+        assert!(install_from(&root.0, &src, "o/r").is_err());
+
+        assert_eq!(remove(&root.0, "spy", None).unwrap(), "mod");
+        assert!(!mods_dir(&root.0).join("spy").exists());
+        assert_eq!(
+            std::fs::read_dir(root.0.join("mods-removed"))
+                .unwrap()
+                .count(),
+            1
+        );
+        assert_eq!(remove(&root.0, "wide", None).unwrap(), "layout");
+        assert!(remove(&root.0, "wide", None).is_err());
+        assert!(remove(&root.0, "../x", None).is_err());
+        assert!(mods_dir(&root.0).join("keep").is_dir());
+
+        // A lone main.js is one mod named after its folder.
+        let solo = src.join("solo-mod");
+        std::fs::create_dir_all(&solo).unwrap();
+        std::fs::write(solo.join("main.js"), "export default () => {}").unwrap();
+        assert_eq!(
+            install_from(&root.0, &solo, "o/r").unwrap().mods,
+            vec!["solo-mod"]
+        );
+        assert!(install_from(&root.0, &src.join("none"), "o/r").is_err());
+        let _ = std::fs::remove_dir_all(&src);
+    }
+
+    #[test]
+    fn github_sources_are_checked_before_git_runs() {
+        assert_eq!(github_source("o/r").unwrap(), ("o/r".into(), None, vec![]));
+        assert_eq!(
+            github_source("https://github.com/o/r.git/").unwrap().0,
+            "o/r"
+        );
+        let (repo, branch, sub) = github_source("https://github.com/o/r/tree/main/mods/x").unwrap();
+        assert_eq!(
+            (repo.as_str(), branch.as_deref(), sub),
+            (
+                "o/r",
+                Some("main"),
+                vec!["mods".to_string(), "x".to_string()]
+            )
+        );
+        for bad in [
+            "",
+            "o",
+            "o/../x",
+            "http://evil.test/o/r",
+            "o/r/..",
+            "-o/r;rm",
+            "o r/x",
+        ] {
+            assert!(github_source(bad).is_err(), "{bad}");
+        }
     }
 
     struct Root(PathBuf);

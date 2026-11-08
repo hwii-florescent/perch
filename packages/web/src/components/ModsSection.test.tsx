@@ -4,8 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModInfo } from "@perch/shared";
 
-const mods = vi.hoisted(() => ({ state: null as unknown, enableMod: vi.fn(async () => null), setLayout: vi.fn(async () => null), updateSettings: vi.fn(), off: false }));
-vi.mock("../mods", () => ({ currentMods: () => mods.state, subscribeMods: () => () => {}, refreshMods: () => {}, enableMod: mods.enableMod, setLayout: mods.setLayout }));
+const mods = vi.hoisted(() => ({ state: null as unknown, enableMod: vi.fn(async () => null), setLayout: vi.fn(async () => null), removeMod: vi.fn(async () => null), updateSettings: vi.fn(), off: false }));
+vi.mock("../mods", () => ({ currentMods: () => mods.state, subscribeMods: () => () => {}, refreshMods: () => {}, enableMod: mods.enableMod, setLayout: mods.setLayout, removeMod: mods.removeMod }));
 vi.mock("../store", () => ({
   usePerchStore: (select: (s: unknown) => unknown) => select({ settings: { mods: { off: mods.off } }, updateSettings: mods.updateSettings }),
 }));
@@ -25,11 +25,13 @@ describe("Settings > Mods", () => {
     expect(q("mod-board-status")?.textContent).toBe("On");
     expect(q("mod-old-status")?.textContent).toBe("Off");
     expect(q("mod-bad-status")?.textContent).toBe("Cannot load: main.js is missing");
-    expect(q("mod-bad")?.querySelector("button")).toBeNull();
+    expect(q("mod-bad")?.querySelectorAll("button")).toHaveLength(1); // only Remove, nothing to turn on
     await act(async () => q("mod-board")!.querySelector("button")!.click());
     expect(mods.enableMod).toHaveBeenCalledWith("board", false);
     await act(async () => q("mod-old")!.querySelector("button")!.click());
     expect(mods.enableMod).toHaveBeenCalledWith("old", true);
+    await act(async () => q("mod-bad-remove")!.click());
+    expect(mods.removeMod).toHaveBeenCalledWith("bad", "mod");
   });
 
   it("lists layouts, marks the one in use, and chooses one or goes back to stock", async () => {
@@ -37,13 +39,16 @@ describe("Settings > Mods", () => {
     mods.state = { mods: [], folder: "/x/mods", policy: { off: false }, safeMode: false, layout: "ide", layouts: [{ id: "ide", name: "IDE", root: block, error: null }, { id: "solo", name: "Solo", root: block, error: null }, { id: "bad", name: "bad", root: null, error: "unknown content" }] };
     await act(async () => root.render(<ModsSection />));
     expect(q("layout-ide")?.textContent).toContain("In use");
-    expect(q("layout-ide")?.querySelector("button")).toBeNull();
+    expect(q("layout-ide")?.querySelectorAll("button")).toHaveLength(1); // in use: only Remove
     expect(q("layout-bad")?.textContent).toContain("Cannot load: unknown content");
-    expect(q("layout-bad")?.querySelector("button")).toBeNull();
+    expect(q("layout-bad")?.querySelectorAll("button")).toHaveLength(1);
     await act(async () => q("layout-solo")!.querySelector("button")!.click());
     expect(mods.setLayout).toHaveBeenCalledWith("solo");
     await act(async () => q("layout-stock")!.querySelector("button")!.click());
     expect(mods.setLayout).toHaveBeenCalledWith(null);
+    expect(q("layout-stock-remove")).toBeNull();
+    await act(async () => q("layout-solo-remove")!.click());
+    expect(mods.removeMod).toHaveBeenCalledWith("solo", "layout");
   });
 
   it("says how to make a mod when there are none, and the off switch sets the one setting", async () => {

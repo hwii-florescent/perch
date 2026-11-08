@@ -1732,12 +1732,13 @@ export interface ModsListMessage {
 }
 
 /** A person's change to one mod: `enable` or `disable`; `layout` chooses the layout named `id` (an
- * empty `id` goes back to stock Perch). Answered with `mods.state`. */
+ * empty `id` goes back to stock Perch); `remove-mod` / `remove-layout` move it to `mods-removed/`.
+ * Answered with `mods.state`. */
 export interface ModsSetMessage {
   type: "mods.set";
   requestId: string;
   id: string;
-  op: "enable" | "disable" | "layout";
+  op: "enable" | "disable" | "layout" | "remove-mod" | "remove-layout";
 }
 
 /** The person's page says whether it loaded a mod's `revision` (capability `mods.report.v1`);
