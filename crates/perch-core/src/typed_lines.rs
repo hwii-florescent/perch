@@ -50,10 +50,10 @@ impl TypedLines {
                 (Escape::None, '\u{7f}' | '\u{8}') => {
                     self.partial.pop();
                 }
-                (Escape::None, c) if !c.is_control() => {
-                    if self.partial.chars().count() < LINE_CHARS {
-                        self.partial.push(c);
-                    }
+                (Escape::None, c)
+                    if !c.is_control() && self.partial.chars().count() < LINE_CHARS =>
+                {
+                    self.partial.push(c);
                 }
                 _ => {}
             }

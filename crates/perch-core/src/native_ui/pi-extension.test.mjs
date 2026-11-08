@@ -78,6 +78,11 @@ async function check(provider) {
     peer.write(JSON.stringify({ type: "steer", requestId: "s2", text: "use the other file" }) + "\n");
     await until(() => received.filter(event => event.requestId === "s2").length === 2);
     assert.equal(sentMessages.length, 1, "a repeated request id is not sent twice");
+    // The CLI goes idle with no event after the running snapshot (a missed settle): the extension looks
+    // again by itself, so the core never keeps an idle prompt as "working".
+    await until(() => received.at(-1).running === true);
+    idle = true;
+    await until(() => received.at(-1).running === false);
   } finally {
     peer?.destroy();
     await handlers.get("session_shutdown")?.();

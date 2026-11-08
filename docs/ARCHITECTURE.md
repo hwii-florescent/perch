@@ -358,6 +358,10 @@ contract the tests hold it to.
   and the paste (the lock covers the 250 ms between paste and Enter, so a later keystroke waits behind it
   but is not read first). Confirmation is only Claude's `UserPromptSubmit` (or the bridge's own answer);
   an unconfirmed write is `unconfirmed` and never repeated.
+- *Why a message waits is logged.* A receipt keeps only the latest reason, so the delivery loop also logs
+  (`info`, "queued mail is waiting") each change of a receiver's reason. A Pi or OMP extension that last said
+  "running" looks again every second until the turn is over, so a missed settle event cannot leave an idle
+  prompt reading as working.
 - *Duplicates and restarts.* The claim is one atomic `queued` to `delivering` update before any byte or
   bridge call, so a message is attempted at most once. A core that stops with a message `delivering` finds
   it `unconfirmed` at boot and never retries it blindly. Queued messages survive restarts; before any
@@ -522,6 +526,21 @@ A lead puts tasks in front of the person instead of starting them; nothing start
 - *The card* is read from these rows (a card whose tasks are all answered and whose sub-sessions are not live
   leaves), shown above the family strip, and follows a started task's sub-session state. It is not in the
   provider's transcript. Cards go with their lead when it is deleted.
+- *A lead shown as its terminal* has no chat on screen, so `PersistentAgentTerminal` draws
+  `nativeChat/TerminalSuggestions.tsx`: nothing when no task waits, else a small count over the terminal that
+  opens the same `SuggestionCards` (Start, Start all, Dismiss, Options) and acts under the terminal's input
+  lease through the same `suggestion.act`. The count is `waitingCount` in `suggestions.ts`; no domain logic is new.
+- *`perch suggestions`, `perch start <id|all>`, `perch dismiss <id>`* (routes `/agent/suggestions`, `/agent/answer`).
+  The list is read-only. The two answers run with the agent's token, so they are **person-only by proof, not by
+  trust**: the core does one only if a client typed that exact line (with or without Claude's and Pi's leading `!`)
+  and Enter into the caller's own terminal in the last 2 minutes (`typed_lines.rs`, fed from
+  `AgentRuntimeAdapter::prepare_input`, the one place a view's keystrokes and pastes reach the PTY; edits and
+  escape sequences are applied or skipped; a line proves one request and is then spent). Perch's own writes, a
+  delivered message and everything an agent runs from its shell never pass there, so an agent cannot make the
+  proof true. The answer is then the same `act` as a click: same limits, key and launch. Without the proof the
+  verb is refused (403) and nothing changes. An id may be shortened to six or more characters naming one waiting
+  task. Not a defence against a process that speaks the WebSocket as a viewer: that is as open for the card's own
+  buttons today.
 
 **Inbound control** (`agent_mail::{InboundMode, gate}`, `sessions.inbound_mode`, `db/agent_mail.rs`, `server/inbound.rs`,
 `inbound.get|state|act|act.result|changed`, capability `inbound.v1`, web `HeldMessages.tsx`, the session row menu; slice
