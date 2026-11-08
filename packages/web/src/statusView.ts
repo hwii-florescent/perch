@@ -45,17 +45,6 @@ export function topSection(sessions: readonly SessionSummary[], needs: ReadonlyS
   return STATUS_SECTIONS[best] ?? null;
 }
 
-/** What a workspace lists under its row: sessions that matter (anything but Idle), the open one, and the
- * lead of a listed sub-session; the rest are counted as `idle`. `all` lists everything (the open
- * workspace, or a viewer who unfolded it). Each keeps the order given. */
-export function discloseSessions(sessions: SessionSummary[], needs: ReadonlySet<string>, held: string | null, activeId: string | null, all: boolean): { shown: SessionSummary[]; idle: number } {
-  if (all) return { shown: sessions, idle: 0 };
-  const keep = new Set(sessions.filter((s) => s.id === activeId || sectionOf(s, needs, held) !== "idle").map((s) => s.id));
-  for (const s of sessions) if (keep.has(s.id) && s.parentSessionId) keep.add(s.parentSessionId);
-  const shown = sessions.filter((s) => keep.has(s.id));
-  return { shown, idle: sessions.length - shown.length };
-}
-
 /** The chat to keep in Done while it is on screen. Reading a finished chat
  * marks it seen, which would drop it to Idle under your eyes; it stays in Done
  * until you leave it or it starts working again. `previous` is the viewed

@@ -126,7 +126,7 @@ test.describe("Wave 1 functionality gaps", () => {
 
     // No folder browser: a session never starts in a folder perch wasn't given.
     await expect(page.locator('[data-testid="dir-browser"]')).toHaveCount(0);
-    const chats = page.locator('[data-testid="new-session-row-none"], [data-testid^="new-session-row-"][title$="/.perch/scratch"]').first();
+    const chats = page.locator('[data-testid="new-session-row-none"]').first();
     await expect(chats).toBeVisible();
 
     // The dialog closes synchronously (before the session.create round-trip

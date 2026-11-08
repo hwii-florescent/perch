@@ -134,7 +134,8 @@ it("workspace background picks it, while its badge and rename input keep their o
   const button = get("workspace-session-session");
   expect(button.getAttribute("aria-current")).toBe("page");
   expect(button.parentElement!.classList.contains("bg-surface-1")).toBe(true);
-  expect(button.querySelector(".agent-status-dot")!.classList.contains("h-[18px]")).toBe(true);
+  expect(button.querySelector(".agent-mark")!.classList.contains("h-[18px]")).toBe(true);
+  expect(button.querySelector(".agent-status-dot")).toBeNull(); // the tree's rows show state as a badge, not a ring
   expect(get("workspace-entry-tree").classList.contains("rounded-ui")).toBe(true);
   expect(get("workspace-entry-tree").classList.contains("bg-surface-1")).toBe(false);
   act(() => get("workspace-entry-tree").querySelector("strong")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));

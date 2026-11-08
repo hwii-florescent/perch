@@ -264,7 +264,7 @@ async function createRemoteSessionViaPicker(page: Page, hostId: string, agent: s
   await newBtn.click();
   const dialog = page.getByTestId("new-session-dialog");
   await expect(dialog).toBeVisible({ timeout: 10_000 });
-  await page.locator('[data-testid="new-session-row-none"], [data-testid^="new-session-row-"][title$="/.perch/scratch"]').first().click();
+  await page.locator('[data-testid="new-session-row-none"]').first().click();
   const agentRow = page.getByTestId(`new-session-row-${agent}`);
   await expect(agentRow).toBeEnabled({ timeout: 10_000 });
   await agentRow.click();

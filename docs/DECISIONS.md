@@ -7,6 +7,18 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-08 — Project tree: explicit state labels, no idle hiding (owner)
+
+Amends the one-tree sidebar decision below.
+
+- Session rows say **Working**, **Needs you** or **Done** in visible text; a dot alone is not enough.
+  Folded project rollups use the same labels and counts. Idle stays unlabelled, and unreachable hosts
+  claim no current state. Labels use full text colour on a quiet state-tinted fill.
+- By project lists all sessions under each expanded workspace, including idle chats in background
+  workspaces. No `+N idle` / `Hide idle` control and no **Show active only** filter; an old saved
+  active-only choice is ignored. Manual project collapse, attention sorting, hidden worktrees and
+  the separate **Show terminals** choice remain unchanged.
+
 ## 2026-11-08 — Project memory: plain files in Perch's own directory (owner)
 
 Settles the "proposed" part of 2026-11-07 (Projects parity). Slice 1 (core and `perch memory`) is

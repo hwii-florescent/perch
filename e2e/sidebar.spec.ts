@@ -55,6 +55,59 @@ test.describe("Perch sidebar", () => {
   });
 
 
+  test("2h. explicit state labels and background idle chats stay visible on desktop and phone", async ({ page }, testInfo) => {
+    // Only the incoming display facts are fixtures; real isolated shells/projects provide the rows.
+    // No agent/model calls are needed to verify the sidebar's presentation.
+    const states = new Map<string, { status: "idle" | "running"; blocked?: boolean }>();
+    await page.routeWebSocket("**/ws", (ws) => {
+      const server = ws.connectToServer();
+      server.onMessage((raw) => {
+        const frame = JSON.parse(String(raw));
+        const decorate = (session: { id: string }) => states.has(session.id)
+          ? { ...session, unseen: false, stale: false, blocked: false, ...states.get(session.id) }
+          : session;
+        if (frame.type === "session.list") frame.sessions = frame.sessions.map(decorate);
+        if (frame.type === "session.updated") frame.session = decorate(frame.session);
+        ws.send(JSON.stringify(frame));
+      });
+    });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-labels-"));
+    const other = path.join(dir, "other");
+    fs.mkdirSync(other);
+    try {
+      await open(page);
+      const work = await startChat(page, "terminal", dir);
+      const ask = await startChat(page, "terminal", dir);
+      const idle = await startChat(page, "terminal", dir);
+      states.set(work, { status: "running" });
+      states.set(ask, { status: "running", blocked: true });
+      states.set(idle, { status: "idle" });
+      await startChat(page, "terminal", other); // The populated workspace is now in the background.
+      await page.evaluate(() => localStorage.setItem("perch.sidebar.activeOnly", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      const check = async () => {
+        for (const [id, text] of [[work, "Working"], [ask, "Needs you"]]) {
+          const badge = page.getByTestId(`session-state-${id}`);
+          await expect(badge).toBeVisible();
+          await expect(badge).toHaveText(text);
+          expect(await badge.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(11);
+          const row = page.getByTestId(`workspace-session-${id}`);
+          expect((await badge.boundingBox())!.x).toBeGreaterThan((await row.boundingBox())!.x);
+        }
+        await expect(page.getByTestId(`workspace-session-${idle}`)).toBeVisible();
+        await expect(page.locator('[data-testid^="workspace-idle-"]')).toHaveCount(0);
+      };
+      await check();
+      await page.screenshot({ path: testInfo.outputPath("project-labels-desktop.png") });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.getByTestId("mobile-switch").click();
+      await check();
+      await page.screenshot({ path: testInfo.outputPath("project-labels-phone.png") });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("2c. scoped +, harness rings and whole worktree rows", async ({ page }, testInfo) => {
     const fixture = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-harness-")));
     const repo = path.join(fixture, "perch");
@@ -82,7 +135,7 @@ test.describe("Perch sidebar", () => {
       await page.getByTestId("new-session-provider-terminal").click();
       const terminal = page.getByTestId("persistent-agent-terminal");
       await expect(terminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30000 });
-      const ring = tree.locator(".agent-status-dot");
+      const ring = tree.locator(".agent-mark");
       await expect(ring).toHaveAttribute("data-provider", "terminal");
       await expect(ring.locator("svg")).toBeVisible();
       // Desktop: Workspaces sit inside the Project; the open one lists its chats as rows under its name.
@@ -103,11 +156,11 @@ test.describe("Perch sidebar", () => {
       const [nameBox, branchBox] = await Promise.all([name.boundingBox(), branch.boundingBox()]);
       expect(branchBox!.x).toBeGreaterThan(nameBox!.x);
       expect(Math.abs(branchBox!.y - nameBox!.y)).toBeLessThan(8);
-      // Clicking a row selects its workspace; a session row switches to its session (idle ones fold until opened).
+      // Clicking a row selects its workspace; even background idle chats stay listed and selectable.
       const treeSession = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
       await main.click({ position: { x: 2, y: 8 } });
       await expect(page.getByTestId(`tab-${mainSession}`)).toHaveClass(/tab-bar__tab--active/);
-      await tree.locator('[data-testid^="workspace-idle-"]').click();
+      await expect(tree.locator('[data-testid^="workspace-idle-"]')).toHaveCount(0);
       await page.getByTestId(`workspace-session-${treeSession}`).click();
       await expect(page.getByTestId(`tab-${treeSession}`)).toHaveClass(/tab-bar__tab--active/);
       await page.keyboard.down("Control");
@@ -144,7 +197,7 @@ test.describe("Perch sidebar", () => {
     const id = await startChat(page, "terminal", dir);
     const terminal = page.getByTestId("persistent-agent-terminal");
     const button = page.getByTestId(`workspace-session-${id}`);
-    const ring = button.locator(".agent-status-dot");
+    const ring = button.locator(".agent-mark");
     await expect(ring).toHaveAttribute("data-provider", "terminal");
     const input = terminal.locator(".xterm-helper-textarea");
     await input.pressSequentially("pi --provider anthropic --model claude-haiku-4-5 --no-extensions --no-skills --no-prompt-templates");
@@ -153,7 +206,7 @@ test.describe("Perch sidebar", () => {
     await expect(terminal.locator(".xterm-rows")).toContainText("claude-haiku-4-5", { timeout: 30000 });
     await expect(ring).toHaveAttribute("data-provider", "pi", { timeout: 10000 });
     const style = await button.evaluate((element) => {
-      const badge = element.querySelector(".agent-status-dot")!;
+      const badge = element.querySelector(".agent-mark")!;
       const mark = badge.querySelector("svg")!;
       return {
         button: getComputedStyle(element).backgroundColor,

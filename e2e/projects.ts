@@ -47,7 +47,7 @@ export async function pickProject(page: Page, dir: string, agent = "terminal"): 
 
 /** With the new-session dialog open, pick Chats (or "No project"), then `agent`. */
 export async function pickChats(page: Page, agent = "terminal"): Promise<void> {
-  await page.locator('[data-testid="new-session-row-none"], [data-testid^="new-session-row-"][title$="/.perch/scratch"]').first().click();
+  await page.getByTestId("new-session-row-none").click();
   await page.getByTestId(`new-session-row-${agent}`).click();
 }
 
