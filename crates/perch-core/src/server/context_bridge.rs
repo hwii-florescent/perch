@@ -14,7 +14,7 @@ async fn prepare(
     let workspace = app.db.resolve_workspace(workspace_id)?;
     anyhow::ensure!(
         workspace.host_id == "local",
-        "Context Bridge currently supports local nests only"
+        "Context Bridge currently supports local workspaces only"
     );
     if let ContextSource::Terminal { session_id, .. } = source {
         let row = app
@@ -48,7 +48,7 @@ async fn prepare(
 fn check_scope(actual: Option<&str>, host: &str, workspace: &str) -> anyhow::Result<()> {
     anyhow::ensure!(
         actual == Some(workspace) && (host.is_empty() || host == "local"),
-        "Choose an agent or terminal in this exact nest and host"
+        "Choose an agent or terminal in this exact workspace and host"
     );
     Ok(())
 }

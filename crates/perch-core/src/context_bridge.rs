@@ -63,7 +63,7 @@ pub fn validate_path(path: &str) -> Result<()> {
             && path
                 .split('/')
                 .all(|part| !part.is_empty() && part != "." && part != ".."),
-        "Choose a file inside this nest"
+        "Choose a file inside this workspace"
     );
     Ok(())
 }

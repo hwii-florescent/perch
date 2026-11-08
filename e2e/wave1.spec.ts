@@ -38,7 +38,7 @@ async function openLocalPicker(page: Page): Promise<void> {
   const btn = page.locator('[data-testid="new-session-local"]');
   await expect(btn).toBeEnabled({ timeout: 10000 });
   await btn.click();
-  await expect(page.locator('[data-testid="project-option-none"]')).toBeVisible({ timeout: 5000 });
+  await expect(page.getByTestId("new-session-dialog")).toBeVisible({ timeout: 5000 });
 }
 
 /** The notification settings as they were before this spec touched anything.
@@ -126,13 +126,14 @@ test.describe("Wave 1 functionality gaps", () => {
 
     // No folder browser: a session never starts in a folder perch wasn't given.
     await expect(page.locator('[data-testid="dir-browser"]')).toHaveCount(0);
-    const chats = page.locator('[data-testid="project-option-none"]');
-    await expect(chats).toContainText("Quickchat");
+    const chats = page.locator('[data-testid="new-session-row-none"], [data-testid^="new-session-row-"][title$="/.perch/scratch"]').first();
+    await expect(chats).toBeVisible();
 
-    // The popover closes synchronously (before the session.create round-trip
+    // The dialog closes synchronously (before the session.create round-trip
     // resolves), so poll localStorage rather than reading it right away.
     await chats.click();
-    await expect(chats).not.toBeVisible({ timeout: 3000 });
+    await page.getByTestId("new-session-row-terminal").click();
+    await expect(page.getByTestId("new-session-dialog")).not.toBeVisible({ timeout: 3000 });
     await expect
       .poll(() => page.evaluate(() => localStorage.getItem("perch.sessionId")), { timeout: 5000 })
       .toBeTruthy();

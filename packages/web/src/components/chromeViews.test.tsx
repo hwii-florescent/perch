@@ -18,20 +18,21 @@ let host: HTMLDivElement;
 const storage = new Map<string, string>();
 vi.stubGlobal("localStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) });
 const select = vi.fn();
-const project = { id: "p", hostId: "local", name: "Birdhouse", path: "/tmp/birdhouse", favorite: false, createdAt: 1, updatedAt: 1 };
+const project = { id: "p", hostId: "local", name: "Project", path: "/tmp/project", favorite: false, createdAt: 1, updatedAt: 1 };
 const workspace = { id: "w", projectId: "p", hostId: "local", path: project.path, name: "Original", dirty: false, state: "active" as const, createdAt: 1, updatedAt: 1 };
-const sessions = ["first", "second"].map((id) => ({ id, title: `${id} session`, hostId: "local", workspaceId: "w", projectId: "p", cwd: project.path, cliProviderId: "terminal", createdAt: 1, status: "idle" as const }));
+const sessions = ["first", "second"].map((id) => ({ id, title: `${id} session`, hostId: "local", workspaceId: "w", projectId: "p", cwd: project.path, cliProviderId: "claude", createdAt: 1, status: "idle" as const }));
 beforeEach(() => {
   vi.clearAllMocks();
   storage.clear();
-  storage.set("perch.sidebar.sessionView", "list");
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
   usePerchStore.setState({ activeHostId: "local", workspaceProjects: [project], workspaces: [workspace], sessions, sessionId: "first", activeWorkspaceId: "w", switchSession: select, worktreeJobs: [], workspaceSnapshotByHost: {} });
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
-const get = (id: string) => host.querySelector(`[data-testid="${id}"]`)!;
+// On the desktop a chat also shows under its project; with a Sessions section these tests mean its row.
+const scope = () => host.querySelector('[data-testid="session-list"]') ?? host;
+const get = (id: string) => (id.startsWith("workspace-session-") ? scope().querySelector(`[data-testid="${id}"]`) : null) ?? host.querySelector(`[data-testid="${id}"]`)!;
 
 it.each(["status", "project", "list", "scratchpad"])("%s sessions have one full-row selection and sibling close actions", (mode) => {
   if (mode !== "status") storage.set("perch.sidebar.organize", mode === "list" ? "list" : "project");
@@ -40,7 +41,7 @@ it.each(["status", "project", "list", "scratchpad"])("%s sessions have one full-
   const selected = get("workspace-session-first");
   const other = get("workspace-session-second");
   const close = get("workspace-session-close-first");
-  expect(host.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+  expect(scope().querySelectorAll('[aria-current="page"]')).toHaveLength(1);
   expect(selected.getAttribute("aria-current")).toBe("page");
   expect(selected.className).not.toContain("bg-surface-1");
   expect(selected.parentElement!.className).toContain("bg-surface-1");

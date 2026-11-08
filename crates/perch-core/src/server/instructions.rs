@@ -1,11 +1,11 @@
-//! `instructions.get` / `instructions.set`: read and save the Instructions of a Birdhouse or
-//! Nest on this core (capability `instructions.v1`). Rules live in `crate::instructions`, the
-//! store in `db/instructions.rs`. Only local Birdhouses and Nests have Instructions here; a
+//! `instructions.get` / `instructions.set`: read and save the Instructions of a Project or
+//! Workspace on this core (capability `instructions.v1`). Rules live in `crate::instructions`, the
+//! store in `db/instructions.rs`. Only local Projects and Workspaces have Instructions here; a
 //! remote one keeps its own on the owning core.
 
 use super::*;
 
-/// Whether `id` names a local Birdhouse (`project`) or Nest (`workspace`).
+/// Whether `id` names a local Project (`project`) or Workspace (`workspace`).
 fn local_target(app: &AppState, scope: &str, id: &str) -> bool {
     match scope {
         "project" => app
@@ -50,7 +50,7 @@ fn reply(
 
 pub(super) fn handle_get(state: &Arc<ConnState>, request_id: String, scope: String, id: String) {
     let error = (!local_target(&state.app, &scope, &id))
-        .then(|| "This Birdhouse or Nest is not on this computer.".to_string());
+        .then(|| "This Project or Workspace is not on this computer.".to_string());
     reply(state, request_id, scope, id, error);
 }
 
@@ -70,7 +70,7 @@ pub(super) fn handle_set(
             .err()
             .map(|error| error.to_string())
     } else {
-        Some("This Birdhouse or Nest is not on this computer.".to_string())
+        Some("This Project or Workspace is not on this computer.".to_string())
     };
     reply(state, request_id, scope, id, error);
 }

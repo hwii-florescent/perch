@@ -25,8 +25,7 @@ import { useEffect, useState } from "react";
 import { usePerchStore } from "../store";
 import { AGENTS } from "../models";
 import { cn } from "../lib/cn";
-import { AGENT_PICKER } from "./AgentPicker";
-import { Select } from "./ui/select";
+import { FolderPicker, type StartTarget } from "./FolderPicker";
 import { START_LINK, StartCard } from "./StartCard";
 
 const STATUS = "flex items-baseline gap-[0.45rem] text-[0.78rem] text-subtext-0";
@@ -83,10 +82,10 @@ export function CliStartPanel() {
   const projectCwds = workspaceProjects
     .filter((project) => project.hostId === activeHostId && project.path !== current?.cwd)
     .map((project) => project.path);
-  const targets = [
+  const targets: StartTarget[] = [
     ...(current?.cwd ? [{ key: "here", label: `${basename(current.cwd)} (this session)`, name: basename(current.cwd), path: current.cwd }] : []),
     ...projectCwds.map((cwd) => ({ key: cwd, label: basename(cwd), name: basename(cwd), path: cwd })),
-    { key: SCRATCHPAD, label: "No birdhouse (Quickchat)", name: "Quickchat", path: "~" },
+    { key: SCRATCHPAD, label: "No project (Quickchat)", name: "Quickchat", path: "~" },
   ];
   const target = targets.find((candidate) => candidate.key === targetKey) ?? targets[0]!;
 
@@ -104,16 +103,7 @@ export function CliStartPanel() {
       testId="cli-start-panel"
       disabled={!ready || !choices.length}
       onPick={pick}
-      target={targets.length > 1 && (
-        <Select
-          className={cn(AGENT_PICKER, "max-w-full text-[0.8rem] [--picker-bg:var(--surface-0)]")}
-          ariaLabel="Where to open"
-          testId="cli-start-target"
-          value={target.key}
-          onChange={setTargetKey}
-          options={targets.map((candidate) => ({ value: candidate.key, label: candidate.label }))}
-        />
-      )}
+      target={<FolderPicker targets={targets} value={target.key} onChange={setTargetKey} />}
       status={<>
         {manifestCapability && manifestState?.state === "ready" && !choices.length && (
           <div className={STATUS} role="status">

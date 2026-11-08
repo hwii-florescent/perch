@@ -73,7 +73,7 @@ const refresh = vi.fn(() => null);
 const requestTree = vi.fn();
 const open = vi.fn();
 const workspace = { id: "w", projectId: "p", hostId: "local", path: "/tmp/explorer", name: "Original", branch: "main", dirty: true, state: "active" as const, createdAt: 1, updatedAt: 1 };
-const project = { id: "p", hostId: "local", path: workspace.path, repoPath: workspace.path, name: "Birdhouse", favorite: false, createdAt: 1, updatedAt: 1 };
+const project = { id: "p", hostId: "local", path: workspace.path, repoPath: workspace.path, name: "Project", favorite: false, createdAt: 1, updatedAt: 1 };
 const file = (path: string, kind: DirectoryEntry["kind"] = "file"): DirectoryEntry => ({ path, name: path.split("/").at(-1)!, kind, size: 0, readonly: false, executable: false });
 const tree = { workspaceId: "w", path: "", entries: [file("src", "directory"), file("package.json"), file("fresh.ts")], state: "ready" as const, truncated: false };
 const initialFiles = useWorkspaceFilesStore.getState();

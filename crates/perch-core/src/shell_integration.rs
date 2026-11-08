@@ -18,24 +18,46 @@ fn quoted(path: &Path) -> String {
     quote(&path.to_string_lossy())
 }
 
+/// The tab (owner key) each shell agent's bridge key was made for. The bridge key keeps the session
+/// but not the tab's provider, and a tab started from the picker (Claude exited, then `pi`) is not a
+/// `terminal` one: without this its PTY would be looked up under the wrong key and every screen read
+/// and input check would fail closed.
+/// ponytail: bounded by sessions x providers and never pruned; a registry on the runtime would drop
+/// entries with their tab.
+static OWNERS: std::sync::Mutex<Option<std::collections::HashMap<AgentKey, AgentKey>>> =
+    std::sync::Mutex::new(None);
+
 pub(crate) fn bridge_key(key: &AgentKey, provider: &str) -> anyhow::Result<AgentKey> {
-    AgentKey::new(
+    let bridge = AgentKey::new(
         &key.workspace_id,
         format!("shell-{}", key.session_id),
         provider,
-    )
-    .map_err(Into::into)
+    )?;
+    OWNERS
+        .lock()
+        .unwrap()
+        .get_or_insert_with(Default::default)
+        .insert(bridge.clone(), key.clone());
+    Ok(bridge)
 }
 /// The PTY a native bridge's agent runs in. A shim-launched agent's bridge key is
-/// `shell-<tab>`; its terminal is the tab's own, not one derived from the bridge key.
+/// `shell-<tab>`; its terminal is the tab's own (whatever provider the tab was started with), not one
+/// derived from the bridge key.
 pub(crate) fn pty_key(key: &AgentKey) -> String {
     let tab = key.session_id.strip_prefix("shell-").and_then(|session| {
-        AgentKey::new(
-            &key.workspace_id,
-            session,
-            crate::agent_fleet::TERMINAL_PROVIDER,
-        )
-        .ok()
+        let owner = OWNERS
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|owners| owners.get(key).cloned());
+        owner.or_else(|| {
+            AgentKey::new(
+                &key.workspace_id,
+                session,
+                crate::agent_fleet::TERMINAL_PROVIDER,
+            )
+            .ok()
+        })
     });
     crate::agent_runtime::terminal_key(tab.as_ref().unwrap_or(key))
 }
@@ -538,6 +560,15 @@ mod tests {
             pty_key(&picker),
             crate::agent_runtime::terminal_key(&picker)
         );
+    }
+
+    /// A tab started as Claude whose CLI exited, with `pi` typed into its shell: the agent's terminal is
+    /// the Claude tab's, not a `terminal` one that does not exist.
+    #[test]
+    fn a_shell_agent_in_a_picker_tab_reads_that_tabs_terminal() {
+        let tab = AgentKey::new("w2", "s2", "claude").unwrap();
+        let bridge = bridge_key(&tab, "pi").unwrap();
+        assert_eq!(pty_key(&bridge), crate::agent_runtime::terminal_key(&tab));
     }
 
     #[test]

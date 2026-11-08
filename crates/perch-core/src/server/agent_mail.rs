@@ -535,7 +535,7 @@ impl World for AppWorld<'_> {
             return TargetFacts::default();
         };
         let app = self.0;
-        let snapshot = app.native_ui.get(&key).and_then(|bridge| bridge.latest());
+        let snapshot = app.native_bridge(&key).and_then(|bridge| bridge.latest());
         let lifecycle = app
             .agent_runtime
             .snapshot(&key)
@@ -589,23 +589,27 @@ impl World for AppWorld<'_> {
         let app = self.0;
         // The same lock Context Bridge holds: no delete, stop or other delivery interleaves.
         let _operation = app.agent_operation_lock.lock().unwrap();
-        let Some((key, provider)) = self.target_key(session) else {
+        let Some((key, _)) = self.target_key(session) else {
             return Delivery::Held(Wait::NotRunning);
         };
-        if !RECEIVERS.contains(&provider.as_str()) {
+        // The agent on screen is the receiver: a tab started as Claude may run `pi` now.
+        let Some(bridge_key) = app.agent_runtime.bridge_key(&key) else {
+            return Delivery::Held(Wait::NotRunning);
+        };
+        if !RECEIVERS.contains(&bridge_key.agent_id.as_str()) {
             return Delivery::Held(Wait::NotRunning);
         }
         // Looked at again under the lock: what was true a moment ago may not be.
         if let Some(wait) = agent_mail::wait_reason(&self.facts(session)) {
             return Delivery::Held(wait);
         }
-        let Some(bridge) = app.native_ui.get(&key) else {
+        let Some(bridge) = app.native_ui.get(&bridge_key) else {
             return Delivery::Held(Wait::NotReported);
         };
         let recheck = || agent_mail::wait_reason(&self.facts(session));
         deliver_native(
             app,
-            (&key, &bridge),
+            (&key, &bridge_key, &bridge),
             (delivery_id, prompt),
             from_person,
             claim,
@@ -629,13 +633,14 @@ const QUIET: Duration = Duration::from_secs(2);
 /// bridge's own answer; an unconfirmed write is never repeated.
 fn deliver_native(
     app: &AppState,
-    receiver: (&AgentKey, &Arc<crate::native_ui::NativeBridge>),
+    // The tab (owns the PTY, leases and lifecycle), the agent whose bridge it is, and that bridge.
+    receiver: (&AgentKey, &AgentKey, &Arc<crate::native_ui::NativeBridge>),
     text: (&str, &str),
     from_person: bool,
     claim: &dyn Fn() -> bool,
     recheck: &dyn Fn() -> Option<Wait>,
 ) -> Delivery {
-    let (key, bridge) = receiver;
+    let (key, agent, bridge) = receiver;
     let (delivery_id, prompt) = text;
     let client = match mail_client() {
         Ok(client) => client,
@@ -647,8 +652,12 @@ fn deliver_native(
             if let Some(wait) = recheck() {
                 return Ok(Delivery::Held(wait));
             }
-            let input = crate::native_ui::typed::input_ready(key)
-                .and_then(|()| crate::native_ui::claude::prepare_input(key, Some(prompt)));
+            // Under the lock again: the agent on screen is still the one the checks were about.
+            if app.agent_runtime.bridge_key(key).as_ref() != Some(agent) {
+                return Ok(Delivery::Held(Wait::NotRunning));
+            }
+            let input = crate::native_ui::typed::input_ready(agent)
+                .and_then(|()| crate::native_ui::claude::prepare_input(agent, Some(prompt)));
             let input = match input {
                 Ok(input) => input,
                 Err(error) => return Ok(Delivery::Held(Wait::Input(error.to_string()))),

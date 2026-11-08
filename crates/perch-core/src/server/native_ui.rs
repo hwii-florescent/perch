@@ -192,30 +192,37 @@ fn resolve(state: &Arc<ConnState>, session_id: &str, provider_id: &str) -> anyho
         .workspace_id
         .clone()
         .unwrap_or_else(|| format!("session-{session_id}"));
-    if row.cli_provider_id.as_deref() == Some(crate::agent_fleet::TERMINAL_PROVIDER) {
-        let key = AgentKey::new(
-            &workspace,
-            session_id,
-            crate::agent_fleet::TERMINAL_PROVIDER,
-        )?;
-        let shell = state
-            .app
-            .agent_runtime
-            .shell_agents()
-            .into_iter()
-            .find_map(|(owner, agent)| {
-                (owner == key && agent.key.agent_id == provider_id).then_some(agent)
-            })
-            .ok_or_else(|| anyhow::anyhow!("{provider_id} is not running in this terminal"))?;
-        anyhow::ensure!(
-            state.app.agent_runtime.shell_agent_is_current(&key, &shell),
-            "{provider_id} is not running in this terminal"
-        );
-        return Ok(Target {
-            bridge: shell.key.clone(),
-            key,
-            shell: Some(shell),
-        });
+    // An agent typed into the tab's shell is the one on screen: a Terminal tab's only agents, and
+    // also what a picker-launched tab shows after its own CLI exited back to the shell (Claude, then
+    // `pi`). The runtime stops owning native status then, so the picker's own bridge never connects.
+    if let Some(owner) = row.cli_provider_id.as_deref() {
+        let key = AgentKey::new(&workspace, session_id, owner)?;
+        let shell =
+            state
+                .app
+                .agent_runtime
+                .shell_agents()
+                .into_iter()
+                .find_map(|(shell_owner, agent)| {
+                    (shell_owner == key && agent.key.agent_id == provider_id).then_some(agent)
+                });
+        match shell {
+            Some(shell) => {
+                anyhow::ensure!(
+                    state.app.agent_runtime.shell_agent_is_current(&key, &shell),
+                    "{provider_id} is not running in this terminal"
+                );
+                return Ok(Target {
+                    bridge: shell.key.clone(),
+                    key,
+                    shell: Some(shell),
+                });
+            }
+            None if owner == crate::agent_fleet::TERMINAL_PROVIDER => {
+                anyhow::bail!("{provider_id} is not running in this terminal")
+            }
+            None => {}
+        }
     }
     anyhow::ensure!(
         row.cli_provider_id.as_deref() == Some(provider_id),
@@ -225,6 +232,12 @@ fn resolve(state: &Arc<ConnState>, session_id: &str, provider_id: &str) -> anyho
     anyhow::ensure!(
         state.app.agent_runtime.runtime_alive(&key),
         "Open this CLI session before using its web view"
+    );
+    // The foreground moved on (the CLI exited to its shell): the picker's bridge ends the moment it
+    // sees that, so say so instead of answering "starting" for ever.
+    anyhow::ensure!(
+        state.app.agent_runtime.native_owner_is_current(&key),
+        "{provider_id} is no longer running in this tab. Switch to CLI view to restart it or run another agent"
     );
     Ok(Target {
         bridge: key.clone(),
@@ -740,12 +753,17 @@ fn apply_option(
     // One change at a time: a second click would type over the first one's read-back.
     static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
     let _serial = ONE_AT_A_TIME.lock().unwrap();
+    // Claude has model, effort and mode pickers; Codex only a mode one. Pi and OMP have no permissions at all.
     anyhow::ensure!(
-        provider_id == "claude",
+        provider_id == "claude" || (provider_id == "codex" && option == pickers::MODE),
         "This CLI has no picker for that option"
     );
     anyhow::ensure!(
-        pickers::valid_choice(option, value),
+        if provider_id == "codex" {
+            pickers::valid_codex_mode(value)
+        } else {
+            pickers::valid_choice(option, value)
+        },
         "That is not a choice this picker offers"
     );
     let Target {
@@ -800,6 +818,77 @@ fn apply_option(
         Ok(latest)
     };
     let before = idle()?;
+
+    if provider_id == "codex" {
+        // Codex's own `/permissions` list, driven key by key and read back from its app-server. Full access is
+        // confirmed in the web first (the CLI asks "Enable full access?"; this answers it for that explicit choice).
+        if before.permission_mode.as_deref() == Some(value) {
+            return Ok((OptionOutcome::Applied, Some(value.to_string())));
+        }
+        let poll = |wanted: &dyn Fn(&str) -> bool| -> anyhow::Result<Option<String>> {
+            let started = std::time::Instant::now();
+            while started.elapsed() < Duration::from_secs(3) {
+                let shown = screen()?;
+                if wanted(&shown) {
+                    return Ok(Some(shown));
+                }
+                std::thread::sleep(OPTION_POLL);
+            }
+            Ok(None)
+        };
+        let close = || write_once(&|write| write("\u{1b}"));
+        write_once(&|write| {
+            crate::native_ui::typed::prepare(&bridge_key, "/permissions", Some(&before))?;
+            crate::native_ui::typed::type_command("/permissions", write)
+        })?;
+        let list = poll(&|shown| pickers::codex_permission_list(shown).is_some())?
+            .and_then(|shown| pickers::codex_permission_list(&shown))
+            .ok_or_else(|| {
+                anyhow::anyhow!("Codex did not show its permissions list. Check CLI view.")
+            })?;
+        if list.current == Some(value) {
+            close()?;
+            publish_latest(state, session_id, provider_id, &bridge_key, &bridge);
+            return Ok((OptionOutcome::Applied, Some(value.to_string())));
+        }
+        let key = list
+            .keys
+            .iter()
+            .find(|(mode, _)| *mode == value)
+            .map(|(_, key)| key.to_string())
+            .ok_or_else(|| anyhow::anyhow!("Codex's permissions list does not offer that mode"))?;
+        write_once(&|write| write(&key))?;
+        if value == "full-access" {
+            if let Some(shown) = poll(&|shown| pickers::codex_full_access_confirm(shown).is_some())?
+            {
+                let yes = pickers::codex_full_access_confirm(&shown).map(|key| key.to_string());
+                write_once(&|write| write(yes.as_deref().unwrap_or("1")))?;
+            }
+        }
+        let started = std::time::Instant::now();
+        while started.elapsed() < OPTION_READ_BACK {
+            std::thread::sleep(OPTION_POLL);
+            if bridge
+                .latest()
+                .and_then(|latest| latest.permission_mode)
+                .as_deref()
+                == Some(value)
+            {
+                publish_latest(state, session_id, provider_id, &bridge_key, &bridge);
+                return Ok((OptionOutcome::Applied, Some(value.to_string())));
+            }
+        }
+        // Not read back: leave no list or dialog open under the prompt.
+        let shown = screen()?;
+        if pickers::codex_permission_list(&shown).is_some()
+            || pickers::codex_full_access_confirm(&shown).is_some()
+        {
+            close()?;
+        }
+        publish_latest(state, session_id, provider_id, &bridge_key, &bridge);
+        return Ok((OptionOutcome::Unconfirmed, None));
+    }
+
     let before_screen = screen()?;
     let footer = pickers::claude_footer(&before_screen);
 

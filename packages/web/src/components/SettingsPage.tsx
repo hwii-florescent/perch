@@ -25,7 +25,7 @@ import { HostStateDot } from "./HostStateDot";
 import { cn } from "../lib/cn";
 import { SettingsGroup, SettingRow, SettingsQuery } from "./ui/setting-row";
 import { Switch } from "./ui/switch";
-import { Select } from "./ui/select";
+import { Select, type SelectOption } from "./ui/select";
 import { KeybindingsSection } from "./KeybindingsSection";
 import { PhoneAccessRows, QrCode, pairLink, pickAddress, usePhoneAccess } from "./PhoneAccess";
 import { GHOST_BUTTON } from "./ui/icon-button";
@@ -409,17 +409,32 @@ function DefaultCwdSection() {
   );
 }
 
-/** A model name saved when the field is left or Enter is pressed. An empty field restores the stored name, unless `allowEmpty` (a harness with no default model), where it clears it. */
-function ModelInput({ value, onCommit, testId, label, disabled, allowEmpty, placeholder }: { value: string; onCommit: (value: string) => void; testId: string; label: string; disabled?: boolean; allowEmpty?: boolean; placeholder?: string }) {
+/** The models `harness`'s installed CLI offers, as suggestions that narrow while typing. Until the list arrives, or when this core cannot list or the harness is not installed, it is the plain text field. */
+function HarnessModelPicker({ harness, value, onCommit, testId, label, allowEmpty, placeholder, disabled }: { harness: string; value: string; onCommit: (value: string) => void; testId: string; label: string; allowEmpty?: boolean; placeholder?: string; disabled?: boolean }) {
+  const models = usePerchStore((s) => s.harnessModels?.find((entry) => entry.id === harness)?.models);
+  if (!models?.length) return <ModelInput testId={testId} label={label} disabled={disabled} allowEmpty={allowEmpty} placeholder={placeholder} value={value} onCommit={onCommit} />;
+  const choices = models.map((model) => ({ value: model.id, label: model.label === model.id ? model.id : `${model.label} · ${model.id}`, text: `${model.label} ${model.id}` }));
+  return <ModelInput testId={testId} label={label} disabled={disabled} allowEmpty={allowEmpty} placeholder={placeholder} value={value} onCommit={onCommit} choices={choices} />;
+}
+
+/** A model name saved when the field is left or Enter is pressed, or at once when a suggestion in `choices` is picked. An empty field restores the stored name, unless `allowEmpty` (a harness with no default model), where it clears it. */
+function ModelInput({ value, onCommit, testId, label, disabled, allowEmpty, placeholder, choices }: { value: string; onCommit: (value: string) => void; testId: string; label: string; disabled?: boolean; allowEmpty?: boolean; placeholder?: string; choices?: SelectOption[] }) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
-  const commit = () => {
-    const next = draft.trim();
+  const commit = (text = draft) => {
+    const next = text.trim();
     if (!next && !allowEmpty) setDraft(value);
     else if (next !== value) onCommit(next);
   };
+  if (choices) {
+    return <span className="contents" onBlur={() => commit()}>
+      <Select freeText className={INPUT_WIDE} testId={testId} ariaLabel={label} disabled={disabled} placeholder={placeholder} options={choices} value={draft}
+        onChange={(next) => { setDraft(next); if (choices.some((choice) => choice.value === next)) commit(next); }}
+        onKeyDown={(event) => { if (event.key === "Enter") commit(); }} />
+    </span>;
+  }
   return <input type="text" className={INPUT_WIDE} data-testid={testId} aria-label={label} disabled={disabled} value={draft} placeholder={placeholder}
-    onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") commit(); }} />;
+    onChange={(event) => setDraft(event.target.value)} onBlur={() => commit()} onKeyDown={(event) => { if (event.key === "Enter") commit(); }} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +444,9 @@ function ModelInput({ value, onCommit, testId, label, disabled, allowEmpty, plac
 function NotificationsSection() {
   const settings = usePerchStore((s) => s.settings);
   const updateSettings = usePerchStore((s) => s.updateSettings);
+  const connected = usePerchStore((s) => s.connected);
+  const fetchHarnessModels = usePerchStore((s) => s.fetchHarnessModels);
+  useEffect(() => { fetchHarnessModels(); }, [connected, fetchHarnessModels]);
 
   // Local optimistic mirrors of the server-persisted values (same pattern as
   // ThemeSection's immediate applyTheme() and DefaultCwdSection's local
@@ -584,16 +602,16 @@ function NotificationsSection() {
         <Switch label="Summarise finished sub-session turns" testId="settings-reporter-enabled" checked={settings?.reporterEnabled ?? true} onChange={(checked) => updateSettings({ reporterEnabled: checked })} />
       </SettingRow>
       <SettingRow title="Claude model" description="Asked of the claude command, signed in as you, with no tools. The default, haiku, follows the current Haiku model; a full name such as claude-haiku-4-5 pins one.">
-        <ModelInput testId="settings-reporter-claude-model" label="Summary model for Claude" disabled={!settings} value={settings?.reporterClaudeModel ?? "haiku"} onCommit={(value) => updateSettings({ reporterClaudeModel: value })} />
+        <HarnessModelPicker harness="claude" testId="settings-reporter-claude-model" label="Summary model for Claude" disabled={!settings} value={settings?.reporterClaudeModel ?? "haiku"} onCommit={(value) => updateSettings({ reporterClaudeModel: value })} />
       </SettingRow>
       <SettingRow title="Codex model" description="Asked of the codex command, read-only, with no shell. If your Codex does not offer gpt-6-luna, use gpt-5.6-luna.">
-        <ModelInput testId="settings-reporter-codex-model" label="Summary model for Codex" disabled={!settings} value={settings?.reporterCodexModel ?? "gpt-6-luna"} onCommit={(value) => updateSettings({ reporterCodexModel: value })} />
+        <HarnessModelPicker harness="codex" testId="settings-reporter-codex-model" label="Summary model for Codex" disabled={!settings} value={settings?.reporterCodexModel ?? "gpt-6-luna"} onCommit={(value) => updateSettings({ reporterCodexModel: value })} />
       </SettingRow>
       <SettingRow title="Pi model" description="Asked of the pi command as provider/model, with no tools, extensions or saved session, so any provider Pi is set up for works. Empty: Pi's sessions are summarised by Claude or Codex when installed, else by the start of their last message.">
-        <ModelInput testId="settings-reporter-pi-model" label="Summary model for Pi" allowEmpty placeholder="provider/model" disabled={!settings} value={settings?.reporterPiModel ?? ""} onCommit={(value) => updateSettings({ reporterPiModel: value })} />
+        <HarnessModelPicker harness="pi" testId="settings-reporter-pi-model" label="Summary model for Pi" allowEmpty placeholder="provider/model" disabled={!settings} value={settings?.reporterPiModel ?? ""} onCommit={(value) => updateSettings({ reporterPiModel: value })} />
       </SettingRow>
       <SettingRow title="OMP model" description="Asked of the omp command as provider/model, with no tools, extensions or saved session. Empty: OMP's sessions are summarised by Claude or Codex when installed, else by the start of their last message.">
-        <ModelInput testId="settings-reporter-omp-model" label="Summary model for OMP" allowEmpty placeholder="provider/model" disabled={!settings} value={settings?.reporterOmpModel ?? ""} onCommit={(value) => updateSettings({ reporterOmpModel: value })} />
+        <HarnessModelPicker harness="omp" testId="settings-reporter-omp-model" label="Summary model for OMP" allowEmpty placeholder="provider/model" disabled={!settings} value={settings?.reporterOmpModel ?? ""} onCommit={(value) => updateSettings({ reporterOmpModel: value })} />
       </SettingRow>
     </SettingsGroup>
     </>
@@ -855,15 +873,15 @@ function SearchBox({ value, onChange }: { value: string; onChange: (value: strin
   );
 }
 
-/** Every matching row across the sections, grouped under the section name. Agents and Keyboard have
- * no rows to filter, so they appear (whole) only when their name matches. */
+/** Every matching row across the sections, grouped under the section name. Keyboard has no rows
+ * to filter, so it appears (whole) only when its name matches. */
 function SettingsResults({ query }: { query: string }) {
   const q = query.trim().toLowerCase();
   const isMobile = useIsMobileWidth();
   return (
     <div className="[&:not(:has([data-setting-row]))>[data-none]]:block" data-testid="settings-results">
       {TABS.map(({ id, label }) => {
-        const whole = id === "agents" || id === "keyboard";
+        const whole = id === "keyboard";
         if (whole && !label.toLowerCase().includes(q)) return null;
         if (id === "keyboard" && isMobile) return null; // no shortcuts to rebind on a touch screen
         return (
@@ -994,7 +1012,6 @@ export function SettingsPage() {
             Back to app
           </button>
         </div>
-        <div className="px-3 pt-1 pb-2"><SearchBox value={query} onChange={setQuery} /></div>
         <div className="flex min-h-0 flex-1 flex-col gap-[2px] overflow-y-auto px-2 pb-3">
           {TABS.map(({ id, label }) => (
             <button
@@ -1011,9 +1028,11 @@ export function SettingsPage() {
         </div>
       </nav>
       <main className={cn(CARD, "min-w-0 flex-1")}>
-        <div className="h-6 shrink-0" data-tauri-drag-region />
+        <div className="box-border flex h-11 shrink-0 items-center justify-end px-4" data-tauri-drag-region>
+          <div className="w-[16rem] max-w-full"><SearchBox value={query} onChange={setQuery} /></div>
+        </div>
         <div className="settings-modal__body min-h-0 flex-1 overflow-y-auto px-8 pb-8">
-          <div className={cn("mx-auto", tab === "agents" && !searching ? "max-w-[60rem]" : "max-w-[46rem]")}>
+          <div className="mx-auto max-w-[46rem]">
             <h1 className="m-0 mb-8 text-[1.6rem] font-semibold text-fg">{searching ? "Search results" : current.label}</h1>
             {searching ? <SettingsResults query={query} /> : <TabContent tab={current.id} />}
           </div>

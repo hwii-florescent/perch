@@ -14,8 +14,8 @@ const QUESTION = "Use the AskUserQuestion tool to ask me one question: red or bl
 const SHORTCUT = process.platform === "darwin" ? "Meta+Shift+U" : "Alt+Shift+U";
 
 async function open(page: Page): Promise<void> {
-  // By status is the default; a stale saved choice from another test must not hide it.
-  await page.addInitScript(() => localStorage.removeItem("perch.sidebar.organize"));
+  // These cover the By status view; the project tree is the default, so choose it.
+  await page.addInitScript(() => localStorage.setItem("perch.sidebar.organize", "status"));
   await page.goto("/", { waitUntil: "networkidle" });
   await expect(page.getByTestId("workspace-overview")).toBeVisible({ timeout: 15_000 });
 }

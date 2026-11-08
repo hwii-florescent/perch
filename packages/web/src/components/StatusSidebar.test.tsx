@@ -17,13 +17,15 @@ let root: Root;
 let host: HTMLDivElement;
 const storage = new Map<string, string>();
 vi.stubGlobal("localStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) });
-const project = { id: "p", hostId: "local", name: "Birdhouse", path: "/tmp/birdhouse", favorite: false, createdAt: 1, updatedAt: 1 };
+const project = { id: "p", hostId: "local", name: "Project", path: "/tmp/project", favorite: false, createdAt: 1, updatedAt: 1 };
 const workspace = { id: "w", projectId: "p", hostId: "local", path: project.path, name: "main", dirty: false, state: "active" as const, createdAt: 1, updatedAt: 1 };
-const chat = (id: string, init: Partial<SessionSummary> = {}) => ({ id, title: `${id} chat`, hostId: "local", workspaceId: "w", projectId: "p", cwd: project.path, cliProviderId: "terminal", createdAt: 1, status: "idle", ...init }) as SessionSummary;
+const chat = (id: string, init: Partial<SessionSummary> = {}) => ({ id, title: `${id} chat`, hostId: "local", workspaceId: "w", projectId: "p", cwd: project.path, cliProviderId: "claude", createdAt: 1, status: "idle", ...init }) as SessionSummary;
 const question: AttentionEvent = { id: "e", sessionId: "ask", agentId: "claude", kind: "question", requiresAction: true, certainty: "heuristic", summary: "", occurredAt: 1, count: 1, read: false };
 
 beforeEach(() => {
   storage.clear();
+  // The tree is the default view; most of these cover the flat By status view.
+  storage.set("perch.sidebar.organize", "status");
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -36,9 +38,10 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 const get = (id: string) => host.querySelector(`[data-testid="${id}"]`);
+const rowsIn = (testId: string) => [...get(testId)!.querySelectorAll('[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])')].map((el) => el.getAttribute("data-testid")!.replace("workspace-session-", ""));
 const sectionIds = () => [...host.querySelectorAll('[data-testid^="status-section-title-"]')].map((el) => `${el.getAttribute("data-testid")!.replace("status-section-title-", "")}:${el.querySelector("[aria-label]")!.textContent}`);
 
-it("is the default view, with sections in order, counts, and no empty section", () => {
+it("By status has sections in order, counts, and no empty section", () => {
   act(() => root.render(<WorkspaceOverview />));
   expect(get("workspace-status-view")).not.toBeNull();
   expect(sectionIds()).toEqual(["needs:1", "done:1", "working:1", "idle:1"]);
@@ -58,10 +61,75 @@ it("nests a sub-session under its lead within a section, and leaves one alone wh
   expect(get("status-section-needs")!.querySelector('[data-testid="workspace-session-ask"]')).not.toBeNull();
 });
 
-it("shows the project as secondary text and the core's reason and certainty on a Needs you row", () => {
+it("shows the core's reason and certainty on a Needs you row, under its project", () => {
   act(() => root.render(<WorkspaceOverview />));
-  expect(get("status-section-needs")!.querySelector('[data-testid="status-row-detail"]')!.textContent).toBe("Birdhouse · Waiting for you · Guessed from terminal output");
-  expect(get("status-section-idle")!.querySelector('[data-testid="status-row-detail"]')!.textContent).toBe("Birdhouse");
+  expect(get("status-section-needs")!.querySelector('[data-testid="status-row-detail"]')!.textContent).toBe("Waiting for you · Guessed from terminal output");
+  expect(get("status-section-needs")!.querySelector('[data-testid="status-project-title"]')!.textContent).toBe("Project");
+  expect(get("status-section-idle")!.querySelector('[data-testid="status-row-detail"]')).toBeNull();
+});
+
+it("By status keeps each section's chats under their project, in the sidebar's project order, Quickchat last", () => {
+  const other = { ...project, id: "q", name: "Other", path: "/tmp/other", updatedAt: 0 };
+  const scratch = { ...project, id: "s", name: "Chats", path: "/tmp/.perch/scratch", updatedAt: 5 };
+  const ow = { ...workspace, id: "ow", projectId: "q", path: other.path };
+  const sw = { ...workspace, id: "sw", projectId: "s", path: scratch.path };
+  usePerchStore.setState({ workspaceProjects: [scratch, other, project], workspaces: [workspace, ow, sw], sessions: [
+    chat("q1", { workspaceId: "ow", projectId: "q", cwd: other.path, createdAt: 9 }),
+    chat("s1", { workspaceId: "sw", projectId: "s", cwd: scratch.path, createdAt: 8 }),
+    chat("p1", { createdAt: 1 }),
+    chat("p2", { createdAt: 2 }),
+  ] });
+  act(() => root.render(<WorkspaceOverview />));
+  const titles = [...get("status-section-idle")!.querySelectorAll('[data-testid="status-project-title"]')].map((el) => el.textContent);
+  expect(titles).toEqual(["Project", "Other", "Quickchat"]);
+  expect(rowsIn("status-project-idle-p")).toEqual(["p2", "p1"]);
+});
+
+it("By status rows are the harness mark and the name, with no state ring (the section says the state)", () => {
+  act(() => root.render(<WorkspaceOverview />));
+  const row = get("workspace-session-work")!;
+  expect(row.querySelector(".agent-mark")).not.toBeNull();
+  expect(host.querySelector('[data-testid="workspace-status-view"] .agent-status-dot')).toBeNull();
+  expect(row.querySelector(".agent-mark")!.getAttribute("title")).toBe("claude");
+});
+
+it("By status ends with the projects that have no agent chat, each with a + and a way in", () => {
+  const other = { ...project, id: "q", name: "Other", path: "/tmp/other", updatedAt: 0 };
+  const ow = { ...workspace, id: "ow", projectId: "q", path: other.path };
+  const focus = vi.fn();
+  usePerchStore.setState({ workspaceProjects: [project, other], workspaces: [workspace, ow], focusWorkspace: focus });
+  act(() => root.render(<WorkspaceOverview />));
+  expect(get("status-no-sessions-title")!.textContent).toBe("No sessions1");
+  expect(get("status-empty-project-p")).toBeNull();
+  const row = get("status-empty-project-q")!;
+  expect(row.textContent).toBe("Other");
+  expect(row.querySelector('[data-testid="workspace-project-new-session-q"]')).not.toBeNull();
+  act(() => (row.querySelector("button") as HTMLElement).click());
+  expect(focus).toHaveBeenCalledWith("ow");
+  // A shell does not count as a chat, and once every project has one the section is gone.
+  act(() => usePerchStore.setState({ sessions: [...usePerchStore.getState().sessions, chat("o1", { workspaceId: "ow", projectId: "q", cwd: other.path })] }));
+  expect(get("status-no-sessions")).toBeNull();
+});
+
+it("a project heading in By status carries a + to start work in it", () => {
+  act(() => root.render(<WorkspaceOverview />));
+  expect(get("status-project-needs-p")!.querySelector('[data-testid="workspace-project-new-session-p"]')).not.toBeNull();
+});
+
+it("lists agents only: a plain terminal stays a tab, one running an agent is listed", () => {
+  usePerchStore.setState({ sessions: [chat("agent"), chat("shell", { cliProviderId: "terminal" }), chat("hand", { cliProviderId: "terminal", currentProviderId: "pi" }), chat("gone", { cliProviderId: "claude", currentProviderId: "terminal" })] });
+  act(() => root.render(<WorkspaceOverview />));
+  expect(rowsIn("status-section-idle")).toEqual(["hand", "agent"]);
+  storage.set("perch.sidebar.organize", "project");
+  act(() => { root.unmount(); root = createRoot(host); });
+  act(() => root.render(<WorkspaceOverview />));
+  expect(get("workspace-session-shell")).toBeNull();
+  expect(get("workspace-session-agent")).not.toBeNull();
+  // Asked for, terminals are listed too, and the choice is kept.
+  act(() => get("workspace-organize")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  act(() => (document.querySelector('[data-testid="workspace-show-terminals"]') as HTMLElement).click());
+  expect(get("workspace-session-shell")).not.toBeNull();
+  expect(storage.get("perch.sidebar.showTerminals")).toBe("1");
 });
 
 it("opens a chat on click and keeps the chat in view in Done while it is read", () => {
@@ -90,8 +158,8 @@ it("does not state Working, Idle or Done for a host that is not connected: one l
   expect(get("status-section-working")).toBeNull();
 });
 
-it("respects a saved Organize choice, and By status is one of the choices", () => {
-  storage.set("perch.sidebar.organize", "project");
+it("opens on the project tree, and By status is one of the choices", () => {
+  storage.delete("perch.sidebar.organize");
   act(() => root.render(<WorkspaceOverview />));
   expect(get("workspace-status-view")).toBeNull();
   expect(get(`workspace-project-p`)).not.toBeNull();
@@ -99,6 +167,77 @@ it("respects a saved Organize choice, and By status is one of the choices", () =
   act(() => (document.querySelector('[data-testid="workspace-organize-status"]') as HTMLElement).click());
   expect(get("workspace-status-view")).not.toBeNull();
   expect(storage.get("perch.sidebar.organize")).toBe("status");
+});
+
+describe("project tree", () => {
+  const click = (el: Element | null) => act(() => el!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  const two = () => {
+    const other = { ...project, id: "q", name: "Other", path: "/tmp/other", updatedAt: 0 };
+    const ow = { ...workspace, id: "ow", projectId: "q", path: other.path };
+    usePerchStore.setState({ workspaceProjects: [project, other], workspaces: [workspace, ow], activeWorkspaceId: null,
+      sessions: [chat("idle"), chat("z", { workspaceId: "ow", projectId: "q", cwd: other.path, status: "running", blocked: true })] });
+  };
+  const order = () => [...host.querySelectorAll('[data-testid^="workspace-project-"][data-reorder-id], [data-testid^="workspace-project-"].workspace-project')].map((el) => el.getAttribute("data-testid"));
+  beforeEach(() => { storage.delete("perch.sidebar.organize"); });
+
+  it("lists what matters under a workspace and folds the idle rest into +N idle", () => {
+    usePerchStore.setState({ activeWorkspaceId: null });
+    act(() => root.render(<WorkspaceOverview />));
+    expect(get("workspace-session-idle")).toBeNull();
+    for (const id of ["work", "ask", "fin"]) expect(get(`workspace-session-${id}`)).not.toBeNull();
+    expect(get("workspace-idle-w")!.textContent).toBe("+1 idle");
+    click(get("workspace-idle-w"));
+    expect(get("workspace-session-idle")).not.toBeNull();
+    expect(get("workspace-idle-w")!.textContent).toBe("Hide idle");
+    click(get("workspace-idle-w"));
+    expect(get("workspace-session-idle")).toBeNull();
+  });
+
+  it("the open workspace lists all of its chats", () => {
+    act(() => root.render(<WorkspaceOverview />));
+    expect(get("workspace-session-idle")).not.toBeNull();
+    expect(get("workspace-idle-w")).toBeNull();
+  });
+
+  it("a folded project says its most urgent state", () => {
+    storage.set("perch.sidebar.collapsedProjects", JSON.stringify(["p"]));
+    usePerchStore.setState({ activeWorkspaceId: null });
+    act(() => root.render(<WorkspaceOverview />));
+    expect(get("workspace-session-ask")).toBeNull();
+    expect(get("project-rollup-p")!.getAttribute("data-section")).toBe("needs");
+  });
+
+  it("the header counts the chats that need you, and is absent when none do", () => {
+    act(() => root.render(<WorkspaceOverview />));
+    expect(get("workspace-needs-you")!.textContent).toBe("1 needs you");
+    act(() => usePerchStore.setState({ sessions: [chat("idle")] }));
+    act(() => useAttention.setState({ events: [] }));
+    expect(get("workspace-needs-you")).toBeNull();
+  });
+
+  it("sorts by attention on request, keeping favourites first, and then has no drag", () => {
+    two();
+    usePerchStore.setState({ serverInfo: { protocolVersion: 1, capabilities: ["workspace.order.v1"] } as never });
+    act(() => root.render(<WorkspaceOverview />));
+    expect(order()).toEqual(["workspace-project-p", "workspace-project-q"]);
+    expect(host.querySelector("[data-reorder-id]")).not.toBeNull();
+    act(() => root.unmount());
+    storage.set("perch.sidebar.sort", "attention");
+    root = createRoot(host);
+    act(() => root.render(<WorkspaceOverview />));
+    expect(order()).toEqual(["workspace-project-q", "workspace-project-p"]);
+    expect(host.querySelector("[data-reorder-id]")).toBeNull();
+  });
+
+  it("show active only hides projects with nothing going on, unless the host is unreachable", () => {
+    two();
+    storage.set("perch.sidebar.activeOnly", "1");
+    act(() => root.render(<WorkspaceOverview />));
+    expect(get("workspace-project-p")).toBeNull();
+    expect(get("workspace-project-q")).not.toBeNull();
+    act(() => usePerchStore.setState({ connected: false }));
+    expect(get("workspace-project-p")).not.toBeNull();
+  });
 });
 
 describe("reordering", () => {

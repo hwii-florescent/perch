@@ -73,7 +73,7 @@ it("cannot save past the cap and shows a core that has no Instructions as unavai
   root = createRoot(host);
   await act(async () => { wire.message(serverInfo([])); });
   wire.send.mockClear();
-  await act(async () => { root.render(<InstructionsDialog scope="workspace" id="w1" name="Nest" onClose={onClose} />); });
+  await act(async () => { root.render(<InstructionsDialog scope="workspace" id="w1" name="Workspace" onClose={onClose} />); });
   expect(wire.send).not.toHaveBeenCalled();
   await act(async () => { await Promise.resolve(); });
   expect(field("instructions-text").disabled).toBe(true);

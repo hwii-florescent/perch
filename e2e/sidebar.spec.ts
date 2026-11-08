@@ -12,6 +12,9 @@ import { addProject, startChat } from "./projects";
 import { execFileSync } from "node:child_process";
 import { localStorageState } from "./localAuth";
 
+// A fresh context is the core's own UI with no saved sidebar choices; terminals are shown, as in the config.
+const terminalsShown = () => localStorageState([{ origin: "http://127.0.0.1:7799", localStorage: [{ name: "perch.sidebar.showTerminals", value: "1" }] }]);
+
 async function open(page: Page): Promise<void> {
   await page.addInitScript(() => localStorage.setItem("perch.onboarding.seen", "1"));
   await page.goto("/", { waitUntil: "networkidle" });
@@ -31,116 +34,26 @@ test.describe("Perch sidebar", () => {
     await expect(page.getByTestId(`workspace-session-${id}`)).toHaveClass(/workspace-entry__session--active/);
   });
 
-  test("2a. Compact sessions are dots on the row; Session list brings the rows back", async ({ page }) => {
+  test("2a. The open workspace lists its chats as rows, in the tab strip's order", async ({ page }) => {
     await open(page);
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-dots-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-rows-"));
     try {
     const first = await startChat(page, "terminal", dir);
     const id = await startChat(page, "terminal", dir);
-    const badges = page.getByTestId("session-dots").filter({ has: page.getByTestId(`workspace-session-${first}`) });
-    const ids = () => badges.locator("button").evaluateAll((buttons) => buttons.map((button) => button.getAttribute("data-testid")!.replace("workspace-session-", "")));
+    const rows = page.locator(".workspace-entry__sessions").filter({ has: page.getByTestId(`workspace-session-${first}`) });
+    const ids = () => rows.locator('[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])').evaluateAll((buttons) => buttons.map((button) => button.getAttribute("data-testid")!.replace("workspace-session-", "")));
     expect(await ids()).toEqual([first, id]);
     await page.getByTestId(`tab-${id}`).dragTo(page.getByTestId(`tab-${first}`));
     await expect.poll(ids).toEqual([id, first]);
     await page.reload({ waitUntil: "networkidle" });
     await expect.poll(ids).toEqual([id, first]);
-    const dot = page.getByTestId("session-dots").getByTestId(`workspace-session-${id}`);
-    await expect(dot).toHaveClass(/workspace-entry__session--active/);
-    await expect(page.locator(".workspace-entry__sessions")).toHaveCount(0);
-    await page.getByTestId("workspace-organize").click();
-    await page.getByTestId("workspace-sessions-list").click();
+    await expect(page.getByTestId(`workspace-session-${id}`)).toHaveClass(/workspace-entry__session--active/);
     await expect(page.getByTestId("session-dots")).toHaveCount(0);
-    await expect(page.locator(".workspace-entry__sessions").getByTestId(`workspace-session-${id}`)).toBeVisible();
-    await page.getByTestId("workspace-organize").click();
-    await page.getByTestId("workspace-sessions-compact").click();
-    await expect(page.getByTestId("session-dots").getByTestId(`workspace-session-${id}`)).toBeVisible();
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("2b. held workspace shortcut modifiers reveal the matching numbers", async ({ page }, testInfo) => {
-    const fixture = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-hints-")));
-    const paths = [path.join(fixture, "first"), path.join(fixture, "second")];
-    paths.forEach((dir) => fs.mkdirSync(dir));
-    try {
-      await open(page);
-      for (const dir of paths) await addProject(page, dir);
-      const entries = paths.map((dir) => page.locator(".workspace-entry").filter({ has: page.locator(`button[title="${dir}"]`) }));
-      for (const entry of entries) await expect(entry).toBeVisible();
-      const hints = page.locator('[data-testid^="workspace-shortcut-"]');
-      await expect(hints).toHaveCount(0);
-      const namesBefore = await Promise.all(entries.map((entry) => entry.locator("strong").boundingBox()));
-      await page.keyboard.down("Control");
-      await page.keyboard.down("Shift");
-      for (const [index, entry] of entries.entries()) {
-        const hint = entry.locator("kbd");
-        await expect(hint).toBeVisible();
-        await expect(hint).toHaveCSS("border-top-width", "0px");
-        await expect(hint).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-        await expect(hint).toHaveCSS("color", "rgb(200, 200, 200)");
-        const [rowBox, hintBox, nameBox] = await Promise.all([entry.boundingBox(), hint.boundingBox(), entry.locator("strong").boundingBox()]);
-        expect(rowBox!.x + rowBox!.width - hintBox!.x - hintBox!.width).toBeCloseTo(12, 0);
-        expect(nameBox).toEqual(namesBefore[index]); // hint does not shift/truncate the name
-        await entry.hover();
-        await expect(entry.getByTestId(/^workspace-project-new-session-/)).not.toBeVisible();
-      }
-      await page.screenshot({ path: testInfo.outputPath("workspace-number-hints.png") });
-      // Live palette changes must recolor already-visible hints without a remount.
-      const originalAccent = await page.evaluate(() => document.documentElement.style.getPropertyValue("--accent"));
-      try {
-        for (const [accent, color] of [["#bd93f9", "rgb(189, 147, 249)"], ["#076678", "rgb(7, 102, 120)"]]) {
-          await page.evaluate((accent) => document.documentElement.style.setProperty("--accent", accent), accent);
-          for (const entry of entries) await expect(entry.locator("kbd")).toHaveCSS("color", color);
-        }
-      } finally {
-        await page.evaluate((accent) => document.documentElement.style.setProperty("--accent", accent), originalAccent);
-      }
-      const number = (await entries[0].locator("kbd").textContent())!;
-      await page.keyboard.press(`Digit${number}`);
-      await expect(entries[0].locator(".workspace-entry__button--active")).toBeVisible();
-      await page.keyboard.up("Shift");
-      await expect(hints).toHaveCount(0);
-      await page.keyboard.up("Control");
-      await page.keyboard.down("Shift"); // modifier order does not matter
-      await page.keyboard.down("Control");
-      await expect(entries[0].locator("kbd")).toBeVisible();
-      await page.evaluate(() => window.dispatchEvent(new Event("blur")));
-      await expect(hints).toHaveCount(0);
-      await page.keyboard.up("Control");
-      await page.keyboard.up("Shift");
-    } finally {
-      fs.rmSync(fixture, { recursive: true, force: true });
-    }
-  });
-
-  test("2b. returning to a workspace restores its last viewed tab", async ({ page }) => {
-    const fixture = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-return-")));
-    const paths = [path.join(fixture, "first"), path.join(fixture, "second")];
-    paths.forEach((dir) => fs.mkdirSync(dir));
-    try {
-      await open(page);
-      const older = await startChat(page, "terminal", paths[0]);
-      const newer = await startChat(page, "terminal", paths[0]);
-      await expect(page.getByTestId(`tab-${newer}`)).toHaveClass(/tab-bar__tab--active/);
-      await page.getByTestId(`tab-${older}`).click();
-      const other = await startChat(page, "terminal", paths[1]);
-      await expect(page.getByTestId(`tab-${other}`)).toHaveClass(/tab-bar__tab--active/);
-      const firstRow = page.locator(".workspace-entry").filter({ has: page.locator(`button[title="${paths[0]}"]`) });
-      await firstRow.locator(".workspace-entry__button").click();
-      await expect(page.getByTestId(`tab-${older}`)).toHaveClass(/tab-bar__tab--active/);
-      await page.getByTestId(`workspace-session-${other}`).click();
-      await page.keyboard.down("Control");
-      await page.keyboard.down("Shift");
-      const number = (await firstRow.locator("kbd").textContent())!;
-      await page.keyboard.press(`Digit${number}`);
-      await page.keyboard.up("Shift");
-      await page.keyboard.up("Control");
-      await expect(page.getByTestId(`tab-${older}`)).toHaveClass(/tab-bar__tab--active/);
-    } finally {
-      fs.rmSync(fixture, { recursive: true, force: true });
-    }
-  });
 
   test("2c. scoped +, harness rings and whole worktree rows", async ({ page }, testInfo) => {
     const fixture = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-harness-")));
@@ -172,8 +85,7 @@ test.describe("Perch sidebar", () => {
       const ring = tree.locator(".agent-status-dot");
       await expect(ring).toHaveAttribute("data-provider", "terminal");
       await expect(ring.locator("svg")).toBeVisible();
-      // Desktop (soft separation, docs/DECISIONS.md 2026-10-24): Nests sit inside the Birdhouse and
-      // their session chips sit inline at the row's right end, 24px targets, no bordered bar.
+      // Desktop: Workspaces sit inside the Project; the open one lists its chats as rows under its name.
       await expect(tree).toHaveCSS("border-radius", "8px");
       await expect(tree.getByTestId("workspace-checkout-icon")).toBeVisible();
       await expect(tree.getByTestId("workspace-checkout-icon").locator("circle")).toHaveCount(3);
@@ -184,26 +96,18 @@ test.describe("Perch sidebar", () => {
       await expect(project.locator(".workspace-tree__guide, [data-guide-end]")).toHaveCount(0);
       await expect(ring).toHaveCSS("width", "18px");
       await expect(ring).toHaveCSS("height", "18px");
-      const target = tree.getByTestId(/^workspace-session-/);
-      await expect(target).toHaveCSS("width", "24px");
-      await expect(target).toHaveCSS("height", "24px");
       const nameRow = tree.locator(".workspace-entry__button");
       expect((await nameRow.boundingBox())!.height).toBeGreaterThanOrEqual(28);
-      const strip = tree.getByTestId("session-dots");
-      await expect(strip).toHaveCSS("border-top-width", "0px");
-      // The chips share the name's row, at its right end.
-      const [rowBox, stripBox] = await Promise.all([nameRow.boundingBox(), strip.boundingBox()]);
-      expect(stripBox!.y).toBeGreaterThanOrEqual(rowBox!.y - 1);
-      expect(stripBox!.y + stripBox!.height).toBeLessThanOrEqual(rowBox!.y + rowBox!.height + 1);
       const name = main.locator("strong");
       const branch = main.locator("span").filter({ hasText: /^main$/ }).last();
       const [nameBox, branchBox] = await Promise.all([name.boundingBox(), branch.boundingBox()]);
       expect(branchBox!.x).toBeGreaterThan(nameBox!.x);
       expect(Math.abs(branchBox!.y - nameBox!.y)).toBeLessThan(8);
-      // Clicking a row selects its workspace; a chip switches to its session.
+      // Clicking a row selects its workspace; a session row switches to its session (idle ones fold until opened).
       const treeSession = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
       await main.click({ position: { x: 2, y: 8 } });
       await expect(page.getByTestId(`tab-${mainSession}`)).toHaveClass(/tab-bar__tab--active/);
+      await tree.locator('[data-testid^="workspace-idle-"]').click();
       await page.getByTestId(`workspace-session-${treeSession}`).click();
       await expect(page.getByTestId(`tab-${treeSession}`)).toHaveClass(/tab-bar__tab--active/);
       await page.keyboard.down("Control");
@@ -223,7 +127,7 @@ test.describe("Perch sidebar", () => {
       const mobileSession = page.getByTestId(`workspace-session-${treeSession}`);
       await expect(mobileSession).toBeVisible();
       const mobileTree = page.locator(".workspace-entry").filter({ has: mobileSession });
-      // The phone keeps the session strip on its own line under the name.
+      // The phone lists the rows on their own lines under the name.
       const headerBox = await mobileTree.locator(".workspace-entry__button").boundingBox();
       const sessionBox = await mobileSession.boundingBox();
       expect(sessionBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height - 1);
@@ -233,7 +137,7 @@ test.describe("Perch sidebar", () => {
     }
   });
 
-  test("2d. Terminal badge follows manually launched Pi and keeps a tight circular highlight", async ({ page }, testInfo) => {
+  test("2d. Terminal badge follows manually launched Pi and keeps a circular badge", async ({ page }, testInfo) => {
     await open(page);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-manual-pi-"));
     try {
@@ -261,10 +165,9 @@ test.describe("Perch sidebar", () => {
       };
     });
     expect(style.button).toBe("rgba(0, 0, 0, 0)");
-    expect(style.width).toBe(20);
-    expect(style.height).toBe(20);
-    expect(style.radius === "50%" || parseFloat(style.radius) >= 10).toBe(true);
-    expect(style.outlineOffset).toBe("1px");
+    expect(style.width).toBe(18);
+    expect(style.height).toBe(18);
+    expect(style.radius === "50%" || parseFloat(style.radius) >= 9).toBe(true);
     expect(style.icon).toBe(14);
     await page.screenshot({ path: testInfo.outputPath("manual-pi-badge-desktop.png") });
     await page.setViewportSize({ width: 390, height: 844 });
@@ -285,37 +188,51 @@ test.describe("Perch sidebar", () => {
     }
   });
 
+  test("2g. Plain terminals stay out of the sidebar unless Show terminals is on", async ({ page }) => {
+    await open(page);
+    const id = await startChat(page, "terminal");
+    await expect(page.getByTestId(`workspace-session-${id}`)).toBeVisible();
+    await page.getByTestId("workspace-organize").click();
+    await page.getByTestId("workspace-show-terminals").click();
+    await expect(page.getByTestId(`workspace-session-${id}`)).toHaveCount(0);
+    await expect(page.getByTestId(`tab-${id}`)).toBeVisible(); // still a tab
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(page.getByTestId(`workspace-session-${id}`)).toHaveCount(0);
+    await page.getByTestId("workspace-organize").click();
+    await page.getByTestId("workspace-show-terminals").click();
+    await expect(page.getByTestId(`workspace-session-${id}`)).toBeVisible();
+  });
+
   test("2b. Organize sidebar: in one list shows every session flat", async ({ page }) => {
     await open(page);
     const id = await startChat(page);
     await page.getByTestId("workspace-organize").click();
     await page.getByTestId("workspace-organize-list").click();
     await expect(page.getByTestId("workspace-session-list").getByTestId(`workspace-session-${id}`)).toBeVisible();
-    await expect(page.getByTestId("workspace-chats")).toHaveCount(0);
     await page.getByTestId("workspace-organize").click();
     await page.getByTestId("workspace-organize-project").click();
     await expect(page.getByTestId("workspace-session-list")).toHaveCount(0);
     await expect(page.getByTestId(`workspace-session-${id}`)).toBeVisible();
   });
 
-  test("2e. By status is the default Organize view, grouped by what each chat needs; a saved choice wins", async ({ browser }) => {
-    const ctx = await browser.newContext({ storageState: localStorageState() }); // no saved choice (the config pins By project)
+  test("2e. The project tree is the default Organize view; By status groups by what each chat needs and a saved choice wins", async ({ browser }) => {
+    const ctx = await browser.newContext({ storageState: terminalsShown() }); // no saved choice (the config pins By project)
     try {
       const page = await ctx.newPage();
       await open(page);
       const id = await startChat(page);
-      await expect(page.getByTestId("workspace-status-view")).toBeVisible();
+      await expect(page.getByTestId("workspace-status-view")).toHaveCount(0);
+      await expect(page.getByTestId("workspace-chats")).toBeVisible();
+      await page.getByTestId("workspace-organize").click();
+      await page.getByTestId("workspace-organize-status").click();
       await expect(page.getByTestId("status-section-idle").getByTestId(`workspace-session-${id}`)).toBeVisible();
       await expect(page.getByTestId("status-section-title-idle")).toContainText("Idle");
+      await page.reload({ waitUntil: "networkidle" });
+      await expect(page.getByTestId("workspace-status-view")).toBeVisible();
       await page.getByTestId("workspace-organize").click();
       await page.getByTestId("workspace-organize-project").click();
       await expect(page.getByTestId("workspace-status-view")).toHaveCount(0);
       await expect(page.getByTestId("workspace-chats")).toBeVisible();
-      await page.reload({ waitUntil: "networkidle" });
-      await expect(page.getByTestId("workspace-status-view")).toHaveCount(0);
-      await page.getByTestId("workspace-organize").click();
-      await page.getByTestId("workspace-organize-status").click();
-      await expect(page.getByTestId("workspace-status-view")).toBeVisible();
     } finally {
       await ctx.close();
     }
@@ -353,8 +270,8 @@ test.describe("Perch sidebar", () => {
 
   test("2c. Chats reorder by drag, Move and tab drag; the core keeps one order for every viewer", async ({ browser }) => {
     const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-order-")));
-    const ctx1 = await browser.newContext({ storageState: localStorageState() });
-    const ctx2 = await browser.newContext({ storageState: localStorageState() });
+    const ctx1 = await browser.newContext({ storageState: terminalsShown() });
+    const ctx2 = await browser.newContext({ storageState: terminalsShown() });
     try {
       const page1 = await ctx1.newPage();
       const page2 = await ctx2.newPage();
@@ -371,6 +288,8 @@ test.describe("Perch sidebar", () => {
         (rows, mine) => rows.map((row) => row.getAttribute("data-testid")!.replace("workspace-session-", "")).filter((id) => mine.includes(id)),
         [a, b, c],
       );
+      // A chat is also a dot under its project; these steps mean its By status row.
+      const row = (page: Page, id: string) => page.getByTestId("workspace-status-view").getByTestId(`workspace-session-${id}`);
       const strip = (page: Page) => page.locator("[data-testid^='tab-']").evaluateAll(
         (tabs, mine) => tabs.map((tab) => tab.getAttribute("data-testid")!.replace("tab-", "")).filter((id) => mine.includes(id)),
         [a, b, c],
@@ -381,23 +300,23 @@ test.describe("Perch sidebar", () => {
 
       // Drag a above c: no click fires, so c stays the open chat; the other viewer follows,
       // and only a moved: b and c keep their order in the strip.
-      await page1.getByTestId(`workspace-session-${a}`).dragTo(page1.getByTestId(`workspace-session-${c}`), { targetPosition: { x: 40, y: 2 } });
+      await row(page1, a).dragTo(row(page1, c), { targetPosition: { x: 40, y: 2 } });
       await expect.poll(() => shown(page1)).toEqual([a, c, b]);
       await expect.poll(() => shown(page2)).toEqual([a, c, b]);
       await expect.poll(() => strip(page1)).toEqual([b, c, a]);
-      await expect(page1.getByTestId(`workspace-session-${c}`)).toHaveClass(/workspace-entry__session--active/);
+      await expect(row(page1, c)).toHaveClass(/workspace-entry__session--active/);
       // Nothing is left displaced or lifted once it lands.
       for (const id of [a, b, c]) {
-        const row = page1.getByTestId(`workspace-session-${id}`).locator("xpath=..");
-        await expect(row).toHaveCSS("transform", "none");
-        await expect(row).toHaveCSS("z-index", "auto");
+        const wrapper = row(page1, id).locator("xpath=..");
+        await expect(wrapper).toHaveCSS("transform", "none");
+        await expect(wrapper).toHaveCSS("z-index", "auto");
       }
 
       // Move down from the other viewer's row menu: a goes below c.
-      await page2.getByTestId(`workspace-session-${a}`).click({ button: "right" });
+      await row(page2, a).click({ button: "right" });
       await page2.getByTestId(`workspace-session-move-down-${a}`).click();
       await expect.poll(() => shown(page1)).toEqual([c, a, b]);
-      await page2.getByTestId(`workspace-session-${a}`).click({ button: "right" });
+      await row(page2, a).click({ button: "right" });
       await expect(page2.getByTestId(`workspace-session-move-up-${a}`)).toBeVisible();
       await expect(page2.getByTestId(`workspace-session-move-down-${a}`)).toBeVisible();
       await page2.keyboard.press("Escape");
@@ -438,8 +357,8 @@ test.describe("Perch sidebar", () => {
   });
 
   test("5. a new session appears live on another connection", async ({ browser }) => {
-    const ctx1 = await browser.newContext({ storageState: localStorageState() });
-    const ctx2 = await browser.newContext({ storageState: localStorageState() });
+    const ctx1 = await browser.newContext({ storageState: terminalsShown() });
+    const ctx2 = await browser.newContext({ storageState: terminalsShown() });
     try {
       const page1 = await ctx1.newPage();
       const page2 = await ctx2.newPage();

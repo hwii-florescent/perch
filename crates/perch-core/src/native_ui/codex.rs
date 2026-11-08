@@ -933,7 +933,7 @@ mod tests {
         view.event(&json!({"method":"thread/settings/updated","params":{"threadId":"native","threadSettings":{"model":"gpt-5.6-luna","effort":"low","approvalPolicy":"on-request","sandboxPolicy":{"type":"readOnly"},"approvalsReviewer":"user"}}}));
         assert_eq!(view.snapshot.model.as_deref(), Some("gpt-5.6-luna"));
         assert_eq!(view.snapshot.effort.as_deref(), Some("low"));
-        assert_eq!(view.snapshot.permission_mode.as_deref(), Some("ask"));
+        assert_eq!(view.snapshot.permission_mode.as_deref(), Some("read-only"));
         view.event(&json!({"method":"turn/completed","params":{"threadId":"native","turn":{"id":"stopped","status":"interrupted"}}}));
         let stopped = view.snapshot.messages.last().unwrap();
         assert_eq!(

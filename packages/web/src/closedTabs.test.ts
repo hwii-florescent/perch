@@ -38,7 +38,7 @@ describe("closed tabs (Cmd+Shift+T)", () => {
     expect(takeClosedTab(() => true)).toBeUndefined();
   });
 
-  it("skips a blank session, skips unusable entries, and forgets a removed birdhouse", () => {
+  it("skips a blank session, skips unusable entries, and forgets a removed project", () => {
     recordClosedTab(session({ cliProviderId: undefined, cliStarted: false }));
     expect(takeClosedTab(() => true)).toBeUndefined();
     recordClosedTab(session({ cwd: "/keep", projectId: "a" }));

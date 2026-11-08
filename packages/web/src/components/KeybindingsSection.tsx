@@ -12,7 +12,7 @@ import { SettingRow, SettingsGroup } from "./ui/setting-row";
 import { cn } from "../lib/cn";
 
 const GROUPS: [KeybindGroup, string][] = [
-  ["global", "Global"], ["tabs", "Tabs"], ["nests", "Nests and birdhouses"], ["panes", "Splits and panes"], ["terminal", "Terminal"], ["editor", "File editor"], ["navigator", "Navigator"], ["directory", "Folder picker"], ["leader", "Leader and follow-up keys"], ["resize", "Resize mode"],
+  ["global", "Global"], ["tabs", "Tabs"], ["nests", "Workspaces and projects"], ["panes", "Splits and panes"], ["terminal", "Terminal"], ["editor", "File editor"], ["navigator", "Navigator"], ["directory", "Folder picker"], ["leader", "Leader and follow-up keys"], ["resize", "Resize mode"],
 ];
 
 const CHIP = "min-w-24 cursor-pointer rounded-ui bg-surface-1 px-2 py-[0.2rem] text-center [font-family:ui-monospace,SFMono-Regular,Menlo,monospace] text-[0.75rem] hover:bg-overlay-0";

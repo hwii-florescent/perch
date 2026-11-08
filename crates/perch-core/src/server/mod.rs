@@ -387,6 +387,15 @@ struct AppState {
     git: Arc<GitService>,
 }
 
+impl AppState {
+    /// The native bridge of whatever agent runs in `key`'s tab now (see `AgentRuntime::bridge_key`).
+    /// Everything that reads or writes *the agent* (mail, steer, read) goes through this, not
+    /// `native_ui.get(key)`, which only finds the agent the tab was started with.
+    fn native_bridge(&self, key: &AgentKey) -> Option<Arc<crate::native_ui::NativeBridge>> {
+        self.native_ui.get(&self.agent_runtime.bridge_key(key)?)
+    }
+}
+
 pub async fn run(
     options: ServerOptions,
     db: Arc<HistoryDb>,
@@ -1519,8 +1528,7 @@ fn spawn_agent_turn_state_task(state: AppState, mut open_turns: attention::OpenT
                             tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
                         }
                         let snapshot = worker
-                            .native_ui
-                            .get(&child)
+                            .native_bridge(&child)
                             .and_then(|bridge| bridge.latest());
                         // The turn's notes are kept before the lead hears of it, so the note
                         // carries them; a model that is slow or absent only delays the note.
@@ -2524,6 +2532,7 @@ fn foundation_capabilities() -> Vec<String> {
         "workspace.nest",
         "workspace.visibility",
         "agent.manifest.list",
+        "agent.models.list",
         "agent.provider.configure",
         "agent.ui.get",
         "agent.ui.prompt",

@@ -5,7 +5,7 @@ import { Dialog } from "./ui/dialog";
 
 const FIELD = "w-full min-w-0 rounded-ui bg-surface-0 px-[0.5rem] py-[0.4rem] text-fg focus:[outline:1px_solid_var(--accent)] [font-family:inherit]";
 
-/** Edit the Instructions of a Birdhouse or Nest: shared text and reference folders that every new
+/** Edit the Instructions of a Project or Workspace: shared text and reference folders that every new
  * session there starts with. The core checks and stores them; running sessions keep what they
  * started with. */
 export function InstructionsDialog({ scope, id, name, onClose }: { scope: InstructionsScope; id: string; name: string; onClose: () => void }) {
@@ -43,7 +43,7 @@ export function InstructionsDialog({ scope, id, name, onClose }: { scope: Instru
     else onClose();
   }
 
-  const label = scope === "project" ? "birdhouse" : "nest";
+  const label = scope === "project" ? "project" : "workspace";
   return (
     <Dialog title={`Instructions for ${name}`} onClose={onClose} testId="instructions-dialog">
       <p className="m-0 text-[0.75rem] text-subtext-0">

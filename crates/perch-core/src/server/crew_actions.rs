@@ -91,14 +91,19 @@ pub(super) fn child_facts(app: &AppState, row: &SubSessionRow) -> ChildFacts {
     let key = key_of(app, &row.child_session_id, &row.provider_id).ok();
     let snapshot = key
         .as_ref()
-        .and_then(|key| app.native_ui.get(key))
+        .and_then(|key| app.native_bridge(key))
         .and_then(|bridge| bridge.latest());
+    // The agent on screen decides what can be done to it (a tab started as Claude may run `pi` now).
+    let provider = key
+        .as_ref()
+        .and_then(|key| app.agent_runtime.bridge_key(key))
+        .map_or_else(|| row.provider_id.clone(), |agent| agent.agent_id);
     let lifecycle = key
         .as_ref()
         .and_then(|key| app.agent_runtime.snapshot(key).ok())
         .map(|snapshot| snapshot.state);
     ChildFacts {
-        provider: row.provider_id.clone(),
+        provider,
         dispatch: row.state,
         alive: app
             .db
@@ -286,13 +291,20 @@ fn steer(
         crew_actions::check_steer_text(request.text.as_deref().unwrap_or_default()).map_err(bad)?;
     let key = agent_mail::check_key(&request.key).map_err(bad)?;
     let agent_key = key_of(app, &row.child_session_id, &row.provider_id)?;
-    let bridge = app.native_ui.get(&agent_key).ok_or_else(|| {
+    // The agent on screen, which may not be the one the tab was started with.
+    let agent = app.agent_runtime.bridge_key(&agent_key).ok_or_else(|| {
+        fail(
+            StatusCode::CONFLICT,
+            "its agent is no longer running in that tab, so Perch cannot reach it",
+        )
+    })?;
+    let bridge = app.native_ui.get(&agent).ok_or_else(|| {
         fail(
             StatusCode::CONFLICT,
             "its native connection is not up, so Perch cannot reach it",
         )
     })?;
-    let claude = row.provider_id == "claude";
+    let claude = agent.agent_id == "claude";
     let lead_provider = app
         .db
         .get_session(lead)
@@ -316,9 +328,14 @@ fn steer(
             {
                 return Ok(Err(fail(StatusCode::CONFLICT, why)));
             }
+            if app.agent_runtime.bridge_key(&agent_key).as_ref() != Some(&agent) {
+                return Ok(Err(fail(
+                    StatusCode::CONFLICT,
+                    "the agent in that tab changed; try again",
+                )));
+            }
             if claude {
-                if let Err(error) = crate::native_ui::claude::prepare_input(&agent_key, Some(text))
-                {
+                if let Err(error) = crate::native_ui::claude::prepare_input(&agent, Some(text)) {
                     return Ok(Err(fail(StatusCode::CONFLICT, error.to_string())));
                 }
             }
@@ -362,7 +379,7 @@ fn steer(
                 Ok(Err(fail(StatusCode::CONFLICT, why)))
             };
             let input = if claude {
-                match crate::native_ui::claude::prepare_input(&agent_key, Some(&prompt)) {
+                match crate::native_ui::claude::prepare_input(&agent, Some(&prompt)) {
                     Ok(input) => input,
                     Err(error) => return nothing_sent(error.to_string()),
                 }
@@ -397,7 +414,7 @@ fn steer(
             Ok(Ok(Prepared::Steer {
                 id: mail.id,
                 reply,
-                claude: claude.then(|| agent_key.clone()),
+                claude: claude.then(|| agent.clone()),
             }))
         },
     );
@@ -446,7 +463,13 @@ fn interrupt(
     row: &SubSessionRow,
 ) -> Result<Prepared, Failure> {
     let agent_key = key_of(app, &row.child_session_id, &row.provider_id)?;
-    let bridge = app.native_ui.get(&agent_key).ok_or_else(|| {
+    let agent = app.agent_runtime.bridge_key(&agent_key).ok_or_else(|| {
+        fail(
+            StatusCode::CONFLICT,
+            "its agent is no longer running in that tab, so Perch cannot reach it",
+        )
+    })?;
+    let bridge = app.native_ui.get(&agent).ok_or_else(|| {
         fail(
             StatusCode::CONFLICT,
             "its native connection is not up, so Perch cannot reach it",
@@ -466,11 +489,17 @@ fn interrupt(
             {
                 return Ok(Err(fail(StatusCode::CONFLICT, why)));
             }
+            if app.agent_runtime.bridge_key(&agent_key).as_ref() != Some(&agent) {
+                return Ok(Err(fail(
+                    StatusCode::CONFLICT,
+                    "the agent in that tab changed; try again",
+                )));
+            }
             // Counted before it is sent: a lead's attempts are what the cap limits, confirmed or not.
             if actor == Actor::Lead {
                 app.db.spend_lead_interrupt(lead, &row.child_session_id)?;
             }
-            let reply = super::native_ui::queue_cancel(&agent_key, &bridge, &id, write)?;
+            let reply = super::native_ui::queue_cancel(&agent, &bridge, &id, write)?;
             Ok(Ok(Prepared::Interrupt {
                 id: id.clone(),
                 reply,

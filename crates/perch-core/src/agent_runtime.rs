@@ -729,6 +729,29 @@ impl AgentRuntimeAdapter {
             .collect()
     }
 
+    /// Whose native bridge speaks for the tab `key` owns: the agent typed into its shell right now,
+    /// else the tab's own while it is still the foreground agent. A tab started as Claude whose CLI
+    /// exited and now runs `pi` is `pi`; one back at a bare shell has none (`None`), so a stale bridge
+    /// of the agent that left is never written to or read as if it were current.
+    pub(crate) fn bridge_key(&self, key: &AgentKey) -> Option<AgentKey> {
+        let (typed, owner_current) = {
+            let active = self.active.lock().unwrap();
+            let runtime = active.get(key);
+            (
+                runtime.and_then(|runtime| runtime.shell_agent.clone()),
+                // The same test as `native_owner_is_current`.
+                runtime.map(|runtime| {
+                    runtime.shell_agent.is_none()
+                        && runtime.observed_provider == runtime.handle.provider_id
+                }),
+            )
+        };
+        let typed = typed
+            .filter(|agent| self.shell_agent_is_current(key, agent))
+            .map(|agent| agent.key);
+        pick_bridge(key, typed, owner_current)
+    }
+
     pub(crate) fn shell_agent_is_current(
         &self,
         key: &AgentKey,
@@ -2065,6 +2088,18 @@ fn process_descends_from(
     false
 }
 
+/// The bridge that speaks for a tab: the shell-typed agent when one is current, else the tab's own
+/// when it still owns the foreground. A runtime we know nothing about (`owner_current` is `None`) keeps
+/// the tab's own, as every lookup did before; one known not to own it has no bridge, because the
+/// bridge of the agent that left may still be registered for a moment.
+fn pick_bridge(
+    owner: &AgentKey,
+    typed: Option<AgentKey>,
+    owner_current: Option<bool>,
+) -> Option<AgentKey> {
+    typed.or_else(|| (owner_current != Some(false)).then(|| owner.clone()))
+}
+
 fn foreground_provider(
     root: u32,
     processes: &HashMap<u32, ForegroundProcess<'_>>,
@@ -2192,6 +2227,21 @@ mod tests {
     use std::time::Duration;
 
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// Picker-launched Claude tab -> `pi` typed into its shell -> back at a bare shell.
+    #[test]
+    fn the_bridge_of_a_tab_follows_the_agent_on_screen_and_never_a_stale_one() {
+        let tab = AgentKey::new("w", "s", "claude").unwrap();
+        let pi = crate::shell_integration::bridge_key(&tab, "pi").unwrap();
+        // Claude owns the foreground: its own bridge.
+        assert_eq!(pick_bridge(&tab, None, Some(true)), Some(tab.clone()));
+        // `pi` is typed into the shell: it, even though Claude's bridge may still be registered.
+        assert_eq!(pick_bridge(&tab, Some(pi.clone()), Some(false)), Some(pi));
+        // Back at a bare shell: nobody, so nothing reaches Claude's stale bridge.
+        assert_eq!(pick_bridge(&tab, None, Some(false)), None);
+        // No runtime known (not started here): the tab's own, as before.
+        assert_eq!(pick_bridge(&tab, None, None), Some(tab));
+    }
 
     #[test]
     fn foreground_identity_tracks_shell_agents_tools_and_background_jobs() {

@@ -1,9 +1,9 @@
 /**
- * Live check of Instructions: text saved on a Birdhouse reaches a new session of every harness
+ * Live check of Instructions: text saved on a Project reaches a new session of every harness
  * through the append flags (Claude `--append-system-prompt-file`, Pi and OMP `--append-system-prompt`,
  * Codex `-c developer_instructions` on its shared app-server), while the repository's own
  * AGENTS.md / CLAUDE.md still load. One cheap-model turn per harness against an isolated core;
- * see docs/TESTING.md. Also checks the Birdhouse menu's dialog (no model turn).
+ * see docs/TESTING.md. Also checks the Project menu's dialog (no model turn).
  *
  *   cd e2e && npx playwright test -c native-composer.config.ts instructions.spec.ts --workers 1 [-g claude]
  */
@@ -236,7 +236,7 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: Inst
   }
 });
 
-test("the Birdhouse menu opens Instructions, saves them and shows them again", async ({ page }, testInfo) => {
+test("the Project menu opens Instructions, saves them and shows them again", async ({ page }, testInfo) => {
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "perch-instructions-ui-"));
   const port = await freePort();
   let core: ChildProcess | undefined;

@@ -2,7 +2,7 @@ import type { InstructionsStateMessage } from "@perch/shared";
 import { newId } from "./ids";
 import { socket } from "./ws";
 
-/** Instructions of a Birdhouse (`project`) or Nest (`workspace`): text and reference folders that
+/** Instructions of a Project (`project`) or Workspace (`workspace`): text and reference folders that
  * every new session there launches with. The core owns the rules and the store
  * (`crates/perch-core/src/instructions.rs`, `server/instructions.rs`); this only asks and tells.
  * Without the capability (an older core) or a connection there is nothing to edit. */

@@ -51,10 +51,3 @@ headless only; isolate `PERCH_DB`, `PERCH_HOSTS`, `PERCHD_DIR` and
 `PERCH_SETTINGS`; never use the installed app's daemon. Clean up your processes.
 Real agent turns use only `claude-haiku-4-5` or `gpt-5.6-luna`; verify the
 banner before prompting. Do not install absent OpenCode to satisfy tests.
-
-## Repository hygiene
-
-This repo is public. Keep private hosts, credentials and employer details out
-of files/history; sample hostnames are not probe targets. Before pushing,
-review `git diff origin/main..main` for leaks. Commit each verified slice
-locally; push/tag/publish only when asked. Leave unrelated user changes alone.

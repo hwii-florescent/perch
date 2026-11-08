@@ -6,11 +6,11 @@ import { NativeUiError, requestNativeUi, subscribeNativeUi } from "../nativeUi";
 import { socket } from "../ws";
 import { renderMarkdown } from "../markdown";
 import { newId } from "../ids";
-import { PlusIcon } from "../components/ui/icons";
 import { loadDraftText, saveDraftText, sentPrompts, stepRecall, withTerminalDraft, type RecallPosition } from "./nativeChat/composerDraft";
 import { CHAT_COLUMN, CHAT_INPUT, CHAT_LIST, CHAT_LIST_CONTAINER, MESSAGE_COPY_ASSISTANT, MESSAGE_COPY_USER, MESSAGE_ERROR, MESSAGE_FILE_LINK, MESSAGE_MARKDOWN, NATIVE_TEXTAREA, SCROLL_PILL, SEND_BUTTON_GO, SEND_BUTTON_STOP, messageClass } from "../components/ui/chat";
 import { sendState } from "./nativeChat/sendState";
-import { withAttachmentPaths } from "./nativeChat/menuTokens";
+import { activeMenu, withAttachmentPaths } from "./nativeChat/menuTokens";
+import { AddMenu, type AddMenuEntry } from "./nativeChat/AddMenu";
 import { useComposerMenu } from "./nativeChat/useComposerMenu";
 import { MenuList, menuOptionId } from "./nativeChat/MenuList";
 import { Attachments, type ComposerImage } from "./nativeChat/Attachments";
@@ -43,6 +43,8 @@ import { useFindHits } from "./nativeChat/useFindHits";
 import { Receipts, RequestCard, WaitingNotice, type Receipt } from "./nativeChat/RequestCard";
 import { uploadAttachment } from "../attachments";
 import { cn } from "../lib/cn";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { FolderIcon } from "../components/ui/icons";
 
 const HINT = "text-[12px] text-subtext-0";
 
@@ -135,6 +137,15 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
   const picker = useRef<HTMLInputElement>(null);
   const hostId = usePerchStore((state) => state.sessions.find((entry) => entry.id === sessionId)?.hostId ?? state.activeHostId);
   const workspaceId = usePerchStore((state) => state.sessions.find((entry) => entry.id === sessionId)?.workspaceId);
+  // Where this chat lives. The folder is fixed when the agent launches (providers key their history to it), so this only names it;
+  // choosing another folder happens on the start screen.
+  const folderPath = usePerchStore((state) => state.sessions.find((entry) => entry.id === sessionId)?.cwd);
+  const folderName = usePerchStore((state) => {
+    const session = state.sessions.find((entry) => entry.id === sessionId);
+    if (!session?.cwd) return "";
+    const workspacePath = session.workspaceId ? workspaceRecord(state, session.workspaceId)?.path : undefined;
+    return workspacePath?.endsWith("/.perch/scratch") ? "Quickchat" : session.cwd.replace(/\/+$/, "").split("/").pop() || session.cwd;
+  });
   const canLinkFiles = usePerchStore((state) => (hostId === "local" ? state.serverInfo?.capabilities : state.workspaceCapabilitiesByHost[hostId])?.includes("fs.links") === true);
   const canChangeOptions = usePerchStore((state) => (hostId === "local" ? state.serverInfo?.capabilities : state.workspaceCapabilitiesByHost[hostId])?.includes("agent.ui.options") === true);
   const { rows: family, refresh: refreshFamily } = useCrew(sessionId);
@@ -150,6 +161,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
   const [outbox, setOutbox] = useState<Outbox | null>(null);
   const [answering, setAnswering] = useState(false);
   const [changing, setChanging] = useState(false);
+  const [confirmFull, setConfirmFull] = useState(false);
   const [receipts, setReceipts] = useState<Receipt[]>(() => receiptsBySession.get(draftKey) ?? []);
   const latest = useRef<NativeUiSnapshot | null>(null);
   latest.current = snapshot;
@@ -249,8 +261,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     for (const file of files) {
       try {
         const staged = await uploadAttachment(sessionId, file);
-        const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
-        updateDraft(textRef.current, [...imagesRef.current, { ...staged, ...(previewUrl ? { previewUrl } : {}) }]);
+        updateDraft(textRef.current, [...imagesRef.current, { ...staged, file }]);
       } catch (reason) { setError((reason as Error).message); }
       finally { setUploading((count) => count - 1); }
     }
@@ -335,8 +346,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
   // Delivery was unknown, so the text comes back as a new message for the user to judge against the transcript.
   function restoreUnconfirmed() {
     if (!outbox) return;
-    // Thumbnails were released with their chips; the staged files are still there.
-    updateDraft(outbox.draft.text, outbox.draft.images.map(({ previewUrl: _gone, ...image }) => image));
+    updateDraft(outbox.draft.text, outbox.draft.images);
     setOutbox(null); setError(null);
     field.current?.focus();
   }
@@ -372,18 +382,19 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     list.current?.querySelector(`[data-block-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "center" });
   };
   useEffect(() => { if (current) jump(current); }, [current, findIndex]);
-  const optionChange: OptionChange | undefined = canChangeOptions ? { enabled: controlling && connected && !exited, busy: changing, apply: (option, value) => void changeOption(option, value) } : undefined;
+  const optionChange: OptionChange | undefined = canChangeOptions ? { enabled: controlling && connected && !exited, busy: changing, apply: (option, value) => { if (option === "mode" && value === "full-access") setConfirmFull(true); else void changeOption(option, value); } } : undefined;
+  const canCompose = connected && controlling && snapshot !== null;
+  const addEntries: AddMenuEntry[] = [
+    { id: "attach", label: "Add files or photos", run: () => picker.current?.click() },
+    // `/name` only means a command at the start of a message, so the shortcut needs an empty draft.
+    ...(activeMenu("/", 1, providerId) ? [{ id: "slash", label: "Slash commands", detail: text ? "Clear the message to start with /" : "Commands and skills", disabled: text !== "", run: () => { nextCaret.current = 1; updateDraft("/"); setCaret(1); field.current?.focus(); } }] : []),
+  ];
   const label = !connected ? "Reconnecting…" : exited ? "CLI exited" : !snapshot ? "Connecting to CLI…" : waiting ? "Waiting for you" : snapshot.running ? "Working" : "Ready";
   return <div className="native-cli-chat outline-none flex min-h-0 min-w-0 flex-1 flex-col [&_pre]:whitespace-pre-wrap [&_pre]:[overflow-wrap:anywhere]" data-testid="native-cli-chat" data-provider={providerId} data-native-pid={snapshot?.pid} data-native-session={snapshot?.providerSessionId} tabIndex={-1}
     onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "f") { event.preventDefault(); setFind((value) => value ?? ""); } }}>
     <div className="terminal__toolbar flex-wrap">
       <span role="status">{label}</span>
-      {snapshot?.model && (optionChange && snapshot.options?.pickers?.some((picker) => picker.id === "model")
-        ? <span className="native-cli-chat__model ml-auto" data-model={snapshot.model}><ModelPicker options={snapshot.options} change={optionChange} /></span>
-        : <span className="native-cli-chat__model ml-auto max-w-[45%] overflow-hidden text-ellipsis" title={snapshot.model} data-model={snapshot.model}>{snapshot.options?.model ?? snapshot.model}</span>)}
-      <OptionLabels options={snapshot?.options} change={optionChange} />
-      {snapshot?.context && <span className={snapshot.model ? undefined : "ml-auto"}><ContextRing context={snapshot.context} /></span>}
-      {!controlling && <button type="button" disabled={!status || !connected || pending || exited} onClick={() => void takeControl()}>Take control</button>}
+      {!controlling && <button type="button" className="ml-auto" disabled={!status || !connected || pending || exited} onClick={() => void takeControl()}>Take control</button>}
     </div>
     {find !== null && <FindBar query={find} onQuery={(value) => { setFind(value); setFindIndex(0); }} count={hits.length} index={hits.length ? ((findIndex % hits.length) + hits.length) % hits.length : 0}
       onStep={(delta) => setFindIndex((value) => value + delta)} onClose={() => { setFind(null); field.current?.focus(); }} />}
@@ -477,9 +488,15 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
         }} />
       <div className="flex items-center gap-2 px-2 pt-1 pb-2">
         <input ref={picker} type="file" multiple hidden data-testid="native-cli-file-input" onChange={(event) => { void attach(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
-        <button type="button" className="size-7 shrink-0 cursor-pointer rounded-full bg-transparent flex items-center justify-center text-subtext-0 [border:0] hover:bg-surface-1 hover:text-fg disabled:cursor-not-allowed disabled:opacity-40" aria-label="Attach file" title="Attach file" disabled={!connected || !controlling || !snapshot}
-          onMouseDown={(event) => event.preventDefault()} onClick={() => picker.current?.click()}><PlusIcon size={16} /></button>
-        <span className={cn(HINT, "flex-1")}>{controlling ? (uploading ? "Uploading…" : snapshot?.running ? "Esc stops the turn" : "") : status?.inputOwner ? "Another view is typing in this agent" : "Viewing agent"}</span>
+        <AddMenu entries={addEntries} disabled={!canCompose} />
+        {folderPath && <span className="flex min-w-0 max-w-[9rem] items-center gap-1 px-1 text-[12px] text-subtext-0" title={folderPath} data-testid="native-cli-folder"><FolderIcon size={13} className="shrink-0" /><span className="truncate">{folderName}</span></span>}
+        <OptionLabels options={snapshot?.options} change={optionChange} only="mode" />
+        <span className={cn(HINT, "min-w-0 flex-1 truncate")}>{controlling ? (uploading ? "Uploading…" : "") : status?.inputOwner ? "Another view is typing in this agent" : "Viewing agent"}</span>
+        {snapshot?.model && (optionChange && snapshot.options?.pickers?.some((picker) => picker.id === "model")
+          ? <span className="native-cli-chat__model" data-model={snapshot.model}><ModelPicker options={snapshot.options} change={optionChange} /></span>
+          : <span className="native-cli-chat__model max-w-[14rem] truncate text-[12px] text-subtext-0" title={snapshot.model} data-model={snapshot.model}>{snapshot.options?.model ?? snapshot.model}</span>)}
+        <OptionLabels options={snapshot?.options} change={optionChange} only="effort" />
+        {snapshot?.context && <ContextRing context={snapshot.context} />}
         <button type="submit" className={sendable.action === "stop" || sendable.action === "stopping" ? SEND_BUTTON_STOP : SEND_BUTTON_GO} aria-label={sendable.label} title={sendable.reason ?? sendable.label} disabled={sendable.disabled}
           onMouseDown={(event) => event.preventDefault()}>
           {sendable.action === "stop" || sendable.action === "stopping"
@@ -489,5 +506,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
       </div>
     </form>
     </div>
+    {confirmFull && <ConfirmDialog message="Full access lets the agent edit any file and run commands, with network access, without asking you. It applies to this session only." confirmLabel="Allow full access"
+      onCancel={() => setConfirmFull(false)} onConfirm={() => { setConfirmFull(false); void changeOption("mode", "full-access"); }} />}
   </div>;
 }

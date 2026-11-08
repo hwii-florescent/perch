@@ -35,6 +35,7 @@ import {
   sessionIdsForProject,
   type ProjectGroup,
 } from "./store";
+import { requestNewSession } from "./appEvents";
 import { StatusDot } from "./components/StatusDot";
 import { WorktreeMenu } from "./components/WorktreeMenu";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -776,7 +777,7 @@ export function NewSessionPopover({ hostId, projectCwds, fixedCwd, anchorRect, o
         data-testid="project-option-none"
         onClick={() => { onSelect("~", selectedAgent); onClose(); }}
       >
-        No birdhouse
+        No project
         <span className={POPOVER_PICK_CWD}>Quickchat</span>
       </button>
       </>}
@@ -831,12 +832,10 @@ export function SidebarContent({ compact = false, onNavigate, onManageHosts }: {
   onManageHosts?: () => void;
 }) {
   const connected = usePerchStore((s) => s.connected);
-  const workspaceProjects = usePerchStore((s) => s.workspaceProjects);
   const serverInfo = usePerchStore((s) => s.serverInfo);
   const status = usePerchStore((s) => s.status);
   const hosts = usePerchStore((s) => s.hosts);
   const activeHostId = usePerchStore((s) => s.activeHostId);
-  const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
   const setActiveHost = usePerchStore((s) => s.setActiveHost);
   const upsertHost = usePerchStore((s) => s.upsertHost);
@@ -844,7 +843,6 @@ export function SidebarContent({ compact = false, onNavigate, onManageHosts }: {
   const workspaceCapabilitiesByHost = usePerchStore((s) => s.workspaceCapabilitiesByHost);
 
   const [hostAnchor, setHostAnchor] = useState<DOMRect | null>(null);
-  const [newAnchor, setNewAnchor] = useState<DOMRect | null>(null);
 
   const { choices, activeHostEntry, activeHostInfo, activeHostState } = useHostChoices();
 
@@ -852,11 +850,6 @@ export function SidebarContent({ compact = false, onNavigate, onManageHosts }: {
     ? workspaceCapabilities
     : workspaceCapabilitiesByHost[activeHostId] ?? []
   ).includes("workspace.snapshot");
-
-  // New sessions start in a listed project or in Chats, never an unadded folder.
-  const projectCwds = workspaceProjects
-    .filter((project) => project.hostId === activeHostId)
-    .map((project) => project.path);
 
   const canCreate = connected && (activeHostId === "local" || activeHostState === "connected");
 
@@ -907,11 +900,11 @@ export function SidebarContent({ compact = false, onNavigate, onManageHosts }: {
             className={cn(segment(), "w-full shrink-0 gap-2 rounded-ui px-[0.9rem] py-[0.55rem] text-left text-[0.82rem] font-semibold text-fg min-[701px]:px-3 min-[701px]:text-[12.5px] min-[701px]:font-medium")}
             data-testid={`new-session-${activeHostId}`}
             disabled={!canCreate}
-            onClick={(e) => setNewAnchor(e.currentTarget.getBoundingClientRect())}
+            onClick={() => { requestNewSession(); onNavigate?.(); }}
           >
             <PlusIcon className="shrink-0 text-subtext-0" />
             New session
-            {!compact && <span className="ml-auto text-[0.7rem] font-normal text-subtext-0">{formatCombo("mod+t")}</span>}
+            {!compact && <span className="ml-auto text-[0.7rem] font-normal text-subtext-0">{formatCombo("cmd+shift+t")}</span>}
           </button>
         </div>
 
@@ -931,15 +924,6 @@ export function SidebarContent({ compact = false, onNavigate, onManageHosts }: {
           onSelect={setActiveHost}
           onToggleEnabled={(entry) => upsertHost({ ...entry, enabled: !entry.enabled })}
           onManage={() => { setSettingsOpen(true); onManageHosts?.(); }}
-        />
-      )}
-      {newAnchor && (
-        <NewSessionPopover
-          hostId={activeHostId}
-          projectCwds={projectCwds}
-          anchorRect={newAnchor}
-          onClose={() => setNewAnchor(null)}
-          onSelect={(cwd, agent) => { createSessionOnHost(activeHostId, cwd, agent); onNavigate?.(); }}
         />
       )}
     </>

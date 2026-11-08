@@ -12,7 +12,7 @@
     ["view.zoomOut","Minus",null,1],
     ["view.zoomReset","Digit0",null,1],
     ["tabs.new","KeyT","t",1],
-    ["tabs.reopen","KeyT","t",9],
+    ["sessions.new","KeyT","t",9],
     ["tabs.keepOpen","Enter",null,5],
     ["tabs.jump1","Digit1",null,1],
     ["tabs.jump2","Digit2",null,1],

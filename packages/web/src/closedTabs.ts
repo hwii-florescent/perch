@@ -1,8 +1,8 @@
 /**
- * closedTabs.ts — the list behind Cmd+Shift+T: sessions and files alike, as the strip treats them. Per viewer (a window's own
+ * closedTabs.ts — the list behind `reopenClosedTab` (unbound): sessions and files alike, as the strip treats them. Per viewer (a window's own
  * localStorage key), newest first, 20 entries for 7 days. Holds descriptors
  * only: no terminal contents, prompt text or command history. Reopening starts
- * a fresh session of the same harness in the same nest; it never re-runs a
+ * a fresh session of the same harness in the same workspace; it never re-runs a
  * command or implies the old process survived (docs/DECISIONS.md, "Reopen").
  * ponytail: "Resume agent conversation" needs the provider's conversation id,
  * which the core drops with the session row; add it to `session.delete` first.
@@ -74,7 +74,7 @@ export function takeClosedTab(usable: (tab: ClosedTab) => boolean): ClosedTab | 
   return list[idx];
 }
 
-/** Remove Birdhouse: its closed tabs go with it. */
+/** Remove Project: its closed tabs go with it. */
 export function forgetClosedTabs(projectId: string): void {
   write(read().filter((tab) => tab.kind === "file" || tab.projectId !== projectId));
 }

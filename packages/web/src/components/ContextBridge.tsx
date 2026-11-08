@@ -116,8 +116,8 @@ function ContextDialog({ workspaceId, source }: { workspaceId: string; source: C
       <label className="grid gap-1 text-[0.78rem] text-fg">Prepared context
         <textarea className={`${CONTROL} min-h-40 resize-y whitespace-pre [tab-size:2]`} aria-label="Prepared context" readOnly value={current ? preview.packet.markdown : ""} placeholder={error ? "Context unavailable" : "Preparing context…"} />
       </label>
-      <label className="grid gap-1 text-[0.78rem] text-fg">Agent in this nest
-        <Select className={CONTROL} ariaLabel="Agent in this nest" value={targetId} disabled={attempted || !ready} onChange={setTargetId}
+      <label className="grid gap-1 text-[0.78rem] text-fg">Agent in this workspace
+        <Select className={CONTROL} ariaLabel="Agent in this workspace" value={targetId} disabled={attempted || !ready} onChange={setTargetId}
           options={[{ value: "", label: "Choose an agent…" }, ...(preview?.agents.map((agent) => ({ value: agent.sessionId, label: `${agent.title} · ${agent.providerId}${agent.canSend ? "" : " · copy only"}` })) ?? [])]} />
       </label>
       <p className="m-0 text-[0.75rem] text-subtext-0">{target?.reason || (ready && !preview.agents.length ? "No agents in this nest. Close this dialog and start one from +, then try again. Nothing is started here." : "Send starts a turn in an existing Claude CLI with an empty prompt. Other agents support Copy context. Nothing is sent until you click Send.")}</p>

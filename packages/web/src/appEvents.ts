@@ -8,6 +8,7 @@ import { usePerchStore } from "./store";
 
 export const ADD_PROJECT_EVENT = "perch:add-project";
 export const NEW_TAB_EVENT = "perch:new-tab";
+export const NEW_SESSION_EVENT = "perch:new-session";
 
 /** Run `fn` once the sidebar is on screen (its dialogs and menus live in it). */
 export function withSidebar(fn: () => void): void {
@@ -20,6 +21,11 @@ export function withSidebar(fn: () => void): void {
 
 export function requestAddProject(): void {
   withSidebar(() => window.dispatchEvent(new Event(ADD_PROJECT_EVENT)));
+}
+
+/** Cmd+Shift+T and the sidebar's New session button: the centered project → harness picker. */
+export function requestNewSession(): void {
+  window.dispatchEvent(new Event(NEW_SESSION_EVENT));
 }
 
 export function requestNewTab(): void {

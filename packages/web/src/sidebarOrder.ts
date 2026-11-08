@@ -69,7 +69,7 @@ export function isNestedIn(item: { id: string; parentSessionId?: string }, items
 }
 
 /** `items` with each sub-session straight after its lead, in the order given, when both are listed. A
- * child whose lead is not in the list (another section, another Nest) stays where it is. One level
+ * child whose lead is not in the list (another section, another Workspace) stays where it is. One level
  * only: Perch's depth limit is 1. */
 export function nestUnderLeads<T extends { id: string; parentSessionId?: string }>(items: T[]): T[] {
   const nested = new Map<string, T[]>();

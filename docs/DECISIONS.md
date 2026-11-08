@@ -7,6 +7,95 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-08 — UI-mode composer: borderless, rounder, options inside (owner)
+
+Amends 2026-11-04 for the native chat composer only. It is one rounded (1.5rem), borderless card that
+stands out by fill; focus lifts the fill one step rather than drawing an outline. Inside it: `+` (files,
+slash commands), the project folder (read-only once the chat has started), permissions, then model,
+effort, context and send. The folder is chosen before the first message, on the start screen (current
+folder, other projects, Quickchat, Add project). Permissions can be shown and chosen for Claude and Codex
+(Pi and OMP have none); choosing Full access asks for confirmation in the web first, and for Codex the core
+then answers the CLI's own "Enable full access?" dialog for that explicit choice. Claude's effort falls back to the level saved in the
+user's Claude settings when the CLI does not draw it, marked as such on the picker.
+
+## 2026-11-08 — Plain names: Project and Workspace, not Birdhouse and Nest (owner)
+
+Supersedes the Birdhouse / Nest copy of 2026-10-04 and 2026-10-25. Older entries below keep the old
+words as history: read Birdhouse as **Project** and Nest as **Workspace**.
+
+- User-facing copy, menus, help, errors and agent-facing text say **Project** (a folder or repository),
+  **Workspace** (a checkout or worktree inside it) and **Quickchat**. "Scratchpad" stays an internal name.
+- Kept on purpose: the `nests.*` keybinding ids (users' saved overrides use them, as does the native
+  shortcut table), the `workspace.nest` protocol message and capability, and the `nest` agent-key alias.
+  "Nest" as a verb for a sub-session or worktree under its parent is unchanged and is not copy.
+- Internal names such as `orderedNests` or `NEST_JUMPS` were not churned; rename them when touched.
+
+## 2026-11-08 — Sidebar: one tree, Project → Workspace → Session, attention-aware (owner)
+
+Supersedes the two-section entry below and amends 2026-11-03 "By status replaces Needs You" and
+2026-10-24/25 (session dots). Orca organizes (Project → Workspace → agents, group-by and sort kept apart);
+Herdr tracks attention (rollups, priority, done-unseen). Perch keeps Orca's one structure and adds
+Herdr's attention to it; a second list was tried and dropped (it repeated every chat and ate height).
+
+- **One tree is the default** ("By project"). Under each workspace row, sessions that matter show as
+  rows: Needs you, Done, Working, the open chat, and the lead of a shown sub-session. Idle ones fold into
+  "+N idle" (click to open, "Hide idle" to fold). The open workspace lists all its chats. An unreachable
+  host folds nothing: last-known states are not trusted to hide a chat.
+- **A folded project** shows its most urgent state and how many chats are in it. No session dots.
+- **Header chip** "N need(s) you" opens the next chat that needs you (same as Cmd-Shift-U). It counts
+  reachable hosts only.
+- **Organize menu:** By project (tree), By status (flat; Needs you, Done, Working, Idle; the old default),
+  In one list (newest first, no drag). Under By project: **Sort by attention** (urgent projects and
+  workspaces first, favourites and pinned workspaces stay first, no drag while on) and **Show active only**
+  (hides projects/workspaces with nothing going on except the open one). Both are per viewer and off
+  or on as saved: sort defaults to the core's order; active-only defaults to off.
+- **By status stays organized by project:** each status section lists its chats under small project
+  headings (the sidebar's project order, Quickchat last; the workspace name shows on the row when the
+  project has several). Drag and Move stay within a project's chats in that section.
+- **By status rows are compact:** the harness mark and the name on one line (the workspace, or why it
+  needs you, muted after it); no state ring, since the section heading already says the state. Project
+  headings carry a hover "+" (worktree menu for a git project, new session otherwise). A final **No
+  sessions** section lists projects with no agent chat, each with its "+"; clicking one opens it.
+- **By status reads in three levels.** A section heading is a faint wash of the state's colour (the same
+  tokens as the status ring: red Needs you, teal Done, yellow Working, green hollow Idle) with a dot and the
+  label in full text colour, so contrast never depends on the hue and the state is also named, not only
+  coloured. Neutral sections (No sessions, Offline: last known) get a grey wash and a hollow dot. A project
+  line has a folder mark and the project name in text colour; its chats sit one step in, under the name,
+  as the harness mark and a muted title. Rows are 36px on a phone and 24px on desktop.
+- **Agents only:** plain terminals get no sidebar row (they stay tabs). A terminal where an agent was
+  started by hand is listed while that agent runs (observed `currentProviderId`). **Show terminals** in the
+  Organize menu lists them too; it is per viewer, off by default. A session with no harness recorded
+  (native chat) is listed.
+- **Saved choices:** `status` and `list` keep meaning what they did; `project` and the retired
+  `workspace` open the tree. The Compact/List session setting and the Sessions section are gone.
+- **Phone:** the same tree and the same Organize menu; no separate switcher.
+- Kept: a chat being read stays in Done until you leave it; "Offline: last known"; core-owned order,
+  drag with landing line and Move up/down; Quickchat strip.
+- Not done: blocked child promoting its parent's rank, a recent-activity sort (no reliable timestamp).
+- Not verified: WebKit, the desktop app, a real phone, real agent turns (needs-you e2e was edited, not run).
+
+## 2026-11-08 — Sidebar: Projects above Sessions, like Herdr's Spaces and Agents (owner) — superseded above
+
+Amends 2026-11-03 "By status replaces Needs You" and the Organize menu (D6/D6a). Learned from Herdr
+(Spaces + Agents lists in one sidebar) and Orca (grouping and sorting kept apart); not a port.
+
+- **Desktop shows two sections at once:** *Projects* (the project/workspace tree, stable order, favourites
+  first) above *Sessions*, each scrolling alone. The Sessions header folds the section and, folded,
+  says how many chats need you. Session rows stay session-level: a workspace is never moved into a
+  status bucket, because a workspace can hold a blocked, a working and a finished chat at once.
+- **Sessions arrangements** (Organize menu): **By status** (default; Needs you, Done, Working, Idle),
+  **By workspace** (a header per workspace in the sidebar's project order, with count, fold, and the most
+  urgent state when folded) and **In one list** (newest first, no drag). **Projects only** hides the
+  section; it is the old saved value `project`, so existing choices keep meaning what they did.
+- **Context where grouping drops it:** a By status row names its project, plus the workspace when the
+  project has several; By workspace rows leave it to the header. A Needs you row keeps the core's
+  reason and certainty.
+- **Phone unchanged:** no room for both, so it shows the projects or the sessions, as before.
+- **Not done:** an aggregate state on a workspace row beyond the session dots already there, a pin or
+  priority sort of sessions, and workflow stages (Todo/In review) for workspaces.
+- Not verified: WebKit, the desktop app window, a real phone. Verified: unit tests, and headless
+  Chromium for sidebar.spec 2b/2c/2e/2f (the Needs you spec was not re-run: it drives real agent turns).
+
 ## 2026-11-07 — Projects parity: persistent memory and a project home (owner)
 
 Owner direction: Perch should have the same feature as Claude Code Projects (beta), not
@@ -625,7 +714,7 @@ below. Naming is approved for phased adoption, not a reason to rename schemas.
 | Close: idle shell | Closing an idle shell still ends it immediately. | none |
 | Close: running work | Closing a working agent, job or server asks first, naming the work. Uncertain state uses the same guard. **2026-10-05 owner:** any agent session (not a terminal) asks on tab ×, Cmd+W and sidebar close, with a "Don't show again" option (Settings turns it back on). | "closing is deleting" (immediate for everything) |
 | Close: watcher | A viewer that does not own the runtime only detaches. **Stop runtime for everyone…** is a separate action. The UI labels the two differently. | "Closing a terminal pane ends its shell" |
-| Reopen | Cmd-Shift-T reopens from a per-viewer list: 20 descriptors, 7 days, no terminal contents, prompt text or command history; cleared on Remove birdhouse. A closed runtime returns as a **stopped tab** with *Start new shell* and, only with a valid provider token, *Resume agent conversation*. Never re-run a command or imply the old process survived. **Shipped first cut (2026-10-05):** reopening starts a fresh session of the same harness in the same nest; the stopped-tab screen and *Resume agent conversation* wait for the core to keep the provider token. | "perch never archives" (this is navigation undo of descriptors, not an archive of sessions) |
+| Reopen | **Superseded (2026-11):** Cmd-Shift-T now opens the centered keyboard-only New session dialog (project → agent/terminal/browser/file, `NewSessionDialog.tsx`); the sidebar's New session button opens the same dialog and no shortcut reopens a closed tab yet. Cmd-T keeps the tab strip's "+" launcher. Formerly: Cmd-Shift-T reopens from a per-viewer list: 20 descriptors, 7 days, no terminal contents, prompt text or command history; cleared on Remove birdhouse. A closed runtime returns as a **stopped tab** with *Start new shell* and, only with a valid provider token, *Resume agent conversation*. Never re-run a command or imply the old process survived. **Shipped first cut (2026-10-05):** reopening starts a fresh session of the same harness in the same nest; the stopped-tab screen and *Resume agent conversation* wait for the core to keep the provider token. | "perch never archives" (this is navigation undo of descriptors, not an archive of sessions) |
 | Empty Nest | Closing the last tab shows that Nest's New Tab / home state. Never another Birdhouse's or Nest's session, never quitting. | already an invariant; kept |
 | Per-viewer focus | Selected Nest/tab, split geometry and sidebar/drawer state are per viewer. Viewers never fight over focus or the PTY resize lease. | already an invariant; kept |
 | Restored resources | A resource whose runtime or file is gone restores as a placeholder with a recoverable error and an explicit action, never an empty substitute. | new |

@@ -21,7 +21,7 @@
 //! reading the footer after every step. Orca's catalog for other CLIs is not ported: Codex's
 //! `/model` is a two-step TUI picker and Pi/OMP have no typed command with a read-back (see the
 //! docs/evidence/cli-probes-2026-11.md).
-use super::session_options::{model_id_label, permission_mode_label};
+use super::session_options::{effort_label, model_id_label, permission_mode_label};
 use crate::protocol::{NativeUiOptions, NativeUiPicker, NativeUiPickerChoice, NativeUiSnapshot};
 use regex::Regex;
 use std::sync::OnceLock;
@@ -248,8 +248,8 @@ pub fn claude_pickers(snapshot: &NativeUiSnapshot, footer: &Footer) -> Vec<Nativ
             note: Some("Claude also saves the pick as your default for new sessions.".into()),
         });
         if let Some(level) = footer.effort {
-            // Haiku has no effort control (Orca: no options on its row); a one-choice list is no control.
-            if alias_of(reported) != Some("haiku") {
+            // Haiku 4.x has no effort control (Orca: no options on its row); a one-choice list is no control.
+            if alias_of(reported) != Some("haiku") || reported.contains("haiku-5") {
                 pickers.push(NativeUiPicker {
                     id: EFFORT.into(),
                     label: "Effort".into(),
@@ -285,6 +285,99 @@ pub fn claude_pickers(snapshot: &NativeUiSnapshot, footer: &Footer) -> Vec<Nativ
         });
     }
     pickers
+}
+
+/// Codex 0.166's `/permissions` presets, in the order its list draws them: the mode, the row's text in that list
+/// (how the CLI's screen is read) and what it does. Probed live (docs/evidence/cli-probes-2026-11.md).
+pub const CODEX_MODES: [(&str, &str, &str); 4] = [
+    (
+        "ask",
+        "Ask for approval",
+        "Reads and edits workspace files and runs commands; asks for internet access or edits outside it",
+    ),
+    (
+        "auto",
+        "Approve for me",
+        "Only asks for actions detected as potentially unsafe",
+    ),
+    (
+        "full-access",
+        "Full Access",
+        "Edits any file and uses the internet without approval",
+    ),
+    (
+        "read-only",
+        "Read Only",
+        "Reads workspace files; asks for edits or internet access",
+    ),
+];
+
+pub fn valid_codex_mode(value: &str) -> bool {
+    CODEX_MODES.iter().any(|(mode, _, _)| *mode == value)
+}
+
+/// A Codex chat's permission picker. The current mode is what its app-server reports for the thread (it sends
+/// `thread/settings/updated` after every change), so unlike Claude's it needs no screen; a combination that is no
+/// preset has no current value but can still be replaced. Codex has no model or effort picker here: `/model` is a
+/// two-step TUI list.
+pub fn codex_pickers(snapshot: &NativeUiSnapshot) -> Vec<NativeUiPicker> {
+    vec![NativeUiPicker {
+        id: MODE.into(),
+        label: "Permissions".into(),
+        current: snapshot.permission_mode.clone().filter(|mode| valid_codex_mode(mode)),
+        choices: CODEX_MODES
+            .iter()
+            .filter_map(|(value, _, description)| {
+                permission_mode_label(value).map(|label| choice(value, label, Some(description)))
+            })
+            .collect(),
+        settable: !snapshot.running && !snapshot.blocked,
+        note: Some("Runs Codex's own /permissions list for this session only; Full access asks you to confirm first.".into()),
+    }]
+}
+
+/// What Codex's `/permissions` list shows: the mode marked `(current)` and the key of every row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodexPermissionList {
+    pub current: Option<&'static str>,
+    pub keys: Vec<(&'static str, char)>,
+}
+
+/// The open `/permissions` list on `screen`, or `None` when it is not showing. Each preset is a numbered row
+/// (`› 2. Approve for me (current)  Only ask for …`); the number is read from the screen, not assumed.
+pub fn codex_permission_list(screen: &str) -> Option<CodexPermissionList> {
+    static ROW: OnceLock<Regex> = OnceLock::new();
+    if !screen.contains("Update Model Permissions") {
+        return None;
+    }
+    let row = ROW.get_or_init(|| {
+        Regex::new(r"^\s*(?:›\s*)?(\d)\.\s+(Ask for approval|Approve for me|Full Access|Read Only)\b(\s+\(current\))?").unwrap()
+    });
+    let mut list = CodexPermissionList {
+        current: None,
+        keys: Vec::new(),
+    };
+    for found in screen.lines().filter_map(|line| row.captures(line)) {
+        let Some((mode, _, _)) = CODEX_MODES.iter().find(|(_, text, _)| *text == &found[2]) else {
+            continue;
+        };
+        list.keys.push((mode, found[1].chars().next()?));
+        if found.get(3).is_some() {
+            list.current = Some(mode);
+        }
+    }
+    (list.keys.len() == CODEX_MODES.len()).then_some(list)
+}
+
+/// The key of "Yes, continue anyway" while Codex asks "Enable full access?".
+pub fn codex_full_access_confirm(screen: &str) -> Option<char> {
+    static YES: OnceLock<Regex> = OnceLock::new();
+    if !screen.contains("Enable full access?") {
+        return None;
+    }
+    let yes =
+        YES.get_or_init(|| Regex::new(r"(?m)^\s*(?:›\s*)?(\d)\.\s+Yes, continue anyway").unwrap());
+    yes.captures(screen)?[1].chars().next()
 }
 
 /// Orca's `parseBuiltSessionOptionCommand` guard, applied before a value is typed: a model is a listed
@@ -335,23 +428,92 @@ pub fn with_pickers(
     options: Option<NativeUiOptions>,
     screen: Option<&str>,
 ) -> Option<NativeUiOptions> {
-    let pickers = match (agent, screen) {
+    with_pickers_with(agent, snapshot, options, screen, &saved_claude_effort)
+}
+
+/// `with_pickers` with the saved-effort lookup supplied (the tests must not read the machine's settings).
+fn with_pickers_with(
+    agent: &str,
+    snapshot: &NativeUiSnapshot,
+    options: Option<NativeUiOptions>,
+    screen: Option<&str>,
+    saved: &dyn Fn(&NativeUiSnapshot) -> Option<&'static str>,
+) -> Option<NativeUiOptions> {
+    // The footer draws the effort only some of the time, so a Claude chat falls back to the level the user
+    // saved for the model; it stays marked as such on the picker.
+    let mut effort = None;
+    let mut from_settings = false;
+    let mut pickers = match (agent, screen) {
+        ("codex", _) => codex_pickers(snapshot),
         ("claude", Some(screen)) => {
             // The footer is read now; the hook-reported mode is as old as the last prompt.
             let mut footer = claude_footer(screen);
             if footer.mode.is_none() {
                 footer.mode = snapshot.permission_mode.as_deref().and_then(known_mode);
             }
+            if footer.effort.is_none() {
+                footer.effort = saved(snapshot);
+                from_settings = footer.effort.is_some();
+            }
+            effort = footer.effort;
             claude_pickers(snapshot, &footer)
         }
         _ => Vec::new(),
     };
-    if pickers.is_empty() {
+    if agent == "claude" && screen.is_none() {
+        effort = saved(snapshot);
+    }
+    for picker in pickers
+        .iter_mut()
+        .filter(|picker| picker.id == EFFORT && from_settings)
+    {
+        picker.note = Some("Shown from your Claude settings: the CLI does not draw it. Picking a level sets it in the CLI.".into());
+    }
+    // A read-only label for a viewer that gets no pickers (an older web, or the screen could not be read).
+    let label = effort.filter(|_| {
+        options
+            .as_ref()
+            .is_none_or(|options| options.effort.is_none())
+    });
+    if pickers.is_empty() && label.is_none() {
         return options;
     }
     let mut options = options.unwrap_or_default();
+    if let Some(level) = label {
+        options.effort = Some(effort_label(level));
+    }
     options.pickers = pickers;
     Some(options)
+}
+
+/// The effort Claude was last told to use for this model: the user's `modelSettings.<model>.effortLevel`,
+/// else their `effortLevel`, in the config dir the CLI itself reads. A model with no effort control has none.
+/// ponytail: user settings only (a project's `.claude/settings.json` can override it), re-read per snapshot;
+/// add the project file and an mtime cache if either matters.
+fn saved_claude_effort(snapshot: &NativeUiSnapshot) -> Option<&'static str> {
+    let model = snapshot
+        .model
+        .as_deref()
+        .filter(|model| !model.is_empty())?;
+    let dir = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| std::path::Path::new(&home).join(".claude"))
+        })?;
+    let settings = serde_json::from_slice(&std::fs::read(dir.join("settings.json")).ok()?).ok()?;
+    saved_effort(model, &settings)
+}
+
+fn saved_effort(model: &str, settings: &serde_json::Value) -> Option<&'static str> {
+    // Haiku 4.x has no effort control; Haiku 5.x does.
+    if alias_of(model) == Some("haiku") && !model.contains("haiku-5") {
+        return None;
+    }
+    let id = model.split('[').next().unwrap_or(model).trim();
+    settings["modelSettings"][id]["effortLevel"]
+        .as_str()
+        .or_else(|| settings["effortLevel"].as_str())
+        .and_then(effort_value)
 }
 
 fn known_mode(mode: &str) -> Option<&'static str> {
@@ -548,6 +710,35 @@ mod tests {
     }
 
     #[test]
+    fn the_saved_effort_stands_in_for_an_undrawn_one_per_model() {
+        let settings = serde_json::json!({
+            "effortLevel": "high",
+            "modelSettings": { "claude-opus-5-5": { "effortLevel": "medium" }, "claude-haiku-5-5": { "effortLevel": "low" } }
+        });
+        // The model's own entry wins, then the global one; a context suffix is not part of the id.
+        assert_eq!(saved_effort("claude-opus-5-5", &settings), Some("medium"));
+        assert_eq!(
+            saved_effort("claude-opus-5-5[1m]", &settings),
+            Some("medium")
+        );
+        assert_eq!(saved_effort("claude-sonnet-5-5", &settings), Some("high"));
+        // Haiku 5.x has an effort control, Haiku 4.x none, whatever the file says.
+        assert_eq!(saved_effort("claude-haiku-5-5", &settings), Some("low"));
+        assert_eq!(saved_effort("claude-haiku-4-5", &settings), None);
+        assert_eq!(
+            saved_effort(
+                "claude-opus-5-5",
+                &serde_json::json!({ "effortLevel": "turbo" })
+            ),
+            None
+        );
+        assert_eq!(
+            saved_effort("claude-opus-5-5", &serde_json::json!({})),
+            None
+        );
+    }
+
+    #[test]
     fn a_running_turn_or_a_prompt_locks_every_picker() {
         let footer = Footer {
             mode: Some("ask"),
@@ -568,8 +759,109 @@ mod tests {
         assert_eq!(pickers[0].choices.len(), 4);
     }
 
+    fn with_pickers(
+        agent: &str,
+        snapshot: &NativeUiSnapshot,
+        options: Option<NativeUiOptions>,
+        screen: Option<&str>,
+    ) -> Option<NativeUiOptions> {
+        with_pickers_with(agent, snapshot, options, screen, &|_| None)
+    }
+
     #[test]
-    fn only_claude_with_a_readable_screen_gets_pickers() {
+    fn a_saved_effort_fills_an_undrawn_one_and_says_where_it_came_from() {
+        let shot = snapshot(Some("claude-opus-5-5"), false);
+        let screen = footer_screen("⏸ manual mode on · ? for shortcuts", "");
+        let saved = |_: &NativeUiSnapshot| Some("medium");
+        let options = with_pickers_with("claude", &shot, None, Some(&screen), &saved).unwrap();
+        let effort = options
+            .pickers
+            .iter()
+            .find(|picker| picker.id == EFFORT)
+            .unwrap();
+        assert_eq!(effort.current.as_deref(), Some("medium"));
+        assert!(effort.note.as_deref().unwrap().contains("settings"));
+        assert_eq!(options.effort.as_deref(), Some("Medium"));
+        // What the footer draws wins, and is not marked as saved.
+        let drawn = footer_screen(
+            "⏸ manual mode on · ? for shortcuts",
+            "     ● high · /effort",
+        );
+        let options = with_pickers_with("claude", &shot, None, Some(&drawn), &saved).unwrap();
+        let effort = options
+            .pickers
+            .iter()
+            .find(|picker| picker.id == EFFORT)
+            .unwrap();
+        assert_eq!(effort.current.as_deref(), Some("high"));
+        assert!(!effort.note.as_deref().unwrap().contains("settings"));
+        // No readable screen: no pickers, but the label is still there.
+        let options = with_pickers_with("claude", &shot, None, None, &saved).unwrap();
+        assert!(options.pickers.is_empty());
+        assert_eq!(options.effort.as_deref(), Some("Medium"));
+    }
+
+    // Captured from Codex 0.166.0 on 2026-11-07 (tmux, no tokens): `/permissions`, then the full-access choice.
+    const CODEX_LIST: &str = "  Update Model Permissions\n  1. Ask for approval          Read and edit workspace files and run commands, with approval required for internet\n                               access or edits outside the workspace\n› 2. Approve for me (current)  Only ask for actions detected as potentially unsafe\n  3. Full Access               Use with caution: Codex can edit files outside this workspace and access the internet\n                               without approval\n  4. Read Only                 Read workspace files, with approval required for edits or internet access\n  enter select · esc back\n";
+    const CODEX_CONFIRM: &str = "  Enable full access?\n  When Codex runs with full access, it can edit any file on your\n› 1. Yes, continue anyway  Apply full access for this session\n  2. Cancel                Go back without enabling full access\n  enter select · esc back\n";
+
+    #[test]
+    fn codexs_permissions_list_and_confirmation_are_read_from_its_screen() {
+        let list = codex_permission_list(CODEX_LIST).unwrap();
+        assert_eq!(list.current, Some("auto"));
+        assert_eq!(
+            list.keys,
+            [
+                ("ask", '1'),
+                ("auto", '2'),
+                ("full-access", '3'),
+                ("read-only", '4')
+            ]
+        );
+        // The marker moves with the current mode, and a list that is not fully on screen is not a list.
+        let moved = CODEX_LIST
+            .replace(" (current)", "")
+            .replace("1. Ask for approval ", "1. Ask for approval (current)");
+        assert_eq!(codex_permission_list(&moved).unwrap().current, Some("ask"));
+        assert_eq!(codex_permission_list("› Ask Codex to do anything"), None);
+        assert_eq!(
+            codex_permission_list(&CODEX_LIST.replace("  4. Read Only", "")),
+            None
+        );
+        assert_eq!(codex_full_access_confirm(CODEX_CONFIRM), Some('1'));
+        assert_eq!(codex_full_access_confirm(CODEX_LIST), None);
+    }
+
+    #[test]
+    fn codex_offers_a_permission_picker_and_pi_and_omp_offer_nothing() {
+        let mut shot = snapshot(Some("gpt-5.6-luna"), false);
+        shot.permission_mode = Some("read-only".into());
+        let options = with_pickers("codex", &shot, None, None).unwrap();
+        assert_eq!(options.pickers.len(), 1);
+        let mode = &options.pickers[0];
+        assert_eq!(
+            (mode.id.as_str(), mode.current.as_deref(), mode.settable),
+            (MODE, Some("read-only"), true)
+        );
+        assert_eq!(
+            mode.choices
+                .iter()
+                .map(|choice| choice.value.as_str())
+                .collect::<Vec<_>>(),
+            ["ask", "auto", "full-access", "read-only"]
+        );
+        // A combination that is no preset has no current value but can be replaced; a running turn locks it.
+        shot.permission_mode = None;
+        shot.running = true;
+        let mode = &with_pickers("codex", &shot, None, None).unwrap().pickers[0];
+        assert_eq!((mode.current.as_deref(), mode.settable), (None, false));
+        for agent in ["pi", "omp"] {
+            assert!(with_pickers(agent, &shot, None, None).is_none(), "{agent}");
+        }
+    }
+
+    #[test]
+    fn only_claude_with_a_readable_screen_gets_claudes_pickers() {
         let screen = footer_screen(
             "⏸ manual mode on · ? for shortcuts",
             "     ● high · /effort",
@@ -578,7 +870,6 @@ mod tests {
         let options = with_pickers("claude", &shot, None, Some(&screen)).unwrap();
         assert_eq!(options.pickers.len(), 3);
         assert!(with_pickers("claude", &shot, None, None).is_none());
-        assert!(with_pickers("codex", &shot, None, Some(&screen)).is_none());
         // The labels already derived are kept.
         let labels = NativeUiOptions {
             model: Some("Opus 5.5".into()),

@@ -2,7 +2,7 @@ import { handleContextBridgeMessage } from "../contextBridge";
 import { handleNativeUiMessage } from "../nativeUi";
 import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal } from "../agentTerminals";
 import { create } from "zustand";
-import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, AccountUsage, SpendSummary, UsageRedeemResultMessage, ClientMessage, CommandEntry, FsBrowseResultMessage, ProjectSummary, ServerInfoMessage, ServerMessage, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorktreeJob, WorktreeJobStartMessage, WorktreeJobStartedMessage, WorktreeBranchDeleteMessage, WorkspaceSummary } from "@perch/shared";
+import type { HarnessModels, AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, AccountUsage, SpendSummary, UsageRedeemResultMessage, ClientMessage, CommandEntry, FsBrowseResultMessage, ProjectSummary, ServerInfoMessage, ServerMessage, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorktreeJob, WorktreeJobStartMessage, WorktreeJobStartedMessage, WorktreeBranchDeleteMessage, WorkspaceSummary } from "@perch/shared";
 import { socket } from "../ws";
 import { resyncPendingBuffersAfterReconnect, useWorkspaceFilesStore } from "../filesystemStore";
 import { forgetClosedTabs, recordClosedTab } from "../closedTabs";
@@ -164,6 +164,9 @@ export interface PerchState {
    * expose different binaries and capabilities. */
   agentManifestsByHost: Record<string, AgentManifestHostState>;
   fetchAgentManifests: (hostId?: string, update?: { providerId: string; enabled?: boolean; isDefault?: boolean }) => string | null;
+  /** Models of each installed harness on this machine, for the settings pickers; null until listed. */
+  harnessModels: HarnessModels[] | null;
+  fetchHarnessModels: () => void;
   /** Lifecycle is keyed by the durable workspace/session/provider tuple. */
   agentLifecycleByKey: Record<string, AgentLifecycleState>;
   fetchAgentLifecycle: (sessionId: string, workspaceId?: string, agentId?: string) => string | null;
@@ -846,6 +849,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   sessions: [],
   deviceId: readDeviceIdStored(),
   agentManifestsByHost: {},
+  harnessModels: null,
   agentLifecycleByKey: {},
   agentControlBySession: {},
   serverInfo: null,
@@ -905,6 +909,12 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     if (!sessionId || requestedCommands.has(sessionId)) return;
     requestedCommands.add(sessionId);
     socket.send({ type: "commands.list", sessionId });
+  },
+
+  fetchHarnessModels: () => {
+    const state = get();
+    if (!state.connected || !state.serverInfo?.capabilities?.includes("agent.models.list")) return;
+    socket.send({ type: "agent.models.list", requestId: newId() });
   },
 
   fetchAgentManifests: (hostIdParam, update) => {
@@ -2266,6 +2276,9 @@ export function handleServerMessage(msg: ServerMessage): void {
       }));
       break;
     }
+    case "agent.models.list":
+      usePerchStore.setState({ harnessModels: msg.harnesses });
+      break;
     case "agent.lifecycle": {
       const status = msg.status;
       const key = agentLifecycleKeyFor(status.key.workspaceId, status.key.sessionId, status.key.agentId);

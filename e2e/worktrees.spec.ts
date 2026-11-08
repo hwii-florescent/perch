@@ -124,6 +124,7 @@ async function createSessionForCwd(page: Page, cwd: string): Promise<void> {
   const newBtn = page.locator('[data-testid="new-session-local"]');
   await expect(newBtn).toBeEnabled({ timeout: 10000 });
   await newBtn.click();
+  await expect(page.getByTestId("new-session-dialog")).toBeVisible();
   await pickProject(page, cwd);
   // The status bar carries the resolved session cwd — proof the create landed
   // on this checkout before any worktree assertion runs.
@@ -288,7 +289,7 @@ test.describe("Git worktrees", () => {
     await page.locator('[data-testid="confirm-accept"]').click();
     // WT3 left a real agent here. Even a clean checkout must not disappear
     // underneath it, and force is not permission to discard running work.
-    await expect(popover.getByTestId("worktree-error")).toContainText("Close this nest");
+    await expect(popover.getByTestId("worktree-error")).toContainText("Close this workspace");
     expect(fs.existsSync(worktreePath)).toBe(true);
     expect(execSync("git branch", { cwd: FIXTURE, input: "" }).toString()).toContain("wt-feature");
 

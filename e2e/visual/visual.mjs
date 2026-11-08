@@ -367,11 +367,11 @@ const STATES = [
     await page.getByTestId("workspace-add-project").click().catch(() => {});
     await closeOverlays(page);
     await page.getByTestId("new-session-local").click();
-    await page.getByTestId("new-session-popover-agent").waitFor();
+    await page.getByTestId("new-session-dialog").waitFor();
   } },
   { name: "05-session-running", run: async (page, ctx) => {
-    await page.getByTestId("new-session-popover-agent").selectOption("terminal");
-    await page.getByTestId("project-option-0").click();
+    await page.getByTestId("new-session-filter").press("Enter"); // first project
+    await page.getByTestId("new-session-row-terminal").click();
     await page.getByTestId("persistent-agent-terminal").waitFor({ timeout: 30000 });
     await page.locator('[data-testid="persistent-agent-terminal"][data-terminal-id]').waitFor({ timeout: 30000 });
     await sleep(1500);
@@ -429,9 +429,9 @@ const STATES = [
   // Tab strip with two tabs: inactive tab, drag source/target, inline rename.
   // The second session is closed again by 05i so later states are unchanged.
   { name: "05f-two-tabs", run: async (page, ctx) => {
-    await page.getByTestId("tab-new").click();
-    await page.getByTestId("new-session-popover-agent").selectOption("terminal");
-    await page.getByTestId("project-option-0").click();
+    await page.getByTestId("new-session-local").click();
+    await page.getByTestId("new-session-filter").press("Enter"); // first project
+    await page.getByTestId("new-session-row-terminal").click();
     await page.waitForFunction(() => document.querySelectorAll('[data-testid^="tab-"]:not([data-testid^="tab-close"]):not([data-testid="tab-bar"]):not([data-testid="tab-new"])').length === 2, null, { timeout: 30000 });
     await page.locator('[data-testid="persistent-agent-terminal"][data-terminal-id]:visible').first().waitFor({ timeout: 30000 });
     const ids = await page.locator('[data-testid^="tab-"]:not([data-testid^="tab-close"]):not([data-testid="tab-bar"]):not([data-testid="tab-new"])').evaluateAll((els) => els.map((e) => e.getAttribute("data-testid").slice(4)));

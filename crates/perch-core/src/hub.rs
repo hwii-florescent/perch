@@ -1282,6 +1282,9 @@ impl HubManager {
                 self.pending_unicast.lock().unwrap().remove(&key);
             }
 
+            // Model lists are asked of this machine only; a remote's reply has no requester.
+            ServerMessage::AgentModelsList { .. } => {}
+
             ServerMessage::AgentLifecycleChanged { status, .. } => {
                 let _ = self
                     .hub_events_tx

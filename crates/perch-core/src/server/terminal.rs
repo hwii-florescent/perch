@@ -683,7 +683,7 @@ pub(super) fn handle_workspace_run(
                 request_id,
                 "workspace_run_failed",
                 format!(
-                    "{error}. No automatic retry; check the nest's terminals before running again."
+                    "{error}. No automatic retry; check the workspace's terminals before running again."
                 ),
                 false,
             );

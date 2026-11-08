@@ -15,9 +15,9 @@ import { usePerchStore, effectiveActiveProject, effectiveWorkspace } from "./sto
 import { activateTab, currentTabs } from "./workspaceTabs";
 import { getPaneController as getDockviewController, splitActiveTab } from "./tiledPanes";
 import { useFileTabs } from "./fileTabs";
-import { jumpToNest, newScratchpad, reopenClosedTab, stepNest } from "./workspaceNav";
+import { jumpToNest, newScratchpad, stepNest } from "./workspaceNav";
 import { requestCloseSession } from "./closeGuard";
-import { requestAddProject, requestNewTab, withSidebar } from "./appEvents";
+import { requestAddProject, requestNewSession, requestNewTab, withSidebar } from "./appEvents";
 import { browserOwner, closeBrowserById, useDrawerBrowsers } from "./drawerBrowsers";
 import { fileTabKey } from "./fileTabs";
 import { focusMainResponder, nativeBrowser, noteBrowserFocus } from "./browserNative";
@@ -110,9 +110,9 @@ shortcut("view.zoomOut", "global", ["cmd+-", "ctrl+-"], "Zoom out", () => zoomOu
 shortcut("view.zoomReset", "global", ["cmd+0", "ctrl+0"], "Reset zoom", () => zoomReset());
 
 // Tabs (browser style)
-shortcut("tabs.new", "tabs", "mod+t", "New tab (pick a harness) in this nest", () => requestNewTab());
+shortcut("tabs.new", "tabs", "mod+t", "New tab (pick a harness) in this workspace", () => requestNewTab());
 shortcut("tabs.close", "tabs", "mod+w", "Close the focused pane, file or tab (agents ask first)", () => closeCurrent());
-shortcut("tabs.reopen", "tabs", ["cmd+shift+t", "alt+shift+t"], "Reopen the last closed tab or file", () => reopenClosedTab());
+shortcut("sessions.new", "tabs", ["cmd+shift+t", "alt+shift+t"], "New session: pick a project, then an agent, terminal or file", () => requestNewSession());
 shortcut("tabs.keepOpen", "tabs", ["cmd+alt+enter", "ctrl+alt+enter"], "Keep the preview tab open (make it a regular tab)", () => {
   const { active, pin } = useFileTabs.getState();
   if (active) pin(active);
@@ -129,15 +129,15 @@ shortcut("tabs.prev", "tabs", ["cmd+shift+[", "ctrl+pageup"], "Previous tab", ()
 shortcut("nav.back", "tabs", ["ctrl+-", "alt+shift+left"], "Back to where you were", () => navBack());
 shortcut("nav.forward", "tabs", ["ctrl+shift+-", "alt+shift+right"], "Forward", () => navForward());
 
-// Nests and birdhouses (workspaces and projects)
-shortcut("nests.prev", "nests", ["ctrl+shift+up", "alt+shift+up"], "Previous nest", () => stepNest(-1));
-shortcut("nests.next", "nests", ["ctrl+shift+down", "alt+shift+down"], "Next nest", () => stepNest(1));
-const NEST_JUMPS: ShortcutRange = { id: "nests.jump", noun: "nest", label: "1…9" };
+// Workspaces and projects (the `nests.*` ids are stored in users' keybinding overrides, so they stay)
+shortcut("nests.prev", "nests", ["ctrl+shift+up", "alt+shift+up"], "Previous workspace", () => stepNest(-1));
+shortcut("nests.next", "nests", ["ctrl+shift+down", "alt+shift+down"], "Next workspace", () => stepNest(1));
+const NEST_JUMPS: ShortcutRange = { id: "nests.jump", noun: "workspace", label: "1…9" };
 for (let i = 1; i <= 9; i++) {
-  shortcut(`nests.jump${i}`, "nests", [`ctrl+shift+${i}`, `alt+shift+${i}`], `Jump to nest ${i}`, () => jumpToNest(i), { range: NEST_JUMPS });
+  shortcut(`nests.jump${i}`, "nests", [`ctrl+shift+${i}`, `alt+shift+${i}`], `Jump to workspace ${i}`, () => jumpToNest(i), { range: NEST_JUMPS });
 }
-shortcut("nests.new", "nests", "mod+n", "New nest (worktree)", () => openWorktreeMenuForActiveProject(true));
-shortcut("nests.addBirdhouse", "nests", "mod+o", "Add birdhouse (project)", () => requestAddProject());
+shortcut("nests.new", "nests", "mod+n", "New workspace (worktree)", () => openWorktreeMenuForActiveProject(true));
+shortcut("nests.addBirdhouse", "nests", "mod+o", "Add project", () => requestAddProject());
 shortcut("nests.scratchpad", "nests", ["cmd+shift+n", null], "New quickchat", () => newScratchpad());
 
 // Splits and panes (iTerm2/Ghostty)
@@ -259,7 +259,7 @@ export function shortcutFor(e: KeyboardEvent, context: boolean | ShortcutContext
 
 type HeldModifiers = Pick<KeyboardEvent, "ctrlKey" | "shiftKey" | "altKey" | "metaKey">;
 
-/** Labels for the nest-jump keys whose modifiers are currently held. */
+/** Labels for the workspace-jump keys whose modifiers are currently held. */
 export function nestShortcutHints(held: HeldModifiers | null, mac = IS_MAC): (string | null)[] {
   return SHORTCUTS.filter((s) => s.range === NEST_JUMPS).map((s) => {
     const spec = effectiveSpec(s, mac);
@@ -438,7 +438,7 @@ function newSessionInCurrentProject(): void {
 
 /** `${hostId}:${repoPath}`: the key the sidebar's `WorktreeMenu` for the
  * checkout on screen answers to. A linked worktree resolves to its project's
- * main repo, so the menu opens from any nest. */
+ * main repo, so the menu opens from any workspace. */
 function activeRepoKey(): string | null {
   const state = usePerchStore.getState();
   const workspace = effectiveWorkspace(state);

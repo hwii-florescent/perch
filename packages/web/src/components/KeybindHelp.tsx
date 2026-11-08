@@ -21,7 +21,7 @@ export interface KeybindHelpProps {
 const GROUP_LABELS: Record<KeybindGroup, string> = {
   global: "Global",
   tabs: "Tabs",
-  nests: "Nests and birdhouses",
+  nests: "Workspaces and projects",
   panes: "Splits and panes",
   terminal: "Terminal",
   leader: "Leader and follow-up keys",

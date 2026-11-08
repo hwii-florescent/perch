@@ -223,6 +223,36 @@ it("turns the sub-session summaries off and saves a model only when it changed",
   }
 });
 
+it("narrows an installed harness's models as you type and saves the one picked", async () => {
+  window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
+  const updateSettings = vi.fn();
+  const models = ["anthropic/claude-sonnet-4-5", "anthropic/claude-haiku-4-5", "openai/o4-mini"].map((id) => ({ id, label: id }));
+  usePerchStore.setState({ settingsOpen: true, settings: { theme: "perch" } as never, fetchSettings: vi.fn(), fetchHosts: vi.fn(), updateSettings, harnessModels: [{ id: "omp", models }] });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<SettingsPage />));
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="settings-nav-notifications"]')!.click());
+    const omp = host.querySelector<HTMLInputElement>('[data-testid="settings-reporter-omp-model"]')!;
+    // Harnesses the core did not list keep the plain text field.
+    expect(host.querySelector<HTMLInputElement>('[data-testid="settings-reporter-pi-model"]')!.getAttribute("role")).toBeNull();
+    await act(async () => {
+      omp.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(omp, "haiku");
+      omp.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const shown = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+    expect(shown.map((option) => option.dataset.value)).toEqual(["anthropic/claude-haiku-4-5"]);
+    expect(updateSettings).not.toHaveBeenCalled();
+    await act(async () => shown[0]!.click());
+    expect(updateSettings).toHaveBeenCalledWith({ reporterOmpModel: "anthropic/claude-haiku-4-5" });
+  } finally {
+    act(() => root.unmount());
+    host.remove();
+  }
+});
+
 it("offers the supported engines in General and follows the saved setting", async () => {
   window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
   const updateSettings = vi.fn();

@@ -7,6 +7,7 @@ import { TabBar } from "./components/TabBar";
 import { Navigator } from "./components/Navigator";
 import { ContextBridge } from "./components/ContextBridge";
 import { CloseAgentGuard } from "./components/CloseAgentGuard";
+import { NewSessionDialog } from "./components/NewSessionDialog";
 import { KeybindHelp } from "./components/KeybindHelp";
 import { Onboarding } from "./components/Onboarding";
 import { MacPermissionSetup } from "./components/MacPermissions";
@@ -33,6 +34,13 @@ const TOOLS_STORAGE_KEY = "perch.workspaceTools";
 const MAC_DESKTOP = "__TAURI_INTERNALS__" in window && /Mac/.test(navigator.platform);
 // The sidebar and drawer toggles blend into the top row and fill only on hover.
 const ICON_BUTTON = "inline-flex size-7 shrink-0 items-center justify-center rounded-ui bg-transparent p-0 text-[0.9rem] leading-none text-subtext-0 [font-family:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg";
+// Sidebar toggle inset, same in both sidebar states. Derived, not eyeballed: the traffic lights end
+// 72px into the card (glass.rs LIGHTS_LEFT 22 + 2 x 23 step + 12 diameter - 8 card inset), and the
+// toggle keeps a 12px gap on each side: 72 + 12 = 84 before it, 12 - 8 (TabBar's px-2) = 4 after it
+// (TOGGLE_AFTER). Change both together if LIGHTS_LEFT moves. Nudged 1px right of the measured
+// centre (85 / 3): the round lights read as visually heavier, so exact centre looks left-shifted.
+const TOGGLE_INSET = MAC_DESKTOP ? "pl-[85px]" : "pl-3";
+const TOGGLE_AFTER = "pr-[3px]";
 // Soft corners for the desktop chrome: every `rounded-ui` inside follows --radius-pane (base.css).
 const SOFT = "[--radius:var(--radius-pane)]";
 // The open gutter between two cards is the resize handle (ResizeHandle.tsx); the same 8px
@@ -259,7 +267,7 @@ export default function App() {
         <div className={cn("flex min-h-0 flex-1 px-2 pt-2", SOFT)} data-tauri-drag-region>
           {showSidebar && (
             <div className={cn(CARD, "w-[var(--sidebar-width,240px)]")} data-testid="sidebar-card">
-              <div className={cn("box-border flex h-11 shrink-0 items-center justify-end pr-2", MAC_DESKTOP ? "pl-[78px]" : "pl-3")} data-tauri-drag-region>
+              <div className={cn("box-border flex h-11 shrink-0 items-center justify-start", TOGGLE_INSET)} data-tauri-drag-region>
                 {sidebarToggle}
               </div>
               <Sidebar />
@@ -282,7 +290,7 @@ export default function App() {
             <div className="box-border flex h-11 shrink-0 items-center" data-tauri-drag-region>
               {/* With the sidebar closed, its toggle (and the traffic lights' room) heads the main card. */}
               {!showSidebar && (
-                <div className={cn("box-border flex shrink-0 items-center self-stretch pr-1", MAC_DESKTOP ? "pl-[78px]" : "pl-3")} data-tauri-drag-region>
+                <div className={cn("box-border flex shrink-0 items-center self-stretch", TOGGLE_INSET, TOGGLE_AFTER)} data-tauri-drag-region>
                   {sidebarToggle}
                 </div>
               )}
@@ -326,6 +334,7 @@ export default function App() {
       <SettingsPage />
       <MacPermissionSetup enabled={!onboardingOpen} />
       <Navigator open={navigatorOpen} onClose={() => setNavigatorOpen(false)} />
+      <NewSessionDialog />
       <KeybindHelp open={keybindHelpOpen} onClose={() => setKeybindHelpOpen(false)} />
       <CloseAgentGuard />
       <ContextBridge />

@@ -78,7 +78,7 @@ fn model_label(id: &str) -> String {
 }
 
 /// Orca's effort wording; a level it has no word for is shown as the provider wrote it.
-fn effort_label(value: &str) -> String {
+pub(super) fn effort_label(value: &str) -> String {
     match value {
         "minimal" => "Minimal",
         "low" => "Low",
@@ -99,6 +99,7 @@ pub(super) fn permission_mode_label(mode: &str) -> Option<&'static str> {
         "accept-edits" => "Accept edits",
         "auto" => "Approve for me",
         "full-access" => "Full access",
+        "read-only" => "Read only",
         "plan" => "Plan mode",
         _ => return None,
     })
@@ -116,9 +117,11 @@ pub fn claude_permission_mode(reported: &str) -> Option<&'static str> {
     })
 }
 
-/// The mode a Codex thread runs in, from the three fields its app-server reports (Orca's three
-/// policies; `untrusted` also asks). Codex has no edits-only mode, and any other combination, a
-/// workspace sandbox the user configured by hand for one, is unknown rather than a guess.
+/// The mode a Codex thread runs in, from the three fields its app-server reports. These are the four presets of
+/// Codex 0.166's `/permissions` list, each probed live (docs/evidence/cli-probes-2026-11.md): Ask for approval is
+/// `on-request` + `workspaceWrite` + user, Approve for me the same with `auto_review`, Full Access `never` +
+/// `dangerFullAccess`, Read Only `on-request` + `readOnly`. Any other combination, a sandbox the user configured
+/// by hand, is unknown rather than a guess.
 pub fn codex_permission_mode(
     approval_policy: &Value,
     sandbox: &Value,
@@ -130,7 +133,8 @@ pub fn codex_permission_mode(
     match (policy, sandbox, reviewer) {
         ("never", "dangerFullAccess", _) => Some("full-access"),
         ("on-request", "workspaceWrite", "auto_review") => Some("auto"),
-        ("on-request" | "untrusted", "readOnly", "user") => Some("ask"),
+        ("on-request", "workspaceWrite", "user") => Some("ask"),
+        ("on-request", "readOnly", "user") => Some("read-only"),
         _ => None,
     }
 }
@@ -224,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_modes_are_the_three_policies_and_nothing_else() {
+    fn codex_modes_are_the_four_presets_and_nothing_else() {
         let mode = |policy: &str, sandbox: &str, reviewer: &str| {
             codex_permission_mode(
                 &json!(policy),
@@ -236,14 +240,14 @@ mod tests {
             mode("never", "dangerFullAccess", "user"),
             Some("full-access")
         );
-        assert_eq!(mode("on-request", "readOnly", "user"), Some("ask"));
-        assert_eq!(mode("untrusted", "readOnly", "user"), Some("ask"));
+        assert_eq!(mode("on-request", "workspaceWrite", "user"), Some("ask"));
+        assert_eq!(mode("on-request", "readOnly", "user"), Some("read-only"));
         assert_eq!(
             mode("on-request", "workspaceWrite", "auto_review"),
             Some("auto")
         );
-        // A hand-made workspace sandbox that asks the user is not one of the three.
-        assert_eq!(mode("on-request", "workspaceWrite", "user"), None);
+        // Not a preset: a stricter approval policy, or a sandbox without approvals.
+        assert_eq!(mode("untrusted", "readOnly", "user"), None);
         assert_eq!(mode("never", "readOnly", "user"), None);
         assert_eq!(
             codex_permission_mode(&Value::Null, &Value::Null, &Value::Null),

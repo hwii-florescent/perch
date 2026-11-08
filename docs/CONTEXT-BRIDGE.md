@@ -1,6 +1,6 @@
 # Context Bridge
 
-Context Bridge brings an excerpt from a local nest into an existing agent's
+Context Bridge brings an excerpt from a local workspace into an existing agent's
 conversation without manually reconstructing its location or copying between
 surfaces. It is a CLI workflow, not an extension of Hosted chat.
 
@@ -18,7 +18,7 @@ surfaces. It is a CLI workflow, not an extension of Hosted chat.
 - **Terminal:** select output and right-click → **Ask agent about selection…**.
   In a mouse-reporting TUI, use the terminal's Shift-selection gesture.
 
-The shared dialog shows the exact prepared text, its nest identity, and an
+The shared dialog shows the exact prepared text, its workspace identity, and an
 optional question. Opening, typing a question, refreshing, copying and cancelling
 never send input, start an agent, save a file, or execute a command.
 
@@ -26,13 +26,13 @@ never send input, start an agent, save a file, or execute a command.
 the read-only preview remains selectable. An already prepared packet can still
 be copied while disconnected.
 
-Choose an agent in the same nest, review the packet, then explicitly click
+Choose an agent in the same workspace, review the packet, then explicitly click
 **Send to agent**. This starts a turn in that existing Claude CLI. **Open agent**
 returns to its tab; the original file and unsaved draft remain open.
 
 ## Safety and limits
 
-- Local nests only in v1 (`context.bridge.v1`). Remote workspaces are not
+- Local workspaces only in v1 (`context.bridge.v1`). Remote workspaces are not
   guessed from paths and never fall back to a local workspace.
 - Direct send currently supports **Claude only**. Other harnesses have Copy
   context until their native transport can prove it will not disturb an
@@ -57,7 +57,7 @@ returns to its tab; the original file and unsaved draft remain open.
   never silently truncated. Control characters are refused; Markdown fences
   are longer than any backtick run in the excerpt.
 - Review text before sharing: output and source files can contain secrets.
-  Packets include the absolute nest path and workspace UUID, including when
+  Packets include the absolute workspace path and workspace UUID, including when
   copied outside Perch. Common secret-file names get an additional warning. This is not a secret
   scanner. Only explicitly sent prompts enter the existing prompt history;
   merely prepared captures have no new persistence layer.
@@ -80,6 +80,6 @@ cd e2e && npx playwright test -c context-bridge.config.ts
 
 The isolated headless Chromium/WebKit probe verifies all four entry points,
 desktop/mobile layouts, an unsaved-draft Haiku roundtrip, stale-file and
-cross-nest refusal, CLI draft preservation, lease cleanup, deduplication and
+cross-workspace refusal, CLI draft preservation, lease cleanup, deduplication and
 refusal after Claude exits back to its shell. It pins and checks Haiku before
 the prompt, owns scratch settings/DB/hosts/perchd, and cleans up its processes.

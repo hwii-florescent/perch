@@ -5,7 +5,7 @@
 **Dated interaction proposal, not a current implementation checklist.**
 
 [DECISIONS.md](DECISIONS.md) records approval and overrides: compact sidebar
-sessions remain, naming is Birdhouse/Nest/Scratchpad, and the chrome-font change
+sessions remain, naming is Project/Nest/Scratchpad, and the chrome-font change
 still needs a trial. [ROADMAP.md](ROADMAP.md) tracks remaining work;
 [ARCHITECTURE.md](ARCHITECTURE.md) describes current behavior. Mixed local tabs/
 splits, per-viewer restoration, rich file viewing, Context Bridge, browser tabs
@@ -537,7 +537,7 @@ Do not ship arbitrary named/colorized groups in the first final-direction releas
 | Close watcher view | Detach that view; **Stop runtime for everyone…** is separate. |
 | Close last tab | Context's New Tab state. Never switch to another project or quit implicitly. |
 
-**Cmd-Shift-T is supported**, but must be truthful:
+**Superseded (2026-11): Cmd-Shift-T now opens the New session dialog; reopen has no shortcut.** If reopen is rebound, it must be truthful:
 
 - Files/folders/URLs: reopen the descriptor with recoverable position/state.
 - A closed runtime was ended. Reopen shows a stopped tab with **Start new shell** and, only when a valid provider token exists, **Resume agent conversation**.
@@ -727,7 +727,7 @@ Commands freeze the selected target when opened and revalidate on execution. Inc
 |---|---|
 | Cmd-T | New tab launcher. |
 | Cmd-W | Close active tab; pinned/dirty/running guards apply. In a modal, dismiss the modal first. |
-| Cmd-Shift-T | Reopen last closed tab descriptor. |
+| Cmd-Shift-T | New session dialog (project → harness/file). Reopen-closed-tab is unbound. |
 | Cmd-1…8 / Cmd-9 | Nth / last tab in visible strip order, including mixed types. |
 | Cmd-Shift-[ / ] | Previous/next tab in strip order. |
 | Cmd-K | Actions and open-work navigation. |

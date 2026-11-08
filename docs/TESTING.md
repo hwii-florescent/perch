@@ -105,7 +105,7 @@ Useful existing coverage (not a claim of a fresh passing run):
   `OPENAI_API_KEY` reach its TUI and pickers (choose "Use an OpenAI API key" once).
 - `sub-sessions.spec.ts` (same config; needs `perch` built beside the core): a Claude lead (haiku) that a
   person has just spoken to runs `perch spawn`, the child (luna Codex; `PERCH_E2E_CHILD=claude` makes it a
-  haiku Claude when Codex's quota is spent) is started in the same Nest with its task as its first
+  haiku Claude when Codex's quota is spent) is started in the same Workspace with its task as its first
   message, reports with `perch report`, the lead reads it with `perch list`, then `perch stop` ends it
   and the core confirms. One lead turn to start and read, one to stop, one child turn. The assertions read
   the core's SQLite file, not the models' words. Verified once with a haiku child; the Codex child's launch

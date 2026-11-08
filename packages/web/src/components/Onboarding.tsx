@@ -66,7 +66,7 @@ export function Onboarding({ onDismiss }: OnboardingProps) {
             New tab: <kbd className={KBD}>{shortcutLabel("tabs.new") ?? "Not set"}</kbd>;{" "}
             split: <kbd className={KBD}>{shortcutLabel("panes.splitRight") ?? "Not set"}</kbd>;{" "}
             first tab: <kbd className={KBD}>{shortcutLabel("tabs.jump1") ?? "Not set"}</kbd>;{" "}
-            reopen a closed tab: <kbd className={KBD}>{shortcutLabel("tabs.reopen") ?? "Not set"}</kbd>.
+            new session: <kbd className={KBD}>{shortcutLabel("sessions.new") ?? "Not set"}</kbd>.
           </li>
           <li>
             Keybind help: <kbd className={KBD}>{shortcutLabel("global.help") ?? "Not set"}</kbd>.{" "}

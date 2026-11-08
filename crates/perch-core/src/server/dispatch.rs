@@ -49,6 +49,9 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             request_id,
             host_id,
         } => agents::handle_agent_manifest_list(state, raw_text, request_id, host_id),
+        ClientMessage::AgentModelsList { request_id } => {
+            reporter::handle_models_list(state, request_id)
+        }
         ClientMessage::AgentUiGet {
             request_id,
             session_id,

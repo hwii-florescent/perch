@@ -3,7 +3,7 @@
 //! the rules are `crate::sub_sessions`, the records `db/sub_sessions.rs`.
 //!
 //! A spawn is admitted and recorded in one transaction before anything is started. The child
-//! is an ordinary session of the lead's Nest, launched like one a person opens (same
+//! is an ordinary session of the lead's Workspace, launched like one a person opens (same
 //! registration, Instructions pin, identity and native bridge), except that nobody views it
 //! and its first message is its task, passed on the agent's command line so no input lease
 //! and no typing into a prompt is involved. A launch that cannot be shown to have started or
@@ -170,7 +170,7 @@ pub(super) async fn start(
         let id = lead
             .workspace_id
             .as_deref()
-            .ok_or_else(|| fail(StatusCode::FORBIDDEN, "this session is not in a Nest"))?;
+            .ok_or_else(|| fail(StatusCode::FORBIDDEN, "this session is not in a Workspace"))?;
         app.db
             .resolve_workspace(id)
             .map_err(|error| fail(StatusCode::FORBIDDEN, error.to_string()))?
@@ -278,7 +278,7 @@ fn discard(app: &AppState, row: &SubSessionRow) {
 }
 
 /// `perch spawn --worktree`: make the child a checkout of the lead's repository, registered under
-/// the lead's Nest, and move its session and record there. Returns the directory it starts in. A
+/// the lead's Workspace, and move its session and record there. Returns the directory it starts in. A
 /// failure at any step discards the child, which has not started. `path` is the checkout's
 /// location; `None` is Perch's default (`~/.perch/worktrees/<repo>/<branch>`).
 async fn place_in_worktree(
@@ -306,7 +306,7 @@ async fn place_in_worktree(
     }
 }
 
-/// A checkout of the lead's repository for the child, registered under the lead's Nest.
+/// A checkout of the lead's repository for the child, registered under the lead's Workspace.
 async fn make_worktree(
     app: &AppState,
     parent: &crate::db::WorkspaceRow,
@@ -484,7 +484,7 @@ pub(super) fn member_report(
         });
     }
     let said = key
-        .and_then(|key| app.native_ui.get(key))
+        .and_then(|key| app.native_bridge(key))
         .and_then(|bridge| bridge.latest())
         .and_then(|latest| agent_mail::last_assistant_text(&latest));
     resolve_child_report(app, session_id, said.as_deref())
@@ -632,8 +632,7 @@ pub(super) async fn read(
         let state = reconcile(&app, &row);
         let key = key_of(&app, &row.child_session_id, &row.provider_id)?;
         let snapshot = app
-            .native_ui
-            .get(&key)
+            .native_bridge(&key)
             .and_then(|bridge| bridge.latest())
             .ok_or_else(|| {
                 fail(
@@ -1059,7 +1058,7 @@ pub(super) mod tests {
         (workspace, child)
     }
 
-    /// Deleting a lead (also what archiving its Nest does) ends its live children first, each
+    /// Deleting a lead (also what archiving its Workspace does) ends its live children first, each
     /// confirmed gone by perchd, and leaves them as ordinary sessions; a child that cannot be shown
     /// stopped keeps the lead.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1137,7 +1136,7 @@ pub(super) mod tests {
     }
 
     /// `perch spawn --worktree`: the child gets a new checkout of the lead's repository, registered
-    /// under the lead's Nest in the same Birdhouse, and its session and record move there; a repository
+    /// under the lead's Workspace in the same Project, and its session and record move there; a repository
     /// that cannot make one discards the child.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn spawn_worktree_places_the_child_in_a_checkout_under_the_leads_nest() {
@@ -1178,7 +1177,7 @@ pub(super) mod tests {
             .any(
                 |entry| std::fs::canonicalize(&entry.path).ok().as_deref() == Some(&checkout_path)
             ));
-        // Registered under the lead's Nest, in the lead's Birdhouse, and the child lives in it.
+        // Registered under the lead's Workspace, in the lead's Project, and the child lives in it.
         let session = db.get_session("child").unwrap().unwrap();
         assert_eq!(session.cwd, cwd);
         let checkout = db

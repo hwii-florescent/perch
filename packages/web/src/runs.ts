@@ -13,7 +13,7 @@ export function runInWorkspace(workspaceId: string, command: string): Promise<st
   }
   const requestId = newId();
   return new Promise((resolve, reject) => {
-    const unknown = () => finish(new Error("Run outcome is unknown. Check the nest’s terminals before running again."));
+    const unknown = () => finish(new Error("Run outcome is unknown. Check the workspace’s terminals before running again."));
     const timer = setTimeout(unknown, 20_000);
     const off = socket.onMessage((reply) => {
       if (!("requestId" in reply) || reply.requestId !== requestId) return;

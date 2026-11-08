@@ -806,7 +806,7 @@ Commands
                           characters; for more, write a file and report its path. Reading
                           from standard input also works.
   perch spawn --agent <claude|codex|pi|omp> [--model <name>] [--worktree] --task <text>
-                          Start a sub-session in this Nest: an ordinary Perch session of its
+                          Start a sub-session in this Workspace: an ordinary Perch session of its
                           own, with its own agent. The task is its first message, so make it
                           complete (up to 3000 characters; for more, write a file and name
                           its path). --worktree gives it its own git checkout. The rest of

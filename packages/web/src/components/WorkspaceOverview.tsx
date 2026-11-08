@@ -5,9 +5,10 @@ import { createPortal } from "react-dom";
 import { canReorderHost, usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
 import { isNestedIn, nestUnderLeads, orderBy, orderProjects, stepTarget, writeScope } from "../sidebarOrder";
 import { certaintyNote, needsYou, reasonLabel, useAttention } from "../attention";
-import { groupByStatus, holdFinished, STATUS_LABELS, STATUS_SECTIONS } from "../statusView";
+import { discloseSessions, groupByStatus, holdFinished, listedInSidebar, sectionOf, STATUS_LABELS, STATUS_SECTIONS, topSection, type StatusSection } from "../statusView";
+import { openNextAttention } from "../attention";
 import { StatusDot } from "./StatusDot";
-import { sessionDotState, type AgentDotState } from "../statusDot";
+import { DOT_GLYPH, sessionDotState, type AgentDotState } from "../statusDot";
 import { menuDivider, menuItem, menuPanel } from "./ui/menu";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import { button } from "./ui/button";
@@ -153,64 +154,69 @@ function readCollapsed(): string[] {
   try { return JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]") as string[]; } catch { return []; }
 }
 
-const MAX_DOTS = 3;
-type SessionView = "compact" | "list";
-const SESSION_VIEW_KEY = "perch.sidebar.sessionView";
-function readSessionView(): SessionView {
-  try { return localStorage.getItem(SESSION_VIEW_KEY) === "list" ? "list" : "compact"; } catch { return "compact"; }
-}
-
-/** Compact sessions: one harness/status badge per session, on a second line under the
- * row's name (`flex-wrap` on the row). Click switches to it, right-click
- * closes it; the tooltip names it and its state. */
-function SessionDots({ sessions, activeId, onPick, onMenu }: {
-  sessions: SessionSummary[];
-  activeId: string | null;
-  onPick: (id: string) => void;
-  onMenu: (session: SessionSummary, x: number, y: number) => void;
-}) {
-  // Desktop: up to MAX_DOTS chips sit at the right end of the row (Nests inside the Birdhouse,
-  // docs/DECISIONS.md 2026-10-24). A crowded row keeps the strip on its own line under the name,
-  // like the phone, so no session is ever hidden.
-  const inline = sessions.length <= MAX_DOTS;
-  return (
-    <span className={cn("order-last w-full min-w-0 pb-1", inline && "min-[701px]:order-none min-[701px]:ml-auto min-[701px]:w-auto min-[701px]:shrink-0 min-[701px]:self-center min-[701px]:pb-0")}>
-    <span
-      className={cn("mx-auto flex w-[85%] min-w-0 cursor-default items-stretch gap-0 overflow-hidden rounded-ui bg-surface-0 px-1", inline && "min-[701px]:mx-0 min-[701px]:w-auto min-[701px]:items-center min-[701px]:bg-transparent min-[701px]:px-0")}
-      data-testid="session-dots"
-      onClick={(event) => event.stopPropagation()}
-      onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
-    >
-      {nestUnderLeads(sessions).map((session) => (
-        <button
-          key={session.id}
-          type="button"
-          className={cn("group grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full bg-transparent p-0 [border:0] focus-visible:outline-none", inline && "min-[701px]:h-6 min-[701px]:w-6", isNestedIn(session, sessions) && "ml-1.5", session.id === activeId && "workspace-entry__session--active")}
-          data-sub-session={isNestedIn(session, sessions) || undefined}
-          data-testid={`workspace-session-${session.id}`}
-          title={`${session.title || "New session"} · ${sessionDotState(session)}`}
-          aria-label={`${session.title || "New session"}, ${sessionDotState(session)}`}
-          aria-current={session.id === activeId ? "true" : undefined}
-          onClick={(event) => { event.stopPropagation(); onPick(session.id); }}
-          onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onMenu(session, event.clientX, event.clientY); }}
-        >
-          <StatusDot session={session} className={cn("h-[18px] w-[18px] group-hover:bg-surface-0 group-focus-visible:[outline:1px_solid_var(--text)] group-focus-visible:outline-offset-1", session.id === activeId && "[outline:1px_solid_var(--text)] outline-offset-1")} />
-        </button>
-      ))}
-    </span>
-    </span>
-  );
-}
-
-type Organize = "status" | "project" | "list";
+/** How the sidebar lists work. "project" is the tree (Project → Workspace → Session), the default; the
+ * others are flat views of the same chats. A saved "workspace" (the retired two-section layout) reads as the tree. */
+type Organize = "project" | "status" | "list";
 const ORGANIZE_KEY = "perch.sidebar.organize";
-const ORGANIZE_LABELS: Record<Organize, string> = { status: "By status", project: "By project", list: "In one list" };
-/** By status unless the viewer saved another choice. */
+const ORGANIZE_LABELS: Record<Organize, string> = { project: "By project", status: "By status", list: "In one list" };
 function readOrganize(): Organize {
   try {
     const saved = localStorage.getItem(ORGANIZE_KEY);
-    return saved === "project" || saved === "list" ? saved : "status";
-  } catch { return "status"; }
+    return saved === "status" || saved === "list" ? saved : "project";
+  } catch { return "project"; }
+}
+/** The tree's order: the core's (manual, with drag and favourites) or by what needs you (no drag). */
+const SORT_KEY = "perch.sidebar.sort";
+const ACTIVE_ONLY_KEY = "perch.sidebar.activeOnly";
+const SHOW_TERMINALS_KEY = "perch.sidebar.showTerminals";
+function readFlag(key: string, on: string): boolean {
+  try { return localStorage.getItem(key) === on; } catch { return false; }
+}
+function saveFlag(key: string, value: string) {
+  try { localStorage.setItem(key, value); } catch { /* per-viewer convenience */ }
+}
+
+/** The ring colours the rest of the app uses for a state, so a section reads the same as a dot elsewhere. */
+const SECTION_STATE: Record<StatusSection, AgentDotState> = { needs: "blocked", done: "done", working: "working", idle: "idle" };
+
+/** A section's heading in By status: the state's colour as a dot (hollow for Idle, as its ring is) on a faint
+ * wash of the same colour, with the label in full text colour so contrast never depends on the hue. */
+function SectionHeading({ section, title, count, note, countLabel, testId }: { section?: StatusSection; title: string; count: number; note?: string; countLabel: string; testId: string }) {
+  const color = section ? DOT_GLYPH[SECTION_STATE[section]].color : undefined;
+  return (
+    <div
+      className={cn("mt-1.5 mb-0.5 flex items-center gap-2 rounded-ui px-3 py-[3px] text-[13px] font-semibold text-fg min-[701px]:text-[12px]", !color && "bg-surface-0")}
+      style={color ? { backgroundColor: `color-mix(in srgb, ${color} 18%, transparent)` } : undefined}
+      data-testid={testId}
+    >
+      {/* Hollow for Idle (its ring) and for the neutral sections (no state is claimed). */}
+      <span className={cn("size-2 shrink-0 rounded-full", (!color || section === "idle") && "border-[1.5px] border-overlay-1 bg-transparent")} style={color ? (section === "idle" ? { borderColor: color } : { backgroundColor: color }) : undefined} aria-hidden="true" />
+      <span>{title}</span>
+      <span className="font-medium text-subtext-0 tabular-nums" aria-label={countLabel}>{count}</span>
+      {note && <span className="min-w-0 truncate text-[0.62rem] font-normal text-subtext-0">{note}</span>}
+    </div>
+  );
+}
+
+/** The mark that says a line is a project (the tree's folder), so it reads apart from the chats under it. */
+function FolderMark() {
+  return (
+    <svg className="mr-1.5 h-3 w-3 shrink-0 text-subtext-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d="M2 5V4a1 1 0 0 1 1-1h3l2 2h5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5Z" />
+    </svg>
+  );
+}
+
+/** A folded project's most urgent state: the dot of one session in it, and how many are in that state. */
+function Rollup({ sessions, section, testId }: { sessions: SessionSummary[]; section: StatusSection; testId: string }) {
+  const lead = sessions[0];
+  if (!lead) return null;
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1" data-testid={testId} data-section={section} title={`${sessions.length} ${STATUS_LABELS[section].toLowerCase()}`}>
+      <StatusDot session={lead} className="h-[16px] w-[16px]" />
+      {sessions.length > 1 && <span className="text-[0.62rem] text-subtext-0 tabular-nums">{sessions.length}</span>}
+    </span>
+  );
 }
 
 /** Orca's hidden-worktrees card: worktrees perch discovered but did not
@@ -327,12 +333,17 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   }, []);
   function tabOrderedSessions(workspace: WorkspaceRecord): SessionSummary[] {
     return workspaceTabs({ ...usePerchStore.getState(), activeHostId: workspace.hostId, activeWorkspaceId: workspace.id }, [])
-      .flatMap((entry) => entry.kind === "session" ? [entry.session] : []);
+      .flatMap((entry) => entry.kind === "session" && agentIds.has(entry.session.id) ? [entry.session] : []);
   }
   const activeHostId = usePerchStore((state) => state.activeHostId);
   const projects = usePerchStore((state) => state.workspaceProjects);
   const workspaces = usePerchStore((state) => state.workspaces);
-  const sessions = usePerchStore((state) => state.sessions);
+  // Agents only unless asked: a plain terminal stays a tab and gets no sidebar row.
+  const [showTerminals, setShowTerminals] = useState(() => readFlag(SHOW_TERMINALS_KEY, "1"));
+  const allKnownSessions = usePerchStore((state) => state.sessions);
+  const agentBySession = usePerchStore((state) => state.cliAgentBySession);
+  const sessions = useMemo(() => allKnownSessions.filter((session) => showTerminals || listedInSidebar(session, agentBySession[session.id])), [allKnownSessions, agentBySession, showTerminals]);
+  const agentIds = useMemo(() => new Set(sessions.map((session) => session.id)), [sessions]);
   const worktreeJobs = usePerchStore((state) => state.worktreeJobs);
   const activeWorkspaceId = usePerchStore((state) => state.activeWorkspaceId);
   const snapshot = usePerchStore((state) => state.workspaceSnapshotByHost[activeHostId]);
@@ -344,7 +355,11 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const connected = usePerchStore((state) => state.connected);
   // The core's project and chat order; no drag or Move without the capability (no local-only order).
   const order = usePerchStore((state) => state.workspaceOrderByHost[state.activeHostId]);
-  const reorderable = usePerchStore((state) => canReorderHost(state, state.activeHostId));
+  const [organize, setOrganize] = useState<Organize>(readOrganize);
+  // Sorting by attention is a view of the core's order, not a new order: no drag or Move while it is on.
+  const [attentionSort, setAttentionSort] = useState(() => readFlag(SORT_KEY, "attention"));
+  const [activeOnly, setActiveOnly] = useState(() => readFlag(ACTIVE_ONLY_KEY, "1"));
+  const reorderable = usePerchStore((state) => canReorderHost(state, state.activeHostId)) && !attentionSort;
   const setWorkspaceOrder = usePerchStore((state) => state.setWorkspaceOrder);
   // Which host the Add project dialog registers on; starts as the active one.
   const [addHostId, setAddHostId] = useState(activeHostId);
@@ -461,7 +476,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     };
   }
 
-  /** Instructions live on the core that owns the folder; a remote birdhouse keeps its own there. */
+  /** Instructions live on the core that owns the folder; a remote project keeps its own there. */
   function instructionsItem(project: WorkspaceProject, scope: InstructionsScope, id: string, name: string, testId: string): MenuItem[] {
     return project.hostId === "local" && instructionsAvailable() ? [{ label: "Instructions…", testId, onSelect: () => setInstructionsFor({ scope, id, name }) }] : [];
   }
@@ -477,13 +492,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         ? [{ label: "Close all sessions", testId: `workspace-project-close-all-${project.id}`, onSelect: () => { for (const session of projectSessions) deleteSession(session.id); } }]
         : []),
       ...singleExtras(project),
-      ...(compact ? [] : [{
-        label: sessionViewStored === "compact" ? "Show session list" : "Show compact sessions",
-        testId: `workspace-project-session-view-${project.id}`,
-        onSelect: () => chooseSessionView(sessionViewStored === "compact" ? "list" : "compact"),
-      }]),
       "divider",
-      { label: "Remove birdhouse", testId: `workspace-project-remove-${project.id}`, danger: true, onSelect: () => setRemovingProject(project) },
+      { label: "Remove project", testId: `workspace-project-remove-${project.id}`, danger: true, onSelect: () => setRemovingProject(project) },
     ];
   }
 
@@ -566,14 +576,6 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     );
   }
 
-  const [organize, setOrganize] = useState<Organize>(readOrganize);
-  const [sessionViewStored, setSessionView] = useState<SessionView>(readSessionView);
-  // The phone keeps full rows: dots are too small a touch target.
-  const sessionView: SessionView = compact ? "list" : sessionViewStored;
-  function chooseSessionView(next: SessionView) {
-    setSessionView(next);
-    try { localStorage.setItem(SESSION_VIEW_KEY, next); } catch { /* per-viewer convenience */ }
-  }
   function sessionMenu(session: SessionSummary, x: number, y: number, siblings: SessionSummary[], flip = false) {
     const hostId = session.hostId ?? "local";
     const entries = workspaceTabs({ ...usePerchStore.getState(), sessionId: session.id, activeHostId: hostId, activeWorkspaceId: session.workspaceId ?? null, activeProject: { hostId, cwd: session.cwd } }, useFileTabs.getState().tabs);
@@ -709,58 +711,117 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     ? STATUS_SECTIONS.map((key) => ({ key, title: STATUS_LABELS[key], list: statusGroups[key] })).filter((section) => section.list.length > 0)
     // Not connected: what these chats were doing is unknown. Show them once, as last known, never as Working/Idle/Done.
     : allSessions.length ? [{ key: "offline", title: "Offline: last known", note: activeHostId === "local" ? "Reconnecting…" : `${sshHosts.find((host) => host.id === activeHostId)?.name ?? activeHostId}: ${hostStates[activeHostId]?.state ?? "connecting"}`, list: statusChats }] : [];
+  /** The branch or name of a session's workspace, only where its project has several (else the project says it all). */
+  function workspaceTag(session: SessionSummary): string | null {
+    const own = workspaces.find((candidate) => candidate.id === session.workspaceId);
+    if (!own || workspacesForProject(workspaces, own.projectId).filter((w) => !w.hidden).length < 2) return null;
+    return own.branch || own.name;
+  }
+  function needsReason(session: SessionSummary): string {
+    const need = needsEvents.get(session.id);
+    return need ? [reasonLabel(need), certaintyNote(need)].filter(Boolean).join(" · ") : "Waiting for you";
+  }
+  /** One chat row of the Sessions section; `detail` is the muted second line (what its group does not already say). */
+  function statusRow(session: SessionSummary, list: SessionSummary[], group: string, detail: string) {
+    return (
+      <div {...sessionRowProps(session, list, group)} className={cn("group/row flex min-w-0 items-stretch rounded-ui", isNestedIn(session, list) && NESTED_ROW, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} data-sub-session={isNestedIn(session, list) || undefined} key={session.id}>
+        <button
+          type="button"
+          className={cn(SESSION, "min-h-9 py-0 pl-[1.875rem] min-[701px]:min-h-6", session.id === sessionId ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
+          aria-current={session.id === sessionId ? "page" : undefined}
+          data-testid={`workspace-session-${session.id}`}
+          data-session={session.id}
+          title={session.cwd}
+          onClick={() => {
+            switchSession(session.id);
+            onNavigate?.();
+          }}
+        >
+          {/* The section says the state, so the row is just the harness and the name. */}
+          <StatusDot plain session={session} className="h-4 w-4" />
+          {/* One line: the name, then what it adds (the workspace, or why it needs you), muted. */}
+          <span className="flex min-w-0 flex-1 items-baseline gap-2">
+            <span className="min-w-0 shrink-[2] truncate">{session.title || "New chat"}</span>
+            {detail && <span className="min-w-0 flex-1 truncate text-[0.62rem] text-subtext-0" data-testid="status-row-detail">{detail}</span>}
+          </span>
+        </button>
+        <button
+          type="button"
+          className={SESSION_CLOSE}
+          data-testid={`workspace-session-close-${session.id}`}
+          title="Close chat"
+          aria-label={`Close ${session.title || "chat"}`}
+          onClick={() => requestCloseSession(session.id)}
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6" /></svg>
+        </button>
+      </div>
+    );
+  }
+
+  /** `list` split by project, in the order the projects are shown (Quickchat last); others under "Other". */
+  function clusterByProject(list: SessionSummary[]): { id: string; name: string; project?: WorkspaceProject; list: SessionSummary[] }[] {
+    const shown = [...visibleProjects, ...(chatsProject ? [chatsProject] : [])];
+    const known = new Set(shown.map((project) => project.id));
+    return [...shown.map((project) => ({ id: project.id, project, name: isChatsProject(project) ? "Quickchat" : project.name || basename(project.path) })), { id: "other", project: undefined, name: "Other" }].flatMap(({ id, name, project }) => {
+      const rows = list.filter((session) => (session.projectId && known.has(session.projectId) ? session.projectId : "other") === id);
+      return rows.length ? [{ id, name, project, list: rows }] : [];
+    });
+  }
+  /** The "+" at the end of a project line: a worktree menu for a git project, else a new session in its folder. */
+  function projectPlus(project: WorkspaceProject, className: string) {
+    return project.repoPath ? <WorktreeMenu hostId={project.hostId} cwd={project.repoPath} projectKey={`${project.hostId}:${project.repoPath}`} className={className} /> : (
+      <button
+        type="button"
+        className={cn("worktree-menu__btn", className)}
+        data-testid={`workspace-project-new-session-${project.id}`}
+        title="New session in this folder"
+        aria-label="New session"
+        onClick={(event) => setNewSession({ project, rect: event.currentTarget.getBoundingClientRect() })}
+      >
+        <PlusIcon />
+      </button>
+    );
+  }
+  // Projects with no agent chat yet, listed last in By status so none goes missing.
+  const emptyProjects = visibleProjects.filter((project) => !sessions.some((session) => session.projectId === project.id));
+  function openProject(project: WorkspaceProject) {
+    const first = workspacesForProject(workspaces, project.id).find((w) => !w.hidden);
+    if (first) navigateToWorkspace(first.id);
+  }
   const statusView = (
     <div className="flex flex-col gap-[2px] py-[0.2rem]" data-testid="workspace-status-view">
       {allSessions.length === 0 && <div className="px-[0.3rem] py-2 text-[0.7rem] text-subtext-0">No chats yet.</div>}
       {statusSections.map((section) => (
         <div className="flex flex-col gap-[2px]" key={section.key} data-testid={`status-section-${section.key}`}>
-          <div className="flex items-baseline gap-[0.4rem] pt-2 pr-3 pb-1 pl-3 text-[14px] font-semibold text-subtext-0 min-[701px]:text-[0.62rem] min-[701px]:tracking-[0.045em] min-[701px]:uppercase" data-testid={`status-section-title-${section.key}`}>
-            <span>{section.title}</span>
-            <span className="tabular-nums" aria-label={`${section.list.length} chats`}>{section.list.length}</span>
-            {section.note && <span className="min-w-0 truncate text-[0.62rem] font-normal tracking-normal normal-case">{section.note}</span>}
-          </div>
-          {nestUnderLeads(section.list).map((session) => {
-            const owner = projects.find((project) => project.id === session.projectId);
-            const need = section.key === "needs" ? needsEvents.get(session.id) : undefined;
-            const reason = section.key !== "needs" ? null : need ? [reasonLabel(need), certaintyNote(need)].filter(Boolean).join(" · ") : "Waiting for you";
-            const detail = [owner && !isChatsProject(owner) ? owner.name || basename(owner.path) : null, reason].filter(Boolean).join(" · ");
-            return (
-              <div {...sessionRowProps(session, section.list, `status:${section.key}`)} className={cn("group/row flex min-w-0 items-stretch rounded-ui", isNestedIn(session, section.list) && NESTED_ROW, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} data-sub-session={isNestedIn(session, section.list) || undefined} key={session.id}>
-                <button
-                  type="button"
-                  className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
-                  aria-current={session.id === sessionId ? "page" : undefined}
-                  data-testid={`workspace-session-${session.id}`}
-                  data-session={session.id}
-                  title={session.cwd}
-                  onClick={() => {
-                    switchSession(session.id);
-                    onNavigate?.();
-                  }}
-                >
-                  {section.key === "offline"
-                    ? <span className="inline-flex h-[18px] w-[18px] shrink-0 rounded-full border-[1.5px] border-overlay-1" aria-hidden="true" />
-                    : <StatusDot session={session} className="h-[18px] w-[18px]" />}
-                  <span className="grid min-w-0 flex-1">
-                    <span className={SESSION_TITLE}>{session.title || "New chat"}</span>
-                    {detail && <span className="min-w-0 truncate text-[0.62rem] text-subtext-0" data-testid="status-row-detail">{detail}</span>}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className={SESSION_CLOSE}
-                  data-testid={`workspace-session-close-${session.id}`}
-                  title="Close chat"
-                  aria-label={`Close ${session.title || "chat"}`}
-                  onClick={() => requestCloseSession(session.id)}
-                >
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6" /></svg>
-                </button>
+          <SectionHeading section={section.key === "offline" ? undefined : (section.key as StatusSection)} title={section.title} count={section.list.length} note={section.note} countLabel={`${section.list.length} chats`} testId={`status-section-title-${section.key}`} />
+          {/* Each section keeps its chats under their project, in the sidebar's project order. */}
+          {clusterByProject(section.list).map((cluster) => (
+            <div className="flex flex-col" key={cluster.id} data-testid={`status-project-${section.key}-${cluster.id}`}>
+              <div className="group/ph flex items-center pr-1 pl-3">
+                {cluster.project && !isChatsProject(cluster.project) ? <FolderMark /> : <span className="mr-1.5 w-3 shrink-0" aria-hidden="true" />}
+                <span className="min-w-0 flex-1 truncate py-[3px] text-[12.5px] font-medium text-fg" data-testid="status-project-title">{cluster.name}</span>
+                {cluster.project && !isChatsProject(cluster.project) && projectPlus(cluster.project, cn(PROJECT_ICON, "size-5"))}
               </div>
-            );
-          })}
+              {nestUnderLeads(cluster.list).map((session) => statusRow(session, cluster.list, `status:${section.key}:${cluster.id}`, [workspaceTag(session), section.key === "needs" ? needsReason(session) : null].filter(Boolean).join(" · ")))}
+            </div>
+          ))}
         </div>
       ))}
+      {emptyProjects.length > 0 && (
+        <div className="flex flex-col" data-testid="status-no-sessions">
+          <SectionHeading title="No sessions" count={emptyProjects.length} countLabel={`${emptyProjects.length} projects`} testId="status-no-sessions-title" />
+          {emptyProjects.map((project) => (
+            <div className="group/ph flex min-w-0 items-center rounded-ui hover:bg-surface-1" key={project.id} data-testid={`status-empty-project-${project.id}`}>
+              <button type="button" className={cn(SESSION, "min-h-9 gap-0 py-0 pl-3 text-fg min-[701px]:min-h-6")} title={project.path} onClick={() => openProject(project)}>
+                <FolderMark />
+                <span className={cn(SESSION_TITLE, "text-[12.5px] font-medium")}>{project.name || basename(project.path)}</span>
+              </button>
+              {projectPlus(project, cn(PROJECT_ICON, "size-5"))}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 
@@ -853,6 +914,80 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         );
   })();
 
+  // One tree for everything: Project → Workspace → Session. A workspace lists the sessions that matter
+  // (Needs you, Done, Working, the open one) and folds the idle rest into "+N idle"; a folded project says
+  // its most urgent state. By status and In one list are flat views of the same chats.
+  const needsIds = useMemo(() => new Set(needsEvents.keys()), [needsEvents]);
+  const needingCount = hostReachable ? statusGroups.needs.length : 0;
+  const [idleOpen, setIdleOpen] = useState<string[]>([]);
+  /** The session rows under a workspace row. The open workspace lists all its chats; others fold the idle ones
+   * unless the viewer unfolded them. An unreachable host's last-known states are not trusted to hide anything. */
+  function workspaceSessionRows(workspace: WorkspaceRecord, list: SessionSummary[]): ReactElement | null {
+    const unfolded = workspace.id === activeWorkspaceId || idleOpen.includes(workspace.id) || !hostReachable;
+    const { shown, idle } = discloseSessions(list, needsIds, held, sessionId, unfolded);
+    if (!shown.length && !idle) return null;
+    const toggle = (
+      <button
+        type="button"
+        className={cn("min-h-7 w-full cursor-pointer rounded-ui bg-transparent py-1 pr-3 pl-[1.9rem] text-left text-[0.68rem] text-subtext-0 [border:0] [font-family:inherit] hover:text-fg", FOCUS)}
+        aria-expanded={idleOpen.includes(workspace.id)}
+        data-testid={`workspace-idle-${workspace.id}`}
+        onClick={() => setIdleOpen((current) => (current.includes(workspace.id) ? current.filter((id) => id !== workspace.id) : [...current, workspace.id]))}
+      >
+        {idle ? `+${idle} idle` : "Hide idle"}
+      </button>
+    );
+    return (
+      <>
+        {shown.length > 0 && sessionRows(shown, workspace.id)}
+        {(idle > 0 || (idleOpen.includes(workspace.id) && workspace.id !== activeWorkspaceId && hostReachable)) && toggle}
+      </>
+    );
+  }
+  /** Most urgent section of a workspace's chats, as an index into STATUS_SECTIONS (Idle when nothing is known). */
+  function urgency(list: SessionSummary[]): number {
+    const top = hostReachable ? topSection(list, needsIds, held) : null;
+    return top ? STATUS_SECTIONS.indexOf(top) : STATUS_SECTIONS.length - 1;
+  }
+  const filtering = activeOnly && hostReachable;
+  const workspaceLive = (w: WorkspaceRecord) => !filtering || w.id === activeWorkspaceId || urgency(sessionsForWorkspace(sessions, w)) < STATUS_SECTIONS.length - 1;
+  // Projects as shown: those with something live when filtering, and by attention (favourites first) when sorting.
+  const shownProjects = visibleProjects
+    .filter((project) => !filtering || workspacesForProject(workspaces, project.id).some((w) => !w.hidden && workspaceLive(w)))
+    .map((project, at) => ({ project, at, urgent: Math.min(STATUS_SECTIONS.length, ...workspacesForProject(workspaces, project.id).map((w) => urgency(sessionsForWorkspace(sessions, w)))) }))
+    .sort((a, b) => (attentionSort ? Number(b.project.favorite) - Number(a.project.favorite) || a.urgent - b.urgent : 0) || a.at - b.at)
+    .map((entry) => entry.project);
+  const organizeButton = (
+    <button
+      type="button"
+      className={cn(segment(), "grid w-9 place-items-center p-0 min-[701px]:my-[3px] min-[701px]:rounded-ui [@media(max-width:700px)]:h-[2.75rem] [@media(max-width:700px)]:w-[2.75rem] [@media(max-width:700px)]:min-w-[2.75rem]")}
+      title="Organize sidebar"
+      aria-label="Organize sidebar"
+      aria-haspopup="menu"
+      data-testid="workspace-organize"
+      onClick={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        const tick = (on: boolean) => (on ? "✓ " : "   ");
+        setMenu({ x: rect.left, y: rect.bottom + 4, label: "Organize sidebar", items: [
+          ...(Object.keys(ORGANIZE_LABELS) as Organize[]).map((key) => (
+            { label: `${tick(organize === key)}${ORGANIZE_LABELS[key]}`, testId: `workspace-organize-${key}`, onSelect: () => chooseOrganize(key) }
+          )),
+          "divider" as const,
+          { label: `${tick(showTerminals)}Show terminals`, testId: "workspace-show-terminals", onSelect: () => { setShowTerminals(!showTerminals); saveFlag(SHOW_TERMINALS_KEY, showTerminals ? "0" : "1"); } },
+          ...(organize === "project" ? [
+            "divider" as const,
+            { label: `${tick(attentionSort)}Sort by attention`, testId: "workspace-sort-attention", onSelect: () => { setAttentionSort(!attentionSort); saveFlag(SORT_KEY, attentionSort ? "manual" : "attention"); } },
+            { label: `${tick(activeOnly)}Show active only`, testId: "workspace-active-only", onSelect: () => { setActiveOnly(!activeOnly); saveFlag(ACTIVE_ONLY_KEY, activeOnly ? "0" : "1"); } },
+          ] : []),
+        ] });
+      }}
+    >
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M2.5 4.5h11M4.5 8h7M6.5 11.5h3" />
+      </svg>
+    </button>
+  );
+
   return (
     <section
       className={cn(
@@ -861,47 +996,37 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         compact ? "min-h-full flex-1" : "min-h-0 flex-1",
       )}
       data-testid="workspace-overview"
-      aria-label="Birdhouses and nests"
+      aria-label="Projects and workspaces"
     >
       <div className="flex shrink-0 items-stretch justify-between gap-[0.45rem] pl-[0.75rem] min-[701px]:pr-[3px] min-[701px]:pl-4">
         <div className="flex min-w-0 items-center gap-[0.45rem] py-[0.55rem]">
-          <span className="text-[0.72rem] font-bold tracking-[0.08em] text-fg uppercase min-[701px]:text-[0.62rem] min-[701px]:font-semibold min-[701px]:tracking-[0.045em] min-[701px]:text-subtext-0">{organize === "project" ? "Birdhouses" : "Sessions"}</span>
+          <span className="text-[0.72rem] font-bold tracking-[0.08em] text-fg uppercase min-[701px]:text-[0.62rem] min-[701px]:font-semibold min-[701px]:tracking-[0.045em] min-[701px]:text-subtext-0">{organize === "project" ? "Projects" : "Sessions"}</span>
           <span className="text-[0.65rem] whitespace-nowrap text-subtext-0 min-[701px]:hidden">
             {organize !== "project"
               ? `${allSessions.length} session${allSessions.length === 1 ? "" : "s"}`
-              : visibleProjects.length ? `${visibleProjects.length} birdhouse${visibleProjects.length === 1 ? "" : "s"}` : "No birdhouses"}
+              : visibleProjects.length ? `${visibleProjects.length} project${visibleProjects.length === 1 ? "" : "s"}` : "No projects"}
           </span>
         </div>
         <div className="flex shrink-0 items-stretch">
-          <button
-            type="button"
-            className={cn(segment(), "grid w-9 place-items-center p-0 min-[701px]:my-[3px] min-[701px]:rounded-ui [@media(max-width:700px)]:h-[2.75rem] [@media(max-width:700px)]:w-[2.75rem] [@media(max-width:700px)]:min-w-[2.75rem]")}
-            title="Organize sidebar"
-            aria-label="Organize sidebar"
-            aria-haspopup="menu"
-            data-testid="workspace-organize"
-            onClick={(event) => {
-              const rect = event.currentTarget.getBoundingClientRect();
-              setMenu({ x: rect.left, y: rect.bottom + 4, label: "Organize sidebar", items: [
-                ...(Object.keys(ORGANIZE_LABELS) as Organize[]).map((key) => (
-                  { label: `${organize === key ? "✓ " : "   "}${ORGANIZE_LABELS[key]}`, testId: `workspace-organize-${key}`, onSelect: () => chooseOrganize(key) }
-                )),
-                "divider" as const,
-                { label: `${sessionViewStored === "compact" ? "✓ " : "   "}Compact sessions`, testId: "workspace-sessions-compact", onSelect: () => chooseSessionView("compact") },
-                { label: `${sessionViewStored === "list" ? "✓ " : "   "}Session list`, testId: "workspace-sessions-list", onSelect: () => chooseSessionView("list") },
-              ] });
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M2.5 4.5h11M4.5 8h7M6.5 11.5h3" />
-            </svg>
-          </button>
+          {/* Across every project: how many chats need you, and one click to the next. */}
+          {needingCount > 0 && (
+            <button
+              type="button"
+              className={cn("my-[3px] cursor-pointer self-center rounded-ui bg-transparent px-2 py-[0.15rem] text-[0.68rem] font-medium text-accent [border:0] [font-family:inherit] hover:bg-surface-1 [@media(max-width:700px)]:min-h-[2.75rem]", FOCUS)}
+              data-testid="workspace-needs-you"
+              title="Open the next chat that needs you"
+              onClick={() => { openNextAttention(); onNavigate?.(); }}
+            >
+              {needingCount} need{needingCount === 1 ? "s" : ""} you
+            </button>
+          )}
+          {organizeButton}
           <button
             type="button"
             className={cn(segment(), "gap-1 px-[0.6rem] text-[0.72rem] font-medium min-[701px]:my-[3px] min-[701px]:rounded-ui [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.65rem]")}
             data-testid="workspace-add-project"
-            title="Add birdhouse"
-            aria-label="Add birdhouse"
+            title="Add project"
+            aria-label="Add project"
             onClick={() => { setAddHostId(activeHostId); setAddOpen((open) => !open); }}
           >
             <PlusIcon size={12} />
@@ -911,14 +1036,14 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       </div>
 
       {addOpen && (
-        <Dialog title="Add birdhouse" onClose={() => setAddOpen(false)} testId="workspace-add-form">
+        <Dialog title="Add project" onClose={() => setAddOpen(false)} testId="workspace-add-form">
           <label className="grid gap-[0.16rem] text-[0.7rem] text-subtext-0">
             <span>Name <em className="text-overlay-1 not-italic">optional</em></span>
             <input
               className="w-full min-w-0 rounded-ui bg-surface-0 px-[0.5rem] py-[0.4rem] text-fg focus:[outline:1px_solid_var(--accent)]"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="Birdhouse name"
+              placeholder="Project name"
               data-testid="workspace-project-name"
             />
           </label>
@@ -962,8 +1087,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       {organize === "project" && visibleProjects.length === 0 && snapshot?.state !== "loading" && (
         <div className="grid justify-items-start gap-[0.32rem] px-3 py-[1.1rem] text-[0.68rem] text-subtext-0">
           <span className="text-[1.3rem] leading-none text-accent" aria-hidden="true">＋</span>
-          <strong className="text-[0.77rem] text-fg">Add a birdhouse</strong>
-          <span>A birdhouse keeps its nests, sessions and files together.</span>
+          <strong className="text-[0.77rem] text-fg">Add a project</strong>
+          <span>A project keeps its workspaces, sessions and files together.</span>
           {!addOpen && (
             <button type="button" className={button({ variant: "soft", size: "sm", className: "mt-[0.18rem] text-fg" })} onClick={() => setAddOpen(true)} data-testid="workspace-empty-add">
               Register folder
@@ -973,7 +1098,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       )}
       <div className="flex min-h-0 flex-1 flex-col gap-[2px] overflow-y-auto px-[3px] py-[3px] [&>*]:shrink-0" data-testid="project-list">
           {organize !== "project" && !showNestHints ? (organize === "list" ? listView : statusView) : <>
-          {visibleProjects.map((project) => {
+          {shownProjects.map((project) => {
             const allWorkspaces = workspacesForProject(workspaces, project.id);
             const projectWorkspaces = allWorkspaces.filter((w) => !w.hidden);
             const hiddenWorkspaces = allWorkspaces.filter((w) => w.hidden);
@@ -985,8 +1110,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             const shortcutHint = single ? nestHint(single.id) : null;
             const projectSessions = sessionsForProject(project.id);
             // With nothing to fold away, the header opens the checkout instead.
-            const collapsible = single ? sessionView === "list" && projectSessions.length > 0 : true;
-            const showHeaderDots = projectSessions.length > 0 && (projectCollapsed || (single && sessionView === "compact"));
+            const collapsible = !single;
+            // Folded, a project still says what needs you.
+            const foldedTop = projectCollapsed && hostReachable ? topSection(projectSessions, needsIds, held) : null;
+            const foldedSessions = foldedTop && foldedTop !== "idle" ? projectSessions.filter((s) => sectionOf(s, needsIds, held) === foldedTop) : [];
             const onHeaderClick = () => (collapsible || !single ? toggleCollapsed(project.id) : navigateToWorkspace(single.id));
             // Reorder inside the favourites or the rest; the whole project is the drop target.
             const projectDnd = dnd("project", project.id, project.favorite ? "favorites" : "projects");
@@ -999,7 +1126,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
               >
                 <div
                   {...withDrag(longPress((x, y) => setMenu({ x, y, label: "Project actions", items: projectMenu(project) })), renamingProjectId === project.id ? {} : projectDnd.handle)}
-                  className={cn("group/ph relative flex cursor-pointer flex-wrap items-stretch rounded-ui hover:bg-surface-1", HOLDABLE, single && "workspace-entry", single && single.id === activeWorkspaceId && (sessionView === "compact" || projectCollapsed || projectSessions.length === 0) && "bg-surface-1")}
+                  className={cn("group/ph relative flex cursor-pointer flex-wrap items-stretch rounded-ui hover:bg-surface-1", HOLDABLE, single && "workspace-entry", single && single.id === activeWorkspaceId && (projectCollapsed || projectSessions.length === 0) && "bg-surface-1")}
                   data-testid={single ? `workspace-entry-${single.id}` : undefined}
                   onClick={(event) => {
                     if (renamingProjectId === project.id || (event.target as HTMLElement).closest("button, input, a")) return;
@@ -1056,15 +1183,15 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   {shortcutHint}
                 </button>
                 )}
-                {showHeaderDots && (
-                  <SessionDots sessions={allWorkspaces.flatMap(tabOrderedSessions)} activeId={sessionId} onPick={pickSession} onMenu={(session, x, y) => sessionMenu(session, x, y, allWorkspaces.flatMap(tabOrderedSessions))} />
+                {foldedTop && foldedSessions.length > 0 && (
+                  <span className="flex items-center self-center pr-1"><Rollup sessions={foldedSessions} section={foldedTop} testId={`project-rollup-${project.id}`} /></span>
                 )}
                 <button
                   type="button"
                   className={cn(PROJECT_ICON, shortcutHint && "invisible")}
                   data-testid={`workspace-project-menu-${project.id}`}
-                  title="Birdhouse actions"
-                  aria-label="Birdhouse actions"
+                  title="Project actions"
+                  aria-label="Project actions"
                   aria-haspopup="menu"
                   onClick={(event) => {
                     const rect = event.currentTarget.getBoundingClientRect();
@@ -1073,18 +1200,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 >
                   <EllipsisIcon />
                 </button>
-                {project.repoPath ? <WorktreeMenu hostId={project.hostId} cwd={project.repoPath} projectKey={`${project.hostId}:${project.repoPath}`} className={cn(HEADER_PLUS, shortcutHint && "invisible")} /> : (
-                  <button
-                    type="button"
-                    className={cn("worktree-menu__btn", HEADER_PLUS, shortcutHint && "invisible")}
-                    data-testid={`workspace-project-new-session-${project.id}`}
-                    title="New session in this folder"
-                    aria-label="New session"
-                    onClick={(event) => setNewSession({ project, rect: event.currentTarget.getBoundingClientRect() })}
-                  >
-                    <PlusIcon />
-                  </button>
-                )}
+                {projectPlus(project, cn(HEADER_PLUS, shortcutHint && "invisible"))}
                 </div>
                 {(!projectCollapsed || (single && !collapsible)) && (allWorkspaces.length > 0 || projectJobs.length > 0) && (
                   <div className="workspace-project__workspaces flex flex-col gap-[2px]">
@@ -1100,15 +1216,17 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                         if (parent?.parentWorkspaceId) children.set(parent.id, [...(children.get(parent.id) ?? []), w]);
                         else roots.push(w);
                       }
+                      // Active-only keeps a workspace that is open or has something going on, and the parent of one.
+                      const keep = (w: WorkspaceRecord): boolean => workspaceLive(w) || (children.get(w.id) ?? []).some(keep);
                       const renderWorkspace = (workspace: WorkspaceRecord, depth: number): ReactElement => {
                       const workspaceActive = workspace.id === activeWorkspaceId;
                       const workspaceSessions = sessionsForWorkspace(sessions, workspace);
-                      const nested = children.get(workspace.id) ?? [];
+                      const nested = (children.get(workspace.id) ?? []).filter(keep);
                       return (
                         <div className="flex flex-col gap-[2px]" data-testid={`workspace-node-${workspace.id}`} key={workspace.id}>
                         <div
                           {...longPress((x, y) => setMenu({ x, y, label: "Workspace actions", items: workspaceMenu(project, workspace) }))}
-                          className={cn("workspace-entry group/entry relative cursor-pointer rounded-ui", HOLDABLE, sessionView === "compact" && workspaceActive && "bg-surface-1")}
+                          className={cn("workspace-entry group/entry relative cursor-pointer rounded-ui", HOLDABLE)}
                           data-testid={`workspace-entry-${workspace.id}`}
                           onClick={(event) => {
                             if (renamingId === workspace.id || (event.target as HTMLElement).closest("button, input, a")) return;
@@ -1139,7 +1257,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               onBlur={() => setRenamingId(null)}
                             />
                           ) : (
-                          <div className={cn("flex flex-wrap items-stretch rounded-ui hover:bg-surface-1", workspaceActive && (sessionView === "compact" || workspaceSessions.length === 0) && "bg-surface-1")}>
+                          <div className={cn("flex flex-wrap items-stretch rounded-ui hover:bg-surface-1", workspaceActive && workspaceSessions.length === 0 && "bg-surface-1")}>
                           <button
                             type="button"
                             className={cn(
@@ -1174,10 +1292,6 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               {workspace.branch && workspace.branch !== (workspace.name || basename(workspace.path)) && <span className={cn(SPAN, "min-w-0 shrink-[3]")}>{workspace.branch}</span>}
                             </span>
                             {workspace.dirty && <span className={DOT} title="Uncommitted changes" aria-label="Uncommitted changes">●</span>}
-                            {/* A collapsed nest keeps only its session count; the active one lists them below. */}
-                            {sessionView === "list" && !workspaceActive && !compact && workspaceSessions.length > 0 && (
-                              <span className="shrink-0 text-[0.62rem] text-subtext-0 tabular-nums" data-testid={`workspace-session-count-${workspace.id}`} title={`${workspaceSessions.length} sessions`}>{workspaceSessions.length}</span>
-                            )}
                             {nestHint(workspace.id)}
                             {/* Only what needs attention; "ready" is the norm. */}
                             {(workspace.pinned || workspace.state === "sleeping") && (
@@ -1186,9 +1300,6 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               </span>
                             )}
                           </button>
-                          {sessionView === "compact" && workspaceSessions.length > 0 && (
-                            <SessionDots sessions={tabOrderedSessions(workspace)} activeId={sessionId} onPick={pickSession} onMenu={(session, x, y) => sessionMenu(session, x, y, tabOrderedSessions(workspace))} />
-                          )}
                           </div>
                           )}
                           {workspace.state === "sleeping" && (
@@ -1200,7 +1311,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               Restore
                             </button>
                           )}
-                          {sessionView === "list" && workspaceSessions.length > 0 && (workspaceActive || compact) && sessionRows(tabOrderedSessions(workspace), workspace.id)}
+                          {workspaceSessions.length > 0 && workspaceSessionRows(workspace, tabOrderedSessions(workspace))}
                         </div>
                         {nested.length > 0 && depth < 8 && (
                           <div className={`${WORKSPACE_TREE} ml-[0.9rem]`} data-testid={`workspace-children-${workspace.id}`}>
@@ -1222,13 +1333,16 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                                 Restore
                               </button>
                             )}
-                            {sessionView === "list" && !projectCollapsed && sessionsForWorkspace(sessions, single).length > 0 && sessionRows(tabOrderedSessions(single), single.id)}
+                            {!projectCollapsed && sessionsForWorkspace(sessions, single).length > 0 && workspaceSessionRows(single, tabOrderedSessions(single))}
                           </>
                         );
                       }
                       return (
                         <div className={WORKSPACE_TREE} data-testid="workspace-tree-root">
-                          {roots.map((workspace) => renderWorkspace(workspace, 0))}
+                          {(attentionSort
+                            ? [...roots].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || urgency(sessionsForWorkspace(sessions, a)) - urgency(sessionsForWorkspace(sessions, b)))
+                            : roots
+                          ).filter(keep).map((workspace) => renderWorkspace(workspace, 0))}
                         </div>
                       );
                     })()}

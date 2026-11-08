@@ -127,33 +127,23 @@ it("workspace background picks it, while its badge and rename input keep their o
   expect(focus).toHaveBeenCalledExactlyOnceWith("tree");
   expect(switchSession).toHaveBeenCalledExactlyOnceWith("session");
   focus.mockClear(); switchSession.mockClear();
-  click(get("workspace-entry-tree").querySelector('[data-testid="session-dots"]')!);
-  expect(focus).not.toHaveBeenCalled();
-  expect(switchSession).not.toHaveBeenCalled();
   click(get("workspace-session-session"));
   expect(switchSession).toHaveBeenCalledExactlyOnceWith("session");
   expect(focus).not.toHaveBeenCalled();
   act(() => usePerchStore.setState({ sessionId: session.id }));
   const button = get("workspace-session-session");
-  expect(button.classList.contains("rounded-full")).toBe(true);
-  expect(button.classList.contains("bg-overlay-0")).toBe(false);
-  expect(button.classList.contains("h-8")).toBe(true);
+  expect(button.getAttribute("aria-current")).toBe("page");
+  expect(button.parentElement!.classList.contains("bg-surface-1")).toBe(true);
   expect(button.querySelector(".agent-status-dot")!.classList.contains("h-[18px]")).toBe(true);
-  expect(get("session-dots").classList.contains("bg-surface-0")).toBe(true);
   expect(get("workspace-entry-tree").classList.contains("rounded-ui")).toBe(true);
-  expect(get("workspace-entry-tree").classList.contains("bg-surface-1")).toBe(true);
-  const badge = button.querySelector(".agent-status-dot")!;
-  expect(badge.classList.contains("outline-offset-1")).toBe(true);
-  expect(badge.classList.contains("[outline:1px_solid_var(--text)]")).toBe(true);
-  expect(badge.classList.contains("bg-panel-bg")).toBe(true);
-  expect(badge.className).not.toContain("bg-overlay-0");
+  expect(get("workspace-entry-tree").classList.contains("bg-surface-1")).toBe(false);
   act(() => get("workspace-entry-tree").querySelector("strong")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
   click(get("workspace-rename-tree"));
   expect(focus).not.toHaveBeenCalled();
   expect(get("workspace-entry-main").querySelector("strong")!.parentElement!.className).toContain("items-baseline");
 });
 
-it("identifies visible workspaces with checkout icons and nests without connecting rails", () => {
+it("identifies visible workspaces with checkout icons and workspaces without connecting rails", () => {
   const nested = { ...worktree, id: "nested-tree", path: "/repo-nested", name: "nested", parentWorkspaceId: "tree" };
   const laterSibling = { ...worktree, id: "later-tree", path: "/repo-later", name: "later" };
   const lastParent = { ...worktree, id: "last-parent", path: "/repo-last", name: "last", parentWorkspaceId: "main" };
@@ -206,7 +196,7 @@ it("identifies visible workspaces with checkout icons and nests without connecti
   focus.mockClear(); switchSession.mockClear();
 });
 
-it("a single-checkout project selects from its background, but not from its session bar", () => {
+it("a single-checkout project selects from its background, but not from its session rows", () => {
   usePerchStore.setState({ workspaces: [workspace], sessions: [{ ...session, workspaceId: workspace.id, cwd: workspace.path }], activeWorkspaceId: workspace.id });
   render(<WorkspaceOverview />);
   expect(orderedNests().map(({ id }) => id)).toEqual(["main"]);
@@ -221,22 +211,18 @@ it("a single-checkout project selects from its background, but not from its sess
   click(get("workspace-entry-main"));
   expect(focus).toHaveBeenCalledExactlyOnceWith("main");
   focus.mockClear(); switchSession.mockClear();
-  click(get("session-dots"));
-  expect(focus).not.toHaveBeenCalled();
-  expect(switchSession).not.toHaveBeenCalled();
   click(get("workspace-session-session"));
   expect(switchSession).toHaveBeenCalledExactlyOnceWith("session");
   expect(focus).not.toHaveBeenCalled();
 });
 
-it.each(["single", "worktree", "collapsed"])("%s workspace badges follow the strip, including live drag reordering", (kind) => {
+it.each(["single", "worktree"])("%s workspace session rows follow the strip, including live drag reordering", (kind) => {
   const owner = kind === "single" ? workspace : worktree;
   const older = { ...session, workspaceId: owner.id, cwd: owner.path };
   const newer = { ...older, id: "newer", createdAt: 2 };
   usePerchStore.setState({ workspaces: kind === "single" ? [workspace] : [workspace, worktree], sessions: [newer, older], sessionId: newer.id, activeWorkspaceId: owner.id });
   render(<><WorkspaceOverview /><TabBar /></>);
-  if (kind === "collapsed") click(get("project-toggle-project"));
-  const badgeIds = () => [...get("session-dots").querySelectorAll("button")].map((button) => button.dataset.testid!.replace("workspace-session-", ""));
+  const badgeIds = () => [...host.querySelectorAll<HTMLElement>('.workspace-entry__sessions [data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])')].map((button) => button.dataset.testid!.replace("workspace-session-", ""));
   const tabIds = () => [...host.querySelectorAll('.tab-bar__tab[data-testid^="tab-"]')].map((tab) => tab.getAttribute("data-testid")!.replace("tab-", ""));
   expect(badgeIds()).toEqual([older.id, newer.id]);
   expect(badgeIds()).toEqual(tabIds());

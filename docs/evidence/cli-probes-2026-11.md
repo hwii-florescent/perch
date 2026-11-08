@@ -68,8 +68,17 @@ not found).
 - `turn/completed` with `status: "interrupted"` marks an interrupt. `thread/settings/updated` and
   `thread/resume` carry model, effort, `approvalPolicy`, `sandbox(Policy)`, `approvalsReviewer`.
 - `/model` is a two-step TUI list (model, then reasoning level; `enter` saves a default, `s` is
-  session-only) over the account's own models. `/permissions` is numbered; "Full Access" asks
-  "Enable full access?". No picker was built because auto-confirming a risk dialog was not approved.
+  session-only) over the account's own models.
+- `/permissions` (probed 2026-11-07, 0.166.0, one `gpt-5.6-luna` turn for the app-server side) is a
+  numbered list under "Update Model Permissions", the active row marked `(current)`; a digit picks it
+  and applies to **this session only** (`~/.codex/config.toml` untouched). Its four presets and what
+  `thread/settings/updated` then reports (`approvalPolicy` / `sandboxPolicy.type` / `approvalsReviewer`):
+  Ask for approval = `on-request` / `workspaceWrite` / `user`; Approve for me = the same with
+  `auto_review`; Full Access = `never` / `dangerFullAccess`; Read Only = `on-request` / `readOnly` /
+  `user`. Full Access first asks "Enable full access?" (`1. Yes, continue anyway`, `2. Cancel`). The
+  notification arrives for a connection that joined the thread with `thread/resume`, which needs the
+  thread's first turn to have run ("no rollout found" before it). The picker is built (owner
+  approved, 2026-11-08): the web confirms Full access first, then the core answers that dialog.
 - Reporter: `-m gpt-5.6-luna -s read-only --ephemeral` with features disabled prints only the final
   message; tokens on stderr (1,891 for a trivial prompt). `codex debug prompt-input` shows ~52 KB of
   model input by default, ~32 KB trimmed; the rest is Codex's own tool text. `gpt-6-luna` exists

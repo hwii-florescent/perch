@@ -1,9 +1,9 @@
-//! Instructions store: one row per Birdhouse (`project`) or Nest (`workspace`), and the
+//! Instructions store: one row per Project (`project`) or Workspace (`workspace`), and the
 //! snapshot each session pinned at its first launch. Rules and composition live in
 //! `crate::instructions`; this file only persists them.
 //!
 //! A pin is written once per session and never rewritten, so wake and resume launch with the
-//! text the session started with even after the Birdhouse's Instructions change. A session
+//! text the session started with even after the Project's Instructions change. A session
 //! that started with nothing to inject keeps an empty pin for the same reason.
 use super::*;
 use crate::instructions::{self, Instructions, Pinned, Source};
@@ -36,13 +36,13 @@ fn get_locked(conn: &Connection, scope: &str, id: &str) -> anyhow::Result<(Instr
 }
 
 impl HistoryDb {
-    /// The Instructions saved for a Birdhouse or Nest, with the revision that identifies them.
+    /// The Instructions saved for a Project or Workspace, with the revision that identifies them.
     pub fn get_instructions(&self, scope: &str, id: &str) -> anyhow::Result<(Instructions, i64)> {
         anyhow::ensure!(SCOPES.contains(&scope), "unknown Instructions scope");
         get_locked(&self.conn.lock().unwrap(), scope, id)
     }
 
-    /// Save a Birdhouse's or Nest's Instructions. The revision rises only when the content
+    /// Save a Project's or Workspace's Instructions. The revision rises only when the content
     /// changed. Refused when the target does not exist or any session it covers would exceed
     /// the shared character cap.
     pub fn set_instructions(
@@ -63,7 +63,7 @@ impl HistoryDb {
                 ))
                 .optional()?
                 .is_some(),
-                "Birdhouse not found"
+                "Project not found"
             );
             let mut stmt = tx.prepare("SELECT id FROM workspaces WHERE project_id = ?1")?;
             let nests: Vec<String> = stmt
@@ -83,9 +83,10 @@ impl HistoryDb {
                     |row| row.get(0),
                 )
                 .optional()?
-                .context("Nest not found")?;
-            let (birdhouse, _) = get_locked(&tx, "project", &project)?;
-            instructions::check_combined(&birdhouse, &next).map_err(anyhow::Error::msg)?;
+                .context("Workspace not found")?;
+            let (project_instructions, _) = get_locked(&tx, "project", &project)?;
+            instructions::check_combined(&project_instructions, &next)
+                .map_err(anyhow::Error::msg)?;
         }
         let (current, revision) = get_locked(&tx, scope, id)?;
         if current == next {
@@ -218,7 +219,7 @@ mod tests {
         .unwrap()
     }
 
-    /// A project with one Nest and one session in it, as `create_session_on_host` leaves them.
+    /// A project with one Workspace and one session in it, as `create_session_on_host` leaves them.
     fn seeded(db: &HistoryDb) -> (String, String, String) {
         let conn = db.conn.lock().unwrap();
         conn.execute(
@@ -274,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn the_cap_is_shared_by_birdhouse_and_nest_in_both_directions() {
+    fn the_cap_is_shared_by_project_and_nest_in_both_directions() {
         let db = db();
         let (project, nest, _) = seeded(&db);
         let big = "x".repeat(instructions::MAX_CHARS - 10);
@@ -284,7 +285,7 @@ mod tests {
             .is_err());
         db.set_instructions("workspace", &nest, &"y".repeat(8), &[])
             .unwrap();
-        // Growing the Birdhouse now would push the Nest's sessions over.
+        // Growing the Project now would push the Workspace's sessions over.
         assert!(db
             .set_instructions(
                 "project",
@@ -303,12 +304,12 @@ mod tests {
     fn a_session_pins_its_first_launch_and_wake_never_sees_later_edits() {
         let db = db();
         let (project, nest, session) = seeded(&db);
-        db.set_instructions("project", &project, "Birdhouse rule", &[])
+        db.set_instructions("project", &project, "Project rule", &[])
             .unwrap();
-        db.set_instructions("workspace", &nest, "Nest rule", &["/ref".into()])
+        db.set_instructions("workspace", &nest, "Workspace rule", &["/ref".into()])
             .unwrap();
         let pinned = db.pin_session_instructions(&session).unwrap().unwrap();
-        assert_eq!(pinned.text, "Birdhouse rule\n\nNest rule");
+        assert_eq!(pinned.text, "Project rule\n\nWorkspace rule");
         assert_eq!(
             pinned.sources,
             [
@@ -333,7 +334,7 @@ mod tests {
         // A session started afterwards gets the new text.
         assert_eq!(
             db.pin_session_instructions("s2").unwrap().unwrap().text,
-            "Changed\n\nNest rule"
+            "Changed\n\nWorkspace rule"
         );
     }
 
@@ -362,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn removing_a_birdhouse_removes_its_and_its_nests_instructions() {
+    fn removing_a_project_removes_its_and_its_nests_instructions() {
         let db = db();
         let (project, nest, _) = seeded(&db);
         db.set_instructions("project", &project, "a", &[]).unwrap();

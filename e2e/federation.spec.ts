@@ -262,13 +262,13 @@ async function createRemoteSessionViaPicker(page: Page, hostId: string, agent: s
   const newBtn = page.locator(`[data-testid="new-session-${hostId}"]`);
   await expect(newBtn).toBeEnabled({ timeout: 5000 });
   await newBtn.click();
-  const picker = page.getByTestId("new-session-popover-agent");
-  await expect(picker).toBeEnabled({ timeout: 10_000 });
-  await choose(picker, agent);
-  const noneOpt = page.locator('[data-testid="project-option-none"]');
-  await expect(noneOpt).toBeVisible({ timeout: 5000 });
-  await noneOpt.click();
-  await expect(noneOpt).not.toBeVisible({ timeout: 3000 });
+  const dialog = page.getByTestId("new-session-dialog");
+  await expect(dialog).toBeVisible({ timeout: 10_000 });
+  await page.locator('[data-testid="new-session-row-none"], [data-testid^="new-session-row-"][title$="/.perch/scratch"]').first().click();
+  const agentRow = page.getByTestId(`new-session-row-${agent}`);
+  await expect(agentRow).toBeEnabled({ timeout: 10_000 });
+  await agentRow.click();
+  await expect(dialog).not.toBeVisible({ timeout: 3000 });
   await expect
     .poll(async () => {
       const id = await page.evaluate(() => localStorage.getItem("perch.sessionId"));

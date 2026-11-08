@@ -248,7 +248,7 @@ describe("direct shortcuts", () => {
     usePerchStore.setState({ settings: { keybindings: {} } as never });
     const entries = keybindEntries(true);
     expect(entries.filter((k) => k.group === "tabs" && k.description.startsWith("Jump to tab")).map((k) => k.keys)).toEqual(["⌘1…8"]);
-    expect(entries.some((k) => k.description === "New nest (worktree)")).toBe(true);
+    expect(entries.some((k) => k.description === "New workspace (worktree)")).toBe(true);
     expect(entries.some((k) => k.group === "leader")).toBe(true);
     usePerchStore.setState({ settings: { keybindings: { "tabs.jump2": "cmd+alt+2" } } as never });
     expect(keybindEntries(true).filter((k) => k.group === "tabs" && /^Jump to tab \d$/.test(k.description))).toHaveLength(8);

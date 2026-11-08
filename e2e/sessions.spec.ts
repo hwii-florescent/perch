@@ -41,7 +41,7 @@ test.describe("Session lifecycle", () => {
   test("S1. New session offers projects and Chats, never a folder browser", async ({ page }) => {
     await open(page);
     await page.getByTestId("new-session-local").click();
-    await expect(page.getByTestId("project-option-none")).toBeVisible();
+    await expect(page.getByTestId("new-session-dialog")).toBeVisible();
     await expect(page.locator('[data-testid="dir-browser"]')).toHaveCount(0);
     await page.keyboard.press("Escape");
 

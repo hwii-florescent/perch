@@ -113,10 +113,13 @@ export default function (pi: any) {
     let usage;
     try { usage = ctx.getContextUsage?.(); } catch { usage = undefined; }
     const context = usage && usage.tokens > 0 && usage.contextWindow > 0 ? { usedTokens: usage.tokens, windowTokens: usage.contextWindow } : undefined;
+    let effort;
+    try { effort = pi.getThinkingLevel?.(); } catch { effort = undefined; }
     return {
       type: "snapshot", version: 1, revision: ++revision, pid: process.pid,
       providerSessionId: ctx.sessionManager.getSessionFile() ?? ctx.sessionManager.getSessionId(),
       cwd: ctx.cwd, model: ctx.model?.id ?? null,
+      effort: typeof effort === "string" && effort ? clip(effort, 64) : null,
       running,
       blocked: running && (asking.size > 0 || approvals > 0 || uiPrompts > 0),
       context,
@@ -260,6 +263,7 @@ export default function (pi: any) {
     server.unref();
   });
   pi.on("session_shutdown", stop);
+  pi.on("model_select", (_event: any, context: any) => { ctx = context; schedule(0); });
   for (const name of ["agent_start", "agent_end", "session_tree", "session_branch", "session_compact"]) {
     pi.on(name, (_event: any, context: any) => {
       ctx = context;
@@ -282,6 +286,7 @@ export default function (pi: any) {
     pi.on("tool_approval_resolved", (_event: any, context: any) => { ctx = context ?? ctx; approvals = Math.max(0, approvals - 1); schedule(0); });
   }
   if (PROVIDER === "pi") {
+    pi.on("thinking_level_select", (_event: any, context: any) => { ctx = context; schedule(0); });
     pi.on("ui_prompt_start", (_event: any, context: any) => { ctx = context ?? ctx; uiPrompts++; schedule(0); });
     pi.on("ui_prompt_end", (_event: any, context: any) => { ctx = context ?? ctx; uiPrompts = Math.max(0, uiPrompts - 1); schedule(0); });
   }

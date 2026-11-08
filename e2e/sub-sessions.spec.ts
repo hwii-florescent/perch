@@ -1,6 +1,6 @@
 /**
  * Live check of sub-sessions (`perch spawn`, `list`, `stop`): a Claude lead (haiku) that a person
- * has just spoken to starts a Codex child (luna) in the same Nest, the child reports, the lead reads
+ * has just spoken to starts a Codex child (luna) in the same Workspace, the child reports, the lead reads
  * that report back with `perch list`, then stops the child and the core confirms it. One lead turn
  * to start and read, one to stop, one child turn; isolated core and daemon, see docs/TESTING.md.
  * What the core records is read from its SQLite file, not from what any model said.
@@ -105,7 +105,7 @@ test("a lead starts a child, reads its report, and stops it with the stop confir
     const reply = await ui.locator('[data-native-role="assistant"]').last().innerText();
     await testInfo.attach("lead-reply", { body: reply, contentType: "text/plain" });
 
-    // What the core recorded: one child, under this lead, in this Nest, started by the person's turn.
+    // What the core recorded: one child, under this lead, in this Workspace, started by the person's turn.
     const rows = sql(fixture, "select child_session_id, parent_session_id, workspace_id, provider_id, model, state from sub_sessions").split("\n").filter(Boolean);
     expect(rows, "exactly one sub-session").toHaveLength(1);
     const [child, parent, childNest, provider, model, state] = rows[0].split("|");

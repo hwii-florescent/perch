@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SessionSummary } from "@perch/shared";
-import { groupByStatus, holdFinished, nextNeeding, sectionOf, sessionsNeedingYou } from "./statusView";
+import { discloseSessions, groupByStatus, holdFinished, topSection, nextNeeding, sectionOf, sessionsNeedingYou } from "./statusView";
 
 const session = (id: string, init: Partial<SessionSummary> = {}) => ({ id, title: id, cwd: "/p", createdAt: 0, status: "idle", ...init }) as SessionSummary;
 const none = new Set<string>();
@@ -74,5 +74,33 @@ describe("sessionsNeedingYou / nextNeeding", () => {
     expect(nextNeeding(["a", "b", "c"], "c")).toBe("a");
     expect(nextNeeding(["a", "b"], "x")).toBe("a");
     expect(nextNeeding(["a"], "a")).toBeNull();
+  });
+});
+
+describe("topSection", () => {
+  it("is the most urgent section among the sessions, null for none", () => {
+    expect(topSection([], none, null)).toBeNull();
+    expect(topSection([session("i"), session("w", { status: "running" })], none, null)).toBe("working");
+    expect(topSection([session("w", { status: "running" }), session("d", { unseen: true })], none, null)).toBe("done");
+    expect(topSection([session("w", { status: "running" }), session("b", { status: "running", blocked: true })], none, null)).toBe("needs");
+    expect(topSection([session("i")], none, null)).toBe("idle");
+  });
+});
+
+describe("discloseSessions", () => {
+  const list = [session("idle1"), session("work", { status: "running" }), session("idle2"), session("open")];
+  it("lists what matters and the open chat, and counts the idle rest", () => {
+    const { shown, idle } = discloseSessions(list, none, null, "open", false);
+    expect(shown.map((s) => s.id)).toEqual(["work", "open"]);
+    expect(idle).toBe(2);
+  });
+  it("lists everything when asked, and keeps the lead of a listed sub-session", () => {
+    expect(discloseSessions(list, none, null, null, true)).toEqual({ shown: list, idle: 0 });
+    const lead = session("lead");
+    const child = session("child", { status: "running", parentSessionId: "lead" });
+    expect(discloseSessions([lead, session("other"), child], none, null, null, false).shown.map((s) => s.id)).toEqual(["lead", "child"]);
+  });
+  it("a chat held in Done by reading stays listed", () => {
+    expect(discloseSessions([session("read")], none, "read", null, false)).toEqual({ shown: [session("read")], idle: 0 });
   });
 });

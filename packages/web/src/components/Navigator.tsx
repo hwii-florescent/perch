@@ -249,7 +249,7 @@ export function Navigator({ open, onClose }: NavigatorProps) {
 
         <div className="flex-1 overflow-y-auto py-[0.3rem]" ref={listRef}>
           {runError && <p className="m-0 px-4 py-2 text-[0.78rem] text-red" role="alert">{runError}</p>}
-          {runMode && <p className="m-0 px-4 py-2 text-[0.78rem] text-subtext-0" role="status">{!connected ? "Reconnect to run commands." : !workspace ? "Select a nest first." : !supportsRun ? "Run needs an updated local core. Remote owned runs are not supported yet." : "Enter a shell command after >. You’ll confirm the host, folder and command before it starts in a new terminal."}</p>}
+          {runMode && <p className="m-0 px-4 py-2 text-[0.78rem] text-subtext-0" role="status">{!connected ? "Reconnect to run commands." : !workspace ? "Select a workspace first." : !supportsRun ? "Run needs an updated local core. Remote owned runs are not supported yet." : "Enter a shell command after >. You’ll confirm the host, folder and command before it starts in a new terminal."}</p>}
           {commands.map((command, index) => <button key={command.id} type="button"
             className={row(index === selected)}
             data-testid={`navigator-command-${command.id}`} data-selected={index === selected}

@@ -84,8 +84,8 @@ test("file icons and Git snapshots stay honest across themes, with centered usag
       });
       for (const center of [geometry.usage, geometry.text]) expect(Math.abs(center - geometry.footer)).toBeLessThanOrEqual(0.5);
       expect(geometry.overflow).toBe(false);
-      const birdhouse = page.getByTestId(`workspace-entry-${workspaceId}`);
-      const surface = await birdhouse.evaluate((element) => {
+      const project = page.getByTestId(`workspace-entry-${workspaceId}`);
+      const surface = await project.evaluate((element) => {
         const probe = document.createElement("span");
         probe.style.backgroundColor = "var(--surface-1)";
         element.append(probe);
@@ -93,9 +93,9 @@ test("file icons and Git snapshots stay honest across themes, with centered usag
         probe.remove();
         return color;
       });
-      await expect(birdhouse).toHaveCSS("background-color", surface);
-      await birdhouse.hover();
-      await expect(birdhouse).toHaveCSS("background-color", surface);
+      await expect(project).toHaveCSS("background-color", surface);
+      await project.hover();
+      await expect(project).toHaveCSS("background-color", surface);
       await page.mouse.move(0, 0);
       await expect(row("src/App.tsx")).toHaveCSS("font-size", "13px");
       expect((await row("src/App.tsx").boundingBox())!.height).toBe(22);

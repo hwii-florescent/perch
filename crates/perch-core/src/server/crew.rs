@@ -48,7 +48,7 @@ fn member_of(
         .and_then(|key| app.agent_runtime.snapshot(key).ok());
     let snapshot = key
         .as_ref()
-        .and_then(|key| app.native_ui.get(key))
+        .and_then(|key| app.native_bridge(key))
         .and_then(|bridge| bridge.latest());
     let blocked = state
         .as_ref()
@@ -71,7 +71,16 @@ fn member_of(
             .map_or_else(wall_clock_millis, |state| state.last_transition_ms as i64);
         (asked, at)
     });
-    let can_message = RECEIVERS.contains(&provider)
+    // What can receive is the agent on screen, not the one the tab was started with.
+    // (`None`: it left, so there is nobody to message.)
+    let on_screen = match &key {
+        Some(key) => app
+            .agent_runtime
+            .bridge_key(key)
+            .map(|agent| agent.agent_id),
+        None => Some(provider.to_string()),
+    };
+    let can_message = on_screen.is_some_and(|agent| RECEIVERS.contains(&agent.as_str()))
         && app.db.live_incarnation(session_id).ok().flatten().is_some()
         && key
             .as_ref()

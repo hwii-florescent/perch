@@ -1,5 +1,5 @@
 /**
- * workspaceNav.ts — navigation between workspaces ("nests") outside React:
+ * workspaceNav.ts — navigation between workspaces outside React:
  * the sidebar and the keyboard shortcuts (`keybinds.ts`) share it, so a
  * keystroke lands exactly where a click would.
  */
@@ -60,9 +60,9 @@ function favoritesThenRecent(a: WorkspaceProject, b: WorkspaceProject): number {
   return b.updatedAt - a.updatedAt;
 }
 
-/** The active host's nests in the sidebar's order: favourite projects first,
+/** The active host's workspaces in the sidebar's order: favourite projects first,
  * then by recent activity, then Quickchat (the Chats workspace) last, so it is one more
- * stop for the nest keys without renumbering the projects. Hidden worktrees left out.
+ * stop for the workspace keys without renumbering the projects. Hidden worktrees left out.
  * ponytail: a worktree nested under another renders under it in the sidebar
  * but sorts flat here; port the sidebar's parent grouping if that matters. */
 export function orderedNests(): WorkspaceRecord[] {
@@ -72,7 +72,7 @@ export function orderedNests(): WorkspaceRecord[] {
     .flatMap((project) => workspacesForProject(state.workspaces, project.id).filter((workspace) => !workspace.hidden));
 }
 
-/** Previous/next nest, wrapping. */
+/** Previous/next workspace, wrapping. */
 export function stepNest(dir: 1 | -1): void {
   const nests = orderedNests();
   if (nests.length < 2) return;
@@ -84,7 +84,7 @@ export function stepNest(dir: 1 | -1): void {
   if (next) navigateToWorkspace(next.id);
 }
 
-/** The Nth (1-indexed) nest. No-op out of range. */
+/** The Nth (1-indexed) workspace. No-op out of range. */
 export function jumpToNest(n: number): void {
   const nest = orderedNests()[n - 1];
   if (nest) navigateToWorkspace(nest.id);
@@ -101,9 +101,9 @@ export function newScratchpad(): void {
   openEmptyWorkspace(chats.hostId, workspace?.path ?? chats.path);
 }
 
-/** Cmd+Shift+T: bring back the most recently closed tab: a file or review opens again,
- * a terminal or agent starts its harness again in its nest (a fresh session, not the old
- * process). A tab whose nest is gone is skipped. */
+/** Bring back (no shortcut bound since Cmd+Shift+T became New session) the most recently closed tab: a file or review opens again,
+ * a terminal or agent starts its harness again in its workspace (a fresh session, not the old
+ * process). A tab whose workspace is gone is skipped. */
 export function reopenClosedTab(): void {
   const state = usePerchStore.getState();
   const nests = new Set(state.workspaces.flatMap((workspace) => (workspace.state === "archived" ? [] : [workspace.id])));

@@ -104,7 +104,7 @@ function resize(delta: number) {
 
 let pendingSplit = false;
 /** Split the active tab with a new Terminal tab, placed exactly as if dragged onto that side of
- * it. The session is matched to the captured nest/host. */
+ * it. The session is matched to the captured workspace/host. */
 export function splitActiveTab(direction: "right" | "below", targetId = currentTabs().activeId) {
   const activeId = targetId;
   const state = usePerchStore.getState();

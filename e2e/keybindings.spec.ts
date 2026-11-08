@@ -37,7 +37,7 @@ async function openLocalPicker(page: Page): Promise<void> {
   const btn = page.locator('[data-testid="new-session-local"]');
   await expect(btn).toBeEnabled({ timeout: 10000 });
   await btn.click();
-  await expect(page.locator('[data-testid="project-option-none"]')).toBeVisible({ timeout: 5000 });
+  await expect(page.getByTestId("new-session-dialog")).toBeVisible({ timeout: 5000 });
 }
 
 /** Start a plain shell session in Chats, named `title` through the tab's

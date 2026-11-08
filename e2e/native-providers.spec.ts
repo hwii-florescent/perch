@@ -92,8 +92,8 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
       await expect(current.getByTestId(`cli-start-agent-${provider}`)).toHaveCount(1);
       if (provider === "pi") {
         await current.getByTestId("new-session-local").click();
-        await choose(current.getByTestId("new-session-popover-agent"), "pi");
-        await current.getByTestId("project-option-none").click();
+        await current.locator('[data-testid="new-session-row-none"], [data-testid^="new-session-row-"][title$="/.perch/scratch"]').first().click();
+        await current.getByTestId("new-session-row-pi").click();
       } else {
         await startFromPanel(current, { agent: provider });
       }

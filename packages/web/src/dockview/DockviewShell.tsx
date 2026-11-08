@@ -77,7 +77,7 @@ function PaneTab(props: IDockviewPanelHeaderProps) {
     const sessionId = typeof props.params?.sessionId === "string" ? props.params.sessionId : s.sessionId;
     if (!sessionId) return "claude";
     const session = s.sessions.find((candidate) => candidate.id === sessionId);
-    return s.cliAgentBySession[sessionId] ?? session?.cliProviderId ?? "claude";
+    return session?.currentProviderId ?? s.cliAgentBySession[sessionId] ?? session?.cliProviderId ?? "claude";
   });
   const showAgentBadge = props.api.id === "chat" && paneLabelsEnabled;
   return (

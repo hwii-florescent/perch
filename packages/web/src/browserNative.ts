@@ -63,7 +63,7 @@ export function focusMainResponder(target: EventTarget | null): void {
  * or divider drag would stall over one (Orca sets `pointer-events: none` on its webviews; a native
  * child webview has no such switch). While any drag holds this, every page is hidden
  * (`WorkspaceBrowser` reads `passthroughActive`) and the pane's placeholder takes the pointer.
- * Returns an idempotent release; holds nest.
+ * Returns an idempotent release; holds workspace.
  * ponytail: the page is blank during the drag; a snapshot placeholder would need a native capture.
  */
 let holds = 0;

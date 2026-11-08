@@ -718,7 +718,7 @@ fn worktree_remove_preflight(db: &HistoryDb, path: &str) -> anyhow::Result<()> {
             .iter()
             .any(|session| session.workspace_id.as_deref() == Some(&workspace.id));
         anyhow::ensure!(!has_tabs,
-            "Close this nest's terminal and agent tabs before deleting its worktree; their processes must be confirmed stopped");
+            "Close this workspace's terminal and agent tabs before deleting its worktree; their processes must be confirmed stopped");
     }
     // Includes daemon work whose core attachment was lost; never equate a
     // failed lookup with permission to remove its working directory.
@@ -1355,7 +1355,7 @@ mod worktree_registration_tests {
         assert!(worktree_remove_preflight(&db, &root.to_string_lossy())
             .unwrap_err()
             .to_string()
-            .contains("Close this nest"));
+            .contains("Close this workspace"));
         db.delete_session("still-open").unwrap();
         let update = crate::db::FileBufferUpdate {
             content: "valuable draft".into(),

@@ -13,7 +13,7 @@
 //! The model is the provider's own CLI in one-shot mode with no tools, so it can read nothing and
 //! run nothing; what it returns is a claim, checked only for its shape.
 use crate::native_ui::transcript::{self, NativeUiBlock};
-use crate::protocol::NativeUiSnapshot;
+use crate::protocol::{HarnessModel, NativeUiSnapshot};
 use serde_json::Value;
 
 /// The longest summary kept, in characters.
@@ -489,6 +489,87 @@ pub fn parse_codex(stdout: &str, stderr: &str) -> Result<Reply, String> {
     })
 }
 
+/// The command that lists the models a harness offers, or `None` for Claude, whose CLI has no
+/// such command: it takes the aliases below or a full name.
+pub fn list_invocation(runner: Runner) -> Option<Invocation> {
+    let args: &[&str] = match runner {
+        Runner::Claude => return None,
+        Runner::Codex => &["debug", "models"],
+        Runner::Pi => &["--list-models"],
+        Runner::Omp => &["models", "--json"],
+    };
+    Some(Invocation {
+        program: runner.provider(),
+        args: args.iter().map(|arg| arg.to_string()).collect(),
+    })
+}
+
+/// Claude's aliases; each follows the newest model of its family.
+pub fn claude_models() -> Vec<HarnessModel> {
+    [("haiku", "Haiku"), ("sonnet", "Sonnet"), ("opus", "Opus")]
+        .map(|(id, label)| HarnessModel {
+            id: id.into(),
+            label: format!("{label} (latest)"),
+        })
+        .into()
+}
+
+/// The models in a listing command's output, keeping only names the settings would accept.
+/// Anything unparseable is an empty list, never an error: the settings page then has no choices
+/// and keeps its text field.
+pub fn parse_model_list(runner: Runner, stdout: &str) -> Vec<HarnessModel> {
+    let model = |id: &str, label: &str| {
+        crate::sub_sessions::check_model(id)
+            .is_ok()
+            .then(|| HarnessModel {
+                id: id.into(),
+                label: label.into(),
+            })
+    };
+    let entries = || {
+        serde_json::from_str::<Value>(stdout)
+            .ok()
+            .and_then(|json| json.get("models")?.as_array().cloned())
+            .unwrap_or_default()
+    };
+    let text =
+        |entry: &Value, key: &str| entry.get(key).and_then(Value::as_str).map(str::to_string);
+    match runner {
+        Runner::Claude => claude_models(),
+        // Hidden entries are internal.
+        Runner::Codex => entries()
+            .iter()
+            .filter(|entry| text(entry, "visibility").as_deref() == Some("list"))
+            .filter_map(|entry| {
+                let slug = text(entry, "slug")?;
+                model(
+                    &slug,
+                    &text(entry, "display_name").unwrap_or_else(|| slug.clone()),
+                )
+            })
+            .collect(),
+        // A table: `provider  model  context  …`, with a header row.
+        Runner::Pi => stdout
+            .lines()
+            .skip(1)
+            .filter_map(|line| {
+                let mut columns = line.split_whitespace();
+                let selector = format!("{}/{}", columns.next()?, columns.next()?);
+                model(&selector, &selector)
+            })
+            .collect(),
+        // Other kinds are not chat models.
+        Runner::Omp => entries()
+            .iter()
+            .filter(|entry| text(entry, "kind").as_deref() == Some("chat"))
+            .filter_map(|entry| {
+                let selector = text(entry, "selector")?;
+                model(&selector, &selector)
+            })
+            .collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -842,5 +923,30 @@ mod tests {
         assert_eq!(reply.usage.input, 1891);
         assert_eq!(parse_codex("ok", "").unwrap().usage.input, 0);
         assert!(parse_codex("  \n", stderr).is_err());
+    }
+
+    #[test]
+    fn each_harnesss_model_listing_is_read_and_unsafe_names_are_dropped() {
+        let ids = |runner, out: &str| {
+            parse_model_list(runner, out)
+                .into_iter()
+                .map(|m| m.id)
+                .collect::<Vec<_>>()
+        };
+        let codex = r#"{"models":[{"slug":"gpt-6-luna","display_name":"GPT-6-Luna","visibility":"list"},
+            {"slug":"gpt-reserve","display_name":"x","visibility":"hide"},
+            {"slug":"--bad","display_name":"x","visibility":"list"}]}"#;
+        assert_eq!(ids(Runner::Codex, codex), ["gpt-6-luna"]);
+        let pi =
+            "provider  model  context\nanthropic  claude-haiku-4-5  200K\nopenai  o4-mini  200K\n";
+        assert_eq!(
+            ids(Runner::Pi, pi),
+            ["anthropic/claude-haiku-4-5", "openai/o4-mini"]
+        );
+        let omp = r#"{"models":[{"kind":"chat","selector":"apple/on-device"},{"kind":"image","selector":"x/y"}]}"#;
+        assert_eq!(ids(Runner::Omp, omp), ["apple/on-device"]);
+        assert!(ids(Runner::Codex, "not json").is_empty());
+        assert!(list_invocation(Runner::Claude).is_none());
+        assert_eq!(ids(Runner::Claude, ""), ["haiku", "sonnet", "opus"]);
     }
 }

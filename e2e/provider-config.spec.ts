@@ -89,7 +89,7 @@ test("configured providers retain identity and isolation across desktop and mobi
     for (const current of [page, phone]) {
       await expect(current.getByTestId("cli-start-agent-fixture-missing")).toHaveCount(0);
       await current.getByTestId("cli-manage-agents").click();
-      await expect(current.locator(".agent-catalog__row")).toHaveCount(40);
+      await expect(current.locator('[data-testid^="agent-catalog-"]')).toHaveCount(40);
       await expect(current.getByRole("region", { name: "Available to install", exact: true }).getByTestId("agent-catalog-fixture-missing")).toBeVisible();
       await expect(current.getByTestId("agent-catalog-opencode").getByRole("link")).toHaveAttribute("href", /^https:\/\//);
       const missing = current.getByTestId("agent-catalog-fixture-missing");
@@ -118,9 +118,9 @@ test("configured providers retain identity and isolation across desktop and mobi
     await expect(desktopBeta.getByText("Default", { exact: true })).toBeVisible();
     // The host's default agent is the first button.
     await expect(phone.locator('[data-testid^="cli-start-agent-"]').first()).toHaveAttribute("data-testid", "cli-start-agent-fixture-beta");
-    await page.getByRole("searchbox", { name: "Search agents" }).fill("claude");
-    await expect(page.locator(".agent-catalog__row")).toHaveCount(3);
-    await page.getByRole("searchbox", { name: "Search agents" }).fill("");
+    await page.getByTestId("settings-search").fill("claude");
+    await expect(page.locator('[data-testid^="agent-catalog-"]')).toHaveCount(3);
+    await page.getByTestId("settings-search").fill("");
     await page.locator(".settings-modal__body").evaluate((element) => { element.scrollTop = 0; });
     await page.screenshot({ path: path.join(shots, `agent-catalog-desktop-${testInfo.project.name}.png`) });
     await phone.getByTestId("cli-manage-agents").click();
@@ -161,7 +161,7 @@ test("configured providers retain identity and isolation across desktop and mobi
     await expect(desktopTerminal.locator(".xterm-rows")).toContainText("reply_fixture-alpha_alpha_message");
     await expect(mobileTerminal.locator(".xterm-rows")).toContainText("reply_fixture-beta_beta_message");
     await expect(page.getByTestId("chat-tab-agent-badge")).toContainText("fixture-alpha");
-    await expect(page.getByRole("region", { name: "Birdhouses and nests", exact: true }).getByRole("button", { name: "alpha_message", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Projects and workspaces", exact: true }).getByRole("button", { name: "alpha_message", exact: true })).toBeVisible();
     await expect(desktopTerminal.locator(".xterm-rows")).not.toContainText("beta_message");
     await expect(mobileTerminal.locator(".xterm-rows")).not.toContainText("alpha_message");
     await phone.reload({ waitUntil: "networkidle" });

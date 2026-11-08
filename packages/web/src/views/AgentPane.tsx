@@ -24,8 +24,9 @@ export function AgentPane({ sessionId: sessionIdProp }: { sessionId?: string } =
   const activeHostId = usePerchStore((s) => s.activeHostId);
   const session = usePerchStore((s) => (sessionId ? s.sessions.find((candidate) => candidate.id === sessionId) : undefined));
   const cliAgent = usePerchStore((s) => (sessionId ? s.cliAgentBySession[sessionId] : undefined)) ?? session?.cliProviderId ?? "claude";
-  // An agent typed into a Terminal tab is the tab's chat provider while it runs.
-  const chatAgent = cliAgent === "terminal" ? session?.chatProviderId : cliAgent;
+  // An agent typed into the tab's shell is its chat provider while it runs: in a Terminal tab, and in a
+  // picker-launched tab whose own CLI has exited back to the shell.
+  const chatAgent = session?.chatProviderId ?? (cliAgent === "terminal" ? undefined : cliAgent);
   const owningHostId = session?.hostId ?? activeHostId;
   const capabilities = usePerchStore((s) => (owningHostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[owningHostId]));
   const manifests = usePerchStore((s) => s.agentManifestsByHost[owningHostId]);
@@ -51,7 +52,7 @@ export function AgentPane({ sessionId: sessionIdProp }: { sessionId?: string } =
       ) : !ready ? (
         <CliStartPanel />
       ) : chatMode === "ui" && nativeUiAvailable ? (
-        <NativeCliChat key={`${sessionId}-${chatAgent}`} sessionId={sessionId} providerId={chatAgent!} terminalProviderId={cliAgent} />
+        <NativeCliChat key={`${sessionId}-${chatAgent}-${session?.chatProviderId ?? ""}`} sessionId={sessionId} providerId={chatAgent!} terminalProviderId={cliAgent} />
       ) : chatMode === "ui" && nativeUiPending ? (
         <div className="p-4 text-[12px] text-subtext-0" role="status">Checking agent…</div>
       ) : (

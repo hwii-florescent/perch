@@ -882,6 +882,22 @@ pub struct AgentLifecycleKey {
 /// A bounded provider descriptor and executable availability result.  The
 /// `reason` field explains an unavailable executable without exposing a shell
 /// command or environment value.
+/// One model a harness offers: `id` is what its `--model` takes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessModel {
+    pub id: String,
+    pub label: String,
+}
+
+/// An installed harness (`claude`, `codex`, `pi`, `omp`) and its models; empty when it could not be listed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessModels {
+    pub id: String,
+    pub models: Vec<HarnessModel>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentManifestSummary {
@@ -1284,7 +1300,7 @@ pub enum ClientMessage {
     #[serde(rename = "browser.suggest", rename_all = "camelCase")]
     BrowserSuggest { request_id: String, query: String },
 
-    /// Read the Instructions of a Birdhouse (`scope: "project"`) or Nest (`"workspace"`) on
+    /// Read the Instructions of a Project (`scope: "project"`) or Workspace (`"workspace"`) on
     /// this core (capability `instructions.v1`). Answered with `instructions.state`.
     #[serde(rename = "instructions.get", rename_all = "camelCase")]
     InstructionsGet {
@@ -1373,7 +1389,7 @@ pub enum ClientMessage {
         generation: Option<u64>,
     },
 
-    /// Save a Birdhouse's or Nest's Instructions (text and reference folders). New sessions
+    /// Save a Project's or Workspace's Instructions (text and reference folders). New sessions
     /// there launch with them; running sessions keep what they started with. Answered with
     /// `instructions.state`, which carries `error` and the unchanged content when refused.
     #[serde(rename = "instructions.set", rename_all = "camelCase")]
@@ -1572,6 +1588,10 @@ pub enum ClientMessage {
         #[serde(default)]
         host_id: Option<String>,
     },
+
+    /// The models each installed harness on this machine offers, for the settings pickers.
+    #[serde(rename = "agent.models.list", rename_all = "camelCase")]
+    AgentModelsList { request_id: String },
 
     /// Configure the host's launcher. Existing sessions remain attachable.
     #[serde(rename = "agent.provider.configure", rename_all = "camelCase")]
@@ -2563,6 +2583,13 @@ pub enum ServerMessage {
         manifests: Vec<AgentManifestSummary>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         revision: Option<u64>,
+    },
+
+    /// Reply to `agent.models.list`: only harnesses whose CLI is installed. Older cores never send it.
+    #[serde(rename = "agent.models.list", rename_all = "camelCase")]
+    AgentModelsList {
+        request_id: String,
+        harnesses: Vec<HarnessModels>,
     },
 
     #[serde(rename = "agent.ui.snapshot", rename_all = "camelCase")]

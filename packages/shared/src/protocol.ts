@@ -1309,6 +1309,24 @@ export interface AgentManifestListMessage {
   hostId?: string;
 }
 
+/** The models each installed harness on this machine offers. Gated by `agent.models.list`. */
+export interface AgentModelsListMessage {
+  type: "agent.models.list";
+  requestId: string;
+}
+
+/** One model a harness offers: `id` is what its `--model` takes. */
+export interface HarnessModel {
+  id: string;
+  label: string;
+}
+
+/** An installed harness (`claude`, `codex`, `pi`, `omp`); `models` is empty when it could not be listed. */
+export interface HarnessModels {
+  id: string;
+  models: HarnessModel[];
+}
+
 export interface AgentProviderConfigureMessage {
   type: "agent.provider.configure";
   requestId: string;
@@ -1653,7 +1671,7 @@ export interface CrewStateMessage {
   error?: string;
 }
 
-/** Read the Instructions of a Birdhouse (`scope: "project"`) or Nest (`"workspace"`) on this core
+/** Read the Instructions of a Project (`scope: "project"`) or Workspace (`"workspace"`) on this core
  * (capability `instructions.v1`). Answered with `instructions.state`. */
 export interface InstructionsGetMessage {
   type: "instructions.get";
@@ -1662,7 +1680,7 @@ export interface InstructionsGetMessage {
   id: string;
 }
 
-/** Save a Birdhouse's or Nest's Instructions (text and reference folders). New sessions there
+/** Save a Project's or Workspace's Instructions (text and reference folders). New sessions there
  * launch with them; running sessions keep what they started with. Answered with
  * `instructions.state`, which carries `error` and the unchanged content when refused. */
 export interface InstructionsSetMessage {
@@ -2471,6 +2489,7 @@ export type ClientMessage =
   | TerminalResizeMessage
   | TerminalKillMessage
   | AgentManifestListMessage
+  | AgentModelsListMessage
   | AgentProviderConfigureMessage
   | AgentUiGetMessage
   | AgentUiFindMessage
@@ -2582,6 +2601,12 @@ export interface AgentManifestListResponseMessage {
   hostId?: string;
   manifests: AgentManifestSummary[];
   revision?: number;
+}
+
+export interface AgentModelsListResponseMessage {
+  type: "agent.models.list";
+  requestId: string;
+  harnesses: HarnessModels[];
 }
 
 export interface AgentLifecycleMessage {
@@ -3251,6 +3276,7 @@ export type ServerMessage =
   | ServerInfoMessage
   | CommandsListResponseMessage
   | AgentManifestListResponseMessage
+  | AgentModelsListResponseMessage
   | AgentUiSnapshotMessage
   | AgentUiResultMessage
   | AgentUiFoundMessage

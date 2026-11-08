@@ -117,6 +117,53 @@ async fn ask_cli(runner: Runner, model: &str, prompt: &str, cwd: &Path) -> Resul
     }
 }
 
+/// A model listing is asked for this long; slower is an empty list.
+const LIST_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// What `runner`'s CLI offers, empty when it cannot be listed.
+async fn list_models(runner: Runner) -> Vec<crate::protocol::HarnessModel> {
+    let Some(invocation) = reporter::list_invocation(runner) else {
+        return reporter::claude_models();
+    };
+    let output = tokio::time::timeout(
+        LIST_TIMEOUT,
+        tokio::process::Command::new(invocation.program)
+            .args(&invocation.args)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+    match output {
+        Ok(Ok(out)) if out.status.success() => {
+            reporter::parse_model_list(runner, &String::from_utf8_lossy(&out.stdout))
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// `agent.models.list`: the models of every installed harness, for the settings pickers.
+pub(super) fn handle_models_list(state: &Arc<ConnState>, request_id: String) {
+    let out_tx = state.out_tx.clone();
+    tokio::spawn(async move {
+        let runners = [Runner::Claude, Runner::Codex, Runner::Pi, Runner::Omp]
+            .into_iter()
+            .filter(|runner| installed(runner.provider()));
+        let harnesses = futures::future::join_all(runners.map(|runner| async move {
+            crate::protocol::HarnessModels {
+                id: runner.provider().into(),
+                models: list_models(runner).await,
+            }
+        }))
+        .await;
+        let _ = out_tx.send(ServerMessage::AgentModelsList {
+            request_id,
+            harnesses,
+        });
+    });
+}
+
 /// Removes the child from the in-flight set however the call ends.
 struct InFlight<'a> {
     app: &'a AppState,

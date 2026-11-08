@@ -1,8 +1,8 @@
-//! Instructions: text and reference folders that every new agent session in a Birdhouse
-//! (project) or a Nest (workspace) receives at launch. Own design: Orca injects nothing at
+//! Instructions: text and reference folders that every new agent session in a Project
+//! (project) or a Workspace (workspace) receives at launch. Own design: Orca injects nothing at
 //! launch (ROADMAP "Perch's version of Claude Projects and sub-sessions", slice 1).
 //!
-//! This module is pure: validation, composition (the Birdhouse's text, then the Nest's), the
+//! This module is pure: validation, composition (the Project's text, then the Workspace's), the
 //! pinned snapshot with its provenance and hash, and the per-provider launch arguments. The
 //! store is `db/instructions.rs`; the seams that apply a pin are `agent_runtime.rs` (picker
 //! launches and wake) and `shell_integration.rs` (agents typed into a Perch shell).
@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
-/// Anthropic's Projects limit; applied to the text a session receives, Birdhouse and Nest together.
+/// Anthropic's Projects limit; applied to the text a session receives, Project and Workspace together.
 pub const MAX_CHARS: usize = 16_000;
 pub const MAX_FOLDERS: usize = 16;
 const MAX_FOLDER_BYTES: usize = 1024;
@@ -24,7 +24,7 @@ pub fn supported(provider: &str) -> bool {
     matches!(provider, "claude" | "codex" | "pi" | "omp")
 }
 
-/// What one Birdhouse or Nest stores.
+/// What one Project or Workspace stores.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Instructions {
     pub text: String,
@@ -78,17 +78,17 @@ pub fn validate(text: &str, folders: &[String]) -> Result<Instructions, String> 
     })
 }
 
-/// A session receives the Birdhouse's text then the Nest's. The cap applies to both together,
+/// A session receives the Project's text then the Workspace's. The cap applies to both together,
 /// so a save that would push any combination over it is refused.
-pub fn check_combined(birdhouse: &Instructions, nest: &Instructions) -> Result<(), String> {
-    let separator = if birdhouse.text.is_empty() || nest.text.is_empty() {
+pub fn check_combined(project: &Instructions, workspace: &Instructions) -> Result<(), String> {
+    let separator = if project.text.is_empty() || workspace.text.is_empty() {
         0
     } else {
         2
     };
-    if birdhouse.text.chars().count() + nest.text.chars().count() + separator > MAX_CHARS {
+    if project.text.chars().count() + workspace.text.chars().count() + separator > MAX_CHARS {
         return Err(format!(
-            "The Birdhouse and Nest Instructions together are limited to {MAX_CHARS} characters."
+            "The Project and Workspace Instructions together are limited to {MAX_CHARS} characters."
         ));
     }
     Ok(())
@@ -97,7 +97,7 @@ pub fn check_combined(birdhouse: &Instructions, nest: &Instructions) -> Result<(
 /// Where a pinned snapshot came from.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Source {
-    /// `"project"` (Birdhouse) or `"workspace"` (Nest).
+    /// `"project"` (Project) or `"workspace"` (Workspace).
     pub scope: String,
     pub id: String,
     pub revision: i64,
@@ -114,7 +114,7 @@ pub struct Pinned {
     pub hash: String,
 }
 
-/// The Birdhouse's and the Nest's Instructions with their stored revisions, broadest first.
+/// The Project's and the Workspace's Instructions with their stored revisions, broadest first.
 /// `None` when neither holds anything.
 pub fn compose(layers: &[(Source, Instructions)]) -> Option<Pinned> {
     let used: Vec<_> = layers
@@ -298,7 +298,7 @@ mod tests {
     }
 
     #[test]
-    fn birdhouse_and_nest_share_one_cap() {
+    fn project_and_nest_share_one_cap() {
         let half = text(&"x".repeat(MAX_CHARS / 2), &[]);
         assert!(check_combined(&half, &text(&"y".repeat(MAX_CHARS / 2 - 2), &[])).is_ok());
         assert!(check_combined(&half, &text(&"y".repeat(MAX_CHARS / 2 - 1), &[])).is_err());
@@ -319,16 +319,16 @@ mod tests {
         let pinned = compose(&[
             (
                 source("project", 3),
-                text("Birdhouse rule", &["/ref", "/shared"]),
+                text("Project rule", &["/ref", "/shared"]),
             ),
             (
                 source("workspace", 1),
-                text("Nest rule", &["/shared", "/nest"]),
+                text("Workspace rule", &["/shared", "/workspace"]),
             ),
         ])
         .unwrap();
-        assert_eq!(pinned.text, "Birdhouse rule\n\nNest rule");
-        assert_eq!(pinned.folders, ["/ref", "/shared", "/nest"]);
+        assert_eq!(pinned.text, "Project rule\n\nWorkspace rule");
+        assert_eq!(pinned.folders, ["/ref", "/shared", "/workspace"]);
         assert_eq!(
             pinned.sources,
             [source("project", 3), source("workspace", 1)]
@@ -337,13 +337,13 @@ mod tests {
         // An empty layer is not a source; the hash follows content only.
         let only_nest = compose(&[
             (source("project", 9), text("", &[])),
-            (source("workspace", 1), text("Nest rule", &[])),
+            (source("workspace", 1), text("Workspace rule", &[])),
         ])
         .unwrap();
         assert_eq!(only_nest.sources, [source("workspace", 1)]);
         assert_eq!(
             only_nest.hash,
-            compose(&[(source("project", 2), text("Nest rule", &[]))])
+            compose(&[(source("project", 2), text("Workspace rule", &[]))])
                 .unwrap()
                 .hash
         );

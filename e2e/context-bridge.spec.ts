@@ -180,13 +180,13 @@ test("editor, file, diff and terminal captures reach the same ready agent only o
     await expect(terminal.locator(".xterm-rows")).toContainText("bridge_unsent_draft");
     await terminal.locator(".xterm-helper-textarea").press("Control+u");
 
-    // A valid source from another nest must not authorize this target.
-    const other = path.join(scratch, "other"); fs.mkdirSync(other); fs.writeFileSync(path.join(other, "note.txt"), "other nest");
+    // A valid source from another workspace must not authorize this target.
+    const other = path.join(scratch, "other"); fs.mkdirSync(other); fs.writeFileSync(path.join(other, "note.txt"), "other workspace");
     await addProject(page, other);
     const otherId = await firstWorkspaceId(page.locator(".workspace-project").filter({ hasText: "other" }));
     const otherPreview = await rpc({ type: "context.preview", workspaceId: otherId, source: { kind: "file", path: "note.txt" }, instruction: "" });
     const wrongNest = await rpc({ type: "context.send", workspaceId: otherId, source: { kind: "file", path: "note.txt" }, instruction: "", digest: otherPreview.packet.digest, targetSessionId, operationId: crypto.randomUUID() });
-    expect(wrongNest.message).toContain("this exact nest");
+    expect(wrongNest.message).toContain("this exact workspace");
 
     // Actual integrated send from an unsaved editor selection.
     await openWorkspaceTool(page, workspaceId, "files");
@@ -196,7 +196,7 @@ test("editor, file, diff and terminal captures reach the same ready agent only o
     const marker = `BRIDGE_OK_${Date.now()}`;
     await dialog.getByLabel("Question for agent", { exact: true }).fill(`Do not use tools, execute commands, or modify files. If the excerpt contains unsaved bridge selection, reply exactly ${marker}.`);
     await expect(prepared).toHaveValue(new RegExp(marker));
-    await choose(dialog.getByLabel("Agent in this nest", { exact: true }), targetSessionId);
+    await choose(dialog.getByLabel("Agent in this workspace", { exact: true }), targetSessionId);
     await expect(dialog.getByRole("button", { name: "Send to agent", exact: true })).toBeEnabled();
     const sendsBefore = sent.filter((message) => message.type === "context.send").length;
     await dialog.getByRole("button", { name: "Send to agent", exact: true }).click();

@@ -405,7 +405,7 @@ test("tiled pane controls, tab menus and pane shortcuts all act on the visible t
     await page.getByTestId("tab-untile-all").click();
     await expect(canvas).toHaveAttribute("data-split", "0");
 
-    // A split shortcut creates a real terminal tab in this nest, not a hidden shell.
+    // A split shortcut creates a real terminal tab in this workspace, not a hidden shell.
     await page.getByTestId(`tab-${first}`).click({ button: "right" });
     await page.getByTestId(`tab-split-with-${second}`).click();
     await page.keyboard.press("Meta+Shift+d");

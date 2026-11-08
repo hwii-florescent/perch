@@ -14,7 +14,7 @@ async function until(predicate) {
 
 // Needs-you for one provider: Pi reports its AskUserQuestion-style tools, OMP
 // its own `ask` tool and its policy engine's approval prompts.
-async function check(provider) {
+async function check(provider, thinkingApi = "available") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-pi-check-"));
   const socket = path.join(dir, "native.sock");
   const module = path.join(dir, "extension.ts");
@@ -24,6 +24,8 @@ async function check(provider) {
   const handlers = new Map();
   const sentMessages = [];
   const pi = { on(name, fn) { handlers.set(name, fn); }, appendEntry() {}, sendUserMessage(text, options) { sentMessages.push([text, options]); } };
+  let effort = "high";
+  if (thinkingApi !== "absent") pi.getThinkingLevel = () => { if (thinkingApi === "throws") throw new Error("unavailable"); return effort; };
   let idle = true;
   const ctx = {
     cwd: dir, model: { id: "model" }, isIdle: () => idle, hasPendingMessages: () => false, abort() {},
@@ -42,6 +44,22 @@ async function check(provider) {
     peer.on("data", data => { buffer += data; let end; while ((end = buffer.indexOf("\n")) >= 0) { const event = JSON.parse(buffer.slice(0, end)); if (event.type !== "commands") received.push(event); buffer = buffer.slice(end + 1); } });
     await until(() => received.length > 0);
     assert.equal(received.at(-1).blocked, false);
+    assert.equal(received.at(-1).effort, thinkingApi === "available" ? "high" : null);
+    if (thinkingApi === "available") {
+      // Idle CLI changes must publish without waiting for a message or another turn.
+      effort = "low";
+      fire("model_select");
+      await until(() => received.at(-1).effort === "low");
+      if (provider === "pi") {
+        effort = "off";
+        fire("thinking_level_select", { level: effort, previousLevel: "low" });
+        await until(() => received.at(-1).effort === "off");
+      }
+      // An unavailable reading clears the old value rather than inventing a default.
+      effort = undefined;
+      fire("model_select");
+      await until(() => received.at(-1).effort === null);
+    }
     idle = false;
     fire("agent_start");
     const ask = provider === "omp" ? "ask" : "AskUserQuestion";
@@ -85,6 +103,7 @@ async function check(provider) {
   }
 }
 
-await check("pi");
-await check("omp");
-console.log("Pi/OMP extension: ask tools and OMP approvals report needs-you until answered or the turn ends");
+for (const provider of ["pi", "omp"]) {
+  for (const api of ["available", "absent", "throws"]) await check(provider, api);
+}
+console.log("Pi/OMP extension: effort read-back and changes, missing APIs, ask tools and approvals");

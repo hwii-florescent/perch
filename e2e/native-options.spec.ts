@@ -82,6 +82,8 @@ test("claude: pickers change model, effort and mode and show only what the CLI r
     // Mode: Claude's own Shift+Tab cycle, read from its footer after every step.
     for (const [mode, label] of [["plan", "Plan mode"], ["ask", "Ask for approval"], ["accept-edits", "Accept edits"], ["full-access", "Full access"]] as const) {
       await choose(pick("mode"), mode);
+      // Full access asks first; the dialog is the person's own confirmation.
+      if (mode === "full-access") await page.getByRole("button", { name: "Allow full access" }).click();
       await expect(pick("mode")).toHaveAttribute("data-value", mode, { timeout: 15_000 });
       await expect(pick("mode")).toContainText(label);
     }

@@ -35,14 +35,20 @@ export async function addProject(page: Page, dir: string): Promise<void> {
   }), dir);
 }
 
-/** With the new-session picker open, add `dir` as a project and start the
- * session in it. */
-export async function pickProject(page: Page, dir: string): Promise<void> {
+/** With the new-session dialog open, add `dir` as a project, pick it, then pick `agent`. */
+export async function pickProject(page: Page, dir: string, agent = "terminal"): Promise<void> {
   dir = realpathSync(dir); // The server canonicalizes local paths (notably macOS /var → /private/var).
   await addProject(page, dir);
-  const option = page.locator('[data-testid^="project-option-"]').and(page.getByTitle(dir, { exact: true }));
+  const option = page.locator('[data-testid^="new-session-row-"]').and(page.getByTitle(dir, { exact: true }));
   await expect(option.first()).toBeVisible({ timeout: 10_000 });
   await option.first().click();
+  await page.getByTestId(`new-session-row-${agent}`).click();
+}
+
+/** With the new-session dialog open, pick Chats (or "No project"), then `agent`. */
+export async function pickChats(page: Page, agent = "terminal"): Promise<void> {
+  await page.locator('[data-testid="new-session-row-none"], [data-testid^="new-session-row-"][title$="/.perch/scratch"]').first().click();
+  await page.getByTestId(`new-session-row-${agent}`).click();
 }
 
 /** Start `agent` through the sidebar's New session popover, in `dir` (added
@@ -52,11 +58,9 @@ export async function pickProject(page: Page, dir: string): Promise<void> {
 export async function startChat(page: Page, agent = "terminal", dir?: string): Promise<string> {
   const before = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
   await page.getByTestId("new-session-local").click();
-  const picker = page.getByTestId("new-session-popover-agent");
-  await expect(picker).toBeEnabled({ timeout: 10_000 });
-  await choose(picker, agent);
-  if (dir) await pickProject(page, dir);
-  else await page.getByTestId("project-option-none").click();
+  await expect(page.getByTestId("new-session-dialog")).toBeVisible({ timeout: 10_000 });
+  if (dir) await pickProject(page, dir, agent);
+  else await pickChats(page, agent);
   await expect.poll(async () => {
     const id = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
     return Boolean(id) && id !== before;

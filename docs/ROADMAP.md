@@ -57,7 +57,7 @@ safety fixes land whenever needed.
 
 ### 1. Complete one managed remote workspace path
 
-First slice implemented: host-qualified inventory and nests/worktrees, text
+First slice implemented: host-qualified inventory and workspaces/worktrees, text
 files/durable drafts/search, Git/review and canonical file/diff surfaces with
 per-viewer presentation now route to their owning core. In-flight resource
 requests fail with an unknown outcome on disconnect; drafts reconcile by
@@ -83,7 +83,7 @@ Start: `crates/perch-core/src/hub.rs`, `ssh.rs`,
 ### 2. Workspace Quick Open and coherent actions
 
 First slice implemented: typing in Navigator (Cmd-P) searches filenames in the
-selected nest through `fs.search` (debounced, superseded searches cancel, skips
+selected workspace through `fs.search` (debounced, superseded searches cancel, skips
 VCS/dependency/build folders, does not read .gitignore, 200-hit/20k-entry/2s
 bounds, local and relayed remote cores). Remaining:
 
@@ -261,15 +261,15 @@ child work, the same SubagentStart/SubagentStop source step 2 needs, so it lands
 there), queue cards, Steer, Rewind, `/compact` shortcut, prompt recall, Claude
 stream-json (not needed for approvals now).
 
-### 1. Instructions: Birdhouse and Nest instructions and files
+### 1. Instructions: Project and Workspace instructions and files
 
-**Done 2026-11-06 for local Birdhouses and Nests** (slice 1 below; ARCHITECTURE).
+**Done 2026-11-06 for local Projects and Workspaces** (slice 1 below; ARCHITECTURE).
 Not done: the read-only view of the repo's own `CLAUDE.md`/`AGENTS.md`, and remote
-Birdhouses. Claude and Codex both read `AGENTS.md`, so Instructions add only
-privacy (not in the repo) and per-Nest text; the missing half of Claude Projects
+Projects. Claude and Codex both read `AGENTS.md`, so Instructions add only
+privacy (not in the repo) and per-Workspace text; the missing half of Claude Projects
 is persistent memory ("Projects parity" below).
 
-Claude-classic-Projects style, stored **privately by Perch** per Birdhouse (and
+Claude-classic-Projects style, stored **privately by Perch** per Project (and
 Quickchat), not in the repo: shared instructions plus reference files/folders that
 every new agent session there receives at launch. **Must work for Pi, OMP,
 Claude and Codex** in the first cut; label other providers unsupported. Launch
@@ -289,7 +289,7 @@ in them).
 Only appended flags; never `--system-prompt` or `--no-context-files`, so repo
 `AGENTS.md`/`CLAUDE.md` keep loading. Show the repo's own
 `CLAUDE.md`/`AGENTS.md` and Claude memory beside it, read-only. No hosted
-knowledge search. Remote Birdhouses keep theirs on the owning core.
+knowledge search. Remote Projects keep theirs on the owning core.
 
 ### 2. Observe native subagents and teams
 
@@ -310,7 +310,7 @@ What Claude agent teams do, across providers: full sessions, not in-process
 subagents, that a lead and the user can see, message and stop.
 
 - **Runs you start.** A Perch-owned run graph: lead session, child sessions
-  (any provider/model, same Nest or a new worktree), a shared task list, messages
+  (any provider/model, same Workspace or a new worktree), a shared task list, messages
   and reports. Children are ordinary Perch sessions shown under their parent.
 - **Child session from here.** User-started, optionally seeded through the
   Context Bridge (explicit send).
@@ -348,8 +348,8 @@ version; the slices below replace their implied order.
 **Decided** (2026-11-05, settled 2026-11-06: [decision](DECISIONS.md),
 [evidence](evidence/claude-projects-subsessions-2026-11-06.md))
 
-- **No new noun.** "Project" stays the repository (Birdhouse). Shared context is
-  **Instructions** on a Birdhouse or Nest; children are chats nested under their lead.
+- **No new noun.** "Project" stays the repository. Shared context is
+  **Instructions** on a Project or Workspace; children are chats nested under their lead.
 - **Coordinator: an ordinary lead session the user picks**, any provider. Perch never
   splits, assigns, retries or summarises work and hosts no model (no coordinator chat,
   scheduler, kanban or planner).
@@ -371,7 +371,7 @@ version; the slices below replace their implied order.
   never a turn opened by a delivered message; checked by the core from the prompt
   ledger and provider events. Children cannot spawn (depth 1). Same rule as Claude
   desktop's side sessions.
-- **Same Nest by default**; a child gets a worktree only with `perch spawn --worktree`.
+- **Same Workspace by default**; a child gets a worktree only with `perch spawn --worktree`.
 - **Reports are claims, not proof.** Separate records for lifecycle (perchd/provider
   events), "needs you" (pending approval or question, never a model claim), delivery
   receipts, and the agent's own `perch report`. A Stop-hook last message (first 400
@@ -415,8 +415,8 @@ The ten questions these settle (as posed 2026-11-05; answers above):
    shared memory file and a library. Memory needs a scope and atomic, conflict-safe
    updates, and agent-written memory or documents must never silently become trusted
    instructions. Size limit (Anthropic's is reportedly 16,000 characters; unconfirmed).
-   One per Birdhouse or also per Nest; can a session opt out.
-3. **Naming.** "Project" already means a repository in the sidebar (Birdhouse).
+   One per Project or also per Workspace; can a session opt out.
+3. **Naming.** "Project" already means a repository in the sidebar.
 4. **Overview.** A drawer, a tab, or only child rows plus Needs You; whether a lead can
    ask the user a question (decision gates) in the first cut.
 5. **Reports are claims, not proof.** An agent's `perch report` or a Stop-hook last
@@ -453,9 +453,9 @@ UI rows from step 0 continue between slices.
    Pi/OMP follow-ups queue until the turn ends; Codex does **not** refuse a busy
    `turn/start`, it joins the running turn, so idle delivery is the core's check alone.
    Nothing contradicted the plan.
-1. **Instructions injection. Done 2026-11-06** (local Birdhouses and Nests; remote ones
+1. **Instructions injection. Done 2026-11-06** (local Projects and Workspaces; remote ones
    and the read-only view of the repo's own `CLAUDE.md`/`AGENTS.md` are not done).
-   Store per Birdhouse/Nest, pin a snapshot
+   Store per Project/Workspace, pin a snapshot
    per launch, record provenance; apply on wake/resume, the shell shim and the Codex
    app-server. Check: Rust unit tests for argv per provider and the snapshot; a live
    haiku/luna turn per provider quoting a marker from the instructions; repo
@@ -548,13 +548,13 @@ across providers ([DECISIONS](DECISIONS.md) 2026-11-07, compared in the
 [evidence](evidence/claude-projects-subsessions-2026-11-06.md)). Gaps, in order:
 
 1. **Persistent project memory (a must).** Agent-written files plus an index, scoped to
-   a Birdhouse, surviving the lead session (the per-run notes folder dies with its lead).
+   a Project, surviving the lead session (the per-run notes folder dies with its lead).
    Constraints carried over from the earlier decisions: separate from Instructions and
    never merged into the trusted prompt; contents not injected, only a short pointer or
    index (agents read files on demand); each file records who wrote it and when; people
    can review, edit and delete; atomic writes with a revision check so concurrent
    writers conflict instead of overwriting; what an agent reads there is information from
-   a peer, not instructions. Open: scope (Birdhouse only, or Nest too), size caps, opt-out
+   a peer, not instructions. Open: scope (Project only, or Workspace too), size caps, opt-out
    per session, whether the repo's own `CLAUDE.md` memory shows beside it.
 2. **Library.** Pickable files and folders for a project (Claude: 100 files per pick, 10
    folders). Today only up to 16 reference-folder paths in Instructions.
@@ -577,11 +577,11 @@ there changed the plan.
 ## Later, bounded additions
 
 - **Honest reopen/resume:** stopped-tab UI and retained provider conversation ID.
-  Cmd-Shift-T currently starts a fresh harness, not the previous conversation.
+  Reopening a closed tab (no shortcut since Cmd-Shift-T became New session) starts a fresh harness, not the previous conversation.
   The provider ID part is needed by step 0 (move/resume) and fork.
 - From peers ([research](evidence/agent-workspaces-2026-11-05.md)): mark unread and
-  a Dock badge; listening ports per Nest; "why this state" from the evidence
-  source Perch already records; sleep idle Nests; review size/activity before
+  a Dock badge; listening ports per Workspace; "why this state" from the evidence
+  source Perch already records; sleep idle Workspaces; review size/activity before
   worktree cleanup.
 - **Thin PR workflow:** open PR, status/checks through existing tools, not a
   Git hosting or issue-management suite.

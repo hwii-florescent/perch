@@ -43,7 +43,7 @@ pub(super) fn announce(app: &AppState, lead_session_id: &str) {
 }
 
 /// A lead may put suggestions in front of a person only if it could start sub-sessions at all: it is
-/// not itself a sub-session, it runs on this computer and it is in a Nest.
+/// not itself a sub-session, it runs on this computer and it is in a Workspace.
 fn check_lead(app: &AppState, caller: &AgentIdentity) -> Result<(), Failure> {
     let lead = app
         .db
@@ -57,7 +57,10 @@ fn check_lead(app: &AppState, caller: &AgentIdentity) -> Result<(), Failure> {
         ));
     }
     if lead.workspace_id.is_none() {
-        return Err(fail(StatusCode::FORBIDDEN, "this session is not in a Nest"));
+        return Err(fail(
+            StatusCode::FORBIDDEN,
+            "this session is not in a Workspace",
+        ));
     }
     let is_child = app
         .db

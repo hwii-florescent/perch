@@ -33,10 +33,11 @@ export const WORKED_FOR =
   "[&[open]>summary]:before:[transform:rotate(45deg)] " +
   "[&_pre]:m-[0.2rem_0_0.3rem_1.2rem] [&_pre]:max-h-72 [&_pre]:overflow-auto [&_pre]:rounded-ui [&_pre]:bg-surface-0 [&_pre]:p-2 [&_pre]:text-[0.78rem] [&_pre]:text-fg";
 /** `NativeCliChat`'s composer textarea: borderless, inherits the font, marks keyboard focus inside its box. */
-export const NATIVE_TEXTAREA = "box-border max-h-[30vh] min-h-[2.5rem] w-full resize-none overflow-y-auto rounded-soft bg-transparent px-3 pt-2.5 pb-1 text-inherit [border:0] [font:inherit] focus:outline-none";
+export const NATIVE_TEXTAREA = "box-border max-h-[30vh] min-h-[2.5rem] w-full resize-none overflow-y-auto rounded-soft bg-transparent px-4 pt-3 pb-1 text-inherit [border:0] [font:inherit] focus:outline-none";
 /** The composer's one round button: Send / Queue (accent) or Stop (neutral), in the same place. */
 export const SEND_BUTTON = "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full [border:0] disabled:cursor-not-allowed disabled:opacity-40 ";
 export const SEND_BUTTON_GO = SEND_BUTTON + "bg-accent text-panel-bg";
 export const SEND_BUTTON_STOP = SEND_BUTTON + "bg-surface-1 text-fg";
-/** The composer is one filled card in the column; focus is a 1px accent outline on the card (DECISIONS 2026-11-04). */
-export const CHAT_INPUT = "flex flex-col rounded-soft bg-surface-0 focus-within:outline-1 focus-within:outline-solid focus-within:outline-accent";
+/** The composer is one rounded, borderless card in the column (ChatGPT, Claude): it stands out by its fill, and focus
+ * lifts the fill one step instead of drawing an outline (DECISIONS 2026-11-08). */
+export const CHAT_INPUT = "flex flex-col rounded-[1.5rem] bg-surface-0 [transition:background_0.15s_ease] focus-within:bg-surface-1";

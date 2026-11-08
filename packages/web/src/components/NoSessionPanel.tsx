@@ -16,6 +16,7 @@ import { useState } from "react";
 import { usePerchStore, effectiveActiveProject } from "../store";
 import { NewSessionPopover } from "../Sidebar";
 import { useAgentChoices } from "./AgentPicker";
+import { FolderPicker, type StartTarget } from "./FolderPicker";
 import { cn } from "../lib/cn";
 import { START_ACTION as ACTION, START_HINT as HINT, START_NAME as NAME, START_PANEL as PANEL, StartCard } from "./StartCard";
 import { requestAddProject } from "../appEvents";
@@ -58,7 +59,7 @@ export function NoSessionPanel({ connected }: { connected: boolean }) {
     const projectName = projects.find((p) => p.id === workspace.projectId && p.path === workspace.path)?.name;
     // Quickchat sessions run in HOME, so show that rather than its bookkeeping folder.
     const quickchat = workspace.path.endsWith("/.perch/scratch");
-    return <WorkspaceStart hostId={workspace.hostId} name={quickchat ? "Quickchat" : workspace.name || projectName || basename(workspace.path)} path={quickchat ? "~" : workspace.path} startPath={workspace.path} />;
+    return <WorkspaceStart key={workspace.id} hostId={workspace.hostId} name={quickchat ? "Quickchat" : workspace.name || projectName || basename(workspace.path)} path={quickchat ? "~" : workspace.path} startPath={workspace.path} quickchat={quickchat} />;
   }
 
   function addProject() {
@@ -73,7 +74,7 @@ export function NoSessionPanel({ connected }: { connected: boolean }) {
         <p className={HINT}>Select a workspace from the sidebar to begin.</p>
         <div className="flex flex-wrap justify-center gap-[0.6rem]">
           <button type="button" className={ACTION} data-testid="home-add-project" onClick={addProject}>
-            Add birdhouse
+            Add project
           </button>
           <button
             type="button"
@@ -110,18 +111,27 @@ function basename(path: string): string {
   return path.split("/").filter(Boolean).pop() ?? path;
 }
 
-/** The focused workspace's start picker: what to open in it. */
-function WorkspaceStart({ hostId, name, path, startPath }: { hostId: string; name: string; path: string; startPath: string }) {
+/** The focused workspace's start picker: what to open in it, in this folder (the default) or another project. */
+function WorkspaceStart({ hostId, name, path, startPath, quickchat }: { hostId: string; name: string; path: string; startPath: string; quickchat: boolean }) {
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
+  const projects = usePerchStore((s) => s.workspaceProjects);
   const { choices } = useAgentChoices(hostId);
+  const [cwd, setCwd] = useState(startPath);
+  const targets: StartTarget[] = [
+    { key: startPath, label: `${name} (current folder)`, name, path },
+    ...projects.filter((project) => project.hostId === hostId && project.path !== startPath).map((project) => ({ key: project.path, label: project.name || basename(project.path), name: project.name || basename(project.path), path: project.path })),
+    ...(quickchat ? [] : [{ key: "~", label: "No project (Quickchat)", name: "Quickchat", path: "~" }]),
+  ];
+  const target = targets.find((candidate) => candidate.key === cwd) ?? targets[0]!;
   return (
     <StartCard
-      name={name}
-      path={path}
+      name={target.name}
+      path={target.path}
       choices={choices}
       idPrefix="workspace-start"
       testId="no-session-panel"
-      onPick={(agent) => createSessionOnHost(hostId, startPath, agent)}
+      target={<FolderPicker targets={targets} value={target.key} onChange={setCwd} testId="workspace-start-target" />}
+      onPick={(agent) => createSessionOnHost(hostId, target.key, agent)}
     />
   );
 }

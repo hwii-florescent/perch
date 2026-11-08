@@ -356,7 +356,7 @@ impl HistoryDb {
                 ON agent_change_snapshots(workspace_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS agent_change_snapshots_session
                 ON agent_change_snapshots(session_id, created_at DESC);
-            -- Instructions per Birdhouse ('project') or Nest ('workspace'), and the
+            -- Instructions per Project ('project') or Workspace ('workspace'), and the
             -- snapshot each session pinned at its first launch (`instructions.rs`).
             -- A pin with NULL text records that the session started with nothing.
             CREATE TABLE IF NOT EXISTS instructions (

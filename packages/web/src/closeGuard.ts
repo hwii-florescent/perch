@@ -24,7 +24,7 @@ export function isAgentSession(session: SessionSummary): boolean {
 /** The session waiting on the warning dialog, if any. */
 export const useCloseGuard = create<{ pending: SessionSummary | null }>(() => ({ pending: null }));
 
-/** Leave execution discoverable in the nest, but release this view. */
+/** Leave execution discoverable in the workspace, but release this view. */
 export function dismissSessionView(sessionId: string): void {
   forgetSessionTerminals(sessionId);
   if (usePerchStore.getState().sessionId === sessionId) usePerchStore.getState().showWorkspaceHome();

@@ -94,7 +94,7 @@ function go(dir: 1 | -1): void {
   }
   const tab = useFileTabs.getState().tabs.find((candidate) => fileTabKey(candidate) === place.id);
   if (!tab) return;
-  // Same order as reopening a closed tab: focusing a nest resets the shown file, so focus first.
+  // Same order as reopening a closed tab: focusing a workspace resets the shown file, so focus first.
   if (tab.workspaceId !== effectiveWorkspace(state)?.id) state.focusWorkspace(tab.workspaceId);
   activateTab({ id: place.id, kind: "resource", tab });
 }

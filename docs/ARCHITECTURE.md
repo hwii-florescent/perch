@@ -125,7 +125,7 @@ Context Bridge's bounded copy/explicit delivery rules live in
 [CONTEXT-BRIDGE](CONTEXT-BRIDGE.md); direct send is currently Claude-only.
 
 Instructions (`instructions.rs`, `db/instructions.rs`) are private text and reference
-folders on a Birdhouse or Nest, capped at 16,000 characters combined. A session pins
+folders on a Project or Nest, capped at 16,000 characters combined. A session pins
 its composed snapshot (with source revisions and a hash) at first launch; wake and
 resume reuse the pin, never the current text. Launch paths reach providers only
 through append flags (`agent_runtime::with_instructions`, the shell shim, the Codex
@@ -266,7 +266,7 @@ has `perch` beside `perch-core` in `target/<profile>/` once `cargo build --works
 any future headless archive must keep the two together (`e2e/packaged-perch.check.mjs`).
 
 **Sub-sessions** (`sub_sessions.rs` rules, `db/sub_sessions.rs` records, `server/sub_sessions.rs`
-routes `/agent/spawn`, `list`, `stop`). A lead starts children in its own Nest with `perch spawn`;
+routes `/agent/spawn`, `list`, `stop`). A lead starts children in its own Workspace with `perch spawn`;
 the core, not the agent, decides:
 
 - *Admission before dispatch*, in one transaction that also writes the child's session row
@@ -293,14 +293,14 @@ the core, not the agent, decides:
 - *Stop* is by the lead for its own children only. The record goes `stopping`, the core terminates the
   process and confirms it is gone (`stop_confirmed`, like session delete), and only then records
   `stopped` and lets the exit be observed. A person stopping a lead (terminal kill) stops its live
-  children the same way. Deleting a lead (also what archiving its Nest does, which deletes the Nest's
+  children the same way. Deleting a lead (also what archiving its Workspace does, which deletes the Workspace's
   sessions) first stops its live children, each confirmed; if one cannot be shown stopped (a stop not
   confirmed, a launch still in flight) the delete is refused and the lead and its records are kept. The
   stopped children then remain as ordinary sessions without a parent; deleting a child drops its record.
   **Esc in the chat is not a stop:** it interrupts the lead's own turn (a keystroke into its prompt), and
   its children keep running; only a terminal kill, a delete and `perch stop` stop them.
 - *`--worktree`*: after the child is recorded, the core makes a new checkout of the lead's repository,
-  registers it as a Nest under the lead's Nest in the same Birdhouse and moves the child's session and
+  registers it as a Nest under the lead's Workspace in the same Project and moves the child's session and
   record there before launching; any failure discards the child, which never started.
 - *Reports are claims.* `perch list` returns lifecycle, whether the agent needs a person (Perch's own
   blocked state, never something the agent said), the dispatch record, and a report: the child's own
@@ -470,7 +470,7 @@ finished turn is summarised by a small model so the expensive one never writes a
   it waits on and the last thing it said, at most 12,000 characters in all, never a tool's output or a file's
   contents. What one summary costs therefore stays flat however long the child runs.
 - *Which model.* One setting per harness, each run through that harness's own CLI in one-shot mode under the
-  user's login, the prompt on stdin, cwd the child's Nest, 60 s: `claude -p --model <m> --tools ""
+  user's login, the prompt on stdin, cwd the child's Workspace, 60 s: `claude -p --model <m> --tools ""
   --no-session-persistence --disable-slash-commands --strict-mcp-config --setting-sources ""` with Perch's own
   system prompt; `codex exec -m <m> -s read-only --ephemeral --ignore-user-config --ignore-rules --disable
   shell_tool …`; `pi --print --mode json --model <m> --thinking off --no-session --no-tools --no-extensions
