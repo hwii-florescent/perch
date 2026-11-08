@@ -321,15 +321,15 @@ fn look_ok(look: &Look) -> Result<(), String> {
                 );
             }
         }
-        Some(Background::Image { image, fit }) => {
+        Some(Background::Image { image, fit })
             if !image_path_ok(image)
                 || fit
                     .as_deref()
-                    .is_some_and(|f| f != "cover" && f != "contain")
-            {
-                return Err("an image background is a plain picture path in the core's folder (png, jpg, webp, gif or svg), fit cover or contain".into());
-            }
+                    .is_some_and(|f| f != "cover" && f != "contain") =>
+        {
+            return Err("an image background is a plain picture path in the core's folder (png, jpg, webp, gif or svg), fit cover or contain".into());
         }
+        Some(Background::Image { .. }) => {}
     }
     if look.radius.is_some_and(|r| r > 48) || look.border.is_some_and(|b| b > 8) {
         return Err("radius is at most 48 and border at most 8".into());
