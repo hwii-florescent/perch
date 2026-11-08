@@ -67,7 +67,7 @@ pub(super) fn agent_remove(app: &AppState, body: &Value) -> Result<Value, Failur
     Ok(json!({ "id": id, "kind": kind }))
 }
 
-/// `perch mod install <source>`: copy mods and layouts from a public GitHub repo; never overwrites.
+/// `perch mod install <source>`: copy mods and layouts from a public GitHub repo, another public https git host or a folder here; never overwrites.
 pub(super) async fn agent_install(app: &AppState, body: &Value) -> Result<Value, Failure> {
     let source = body["source"]
         .as_str()
@@ -75,7 +75,7 @@ pub(super) async fn agent_install(app: &AppState, body: &Value) -> Result<Value,
         .ok_or_else(|| {
             fail(
                 StatusCode::BAD_REQUEST,
-                "name a GitHub repository to install from",
+                "name a GitHub repository, an https git URL or a folder to install from",
             )
         })?
         .to_string();

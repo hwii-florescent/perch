@@ -1392,7 +1392,8 @@ Commands
   perch mod clone <example> [id]
                           Copy one into the mods or layouts folder (never overwrites), then edit it.
   perch mod install <owner/repo[/folder]>
-                          Copy mods/<name>/ and layouts/<name>.json from a public GitHub repo (or one
+                          Also: https://<public git host>/<path>[#branch], or a folder on this computer
+                          (/abs/path or ~/path). Copy mods/<name>/ and layouts/<name>.json from a public GitHub repo (or one
                           folder with a main.js) into place; never overwrites, and prints warnings for
                           code that runs programs, reaches the network or touches files. Read it first.
   perch mod commands      The app commands a key, a mod or `perch mod do` can run.

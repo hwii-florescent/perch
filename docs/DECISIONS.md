@@ -140,7 +140,10 @@ approval not mattering much.
   same result shape); a mod can only name a configured, enabled host, never an arbitrary address. A write goes down ssh's stdin (up to 5 MiB,
   as a read); reads/lists/stats are the same as local. Mods themselves still run on the
   screen of the machine showing the app.
-- **Not built:** installing from anything but GitHub, pinning or updating an installed mod.
+- **Install sources.** Besides `owner/repo[/folder]`: `https://<public host>/<path>[#branch]` (https only, no
+  credentials, ports, IP literals or `.local`/`localhost` hosts, `public_git_url`) and a folder on this computer
+  (`/abs` or `~/`). Same copy rules and warnings.
+- **Not built:** pinning or updating an installed mod.
 
 ## 2026-11-08 — Project tree: explicit state labels, no idle hiding (owner)
 

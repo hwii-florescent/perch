@@ -432,6 +432,41 @@ fn github_source(source: &str) -> Result<(String, Option<String>, Vec<String>), 
     Ok((repo, branch, sub.iter().map(|s| s.to_string()).collect()))
 }
 
+/// An https git URL on a public host: no credentials, no ports, and no address that is this computer or
+/// its network (the core would be fetching on someone's say-so).
+fn public_git_url(url: &str) -> Result<(), Error> {
+    let bad = || {
+        Error::Invalid(
+            "a git source is an https:// URL on a public host (or owner/repo for GitHub)".into(),
+        )
+    };
+    let rest = url.strip_prefix("https://").ok_or_else(bad)?;
+    let (host, path) = rest.split_once('/').ok_or_else(bad)?;
+    let host_ok = host.contains('.')
+        && host.len() <= 100
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.'))
+        && !host.starts_with(['-', '.'])
+        && !host.chars().all(|c| c.is_ascii_digit() || c == '.')
+        && !host.ends_with(".local")
+        && !host.ends_with(".internal")
+        && !host.ends_with(".localhost");
+    let path_ok = !path.is_empty()
+        && path.len() <= 200
+        && !path
+            .split('/')
+            .any(|p| p.is_empty() || p == ".." || p.starts_with('-'))
+        && path
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'));
+    if host_ok && path_ok {
+        Ok(())
+    } else {
+        Err(bad())
+    }
+}
+
 fn copy_tree(from: &Path, to: &Path, files: &mut usize, bytes: &mut u64) -> Result<(), Error> {
     std::fs::create_dir_all(to)?;
     for entry in std::fs::read_dir(from)? {
@@ -494,6 +529,34 @@ fn warnings_for(id: &str, dir: &Path) -> Vec<String> {
 /// of them; a folder with a `main.js` at its top is one mod named after the folder. Never overwrites:
 /// a name already in use stops the install before anything is copied. Blocking (it runs `git`).
 pub fn install(root: &Path, source: &str) -> Result<Installed, Error> {
+    // A folder on this computer: `/abs/path` or `~/path`.
+    if source.starts_with('/') || source.starts_with("~/") {
+        let path = match source.strip_prefix("~/") {
+            Some(rest) => PathBuf::from(
+                std::env::var_os("HOME").ok_or_else(|| Error::Invalid("no home folder".into()))?,
+            )
+            .join(rest),
+            None => PathBuf::from(source),
+        };
+        return install_from(root, &path, source);
+    }
+    // Any other git host over https: `https://host/path[.git][#branch]`.
+    if source.starts_with("https://") && !source.starts_with("https://github.com/") {
+        let (url, branch) = source
+            .split_once('#')
+            .map_or((source, None), |(u, b)| (u, Some(b)));
+        public_git_url(url)?;
+        if branch.is_some_and(|b| {
+            b.is_empty()
+                || b.len() > 100
+                || !b
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
+        }) {
+            return Err(Error::Invalid("a branch is plain text".into()));
+        }
+        return install_from_url(root, url, branch, &[], url.trim_start_matches("https://"));
+    }
     let (repo, branch, sub) = github_source(source)?;
     install_from_url(
         root,
@@ -920,6 +983,38 @@ mod tests {
         assert!(install_from_url(&one.0, url, Some("nope"), &[], "o/r").is_err());
         assert!(install_from_url(&one.0, "/no/such/repo", None, &[], "o/r").is_err());
         let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn other_git_hosts_must_be_public_https_and_a_local_folder_installs() {
+        for ok in ["https://gitlab.com/o/r.git", "https://codeberg.org/o/r"] {
+            assert!(
+                public_git_url(ok.split('#').next().unwrap()).is_ok(),
+                "{ok}"
+            );
+        }
+        for bad in [
+            "http://gitlab.com/o/r",
+            "https://localhost/o/r",
+            "https://127.0.0.1/o/r",
+            "https://10.0.0.5/o/r",
+            "https://printer.local/o/r",
+            "https://user@gitlab.com/o/r",
+            "https://gitlab.com:8080/o/r",
+            "https://gitlab.com/o/../r",
+            "https://gitlab.com/-o/r",
+            "https://gitlab.com",
+        ] {
+            assert!(public_git_url(bad).is_err(), "{bad}");
+        }
+        let root = Root::new();
+        let from = std::env::temp_dir().join(format!("perch-local-src-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&from).unwrap();
+        std::fs::write(from.join("main.js"), "export default () => {}").unwrap();
+        let done = install(&root.0, from.to_str().unwrap()).unwrap();
+        assert_eq!(done.mods.len(), 1);
+        assert!(install(&root.0, "https://localhost/o/r").is_err());
+        let _ = std::fs::remove_dir_all(&from);
     }
 
     #[test]
