@@ -10,7 +10,8 @@ conventions, not automatic approval. AGENTS is only a brief contributor entry po
 ## 2026-11-08 — Project memory: plain files in Perch's own directory (owner)
 
 Settles the "proposed" part of 2026-11-07 (Projects parity). Slice 1 (core and `perch memory`) is
-built; the Project home UI is the next slice.
+built; slice 2 is a "Memory…" dialog on the Project menu (list, edit, create, delete; a stale save keeps
+the draft and offers their version). A Project home page is not built.
 
 - **Storage.** Plain Markdown files in `<directory of the history database, default ~/.perch>/memory/
   <project id>/` (0700 dirs, 0600 files), like the notes folder but **not** under `/tmp`: the notes
