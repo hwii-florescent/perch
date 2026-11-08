@@ -12,7 +12,7 @@ vi.mock("./AgentPicker", () => ({
 vi.mock("./AgentIcon", () => ({ AgentIcon: () => null }));
 vi.mock("./FileEntryMenu", () => ({ FileEntryMenu: () => null }));
 vi.mock("./TabBar", () => ({ BrowserIcon: () => null, FileIcon: () => null }));
-import { requestNewSession } from "../appEvents";
+import { ADD_PROJECT_EVENT, requestNewSession } from "../appEvents";
 import { usePerchStore } from "../store";
 import { NewSessionDialog } from "./NewSessionDialog";
 
@@ -28,6 +28,7 @@ beforeEach(async () => {
     workspaceProjects: [
       { id: "p1", hostId: "local", name: "alpha", path: "/a" },
       { id: "p2", hostId: "local", name: "beta", path: "/b" },
+      { id: "chats", hostId: "local", name: "Chats", path: "/home/me/.perch/scratch" },
     ],
   } as never);
   host = document.createElement("div");
@@ -53,5 +54,18 @@ it("Backspace on an empty filter goes back to the projects; Escape closes", asyn
   await key("Backspace");
   expect(document.body.textContent).toContain("beta");
   await key("Escape");
+  expect(document.querySelector('[data-testid="new-session-dialog"]')).toBeNull();
+});
+
+it("hides the scratch Chats project behind No project (home), and offers Add project", async () => {
+  expect(document.body.textContent).not.toContain("scratch");
+  await key("4"); // alpha, beta, Add project…, No project
+  expect(document.body.textContent).toContain("Terminal");
+  await key("Backspace");
+  const added = vi.fn();
+  window.addEventListener(ADD_PROJECT_EVENT, added);
+  await key("3");
+  window.removeEventListener(ADD_PROJECT_EVENT, added);
+  expect(added).toHaveBeenCalled();
   expect(document.querySelector('[data-testid="new-session-dialog"]')).toBeNull();
 });

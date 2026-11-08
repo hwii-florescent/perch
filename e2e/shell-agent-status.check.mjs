@@ -1,6 +1,7 @@
 // Deterministic native status adapters in a real shell/core/private daemon.
 // No installed app state, browser, provider calls or paid turns.
 // cargo build -p perch-core && node --experimental-strip-types e2e/shell-agent-status.check.mjs
+// Add --nested-only for the picker/nested-tool ownership regression alone.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -26,6 +27,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 const provider = path.basename(process.argv[1]);
 let running = false, blocked = false, revision = 0;
@@ -75,6 +77,12 @@ process.stdout.write('\\x1b]0;' + (provider === 'aider' ? 'aider ready' : 'π - 
 for await (const line of readline.createInterface({ input: process.stdin })) {
   if (line === 'exit') { await shutdown(); process.exit(0); }
   if (line === 'work') { running = true; blocked = false; publish('agent_start'); }
+  if (line === 'hold') await delay(2500);
+  if (line === 'nested' || line === 'nested-pi') {
+    const child = spawnSync(line === 'nested-pi' ? 'pi' : 'omp', [], { input: 'work\\nhold\\ndone\\nexit\\n', encoding: 'utf8' });
+    if (child.status !== 0) throw Error('nested fixture failed: ' + child.stderr);
+    process.stdout.write('nested-done\\n');
+  }
   if (line === 'ask') {
     blocked = true;
     if (provider === 'pi' || provider === 'omp') handlers.get('tool_execution_start')({ toolCallId: 'ask', toolName: provider === 'pi' ? 'AskUserQuestion' : 'ask' }, ctx);
@@ -143,7 +151,7 @@ try {
   const summary = () => summaries.get(sessionId);
   const state = (status, blocked = false) => summary()?.status === status && Boolean(summary()?.blocked) === blocked;
   let restarted = false;
-  for (const provider of ["pi", "omp", "claude", "opencode", "aider", "pi"]) {
+  for (const provider of process.argv.includes("--nested-only") ? [] : ["pi", "omp", "claude", "opencode", "aider", "pi"]) {
     messages.length = 0;
     input(provider);
     await until(() => messages.some(message => provider === "aider"
@@ -189,6 +197,38 @@ try {
   input("exit");
   await until(() => messages.some(message => message.type === "terminal.exit"), "fixture shell exited");
   assert(!messages.some(message => message.type === "error"), JSON.stringify(messages.filter(message => message.type === "error")));
+
+  // A picker-launched agent's tool may invoke another interactive agent through
+  // the inherited shell shim. That child must never take the enclosing tab's status.
+  messages.length = 0;
+  send({ type: "session.create", cwd: fs.realpathSync(scratch), hostId: "local" });
+  await until(() => messages.some(message => message.type === "session.created"), "picker session created");
+  const pickerId = messages.findLast(message => message.type === "session.created").sessionId;
+  send({ type: "agent.terminal.open", requestId: "picker", viewId: "picker", sessionId: pickerId, providerId: "pi", cols: 80, rows: 24 });
+  await until(() => messages.some(message => message.type === "agent.terminal.opened"), "picker Pi opened");
+  const pickerTerminal = messages.findLast(message => message.type === "agent.terminal.opened").terminalId;
+  const pickerInput = data => send({ type: "terminal.input", terminalId: pickerTerminal, shared: true, data: data + "\r" });
+  await until(() => summaries.get(pickerId)?.status === "idle", "picker Pi idle");
+  pickerInput("work");
+  await until(() => summaries.get(pickerId)?.status === "running", "picker Pi working");
+  for (const command of ["nested", "nested-pi"]) {
+    messages.length = 0;
+    pickerInput(command);
+    await until(() => {
+      const summary = summaries.get(pickerId);
+      assert.equal(summary?.status, "running", "nested tool agent must not finish its enclosing Pi turn");
+      assert.equal(summary?.chatProviderId, undefined, "nested tool agent must not become the tab's chat provider");
+      return messages.some(message => message.type === "terminal.data" && message.data.includes("nested-done"));
+    }, "nested tool finished");
+    await delay(1600); // Also observe the process snapshot after the nested child exits.
+    assert.equal(summaries.get(pickerId)?.status, "running", "Pi remains working after its tool agent exits");
+  }
+  pickerInput("done");
+  await until(() => summaries.get(pickerId)?.status === "idle", "only Pi's own completion ends the turn");
+  pickerInput("exit");
+  await until(() => summaries.get(pickerId)?.currentProviderId === "terminal", "picker Pi returned to shell");
+  pickerInput("exit");
+  console.log("picker Pi: nested tool agent cannot steal chat/status ownership or finish its parent's turn");
 } catch (error) {
   console.error(error);
   throw error;

@@ -34,22 +34,24 @@ test.describe("Status glyph system", () => {
     await open(page);
     const sessionId = await startChat(page);
     // The v4 status bar shows host/path/branch; harness identity stays in the sidebar and tab.
-    const dot = page.getByTestId(`workspace-session-${sessionId}`).locator(".agent-status-dot");
-    await expect(dot).toHaveClass(/agent-status-dot--idle/);
+    const dot = page.getByTestId(`workspace-session-${sessionId}`).locator(".agent-mark");
     await expect(dot).toHaveAttribute("data-provider", "terminal");
     await expect(dot.locator("svg")).toBeVisible();
     const color = await dot.evaluate((el) => getComputedStyle(el).color);
     expect(color).not.toBe("");
     expect(color.startsWith("var(")).toBeFalsy();
+    // Idle says nothing at the end of the row.
+    await expect(page.getByTestId(`session-state-${sessionId}`)).toHaveCount(0);
   });
 
-  test("G2. a running turn shows a static working dot", async ({ page }) => {
+  test("G2. a running turn says Working without animation", async ({ page }) => {
     await open(page);
     const sessionId = await startSlowTurn(page);
-    const working = page.getByTestId(`workspace-session-${sessionId}`).locator(".agent-status-dot--working");
+    const working = page.getByTestId(`session-state-${sessionId}`);
     await expect(working).toBeVisible({ timeout: 15_000 });
-    await expect(working).toHaveAttribute("data-provider", "claude");
-    await expect(working.locator("svg")).toBeVisible();
+    await expect(working).toHaveAttribute("data-state", "working");
+    await expect(page.getByTestId(`workspace-session-${sessionId}`).locator(".agent-mark")).toHaveAttribute("data-provider", "claude");
+    await expect(working).toHaveText("Working");
     expect(await working.evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
     await expect(working).not.toBeVisible({ timeout: 90_000 });
   });
@@ -68,13 +70,11 @@ test.describe("Status glyph system", () => {
       await open(page2);
       await startChat(page2);
       const row = page2.getByTestId(`workspace-session-${sessionId}`);
-      const done = row.locator(".agent-status-dot--done");
-      await expect(done).toBeVisible({ timeout: 90_000 });
-      await expect(done.locator("svg")).toBeVisible();
+      const done = row.locator(`[data-testid="session-state-${sessionId}"]`);
+      await expect(done).toHaveText("Done", { timeout: 90_000 });
 
       await row.click();
-      await expect(row.locator(".agent-status-dot--idle")).toBeVisible({ timeout: 10_000 });
-      await expect(done).toHaveCount(0);
+      await expect(done).toHaveCount(0, { timeout: 10_000 });
     } finally {
       await ctx1.close();
       await ctx2.close();

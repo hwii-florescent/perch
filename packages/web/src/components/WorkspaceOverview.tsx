@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { canReorderHost, usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
 import { isNestedIn, nestUnderLeads, orderBy, orderProjects, stepTarget, writeScope } from "../sidebarOrder";
 import { certaintyNote, needsYou, reasonLabel, useAttention } from "../attention";
-import { discloseSessions, groupByStatus, holdFinished, listedInSidebar, sectionOf, STATUS_LABELS, STATUS_SECTIONS, topSection, type StatusSection } from "../statusView";
+import { groupByStatus, holdFinished, listedInSidebar, sectionOf, STATUS_LABELS, STATUS_SECTIONS, topSection, type StatusSection } from "../statusView";
 import { openNextAttention } from "../attention";
 import { StatusDot } from "./StatusDot";
 import { DOT_GLYPH, sessionDotState, type AgentDotState } from "../statusDot";
@@ -169,7 +169,6 @@ function readOrganize(): Organize {
 }
 /** The tree's order: the core's (manual, with drag and favourites) or by what needs you (no drag). */
 const SORT_KEY = "perch.sidebar.sort";
-const ACTIVE_ONLY_KEY = "perch.sidebar.activeOnly";
 const SHOW_TERMINALS_KEY = "perch.sidebar.showTerminals";
 function readFlag(key: string, on: string): boolean {
   try { return localStorage.getItem(key) === on; } catch { return false; }
@@ -181,16 +180,13 @@ function saveFlag(key: string, value: string) {
 /** The ring colours the rest of the app uses for a state, so a section reads the same as a dot elsewhere. */
 const SECTION_STATE: Record<StatusSection, AgentDotState> = { needs: "blocked", done: "done", working: "working", idle: "idle" };
 
-/** A section's heading in By status: the state's colour as a dot (hollow for Idle, as its ring is) on a faint
- * wash of the same colour, with the label in full text colour so contrast never depends on the hue. */
+/** A section's heading in By status: the state's colour as a dot (hollow for Idle, as its ring is) before
+ * the label, which stays in full text colour so contrast never depends on the hue. No band, no rule:
+ * the dot and the space above carry the break. */
 function SectionHeading({ section, title, count, note, countLabel, testId }: { section?: StatusSection; title: string; count: number; note?: string; countLabel: string; testId: string }) {
   const color = section ? DOT_GLYPH[SECTION_STATE[section]].color : undefined;
   return (
-    <div
-      className={cn("mt-1.5 mb-0.5 flex items-center gap-2 rounded-ui px-3 py-[3px] text-[13px] font-semibold text-fg min-[701px]:text-[12px]", !color && "bg-surface-0")}
-      style={color ? { backgroundColor: `color-mix(in srgb, ${color} 18%, transparent)` } : undefined}
-      data-testid={testId}
-    >
+    <div className="mt-3 mb-0.5 flex items-center gap-2 px-3 py-[3px] text-[13px] font-semibold text-fg min-[701px]:text-[12px]" data-testid={testId}>
       {/* Hollow for Idle (its ring) and for the neutral sections (no state is claimed). */}
       <span className={cn("size-2 shrink-0 rounded-full", (!color || section === "idle") && "border-[1.5px] border-overlay-1 bg-transparent")} style={color ? (section === "idle" ? { borderColor: color } : { backgroundColor: color }) : undefined} aria-hidden="true" />
       <span>{title}</span>
@@ -209,14 +205,25 @@ function FolderMark() {
   );
 }
 
-/** A folded project's most urgent state: the dot of one session in it, and how many are in that state. */
-function Rollup({ sessions, section, testId }: { sessions: SessionSummary[]; section: StatusSection; testId: string }) {
-  const lead = sessions[0];
-  if (!lead) return null;
+/** The state at the end of a chat row, in words so colour is never the only signal.
+ * Idle says nothing; the harness mark stays plain. `count` is for a folded project. */
+function StateBadge({ section, count = 1, testId }: { section: StatusSection; count?: number; testId?: string }) {
+  if (section === "idle") return null;
+  const color = DOT_GLYPH[SECTION_STATE[section]].color;
+  const n = count > 1 ? <span className="ml-1 tabular-nums">{count}</span> : null;
   return (
-    <span className="inline-flex shrink-0 items-center gap-1" data-testid={testId} data-section={section} title={`${sessions.length} ${STATUS_LABELS[section].toLowerCase()}`}>
-      <StatusDot session={lead} className="h-[16px] w-[16px]" />
-      {sessions.length > 1 && <span className="text-[0.62rem] text-subtext-0 tabular-nums">{sessions.length}</span>}
+    <span className="shrink-0 rounded-full px-1.5 py-px text-[11px] leading-4 font-medium text-fg" style={{ backgroundColor: `color-mix(in srgb, ${color} 22%, transparent)` }} data-state={section} data-testid={testId}>
+      {STATUS_LABELS[section]}{n}
+    </span>
+  );
+}
+
+/** A folded project's most urgent state, and how many chats are in it. */
+function Rollup({ sessions, section, testId }: { sessions: SessionSummary[]; section: StatusSection; testId: string }) {
+  if (!sessions.length) return null;
+  return (
+    <span className="inline-flex shrink-0 items-center" data-testid={testId} data-section={section} title={`${sessions.length} ${STATUS_LABELS[section].toLowerCase()}`}>
+      <StateBadge section={section} count={sessions.length} />
     </span>
   );
 }
@@ -360,7 +367,6 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const [organize, setOrganize] = useState<Organize>(readOrganize);
   // Sorting by attention is a view of the core's order, not a new order: no drag or Move while it is on.
   const [attentionSort, setAttentionSort] = useState(() => readFlag(SORT_KEY, "attention"));
-  const [activeOnly, setActiveOnly] = useState(() => readFlag(ACTIVE_ONLY_KEY, "1"));
   const reorderable = usePerchStore((state) => canReorderHost(state, state.activeHostId)) && !attentionSort;
   const setWorkspaceOrder = usePerchStore((state) => state.setWorkspaceOrder);
   // Which host the Add project dialog registers on; starts as the active one.
@@ -561,8 +567,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
               data-testid={`workspace-session-${session.id}`}
               onClick={() => pickSession(session.id)}
             >
-              <StatusDot session={session} className="h-[18px] w-[18px]" />
+              <StatusDot plain session={session} className="h-[18px] w-[18px]" />
               <span className={SESSION_TITLE}>{session.title || "New session"}</span>
+              {hostReachable && <StateBadge section={sectionOf(session, needsIds, held)} testId={`session-state-${session.id}`} />}
             </button>
             <button
               type="button"
@@ -702,6 +709,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const held = holdFinished(reading.current.id === sessionId ? reading.current.held : null, sessionId, reading.current.id === sessionId ? reading.current.dot : undefined, viewedDot);
   reading.current = { id: sessionId, held, dot: viewedDot };
   const needsEvents = useMemo(() => new Map(needsYou(attentionEvents).map((event) => [event.sessionId, event])), [attentionEvents]);
+  const needsIds = useMemo(() => new Set(needsEvents.keys()), [needsEvents]);
   // Within a section: newest first on screen, the mirror of the strips' order (each workspace in its
   // strip's order, then the core's chat order), so a move is mirrored back before it is written and
   // a first move changes nothing else. Built from reversed inputs so chats the core has not listed
@@ -801,7 +809,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           <SectionHeading section={section.key === "offline" ? undefined : (section.key as StatusSection)} title={section.title} count={section.list.length} note={section.note} countLabel={`${section.list.length} chats`} testId={`status-section-title-${section.key}`} />
           {/* Each section keeps its chats under their project, in the sidebar's project order. */}
           {clusterByProject(section.list).map((cluster) => (
-            <div className="flex flex-col" key={cluster.id} data-testid={`status-project-${section.key}-${cluster.id}`}>
+            <div className="flex flex-col gap-[2px]" key={cluster.id} data-testid={`status-project-${section.key}-${cluster.id}`}>
               <div className="group/ph flex items-center pr-1 pl-3">
                 {cluster.project && !isChatsProject(cluster.project) ? <FolderMark /> : <span className="mr-1.5 w-3 shrink-0" aria-hidden="true" />}
                 <span className="min-w-0 flex-1 truncate py-[3px] text-[12.5px] font-medium text-fg" data-testid="status-project-title">{cluster.name}</span>
@@ -897,8 +905,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                         onNavigate?.();
                       }}
                     >
-                      <StatusDot session={session} className="h-[18px] w-[18px]" />
+                      <StatusDot plain session={session} className="h-[18px] w-[18px]" />
                       <span className={SESSION_TITLE}>{session.title || "New chat"}</span>
+                      {hostReachable && <StateBadge section={sectionOf(session, needsIds, held)} testId={`session-state-${session.id}`} />}
                     </button>
                     <button
                       type="button"
@@ -918,46 +927,16 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         );
   })();
 
-  // One tree for everything: Project → Workspace → Session. A workspace lists the sessions that matter
-  // (Needs you, Done, Working, the open one) and folds the idle rest into "+N idle"; a folded project says
-  // its most urgent state. By status and In one list are flat views of the same chats.
-  const needsIds = useMemo(() => new Set(needsEvents.keys()), [needsEvents]);
+  // One tree for everything: Project → Workspace → Session. All chats stay listed regardless
+  // of activity; a folded project says its most urgent state. Flat views show the same chats.
   const needingCount = hostReachable ? statusGroups.needs.length : 0;
-  const [idleOpen, setIdleOpen] = useState<string[]>([]);
-  /** The session rows under a workspace row. The open workspace lists all its chats; others fold the idle ones
-   * unless the viewer unfolded them. An unreachable host's last-known states are not trusted to hide anything. */
-  function workspaceSessionRows(workspace: WorkspaceRecord, list: SessionSummary[]): ReactElement | null {
-    const unfolded = workspace.id === activeWorkspaceId || idleOpen.includes(workspace.id) || !hostReachable;
-    const { shown, idle } = discloseSessions(list, needsIds, held, sessionId, unfolded);
-    if (!shown.length && !idle) return null;
-    const toggle = (
-      <button
-        type="button"
-        className={cn("min-h-7 w-full cursor-pointer rounded-ui bg-transparent py-1 pr-3 pl-[1.9rem] text-left text-[0.68rem] text-subtext-0 [border:0] [font-family:inherit] hover:text-fg", FOCUS)}
-        aria-expanded={idleOpen.includes(workspace.id)}
-        data-testid={`workspace-idle-${workspace.id}`}
-        onClick={() => setIdleOpen((current) => (current.includes(workspace.id) ? current.filter((id) => id !== workspace.id) : [...current, workspace.id]))}
-      >
-        {idle ? `+${idle} idle` : "Hide idle"}
-      </button>
-    );
-    return (
-      <>
-        {shown.length > 0 && sessionRows(shown, workspace.id)}
-        {(idle > 0 || (idleOpen.includes(workspace.id) && workspace.id !== activeWorkspaceId && hostReachable)) && toggle}
-      </>
-    );
-  }
   /** Most urgent section of a workspace's chats, as an index into STATUS_SECTIONS (Idle when nothing is known). */
   function urgency(list: SessionSummary[]): number {
     const top = hostReachable ? topSection(list, needsIds, held) : null;
     return top ? STATUS_SECTIONS.indexOf(top) : STATUS_SECTIONS.length - 1;
   }
-  const filtering = activeOnly && hostReachable;
-  const workspaceLive = (w: WorkspaceRecord) => !filtering || w.id === activeWorkspaceId || urgency(sessionsForWorkspace(sessions, w)) < STATUS_SECTIONS.length - 1;
-  // Projects as shown: those with something live when filtering, and by attention (favourites first) when sorting.
+  // Sort by attention (favourites first) when requested, without hiding idle projects or workspaces.
   const shownProjects = visibleProjects
-    .filter((project) => !filtering || workspacesForProject(workspaces, project.id).some((w) => !w.hidden && workspaceLive(w)))
     .map((project, at) => ({ project, at, urgent: Math.min(STATUS_SECTIONS.length, ...workspacesForProject(workspaces, project.id).map((w) => urgency(sessionsForWorkspace(sessions, w)))) }))
     .sort((a, b) => (attentionSort ? Number(b.project.favorite) - Number(a.project.favorite) || a.urgent - b.urgent : 0) || a.at - b.at)
     .map((entry) => entry.project);
@@ -981,7 +960,6 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           ...(organize === "project" ? [
             "divider" as const,
             { label: `${tick(attentionSort)}Sort by attention`, testId: "workspace-sort-attention", onSelect: () => { setAttentionSort(!attentionSort); saveFlag(SORT_KEY, attentionSort ? "manual" : "attention"); } },
-            { label: `${tick(activeOnly)}Show active only`, testId: "workspace-active-only", onSelect: () => { setActiveOnly(!activeOnly); saveFlag(ACTIVE_ONLY_KEY, activeOnly ? "0" : "1"); } },
           ] : []),
         ] });
       }}
@@ -1220,12 +1198,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                         if (parent?.parentWorkspaceId) children.set(parent.id, [...(children.get(parent.id) ?? []), w]);
                         else roots.push(w);
                       }
-                      // Active-only keeps a workspace that is open or has something going on, and the parent of one.
-                      const keep = (w: WorkspaceRecord): boolean => workspaceLive(w) || (children.get(w.id) ?? []).some(keep);
                       const renderWorkspace = (workspace: WorkspaceRecord, depth: number): ReactElement => {
                       const workspaceActive = workspace.id === activeWorkspaceId;
                       const workspaceSessions = sessionsForWorkspace(sessions, workspace);
-                      const nested = (children.get(workspace.id) ?? []).filter(keep);
+                      const nested = children.get(workspace.id) ?? [];
                       return (
                         <div className="flex flex-col gap-[2px]" data-testid={`workspace-node-${workspace.id}`} key={workspace.id}>
                         <div
@@ -1315,7 +1291,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               Restore
                             </button>
                           )}
-                          {workspaceSessions.length > 0 && workspaceSessionRows(workspace, tabOrderedSessions(workspace))}
+                          {workspaceSessions.length > 0 && sessionRows(tabOrderedSessions(workspace), workspace.id)}
                         </div>
                         {nested.length > 0 && depth < 8 && (
                           <div className={`${WORKSPACE_TREE} ml-[0.9rem]`} data-testid={`workspace-children-${workspace.id}`}>
@@ -1337,7 +1313,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                                 Restore
                               </button>
                             )}
-                            {!projectCollapsed && sessionsForWorkspace(sessions, single).length > 0 && workspaceSessionRows(single, tabOrderedSessions(single))}
+                            {!projectCollapsed && sessionsForWorkspace(sessions, single).length > 0 && sessionRows(tabOrderedSessions(single), single.id)}
                           </>
                         );
                       }
@@ -1346,7 +1322,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           {(attentionSort
                             ? [...roots].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || urgency(sessionsForWorkspace(sessions, a)) - urgency(sessionsForWorkspace(sessions, b)))
                             : roots
-                          ).filter(keep).map((workspace) => renderWorkspace(workspace, 0))}
+                          ).map((workspace) => renderWorkspace(workspace, 0))}
                         </div>
                       );
                     })()}

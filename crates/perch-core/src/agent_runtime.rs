@@ -447,13 +447,14 @@ impl AgentRuntimeAdapter {
             else {
                 continue;
             };
-            if let Some(provider) = foreground_provider(root, &processes, &names) {
-                if provider != runtime.observed_provider {
+            let foreground = foreground_provider(root, &processes, &names);
+            if let Some((_, provider)) = &foreground {
+                if provider != &runtime.observed_provider {
                     runtime.observed_provider = provider.clone();
                     *runtime.title_tracker.lock().unwrap() =
                         crate::agent_title::TitleTracker::default();
                     runtime.title_status.store(false, Ordering::Release);
-                    if let Some(manifest) = self.providers.get(&provider) {
+                    if let Some(manifest) = self.providers.get(provider) {
                         *runtime.output_detection.lock().unwrap() =
                             (manifest.status_detection, String::new());
                     }
@@ -476,8 +477,13 @@ impl AgentRuntimeAdapter {
                     }
                 }
             }
-            let launched = crate::shell_integration::launched(key)?
-                .filter(|agent| process_descends_from(agent.pid, root, &processes));
+            // A tool-launched agent is also a descendant, but only the enclosing
+            // foreground agent may own this tab's native status (even for the same provider).
+            let launched = crate::shell_integration::launched(key)?.filter(|agent| {
+                foreground
+                    .as_ref()
+                    .is_some_and(|(pid, _)| *pid == agent.pid)
+            });
             if runtime.shell_agent != launched {
                 if runtime.shell_agent.is_some() {
                     // A successful process snapshot confirmed that invocation
@@ -500,7 +506,7 @@ impl AgentRuntimeAdapter {
                 let identity = &runtime.handle.terminal;
                 // A tmux/SSH attachment is not the remote agent's process tree.
                 identity.daemon_session.as_ref()?;
-                let provider = foreground_provider(identity.process_id?, &processes, &names)?;
+                let (_, provider) = foreground_provider(identity.process_id?, &processes, &names)?;
                 Some((runtime.handle.key.session_id.clone(), provider))
             })
             .collect();
@@ -2043,24 +2049,6 @@ fn process_snapshot(text: &str) -> HashMap<u32, ForegroundProcess<'_>> {
         .collect()
 }
 
-fn process_descends_from(
-    pid: u32,
-    root: u32,
-    processes: &HashMap<u32, ForegroundProcess<'_>>,
-) -> bool {
-    let mut ancestor = pid;
-    for _ in 0..processes.len() {
-        if ancestor == root {
-            return processes.contains_key(&root);
-        }
-        let Some(process) = processes.get(&ancestor) else {
-            return false;
-        };
-        ancestor = process.parent;
-    }
-    false
-}
-
 /// The bridge that speaks for a tab: the shell-typed agent when one is current, else the tab's own
 /// when it still owns the foreground. A runtime we know nothing about (`owner_current` is `None`) keeps
 /// the tab's own, as every lookup did before; one known not to own it has no bridge, because the
@@ -2077,7 +2065,7 @@ fn foreground_provider(
     root: u32,
     processes: &HashMap<u32, ForegroundProcess<'_>>,
     providers: &HashMap<String, String>,
-) -> Option<String> {
+) -> Option<(u32, String)> {
     processes.get(&root)?;
     let nearest = processes
         .iter()
@@ -2101,8 +2089,8 @@ fn foreground_provider(
         })
         .min_by_key(|(depth, pid, _)| (*depth, *pid));
     Some(nearest.map_or(
-        crate::agent_fleet::TERMINAL_PROVIDER.to_string(),
-        |(_, _, provider)| provider.clone(),
+        (root, crate::agent_fleet::TERMINAL_PROVIDER.to_string()),
+        |(_, pid, provider)| (pid, provider.clone()),
     ))
 }
 
@@ -2266,20 +2254,30 @@ mod tests {
         ];
         for (text, expected) in cases {
             assert_eq!(
-                foreground_provider(10, &process_snapshot(text), &providers).as_deref(),
+                foreground_provider(10, &process_snapshot(text), &providers)
+                    .as_ref()
+                    .map(|(_, provider)| provider.as_str()),
                 expected,
                 "{text}"
             );
         }
         let mut processes = process_snapshot("10 1 S zsh zsh\n11 10 S+ pi pi");
         assert_eq!(
-            foreground_provider(10, &processes, &providers).as_deref(),
-            Some("pi")
+            foreground_provider(10, &processes, &providers),
+            Some((11, "pi".into()))
         );
+        // Nested agents, including the same provider, cannot own the tab's status.
+        for child in ["pi", "codex"] {
+            let text = format!("10 1 S+ sh sh\n11 10 S+ pi pi\n12 11 S+ {child} {child}");
+            assert_eq!(
+                foreground_provider(10, &process_snapshot(&text), &providers),
+                Some((11, "pi".into()))
+            );
+        }
         processes.remove(&11); // Exit with no OSC shell-title update.
         assert_eq!(
-            foreground_provider(10, &processes, &providers).as_deref(),
-            Some("terminal")
+            foreground_provider(10, &processes, &providers),
+            Some((10, "terminal".into()))
         );
     }
 

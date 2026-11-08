@@ -180,17 +180,29 @@ describe("project tree", () => {
   const order = () => [...host.querySelectorAll('[data-testid^="workspace-project-"][data-reorder-id], [data-testid^="workspace-project-"].workspace-project')].map((el) => el.getAttribute("data-testid"));
   beforeEach(() => { storage.delete("perch.sidebar.organize"); });
 
-  it("lists what matters under a workspace and folds the idle rest into +N idle", () => {
+  it("keeps every session visible in a background workspace, including one that becomes idle", () => {
     usePerchStore.setState({ activeWorkspaceId: null });
     act(() => root.render(<WorkspaceOverview />));
-    expect(get("workspace-session-idle")).toBeNull();
-    for (const id of ["work", "ask", "fin"]) expect(get(`workspace-session-${id}`)).not.toBeNull();
-    expect(get("workspace-idle-w")!.textContent).toBe("+1 idle");
-    click(get("workspace-idle-w"));
-    expect(get("workspace-session-idle")).not.toBeNull();
-    expect(get("workspace-idle-w")!.textContent).toBe("Hide idle");
-    click(get("workspace-idle-w"));
-    expect(get("workspace-session-idle")).toBeNull();
+    for (const id of ["idle", "work", "ask", "fin"]) expect(get(`workspace-session-${id}`)).not.toBeNull();
+    expect(get("workspace-idle-w")).toBeNull();
+    act(() => usePerchStore.setState({ sessions: usePerchStore.getState().sessions.map((s) => s.id === "work" ? { ...s, status: "idle" } : s) }));
+    expect(get("workspace-session-work")).not.toBeNull();
+    expect(get("session-state-work")).toBeNull();
+  });
+
+  it("says Needs you, Done and Working in visible words at the end of a row, nothing for Idle, with no state ring", () => {
+    act(() => root.render(<WorkspaceOverview />));
+    expect(get("session-state-ask")!.textContent).toBe("Needs you");
+    expect(get("session-state-ask")!.getAttribute("data-state")).toBe("needs");
+    expect(get("session-state-fin")!.textContent).toBe("Done");
+    expect(get("session-state-work")!.getAttribute("data-state")).toBe("working");
+    expect(get("session-state-work")!.textContent).toBe("Working");
+    expect(get("session-state-work")!.className).toContain("text-[11px]");
+    expect(get("session-state-idle")).toBeNull();
+    expect(host.querySelector(".agent-status-dot")).toBeNull();
+    // A host that is not reachable states nothing.
+    act(() => usePerchStore.setState({ connected: false }));
+    expect(host.querySelector('[data-testid^="session-state-"]')).toBeNull();
   });
 
   it("the open workspace lists all of its chats", () => {
@@ -199,12 +211,17 @@ describe("project tree", () => {
     expect(get("workspace-idle-w")).toBeNull();
   });
 
-  it("a folded project says its most urgent state", () => {
+  it.each(["needs", "working"])("a folded project says %s in visible words", (section) => {
     storage.set("perch.sidebar.collapsedProjects", JSON.stringify(["p"]));
     usePerchStore.setState({ activeWorkspaceId: null });
+    if (section === "working") {
+      usePerchStore.setState({ sessions: [chat("work", { status: "running" })] });
+      useAttention.setState({ events: [] });
+    }
     act(() => root.render(<WorkspaceOverview />));
-    expect(get("workspace-session-ask")).toBeNull();
-    expect(get("project-rollup-p")!.getAttribute("data-section")).toBe("needs");
+    expect(get("workspace-session-work")).toBeNull();
+    expect(get("project-rollup-p")!.getAttribute("data-section")).toBe(section);
+    expect(get("project-rollup-p")!.textContent).toBe(section === "needs" ? "Needs you" : "Working");
   });
 
   it("the header counts the chats that need you, and is absent when none do", () => {
@@ -229,14 +246,15 @@ describe("project tree", () => {
     expect(host.querySelector("[data-reorder-id]")).toBeNull();
   });
 
-  it("show active only hides projects with nothing going on, unless the host is unreachable", () => {
+  it("ignores the retired active-only preference and offers no idle-hiding control", () => {
     two();
     storage.set("perch.sidebar.activeOnly", "1");
     act(() => root.render(<WorkspaceOverview />));
-    expect(get("workspace-project-p")).toBeNull();
-    expect(get("workspace-project-q")).not.toBeNull();
-    act(() => usePerchStore.setState({ connected: false }));
     expect(get("workspace-project-p")).not.toBeNull();
+    expect(get("workspace-session-idle")).not.toBeNull();
+    expect(get("workspace-project-q")).not.toBeNull();
+    click(get("workspace-organize"));
+    expect(document.querySelector('[data-testid="workspace-active-only"]')).toBeNull();
   });
 });
 

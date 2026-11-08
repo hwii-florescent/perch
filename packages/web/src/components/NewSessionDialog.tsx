@@ -7,7 +7,7 @@
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { NEW_SESSION_EVENT } from "../appEvents";
+import { NEW_SESSION_EVENT, requestAddProject } from "../appEvents";
 import { openBlankBrowser, useFileTabs } from "../fileTabs";
 import { cn } from "../lib/cn";
 import { effectiveActiveProject, effectiveWorkspace, usePerchStore, type WorkspaceProject } from "../store";
@@ -32,7 +32,8 @@ export function NewSessionDialog() {
 function Dialog({ onClose }: { onClose: () => void }) {
   const hostId = usePerchStore((s) => s.activeHostId);
   const allProjects = usePerchStore((s) => s.workspaceProjects);
-  const projects = allProjects.filter((p) => p.hostId === hostId);
+  // Chats (the scratch workspace) is the "No project" row below: quickchats run in the home folder.
+  const projects = allProjects.filter((p) => p.hostId === hostId && !isChatsProject(p));
   const activeProject = usePerchStore(effectiveActiveProject);
   const activeWorkspace = usePerchStore(effectiveWorkspace);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
@@ -66,7 +67,8 @@ function Dialog({ onClose }: { onClose: () => void }) {
     title = "New session in…";
     rows = [
       ...projects.map((p) => ({ id: p.id, label: p.name || p.path, detail: p.path, run: () => pick(p) })),
-      ...(projects.some(isChatsProject) ? [] : [{ id: "none", label: "No project", detail: "Quickchat", muted: true, run: () => pick(null) }]),
+      { id: "add", label: "Add project…", muted: true, run: () => { onClose(); requestAddProject(); } },
+      { id: "none", label: "No project", detail: "Quickchat in ~", muted: true, run: () => pick(null) },
     ];
   } else {
     const { target } = stage;

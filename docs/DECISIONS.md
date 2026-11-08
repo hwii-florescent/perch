@@ -7,6 +7,18 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-08 — Project tree: explicit state labels, no idle hiding (owner)
+
+Amends the one-tree sidebar decision below.
+
+- Session rows say **Working**, **Needs you** or **Done** in visible text; a dot alone is not enough.
+  Folded project rollups use the same labels and counts. Idle stays unlabelled, and unreachable hosts
+  claim no current state. Labels use full text colour on a quiet state-tinted fill.
+- By project lists all sessions under each expanded workspace, including idle chats in background
+  workspaces. No `+N idle` / `Hide idle` control and no **Show active only** filter; an old saved
+  active-only choice is ignored. Manual project collapse, attention sorting, hidden worktrees and
+  the separate **Show terminals** choice remain unchanged.
+
 ## 2026-11-08 — Project memory: plain files in Perch's own directory (owner)
 
 Settles the "proposed" part of 2026-11-07 (Projects parity). Slice 1 (core and `perch memory`) is
@@ -196,8 +208,9 @@ queue but it should be send right to the agent when it starts that message inste
   follow-up (the default for `perch send` and Perch status notes), or in the running turn for
   `perch steer`.
 - Through each CLI's approved native path only (Pi/OMP extension `sendUserMessage` with
-  `deliverAs`; Claude and Codex as their bridges allow). A CLI with no follow-up queue keeps the
-  idle wait, and the receipt says so.
+  `deliverAs`; Claude and Codex as their bridges allow). A CLI with no follow-up queue (Claude,
+  Codex) gets the message as a steer into the running turn instead of waiting for idle (owner,
+  same day: "I would accept a steer here instead of waiting for idle"); the receipt says steered.
 - Unchanged: never typed into a PTY; never over a person's draft or an open question or approval
   (those still wait, with the reason); holds and refusals; unknown state is not idle.
 - Receipts say delivered, queued in the agent, or steered.
