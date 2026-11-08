@@ -68,6 +68,80 @@ const BUILTIN: Record<string, Omit<Program, "id">> = {
   tmux: { name: "tmux", tile: "#1bb91f", match: ["screen"] },
   htop: { name: "htop", tile: "#0ea5e9", match: ["btop", "top"] },
   less: { name: "less", tile: "#6b7280", match: ["man", "bat"] },
+  goose: { name: "Goose", tile: "#f59e0b", run: ["goose"] },
+  crush: { name: "Crush", tile: "#ec4899", run: ["crush"] },
+  qwen: { name: "Qwen", tile: "#6d28d9", run: ["qwen"] },
+  cline: { name: "Cline", tile: "#0ea5e9", run: ["cline"] },
+  kilo: { name: "Kilo", tile: "#111827", run: ["kilo"] },
+  ollama: { name: "Ollama", tile: "#374151" },
+  micro: { name: "micro", tile: "#2563eb" },
+  kak: { name: "Kakoune", tile: "#7c3aed", match: ["kakoune"] },
+  zed: { name: "Zed", tile: "#084ccf" },
+  subl: { name: "Sublime", tile: "#ff9800", match: ["sublime_text"] },
+  idea: { name: "IntelliJ", tile: "#fe315d", match: ["webstorm", "pycharm", "goland", "clion"] },
+  php: { name: "PHP", tile: "#777bb4", match: ["composer"] },
+  perl: { name: "Perl", tile: "#39457e" },
+  lua: { name: "Lua", tile: "#000080", match: ["luajit"] },
+  julia: { name: "Julia", tile: "#9558b2" },
+  R: { name: "R", tile: "#276dc3", match: ["Rscript"] },
+  elixir: { name: "Elixir", tile: "#6e4a7e", match: ["mix", "iex"] },
+  erl: { name: "Erlang", tile: "#a90533", match: ["erlang", "rebar3"] },
+  ghc: { name: "Haskell", tile: "#5e5086", match: ["stack", "cabal", "ghci"] },
+  ocaml: { name: "OCaml", tile: "#ee6a1a", match: ["dune", "opam"] },
+  zig: { name: "Zig", tile: "#f7a41d" },
+  swift: { name: "Swift", tile: "#f05138", match: ["swiftc", "xcodebuild"] },
+  kotlin: { name: "Kotlin", tile: "#7f52ff", match: ["kotlinc"] },
+  dotnet: { name: ".NET", tile: "#512bd4" },
+  gradle: { name: "Gradle", tile: "#02303a", match: ["gradlew"] },
+  mvn: { name: "Maven", tile: "#c71a36" },
+  scala: { name: "Scala", tile: "#dc322f", match: ["sbt"] },
+  dart: { name: "Dart", tile: "#0175c2", match: ["flutter"] },
+  pip: { name: "pip", tile: "#3776ab", match: ["pip3"] },
+  uv: { name: "uv", tile: "#de5fe9", match: ["uvx"] },
+  poetry: { name: "Poetry", tile: "#60a5fa" },
+  conda: { name: "Conda", tile: "#44a833", match: ["mamba"] },
+  pytest: { name: "pytest", tile: "#0a9edc" },
+  cmake: { name: "CMake", tile: "#064f8c", match: ["ninja"] },
+  gcc: { name: "GCC", tile: "#6b7280", match: ["clang", "cc", "c++", "g++"] },
+  eslint: { name: "ESLint", tile: "#4b32c3" },
+  prettier: { name: "Prettier", tile: "#f7b93e" },
+  webpack: { name: "webpack", tile: "#8dd6f9" },
+  esbuild: { name: "esbuild", tile: "#ffcf00" },
+  next: { name: "Next.js", tile: "#000000" },
+  astro: { name: "Astro", tile: "#ff5d01" },
+  turbo: { name: "Turborepo", tile: "#ef4444", match: ["nx"] },
+  tailwindcss: { name: "Tailwind", tile: "#06b6d4" },
+  storybook: { name: "Storybook", tile: "#ff4785" },
+  cypress: { name: "Cypress", tile: "#17202c" },
+  mocha: { name: "Mocha", tile: "#8d6748" },
+  curl: { name: "curl", tile: "#073551", match: ["wget", "http", "xh"] },
+  rsync: { name: "rsync", tile: "#475569", match: ["scp", "sftp"] },
+  jq: { name: "jq", tile: "#475569", match: ["yq"] },
+  fzf: { name: "fzf", tile: "#f59e0b" },
+  rg: { name: "ripgrep", tile: "#475569", match: ["grep", "ag", "fd", "find"] },
+  yazi: { name: "Yazi", tile: "#16a34a", match: ["ranger", "lf", "nnn", "mc"] },
+  gh: { name: "GitHub", tile: "#24292f", match: ["glab", "hub"] },
+  brew: { name: "Homebrew", tile: "#fbb040", match: ["apt", "dnf", "pacman", "nix"] },
+  aws: { name: "AWS", tile: "#ff9900" },
+  gcloud: { name: "Google Cloud", tile: "#4285f4" },
+  az: { name: "Azure", tile: "#0078d4" },
+  ansible: { name: "Ansible", tile: "#ee0000", match: ["ansible-playbook"] },
+  vagrant: { name: "Vagrant", tile: "#1868f2" },
+  nginx: { name: "nginx", tile: "#009639", match: ["caddy", "httpd"] },
+  mongosh: { name: "MongoDB", tile: "#47a248", match: ["mongod", "mongo"] },
+  clickhouse: { name: "ClickHouse", tile: "#ffcc00", match: ["clickhouse-client"] },
+  duckdb: { name: "DuckDB", tile: "#fff000" },
+  cockroach: { name: "CockroachDB", tile: "#6933ff" },
+  watch: { name: "watch", tile: "#6b7280", match: ["tail", "cat", "tee"] },
+  ping: { name: "ping", tile: "#475569", match: ["traceroute", "mtr", "dig", "nslookup"] },
+  lazydocker: { name: "Lazydocker", tile: "#2496ed" },
+  just: { name: "just", tile: "#6b7280", match: ["task", "invoke"] },
+  watchexec: { name: "watchexec", tile: "#6b7280", match: ["nodemon", "entr", "cargo-watch"] },
+  ngrok: { name: "ngrok", tile: "#1f1e37", match: ["cloudflared", "tailscale"] },
+  gpg: { name: "GnuPG", tile: "#0093dd", match: ["age", "pass"] },
+  neofetch: { name: "fetch", tile: "#6b7280", match: ["fastfetch"] },
+  cursor: { name: "Cursor", tile: "#111827" },
+  windsurf: { name: "Windsurf", tile: "#0b100f" },
 };
 const SHELLS = ["bash", "zsh", "sh", "fish", "dash", "ksh", "nu", "pwsh", "tcsh", "csh"];
 const INTERPRETERS = ["node", "python", "python3", "ruby", "perl", "php", "bun", "deno", "npx", "bunx", "pnpx", "uv", "uvx", "pipx"];
@@ -77,6 +151,14 @@ const base = (path: string) => path.split("/").pop()!.replace(/\.(m?js|cjs|ts|py
 const tileFor = (name: string) => `hsl(${[...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7)} 45% 40%)`;
 
 /** The table: built-ins with `programs.json` merged over them field by field. */
+/** What the table holds: the built-in entries, whether or not a `programs.json` adds to them. */
+export const BUILTIN_COUNT = Object.keys(BUILTIN).length;
+
+/** The `programs.json` the core last sent; the sidebar, toasts and `api.program()` read through it. */
+let userFile: ProgramsFile | undefined;
+export const setProgramsFile = (file: ProgramsFile | undefined) => { userFile = file; };
+export const currentPrograms = () => userFile;
+
 export function programTable(file?: ProgramsFile): Program[] {
   const merged = new Map<string, Program>(Object.entries(BUILTIN).map(([id, entry]) => [id, { id, ...entry }]));
   for (const [id, entry] of Object.entries(file?.programs ?? {})) {

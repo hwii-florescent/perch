@@ -6,7 +6,7 @@ import { prefersDark } from "./themes";
 import { zoomFactor } from "./zoom";
 import { nodeIds, shownLayout } from "./layoutState";
 import { playBlockedTone, playDoneTone } from "./sound";
-import { programFor, programTable, type ProgramsFile } from "./programs";
+import { currentPrograms, programFor, programTable } from "./programs";
 import { exec, getShared, listDir, onShared, readTextFile, setShared, statFile, watchPath, writeTextFile, type ExecResult, type FileStat, type OnHost } from "./modHost";
 import { modUi } from "./modUi";
 import type { WorkspaceProject, WorkspaceRecord } from "./store";
@@ -81,6 +81,10 @@ export interface ModApi {
   terminals(): { id: string; title: string; cwd: string; workspaceId?: string; hostId: string; focused: boolean }[];
   /** What the tab on screen shows: its tiles when split, else the one tab. `kind` is session, file, review, browser or mod. */
   panes(): { id: string; kind: string; title: string; mod?: string; focused: boolean }[];
+  /** The last `lines` lines (default 50) of a terminal's text, screen and scrollback: `id` is a session id or a terminal id, and it must be on screen (herdr's `hc read`). */
+  readTerminal(id: string, lines?: number): string;
+  /** Types `text` into a terminal like the person would (add "\r" for Enter): herdr's `hc send`. Throws if there is no such terminal. */
+  sendText(id: string, text: string): void;
   /** This computer (id "local") and the computers in Settings > Hosts, with whether they can be reached now. */
   machines(): { id: string; name: string; state: "ready" | "loading" | "unavailable" }[];
   subscribe(changed: () => void): () => void;
@@ -153,7 +157,7 @@ export const bindKey = (command: string, keys: string | null) => bridge.bind(com
 export const commandList = () => bridge.list();
 
 /** Which layout is shown and which load; `mods.ts` sets it as the core reports (this file cannot import it). */
-let layoutInfo: { layout: string | null; layouts: string[]; home: string; folder: string; programs?: ProgramsFile } = { layout: null, layouts: [], home: "", folder: "" };
+let layoutInfo: { layout: string | null; layouts: string[]; home: string; folder: string } = { layout: null, layouts: [], home: "", folder: "" };
 export const setLayoutInfo = (next: typeof layoutInfo) => { layoutInfo = next; };
 
 /** A mod's default export: draws into `el` and may return what to undo when it is replaced. */
@@ -290,8 +294,8 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
         return () => resolve(null);
       });
     }),
-    programs: () => programTable(layoutInfo.programs),
-    program: (command) => programFor(command, layoutInfo.programs),
+    programs: () => programTable(currentPrograms()),
+    program: (command) => programFor(command, currentPrograms()),
     knownAgents: async (on) => {
       const host = on?.host ?? "local";
       const read = () => usePerchStore.getState().agentManifestsByHost[host]?.manifests;
@@ -301,7 +305,7 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
       }
       const found = (read() ?? []).filter((m) => m.enabled !== false && m.supportedModes.includes("cli")).map((m) => ({ id: m.id, name: m.displayName, installed: m.available, isDefault: m.isDefault === true } as { id: string; name: string; installed: boolean; isDefault: boolean; run?: string[] }));
       // programs.json entries with a `run` are agents a menu can start; installed means the program is on that computer's login PATH.
-      for (const entry of programTable(layoutInfo.programs).filter((p) => p.run?.length && !found.some((m) => m.id === p.id))) {
+      for (const entry of programTable(currentPrograms()).filter((p) => p.run?.length && !found.some((m) => m.id === p.id))) {
         const probe = await exec("sh", ["-lc", `command -v '${entry.run![0]!.replace(/'/g, "'\\''")}'`], on).catch(() => null);
         found.push({ id: entry.id, name: entry.name, installed: probe?.code === 0, isDefault: false, run: entry.run });
       }
@@ -321,6 +325,16 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
     agents: () => usePerchStore.getState().sessions.filter((s) => s.cliProviderId !== "terminal").map((s) => ({ id: s.id, title: s.title, provider: s.cliProviderId ?? "", status: sessionDotState(s) as "working" | "idle" | "blocked" | "done", workspaceId: s.workspaceId, hostId: s.hostId ?? "local", focused: s.id === usePerchStore.getState().sessionId })),
     terminals: () => usePerchStore.getState().sessions.filter((s) => s.cliProviderId === "terminal").map((s) => ({ id: s.id, title: s.title, cwd: s.cwd, workspaceId: s.workspaceId, hostId: s.hostId ?? "local", focused: s.id === usePerchStore.getState().sessionId })),
     panes: () => panesOnScreen(),
+    readTerminal: (id, lines) => {
+      const text = terminalText(terminalElement(id), lines);
+      if (text === null) throw new Error(`Terminal ${id} is not on screen.`);
+      return text;
+    },
+    sendText: (id, text) => {
+      const terminalId = terminalElement(id).getAttribute("data-terminal-id");
+      if (!terminalId) throw new Error(`No terminal ${id}.`);
+      usePerchStore.getState().sendTerminalInput(terminalId, text);
+    },
     machines: () => {
       const s = usePerchStore.getState();
       return [
@@ -403,6 +417,14 @@ export async function importMod(src: string): Promise<ModMount> {
  * fails to load or throws leaves the previous one on screen and reports why. */
 // The tab strip pulls in the whole file store, so the canvas code hands this in (modCommands) instead of modApp importing it.
 let panesOnScreen: () => ReturnType<ModApi["panes"]> = () => [];
+// xtermSetup pulls in the file store too, so the canvas code hands the reader over (modCommands).
+let terminalText: (root: Element, lines?: number) => string | null = () => null;
+export const setTerminalReader = (reader: typeof terminalText) => { terminalText = reader; };
+/** The element of a terminal on screen, by its terminal id or its session's. */
+const terminalElement = (id: string): Element => {
+  const terminalId = usePerchStore.getState().cliTerminalIds[id] ?? id;
+  return document.querySelector(`[data-terminal-id="${CSS.escape(terminalId)}"]`) ?? document.createElement("div");
+};
 export const setPanesSource = (source: typeof panesOnScreen) => { panesOnScreen = source; };
 
 export function createSwapper(host: HTMLElement, report: (error: string | null) => void, importer: (src: string) => Promise<ModMount> = importMod) {

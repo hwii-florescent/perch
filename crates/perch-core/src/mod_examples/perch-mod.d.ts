@@ -30,6 +30,10 @@ interface ModApi {
   terminals(): { id: string; title: string; cwd: string; workspaceId?: string; hostId: string; focused: boolean }[];
   /** What the tab on screen shows: its tiles when split, else the one tab. `kind` is session, file, review, browser or mod. */
   panes(): { id: string; kind: string; title: string; mod?: string; focused: boolean }[];
+  /** The last `lines` lines (default 50) of a terminal's text, screen and scrollback: `id` is a session id or a terminal id, and it must be on screen (herdr's `hc read`). */
+  readTerminal(id: string, lines?: number): string;
+  /** Types `text` into a terminal like the person would (add "\r" for Enter): herdr's `hc send`. Throws if there is no such terminal. */
+  sendText(id: string, text: string): void;
   /** This computer (id "local") and the computers in Settings > Hosts, with whether they can be reached now. */
   machines(): { id: string; name: string; state: "ready" | "loading" | "unavailable" }[];
   /** Calls `changed` after any of that changes. Returns the way to stop. */

@@ -130,8 +130,10 @@ approval not mattering much.
   `perch mod status`) and the page applies them. `keys.json` follows herdr's sections and actions (`global`, `terminal`,
   `layout:<name>`, `mod:<name>`; command, `name:value`, `send:`, `<mod>.<command>`, `terminal`, `{command, args}`) and listens
   on the window's capture phase so it beats the app's own shortcuts; ctrl+alt+shift+Escape is never taken. `programs.json`
-  changes a built-in table of about 50 programs (herdr ships 120) field by field and feeds `api.program()`, `programs()` and
-  `knownAgents()` (entries with `run`); the core's own toasts and the sidebar icons do not read it yet.
+  changes a built-in table of about 120 programs (herdr ships 120) field by field and feeds `api.program()`, `programs()`,
+  `knownAgents()` (entries with `run`), the sidebar icons (a program `icon` is served from inside the folder by
+  `GET /mods/file?icon=`, 1 MiB, svg/png/jpg/webp) and the "<Program> finished" toast. `api.readTerminal(id, lines)` and
+  `api.sendText(id, text)` are the mod-facing half of herdr's `hc`; Perch's `perch` CLI covers the rest.
 - **Data a mod reads.** `props()` (a `mod:` block's `props` object, at most 4 KiB, reloads the copy when it changes),
   `theme()` (colors by herdr's names, read from the page's custom properties so a layout look or theme file shows),
   `settings()` (+ `dark`, `zoom`), `keys()`, `layout()`/`layouts()`, and `notify({icon, timeout})`.

@@ -1,6 +1,7 @@
 import { placeFloat, resetLayoutState, resizeNode, showStackChild, toggleNode } from "./layoutState";
 import { cloneMod, currentMods, openMod, setLayout } from "./mods";
-import { bindKey, runCommand, setPanesSource } from "./modApp";
+import { bindKey, runCommand, setPanesSource, setTerminalReader } from "./modApp";
+import { terminalText } from "./xtermSetup";
 import { focusedSplit, getPaneController, openModTab, splitActiveTab } from "./tiledPanes";
 import { currentTabs, entryLabel } from "./workspaceTabs";
 import { zoomIn, zoomOut, zoomReset } from "./zoom";
@@ -53,6 +54,7 @@ const clone = (layout: boolean) => later(async (args) => {
   if (layout) await setLayout(made);
 });
 
+setTerminalReader(terminalText);
 setPanesSource(() => {
   const { tabs, activeId } = currentTabs();
   const shown = new Set(focusedSplit()?.ids ?? [activeId]);

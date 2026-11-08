@@ -194,6 +194,31 @@ export interface PerchTerminal {
  * `onResize` fires only when the fitted grid actually changes, and is what
  * should be forwarded to the PTY.
  */
+/** The live terminals by the element they draw in, so a mod can read one's text (`api.readTerminal`). */
+const liveTerminals = new Map<HTMLElement, Terminal>();
+
+/** The last `lines` lines (screen and scrollback, trailing blanks dropped) of the terminal drawn in or under `root`. */
+export function terminalText(root: Element, lines = 50): string | null {
+  const host = [...liveTerminals.keys()].find((container) => root === container || root.contains(container));
+  const term = host && liveTerminals.get(host);
+  if (!term) return null;
+  const buffer = term.buffer.active;
+  const out: string[] = [];
+  const wanted = Math.max(1, Math.min(lines, 5000));
+  for (let y = buffer.length - 1; y >= 0 && out.length < wanted; y--) {
+    let line = buffer.getLine(y);
+    let text = line?.translateToString(true) ?? "";
+    // A wrapped row continues the one above it: join them into one line.
+    while (line?.isWrapped && y > 0) {
+      line = buffer.getLine(--y);
+      text = (line?.translateToString(false) ?? "") + text;
+    }
+    // Blank rows under the last output are the empty screen, not lines.
+    if (out.length || text.trim()) out.unshift(text);
+  }
+  return out.join("\n");
+}
+
 export function createPerchTerminal(
   container: HTMLElement,
   onResize: (cols: number, rows: number) => void,
@@ -687,6 +712,7 @@ export function createPerchTerminal(
     fit();
   });
 
+  liveTerminals.set(container, term);
   const stopContext = attachTerminalContext(container, term, contextSessionId);
   // Observes OSC 133 output marks only (jump between commands, failed-command ticks); no input is touched.
   const commandMarks = attachCommandMarks(term);
@@ -702,6 +728,7 @@ export function createPerchTerminal(
     dispose: () => {
       if (disposed) return;
       disposed = true;
+      liveTerminals.delete(container);
       if (frame) cancelAnimationFrame(frame);
       observer.disconnect();
       stopZoom();

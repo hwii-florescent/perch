@@ -1,4 +1,6 @@
 /** Harness and terminal artwork adapted from Orca (MIT); see THIRD_PARTY_NOTICES.md. */
+import { getBasePath } from "../base";
+import { currentPrograms, programFor } from "../programs";
 import React from "react";
 
 export function PiIcon({ size = 14 }: { size?: number }): React.JSX.Element {
@@ -252,6 +254,14 @@ const favicons = import.meta.glob<string>("../assets/agent-icons/*.png", { eager
 
 /** Bundled marks work offline. Unknown custom harnesses get Orca's letter tile. */
 export function AgentIcon({ provider, size = 14 }: { provider?: string; size?: number }) {
+  // An icon the person's programs.json names (a path inside the folder that holds mods/) replaces the stock one.
+  const mine = provider ? currentPrograms()?.programs?.[provider] : undefined;
+  if (typeof mine?.icon === "string" && mine.icon) {
+    const url = `${window.location.origin}${getBasePath()}mods/file?${new URLSearchParams({ icon: mine.icon })}`;
+    return mine.tint
+      ? <span aria-hidden="true" data-program-icon={provider} style={{ display: "inline-block", width: size, height: size, background: mine.color ?? "currentColor", WebkitMask: `url(${url}) center / contain no-repeat`, mask: `url(${url}) center / contain no-repeat` }} />
+      : <img src={url} width={size} height={size} alt="" aria-hidden="true" data-program-icon={provider} />;
+  }
   switch (provider) {
     case "claude":
     case "claude-agent-teams": return <ClaudeIcon size={size} />;
@@ -267,5 +277,5 @@ export function AgentIcon({ provider, size = 14 }: { provider?: string; size?: n
   }
   const src = favicons[`../assets/agent-icons/${provider}.png`];
   return src ? <img src={src} width={size} height={size} alt="" aria-hidden="true" />
-    : <AgentLetterIcon letter={provider?.[0]?.toUpperCase() || "?"} size={size} />;
+    : <AgentLetterIcon letter={(provider && programFor(provider, currentPrograms()).name[0]?.toUpperCase()) || provider?.[0]?.toUpperCase() || "?"} size={size} />;
 }

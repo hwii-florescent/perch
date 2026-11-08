@@ -289,10 +289,32 @@ pub(super) async fn file(
     if let Err(status) = authorize_request(&app, &peer, &headers, &params) {
         return (status, "device access denied").into_response();
     }
+    let policy = app.settings.get().mods;
+    // A program's icon from programs.json: an image under the folder, shown by <img> and never run.
+    if let Some(rel) = params.get("icon") {
+        return match mods::icon(&app.memory_root, &policy, rel) {
+            Ok((bytes, kind)) => (
+                [
+                    ("content-type", kind),
+                    ("x-content-type-options", "nosniff"),
+                    (
+                        "content-security-policy",
+                        "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+                    ),
+                    ("cache-control", "no-cache"),
+                ],
+                bytes,
+            )
+                .into_response(),
+            Err(error) => {
+                let (status, text) = failure(error);
+                (status, text).into_response()
+            }
+        };
+    }
     let Some(id) = params.get("id") else {
         return (StatusCode::BAD_REQUEST, "id is required").into_response();
     };
-    let policy = app.settings.get().mods;
     if let Some(name) = params.get("font") {
         return match mods::font(&app.memory_root, &policy, id, name) {
             Ok((bytes, kind)) => (

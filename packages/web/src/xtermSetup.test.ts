@@ -99,6 +99,25 @@ describe("selectTerminalTheme", () => {
 });
 
 describe("createPerchTerminal", () => {
+  it("terminalText reads a live terminal's lines (wrapped rows joined, blanks trimmed) and forgets a disposed one", async () => {
+    HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }) })) as never;
+    window.matchMedia ??= (() => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} })) as never;
+    globalThis.ResizeObserver ??= class { observe() {} disconnect() {} } as never;
+    globalThis.IntersectionObserver ??= class { observe() {} disconnect() {} } as never;
+    const { createPerchTerminal, terminalText } = await import("./xtermSetup");
+    const host = document.createElement("div");
+    const surface = host.appendChild(document.createElement("div"));
+    const { term, dispose } = createPerchTerminal(surface, () => {});
+    term.resize(10, 5);
+    term.write("one\r\n0123456789abcdef\r\nlast\r\n\r\n");
+    term.resize(10, 6); // a size change flushes the queued write
+    expect(terminalText(host)).toBe("one\n0123456789abcdef\nlast");
+    expect(terminalText(host, 1)).toBe("last");
+    expect(terminalText(document.createElement("div"))).toBeNull();
+    dispose();
+    expect(terminalText(host)).toBeNull();
+  });
+
   it("keeps an empty write's callback, and later writes, across a resize", async () => {
     // jsdom has no canvas, matchMedia, ResizeObserver or IntersectionObserver; xterm only uses them to measure and pause.
     HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }) })) as never;

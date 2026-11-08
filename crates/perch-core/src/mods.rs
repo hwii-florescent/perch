@@ -298,6 +298,51 @@ pub fn font(
     Ok((std::fs::read(path)?, kind))
 }
 
+const ICON_KINDS: [(&str, &str); 5] = [
+    ("svg", "image/svg+xml"),
+    ("png", "image/png"),
+    ("jpg", "image/jpeg"),
+    ("jpeg", "image/jpeg"),
+    ("webp", "image/webp"),
+];
+
+/// A program icon from `programs.json` (`"icon": "my-icons/mytool.svg"`): an image under the folder
+/// that holds `mods/`, by relative path, up to 1 MiB. Nothing outside that folder is served.
+pub fn icon(root: &Path, policy: &Policy, rel: &str) -> Result<(Vec<u8>, &'static str), Error> {
+    if policy.is_off() {
+        return Err(Error::NotFound("mods are off".into()));
+    }
+    let relative = Path::new(rel);
+    if rel.is_empty()
+        || !relative
+            .components()
+            .all(|c| matches!(c, Component::Normal(_)))
+    {
+        return Err(Error::Invalid(
+            "an icon is a relative path inside the folder".into(),
+        ));
+    }
+    let ext = relative
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let kind = ICON_KINDS
+        .iter()
+        .find(|(e, _)| *e == ext)
+        .map(|(_, k)| *k)
+        .ok_or_else(|| Error::Invalid("an icon is an svg, png, jpg or webp".into()))?;
+    let base = root.canonicalize()?;
+    let path = base.join(relative).canonicalize()?;
+    if !path.starts_with(&base) {
+        return Err(Error::Invalid("the icon points outside the folder".into()));
+    }
+    if std::fs::metadata(&path)?.len() > 1024 * 1024 {
+        return Err(Error::Invalid("larger than 1 MiB".into()));
+    }
+    Ok((std::fs::read(path)?, kind))
+}
+
 /// Turn one mod off or back on.
 pub fn set_enabled(root: &Path, policy: &Policy, id: &str, enabled: bool) -> Result<(), Error> {
     if !scan(root, policy).iter().any(|m| m.id == id) {
@@ -1081,6 +1126,34 @@ mod tests {
         assert!(install_from_url(&one.0, url, Some("nope"), &[], "o/r").is_err());
         assert!(install_from_url(&one.0, "/no/such/repo", None, &[], "o/r").is_err());
         let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn a_program_icon_is_served_from_inside_the_folder_only() {
+        let root = std::env::temp_dir().join(format!("perch-icons-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("my-icons")).unwrap();
+        std::fs::write(root.join("my-icons/a.svg"), "<svg/>").unwrap();
+        std::fs::write(root.join("secret.txt"), "x").unwrap();
+        let on = Policy { off: false };
+        let (bytes, kind) = icon(&root, &on, "my-icons/a.svg").unwrap();
+        assert_eq!((bytes.as_slice(), kind), (&b"<svg/>"[..], "image/svg+xml"));
+        assert!(icon(&root, &on, "../x.svg").is_err());
+        assert!(icon(&root, &on, "/etc/hosts.png").is_err());
+        assert!(icon(&root, &on, "secret.txt").is_err()); // not an image
+        assert!(icon(&root, &Policy { off: true }, "my-icons/a.svg").is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("secret.txt"), root.join("my-icons/link.png"))
+                .unwrap();
+            assert!(icon(&root, &on, "my-icons/link.png").is_ok()); // inside the folder: fine
+            let outside =
+                std::env::temp_dir().join(format!("perch-outside-{}.png", uuid::Uuid::new_v4()));
+            std::fs::write(&outside, "x").unwrap();
+            std::os::unix::fs::symlink(&outside, root.join("my-icons/out.png")).unwrap();
+            assert!(icon(&root, &on, "my-icons/out.png").is_err()); // a link out is refused
+            let _ = std::fs::remove_file(outside);
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

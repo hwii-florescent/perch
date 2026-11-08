@@ -1,3 +1,4 @@
+import { currentPrograms, programFor } from "../programs";
 import { useEffect, useState } from "react";
 import { cn } from "../lib/cn";
 import { usePerchStore, type ToastEntry } from "../store";
@@ -32,7 +33,11 @@ function ToastItem({ toast }: { toast: ToastEntry }) {
     return () => window.clearTimeout(timer);
   }, [toast.id, toast.timeout, blocked, paused, dismissToast]);
 
-  const heading = usage ? toast.title : blocked ? LABEL.blocked : LABEL.done;
+  // "Kiro finished": an agent's program name (programs.json can rename it); a plain terminal or an unknown program stays "Session finished".
+  const provider = session?.currentProviderId ?? session?.cliProviderId;
+  const program = provider && provider !== "terminal" ? programFor(provider, currentPrograms()) : null;
+  const finished = program && program.id !== "program" && program.id !== "shell" ? `${program.name} finished` : LABEL.done;
+  const heading = usage ? toast.title : blocked ? LABEL.blocked : finished;
   const detail = usage ? toast.body : toast.title || "(new session)";
 
   const open = () => {

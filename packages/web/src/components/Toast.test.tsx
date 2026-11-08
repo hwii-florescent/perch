@@ -47,3 +47,30 @@ it("shows what happened, opens the session, pauses on hover and auto-dismisses",
     expect(usePerchStore.getState().toasts).toEqual([]);
   } finally { act(() => root.unmount()); host.remove(); }
 });
+
+it("names the agent that finished, as the program table does (programs.json can rename it)", async () => {
+  const { setProgramsFile } = await import("../programs");
+  const { AgentIcon } = await import("./AgentIcon");
+  usePerchStore.setState({
+    sessions: [{ id: "k", title: "Fix", cwd: "/p", createdAt: 1, status: "idle", cliProviderId: "kiro" }, { id: "t", title: "sh", cwd: "/p", createdAt: 2, status: "idle", cliProviderId: "terminal" }] as never,
+    toasts: [{ id: "a", sessionId: "k", title: "Fix", kind: "done" }, { id: "b", sessionId: "t", title: "sh", kind: "done" }] as never,
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    act(() => root.render(<Toast />));
+    expect(host.textContent).toContain("Kiro finished");
+    expect(host.textContent).toContain("Session finished"); // a plain terminal
+    setProgramsFile({ programs: { kiro: { name: "Kiro CLI", icon: "my-icons/kiro.svg", tint: false } } });
+    act(() => root.render(<Toast />));
+    expect(host.textContent).toContain("Kiro CLI finished");
+    // And its icon is the person's own file, served from inside their folder.
+    act(() => root.render(<AgentIcon provider="kiro" />));
+    expect(host.querySelector("img")?.getAttribute("src")).toMatch(/mods\/file\?icon=my-icons%2Fkiro\.svg$/);
+  } finally {
+    setProgramsFile(undefined);
+    act(() => root.unmount());
+    host.remove();
+  }
+});

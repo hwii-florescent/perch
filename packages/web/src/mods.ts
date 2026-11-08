@@ -3,6 +3,7 @@ import { getBasePath } from "./base";
 import { newId } from "./ids";
 import { commandList, runCommand, setLayoutInfo } from "./modApp";
 import { setSlotErrorReporter } from "./slots";
+import { setProgramsFile } from "./programs";
 import { registerThemes } from "./themes";
 import { usePerchStore } from "./store";
 import { socket } from "./ws";
@@ -46,7 +47,8 @@ socket.onMessage((message) => {
     const { type: _type, requestId, ...state } = message;
     latest = state;
     registerThemes(state.themes ?? []);
-    setLayoutInfo({ layout: state.layout || null, layouts: (state.layouts ?? []).filter((l) => l.root).map((l) => l.id), home: state.home ?? "", folder: state.folder, programs: state.programs });
+    setLayoutInfo({ layout: state.layout || null, layouts: (state.layouts ?? []).filter((l) => l.root).map((l) => l.id), home: state.home ?? "", folder: state.folder });
+    setProgramsFile(state.programs);
     loadFonts(state);
     watchers.forEach((watch) => watch());
     settle(requestId, state);
