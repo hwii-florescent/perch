@@ -413,17 +413,31 @@ fn warnings_for(id: &str, dir: &Path) -> Vec<String> {
 /// a name already in use stops the install before anything is copied. Blocking (it runs `git`).
 pub fn install(root: &Path, source: &str) -> Result<Installed, Error> {
     let (repo, branch, sub) = github_source(source)?;
+    install_from_url(
+        root,
+        &format!("https://github.com/{repo}.git"),
+        branch.as_deref(),
+        &sub,
+        &repo,
+    )
+}
+
+/// `install` for any git URL or path; the source has already been checked.
+fn install_from_url(
+    root: &Path,
+    url: &str,
+    branch: Option<&str>,
+    sub: &[String],
+    repo: &str,
+) -> Result<Installed, Error> {
     let work = std::env::temp_dir().join(format!("perch-install-{}", uuid::Uuid::new_v4()));
     let result = (|| {
         let mut clone = std::process::Command::new("git");
         clone.args(["clone", "--depth", "1", "--quiet"]);
-        if let Some(branch) = &branch {
+        if let Some(branch) = branch {
             clone.args(["--branch", branch]);
         }
-        clone
-            .arg(format!("https://github.com/{repo}.git"))
-            .arg(&work)
-            .env("GIT_TERMINAL_PROMPT", "0");
+        clone.arg(url).arg(&work).env("GIT_TERMINAL_PROMPT", "0");
         let output = clone
             .output()
             .map_err(|e| Error::Invalid(format!("could not run git: {e}")))?;
@@ -436,7 +450,7 @@ pub fn install(root: &Path, source: &str) -> Result<Installed, Error> {
         install_from(
             root,
             &sub.iter().fold(work.clone(), |dir, s| dir.join(s)),
-            &repo,
+            repo,
         )
     })();
     let _ = std::fs::remove_dir_all(&work);
@@ -566,15 +580,47 @@ pub const EXAMPLES: &[Example] = &[
     },
 ];
 
-/// `perch mod clone <example> [as <id>]`: copies a shipped example into the mods or layouts folder
-/// as `new_id` (default: its own name) and returns that id. Never overwrites: an id in use is refused.
+/// Duplicates a mod or layout already in the folders, as herdr's "Duplicate mod/layout": the copy is
+/// `new_id` (default `<id>-copy`), yours to edit, and nothing is overwritten.
+fn clone_installed(root: &Path, id: &str, new_id: Option<&str>) -> Result<Option<String>, Error> {
+    let (mod_dir, layout) = (
+        mods_dir(root).join(id),
+        root.join("layouts").join(format!("{id}.json")),
+    );
+    if !plain_id(id) || !(mod_dir.is_dir() || layout.is_file()) {
+        return Ok(None);
+    }
+    let copy = new_id.map_or_else(|| format!("{id}-copy"), String::from);
+    let to = if mod_dir.is_dir() {
+        mods_dir(root).join(&copy)
+    } else {
+        root.join("layouts").join(format!("{copy}.json"))
+    };
+    if !plain_id(&copy) || to.exists() {
+        return Err(Error::Invalid(format!(
+            "\"{copy}\" is taken or not a plain id; pass another: perch mod clone {id} <id>"
+        )));
+    }
+    if mod_dir.is_dir() {
+        copy_tree(&mod_dir, &to, &mut 0, &mut 0)?;
+    } else {
+        std::fs::copy(&layout, &to)?;
+    }
+    Ok(Some(copy))
+}
+
+/// `perch mod clone <example|id> [as <id>]`: copies a shipped example (or one of your own mods or
+/// layouts) into the mods or layouts folder as `new_id` (default: its own name, or `<id>-copy`) and
+/// returns that id. Never overwrites: an id in use is refused.
 pub fn clone_example(root: &Path, example: &str, new_id: Option<&str>) -> Result<String, Error> {
-    let found = EXAMPLES.iter().find(|e| e.id == example).ok_or_else(|| {
-        Error::NotFound(format!(
-            "no example \"{example}\" (try: {})",
-            EXAMPLES.iter().map(|e| e.id).collect::<Vec<_>>().join(", ")
-        ))
-    })?;
+    let Some(found) = EXAMPLES.iter().find(|e| e.id == example) else {
+        return clone_installed(root, example, new_id)?.ok_or_else(|| {
+            Error::NotFound(format!(
+                "no example or mod \"{example}\" (examples: {})",
+                EXAMPLES.iter().map(|e| e.id).collect::<Vec<_>>().join(", ")
+            ))
+        });
+    };
     let id = new_id.unwrap_or(found.id);
     if !plain_id(id) {
         return Err(Error::Invalid(
@@ -627,6 +673,22 @@ mod tests {
         }
         clone_example(&root.0, "command-list", Some("mine")).unwrap();
         assert!(clone_example(&root.0, "nope", None).is_err());
+        // One of your own, copied under a new name (and never over an existing one).
+        assert_eq!(clone_example(&root.0, "mine", None).unwrap(), "mine-copy");
+        assert!(clone_example(&root.0, "mine", None).is_err());
+        std::fs::copy(
+            root.0.join("layouts/ide.json"),
+            root.0.join("layouts/home.json"),
+        )
+        .unwrap();
+        assert_eq!(
+            clone_example(&root.0, "home", Some("dusk")).unwrap(),
+            "dusk"
+        );
+        std::fs::remove_file(root.0.join("layouts/home.json")).unwrap();
+        assert!(root.0.join("mods/mine-copy/main.js").is_file());
+        std::fs::remove_dir_all(mods_dir(&root.0).join("mine-copy")).unwrap();
+        std::fs::remove_file(root.0.join("layouts/dusk.json")).unwrap();
         assert!(clone_example(&root.0, "ide", Some("../x")).is_err());
         let mods = scan(&root.0, &policy);
         assert_eq!(mods.len(), 4, "{mods:?}"); // the three example mods, and mine
@@ -697,6 +759,67 @@ mod tests {
         );
         assert!(install_from(&root.0, &src.join("none"), "o/r").is_err());
         let _ = std::fs::remove_dir_all(&src);
+    }
+
+    #[test]
+    fn install_clones_a_real_repo_and_takes_one_folder_of_it() {
+        let git = |dir: &Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .current_dir(dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        let repo = std::env::temp_dir().join(format!("perch-repo-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(repo.join("mods/clock")).unwrap();
+        std::fs::create_dir_all(repo.join("extras/solo")).unwrap();
+        std::fs::write(
+            repo.join("mods/clock/main.js"),
+            "export default (el) => { el.textContent = 'tick' }",
+        )
+        .unwrap();
+        std::fs::write(
+            repo.join("extras/solo/main.js"),
+            "export default () => fetch('/x')",
+        )
+        .unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "x"]);
+        let url = repo.to_str().unwrap();
+
+        let all = Root::new();
+        let done = install_from_url(&all.0, url, None, &[], "o/r").unwrap();
+        assert_eq!(done.mods, vec!["clock"]);
+        assert!(mods_dir(&all.0).join("clock/main.js").is_file());
+        assert!(!mods_dir(&all.0).join("clock/.git").exists());
+
+        let one = Root::new();
+        let done = install_from_url(
+            &one.0,
+            url,
+            Some("main"),
+            &["extras".into(), "solo".into()],
+            "o/r",
+        )
+        .unwrap();
+        assert_eq!(done.mods, vec!["solo"]);
+        assert!(
+            done.warnings
+                .iter()
+                .any(|w| w.contains("reaches the network")),
+            "{:?}",
+            done.warnings
+        );
+        assert!(install_from_url(&one.0, url, Some("nope"), &[], "o/r").is_err());
+        assert!(install_from_url(&one.0, "/no/such/repo", None, &[], "o/r").is_err());
+        let _ = std::fs::remove_dir_all(&repo);
     }
 
     #[test]

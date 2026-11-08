@@ -11,7 +11,7 @@
  */
 import type { AgentKind } from "@perch/shared";
 import type { ActiveProject } from "./index";
-import { newId } from "./index";
+import { newId } from "../ids";
 import { readViewerStored, viewerKey } from "../viewer";
 
 /** localStorage keys backing `activeHostId` / `activeProject`. These are

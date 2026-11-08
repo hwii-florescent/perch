@@ -265,7 +265,15 @@ export interface Look {
   font?: string;
   radius?: number;
   border?: number;
+  shadow?: "sm" | "md" | "lg";
+  terminalPadding?: number;
+  terminalOpacity?: number;
+  paneRadius?: number;
+  paneBorder?: number;
+  paneFocus?: string;
 }
+
+const SHADOWS = { sm: "0 1px 3px rgb(0 0 0 / 0.3)", md: "0 4px 14px rgb(0 0 0 / 0.35)", lg: "0 10px 32px rgb(0 0 0 / 0.45)" };
 
 /** The CSS custom properties a look sets. Below `<html>` (`derived`) it also sets the ones
  * `base.css` computes from the palette at `:root`, which would otherwise keep the root's colors. */
@@ -291,6 +299,12 @@ export function lookVars(look: Look, derived: boolean): Record<string, string> {
   if (look.font) vars["--font-ui"] = look.font;
   if (look.radius != null) vars["--card-radius"] = `${look.radius}px`;
   if (look.border != null) vars["--card-border"] = `${look.border}px`;
+  if (look.shadow) vars["--card-shadow"] = SHADOWS[look.shadow];
+  if (look.terminalPadding != null) vars["--terminal-padding"] = `${look.terminalPadding}px`;
+  if (look.paneRadius != null) vars["--radius-pane"] = `${look.paneRadius}px`;
+  if (look.paneBorder != null) vars["--pane-border"] = `${look.paneBorder}px`;
+  if (look.paneFocus) vars["--pane-focus"] = look.paneFocus;
+  if (look.terminalOpacity != null) vars["--terminal-opacity"] = String(look.terminalOpacity);
   return vars;
 }
 

@@ -1475,14 +1475,19 @@ Mods
     'mauve', 'green', 'yellow', 'red', 'blue', 'teal', 'peach', 'backdrop'}, each #rrggbb),
     'font' (a CSS font-family for the interface), 'radius' (card corners, px) and 'border'
     (card outline, px), plus 'background' (a CSS color or gradient, no url()). A node with
-    'float': {'x', 'y', 'width', 'height'} (px) is drawn over the window instead of in the flow.
-    The terminal keeps its own colors and font. Example, an IDE: a row of
+    'float': {'x', 'y', 'width', 'height'} (px) is drawn over the window instead of in the flow;
+    add 'edge' ('top'|'right'|'bottom'|'left', 12px in) and 'align' ('start'|'center'|'end') to
+    dock it to a side instead of x, y, and 'peek' (px, left or right edge) to make it a drawer that
+    slides out on hover. Also on any node: 'shadow' ('sm'|'md'|'lg'), 'terminalPadding' (px) and
+    'terminalOpacity' (0.1 to 1) for terminals under it, and for the canvas's panes 'paneRadius',
+    'paneBorder' (px) and 'paneFocus' (#rrggbb outline of the focused pane); 'size' also takes 'min'
+    and 'max' (px, along the parent's direction). The terminal keeps its own colors and font. Example, an IDE: a row of
     sidebar (220px), a column of canvas over mod:terminal-notes (160px), and files (320px). Write
     the file, then `perch mod layout <id>` applies it at once (a file that does not parse cannot
     be chosen, and one that breaks later falls back to Perch as shipped); edits show as you save.
   - Start from an example, not an empty folder: `perch mod examples` lists what ships (mods that use
-    each part of `api`, layouts with and without a look) and `perch mod clone <example> [id]` copies
-    one to edit.
+    each part of `api`, layouts with and without a look) and `perch mod clone <example|your mod or layout> [id]`
+    copies one to edit (a copy of your own is `<id>-copy` unless you name it).
   - After every edit run `perch mod check <id>`: it says whether the person's window loaded and
     mounted the new files, or why not (a slot function that throws counts). Then `perch mod dom <id>`
     shows what it drew, as text and HTML (`perch mod dom app` is the whole window).

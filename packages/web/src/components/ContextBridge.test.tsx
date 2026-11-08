@@ -9,7 +9,7 @@ vi.mock("../ws", () => ({ socket: { connected: true, send: transport.send, onCon
 vi.mock("../store", () => ({ usePerchStore: Object.assign((select: (value: typeof state) => unknown) => select(state), { getState: () => state }) }));
 vi.mock("../workspaceTabs", () => ({ activateTab: (entry: { session: { id: string } }) => state.switchSession(entry.session.id) }));
 vi.mock("../filesystemStore", () => ({ useWorkspaceFilesStore: { getState: () => ({ documents: {} }) } }));
-import { askAgent, handleContextBridgeMessage, useContextBridge } from "../contextBridge";
+import { askAgent, bindContextBridgeStore, handleContextBridgeMessage, useContextBridge } from "../contextBridge";
 import { ContextBridge } from "./ContextBridge";
 import { chooseDropdown } from "./ui/selectTesting";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -25,6 +25,7 @@ async function respond(agents: ContextAgent[] = [agent]) {
   await act(async () => { handleContextBridgeMessage({ type: "context.preview.result", requestId: request.requestId, packet, agents }); });
 }
 beforeEach(async () => {
+  bindContextBridgeStore(() => state as never);
   vi.useFakeTimers(); transport.send.mockClear(); state.switchSession.mockClear(); state.connected = true;
   useContextBridge.setState({ capture: null, menu: null });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);

@@ -1,4 +1,4 @@
-import { handleContextBridgeMessage } from "../contextBridge";
+import { bindContextBridgeStore, handleContextBridgeMessage } from "../contextBridge";
 import { handleNativeUiMessage } from "../nativeUi";
 import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal } from "../agentTerminals";
 import { create } from "zustand";
@@ -1654,6 +1654,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     });
   },
 }));
+bindContextBridgeStore(usePerchStore.getState);
 
 /** Leaving the active session lands on a neighbouring session of the same
  * workspace, like a browser; leaving its last session keeps the workspace

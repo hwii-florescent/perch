@@ -2859,6 +2859,9 @@ export interface ModInfo {
 export interface LayoutSize {
   px?: number;
   weight?: number;
+  /** Along the parent's direction, px. */
+  min?: number;
+  max?: number;
 }
 
 /** A window layout, as in herdr's desktop app: a tree of rows, columns and blocks. A block's
@@ -2880,8 +2883,24 @@ export interface LayoutLook {
   border?: number;
   /** A CSS color or gradient behind the node (no `url()`). */
   background?: string;
+  /** `sm`, `md` or `lg`: a shadow under the cards. */
+  shadow?: "sm" | "md" | "lg";
+  /** Space around every terminal under this node, px. */
+  terminalPadding?: number;
+  /** 0.1 to 1: below 1 a terminal fades into what is behind it. */
+  terminalOpacity?: number;
+  /** Pane frames in the canvas: corner radius, outline width (px) and the focused pane's outline color. */
+  paneRadius?: number;
+  paneBorder?: number;
+  paneFocus?: string;
   /** Takes the node out of the flow and draws it over the window at this place and size (px). */
-  float?: { x: number; y: number; width: number; height: number };
+  float?: {
+    x: number; y: number; width: number; height: number;
+    /** Docks to a window edge 12 px in, along it at `align`, instead of sitting at `x`, `y`. */
+    edge?: "top" | "right" | "bottom" | "left"; align?: "start" | "center" | "end";
+    /** A drawer: on a left or right edge only this many px show until it is hovered. */
+    peek?: number;
+  };
 }
 
 export interface LayoutInfo {

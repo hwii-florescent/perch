@@ -10,7 +10,9 @@
   min-width: 0;
   min-height: 0;
   display: flex;
-  padding: 0;
+  /* A layout's `terminalPadding`; the surface inside is what the fitter measures, so it shrinks to fit. */
+  padding: var(--terminal-padding, 0);
+  opacity: var(--terminal-opacity, 1);
 }
 
 .terminal__surface {

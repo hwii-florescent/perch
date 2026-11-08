@@ -1,0 +1,78 @@
+/**
+ * mods.spec.ts — a mod and a layout written into the core's folder show up in the running app,
+ * draw (a mod block, a slot, the layout's look), and go away again from Settings.
+ *
+ * The suite's core keeps its mods beside its database (`<state>/hub/mods`, `<state>/hub/layouts`).
+ */
+import { test, expect, type Page } from "@playwright/test";
+import * as fs from "node:fs";
+import * as path from "node:path";
+
+const HOME = path.join(process.env.PERCH_E2E_STATE ?? "", "hub");
+const MOD = path.join(HOME, "mods", "e2e-hello");
+const LAYOUT = path.join(HOME, "layouts", "e2e-look.json");
+
+test.afterEach(() => {
+  fs.rmSync(MOD, { recursive: true, force: true });
+  fs.rmSync(LAYOUT, { force: true });
+  fs.rmSync(path.join(HOME, "layout-state.json"), { force: true });
+  fs.rmSync(path.join(HOME, "mods-removed"), { recursive: true, force: true });
+});
+
+async function openMods(page: Page) {
+  // A bundle that throws while loading (a module cycle) leaves a blank page, so say why.
+  page.on("pageerror", (error) => console.log("PAGEERROR", error.message));
+  await page.goto("/", { waitUntil: "networkidle" });
+  await expect(page.locator('[data-testid="settings-gear"]')).toBeVisible({ timeout: 15000 });
+  await page.locator('[data-testid="settings-gear"]').click();
+  await page.locator('[data-testid="settings-nav-mods"]').click();
+}
+
+test("a mod and a layout written to the folder appear, draw, and are removed from Settings", async ({ page }) => {
+  fs.mkdirSync(MOD, { recursive: true });
+  fs.mkdirSync(path.dirname(LAYOUT), { recursive: true });
+  fs.writeFileSync(path.join(MOD, "main.js"), "export default (el, api) => { el.textContent = 'hello from a mod'; el.dataset.sessions = String(api.sessions().length); }");
+  fs.writeFileSync(LAYOUT, JSON.stringify({
+    name: "E2E look", type: "row", theme: "nord", terminalPadding: 12, terminalOpacity: 0.9, paneRadius: 2, shadow: "md",
+    children: [
+      { type: "block", content: "sidebar", size: { px: 240, min: 120, max: 400 } },
+      { type: "block", content: "canvas" },
+      { type: "block", content: "mod:e2e-hello", size: { px: 200 }, float: { x: 0, y: 0, width: 220, height: 80, edge: "right", align: "start", peek: 40 } },
+    ],
+  }));
+
+  await openMods(page);
+  // The core rescans every 2 s and tells the page.
+  await expect(page.locator('[data-testid="mod-e2e-hello"]')).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('[data-testid="mod-e2e-hello-status"]')).toHaveText("On");
+  const layout = page.locator('[data-testid="layout-e2e-look"]');
+  await expect(layout).toBeVisible();
+  await layout.getByRole("button", { name: "Use" }).click();
+  await page.keyboard.press("Escape");
+
+  const block = page.locator('[data-testid="layout-mod:e2e-hello"]');
+  await expect(block).toContainText("hello from a mod", { timeout: 10000 });
+  await expect(block).toHaveClass(/layout-drawer/);
+  await expect(page.locator('[data-testid="layout-root"]')).toBeVisible();
+  const vars = await page.evaluate(() => {
+    const style = document.documentElement.style;
+    return ["--terminal-padding", "--terminal-opacity", "--radius-pane", "--card-shadow"].map((name) => style.getPropertyValue(name));
+  });
+  expect(vars[0]).toBe("12px");
+  expect(vars[1]).toBe("0.9");
+  expect(vars[2]).toBe("2px");
+  expect(vars[3]).toContain("rgb(0 0 0");
+
+  // Remove both from Settings: they leave the folders (to the trash folder) and the window goes back to stock.
+  await page.locator('[data-testid="settings-gear"]').click();
+  await page.locator('[data-testid="settings-nav-mods"]').click();
+  await page.locator('[data-testid="mod-e2e-hello-remove"]').click();
+  await expect(page.locator('[data-testid="mod-e2e-hello"]')).toHaveCount(0, { timeout: 10000 });
+  await page.locator('[data-testid="layout-e2e-look-remove"]').click();
+  await expect(page.locator('[data-testid="layout-e2e-look"]')).toHaveCount(0, { timeout: 10000 });
+  expect(fs.existsSync(MOD)).toBe(false);
+  expect(fs.existsSync(LAYOUT)).toBe(false);
+  expect(fs.readdirSync(path.join(HOME, "mods-removed")).length).toBe(2);
+  await page.keyboard.press("Escape");
+  await expect(page.locator('[data-testid="layout-root"]')).toHaveCount(0);
+});

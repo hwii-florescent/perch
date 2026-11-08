@@ -4,11 +4,10 @@ import type { Terminal } from "@xterm/xterm";
 const transport = vi.hoisted(() => ({ send: vi.fn(), connected: true, connection: (_: boolean) => {} }));
 const state = vi.hoisted(() => ({ serverInfo: { capabilities: ["context.bridge.v1"] }, workspaces: [{ id: "w", hostId: "local" }, { id: "r", hostId: "remote" }], sessions: [{ id: "s", workspaceId: "w" }], documents: {} as Record<string, Record<string, { content: string; savedContent: string }>> }));
 vi.mock("./ws", () => ({ socket: { send: transport.send, get connected() { return transport.connected; }, onConnectionChange: (handler: (connected: boolean) => void) => { transport.connection = handler; } } }));
-vi.mock("./store", () => ({ usePerchStore: { getState: () => state } }));
 vi.mock("./filesystemStore", () => ({ useWorkspaceFilesStore: { getState: () => state } }));
-import { askAgent, askAgentAboutFile, attachTerminalContext, contextBridgeAvailable, handleContextBridgeMessage, requestContext, useContextBridge } from "./contextBridge";
+import { askAgent, askAgentAboutFile, attachTerminalContext, bindContextBridgeStore, contextBridgeAvailable, handleContextBridgeMessage, requestContext, useContextBridge } from "./contextBridge";
 
-beforeEach(() => { transport.send.mockClear(); transport.connected = true; state.documents = {}; useContextBridge.setState({ capture: null, menu: null }); });
+beforeEach(() => { bindContextBridgeStore(() => state as never); transport.send.mockClear(); transport.connected = true; state.documents = {}; useContextBridge.setState({ capture: null, menu: null }); });
 afterEach(() => { transport.connection(false); vi.useRealTimers(); });
 
 it("uses the latest unsaved view draft and requires an exact local workspace", () => {

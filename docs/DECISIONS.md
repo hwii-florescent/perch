@@ -93,8 +93,14 @@ approval not mattering much.
   The terminal keeps the server's profile. A node may also have a `background` (color or gradient,
   no `url()`; the root's paints behind the cards), a `float` (`x`, `y`, `width`, `height` px: drawn
   over the window) and a block may be `terminal:<session id>` (a live shell via `PersistentTerminal`;
-  one place at a time, so not also in the canvas). Not built: terminal padding/opacity, pane frames,
-  and looks reaching menus opened from a themed subtree (they use the root's).
+  one place at a time, so not also in the canvas). Also `shadow` (sm|md|lg), `terminalPadding` (px) and
+  `terminalOpacity` (0.1..1, fades the whole terminal) for terminals, `paneRadius`/`paneBorder`/`paneFocus`
+  for the canvas's pane frames (set as `--radius-pane`, `--pane-border`, `--pane-focus`), `size.min`/`max`
+  along the parent's direction, and a `float` may dock to an `edge` (+ `align`) and, on a left or right
+  edge, `peek` as a hover drawer. The terminal's font and colors stay the server's profile. Not built:
+  looks reaching menus opened from a themed subtree (they use the root's), `stack` nodes, gradients as
+  images, light/dark theme pairs, per-pane header mods, and mod-fonts folders. `perch mod clone <id>`
+  also duplicates one of your own mods or layouts (as `<id>-copy`).
 - **Install and remove.** `perch mod install <owner/repo[/folder]>` (or a github.com link, incl.
   `/tree/<branch>/…`) shallow-clones a public repo and copies `mods/<name>/` and `layouts/<name>.json`
   (or a lone `main.js` as one mod); it never overwrites, stops before copying anything if a name is

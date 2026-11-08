@@ -92,3 +92,37 @@ describe("which layout is drawn", () => {
     expect(activeLayout({ ...base, layout: "gone", layouts: [] })).toBeNull();
   });
 });
+
+describe("a layout's frame and terminal look", () => {
+  it("sets shadow, terminal padding and opacity as variables, and min/max along the parent's direction", async () => {
+    const tree: LayoutNode = { type: "row", terminalPadding: 10, terminalOpacity: 0.5, children: [
+      { type: "block", content: "sidebar", size: { px: 200, min: 100, max: 300 }, shadow: "md" },
+      { type: "column", children: [{ type: "block", content: "canvas", size: { min: 50, max: 400 } }] },
+    ] };
+    await act(async () => root.render(<LayoutRoot root={tree} />));
+    const html = document.documentElement.style;
+    expect(html.getPropertyValue("--terminal-padding")).toBe("10px");
+    expect(html.getPropertyValue("--terminal-opacity")).toBe("0.5");
+    const node = (id: string) => host.querySelector(`[data-testid="layout-${id}"]`) as HTMLElement;
+    expect(node("sidebar").style.getPropertyValue("--card-shadow")).toContain("rgb(0 0 0");
+    expect([node("sidebar").style.minWidth, node("sidebar").style.maxWidth]).toEqual(["100px", "300px"]); // in a row: width
+    expect([node("canvas").style.minHeight, node("canvas").style.maxHeight]).toEqual(["50px", "400px"]); // in a column: height
+  });
+
+  it("docks a float to an edge, makes a drawer of one that peeks, and frames panes", async () => {
+    const tree: LayoutNode = { type: "row", paneRadius: 3, paneBorder: 1, paneFocus: "#ff8800", children: [
+      { type: "block", content: "sidebar", float: { x: 0, y: 0, width: 300, height: 200, edge: "left", align: "center", peek: 40 } },
+      { type: "block", content: "files", float: { x: 0, y: 0, width: 200, height: 100, edge: "bottom", align: "end" } },
+    ] };
+    await act(async () => root.render(<LayoutRoot root={tree} />));
+    const node = (id: string) => host.querySelector(`[data-testid="layout-${id}"]`) as HTMLElement;
+    expect(node("sidebar").className).toContain("layout-drawer");
+    expect(node("sidebar").style.left).toBe("12px");
+    expect(node("sidebar").style.top).toBe("calc(50% - 100px)");
+    expect(node("sidebar").style.getPropertyValue("--float-hide")).toBe("-272px"); // 300 - 40 + 12
+    expect(node("files").className).not.toContain("layout-drawer");
+    expect([node("files").style.bottom, node("files").style.right]).toEqual(["12px", "12px"]);
+    const html = document.documentElement.style;
+    expect([html.getPropertyValue("--radius-pane"), html.getPropertyValue("--pane-border"), html.getPropertyValue("--pane-focus")]).toEqual(["3px", "1px", "#ff8800"]);
+  });
+});

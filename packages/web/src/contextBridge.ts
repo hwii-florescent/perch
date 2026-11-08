@@ -1,16 +1,22 @@
 import { create } from "zustand";
 import type { ContextSource, ContextPreviewResultMessage, ClientMessage, ServerMessage } from "@perch/shared";
 import type { Terminal } from "@xterm/xterm";
-import { usePerchStore } from "./store";
+import type { PerchState } from "./store";
 import { useWorkspaceFilesStore } from "./filesystemStore";
 import { socket } from "./ws";
+
+// The store imports this module, so this module cannot import the store: a cycle between the two
+// chunks makes the production bundle read the store's `create` before it exists. The store hands its
+// state getter over instead.
+let storeState: () => PerchState = () => { throw new Error("the context bridge ran before the store existed"); };
+export function bindContextBridgeStore(get: () => PerchState) { storeState = get; }
 
 type Capture = { workspaceId: string; source: ContextSource };
 type Menu = Capture & { x: number; y: number };
 export const useContextBridge = create<{ capture: Capture | null; menu: Menu | null }>(() => ({ capture: null, menu: null }));
 
 export function contextBridgeAvailable(workspaceId: string): boolean {
-  const state = usePerchStore.getState();
+  const state = storeState();
   return state.serverInfo?.capabilities?.includes("context.bridge.v1") === true
     && state.workspaces.some((workspace) => workspace.id === workspaceId && workspace.hostId === "local");
 }
@@ -28,7 +34,7 @@ export function askAgentAboutFile(workspaceId: string, path: string) {
 /** Stores only selected text and identity, never a cached xterm/view callback. */
 export function attachTerminalContext(container: HTMLElement, term: Terminal, sessionId: string | undefined) {
   const open = (event: MouseEvent) => {
-    const session = usePerchStore.getState().sessions.find((candidate) => candidate.id === sessionId);
+    const session = storeState().sessions.find((candidate) => candidate.id === sessionId);
     const text = term.getSelection();
     if (!text || !session?.workspaceId || !contextBridgeAvailable(session.workspaceId)) return;
     event.preventDefault();

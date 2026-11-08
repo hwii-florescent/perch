@@ -13,7 +13,7 @@ import { WorkspaceTools } from "./WorkspaceTools";
 
 // The same card the stock window draws its three panes on.
 const CARD = "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--card-radius,12px)] bg-[var(--card-bg)]";
-const OUTLINE: CSSProperties = { borderStyle: "solid", borderWidth: "var(--card-border, 0px)", borderColor: "var(--overlay-0)" };
+const OUTLINE: CSSProperties = { borderStyle: "solid", borderWidth: "var(--card-border, 0px)", borderColor: "var(--overlay-0)", boxShadow: "var(--card-shadow, none)" };
 
 /** One of Perch's own panes, or a mod's view, by the name a layout gives it. */
 function Block({ content, mods }: { content: string; mods: ModInfo[] }) {
@@ -33,9 +33,22 @@ function Block({ content, mods }: { content: string; mods: ModInfo[] }) {
   return <ModView mod={mod} />;
 }
 
-function Node({ node, mods, root }: { node: LayoutNode; mods: ModInfo[]; root?: boolean }) {
+const EDGE_GAP = 12;
+/** Where a floating node sits: at x, y, or docked to a window edge (a drawer when it peeks). */
+function floatStyle(float: NonNullable<LayoutNode["float"]>): CSSProperties {
+  const { x, y, width, height, edge, align = "center", peek } = float;
+  const base: CSSProperties = { position: "fixed", width, height, zIndex: 1500, flex: "none" };
+  if (!edge) return { ...base, left: x, top: y };
+  const vertical = edge === "left" || edge === "right";
+  const along = (start: "top" | "left", end: "bottom" | "right", size: number) =>
+    align === "start" ? { [start]: EDGE_GAP } : align === "end" ? { [end]: EDGE_GAP } : { [start]: `calc(50% - ${size / 2}px)` };
+  const hide = peek != null ? { "--float-hide": `${edge === "left" ? "-" : ""}${width - peek + EDGE_GAP}px` } : {};
+  return { ...base, ...(vertical ? along("top", "bottom", height) : along("left", "right", width)), [edge]: EDGE_GAP, ...hide } as CSSProperties;
+}
+
+function Node({ node, mods, root, inRow }: { node: LayoutNode; mods: ModInfo[]; root?: boolean; inRow?: boolean }) {
   if (node.hidden) return null;
-  const { px, weight } = node.size ?? {};
+  const { px, weight, min, max } = node.size ?? {};
   // The root's look is on <html> (menus and dialogs outside this tree follow it); below it, the
   // custom properties cascade to the children from here.
   const style: CSSProperties = {
@@ -44,13 +57,15 @@ function Node({ node, mods, root }: { node: LayoutNode; mods: ModInfo[]; root?: 
     flex: root ? "1 1 0%" : px != null ? `0 0 ${px}px` : `${weight ?? 1} 1 0%`,
     padding: node.padding || undefined,
     background: node.background,
+    // Along the parent's direction; a root has none.
+    ...(root ? {} : inRow ? { minWidth: min, maxWidth: max } : { minHeight: min, maxHeight: max }),
     // Out of the flow, over the window and under dialogs.
-    ...(node.float && !root ? { position: "fixed", left: node.float.x, top: node.float.y, width: node.float.width, height: node.float.height, zIndex: 1500, flex: "none" } : {}),
+    ...(node.float && !root ? floatStyle(node.float) : {}),
   };
-  if (node.type === "block") return <div className={CARD} style={{ ...style, ...OUTLINE }} data-testid={`layout-${node.content}`}><Block content={node.content} mods={mods} /></div>;
+  if (node.type === "block") return <div className={cn(CARD, node.float?.peek != null && "layout-drawer")} style={{ ...style, ...OUTLINE }} data-testid={`layout-${node.content}`}><Block content={node.content} mods={mods} /></div>;
   return (
     <div className={cn("flex min-h-0 min-w-0", node.type === "row" ? "flex-row" : "flex-col")} style={{ ...style, gap: node.gap || undefined }}>
-      {node.children.map((child, index) => <Node key={index} node={child} mods={mods} />)}
+      {node.children.map((child, index) => <Node key={index} node={child} mods={mods} inRow={node.type === "row"} />)}
     </div>
   );
 }
@@ -59,8 +74,8 @@ function Node({ node, mods, root }: { node: LayoutNode; mods: ModInfo[]; root?: 
  * core has already checked the shape; a layout that stops parsing is never passed here. */
 export function LayoutRoot({ root }: { root: LayoutNode }) {
   const mods = useSyncExternalStore(subscribeMods, currentMods)?.mods ?? [];
-  const { theme, colors, font, radius, border } = root;
-  const look = JSON.stringify({ theme, colors, font, radius, border });
+  const { theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus } = root;
+  const look = JSON.stringify({ theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus });
   // A root background paints the window behind the cards.
   useEffect(() => {
     setRootLook(lookVars(JSON.parse(look), false));

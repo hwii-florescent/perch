@@ -164,3 +164,7 @@ body {
 :root[data-keyboard] .mobile-pane-nav {
   display: none;
 }
+
+/* A layout's floating block docked to a side with `peek`: only the peek width shows until hovered. */
+.layout-drawer { transform: translateX(var(--float-hide, 0)); transition: transform 0.18s ease; }
+.layout-drawer:hover, .layout-drawer:focus-within { --float-hide: 0px; }

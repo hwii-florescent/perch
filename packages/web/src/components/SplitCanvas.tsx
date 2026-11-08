@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { cn } from "../lib/cn";
 import { DockviewShell } from "../dockview/DockviewShell";
 import { AgentPane } from "../views/AgentPane";
@@ -109,6 +109,11 @@ export function SplitCanvas() {
   const tileVisible = (id: string) => !zoomed || zoomed === id;
   // Whole-pixel shared edges: no half-pixel canvas compositing. Sashes sit on these edges.
   const placed = split ? layout(split.tree, { x: 0, y: 0, w: box.width, h: box.height }, { round: true, live }) : null;
+  /** A pane's place plus the layout's pane frame (`paneBorder`, `paneFocus`); no frame unless a layout asks. */
+  const frame = (id: string, focused: boolean): CSSProperties => ({
+    ...slot(id),
+    border: `var(--pane-border, 0px) solid ${focused ? "var(--pane-focus, var(--overlay-0))" : "var(--overlay-0)"}`,
+  });
   const slot = (id: string) => {
     const shared = placed?.panes.get(id);
     if (!shared) return undefined;
@@ -251,7 +256,7 @@ export function SplitCanvas() {
         <div
           key={entry.id}
           className={cn("absolute z-10 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-soft bg-panel-bg", flushTop(entry.id) && "rounded-t-none")}
-          style={slot(entry.id)}
+          style={frame(entry.id, entry.id === activeId)}
           data-testid={entry.id === sessionId ? "split-pane-session" : `split-pane-session-${entry.id}`}
           data-pane-id={entry.id}
           data-pane-visible={tileVisible(entry.id)}
@@ -278,7 +283,7 @@ export function SplitCanvas() {
           key={id}
           // Files, reviews and browsers read as panes against the shell: inside, panel-bg is surface-dim.
           className={cn("absolute z-10 flex overflow-hidden rounded-soft bg-panel-bg [--panel-bg:var(--surface-dim)]", !split && "inset-0", flushTop(id) && "rounded-t-none")}
-          style={slot(id)}
+          style={frame(id, id === activeKey)}
           data-pane-id={id}
           data-pane-visible={tileVisible(id)}
           data-testid={tab.kind === "review" ? "split-pane-review" : tab.kind === "browser" ? "split-pane-browser" : `split-pane-file-${tab.path}`}
