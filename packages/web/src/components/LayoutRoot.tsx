@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useSyncExternalStore, type CSSProperties, type PointerEvent } from "react";
+import { tauriInvoke } from "../links";
 import { setPaneLook } from "../paneLook";
 import { lookVars, prefersDark, setRootLook } from "../themes";
 import { activeOverride, floatOverride, hiddenOverride, layoutStateVersion, pointAtLayout, publishFloat, publishStack, setActive, setFloat, setShownLayout, setSizes, sizeOverride, snapSpot, subscribeLayoutState } from "../layoutState";
@@ -234,9 +235,17 @@ export function LayoutRoot({ root }: { root: LayoutNode }) {
   useEffect(() => { publishStacks(root); });
   // The desktop draws its window buttons over the layout's top-left corner (macOS): say how much room
   // they need, for a layout that sets `titlebar: "none"` and draws its own bar.
+  const lights = root.trafficLights;
+  const [lightsX, lightsY] = lights ?? [];
   useEffect(() => {
-    document.documentElement.style.setProperty("--titlebar-inset", "__TAURI_INTERNALS__" in window && /Mac/.test(navigator.platform) ? "84px" : "0px");
-    return () => void document.documentElement.style.removeProperty("--titlebar-inset");
-  }, []);
+    const mac = "__TAURI_INTERNALS__" in window && /Mac/.test(navigator.platform);
+    // Room to leave on the left: the buttons' own span past where the layout put them.
+    document.documentElement.style.setProperty("--titlebar-inset", mac ? `${(lightsX ?? 14) + 70}px` : "0px");
+    if (mac && lightsX !== undefined && lightsY !== undefined) void tauriInvoke?.("set_traffic_lights", { at: [lightsX, lightsY] });
+    return () => {
+      document.documentElement.style.removeProperty("--titlebar-inset");
+      if (mac && lightsX !== undefined) void tauriInvoke?.("set_traffic_lights", { at: null });
+    };
+  }, [lightsX, lightsY]);
   return <div className="flex min-h-0 flex-1 px-2 pt-2" style={{ background: root.background }} data-testid="layout-root"><Node node={{ ...root, background: undefined }} mods={mods} root path="r" parentPath="" index={0} /></div>;
 }

@@ -102,6 +102,8 @@ approval not mattering much.
   folder; `resolve_backgrounds` turns both into CSS, an image into a data URI, so the page fetches nothing).
   Not built: looks reaching menus opened from a themed subtree (they use the root's). `perch mod clone <id>`
   also duplicates one of your own mods or layouts (as `<id>-copy`).
+- **Traffic lights.** Root `trafficLights: [x, y]` moves the macOS window buttons (desktop command
+  `set_traffic_lights`, undone when the layout goes; `--titlebar-inset` follows). Not run in a real desktop window here.
 - **Window controls.** `window.minimize`, `window.maximize` (toggle) and `window.close` are typed commands that call
   the desktop window's IPC (`capabilities/main.json` grants exactly those three beside start-dragging); in a browser they
   throw "in the desktop app". A layout that hides the title bar draws its own buttons and runs these.

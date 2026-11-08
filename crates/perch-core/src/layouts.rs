@@ -75,6 +75,9 @@ pub struct Chrome {
     /// Root only: `"none"` hides the system title bar so the layout draws its own.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub titlebar: Option<String>,
+    /// Root only: where macOS draws the window buttons, px from the window's top-left `[x, y]`.
+    #[serde(rename = "trafficLights", skip_serializing_if = "Option::is_none")]
+    pub traffic_lights: Option<[u32; 2]>,
     /// Root only: a `.svg` or `.png` beside the layout file that Settings shows for it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
@@ -390,6 +393,9 @@ fn check(node: &Node, depth: usize, walk: &mut Walk) -> Result<(), String> {
         .as_ref()
         .is_some_and(|t| t.len() > 60 || t.chars().any(char::is_control))
         || chrome.titlebar.as_deref().is_some_and(|t| t != "none")
+        || chrome
+            .traffic_lights
+            .is_some_and(|[x, y]| x > 400 || y > 200)
         || chrome
             .preview
             .as_deref()
@@ -892,7 +898,7 @@ mod tests {
             ("chrome.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>"),
             (
                 "chrome.json",
-                r##"{"type":"column","id":"root","theme":{"light":"paper","dark":"nord"},"titlebar":"none","preview":"chrome.svg","resizable":false,
+                r##"{"type":"column","id":"root","theme":{"light":"paper","dark":"nord"},"titlebar":"none","trafficLights":[20,24],"preview":"chrome.svg","resizable":false,
                 "divider":{"width":1,"color":"#333333"},"children":[
                 {"type":"block","id":"bar","content":"tabs","windowDrag":true,"size":{"px":30}},
                 {"type":"stack","id":"main","active":"b","header":"tabs","children":[
@@ -979,6 +985,7 @@ mod tests {
             })
         );
         assert!(!top.resizable && top.divider.as_ref().unwrap().width == 1);
+        assert_eq!(top.chrome.traffic_lights, Some([20, 24]));
         let Node::Stack(stack) = &top.children[1] else {
             panic!("a stack")
         };

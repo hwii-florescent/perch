@@ -2882,6 +2882,8 @@ export interface LayoutChrome {
   title?: string;
   windowDrag?: boolean;
   titlebar?: "none";
+  /** Root only: where macOS draws the window buttons, px from the window's top-left. */
+  trafficLights?: [number, number];
   preview?: string;
 }
 

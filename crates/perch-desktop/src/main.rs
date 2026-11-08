@@ -40,6 +40,18 @@ fn open_external(url: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// A layout's `trafficLights: [x, y]`: where macOS draws the window buttons (none puts them back).
+#[tauri::command]
+fn set_traffic_lights(window: tauri::WebviewWindow, at: Option<(f64, f64)>) {
+    #[cfg(target_os = "macos")]
+    glass::set_lights_at(
+        at.filter(|(x, y)| (0.0..=400.0).contains(x) && (0.0..=200.0).contains(y)),
+        &window,
+    );
+    #[cfg(not(target_os = "macos"))]
+    let _ = (window, at);
+}
+
 /// Explicit explorer action, with Finder semantics: the OS association decides what
 /// opens (including launching executable documents or application bundles).
 /// Only the trusted main webview has this IPC; never accept URLs or relative paths.
@@ -221,6 +233,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             open_external,
+            set_traffic_lights,
             open_in_default_app,
             reveal_in_finder,
             notify::notify_session,

@@ -1520,7 +1520,7 @@ Mods
     dock it to a side instead of x, y, and 'peek' (px, left or right edge) to make it a drawer that
     slides out on hover. A person drags a float by the strip along its top edge; on release it springs to
     the nearest edge and third and the spot is kept (the 'window.minimize|maximize|close' commands are the desktop window's buttons for a layout that sets
-    titlebar none; the 'layout.float' {id, edge?, align?} command sets or,
+    titlebar none (root 'trafficLights': [x, y] moves the macOS buttons); the 'layout.float' {id, edge?, align?} command sets or,
     with no edge, resets it; a mod reads shared('layout.float.<id>') = {edge, align, vertical, dragging}). Also on any node: 'shadow' ('sm'|'md'|'lg'), 'terminalPadding' (px) and
     'terminalOpacity' (0.1 to 1) for terminals under it, and for the canvas's panes 'paneRadius',
     'paneBorder' (px) and 'paneFocus' (#rrggbb outline of the focused pane); 'paneGap' (px between panes, at most 48), 'paneLone': true (frame a tab's only pane too; panes are

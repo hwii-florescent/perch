@@ -83,6 +83,15 @@ unsafe impl objc2::Encode for Rect {
         objc2::Encoding::Struct("CGRect", &[Point::ENCODING, Size::ENCODING]);
 }
 
+/// Where a layout that hides the title bar wants the window buttons (px from the window's top-left,
+/// the first button's left and top); `None` keeps them centred on the sidebar's title row.
+static LIGHTS_AT: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mutex::new(None);
+
+pub fn set_lights_at(at: Option<(f64, f64)>, window: &WebviewWindow) {
+    *LIGHTS_AT.lock().unwrap_or_else(|e| e.into_inner()) = at;
+    position_traffic_lights(window);
+}
+
 /// Centre the close / minimise / zoom buttons on the 44px top row of the sidebar card.
 ///
 /// Same approach as tao's `traffic_light_position` (resize the title bar container, then place the
@@ -115,7 +124,8 @@ pub fn position_traffic_lights(window: &WebviewWindow) {
             let window_frame: Rect = msg_send![ns_window, frame];
             let mut container_frame: Rect = msg_send![container, frame];
             // Centred on the row's middle, which sits CARD_TOP below the window top.
-            let band = TITLE_ROW + 2.0 * CARD_TOP;
+            let at = *LIGHTS_AT.lock().unwrap_or_else(|e| e.into_inner());
+            let band = at.map_or(TITLE_ROW + 2.0 * CARD_TOP, |(_, y)| 2.0 * y + 16.0);
             container_frame.size.height = band;
             container_frame.origin.y = window_frame.size.height - band;
             let _: () = msg_send![container, setFrame: container_frame];
@@ -125,7 +135,7 @@ pub fn position_traffic_lights(window: &WebviewWindow) {
             for (index, button) in buttons.into_iter().enumerate() {
                 let frame: Rect = msg_send![button, frame];
                 let origin = Point {
-                    x: LIGHTS_LEFT + index as f64 * step,
+                    x: at.map_or(LIGHTS_LEFT, |(x, _)| x) + index as f64 * step,
                     y: (band - frame.size.height) / 2.0,
                 };
                 let _: () = msg_send![button, setFrameOrigin: origin];
