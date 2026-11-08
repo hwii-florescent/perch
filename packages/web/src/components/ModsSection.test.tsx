@@ -12,7 +12,7 @@ vi.mock("../ws", () => ({
     onConnectionChange: (handler: (connected: boolean) => void) => { wire.connection = handler; },
   },
 }));
-const store = vi.hoisted(() => ({ settings: { mods: { mode: "ask", off: false } } as unknown, updateSettings: vi.fn() }));
+const store = vi.hoisted(() => ({ settings: { mods: { mode: "ask", off: false } } as unknown, updateSettings: vi.fn(), activeWorkspaceId: null, workspaces: [], sessions: [] }));
 vi.mock("../store", () => ({ usePerchStore: (select: (s: typeof store) => unknown) => select(store) }));
 import { ModsSection } from "./ModsSection";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ModInfo, ModRun, ModsPolicy } from "@perch/shared";
 import { usePerchStore } from "../store";
+import { workspaceRecord } from "../terminalScope";
+import { answerPanel } from "../modPanelBridge";
 import { approveMod, enableMod, listMods, modPanelUrl, modsAvailable, runModAction, type ModsState } from "../mods";
 import { SettingsGroup, SettingRow } from "./ui/setting-row";
 import { Select } from "./ui/select";
@@ -28,7 +30,18 @@ const statusText = (mod: ModInfo) => {
 /** A panel is a page the mod wrote. It runs in a sandboxed iframe with no network and no access to
  * this app (`allow-scripts` only, never `allow-same-origin`); the core also sends it a header that
  * says the same, so opening the URL directly is no different. */
-function PanelOverlay({ title, src, onClose }: { title: string; src: string; onClose: () => void }) {
+function PanelOverlay({ title, src, canRead, onClose }: { title: string; src: string; canRead: boolean; onClose: () => void }) {
+  const frame = useRef<HTMLIFrameElement>(null);
+  const workspaceId = usePerchStore((s) => (s.activeWorkspaceId && workspaceRecord(s, s.activeWorkspaceId)?.hostId === "local" ? s.activeWorkspaceId : null));
+  // The panel's origin is opaque, so replies go to "*"; only this frame's own messages are answered.
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== frame.current?.contentWindow) return;
+      void answerPanel(event.data, canRead, workspaceId).then((reply) => reply && frame.current?.contentWindow?.postMessage(reply, "*"));
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [canRead, workspaceId]);
   return (
     <div className="fixed inset-0 z-[2100] flex flex-col bg-[rgba(0,0,0,0.55)] p-6" role="dialog" aria-modal="true" aria-label={title} data-testid="mod-panel" onKeyDown={(event) => { if (event.key === "Escape") onClose(); }}>
       <div className="mx-auto flex min-h-0 w-full max-w-[56rem] flex-1 flex-col gap-2 rounded-ui bg-panel-bg p-3">
@@ -36,7 +49,7 @@ function PanelOverlay({ title, src, onClose }: { title: string; src: string; onC
           <h2 className="m-0 text-[0.9rem] font-semibold text-fg">{title}</h2>
           <button type="button" className={GHOST_BUTTON} onClick={onClose} autoFocus>Close</button>
         </div>
-        <iframe title={title} src={src} sandbox="allow-scripts" referrerPolicy="no-referrer" className="min-h-0 flex-1 rounded-ui border-0 bg-white" />
+        <iframe ref={frame} title={title} src={src} sandbox="allow-scripts" referrerPolicy="no-referrer" className="min-h-0 flex-1 rounded-ui border-0 bg-white" />
       </div>
     </div>
   );
@@ -102,7 +115,7 @@ export function ModsSection() {
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [runs, setRuns] = useState<Record<string, ModRun>>({});
-  const [panel, setPanel] = useState<{ title: string; src: string } | null>(null);
+  const [panel, setPanel] = useState<{ title: string; src: string; canRead: boolean } | null>(null);
 
   const take = useCallback((next: ModsState | null) => {
     if (!next) { setMessage(NO_ANSWER); return; }
@@ -153,14 +166,14 @@ export function ModsSection() {
                   if (answer?.run) setRuns((all) => ({ ...all, [mod.id]: answer.run! }));
                   return answer;
                 })}
-                onOpen={(panelId, title) => setPanel({ title, src: modPanelUrl(mod.id, panelId) })}
+                onOpen={(panelId, title) => setPanel({ title, src: modPanelUrl(mod.id, panelId), canRead: mod.required.includes("read-project") })}
               />
             ))}
           </>
         )}
         {message && <p className="py-2 text-[0.8rem] text-red" role="alert" data-testid="mods-message">{message}</p>}
       </SettingsGroup>
-      {panel && <PanelOverlay title={panel.title} src={panel.src} onClose={() => setPanel(null)} />}
+      {panel && <PanelOverlay title={panel.title} src={panel.src} canRead={panel.canRead} onClose={() => setPanel(null)} />}
     </>
   );
 }

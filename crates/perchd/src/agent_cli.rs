@@ -1399,6 +1399,10 @@ Mods
     for the session an event or invocation was about: reading needs `read-project` and writing
     `write-project` in the mod's `capabilities`, and the person approved those. It cannot spawn,
     send, suggest, stop or approve, and it stops working when the command ends.
+  - A panel can read project files if the mod's `capabilities` has `read-project`: it posts
+    `parent.postMessage({perch:'read-file', id:1, path:'README.md'}, '*')` and listens for
+    `{perch:'reply', id:1, ok:true, text}` (or `ok:false, error`). Text only, up to 256 KiB, the
+    open local project only; it has no network and cannot write.
   - To undo, `perch mod disable <id>` or delete the folder. Starting Perch with PERCH_MODS=off
     loads none.
 

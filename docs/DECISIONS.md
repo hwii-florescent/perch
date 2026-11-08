@@ -14,9 +14,11 @@ through the CLI) plus an iframe panel that herdr lacks. Built: `mods.rs` (manife
 audit log), `settings.mods`, `mods_run.rs` (actions and events run), `perch mod
 list|enable|disable|approve|run|runs`, the person-plane messages `mods.list`/`mods.set` (capability
 `mods.v1`), `GET /mods/panel`, and Settings > Mods (policy, off switch, a preview of what approving
-runs, Approve, Run, Open, Turn on/off), and a scoped `perch` token for a mod's own commands. Not
-built: a panel's data bridge (a panel is one inline HTML file that can draw but cannot yet read
-project files) and docking a panel as a pane.
+runs, Approve, Run, Open, Turn on/off), a scoped `perch` token for a mod's own commands, and a
+panel's read-only file bridge (`modPanelBridge.ts`: the panel posts `read-file`, the page answers
+only that frame, only for a mod approved for `read-project`, text up to 256 KiB, through the same
+descriptor-confined `/workspace-file` route; local open project only). Not built: docking a panel
+as a pane.
 - **Panels.** One self-contained `.html` file (no sub-assets: a sandboxed page has no cookie, so it
   could not fetch them), served only for an Active mod from inside its folder (symlinks resolved,
   2 MiB cap), to a person's token only, with `Content-Security-Policy: sandbox allow-scripts;
