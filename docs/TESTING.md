@@ -231,6 +231,17 @@ The native probe invokes the installed event-monitor handler and AppKit menu
 matching with native events, not hardware keystrokes. It does not certify global
 OS dispatch, monitor delivery by the OS event pump or non-US keyboard layouts.
 
+## Window chrome regression (macOS)
+
+`cargo run -p perch-desktop --example window_chrome_probe` builds the main window with the app's
+own options (overlay title bar, hidden title, transparent) but hidden, unfocused and with the
+app's activation policy prohibited, then drives it through the production capability file:
+it measures the real AppKit close/minimise/zoom buttons (default spot, a layout's
+`trafficLights`, reset), toggles maximise and minimise, takes a WKWebView snapshot
+(`api.screenshot()` in the app) and checks that `plugin:window|destroy` stays refused before
+closing the window. No core, daemon, shells, installed app or external network. It does not
+show how the lights look to a person (colours, hover glyphs) or the vibrancy behind them.
+
 ## Settings-resolved command regression
 
 `npm run test -w @perch/web -- src/keybinds.scopes.test.tsx src/keybinds.test.ts src/editorKeymap.test.ts src/keybinds.close.test.tsx`

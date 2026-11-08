@@ -52,6 +52,23 @@ fn set_traffic_lights(window: tauri::WebviewWindow, at: Option<(f64, f64)>) {
     let _ = (window, at);
 }
 
+/// The window's web view as the OS renders it (WKWebView's own snapshot: terminal canvases, web
+/// fonts and native vibrancy-free pixels as shown), a PNG data URL for `api.screenshot()`.
+#[tauri::command]
+async fn capture_window(window: tauri::WebviewWindow) -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        use base64::Engine;
+        let png = glass::snapshot_png(&window).await?;
+        Ok(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png)))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window;
+        Err("only the macOS app captures the window".into())
+    }
+}
+
 /// Explicit explorer action, with Finder semantics: the OS association decides what
 /// opens (including launching executable documents or application bundles).
 /// Only the trusted main webview has this IPC; never accept URLs or relative paths.
@@ -234,6 +251,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             open_external,
             set_traffic_lights,
+            capture_window,
             open_in_default_app,
             reveal_in_finder,
             notify::notify_session,

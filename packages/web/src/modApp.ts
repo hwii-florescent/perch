@@ -53,7 +53,7 @@ export interface ModApi {
   watch(path: string, changed: () => void, on?: OnHost): () => void;
   /** Resolves with the paths that changed in `dir` (its entries, one level down; polled every 2 s) the next time any does: loop `for (;;) { await api.watchFolder(dir); refresh(); }`. Rejects when the mod is replaced. */
   watchFolder(dir: string, on?: OnHost): Promise<string[]>;
-  /** A folder chooser (Perch's own, over `listDir`, since there is no system picker): resolves with the chosen folder, or null if closed. Starts at `start` or the home folder. */
+  /** A folder chooser: the system's picker in the desktop app (for this computer), else Perch's own over `listDir`: resolves with the chosen folder, or null if closed. Starts at `start` or the home folder. */
   pickFolder(options?: { prompt?: string; start?: string; host?: string }): Promise<string | null>;
   /** The agents a computer can start (Settings > Agents): `{id, name, installed, isDefault}`. Start one with `store.getState().createSessionOnHost(host, cwd, id)`. */
   knownAgents(on?: OnHost): Promise<{ id: string; name: string; installed: boolean; isDefault: boolean }[]>;
@@ -117,7 +117,7 @@ export interface ModApi {
   /** A window that stays until closed, under modals and over the app: drag it by its title bar. A
    * `key` remembers where it was put and replaces an open window with the same key. */
   window(options: { key?: string; title?: string; width?: number; height?: number; at?: { x: number; y: number }; frame?: "none" }, draw: Draw): () => void;
-  /** A picture of the app as a PNG data URL (drawn from the page: terminal canvases are copied, web fonts fall back). */
+  /** A picture of the app as a PNG data URL: the OS's own capture of the window in the desktop app, else drawn from the page (terminal canvases are copied, web fonts fall back). */
   screenshot(): Promise<string>;
   /** Calls `frame(ms)` (milliseconds since the loop began) before each repaint, at most `fps` times a
    * second (default 60), and pauses while the page is hidden: for motion. Stops when the mod is
@@ -183,6 +183,9 @@ function theme(): ModTheme {
 }
 
 /** The API for one load of a mod, and `dispose` for what it left open (overlays). */
+// Read when used, not at import: links.ts (the usual home of this) pulls in the whole store.
+const tauriInternals = () => (window as { __TAURI_INTERNALS__?: { invoke: (cmd: string, args?: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__;
+
 export function modApi(modId: string, given: Record<string, unknown> = {}): ModApi & { dispose(): void } {
   const open = new Set<() => void>();
   const ui = modUi(modId, open);
@@ -216,7 +219,10 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
     writeTextFile,
     statFile,
     listDir,
-    screenshot: () => import("./shot").then(({ screenshot }) => screenshot()),
+    // The desktop app asks the OS's own web view for the picture; the browser draws the page itself.
+    screenshot: () => tauriInternals()
+      ? (tauriInternals()!.invoke("capture_window") as Promise<string>).catch(() => import("./shot").then(({ screenshot }) => screenshot()))
+      : import("./shot").then(({ screenshot }) => screenshot()),
     loop,
     frames: (list, every, show) => {
       let shown = -1;
@@ -243,7 +249,10 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
       void scan().catch(() => {});
       open.add(entry.stop);
     }),
-    pickFolder: ({ prompt = "Choose a folder", start, host } = {}) => new Promise<string | null>((resolve) => {
+    pickFolder: ({ prompt = "Choose a folder", start, host } = {}) => !host && tauriInternals()
+      // The desktop app is on this computer: use the system's own picker (the same one Add project uses).
+      ? tauriInternals()!.invoke("plugin:dialog|open", { options: { directory: true, title: prompt, ...(start ? { defaultPath: start } : {}) } }).then((picked: unknown) => (typeof picked === "string" ? picked : null))
+      : new Promise<string | null>((resolve) => {
       let closeIt = () => {};
       const finish = (folder: string | null) => { resolve(folder); closeIt(); };
       closeIt = ui.overlay((box, close) => {

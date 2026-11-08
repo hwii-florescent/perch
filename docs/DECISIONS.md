@@ -122,6 +122,10 @@ approval not mattering much.
   entries) read the app. `pickFolder` is Perch's own folder chooser over `listDir` (no system picker plugin in the desktop shell). `nextCommand()` returns the next call of a command the mod registered without `run`; a mod's tile takes the
   keyboard when `pane.go` lands on it (every mod pane is focusable, so `mod.json focusable` is not needed). Not ported:
   `hc` (Perch's own `perch` CLI covers it).
+- **Native pickers and pictures.** In the desktop app `pickFolder()` opens the system folder picker (the one Add project
+  uses) and `screenshot()` is WKWebView's own snapshot (`capture_window`); the browser keeps Perch's chooser and the
+  page-drawn picture. Traffic lights, `trafficLights`, maximise, minimise and the picture are checked by
+  `window_chrome_probe` (docs/TESTING.md).
 - **Data a mod reads.** `props()` (a `mod:` block's `props` object, at most 4 KiB, reloads the copy when it changes),
   `theme()` (colors by herdr's names, read from the page's custom properties so a layout look or theme file shows),
   `settings()` (+ `dark`, `zoom`), `keys()`, `layout()`/`layouts()`, and `notify({icon, timeout})`.

@@ -197,6 +197,18 @@ describe("an app module's versions", () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain("Pick: /w/a"));
     [...document.querySelectorAll("button")].find((b) => b.textContent === "Choose this folder")!.click();
     expect(await picked).toBe("/w/a");
+    // In the desktop app this computer's picker is the system's.
+    const invoke = vi.fn(async () => "/Users/me/proj");
+    (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = { invoke };
+    expect(await api.pickFolder({ prompt: "Pick", start: "/w" })).toBe("/Users/me/proj");
+    expect(invoke).toHaveBeenCalledWith("plugin:dialog|open", { options: { directory: true, title: "Pick", defaultPath: "/w" } });
+    invoke.mockResolvedValueOnce(null as never);
+    expect(await api.pickFolder()).toBeNull();
+    // And the window picture is the OS's own capture there, falling back to the page's drawing if that fails.
+    invoke.mockResolvedValueOnce("data:image/png;base64,AAAA" as never);
+    expect(await api.screenshot()).toBe("data:image/png;base64,AAAA");
+    expect(invoke).toHaveBeenLastCalledWith("capture_window");
+    delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
     vi.useFakeTimers();
     const changed = api.watchFolder("/w");
     await vi.advanceTimersByTimeAsync(10); // first scan is the baseline

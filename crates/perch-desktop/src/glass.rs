@@ -163,3 +163,57 @@ pub fn round_webview(webview: &tauri::Webview) {
         }
     });
 }
+
+/// A PNG of the web view as WKWebView renders it (`takeSnapshot`), at its backing resolution.
+pub async fn snapshot_png(window: &WebviewWindow) -> Result<Vec<u8>, String> {
+    use block2::RcBlock;
+    use objc2::{msg_send, runtime::AnyObject};
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<Vec<u8>, String>>();
+    let tx = std::sync::Mutex::new(Some(tx));
+    window
+        .with_webview(move |platform| {
+            let view = platform.inner().cast::<AnyObject>();
+            let done = RcBlock::new(move |image: *mut AnyObject, error: *mut AnyObject| {
+                let Some(tx) = tx.lock().unwrap_or_else(|e| e.into_inner()).take() else {
+                    return;
+                };
+                // SAFETY: AppKit hands this block a valid NSImage (or nil with an NSError) on the main thread;
+                // every receiver is checked for nil and each selector is public API.
+                let png = unsafe {
+                    if image.is_null() {
+                        let text = if error.is_null() {
+                            "no image".to_string()
+                        } else {
+                            let description: *mut AnyObject = msg_send![error, localizedDescription];
+                            let utf8: *const std::ffi::c_char = msg_send![description, UTF8String];
+                            std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned()
+                        };
+                        Err(format!("the web view could not be captured: {text}"))
+                    } else {
+                        let tiff: *mut AnyObject = msg_send![image, TIFFRepresentation];
+                        let rep: *mut AnyObject = msg_send![objc2::class!(NSBitmapImageRep), imageRepWithData: tiff];
+                        let empty: *mut AnyObject = msg_send![objc2::class!(NSDictionary), dictionary];
+                        // NSBitmapImageFileTypePNG = 4
+                        let data: *mut AnyObject = if rep.is_null() { std::ptr::null_mut() } else { msg_send![rep, representationUsingType: 4usize, properties: empty] };
+                        if data.is_null() {
+                            Err("the capture could not be encoded".to_string())
+                        } else {
+                            let length: usize = msg_send![data, length];
+                            let bytes: *const u8 = msg_send![data, bytes];
+                            Ok(std::slice::from_raw_parts(bytes, length).to_vec())
+                        }
+                    }
+                };
+                let _ = tx.send(png);
+            });
+            // SAFETY: `inner()` is the live WKWebView and this closure runs on the main thread.
+            unsafe {
+                let _: () = msg_send![view, takeSnapshotWithConfiguration: std::ptr::null_mut::<AnyObject>(), completionHandler: &*done];
+            }
+        })
+        .map_err(|error| error.to_string())?;
+    tokio::time::timeout(std::time::Duration::from_secs(10), rx)
+        .await
+        .map_err(|_| "capturing the window timed out".to_string())?
+        .map_err(|_| "the capture was dropped".to_string())?
+}

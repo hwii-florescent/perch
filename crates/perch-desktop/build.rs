@@ -6,6 +6,7 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "open_external",
             "set_traffic_lights",
+            "capture_window",
             "open_in_default_app",
             "reveal_in_finder",
             "notify_session",

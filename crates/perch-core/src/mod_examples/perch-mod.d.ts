@@ -69,7 +69,7 @@ interface ModApi {
   /** A window that stays until closed: drag it by its title bar. A `key` remembers where it was put and replaces an open one with the same key. `frame: "none"` drops the border, shadow and title bar: draw your own, and a press you do not stop (`stopPropagation`) drags the window. */
   window(options: { key?: string; title?: string; width?: number; height?: number; at?: { x: number; y: number }; frame?: "none" }, draw: Draw): () => void;
   /** Calls `frame(ms)` (milliseconds since the loop began) before each repaint, at most `fps` times a second (default 60), and pauses while the page is hidden: for motion. Stops when the mod is replaced, or call the returned function. */
-  /** A picture of the app as a PNG data URL (drawn from the page: terminal canvases are copied, web fonts fall back). */
+  /** A picture of the app as a PNG data URL: the OS's own capture of the window in the desktop app, else drawn from the page (terminal canvases are copied, web fonts fall back). */
   screenshot(): Promise<string>;
   loop(frame: (ms: number) => void, options?: { fps?: number }): () => void;
   /** Steps through `list` every `every` ms (a spinner: ["⠋", "⠙", …], 90), calling `show(item, index)` when it changes; returns the way to stop. */
@@ -108,7 +108,7 @@ interface ModApi {
   watch(path: string, changed: () => void, on?: { host?: string }): () => void;
   /** Resolves with the paths that changed in `dir` (its entries, one level down; polled every 2 s) the next time any does: loop `for (;;) { await api.watchFolder(dir); refresh(); }`. Rejects when the mod is replaced. */
   watchFolder(dir: string, on?: { host?: string }): Promise<string[]>;
-  /** A folder chooser (Perch's own, over `listDir`, since there is no system picker): resolves with the chosen folder, or null if closed. Starts at `start` or the home folder. */
+  /** A folder chooser: the system's picker in the desktop app (for this computer), else Perch's own over `listDir`: resolves with the chosen folder, or null if closed. Starts at `start` or the home folder. */
   pickFolder(options?: { prompt?: string; start?: string; host?: string }): Promise<string | null>;
   /** The agents a computer can start (Settings > Agents): `{id, name, installed, isDefault}`. Start one with `store.getState().createSession{ host?: string }(host, cwd, id)`. */
   knownAgents(on?: { host?: string }): Promise<{ id: string; name: string; installed: boolean; isDefault: boolean }[]>;
