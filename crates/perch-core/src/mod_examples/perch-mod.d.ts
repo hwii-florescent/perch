@@ -40,6 +40,10 @@ interface ModApi {
    * Draws one of Perch's parts instead of the stock one, which keeps its behavior and comes back if the mod throws. Called again with new `data` whenever it changes.
    *  toast        data {id, kind: "done"|"blocked"|"usage", level?, title, body?, sessionId, sessionTitle?}  actions open, dismiss
    *  session-row  data {id, title, status, blocked?, unseen?, createdAt, cwd, branch?, active}  actions open, remove
+   *  project-row  data {cwd, name, state, sessionCount, active, hostId}  actions open, closeAll   (the sidebar's project header; its other buttons stay)
+   *  tab          data {id, title, label, state: "focused"|"visible"|"hidden", provider?, blocked?, unseen?}  actions open, rename, menu(x, y)   (its close button stays)
+   *  status-bar   data {online, host, cwd, branch?, sessionId?, contextTokens?, costUsd?, zoom}  actions resetZoom
+   *  confirm      data {message, confirmLabel, cancelLabel, busy}  actions confirm, cancel   (the dialog's panel; backdrop, Enter and Esc stay)
    */
   slot(name: string, render: (el: HTMLElement, props: { data: Record<string, any>; actions: Record<string, (...args: any[]) => void> }) => void | (() => void)): () => void;
 

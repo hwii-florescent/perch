@@ -6,6 +6,10 @@
 export const SLOTS = {
   toast: "One notification card. data: {id, kind: 'done'|'blocked'|'usage', title, body?, sessionId, sessionTitle?}. actions: open() (go to the session), dismiss().",
   "session-row": "One session in the sidebar. data: {id, title, status: 'running'|'idle', blocked?, unseen?, createdAt, cwd, branch?, active}. actions: open(), remove().",
+  "project-row": "A project's header in the sidebar (its worktree, review and close buttons stay). data: {cwd, name, state, sessionCount, active, hostId}. actions: open(), closeAll().",
+  tab: "One session tab in the tab bar (its close button stays). data: {id, title, label, state: 'focused'|'visible'|'hidden', provider?, blocked?, unseen?}. actions: open(), rename(), menu(x, y).",
+  "status-bar": "The whole status bar. data: {online, host, cwd, branch?, sessionId?, contextTokens?, costUsd?, zoom}. actions: resetZoom().",
+  confirm: "The confirmation dialog's panel (the backdrop, Enter and Esc stay). data: {message, confirmLabel, cancelLabel, busy}. actions: confirm(), cancel().",
 } as const;
 export type SlotName = keyof typeof SLOTS;
 

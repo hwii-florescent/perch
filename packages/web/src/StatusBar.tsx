@@ -8,6 +8,7 @@ import { GHOST_BUTTON } from "./components/ui/icon-button";
 import { menuPanel } from "./components/ui/menu";
 import { useZoom, zoomReset } from "./zoom";
 import { IS_MAC, formatCombo } from "./keyCombo";
+import { Slot } from "./components/Slot";
 import type { AccountUsage, UsageWindow } from "@perch/shared";
 
 function formatTokens(n: number): string {
@@ -354,9 +355,11 @@ export function StatusBar() {
   const cwd = status?.cwd || knownSession?.cwd || workspace?.path || "";
   const branch = status?.branch ?? workspace?.branch;
 
+  const data = { online, host: hostId === "local" ? "Local" : host?.name ?? hostId, cwd, branch, sessionId, contextTokens: status?.contextTokens, costUsd: status?.costUsd, zoom };
   return (
-    // v4 mock: host, path and branch left; optional session details in the middle;
-    // Needs You, usage and the connection check right. Identity stays in tabs/sidebar.
+    <Slot name="status-bar" data={data} actions={{ resetZoom: zoomReset }}>
+    {/* v4 mock: host, path and branch left; optional session details in the middle;
+        Needs You, usage and the connection check right. Identity stays in tabs/sidebar. */}
     <footer className="status-bar box-border flex h-6 shrink-0 items-center gap-3 overflow-hidden px-3 text-[10px] leading-none whitespace-nowrap text-subtext-0 [--radius:var(--radius-pane)]">
       <div className="status-bar__location flex min-w-0 flex-1 items-center gap-[13px] overflow-hidden">
         <span className={cn("size-1 shrink-0 rounded-full", online ? "bg-green" : "bg-yellow")} title={connectionLabel} />
@@ -383,5 +386,6 @@ export function StatusBar() {
         <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={online ? "m4 10 4 4 8-8" : "M10 4v7m0 4v1"} /></svg>
       </span>
     </footer>
+    </Slot>
   );
 }

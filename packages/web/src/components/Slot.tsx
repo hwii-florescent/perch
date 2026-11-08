@@ -3,11 +3,13 @@ import { slotFor, subscribeSlots, type SlotName, type SlotProps } from "../slots
 
 /** Shows what a mod drew for this slot (`api.slot`), else `children`, the stock interface. A mod that
  * throws falls back to the stock interface until the mod changes. */
-export function Slot({ name, data, actions, className, children }: {
+export function Slot({ name, data, actions, className, isolate, children }: {
   name: SlotName;
   data: SlotProps["data"];
   actions: SlotProps["actions"];
   className?: string;
+  /** Clicks inside a mod's drawing do not reach the stock parent (a dialog sitting on a backdrop). */
+  isolate?: boolean;
   children: ReactNode;
 }) {
   const provider = useSyncExternalStore(subscribeSlots, () => slotFor(name));
@@ -35,5 +37,5 @@ export function Slot({ name, data, actions, className, children }: {
     }
   }, [provider, key, failed, name]);
   if (!active) return <>{children}</>;
-  return <div ref={host} className={className} data-slot={name} data-slot-mod={provider.modId} />;
+  return <div ref={host} className={className} data-slot={name} data-slot-mod={provider.modId} onClick={isolate ? (event) => event.stopPropagation() : undefined} />;
 }

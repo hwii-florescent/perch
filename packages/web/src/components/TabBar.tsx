@@ -16,6 +16,7 @@ import { TabDragLayer } from "./TabDragLayer";
 import { TabSplitMenu } from "./TabSplitMenu";
 import { useWorkspaceFilesStore } from "../filesystemStore";
 import { segment } from "./ui/segment";
+import { Slot } from "./Slot";
 import { NEW_TAB_EVENT } from "../appEvents";
 import { requestCloseSession } from "../closeGuard";
 
@@ -165,6 +166,16 @@ export function TabBar() {
       ) : (
         <span key={s.id} className={TAB_SLOT} data-tab-entry={s.id}>
         {separated && <span className={SEPARATOR} aria-hidden="true" data-testid="tab-separator" />}
+        <Slot
+          name="tab"
+          className="flex min-w-0"
+          data={{ id: s.id, title: s.title, label: sessionLabel(s), state, provider: s.currentProviderId ?? cliAgentBySession[s.id] ?? s.cliProviderId, blocked: s.blocked, unseen: s.unseen }}
+          actions={{
+            open: () => activateTab(entry),
+            rename: () => { setRenamingId(s.id); setRenameValue(s.title || ""); },
+            menu: (x, y) => useSplitSets.getState().openMenu(s.id, Number(x), Number(y)),
+          }}
+        >
         <button
           type="button"
           className={cn(
@@ -195,6 +206,7 @@ export function TabBar() {
           </span>
           <span className="truncate">{sessionLabel(s)}</span>
         </button>
+        </Slot>
         {/* Like closing a tab in Orca: the session, its agent and its shells
          * end (the agent's own transcript stays on disk). */}
         <button

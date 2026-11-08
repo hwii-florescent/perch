@@ -51,9 +51,10 @@ approval not mattering much.
   rewriting them as mods (herdr's way) a stock component wraps its output in `<Slot name>`
   (`components/Slot.tsx`, `slots.ts` `SLOTS`) and passes plain `data` and `actions`. `api.slot(name,
   (el, {data, actions}) => cleanup?)` claims it; the component keeps its state, keys and timers,
-  and the stock part shows again if the mod throws or is gone. Built: `toast` (the card) and
-  `session-row` (the sidebar's rows). A slot is a few lines at its component, so the rest (tab
-  pills, project rows, menus, dialogs, the status bar) are added one at a time as they are wanted;
+  and the stock part shows again if the mod throws or is gone. Built: `toast`, `session-row`,
+  `project-row`, `tab`, `status-bar` and `confirm` (each documented in `SLOTS` and the types file;
+  a test keeps the two in step). A slot is a few lines at its component, so menus and the other
+  dialogs are added one at a time as they are wanted;
   a slot a mod fills completely is how a stock part becomes replaceable. Not covered: a mod
   changing a part's behavior or structure (a slot is the look and the actions it is given), and
   `perch mod check` does not see a slot function that throws later, only the console does.

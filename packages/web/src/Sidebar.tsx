@@ -530,6 +530,12 @@ function ProjectRow({
   return (
     <div className="mb-1">
       <div className="sidebar__project-header flex items-stretch gap-[2px] px-[3px]">
+        <Slot
+          name="project-row"
+          className="flex min-w-0 flex-1"
+          data={{ cwd: group.cwd, name: basename(group.cwd), state: dotState, sessionCount, active: isActiveProject, hostId }}
+          actions={{ open: () => onSelectProject(group.cwd), closeAll: () => setConfirmingCloseAll(true) }}
+        >
         <button
           type="button"
           className={cn(
@@ -561,6 +567,7 @@ function ProjectRow({
           </span>
           <span className="shrink-0 rounded-ui bg-surface-1 px-[0.35rem] py-[0.05rem] text-[0.68rem] text-subtext-0">{sessionCount}</span>
         </button>
+        </Slot>
         <ProjectWorktrees projectKey={group.key} hostId={hostId} cwd={group.cwd} />
         <ProjectGitReviewButton hostId={hostId} sessions={group.sessions} />
         <button

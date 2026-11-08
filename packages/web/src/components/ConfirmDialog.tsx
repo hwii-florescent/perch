@@ -12,6 +12,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { button } from "./ui/button";
+import { Slot } from "./Slot";
 
 export interface ConfirmDialogProps {
   message: string;
@@ -54,6 +55,13 @@ export function ConfirmDialog({
 
   return createPortal(
     <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-[rgba(0,0,0,0.55)]" onClick={() => { if (!busy) onCancel(); }}>
+      <Slot
+        name="confirm"
+        isolate
+        data={{ message, confirmLabel, cancelLabel, busy }}
+        actions={{ confirm: onConfirm, cancel: onCancel }}
+        className="w-[min(360px,calc(100vw_-_2rem))]"
+      >
       <div
         className="w-[min(360px,calc(100vw_-_2rem))] rounded-ui bg-panel-bg p-4 shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
         role="dialog"
@@ -86,6 +94,7 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
+      </Slot>
     </div>,
     document.body
   );

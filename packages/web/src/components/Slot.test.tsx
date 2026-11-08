@@ -2,7 +2,8 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { claimSlot } from "../slots";
+import { readFileSync } from "node:fs";
+import { SLOTS, claimSlot } from "../slots";
 import { Slot } from "./Slot";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -54,6 +55,11 @@ describe("a slot in Perch's own interface", () => {
     await act(async () => {});
     expect(host.textContent).toBe("fixed");
     await act(async () => releaseGood());
+  });
+
+  it("lists every slot in the types file `perch mod api` prints", () => {
+    const types = readFileSync("../../crates/perch-core/src/mod_examples/perch-mod.d.ts", "utf8");
+    for (const name of Object.keys(SLOTS)) expect(types, name).toMatch(new RegExp(`^   \\*  ${name}\\s`, "m"));
   });
 
   it("refuses a slot that does not exist and lists the real ones", () => {
