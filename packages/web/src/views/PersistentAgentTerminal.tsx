@@ -14,6 +14,7 @@ import { useIsMobileWidth } from "../responsive";
 import { button } from "../components/ui/button";
 import { glass } from "../components/ui/glass";
 import { PhoneSizeNotice } from "../components/PhoneSizeNotice";
+import { TerminalSuggestions } from "./nativeChat/TerminalSuggestions";
 import { cn } from "../lib/cn";
 
 /** The PTY's size, in-band in its output (`terminal::pty_size_marker`). */
@@ -248,6 +249,7 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
     {phoneSized && status?.resizeOwner && <PhoneSizeNotice generation={status.resizeOwner.generation} pending={pending} onThisTab={() => void view?.takeBack(false)} onAllTabs={() => void view?.takeBack(true)} />}
     <div className="terminal__surface" ref={container} />
     <TerminalSearchBar controller={search} />
+    <TerminalSuggestions sessionId={sessionId} terminalId={terminalId} controlling={controlling} />
     {fileDrop && (
       <div
         className={fileDrop.error ? "terminal__cli-error max-w-full break-words" : "terminal__exited"}

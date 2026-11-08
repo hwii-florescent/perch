@@ -700,6 +700,9 @@ fn deliver_native(
 /// The delivery loop: a pass over every receiver with queued mail whenever something is queued
 /// and every couple of seconds while anything waits. Cheap when the queue is empty.
 pub(super) async fn run_deliveries(app: AppState) {
+    // The receipt keeps only the latest reason a message waits; the log keeps each change of it, so
+    // "why was this never delivered" can be answered after the fact.
+    let mut last_wait = std::collections::HashMap::<String, String>::new();
     loop {
         tokio::select! {
             _ = app.mail_notify.notified() => {}
@@ -708,25 +711,29 @@ pub(super) async fn run_deliveries(app: AppState) {
         let Ok(targets) = app.db.queued_mail_targets() else {
             continue;
         };
+        last_wait.retain(|target, _| targets.contains(target));
         for target in targets {
             let worker = app.clone();
+            let named = target.clone();
             let outcome = tokio::task::spawn_blocking(move || {
                 pass(&worker.db, &AppWorld(&worker), &target, now_millis() as i64)
             })
             .await;
-            match outcome {
-                Ok(Pass::Sent { ids, reply }) => {
-                    settle(&app.db, &ids, reply).await;
-                    // Receipts changed on both ends: the family strip follows session updates.
-                    for id in &ids {
-                        if let Ok(Some(row)) = app.db.mail(id) {
-                            notify_session_updated(&app, &row.target_session_id);
-                            notify_session_updated(&app, &row.sender_session_id);
-                        }
+            if let Ok(Pass::Waiting(reason)) = &outcome {
+                if last_wait.get(&named) != Some(reason) {
+                    tracing::info!(receiver = %named, reason, "queued mail is waiting");
+                    last_wait.insert(named, reason.clone());
+                }
+            }
+            if let Ok(Pass::Sent { ids, reply }) = outcome {
+                settle(&app.db, &ids, reply).await;
+                // Receipts changed on both ends: the family strip follows session updates.
+                for id in &ids {
+                    if let Ok(Some(row)) = app.db.mail(id) {
+                        notify_session_updated(&app, &row.target_session_id);
+                        notify_session_updated(&app, &row.sender_session_id);
                     }
                 }
-                Ok(Pass::Waiting(reason)) => tracing::debug!(reason, "mail is waiting"),
-                _ => {}
             }
         }
     }

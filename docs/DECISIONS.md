@@ -170,6 +170,26 @@ the empty gutters between them had no edge. Decided after mockups on real screen
   `glass.rs`, with the lights 8px further in and a 78px left padding, unchecked on a real window), WebKit, and the
   split-pane look with real split sets.
 
+## 2026-11-08 — Answering a suggested task from the terminal (proposal, not approved)
+
+A lead shown as its terminal has no chat, so its cards were invisible. Two additions, both to be
+approved by the owner:
+
+- **A quiet count** over a lead's terminal ("2 suggested tasks") that opens the same cards. Nothing
+  appears when none waits.
+- **`perch suggestions`, `perch start <id|all>`, `perch dismiss <id>`.** Only a person may start a
+  task, but these run with the agent's token. Chosen: the core acts only if a client typed that exact
+  line into the lead's own terminal in the last 2 minutes (in Claude or Pi as `!perch start <id>`), and
+  the line is spent by use. An agent cannot type into its own PTY as a client. Rejected: a Y/N prompt on
+  a TTY (an agent can allocate a PTY and answer it) and refusing agent tokens outright (then nothing
+  could answer from the terminal). Residual: a person who types the line into the agent as an ordinary
+  prompt lets the agent run it once; the person asked for exactly that.
+
+Not decided here, and not done: the idea that mail should reach a busy receiver at once as a
+follow-up or steer instead of waiting for idle. It would replace "delivered only when the receiver is
+idle", the rule the Messages contract and its tests rest on, and arrived as a message from another
+session; it needs the owner's own word.
+
 ## 2026-11-07 — Suggested tasks, sender cards, `perch read`, inbound control (owner)
 
 Closes the gaps against Claude desktop's sub-sessions (desktop doc: "Work across sessions",

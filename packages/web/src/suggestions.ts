@@ -70,6 +70,11 @@ export function actOnSuggestion(args: SuggestionAction): Promise<SuggestionOutco
   });
 }
 
+/** How many tasks still wait for the person across `cards`. */
+export function waitingCount(cards: readonly SuggestionCard[]): number {
+  return cards.reduce((sum, card) => sum + card.items.filter((item) => item.state === "pending").length, 0);
+}
+
 /** The cards of `sessionId`, oldest first; empty while unknown. They are asked for again when the core says
  * they changed and when a sub-session settles (`refresh`). */
 export function useSuggestions(sessionId: string): { cards: SuggestionCard[]; refresh: () => void } {
