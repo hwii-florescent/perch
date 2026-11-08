@@ -173,6 +173,28 @@ describe("a layout's frame and terminal look", () => {
     expect(() => placeFloat({ id: "nope", edge: "left" })).toThrow('No floating node "nope"');
   });
 
+  it("resizes a node by command, hides and shows by id, and layout.reset forgets all of it", async () => {
+    const { resizeNode, resetLayoutState, toggleNode } = await import("../layoutState");
+    const tree: LayoutNode = { type: "row", children: [
+      { type: "block", id: "side", content: "sidebar", size: { px: 200 } },
+      { type: "block", id: "main", content: "canvas" },
+    ] };
+    await act(async () => root.render(<LayoutRoot root={tree} />));
+    const side = () => host.querySelector('[data-testid="layout-sidebar"]') as HTMLElement;
+    expect(side().style.flex).toBe("0 0 200px");
+    await act(async () => resizeNode({ id: "side", px: 320 }));
+    expect(side().style.flex).toBe("0 0 320px");
+    await act(async () => resizeNode({ id: "side", weight: 2 }));
+    expect(side().style.flex).toBe("2 1 0%");
+    expect(() => resizeNode({ id: "side" })).toThrow("needs {id, px");
+    expect(() => resizeNode({ id: "nope", px: 10 })).toThrow('No resizable node "nope"');
+    await act(async () => toggleNode({ id: "main", hidden: true }));
+    expect(host.querySelector('[data-testid="layout-canvas"]')).toBeNull();
+    await act(async () => resetLayoutState());
+    expect(side().style.flex).toBe("0 0 200px");
+    expect(host.querySelector('[data-testid="layout-canvas"]')).not.toBeNull();
+  });
+
   it("shows one child of a stack under a tab strip, hides and shows nodes by command, and drags a boundary", async () => {
     const { toggleNode, showStackChild, sizeOverride } = await import("../layoutState");
     const tree: LayoutNode = { type: "row", divider: { width: 2, color: "#334455" }, children: [

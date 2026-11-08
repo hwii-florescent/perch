@@ -1550,7 +1550,7 @@ Mods
     More node types and fields: {'type': 'stack', 'active': <child id>, 'header': 'tabs' | 'mod:<id>',
     'children': [...]} shows one child at a time (a header mod reads shared('layout.stack.<id>') and
     runs the 'layout.stack' command with {stack, child}); any node may have an 'id' (for the
-    'layout.toggle' {id, hidden?} and 'layout.stack' commands, `perch mod do ...`) and a 'title'
+    'layout.toggle' {id, hidden?} and 'layout.stack' commands (also layout.show/hide/select/resize/reset/switch/clone, mod.clone/open, app.theme, app.zoom_*, tab.*, pane.split/zoom/go/swap: `perch mod commands`), `perch mod do ...`) and a 'title'
     (its tab); rows and columns take 'divider' ({'width', 'color'}) and 'resizable' (default true:
     the boundaries drag, and the sizes are kept per layout on that device); 'windowDrag': true makes
     dragging a node move the desktop window; the root may set 'preview' (an .svg or .png beside the

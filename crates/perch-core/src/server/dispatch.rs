@@ -302,9 +302,12 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             text,
             error,
         } => super::mods::handle_snapshot(state, request_id, html, text, error),
-        ClientMessage::ModsSet { request_id, id, op } => {
-            super::mods::handle_set(state, request_id, id, op)
-        }
+        ClientMessage::ModsSet {
+            request_id,
+            id,
+            op,
+            as_id,
+        } => super::mods::handle_set(state, request_id, id, op, as_id),
         ClientMessage::MemoryList {
             request_id,
             project_id,

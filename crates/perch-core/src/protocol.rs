@@ -1357,6 +1357,9 @@ pub enum ClientMessage {
         request_id: String,
         id: String,
         op: String,
+        /// For `clone`: the new id (default `<id>-copy`).
+        #[serde(default, rename = "as")]
+        as_id: Option<String>,
     },
 
     /// The page's answer to `mods.snapshot.request`: what is drawn, as HTML and as text, or why not.

@@ -89,7 +89,11 @@ function FloatGrip({ id, spot }: { id: string; spot: { edge: string; align: stri
 }
 
 /** The node's size, as the person last dragged it or else as the file says. */
-const sizeOf = (node: LayoutNode, parentPath: string, index: number) => ({ ...node.size, ...sizeOverride(parentPath)?.[index] }) as NonNullable<LayoutNode["size"]>;
+const sizeOf = (node: LayoutNode, parentPath: string, index: number) => {
+  const dragged = sizeOverride(parentPath)?.[index];
+  // A px or a weight the person set replaces the file's whole way of sizing (min and max stay).
+  return (dragged ? { ...node.size, px: undefined, weight: undefined, ...dragged } : { ...node.size }) as NonNullable<LayoutNode["size"]>;
+};
 
 const shownNode = (node: LayoutNode) => !(hiddenOverride(node.id) ?? node.hidden);
 

@@ -105,6 +105,18 @@ export const listMods = () => ask((requestId) => ({ type: "mods.list", requestId
 export const enableMod = (id: string, enabled: boolean) =>
   ask((requestId) => ({ type: "mods.set", requestId, id, op: enabled ? "enable" : "disable" }));
 
+/** Copies one of your mods or layouts (or a shipped example) as `as` (default `<id>-copy`); resolves with
+ * the new id, or throws why not. */
+export async function cloneMod(id: string, as?: string): Promise<string> {
+  const state = await ask((requestId) => ({ type: "mods.set", requestId, id, op: "clone", as }));
+  if (!state) throw new Error("Perch did not answer.");
+  if (state.error) throw new Error(state.error);
+  return as || `${id}-copy`;
+}
+
+/** Shows a mod's overlay, as `perch mod open` does. */
+export const openMod = (modId: string) => openers.forEach((open) => open(modId));
+
 /** Moves a mod folder or a layout file to `mods-removed/` (never deleted). */
 export const removeMod = (id: string, kind: "mod" | "layout") =>
   ask((requestId) => ({ type: "mods.set", requestId, id, op: kind === "mod" ? "remove-mod" : "remove-layout" }));

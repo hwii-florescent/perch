@@ -1738,7 +1738,9 @@ export interface ModsSetMessage {
   type: "mods.set";
   requestId: string;
   id: string;
-  op: "enable" | "disable" | "layout" | "remove-mod" | "remove-layout";
+  op: "enable" | "disable" | "layout" | "clone" | "remove-mod" | "remove-layout";
+  /** For `clone`: the new id (default `<id>-copy`). */
+  as?: string;
 }
 
 /** The person's page says whether it loaded a mod's `revision` (capability `mods.report.v1`);

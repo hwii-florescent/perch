@@ -57,6 +57,28 @@ export function snapSpot(centerX: number, centerY: number, width: number, height
   return { edge, align: along < 1 / 3 ? "start" : along > 2 / 3 ? "end" : "center" };
 }
 
+/** Forgets the clicks on the shown layout (hidden nodes, stack picks, sizes, float spots). */
+export const resetLayoutState = () => change((s) => { s.hidden = {}; s.active = {}; s.sizes = {}; s.floats = {}; });
+
+/** The path of the node with this id (`r/1/0`), its parent's path and its index there. */
+function locate(node: LayoutNode, id: string, path = "r"): { path: string; parent: string; index: number } | null {
+  if (node.id === id) return { path, parent: path.slice(0, path.lastIndexOf("/")), index: Number(path.slice(path.lastIndexOf("/") + 1)) };
+  if ("children" in node) for (let i = 0; i < node.children.length; i++) { const hit = locate(node.children[i]!, id, `${path}/${i}`); if (hit) return hit; }
+  return null;
+}
+
+/** `layout.resize {id, px | weight}`: give a node a size, as if its boundary had been dragged. */
+export function resizeNode(args: unknown): void {
+  const { id, px, weight } = (args ?? {}) as { id?: unknown; px?: unknown; weight?: unknown };
+  const at = typeof id === "string" && shown ? locate(shown, id) : null;
+  if (!at || at.path === "r") throw new Error(`No resizable node "${String(id)}" in the shown layout.`);
+  const size = typeof px === "number" && px > 0 ? { px } : typeof weight === "number" && weight > 0 ? { weight } : null;
+  if (!size) throw new Error("layout.resize needs {id, px: <number>} or {id, weight: <number>}.");
+  const sizes = [...(sizeOverride(at.parent) ?? [])];
+  sizes[at.index] = size;
+  setSizes(at.parent, sizes);
+}
+
 /** The ids a layout names, so commands can refuse one that is not there. */
 export function nodeIds(node: LayoutNode, into = new Map<string, LayoutNode>()): Map<string, LayoutNode> {
   if (node.id) into.set(node.id, node);

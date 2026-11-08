@@ -655,7 +655,13 @@ pub(super) fn handle_list(state: &Arc<ConnState>, request_id: String) {
 }
 
 /// A person's click: turn one mod off or on.
-pub(super) fn handle_set(state: &Arc<ConnState>, request_id: String, id: String, op: String) {
+pub(super) fn handle_set(
+    state: &Arc<ConnState>,
+    request_id: String,
+    id: String,
+    op: String,
+    as_id: Option<String>,
+) {
     let app = &state.app;
     let policy = app.settings.get().mods;
     let outcome = match op.as_str() {
@@ -666,10 +672,16 @@ pub(super) fn handle_set(state: &Arc<ConnState>, request_id: String, id: String,
             &policy,
             Some(id.as_str()).filter(|id| !id.is_empty()),
         ),
+        "clone" => mods::clone_example(
+            &app.memory_root,
+            &id,
+            as_id.as_deref().filter(|n| !n.is_empty()),
+        )
+        .map(drop),
         "remove-mod" => mods::remove(&app.memory_root, &id, Some("mod")).map(drop),
         "remove-layout" => mods::remove(&app.memory_root, &id, Some("layout")).map(drop),
         _ => Err(Error::Invalid(
-            "ops are enable, disable, layout, remove-mod and remove-layout".into(),
+            "ops are enable, disable, layout, clone, remove-mod and remove-layout".into(),
         )),
     };
     let error = outcome.err().map(|error| error.to_string());

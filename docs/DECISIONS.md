@@ -104,6 +104,11 @@ approval not mattering much.
   also duplicates one of your own mods or layouts (as `<id>-copy`).
 - **Traffic lights.** Root `trafficLights: [x, y]` moves the macOS window buttons (desktop command
   `set_traffic_lights`, undone when the layout goes; `--titlebar-inset` follows). Not run in a real desktop window here.
+- **Commands with herdr's names.** `perch mod commands` also lists `layout.switch {name?}` (named, or the next; after the
+  last, Perch as shipped), `layout.show/hide {id}`, `layout.select {stack, child}`, `layout.resize {id, px|weight}`,
+  `layout.reset`, `layout.clone`/`mod.clone {name, as?}` (the `clone` op of `mods.set`; a cloned layout is shown),
+  `mod.open {name}`, `app.theme {name}`, `app.zoom_in|out|reset`, `tab.new|next|prev|close`, `pane.split {direction}`,
+  `pane.zoom`, `pane.go {direction}` and `pane.swap {direction}`. They are the same typed commands a key or `api.run` uses.
 - **Data a mod reads.** `props()` (a `mod:` block's `props` object, at most 4 KiB, reloads the copy when it changes),
   `theme()` (colors by herdr's names, read from the page's custom properties so a layout look or theme file shows),
   `settings()` (+ `dark`, `zoom`), `keys()`, `layout()`/`layouts()`, and `notify({icon, timeout})`.
