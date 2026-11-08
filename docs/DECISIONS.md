@@ -101,6 +101,16 @@ approval not mattering much.
   looks reaching menus opened from a themed subtree (they use the root's), `stack` nodes, gradients as
   images, light/dark theme pairs, per-pane header mods, and mod-fonts folders. `perch mod clone <id>`
   also duplicates one of your own mods or layouts (as `<id>-copy`).
+- **Layout structure, themes, fonts.** A `stack` node shows one child (`active`, `header`: `tabs` or a mod
+  that reads `shared("layout.stack.<id>")` and runs `layout.stack`); nodes take `id`/`title`,
+  `divider`/`resizable` (boundaries drag; sizes, hidden nodes and stack picks are kept per layout, keyed
+  by the file's content so an edit resets them, and `layout.toggle {id}` / `layout.stack {stack, child}`
+  run on the same state), `windowDrag` (`data-tauri-drag-region`), root `preview` (a data URI in the layout
+  info, shown in Settings), root `titlebar: "none"` (macOS keeps its window buttons over the layout, so
+  it only sets `--titlebar-inset`), and `theme` may be `{light, dark}`. `themes/<name>.json` (Perch's
+  `colors` over a `base`, or herdr's `background`/`foreground`/`ansi`) are offered by file name; a
+  mod's `fonts/` files load as fonts named by file stem (`GET /mods/file?id=&font=`). New slots
+  `pane-header` and `terminal-menu`; `api.loop(frame, {fps})` for animation.
 - **Driving the window.** `perch mod commands` lists the app commands (the ones keys, `api.commands` and
   `api.run` use) and `perch mod do <command> [json]` runs one on the person's screen, as herdr's
   `herdr-app commands` / `do`: it reuses the `mods.snapshot.request` round trip (`command`, `args`), so a

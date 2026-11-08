@@ -163,6 +163,23 @@ describe("an app module's versions", () => {
     vi.unstubAllGlobals();
   });
 
+  it("loop calls a frame function at most fps times a second, with elapsed time, until the mod goes", async () => {
+    let queued: ((now: number) => void) | undefined;
+    vi.stubGlobal("requestAnimationFrame", (fn: (now: number) => void) => { queued = fn; return 1; });
+    vi.stubGlobal("cancelAnimationFrame", () => { queued = undefined; });
+    let api!: ModApi;
+    const swapper = createSwapper(document.createElement("div"), vi.fn(), async () => (_el, a) => { api = a; });
+    await swapper.load("x", "m");
+    const frames: number[] = [];
+    api.loop((ms) => frames.push(Math.round(ms)), { fps: 10 });
+    const tick = (now: number) => queued?.(now);
+    tick(1000); tick(1030); tick(1098); tick(1100); tick(1250);
+    expect(frames).toEqual([0, 100, 250]); // the 30 ms and 98 ms ticks were too soon for 10 fps
+    swapper.stop();
+    expect(queued).toBeUndefined();
+    vi.unstubAllGlobals();
+  });
+
   it("documents every member of the api in the types file `perch mod api` prints, and nothing else", () => {
     const types = readFileSync("../../crates/perch-core/src/mod_examples/perch-mod.d.ts", "utf8");
     const declared = [...types.matchAll(/^  (\w+)[(:?]/gm)].map((m) => m[1]).sort();

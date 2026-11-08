@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { applyTheme, backdropFor, lookVars, PERCH_DEFAULT, resolveTheme, setRootLook, THEMES, THEME_NAMES } from "./themes";
+import { applyTheme, backdropFor, lookVars, paletteFromFile, PERCH_DEFAULT, registerThemes, resolveTheme, setRootLook, themeName, THEMES, THEME_NAMES } from "./themes";
 import catppuccin from "./palettes/catppuccin.json";
 import resolvedBeforePaletteImport from "./__fixtures__/themes.resolved.json";
 
@@ -142,4 +142,36 @@ it("the root look stays on top when the settings theme is applied again, and is 
   setRootLook({});
   expect(root.getPropertyValue("--accent")).toBe(resolveTheme("perch").accent);
   expect(root.getPropertyValue("--card-radius")).toBe("");
+});
+
+describe("theme files", () => {
+  const ansi = Array.from({ length: 16 }, (_, i) => `#${(i * 15).toString(16).padStart(2, "0").repeat(3)}`);
+  it("derive a palette from herdr's terminal shape or from Perch's own, and are offered by file name", () => {
+    const term = paletteFromFile({ background: "#101010", foreground: "#eeeeee", ansi })!;
+    expect([term.panelBg, term.text, term.red, term.green]).toEqual(["#101010", "#eeeeee", ansi[1], ansi[2]]);
+    expect(term.surface0).not.toBe(term.panelBg);
+    const mine = paletteFromFile({ base: "catppuccin", colors: { accent: "#ff8800" } })!;
+    expect([mine.accent, mine.panelBg]).toEqual(["#ff8800", THEMES.catppuccin!.panelBg]);
+    expect(paletteFromFile({})).toBeNull();
+
+    registerThemes([
+      { id: "dusk", name: "Dusk", theme: { background: "#101010", foreground: "#eeeeee", ansi }, error: null },
+      { id: "perch", name: "Perch", theme: { colors: { accent: "#ff8800" } }, error: null }, // a shipped name stays shipped
+      { id: "broken", name: "broken", theme: null, error: "colors are #rrggbb" },
+    ]);
+    expect(THEME_NAMES).toContain("dusk");
+    expect(THEME_NAMES).not.toContain("broken");
+    expect(THEMES.perch).toBe(PERCH_DEFAULT);
+    expect(resolveTheme("dusk").panelBg).toBe("#101010");
+    registerThemes([]); // a removed file stops being offered
+    expect(THEME_NAMES).not.toContain("dusk");
+    expect(Object.hasOwn(THEMES, "dusk")).toBe(false);
+  });
+
+  it("picks a half of a light/dark pair", () => {
+    expect(themeName("nord", true)).toBe("nord");
+    expect(themeName({ light: "paper", dark: "nord" }, true)).toBe("nord");
+    expect(themeName({ light: "paper", dark: "nord" }, false)).toBe("paper");
+    expect(themeName(undefined, true)).toBeUndefined();
+  });
 });

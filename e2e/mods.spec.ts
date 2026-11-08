@@ -11,10 +11,14 @@ import * as path from "node:path";
 const HOME = path.join(process.env.PERCH_E2E_STATE ?? "", "hub");
 const MOD = path.join(HOME, "mods", "e2e-hello");
 const LAYOUT = path.join(HOME, "layouts", "e2e-look.json");
+const STACK = path.join(HOME, "layouts", "e2e-stack.json");
+const THEME = path.join(HOME, "themes", "e2e-dusk.json");
 
 test.afterEach(() => {
   fs.rmSync(MOD, { recursive: true, force: true });
   fs.rmSync(LAYOUT, { force: true });
+  fs.rmSync(STACK, { force: true });
+  fs.rmSync(THEME, { force: true });
   fs.rmSync(path.join(HOME, "layout-state.json"), { force: true });
   fs.rmSync(path.join(HOME, "mods-removed"), { recursive: true, force: true });
 });
@@ -75,4 +79,50 @@ test("a mod and a layout written to the folder appear, draw, and are removed fro
   expect(fs.readdirSync(path.join(HOME, "mods-removed")).length).toBe(2);
   await page.keyboard.press("Escape");
   await expect(page.locator('[data-testid="layout-root"]')).toHaveCount(0);
+});
+
+test("a stack, a divider, a theme file and a draggable boundary work in the running app", async ({ page }) => {
+  fs.mkdirSync(path.dirname(STACK), { recursive: true });
+  fs.mkdirSync(path.dirname(THEME), { recursive: true });
+  const ansi = Array.from({ length: 16 }, (_, i) => `#${(i * 15).toString(16).padStart(2, "0").repeat(3)}`);
+  fs.writeFileSync(THEME, JSON.stringify({ name: "E2E Dusk", background: "#101820", foreground: "#e8e8e8", ansi }));
+  fs.writeFileSync(STACK, JSON.stringify({
+    name: "E2E stack", type: "row", theme: "e2e-dusk", divider: { width: 2, color: "#445566" },
+    children: [
+      { type: "block", id: "side", content: "sidebar", size: { px: 240 } },
+      { type: "stack", id: "work", header: "tabs", children: [
+        { type: "block", id: "main", title: "Canvas", content: "canvas" },
+        { type: "block", id: "tools", title: "Files", content: "files" },
+      ] },
+    ],
+  }));
+
+  await openMods(page);
+  await expect(page.locator('[data-testid="layout-e2e-stack"]')).toBeVisible({ timeout: 15000 });
+  await page.locator('[data-testid="layout-e2e-stack"]').getByRole("button", { name: "Use" }).click();
+  await page.keyboard.press("Escape");
+
+  // The theme file by name styled the window, the stack shows its first child under a tab strip.
+  await expect(page.locator('[data-testid="stack-tabs-work"]')).toBeVisible({ timeout: 10000 });
+  expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--panel-bg"))).toBe("#101820");
+  await expect(page.locator('[data-testid="layout-canvas"]')).toBeVisible();
+  await expect(page.locator('[data-testid="layout-files"]')).toHaveCount(0);
+  await page.getByRole("tab", { name: "Files" }).click();
+  await expect(page.locator('[data-testid="layout-files"]')).toBeVisible();
+  await expect(page.locator('[data-testid="layout-canvas"]')).toHaveCount(0);
+
+  // The boundary drags and the new width is kept.
+  const side = page.locator('[data-testid="layout-sidebar"]');
+  const before = (await side.boundingBox())!.width;
+  const grip = page.locator('[data-testid="layout-boundary"] > div').first();
+  const box = (await grip.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const after = (await side.boundingBox())!.width;
+  expect(after).toBeGreaterThan(before + 40);
+  await page.reload({ waitUntil: "networkidle" });
+  await expect(page.locator('[data-testid="layout-sidebar"]')).toBeVisible({ timeout: 15000 });
+  expect(Math.abs((await page.locator('[data-testid="layout-sidebar"]').boundingBox())!.width - after)).toBeLessThan(2);
 });

@@ -125,4 +125,57 @@ describe("a layout's frame and terminal look", () => {
     const html = document.documentElement.style;
     expect([html.getPropertyValue("--radius-pane"), html.getPropertyValue("--pane-border"), html.getPropertyValue("--pane-focus")]).toEqual(["3px", "1px", "#ff8800"]);
   });
+
+  it("shows one child of a stack under a tab strip, hides and shows nodes by command, and drags a boundary", async () => {
+    const { toggleNode, showStackChild, sizeOverride } = await import("../layoutState");
+    const tree: LayoutNode = { type: "row", divider: { width: 2, color: "#334455" }, children: [
+      { type: "block", id: "side", content: "sidebar", windowDrag: true },
+      { type: "stack", id: "work", header: "tabs", active: "b", children: [
+        { type: "block", id: "a", title: "Files", content: "files" },
+        { type: "block", id: "b", title: "Git", content: "git" },
+      ] },
+    ] };
+    await act(async () => root.render(<LayoutRoot root={tree} />));
+    const text = () => host.textContent ?? "";
+    expect(text()).toContain("tools:gitReview");
+    expect(text()).not.toContain("tools:files");
+    expect(host.querySelector('[data-testid="stack-tabs-work"]')?.textContent).toBe("FilesGit");
+    expect((host.querySelector('[data-node-id="side"]') as HTMLElement).hasAttribute("data-tauri-drag-region")).toBe(true);
+    expect(host.querySelectorAll('[data-testid="layout-boundary"]')).toHaveLength(1);
+    expect((host.querySelector('[data-testid="layout-boundary"]') as HTMLElement).style.background).toContain("rgb(51, 68, 85)");
+
+    await act(async () => (host.querySelector('[role="tab"]') as HTMLElement).click()); // Files
+    expect(text()).toContain("tools:files");
+    await act(async () => showStackChild({ stack: "work", child: "b" }));
+    expect(text()).toContain("tools:gitReview");
+    expect(() => showStackChild({ stack: "work", child: "zz" })).toThrow(/layout.stack needs/);
+
+    await act(async () => toggleNode({ id: "side" }));
+    expect(text()).not.toContain("sidebar");
+    await act(async () => toggleNode({ id: "side", hidden: false }));
+    expect(text()).toContain("sidebar");
+    expect(() => toggleNode({ id: "nope" })).toThrow(/No node/);
+
+    // A drag on the boundary keeps the new sizes for this layout.
+    const grip = host.querySelector('[data-testid="layout-boundary"] > div') as HTMLElement;
+    const sizes = [{ left: 0, width: 100 }, { left: 102, width: 300 }];
+    const children = [...(host.querySelector('[data-testid="layout-root"] > div') as HTMLElement).children].filter((el) => !el.matches('[data-testid="layout-boundary"]'));
+    children.forEach((el, i) => { (el as HTMLElement).getBoundingClientRect = () => ({ width: sizes[i]!.width, height: 50, left: sizes[i]!.left, right: 0, top: 0, bottom: 0, x: 0, y: 0, toJSON: () => ({}) }); });
+    await act(async () => { grip.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 101 })); });
+    await act(async () => { window.dispatchEvent(new MouseEvent("pointermove", { clientX: 151 })); });
+    await act(async () => { window.dispatchEvent(new MouseEvent("pointerup")); });
+    const [first, second] = sizeOverride("r") ?? [];
+    expect(first?.weight).toBeCloseTo(0.75, 1); // 150 of 400, times two
+    expect(second?.weight).toBeCloseTo(1.25, 1);
+  });
+
+  it("picks the half of a light/dark theme pair that fits the system", async () => {
+    const tree: LayoutNode = { type: "row", theme: { light: "catppuccin-latte", dark: "catppuccin" }, children: [{ type: "block", content: "sidebar" }] };
+    await act(async () => root.render(<LayoutRoot root={tree} />));
+    const panel = document.documentElement.style.getPropertyValue("--panel-bg");
+    expect(panel).not.toBe("");
+    const dark = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ?? false;
+    const { resolveTheme } = await import("../themes");
+    expect(panel).toBe(resolveTheme(dark ? "catppuccin" : "catppuccin-latte").panelBg);
+  });
 });

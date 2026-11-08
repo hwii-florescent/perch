@@ -85,6 +85,10 @@ pub struct ModInfo {
     pub revision: String,
     /// Why the folder cannot be loaded, if it cannot.
     pub error: Option<String>,
+    /// Font files in the mod's `fonts/` folder (`.ttf`, `.otf`, `.woff`, `.woff2`): the page loads each
+    /// under its file name without the extension, so a layout can name it in `font`.
+    #[serde(default)]
+    pub fonts: Vec<String>,
 }
 
 fn mods_dir(root: &Path) -> PathBuf {
@@ -200,6 +204,7 @@ pub fn scan(root: &Path, policy: &Policy) -> Vec<ModInfo> {
                     place: m.place,
                     revision: format!("{:x}", revision(&entry)),
                     error: None,
+                    fonts: fonts_of(&dir),
                     id,
                 },
                 Err(error) => ModInfo {
@@ -209,11 +214,88 @@ pub fn scan(root: &Path, policy: &Policy) -> Vec<ModInfo> {
                     place: Place::None,
                     revision: String::new(),
                     error: Some(error.to_string()),
+                    fonts: Vec::new(),
                     id,
                 },
             }
         })
         .collect()
+}
+
+const MAX_FONT_BYTES: u64 = 4 * 1024 * 1024;
+const FONT_KINDS: [(&str, &str); 4] = [
+    ("ttf", "font/ttf"),
+    ("otf", "font/otf"),
+    ("woff", "font/woff"),
+    ("woff2", "font/woff2"),
+];
+
+fn font_name_ok(name: &str) -> bool {
+    name.len() <= 80
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ' '))
+        && name.rsplit_once('.').is_some_and(|(_, ext)| {
+            FONT_KINDS
+                .iter()
+                .any(|(e, _)| *e == ext.to_ascii_lowercase())
+        })
+}
+
+/// The usable font files in `<mod>/fonts/`, sorted, at most 8.
+fn fonts_of(dir: &Path) -> Vec<String> {
+    let mut found: Vec<String> = std::fs::read_dir(dir.join("fonts"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| {
+            e.file_type().is_ok_and(|t| t.is_file())
+                && e.metadata().is_ok_and(|m| m.len() <= MAX_FONT_BYTES)
+        })
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| font_name_ok(n))
+        .collect();
+    found.sort();
+    found.truncate(8);
+    found
+}
+
+/// One font file of an enabled mod, with its content type; only names `scan` lists are served.
+pub fn font(
+    root: &Path,
+    policy: &Policy,
+    id: &str,
+    name: &str,
+) -> Result<(Vec<u8>, &'static str), Error> {
+    let found = scan(root, policy)
+        .into_iter()
+        .find(|m| m.id == id && m.enabled && m.error.is_none())
+        .ok_or_else(|| Error::NotFound(format!("no enabled mod \"{id}\"")))?;
+    if !found.fonts.iter().any(|f| f == name) {
+        return Err(Error::NotFound(format!(
+            "mod \"{id}\" has no font \"{name}\""
+        )));
+    }
+    let ext = name
+        .rsplit_once('.')
+        .map_or("", |(_, e)| e)
+        .to_ascii_lowercase();
+    let kind = FONT_KINDS
+        .iter()
+        .find(|(e, _)| *e == ext)
+        .map_or("font/ttf", |(_, k)| k);
+    let path = mods_dir(root)
+        .join(id)
+        .join("fonts")
+        .join(name)
+        .canonicalize()?;
+    if !path.starts_with(mods_dir(root).join(id).canonicalize()?) {
+        return Err(Error::Invalid(
+            "the font points outside the mod's folder".into(),
+        ));
+    }
+    Ok((std::fs::read(path)?, kind))
 }
 
 /// Turn one mod off or back on.
@@ -704,6 +786,24 @@ mod tests {
     }
 
     #[test]
+    fn a_mods_font_files_are_listed_and_only_those_are_served() {
+        let root = Root::new();
+        let policy = Policy::default();
+        root.put("pretty", "main.js", "export default () => {}");
+        root.put("pretty", "fonts/Pixel One.ttf", "ttfbytes");
+        root.put("pretty", "fonts/notes.txt", "x");
+        root.put("pretty", "fonts/.hidden.otf", "x");
+        let found = scan(&root.0, &policy);
+        assert_eq!(found[0].fonts, vec!["Pixel One.ttf"]);
+        let (bytes, kind) = font(&root.0, &policy, "pretty", "Pixel One.ttf").unwrap();
+        assert_eq!((bytes.as_slice(), kind), (&b"ttfbytes"[..], "font/ttf"));
+        for bad in ["notes.txt", "../main.js", ".hidden.otf", "nope.ttf"] {
+            assert!(font(&root.0, &policy, "pretty", bad).is_err(), "{bad}");
+        }
+        assert!(font(&root.0, &policy, "nope", "Pixel One.ttf").is_err());
+    }
+
+    #[test]
     fn remove_moves_to_the_trash_and_install_copies_without_overwriting() {
         let root = Root::new();
         root.put("keep", "main.js", "export default () => {}");
@@ -860,7 +960,7 @@ mod tests {
         }
         fn put(&self, id: &str, file: &str, text: &str) {
             let dir = mods_dir(&self.0).join(id);
-            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::create_dir_all(dir.join(file).parent().unwrap()).unwrap();
             std::fs::write(dir.join(file), text).unwrap();
         }
     }

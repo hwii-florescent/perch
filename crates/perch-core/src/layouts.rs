@@ -51,6 +51,45 @@ pub struct Size {
     pub max: Option<u32>,
 }
 
+/// A theme name, or one for each system appearance: `{"light": "paper", "dark": "nord"}`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ThemeRef {
+    Name(String),
+    Pair { light: String, dark: String },
+}
+
+/// What any node may carry besides its look: a name for commands and stack tabs, dragging the window
+/// by it, and (on the root) hiding the system title bar and a picture for Settings.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Chrome {
+    /// Names the node for commands (`layout.toggle`, `layout.stack`) and, in a stack, its tab.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Dragging this node moves the desktop window; a double-click maximizes it.
+    #[serde(rename = "windowDrag", skip_serializing_if = "std::ops::Not::not")]
+    pub window_drag: bool,
+    /// Root only: `"none"` hides the system title bar so the layout draws its own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub titlebar: Option<String>,
+    /// Root only: a `.svg` or `.png` beside the layout file that Settings shows for it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+}
+
+/// A line between a row's or column's children.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Divider {
+    pub width: u32,
+    /// `#rrggbb`; the theme's border color when unset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+}
+
 /// How a node looks, as in herdr's cascading look properties: set on any node, and the nearest one up
 /// the tree wins. On the root it restyles the whole app; on a deeper node, that subtree.
 /// `theme` is a name from `themes.ts` (an unknown one shows as the default theme), `colors`
@@ -60,7 +99,7 @@ pub struct Size {
 #[serde(default)]
 pub struct Look {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub theme: Option<String>,
+    pub theme: Option<ThemeRef>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub colors: BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -114,6 +153,13 @@ pub struct Float {
 pub struct Group {
     #[serde(flatten)]
     pub look: Look,
+    #[serde(flatten)]
+    pub chrome: Chrome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub divider: Option<Divider>,
+    /// Drag the boundary between children (default true); the sizes are kept on this device.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub resizable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub float: Option<Float>,
     pub size: Option<Size>,
@@ -123,11 +169,42 @@ pub struct Group {
     pub children: Vec<Node>,
 }
 
+fn yes() -> bool {
+    true
+}
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+/// One child shows at a time: `active` (a child's `id`, else the first), with a `header` that
+/// switches: `"tabs"` for a plain strip, or `mod:<id>` for a mod that draws it (it reads the shared
+/// `layout.stack.<id>` and runs the `layout.stack` command).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Stack {
+    #[serde(flatten)]
+    pub look: Look,
+    #[serde(flatten)]
+    pub chrome: Chrome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub float: Option<Float>,
+    pub size: Option<Size>,
+    pub hidden: bool,
+    pub padding: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub header: Option<String>,
+    pub children: Vec<Node>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Block {
     #[serde(flatten)]
     pub look: Look,
+    #[serde(flatten)]
+    pub chrome: Chrome,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub float: Option<Float>,
     pub size: Option<Size>,
@@ -142,6 +219,7 @@ pub enum Node {
     Row(Group),
     Column(Group),
     Block(Block),
+    Stack(Stack),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -149,6 +227,9 @@ pub struct LayoutInfo {
     pub id: String,
     pub name: String,
     pub root: Option<Node>,
+    /// The root's `preview` picture as a data URI, if it has one and it reads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
     /// Why the file cannot be used, if it cannot.
     pub error: Option<String>,
 }
@@ -180,7 +261,12 @@ fn look_ok(look: &Look) -> Result<(), String> {
         text.as_ref()
             .is_none_or(|t| t.len() <= 120 && !t.chars().any(char::is_control))
     };
-    if !text_ok(&look.theme) || !text_ok(&look.font) {
+    let theme = match &look.theme {
+        None => None,
+        Some(ThemeRef::Name(name)) => Some(vec![name.clone()]),
+        Some(ThemeRef::Pair { light, dark }) => Some(vec![light.clone(), dark.clone()]),
+    };
+    if theme.iter().flatten().any(|t| !text_ok(&Some(t.clone()))) || !text_ok(&look.font) {
         return Err("theme and font must be short plain text".into());
     }
     if let Some(background) = &look.background {
@@ -221,18 +307,42 @@ fn look_ok(look: &Look) -> Result<(), String> {
     Ok(())
 }
 
-fn check(node: &Node, depth: usize, count: &mut usize) -> Result<(), String> {
-    *count += 1;
-    if depth > MAX_DEPTH || *count > MAX_NODES {
+/// The ids, and whether this is the root, for the checks that look across the tree.
+struct Walk {
+    count: usize,
+    ids: std::collections::HashSet<String>,
+}
+
+fn check(node: &Node, depth: usize, walk: &mut Walk) -> Result<(), String> {
+    walk.count += 1;
+    if depth > MAX_DEPTH || walk.count > MAX_NODES {
         return Err(format!(
             "too big: at most {MAX_DEPTH} levels and {MAX_NODES} nodes"
         ));
     }
-    let (look, float) = match node {
-        Node::Row(g) | Node::Column(g) => (&g.look, &g.float),
-        Node::Block(b) => (&b.look, &b.float),
+    let (look, chrome, float) = match node {
+        Node::Row(g) | Node::Column(g) => (&g.look, &g.chrome, &g.float),
+        Node::Block(b) => (&b.look, &b.chrome, &b.float),
+        Node::Stack(s) => (&s.look, &s.chrome, &s.float),
     };
     look_ok(look)?;
+    if let Some(id) = &chrome.id {
+        if !plain_id(id) || !walk.ids.insert(id.clone()) {
+            return Err(format!("node id \"{id}\" must be a plain id, used once"));
+        }
+    }
+    if chrome
+        .title
+        .as_ref()
+        .is_some_and(|t| t.len() > 60 || t.chars().any(char::is_control))
+        || chrome.titlebar.as_deref().is_some_and(|t| t != "none")
+        || chrome
+            .preview
+            .as_deref()
+            .is_some_and(|p| !preview_name_ok(p))
+    {
+        return Err("title is short plain text, titlebar is \"none\", preview is a plain .svg or .png file name".into());
+    }
     if float.as_ref().is_some_and(|f| {
         f.x.max(f.y) > 10_000
             || !(1..=10_000).contains(&f.width)
@@ -257,12 +367,43 @@ fn check(node: &Node, depth: usize, count: &mut usize) -> Result<(), String> {
     }
     match node {
         Node::Row(g) | Node::Column(g) => {
-            if g.children.is_empty() || g.gap > 200 || g.padding > 200 || !size_ok(&g.size) {
-                return Err("a row or column needs children and sane gap, padding and size".into());
+            let divider_ok = g
+                .divider
+                .as_ref()
+                .is_none_or(|d| d.width <= 16 && d.color.as_deref().is_none_or(hex_color));
+            if g.children.is_empty()
+                || g.gap > 200
+                || g.padding > 200
+                || !size_ok(&g.size)
+                || !divider_ok
+            {
+                return Err("a row or column needs children and sane gap, padding, size and divider (at most 16, #rrggbb)".into());
             }
             g.children
                 .iter()
-                .try_for_each(|c| check(c, depth + 1, count))
+                .try_for_each(|c| check(c, depth + 1, walk))
+        }
+        Node::Stack(s) => {
+            let header_ok = s
+                .header
+                .as_deref()
+                .is_none_or(|h| h == "tabs" || h.strip_prefix("mod:").is_some_and(plain_id));
+            let active_ok = s.active.as_ref().is_none_or(|a| {
+                s.children
+                    .iter()
+                    .any(|c| node_id(c).is_some_and(|id| id == a))
+            });
+            if s.children.is_empty()
+                || s.padding > 200
+                || !size_ok(&s.size)
+                || !header_ok
+                || !active_ok
+            {
+                return Err("a stack needs children, a header of \"tabs\" or mod:<id>, and an active that is a child's id".into());
+            }
+            s.children
+                .iter()
+                .try_for_each(|c| check(c, depth + 1, walk))
         }
         Node::Block(b) => {
             let known = BUILTIN.contains(&b.content.as_str())
@@ -278,6 +419,54 @@ fn check(node: &Node, depth: usize, count: &mut usize) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+fn node_id(node: &Node) -> Option<&String> {
+    match node {
+        Node::Row(g) | Node::Column(g) => g.chrome.id.as_ref(),
+        Node::Block(b) => b.chrome.id.as_ref(),
+        Node::Stack(s) => s.chrome.id.as_ref(),
+    }
+}
+
+fn hex_color(text: &str) -> bool {
+    text.len() == 7 && text.starts_with('#') && text[1..].chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn preview_name_ok(name: &str) -> bool {
+    (name.ends_with(".svg") || name.ends_with(".png"))
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        && !name.starts_with('.')
+}
+
+/// The root's preview picture as a data URI; a file that is missing, large or not the right kind is
+/// simply no picture.
+fn read_preview(dir: &Path, node: &Node) -> Option<String> {
+    use base64::Engine;
+    let chrome = match node {
+        Node::Row(g) | Node::Column(g) => &g.chrome,
+        Node::Block(b) => &b.chrome,
+        Node::Stack(s) => &s.chrome,
+    };
+    let name = chrome.preview.as_deref().filter(|n| preview_name_ok(n))?;
+    let path = dir.join(name);
+    let meta = std::fs::symlink_metadata(&path).ok()?;
+    if !meta.is_file() || meta.len() > 300 * 1024 {
+        return None;
+    }
+    let kind = if name.ends_with(".svg") {
+        "image/svg+xml"
+    } else {
+        "image/png"
+    };
+    let bytes = std::fs::read(&path).ok()?;
+    Some(format!(
+        "data:{kind};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
 }
 
 fn read(path: &Path, id: &str) -> LayoutInfo {
@@ -297,20 +486,30 @@ fn read(path: &Path, id: &str) -> LayoutInfo {
         .and_then(|value| {
             let name = value["name"].as_str().unwrap_or(id).to_string();
             let node: Node = serde_json::from_value(value).map_err(|e| e.to_string())?;
-            check(&node, 1, &mut 0)?;
-            Ok((name, node))
+            check(
+                &node,
+                1,
+                &mut Walk {
+                    count: 0,
+                    ids: Default::default(),
+                },
+            )?;
+            let preview = path.parent().and_then(|dir| read_preview(dir, &node));
+            Ok((name, node, preview))
         });
     match loaded {
-        Ok((name, node)) => LayoutInfo {
+        Ok((name, node, preview)) => LayoutInfo {
             id: id.into(),
             name,
             root: Some(node),
+            preview,
             error: None,
         },
         Err(error) => LayoutInfo {
             id: id.into(),
             name: id.into(),
             root: None,
+            preview: None,
             error: Some(error),
         },
     }
@@ -334,6 +533,117 @@ pub fn scan(root: &Path, policy: &Policy) -> Vec<LayoutInfo> {
         .collect();
     found.sort_by(|a, b| a.id.cmp(&b.id));
     found
+}
+
+/// A theme file in `<root>/themes/<id>.json`. Two shapes: Perch's own, `{"name", "base"?, "colors":
+/// {palette token: "#rrggbb"}}` (tokens are `COLORS` without `backdrop`; `base` is the theme the rest
+/// comes from), or herdr's terminal one, `{"name", "background", "foreground", "selection"?,
+/// "cursor"?, "ansi": [16 colors]}`, from which the page derives the palette.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ThemeFile {
+    pub name: Option<String>,
+    pub base: Option<String>,
+    pub colors: BTreeMap<String, String>,
+    pub background: Option<String>,
+    pub foreground: Option<String>,
+    pub selection: Option<String>,
+    pub cursor: Option<String>,
+    pub ansi: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThemeInfo {
+    pub id: String,
+    pub name: String,
+    pub theme: Option<ThemeFile>,
+    pub error: Option<String>,
+}
+
+fn theme_ok(theme: &ThemeFile) -> Result<(), String> {
+    let bad = |c: &String| !hex_color(c);
+    if theme
+        .colors
+        .iter()
+        .any(|(name, value)| !COLORS.contains(&name.as_str()) || name == "backdrop" || bad(value))
+        || [
+            &theme.background,
+            &theme.foreground,
+            &theme.selection,
+            &theme.cursor,
+        ]
+        .into_iter()
+        .flatten()
+        .any(bad)
+        || theme.ansi.iter().any(bad)
+        || !(theme.ansi.is_empty() || theme.ansi.len() == 16)
+    {
+        return Err("colors are #rrggbb, palette tokens are known, and ansi has 16 entries".into());
+    }
+    let shaped =
+        !theme.colors.is_empty() || (theme.background.is_some() && theme.foreground.is_some());
+    if !shaped {
+        return Err("a theme has colors, or a background and foreground".into());
+    }
+    if theme
+        .name
+        .iter()
+        .chain(theme.base.iter())
+        .any(|t| t.len() > 60 || t.chars().any(char::is_control))
+    {
+        return Err("name and base are short plain text".into());
+    }
+    Ok(())
+}
+
+/// The theme files in `themes/`, sorted by id; none while mods are off. A file that does not parse
+/// is listed with its error and never breaks the rest.
+pub fn scan_themes(root: &Path, policy: &Policy) -> Vec<ThemeInfo> {
+    if policy.is_off() {
+        return Vec::new();
+    }
+    let Ok(entries) = std::fs::read_dir(root.join("themes")) else {
+        return Vec::new();
+    };
+    let mut ids: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter_map(|n| n.strip_suffix(".json").map(String::from))
+        .filter(|id| plain_id(id))
+        .collect();
+    ids.sort();
+    ids.into_iter()
+        .map(|id| {
+            let path = root.join("themes").join(format!("{id}.json"));
+            let parsed = std::fs::metadata(&path)
+                .map_err(|e| e.to_string())
+                .and_then(|m| {
+                    if m.len() > 64 * 1024 {
+                        Err("larger than 64 KiB".to_string())
+                    } else {
+                        std::fs::read_to_string(&path).map_err(|e| e.to_string())
+                    }
+                })
+                .and_then(|text| {
+                    serde_json::from_str::<ThemeFile>(&text).map_err(|e| e.to_string())
+                })
+                .and_then(|t| theme_ok(&t).map(|()| t));
+            match parsed {
+                Ok(theme) => ThemeInfo {
+                    name: theme.name.clone().unwrap_or_else(|| id.clone()),
+                    id,
+                    theme: Some(theme),
+                    error: None,
+                },
+                Err(error) => ThemeInfo {
+                    name: id.clone(),
+                    id,
+                    theme: None,
+                    error: Some(error),
+                },
+            }
+        })
+        .collect()
 }
 
 /// The layout the person chose, if any.
@@ -463,6 +773,41 @@ mod tests {
                 "drawer-bad.json",
                 r#"{"type":"block","content":"tabs","float":{"x":0,"y":0,"width":300,"height":200,"edge":"top","peek":40}}"#,
             ),
+            ("chrome.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>"),
+            (
+                "chrome.json",
+                r##"{"type":"column","id":"root","theme":{"light":"paper","dark":"nord"},"titlebar":"none","preview":"chrome.svg","resizable":false,
+                "divider":{"width":1,"color":"#333333"},"children":[
+                {"type":"block","id":"bar","content":"tabs","windowDrag":true,"size":{"px":30}},
+                {"type":"stack","id":"main","active":"b","header":"tabs","children":[
+                  {"type":"block","id":"a","title":"Files","content":"files"},
+                  {"type":"block","id":"b","title":"Git","content":"git"}]}]}"##,
+            ),
+            (
+                "stack-bad-active.json",
+                r#"{"type":"stack","active":"zz","children":[{"type":"block","content":"tabs"}]}"#,
+            ),
+            (
+                "stack-bad-header.json",
+                r#"{"type":"stack","header":"nope","children":[{"type":"block","content":"tabs"}]}"#,
+            ),
+            ("stack-empty.json", r#"{"type":"stack","children":[]}"#),
+            (
+                "dup-id.json",
+                r#"{"type":"row","children":[{"type":"block","id":"x","content":"tabs"},{"type":"block","id":"x","content":"canvas"}]}"#,
+            ),
+            (
+                "bad-titlebar.json",
+                r#"{"type":"block","content":"tabs","titlebar":"fancy"}"#,
+            ),
+            (
+                "bad-preview.json",
+                r#"{"type":"block","content":"tabs","preview":"../x.svg"}"#,
+            ),
+            (
+                "bad-divider.json",
+                r#"{"type":"row","divider":{"width":3,"color":"red"},"children":[{"type":"block","content":"tabs"}]}"#,
+            ),
             (
                 "pane-bad.json",
                 r#"{"type":"block","content":"tabs","paneFocus":"red"}"#,
@@ -494,10 +839,30 @@ mod tests {
         let Some(Node::Row(group)) = &by("ok").root else {
             panic!("a row")
         };
-        assert_eq!(group.look.theme.as_deref(), Some("nord"));
+        assert_eq!(group.look.theme, Some(ThemeRef::Name("nord".into())));
         assert_eq!(group.look.colors["accent"], "#ff8800");
         assert_eq!((group.look.radius, group.look.border), (Some(4), Some(1)));
         assert!(by("fancy").error.is_none(), "{:?}", by("fancy").error);
+        assert!(by("chrome").error.is_none(), "{:?}", by("chrome").error);
+        assert!(by("chrome")
+            .preview
+            .as_deref()
+            .is_some_and(|p| p.starts_with("data:image/svg+xml;base64,")));
+        let Some(Node::Column(top)) = &by("chrome").root else {
+            panic!("a column")
+        };
+        assert_eq!(
+            top.look.theme,
+            Some(ThemeRef::Pair {
+                light: "paper".into(),
+                dark: "nord".into()
+            })
+        );
+        assert!(!top.resizable && top.divider.as_ref().unwrap().width == 1);
+        let Node::Stack(stack) = &top.children[1] else {
+            panic!("a stack")
+        };
+        assert_eq!(stack.active.as_deref(), Some("b"));
         assert!(by("drawer").error.is_none(), "{:?}", by("drawer").error);
         assert!(by("pane-ok").error.is_none(), "{:?}", by("pane-ok").error);
         let Some(Node::Row(look)) = &by("term-look").root else {
@@ -520,12 +885,56 @@ mod tests {
             "minmax",
             "pane-bad",
             "drawer-bad",
+            "stack-bad-active",
+            "stack-bad-header",
+            "stack-empty",
+            "dup-id",
+            "bad-titlebar",
+            "bad-preview",
+            "bad-divider",
         ] {
             assert!(by(bad).error.is_some(), "{bad}");
         }
         // The page reads the look off the node as camelCase-free flat keys.
         let json = serde_json::to_value(&group.look).unwrap();
         assert_eq!(json["font"], "Geist, sans-serif");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn theme_files_load_in_either_shape_and_a_bad_one_never_breaks_the_rest() {
+        let root = std::env::temp_dir().join(format!("perch-themes-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("themes")).unwrap();
+        let put =
+            |name: &str, text: &str| std::fs::write(root.join("themes").join(name), text).unwrap();
+        put(
+            "mine.json",
+            r##"{"name":"Mine","base":"nord","colors":{"accent":"#ff8800"}}"##,
+        );
+        let ansi: Vec<String> = (0..16).map(|i| format!("#{i:02x}{i:02x}{i:02x}")).collect();
+        put(
+            "term.json",
+            &format!(
+                r##"{{"background":"#101010","foreground":"#eeeeee","ansi":{}}}"##,
+                serde_json::json!(ansi)
+            ),
+        );
+        put("bad-hex.json", r#"{"colors":{"accent":"orange"}}"#);
+        put("bad-token.json", r##"{"colors":{"nope":"#000000"}}"##);
+        put(
+            "bad-ansi.json",
+            r##"{"background":"#000000","foreground":"#ffffff","ansi":["#000000"]}"##,
+        );
+        put("empty.json", "{}");
+        put("not json.json", "{");
+        let found = scan_themes(&root, &Policy::default());
+        let by = |id: &str| found.iter().find(|t| t.id == id).unwrap();
+        assert_eq!(by("mine").name, "Mine");
+        assert!(by("mine").error.is_none() && by("term").error.is_none());
+        for bad in ["bad-hex", "bad-token", "bad-ansi", "empty"] {
+            assert!(by(bad).error.is_some(), "{bad}");
+        }
+        assert_eq!(found.len(), 6); // "not json" has a space: not a plain id
         let _ = std::fs::remove_dir_all(&root);
     }
 

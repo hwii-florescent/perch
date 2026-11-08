@@ -43,6 +43,8 @@ interface ModApi {
    *  project-row  data {cwd, name, state, sessionCount, active, hostId}  actions open, closeAll   (the sidebar's project header; its other buttons stay)
    *  tab          data {id, title, label, state: "focused"|"visible"|"hidden", provider?, blocked?, unseen?}  actions open, rename, menu(x, y)   (its close button stays)
    *  status-bar   data {online, host, cwd, branch?, sessionId?, contextTokens?, costUsd?, zoom}  actions resetZoom
+   *  terminal-menu  data {x, y, workspaceId, sessionId?, selection?}  actions ask, close   (the menu on a right-click over selected terminal text)
+   *  pane-header  data {id, title, label, state: "working"|"idle"|"blocked"|"done"|"unknown", provider?, focused}  actions open, menu(x, y)   (a tiled pane's header row; its expand and close buttons stay)
    *  confirm      data {message, confirmLabel, cancelLabel, busy}  actions confirm, cancel   (the dialog's panel; backdrop, Enter and Esc stay)
    */
   slot(name: string, render: (el: HTMLElement, props: { data: Record<string, any>; actions: Record<string, (...args: any[]) => void> }) => void | (() => void)): () => void;
@@ -54,6 +56,8 @@ interface ModApi {
   popup(anchor: HTMLElement | { x: number; y: number }, draw: Draw): () => void;
   /** A window that stays until closed: drag it by its title bar. A `key` remembers where it was put and replaces an open one with the same key. */
   window(options: { key?: string; title?: string; width?: number; height?: number; at?: { x: number; y: number } }, draw: Draw): () => void;
+  /** Calls `frame(ms)` (milliseconds since the loop began) before each repaint, at most `fps` times a second (default 60), and pauses while the page is hidden: for motion. Stops when the mod is replaced, or call the returned function. */
+  loop(frame: (ms: number) => void, options?: { fps?: number }): () => void;
   /** A toast. `action` runs a command when it is clicked. */
   notify(note: { title: string; body?: string; level?: "info" | "warning" | "error"; action?: { command: string; args?: unknown } }): void;
 

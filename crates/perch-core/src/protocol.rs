@@ -2531,6 +2531,9 @@ pub enum ServerMessage {
         layouts: Vec<crate::layouts::LayoutInfo>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layout: Option<String>,
+        /// The theme files in `themes/`, offered to layouts and Settings by file name.
+        #[serde(default)]
+        themes: Vec<crate::layouts::ThemeInfo>,
         policy: crate::mods::Policy,
         safe_mode: bool,
         folder: String,

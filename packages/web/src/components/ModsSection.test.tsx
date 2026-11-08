@@ -36,13 +36,15 @@ describe("Settings > Mods", () => {
 
   it("lists layouts, marks the one in use, and chooses one or goes back to stock", async () => {
     const block = { type: "block", content: "canvas" };
-    mods.state = { mods: [], folder: "/x/mods", policy: { off: false }, safeMode: false, layout: "ide", layouts: [{ id: "ide", name: "IDE", root: block, error: null }, { id: "solo", name: "Solo", root: block, error: null }, { id: "bad", name: "bad", root: null, error: "unknown content" }] };
+    mods.state = { mods: [], folder: "/x/mods", policy: { off: false }, safeMode: false, layout: "ide", layouts: [{ id: "ide", name: "IDE", root: block, error: null }, { id: "solo", name: "Solo", root: block, error: null, preview: "data:image/svg+xml;base64,PHN2Zy8+" }, { id: "bad", name: "bad", root: null, error: "unknown content" }] };
     await act(async () => root.render(<ModsSection />));
     expect(q("layout-ide")?.textContent).toContain("In use");
     expect(q("layout-ide")?.querySelectorAll("button")).toHaveLength(1); // in use: only Remove
     expect(q("layout-bad")?.textContent).toContain("Cannot load: unknown content");
     expect(q("layout-bad")?.querySelectorAll("button")).toHaveLength(1);
     await act(async () => q("layout-solo")!.querySelector("button")!.click());
+    expect(q("layout-solo-preview")?.getAttribute("src")).toContain("data:image/svg+xml");
+    expect(q("layout-ide-preview")).toBeNull();
     expect(mods.setLayout).toHaveBeenCalledWith("solo");
     await act(async () => q("layout-stock")!.querySelector("button")!.click());
     expect(mods.setLayout).toHaveBeenCalledWith(null);

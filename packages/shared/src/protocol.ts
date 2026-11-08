@@ -2853,6 +2853,8 @@ export interface ModInfo {
   revision: string;
   /** Why the folder cannot be loaded, if it cannot. */
   error: string | null;
+  /** Font files in the mod's `fonts/` folder; the page loads each as the file name without its extension. */
+  fonts?: string[];
 }
 
 /** `{px}` (fixed) or `{weight}` (a share of what fixed siblings leave; default 1). */
@@ -2867,8 +2869,21 @@ export interface LayoutSize {
 /** A window layout, as in herdr's desktop app: a tree of rows, columns and blocks. A block's
  * `content` is `sidebar`, `tabs`, `canvas`, `files`, `git`, `status`, `mod:<id>` or `terminal:<session id>`. */
 export type LayoutNode =
-  | (LayoutLook & { type: "row" | "column"; size?: LayoutSize | null; hidden?: boolean; gap?: number; padding?: number; children: LayoutNode[] })
-  | (LayoutLook & { type: "block"; size?: LayoutSize | null; hidden?: boolean; padding?: number; content: string });
+  | (LayoutLook & LayoutChrome & { type: "row" | "column"; size?: LayoutSize | null; hidden?: boolean; gap?: number; padding?: number; divider?: { width: number; color?: string }; resizable?: boolean; children: LayoutNode[] })
+  | (LayoutLook & LayoutChrome & { type: "block"; size?: LayoutSize | null; hidden?: boolean; padding?: number; content: string })
+  | (LayoutLook & LayoutChrome & { type: "stack"; size?: LayoutSize | null; hidden?: boolean; padding?: number; active?: string; header?: string; children: LayoutNode[] });
+
+/** What any node may carry besides its look. `id` names it for the `layout.toggle` and `layout.stack`
+ * commands and, in a stack, `title` is its tab. `windowDrag` makes dragging it move the desktop
+ * window; on the root, `titlebar: "none"` hides the system title bar and `preview` names the picture
+ * (`.svg`/`.png` beside the layout file) Settings shows. */
+export interface LayoutChrome {
+  id?: string;
+  title?: string;
+  windowDrag?: boolean;
+  titlebar?: "none";
+  preview?: string;
+}
 
 /** A node's look; the nearest one up the tree wins (the root's restyles the whole app). `theme` is a
  * name from the app's themes, `colors` overrides palette tokens (`accent`, `panelBg`, `surface0`,
@@ -2876,7 +2891,8 @@ export type LayoutNode =
  * `red`, `blue`, `teal`, `peach`, and the window `backdrop`) with `#rrggbb`, `font` is a CSS
  * font-family, `radius` rounds cards and `border` outlines them (px). */
 export interface LayoutLook {
-  theme?: string;
+  /** A theme name, or one for each system appearance. */
+  theme?: string | { light: string; dark: string };
   colors?: Record<string, string>;
   font?: string;
   radius?: number;
@@ -2903,10 +2919,31 @@ export interface LayoutLook {
   };
 }
 
+/** A file in `themes/`: Perch's shape (`colors`, from a `base` theme) or herdr's terminal one
+ * (`background`, `foreground`, `ansi`), from which the page derives the palette. */
+export interface ThemeFile {
+  name?: string;
+  base?: string;
+  colors?: Record<string, string>;
+  background?: string;
+  foreground?: string;
+  selection?: string;
+  cursor?: string;
+  ansi?: string[];
+}
+export interface ThemeInfo {
+  id: string;
+  name: string;
+  theme: ThemeFile | null;
+  error: string | null;
+}
+
 export interface LayoutInfo {
   id: string;
   name: string;
   root: LayoutNode | null;
+  /** The root's `preview` picture as a data URI. */
+  preview?: string;
   /** Why the file cannot be used, if it cannot. */
   error: string | null;
 }
@@ -2953,6 +2990,8 @@ export interface ModsStateMessage {
   /** The layouts in `layouts/`, and the one chosen (absent: stock Perch). */
   layouts?: LayoutInfo[];
   layout?: string;
+  /** The theme files in `themes/`, offered to layouts and Settings by file name. */
+  themes?: ThemeInfo[];
   policy: ModsPolicy;
   safeMode: boolean;
   folder: string;

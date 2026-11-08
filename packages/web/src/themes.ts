@@ -7,6 +7,7 @@
  * not these app tokens. The default name agrees with Rust's `default_theme()`.
  */
 import catppuccin from "./palettes/catppuccin.json";
+import type { ThemeFile, ThemeInfo } from "@perch/shared";
 
 export interface Palette {
   accent: string;
@@ -184,6 +185,47 @@ export const THEMES: Record<string, Palette> = {
 /** Ordered list of theme names for the Settings UI; `"perch"` (the default)
  * is first. */
 export const THEME_NAMES: string[] = Object.keys(THEMES);
+const SHIPPED = new Set(THEME_NAMES);
+
+const hexMix = (a: string, b: string, pct: number) => `#${[1, 3, 5].map((i) => Math.round(parseInt(a.slice(i, i + 2), 16) * (1 - pct / 100) + parseInt(b.slice(i, i + 2), 16) * pct / 100).toString(16).padStart(2, "0")).join("")}`;
+
+/** A palette from a `themes/<id>.json` file: Perch's shape (`colors` over a `base` theme) or herdr's
+ * terminal one, whose surfaces are mixed from its background and foreground and whose accents are its
+ * ANSI colors. Returns null for one that has neither. */
+export function paletteFromFile(file: ThemeFile): Palette | null {
+  if (file.colors && Object.keys(file.colors).length) {
+    const base = (file.base && Object.hasOwn(THEMES, file.base) ? THEMES[file.base] : undefined) ?? PERCH_DEFAULT;
+    return { ...base, ...(file.colors as Partial<Palette>) };
+  }
+  const { background: bg, foreground: fg, ansi = [] } = file;
+  if (!bg || !fg) return null;
+  const light = luminance(bg) > 0.179;
+  const accent = file.cursor ?? ansi[4] ?? fg;
+  return {
+    accent, panelBg: bg, text: fg,
+    surface0: hexMix(bg, fg, 8), surface1: hexMix(bg, fg, 16),
+    surfaceDim: hexMix(bg, light ? "#ffffff" : "#000000", 40),
+    overlay0: hexMix(bg, fg, 28), overlay1: hexMix(bg, fg, 55), subtext0: hexMix(bg, fg, 72),
+    mauve: ansi[5] ?? accent, green: ansi[2] ?? accent, yellow: ansi[3] ?? accent, red: ansi[1] ?? accent,
+    blue: ansi[4] ?? accent, teal: ansi[6] ?? accent, peach: ansi[11] ?? ansi[3] ?? accent,
+  };
+}
+
+/** Offers the files in `themes/` as themes by file name (to a layout's `theme` and the Settings
+ * picker), replacing the ones offered before. A file may not take a shipped theme's name. */
+export function registerThemes(themes: ThemeInfo[]): void {
+  for (const name of [...THEME_NAMES]) if (!SHIPPED.has(name)) { delete THEMES[name]; THEME_NAMES.splice(THEME_NAMES.indexOf(name), 1); }
+  for (const { id, theme, error } of themes) {
+    const palette = !error && theme && !SHIPPED.has(id) ? paletteFromFile(theme) : null;
+    if (palette) { THEMES[id] = palette; THEME_NAMES.push(id); }
+  }
+}
+
+/** The theme a layout names: one name, or the half of a light/dark pair that fits the system. */
+export function themeName(theme: string | { light: string; dark: string } | undefined, dark: boolean): string | undefined {
+  return typeof theme === "object" ? (dark ? theme.dark : theme.light) : theme;
+}
+export const prefersDark = () => typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches;
 
 const TOKEN_CSS_VARS: Record<keyof Palette, string> = {
   accent: "--accent",
@@ -260,7 +302,7 @@ export function backdropFor(p: { panelBg: string; text: string }): string {
 
 /** A layout's look (`crates/perch-core/src/layouts.rs` `Look`): set on any node, cascading down. */
 export interface Look {
-  theme?: string;
+  theme?: string | { light: string; dark: string };
   colors?: Record<string, string>;
   font?: string;
   radius?: number;
@@ -279,8 +321,9 @@ const SHADOWS = { sm: "0 1px 3px rgb(0 0 0 / 0.3)", md: "0 4px 14px rgb(0 0 0 / 
  * `base.css` computes from the palette at `:root`, which would otherwise keep the root's colors. */
 export function lookVars(look: Look, derived: boolean): Record<string, string> {
   const vars: Record<string, string> = {};
-  if (look.theme) {
-    const palette = resolveTheme(look.theme);
+  const name = themeName(look.theme, prefersDark());
+  if (name) {
+    const palette = resolveTheme(name);
     for (const key of Object.keys(TOKEN_CSS_VARS) as (keyof Palette)[]) vars[TOKEN_CSS_VARS[key]] = palette[key];
     vars["--backdrop"] = backdropFor(palette);
     vars["color-scheme"] = palette.colorScheme;

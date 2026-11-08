@@ -1497,8 +1497,8 @@ Mods
     comments); read it before writing a mod. In short, `api` gives: Perch's data (sessions(),
     projects(), focused(), subscribe()), commands (commands(), run(id, args), command({...}),
     bind()), floating surfaces (overlay, popup, window, notify), drawing Perch's own parts
-    (slot(name, render): the toast and the sidebar's session-row keep their behavior and come back
-    if the mod throws), the computer (exec, readTextFile, writeTextFile, watch, ...) and shared
+    (slot(name, render): the toast, the sidebar's session-row, a tiled pane's pane-header and the
+    terminal-menu keep their behavior and come back if the mod throws; loop(frame) for animation), the computer (exec, readTextFile, writeTextFile, watch, ...) and shared
     state between mods. It runs inside Perch's page with the person's full access, so it can do
     anything the app can; a bug in it can break the page.
   - A layout changes the whole window, as in herdr. `layouts/<id>.json` (next to `mods/`, the
@@ -1520,7 +1520,21 @@ Mods
     slides out on hover. Also on any node: 'shadow' ('sm'|'md'|'lg'), 'terminalPadding' (px) and
     'terminalOpacity' (0.1 to 1) for terminals under it, and for the canvas's panes 'paneRadius',
     'paneBorder' (px) and 'paneFocus' (#rrggbb outline of the focused pane); 'size' also takes 'min'
-    and 'max' (px, along the parent's direction). The terminal keeps its own colors and font. Example, an IDE: a row of
+    and 'max' (px, along the parent's direction). The terminal keeps its own colors and font.
+    More node types and fields: {'type': 'stack', 'active': <child id>, 'header': 'tabs' | 'mod:<id>',
+    'children': [...]} shows one child at a time (a header mod reads shared('layout.stack.<id>') and
+    runs the 'layout.stack' command with {stack, child}); any node may have an 'id' (for the
+    'layout.toggle' {id, hidden?} and 'layout.stack' commands, `perch mod do ...`) and a 'title'
+    (its tab); rows and columns take 'divider' ({'width', 'color'}) and 'resizable' (default true:
+    the boundaries drag, and the sizes are kept per layout on that device); 'windowDrag': true makes
+    dragging a node move the desktop window; the root may set 'preview' (an .svg or .png beside the
+    layout file, shown in Settings) and 'titlebar': 'none' (the desktop draws its window buttons
+    over the top-left corner: --titlebar-inset on <html> says how much room). 'theme' may be
+    {'light': 'paper', 'dark': 'nord'} to follow the system. A file `themes/<name>.json` is a theme
+    by that name, usable in 'theme' and in Settings: {'name', 'base': 'nord', 'colors': {'accent':
+    '#ff8800'}} (palette tokens over a base theme) or herdr's {'background', 'foreground', 'ansi': [16
+    colors]}. Font files in a mod's 'fonts/' folder (.ttf .otf .woff .woff2) load under their file
+    name without the extension, so 'font' can name them. Example, an IDE: a row of
     sidebar (220px), a column of canvas over mod:terminal-notes (160px), and files (320px). Write
     the file, then `perch mod layout <id>` applies it at once (a file that does not parse cannot
     be chosen, and one that breaks later falls back to Perch as shipped); edits show as you save.

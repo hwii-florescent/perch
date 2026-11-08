@@ -52,7 +52,8 @@ export function ModsSection() {
       <SettingsGroup title="Window layout">
         {[{ id: null, name: "Perch as shipped", error: null }, ...(state?.layouts ?? [])].map((layout) => (
           <div key={layout.id ?? "stock"} className="flex flex-wrap items-center justify-between gap-2 border-b border-surface-1 py-[0.8rem] last:border-b-0" data-testid={`layout-${layout.id ?? "stock"}`}>
-            <div className="min-w-0">
+            {"preview" in layout && layout.preview && <img src={layout.preview} alt="" className="h-12 w-20 shrink-0 rounded-ui object-cover" data-testid={`layout-${layout.id}-preview`} />}
+            <div className="min-w-0 flex-1">
               <div className="text-[0.85rem] font-medium text-fg">{layout.name}</div>
               <div className={MUTED}>{layout.error ? `Cannot load: ${layout.error}` : (state?.layout ?? null) === layout.id ? "In use" : ""}</div>
             </div>

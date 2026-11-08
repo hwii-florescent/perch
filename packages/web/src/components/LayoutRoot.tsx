@@ -1,5 +1,6 @@
-import { useEffect, useSyncExternalStore, type CSSProperties } from "react";
-import { lookVars, setRootLook } from "../themes";
+import { Fragment, useEffect, useRef, useSyncExternalStore, type CSSProperties, type PointerEvent } from "react";
+import { lookVars, prefersDark, setRootLook } from "../themes";
+import { activeOverride, hiddenOverride, layoutStateVersion, pointAtLayout, publishStack, setActive, setShownLayout, setSizes, sizeOverride, subscribeLayoutState } from "../layoutState";
 import type { LayoutNode, ModInfo } from "@perch/shared";
 import { currentMods, subscribeMods } from "../mods";
 import { cn } from "../lib/cn";
@@ -46,9 +47,67 @@ function floatStyle(float: NonNullable<LayoutNode["float"]>): CSSProperties {
   return { ...base, ...(vertical ? along("top", "bottom", height) : along("left", "right", width)), [edge]: EDGE_GAP, ...hide } as CSSProperties;
 }
 
-function Node({ node, mods, root, inRow }: { node: LayoutNode; mods: ModInfo[]; root?: boolean; inRow?: boolean }) {
-  if (node.hidden) return null;
-  const { px, weight, min, max } = node.size ?? {};
+/** The node's size, as the person last dragged it or else as the file says. */
+const sizeOf = (node: LayoutNode, parentPath: string, index: number) => ({ ...node.size, ...sizeOverride(parentPath)?.[index] }) as NonNullable<LayoutNode["size"]>;
+
+const shownNode = (node: LayoutNode) => !(hiddenOverride(node.id) ?? node.hidden);
+
+/** The boundary between two children of a row or column: a line when the layout draws a divider, and
+ * always a wider invisible grip over it. Dragging moves the boundary; the sizes are kept per layout. */
+function Boundary({ row, divider, path, prev, next, siblings }: { row: boolean; divider?: { width: number; color?: string }; path: string; prev: number; next: number; siblings: LayoutNode[] }) {
+  const grip = useRef<HTMLDivElement>(null);
+  const drag = (event: PointerEvent<HTMLDivElement>) => {
+    const before = grip.current?.parentElement?.previousElementSibling as HTMLElement | null;
+    const after = grip.current?.parentElement?.nextElementSibling as HTMLElement | null;
+    if (!before || !after) return;
+    event.preventDefault();
+    const measure = (el: HTMLElement) => (row ? el.getBoundingClientRect().width : el.getBoundingClientRect().height);
+    const start = { at: row ? event.clientX : event.clientY, a: measure(before), b: measure(after) };
+    const sizes = [...(sizeOverride(path) ?? [])];
+    const clamp = (value: number, node: LayoutNode) => Math.max(node.size?.min ?? 24, Math.min(node.size?.max ?? 10_000, value));
+    const fixed = (index: number) => sizeOf(siblings[index]!, path, index).px != null;
+    const move = (ev: globalThis.PointerEvent) => {
+      const delta = (row ? ev.clientX : ev.clientY) - start.at;
+      const a = clamp(start.a + delta, siblings[prev]!);
+      const b = clamp(start.b - (a - start.a), siblings[next]!);
+      const total = start.a + start.b;
+      // A fixed-size child keeps a fixed size; two flexible ones share the same total by weight.
+      sizes[prev] = fixed(prev) ? { px: a } : { weight: (a / total) * 2 };
+      sizes[next] = fixed(next) ? { px: b } : { weight: (b / total) * 2 };
+      setSizes(path, [...sizes]);
+    };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const width = divider?.width ?? 0;
+  return (
+    <div className="relative shrink-0" style={{ [row ? "width" : "height"]: width, background: width ? divider?.color ?? "var(--overlay-0)" : undefined }} data-testid="layout-boundary">
+      <div ref={grip} onPointerDown={drag} className="absolute z-10" style={row ? { top: 0, bottom: 0, left: -4, width: 8, cursor: "col-resize" } : { left: 0, right: 0, top: -4, height: 8, cursor: "row-resize" }} />
+    </div>
+  );
+}
+
+function StackHeader({ node, active, mods }: { node: Extract<LayoutNode, { type: "stack" }>; active: string; mods: ModInfo[] }) {
+  if (node.header?.startsWith("mod:")) return <div className="flex h-9 shrink-0 items-stretch"><Block content={node.header} mods={mods} /></div>;
+  if (node.header !== "tabs") return null;
+  return (
+    <div className="flex h-9 shrink-0 items-center gap-1 px-1" role="tablist" data-testid={`stack-tabs-${node.id ?? "stack"}`}>
+      {node.children.map((child, index) => {
+        const id = child.id ?? String(index);
+        return (
+          <button key={id} type="button" role="tab" aria-selected={id === active}
+            className={cn("h-7 rounded-[var(--card-radius,8px)] px-3 text-[0.8rem]", id === active ? "bg-[var(--surface-1)] text-[var(--text)]" : "text-[var(--subtext-0)] hover:bg-[var(--surface-0)]")}
+            onClick={() => node.id && setActive(node.id, id)}>{child.title ?? child.id ?? `Tab ${index + 1}`}</button>
+        );
+      })}
+    </div>
+  );
+}
+
+function Node({ node, mods, root, inRow, path, parentPath, index }: { node: LayoutNode; mods: ModInfo[]; root?: boolean; inRow?: boolean; path: string; parentPath: string; index: number }) {
+  if (!shownNode(node)) return null;
+  const { px, weight, min, max } = root ? ({} as NonNullable<LayoutNode["size"]>) : sizeOf(node, parentPath, index);
   // The root's look is on <html> (menus and dialogs outside this tree follow it); below it, the
   // custom properties cascade to the children from here.
   const style: CSSProperties = {
@@ -62,24 +121,75 @@ function Node({ node, mods, root, inRow }: { node: LayoutNode; mods: ModInfo[]; 
     // Out of the flow, over the window and under dialogs.
     ...(node.float && !root ? floatStyle(node.float) : {}),
   };
-  if (node.type === "block") return <div className={cn(CARD, node.float?.peek != null && "layout-drawer")} style={{ ...style, ...OUTLINE }} data-testid={`layout-${node.content}`}><Block content={node.content} mods={mods} /></div>;
+  const common = { "data-node-id": node.id, "data-tauri-drag-region": node.windowDrag ? true : undefined };
+  if (node.type === "block") return <div className={cn(CARD, node.float?.peek != null && "layout-drawer")} style={{ ...style, ...OUTLINE }} data-testid={`layout-${node.content}`} {...common}><Block content={node.content} mods={mods} /></div>;
+  if (node.type === "stack") {
+    const ids = node.children.map((child, i) => child.id ?? String(i));
+    const current = Math.max(0, ids.indexOf(activeOverride(node.id) ?? node.active ?? ids[0]!));
+    return (
+      <div className="flex min-h-0 min-w-0 flex-col" style={style} data-testid={`layout-stack-${node.id ?? path}`} {...common}>
+        <StackHeader node={node} active={ids[current]!} mods={mods} />
+        <Node node={node.children[current]!} mods={mods} path={`${path}/${current}`} parentPath={path} index={current} inRow={false} />
+      </div>
+    );
+  }
+  const row = node.type === "row";
+  const visible = node.children.map((child, i) => (shownNode(child) ? i : -1)).filter((i) => i >= 0);
   return (
-    <div className={cn("flex min-h-0 min-w-0", node.type === "row" ? "flex-row" : "flex-col")} style={{ ...style, gap: node.gap || undefined }}>
-      {node.children.map((child, index) => <Node key={index} node={child} mods={mods} inRow={node.type === "row"} />)}
+    <div className={cn("flex min-h-0 min-w-0", row ? "flex-row" : "flex-col")} style={{ ...style, gap: node.gap || undefined }} {...common}>
+      {node.children.map((child, i) => {
+        const before = visible[visible.indexOf(i) - 1];
+        const line = before !== undefined && (node.resizable !== false || node.divider);
+        return (
+          <Fragment key={i}>
+            {line && (node.resizable !== false
+              ? <Boundary row={row} divider={node.divider} path={path} prev={before} next={i} siblings={node.children} />
+              : <div className="shrink-0" style={{ [row ? "width" : "height"]: node.divider?.width, background: node.divider?.color ?? "var(--overlay-0)" }} />)}
+            <Node node={child} mods={mods} path={`${path}/${i}`} parentPath={path} index={i} inRow={row} />
+          </Fragment>
+        );
+      })}
     </div>
   );
 }
+
+/** Publishes each stack's children and shown child for a mod that draws its header. */
+function publishStacks(node: LayoutNode) {
+  if (node.type === "stack" && node.id) {
+    const ids = node.children.map((child, i) => child.id ?? String(i));
+    publishStack(node.id, node.children.map((child, i) => ({ id: ids[i]!, title: child.title ?? child.id ?? `Tab ${i + 1}` })), activeOverride(node.id) ?? node.active ?? ids[0]!);
+  }
+  if ("children" in node) node.children.forEach(publishStacks);
+}
+
+const watchDark = (watch: () => void) => {
+  const query = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
+  query?.addEventListener("change", watch);
+  return () => query?.removeEventListener("change", watch);
+};
 
 /** The whole window as a layout file describes it, in the place the stock three cards would be. The
  * core has already checked the shape; a layout that stops parsing is never passed here. */
 export function LayoutRoot({ root }: { root: LayoutNode }) {
   const mods = useSyncExternalStore(subscribeMods, currentMods)?.mods ?? [];
+  pointAtLayout(root);
+  useSyncExternalStore(subscribeLayoutState, layoutStateVersion);
+  const dark = useSyncExternalStore(watchDark, prefersDark);
   const { theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus } = root;
-  const look = JSON.stringify({ theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus });
+  const look = JSON.stringify({ theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus, dark });
   // A root background paints the window behind the cards.
   useEffect(() => {
-    setRootLook(lookVars(JSON.parse(look), false));
+    const { dark: _dark, ...rest } = JSON.parse(look);
+    setRootLook(lookVars(rest, false));
     return () => setRootLook({});
   }, [look]);
-  return <div className="flex min-h-0 flex-1 px-2 pt-2" style={{ background: root.background }} data-testid="layout-root"><Node node={{ ...root, background: undefined }} mods={mods} root /></div>;
+  useEffect(() => { setShownLayout(root); return () => setShownLayout(null); }, [root]);
+  useEffect(() => { publishStacks(root); });
+  // The desktop draws its window buttons over the layout's top-left corner (macOS): say how much room
+  // they need, for a layout that sets `titlebar: "none"` and draws its own bar.
+  useEffect(() => {
+    document.documentElement.style.setProperty("--titlebar-inset", "__TAURI_INTERNALS__" in window && /Mac/.test(navigator.platform) ? "84px" : "0px");
+    return () => void document.documentElement.style.removeProperty("--titlebar-inset");
+  }, []);
+  return <div className="flex min-h-0 flex-1 px-2 pt-2" style={{ background: root.background }} data-testid="layout-root"><Node node={{ ...root, background: undefined }} mods={mods} root path="r" parentPath="" index={0} /></div>;
 }

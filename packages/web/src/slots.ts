@@ -9,6 +9,8 @@ export const SLOTS = {
   "project-row": "A project's header in the sidebar (its worktree, review and close buttons stay). data: {cwd, name, state, sessionCount, active, hostId}. actions: open(), closeAll().",
   tab: "One session tab in the tab bar (its close button stays). data: {id, title, label, state: 'focused'|'visible'|'hidden', provider?, blocked?, unseen?}. actions: open(), rename(), menu(x, y).",
   "status-bar": "The whole status bar. data: {online, host, cwd, branch?, sessionId?, contextTokens?, costUsd?, zoom}. actions: resetZoom().",
+  "terminal-menu": "The menu that opens on a right-click over selected terminal text. data: {x, y, workspaceId, sessionId?, selection?}. actions: ask() (ask an agent about it), close().",
+  "pane-header": "The header row of a tiled pane in the canvas (its expand and close buttons stay). data: {id, title, label, state: 'working'|'idle'|'blocked'|'done'|'unknown', provider?, focused}. actions: open(), menu(x, y).",
   confirm: "The confirmation dialog's panel (the backdrop, Enter and Esc stay). data: {message, confirmLabel, cancelLabel, busy}. actions: confirm(), cancel().",
 } as const;
 export type SlotName = keyof typeof SLOTS;

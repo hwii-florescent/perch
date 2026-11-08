@@ -3,6 +3,7 @@ import { getBasePath } from "./base";
 import { newId } from "./ids";
 import { commandList, runCommand } from "./modApp";
 import { setSlotErrorReporter } from "./slots";
+import { registerThemes } from "./themes";
 import { socket } from "./ws";
 
 /** Mods: folders with a `main.js` that this page imports and runs with the person's full access, as
@@ -43,6 +44,8 @@ socket.onMessage((message) => {
   } else if (message.type === "mods.state") {
     const { type: _type, requestId, ...state } = message;
     latest = state;
+    registerThemes(state.themes ?? []);
+    loadFonts(state);
     watchers.forEach((watch) => watch());
     settle(requestId, state);
   } else if (message.type === "mods.snapshot.request") {
@@ -124,4 +127,21 @@ setSlotErrorReporter((modId, error) => {
 });
 
 /** Where a mod's code is served from (a person's token only). */
+// Fonts a mod ships in its `fonts/` folder, loaded once under the file name without the extension, so a
+// layout's `font` can name them. A changed file keeps the font it first loaded until the page reloads.
+const loadedFonts = new Set<string>();
+function loadFonts(state: ModsState) {
+  if (typeof FontFace === "undefined") return;
+  for (const mod of state.mods) {
+    if (!mod.enabled || mod.error) continue;
+    for (const file of mod.fonts ?? []) {
+      const key = `${mod.id}/${file}`;
+      if (loadedFonts.has(key)) continue;
+      loadedFonts.add(key);
+      const url = `${window.location.origin}${getBasePath()}mods/file?${new URLSearchParams({ id: mod.id, font: file })}`;
+      new FontFace(file.replace(/\.[^.]+$/, ""), `url("${url}")`).load().then((face) => document.fonts.add(face), () => loadedFonts.delete(key));
+    }
+  }
+}
+
 export const modFileUrl = (id: string) => `${window.location.origin}${getBasePath()}mods/file?${new URLSearchParams({ id })}`;

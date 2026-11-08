@@ -73,6 +73,10 @@ export interface ModApi {
   /** A window that stays until closed, under modals and over the app: drag it by its title bar. A
    * `key` remembers where it was put and replaces an open window with the same key. */
   window(options: { key?: string; title?: string; width?: number; height?: number; at?: { x: number; y: number } }, draw: Draw): () => void;
+  /** Calls `frame(ms)` (milliseconds since the loop began) before each repaint, at most `fps` times a
+   * second (default 60), and pauses while the page is hidden: for motion. Stops when the mod is
+   * replaced, or call the returned function. */
+  loop(frame: (ms: number) => void, options?: { fps?: number }): () => void;
 }
 type Draw = (el: HTMLElement, close: () => void) => void | (() => void);
 
@@ -125,6 +129,19 @@ export function modApi(modId: string): ModApi & { dispose(): void } {
     writeTextFile,
     statFile,
     listDir,
+    loop: (frame, { fps = 60 } = {}) => {
+      let id = 0, last = -Infinity, begin = -1, stopped = false;
+      const step = (now: number) => {
+        if (stopped) return;
+        id = requestAnimationFrame(step);
+        if (begin < 0) begin = now;
+        if (now - last < 1000 / Math.max(1, Math.min(fps, 120)) - 1) return;
+        last = now;
+        try { frame(now - begin); } catch (error) { console.error("a mod's loop threw", error); stopped = true; cancelAnimationFrame(id); }
+      };
+      id = requestAnimationFrame(step);
+      return track(() => { stopped = true; cancelAnimationFrame(id); });
+    },
     watch: (path, changed) => track(watchPath(path, changed)),
     shared: getShared,
     setShared,

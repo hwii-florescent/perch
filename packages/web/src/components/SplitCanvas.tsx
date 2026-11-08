@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { Slot } from "./Slot";
 import { cn } from "../lib/cn";
 import { DockviewShell } from "../dockview/DockviewShell";
 import { AgentPane } from "../views/AgentPane";
@@ -266,12 +267,19 @@ export function SplitCanvas() {
           {/* One compact row owns the name, status and actions; no floating controls over the header. */}
           <div className="flex h-7 shrink-0 items-center gap-1.5 px-1.5 text-xs text-subtext-0" data-testid={`pane-header-${entry.id}`}
             onContextMenu={(event) => { event.preventDefault(); useSplitSets.getState().openMenu(entry.id, event.clientX, event.clientY); }}>
-            <span className="shrink-0"><AgentIcon provider={entry.session.currentProviderId ?? cliAgentBySession[entry.id] ?? entry.session.cliProviderId} size={12} /></span>
-            <span className="min-w-0 flex-1 truncate" title={entry.session.title}>{entryLabel(entry)}</span>
-            <span className="flex min-w-0 items-center gap-1" title={STATE_WORD[sessionDotState(entry.session)]}>
-              <span className="size-[5px] shrink-0 rounded-full" style={{ background: DOT_GLYPH[sessionDotState(entry.session)].color }} aria-hidden="true" />
-              <span className="truncate">{STATE_WORD[sessionDotState(entry.session)]}</span>
-            </span>
+            <Slot
+              name="pane-header"
+              className="flex min-w-0 flex-1 items-center gap-1.5"
+              data={{ id: entry.id, title: entry.session.title, label: entryLabel(entry), state: sessionDotState(entry.session), provider: entry.session.currentProviderId ?? cliAgentBySession[entry.id] ?? entry.session.cliProviderId, focused: entry.id === activeId }}
+              actions={{ open: () => activateTab(entry), menu: (x, y) => useSplitSets.getState().openMenu(entry.id, Number(x), Number(y)) }}
+            >
+              <span className="shrink-0"><AgentIcon provider={entry.session.currentProviderId ?? cliAgentBySession[entry.id] ?? entry.session.cliProviderId} size={12} /></span>
+              <span className="min-w-0 flex-1 truncate" title={entry.session.title}>{entryLabel(entry)}</span>
+              <span className="flex min-w-0 items-center gap-1" title={STATE_WORD[sessionDotState(entry.session)]}>
+                <span className="size-[5px] shrink-0 rounded-full" style={{ background: DOT_GLYPH[sessionDotState(entry.session)].color }} aria-hidden="true" />
+                <span className="truncate">{STATE_WORD[sessionDotState(entry.session)]}</span>
+              </span>
+            </Slot>
             {tileControls(entry)}
           </div>
           <AgentPane sessionId={entry.id} />

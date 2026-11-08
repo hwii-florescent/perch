@@ -7,6 +7,7 @@ import { activateTab } from "../workspaceTabs";
 import { newId } from "../ids";
 import { Dialog } from "./ui/dialog";
 import { Select } from "./ui/select";
+import { Slot } from "./Slot";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import { menuItem, menuPanel } from "./ui/menu";
 
@@ -35,7 +36,13 @@ function TerminalMenu({ menu }: { menu: NonNullable<ReturnType<typeof useContext
     return () => { document.removeEventListener("mousedown", outside); document.removeEventListener("keydown", key); window.removeEventListener("blur", close); };
   }, []);
   return createPortal(<div ref={ref} className={menuPanel} style={{ position: "fixed", zIndex: 2200, left: Math.max(8, Math.min(menu.x, window.innerWidth - 260)), top: Math.max(8, Math.min(menu.y, window.innerHeight - 72)) }}>
-    <button type="button" className={menuItem()} onClick={() => askAgent(menu.workspaceId, menu.source)}>Ask agent about selection…</button>
+    <Slot
+      name="terminal-menu"
+      data={{ x: menu.x, y: menu.y, workspaceId: menu.workspaceId, sessionId: menu.source.kind === "terminal" ? menu.source.sessionId : undefined, selection: menu.source.kind === "terminal" ? menu.source.text : undefined }}
+      actions={{ ask: () => askAgent(menu.workspaceId, menu.source), close: () => useContextBridge.setState({ menu: null }) }}
+    >
+      <button type="button" className={menuItem()} onClick={() => askAgent(menu.workspaceId, menu.source)}>Ask agent about selection…</button>
+    </Slot>
   </div>, document.body);
 }
 

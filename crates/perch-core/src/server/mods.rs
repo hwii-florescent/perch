@@ -292,6 +292,23 @@ pub(super) async fn file(
         return (StatusCode::BAD_REQUEST, "id is required").into_response();
     };
     let policy = app.settings.get().mods;
+    if let Some(name) = params.get("font") {
+        return match mods::font(&app.memory_root, &policy, id, name) {
+            Ok((bytes, kind)) => (
+                [
+                    ("content-type", kind),
+                    ("x-content-type-options", "nosniff"),
+                    ("cache-control", "no-store"),
+                ],
+                bytes,
+            )
+                .into_response(),
+            Err(error) => {
+                let (status, text) = failure(error);
+                (status, text).into_response()
+            }
+        };
+    }
     match mods::source(&app.memory_root, &policy, id) {
         Ok(code) => (
             [
@@ -477,6 +494,7 @@ fn state_message(app: &AppState, request_id: String, error: Option<String>) -> S
         mods: mods::scan(&app.memory_root, &policy),
         layouts: layouts::scan(&app.memory_root, &policy),
         layout: layouts::current(&app.memory_root),
+        themes: layouts::scan_themes(&app.memory_root, &policy),
         safe_mode: policy.is_off(),
         policy,
         folder: app.memory_root.join("mods").display().to_string(),
@@ -518,7 +536,12 @@ pub(super) fn handle_set(state: &Arc<ConnState>, request_id: String, id: String,
 // to 2 s to show, and the upgrade path is `notify` on the mods folder.
 pub(super) fn spawn_watch(app: AppState) {
     tokio::spawn(async move {
-        type Seen = (Vec<mods::ModInfo>, Vec<layouts::LayoutInfo>, Option<String>);
+        type Seen = (
+            Vec<mods::ModInfo>,
+            Vec<layouts::LayoutInfo>,
+            Option<String>,
+            Vec<layouts::ThemeInfo>,
+        );
         let mut seen: Option<Seen> = None;
         let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
         loop {
@@ -529,6 +552,7 @@ pub(super) fn spawn_watch(app: AppState) {
                     mods::scan(&root, &policy),
                     layouts::scan(&root, &policy),
                     layouts::current(&root),
+                    layouts::scan_themes(&root, &policy),
                 )
             })
             .await
