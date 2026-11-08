@@ -738,10 +738,7 @@ mod tests {
         .unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let old = std::env::var_os("PATH").unwrap_or_default();
-        let mut paths = vec![dir.clone()];
-        paths.extend(std::env::split_paths(&old));
-        std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+        std::env::set_var("PERCH_SSH", &shim); // only the ssh helpers read it
 
         let target = dir.join("nested/out.txt");
         let big = "x".repeat(600 * 1024); // past what a command line carries
@@ -761,7 +758,7 @@ mod tests {
             "t",
         )
         .await;
-        std::env::set_var("PATH", old);
+        std::env::remove_var("PERCH_SSH");
         assert!(wrote.unwrap().status.success());
         assert_eq!(run.unwrap().len(), big.len());
         let _ = std::fs::remove_dir_all(&dir);

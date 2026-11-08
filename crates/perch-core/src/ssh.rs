@@ -228,6 +228,11 @@ pub async fn exec_with_fallback(
     Ok(out)
 }
 
+/// The `ssh` to run: `PERCH_SSH` when set (a wrapper or a stand-in), else the one on PATH.
+fn ssh_program() -> std::ffi::OsString {
+    std::env::var_os("PERCH_SSH").unwrap_or_else(|| "ssh".into())
+}
+
 /// Run an `ssh <args>` subprocess bounded by an overall `timeout_secs`, on top
 /// of whatever `-o ConnectTimeout=` the caller passed in `args`. Devpod
 /// `ProxyCommand` wrappers can stall well past normal TCP connect, so relying
@@ -242,7 +247,7 @@ pub async fn run_ssh_bounded(
     timeout_secs: u64,
     phase: &str,
 ) -> Result<std::process::Output, String> {
-    let mut cmd = tokio::process::Command::new("ssh");
+    let mut cmd = tokio::process::Command::new(ssh_program());
     cmd.args(args);
     cmd.kill_on_drop(true);
     match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), cmd.output()).await {
@@ -294,7 +299,7 @@ pub async fn run_remote_with_input(
     use tokio::io::AsyncWriteExt;
     let mut args = base_args(ssh_host);
     args.push(format!("{REMOTE_PATH_PREFIX} {command}"));
-    let mut child = tokio::process::Command::new("ssh")
+    let mut child = tokio::process::Command::new(ssh_program())
         .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
