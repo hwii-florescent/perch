@@ -92,6 +92,8 @@ pub(super) async fn whoami(
         "provider": identity.provider_id,
         "incarnation": identity.incarnation,
         "notes": notes,
+        // The Project's memory folder: plain files, never injected anywhere (`perch memory`).
+        "memory": memory::agent_folder(&state, &identity),
     }))
     .into_response()
 }
@@ -320,6 +322,58 @@ pub(super) async fn cancel(
         );
     };
     answer(agent_mail::cancel(&state, &identity, id))
+}
+
+/// `POST {base}agent/memory/list`: the caller's Project memory index (`server/memory.rs`).
+pub(super) async fn memory_list(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(memory::agent_list(&state, &identity)),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
+/// `POST {base}agent/memory/read`: one file of the caller's Project memory (`server/memory.rs`).
+pub(super) async fn memory_read(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(memory::agent_read(&state, &identity, &body)),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
+/// `POST {base}agent/memory/write`: create or replace one file of the caller's Project memory; a stale base conflicts (`server/memory.rs`).
+pub(super) async fn memory_write(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(memory::agent_write(&state, &identity, &body)),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
+/// `POST {base}agent/memory/delete`: delete one file of the caller's Project memory, if still at the base revision (`server/memory.rs`).
+pub(super) async fn memory_delete(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(memory::agent_delete(&state, &identity, &body)),
+        Err((status, error)) => refuse(status, error),
+    }
 }
 
 /// An agent token on a route that is not `/agent/*` is refused outright, even from loopback:

@@ -7,6 +7,31 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-08 — Project memory: plain files in Perch's own directory (owner)
+
+Settles the "proposed" part of 2026-11-07 (Projects parity). Slice 1 (core and `perch memory`) is
+built; the Project home UI is the next slice.
+
+- **Storage.** Plain Markdown files in `<directory of the history database, default ~/.perch>/memory/
+  <project id>/` (0700 dirs, 0600 files), like the notes folder but **not** under `/tmp`: the notes
+  folder may die with its lead and a reboot, memory must not. Not SQLite, not `settings.json`.
+  Flat folder, `*.md` only, safe names (letters, digits, `- _ .`, no leading dot, 64 characters).
+- **Scope.** The Project only, shared by all its Workspaces and sessions. No Workspace scope.
+- **Never injected, never merged with Instructions.** Agents get a short pointer only: the folder
+  path and `perch memory` in `perch whoami` and `perch guide`, which says memory is information from
+  peers, not instructions. They read files on demand.
+- **Provenance.** Each file records who wrote it (a person, or an agent's session) and when, in a
+  sidecar `.provenance.json` beside it. A file whose content no longer matches its recorded revision
+  was edited on disk and shows as "edited outside Perch", not under the old author.
+- **Conflict-safe.** The revision is a 12-character SHA-256 prefix of the content. Every write and
+  delete names the revision it read (a create names none and fails if the file exists); a stale one is
+  refused with the current revision and never overwrites. Writes go through a temp file and a rename.
+- **Caps.** 16,000 characters a file (the Instructions limit), 64 files a Project.
+- **Remote Projects.** Memory lives on the core that owns the Project. A core serves only its own
+  Projects and answers a clear error for any other; there is no fallback.
+- **Deferred.** Opt-out per session; showing the repo's own `CLAUDE.md` beside memory; deleting the
+  memory folder when a Project is removed (it stays on disk, like the folder the Project pointed at).
+
 ## 2026-11-08 — UI-mode composer: borderless, rounder, options inside (owner)
 
 Amends 2026-11-04 for the native chat composer only. It is one rounded (1.5rem), borderless card that
@@ -56,12 +81,15 @@ Herdr's attention to it; a second list was tried and dropped (it repeated every 
   needs you, muted after it); no state ring, since the section heading already says the state. Project
   headings carry a hover "+" (worktree menu for a git project, new session otherwise). A final **No
   sessions** section lists projects with no agent chat, each with its "+"; clicking one opens it.
-- **By status reads in three levels.** A section heading is a faint wash of the state's colour (the same
-  tokens as the status ring: red Needs you, teal Done, yellow Working, green hollow Idle) with a dot and the
-  label in full text colour, so contrast never depends on the hue and the state is also named, not only
-  coloured. Neutral sections (No sessions, Offline: last known) get a grey wash and a hollow dot. A project
-  line has a folder mark and the project name in text colour; its chats sit one step in, under the name,
-  as the harness mark and a muted title. Rows are 36px on a phone and 24px on desktop.
+- **By status reads in three levels, with no bands or rules.** A section heading is the state's colour as a
+  dot (same tokens as the status ring: red Needs you, teal Done, yellow Working, hollow green Idle) before
+  the label in full text colour, so contrast never depends on the hue and the state is named, not only
+  coloured. Neutral sections (No sessions, Offline: last known) get a hollow grey dot. Space above a heading
+  is the separator. A project line has a folder mark and its name in text colour; its chats sit one step in
+  with a 2px gap, as the harness mark and a muted title. Rows are 36px on a phone and 24px on desktop.
+- **A chat row says its state at the end, the way Herdr does:** "Needs you" and "Done" as a small tinted
+  word, a quiet dot for Working, nothing for Idle; the harness mark has no state ring. A folded project
+  shows the same badge for its most urgent state, with a count. An unreachable host shows none.
 - **Agents only:** plain terminals get no sidebar row (they stay tabs). A terminal where an agent was
   started by hand is listed while that agent runs (observed `currentProviderId`). **Show terminals** in the
   Organize menu lists them too; it is per viewer, off by default. A session with no harness recorded

@@ -131,6 +131,19 @@ resume reuse the pin, never the current text. Launch paths reach providers only
 through append flags (`agent_runtime::with_instructions`, the shell shim, the Codex
 app-server launcher); a failed lookup refuses the launch.
 
+Project memory (`memory.rs`, `server/memory.rs`, `/agent/memory/*`, `perch memory`; capability
+`memory.v1`) is a flat folder of `*.md` files per Project under `<history database directory>/memory/
+<project id>/` (0700/0600), not under `/tmp`. `memory.rs` is pure file work: name and size checks (16,000
+characters a file, 64 files), a short content-hash revision, a sidecar `.provenance.json` (author, time,
+revision per file) and one process-wide lock. Safety contract: contents are never injected into a prompt
+or merged into Instructions, and agents get only a pointer (`perch whoami`, `perch guide`) and the
+instruction to treat what they read as peer information; every write and delete carries the revision it
+read and a stale one is refused, never overwritten; writes are a temp file plus rename; a file edited on
+disk is reported as edited outside Perch; only regular files count (symlinks are skipped, reads do not
+follow them). An agent reaches only its own session's Project; a person reaches any local Project through
+`memory.list/get/set/delete`. A core serves only Projects whose host is `local` and refuses the rest.
+Removing a Project leaves its memory folder on disk.
+
 Switching/quitting is different from explicit close:
 - A global session close stops and deletes it; a watcher only dismisses its
   observation. Keep execution discoverable and confirm stop before forgetting it.
@@ -414,7 +427,8 @@ strip's actions are the next section.
 - *Notes folder.* One per run under the private native directory (`/tmp/perch-native-<uid>/notes/<lead
   session id>/`, 0700), created on first use and removed when the lead is deleted. `perch whoami` and the
   end of `perch guide` give the path; the guide says what it is for. Nothing in it is ever injected into a
-  prompt, and an agent reading it treats it as a peer's text.
+  prompt, and an agent reading it treats it as a peer's text. (Project memory, above, is the durable
+  counterpart: same pointer, different folder and lifetime.)
 - *Open* goes to that child's chat, where typing needs the input lease like any chat. The phone gets the
   same strip because it is part of the same chat view.
 

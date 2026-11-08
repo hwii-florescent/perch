@@ -541,7 +541,7 @@ UI rows from step 0 continue between slices.
    jsdom tests only; **no live run**. 9a-9c ran live once (`e2e/suggestions.spec.ts`, haiku lead and child): suggest,
    Start by click, sender card, `perch read`. Not run live: Do it here, Options, Start all, non-Claude receivers.
 
-#### Projects parity (owner direction 2026-11-07; not started)
+#### Projects parity (owner direction 2026-11-07; item 1 slice 1 built, rest not started)
 
 Goal: the same feature set as Claude Code Projects (beta), built on Perch sessions and
 across providers ([DECISIONS](DECISIONS.md) 2026-11-07, compared in the
@@ -554,8 +554,12 @@ across providers ([DECISIONS](DECISIONS.md) 2026-11-07, compared in the
    index (agents read files on demand); each file records who wrote it and when; people
    can review, edit and delete; atomic writes with a revision check so concurrent
    writers conflict instead of overwriting; what an agent reads there is information from
-   a peer, not instructions. Open: scope (Project only, or Workspace too), size caps, opt-out
-   per session, whether the repo's own `CLAUDE.md` memory shows beside it.
+   a peer, not instructions. **Slice 1 built (2026-11-08):** `memory.rs`, `memory.*` messages
+   (`memory.v1`), `perch memory list|read|write|delete`, tests; storage, scope, caps and
+   conflict rules settled in [DECISIONS](DECISIONS.md) 2026-11-08. **Not built:** the Project home UI
+   (review, edit, delete from the web; the web client lives on `memory.list/get/set/delete`),
+   opt-out per session, showing the repo's own `CLAUDE.md` memory beside it, cleanup when a Project is
+   removed, and any live run (no agent has used `perch memory` yet).
 2. **Library.** Pickable files and folders for a project (Claude: 100 files per pick, 10
    folders). Today only up to 16 reference-folder paths in Instructions.
 3. **Project home.** One place for Instructions, memory, library and threads, and an

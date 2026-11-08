@@ -289,6 +289,28 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             text,
             folders,
         } => super::instructions::handle_set(state, request_id, scope, id, text, folders),
+        ClientMessage::MemoryList {
+            request_id,
+            project_id,
+        } => super::memory::handle_list(state, request_id, project_id),
+        ClientMessage::MemoryGet {
+            request_id,
+            project_id,
+            name,
+        } => super::memory::handle_get(state, request_id, project_id, name),
+        ClientMessage::MemorySet {
+            request_id,
+            project_id,
+            name,
+            text,
+            base_revision,
+        } => super::memory::handle_set(state, request_id, project_id, name, text, base_revision),
+        ClientMessage::MemoryDelete {
+            request_id,
+            project_id,
+            name,
+            base_revision,
+        } => super::memory::handle_delete(state, request_id, project_id, name, base_revision),
         ClientMessage::BrowserHistoryRemove { ref url } => {
             super::browser_history::handle_remove(state, url)
         }

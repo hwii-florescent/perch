@@ -1671,6 +1671,68 @@ export interface CrewStateMessage {
   error?: string;
 }
 
+/** Who wrote a memory file: `person`, `agent` (`session` is its session id) or `outside` (the
+ * content on disk is not what Perch recorded: edited outside Perch). */
+export interface MemoryAuthor {
+  kind: "person" | "agent" | "outside";
+  session?: string;
+  label: string;
+}
+
+/** One file in a Project's memory index. `revision` is a short content hash; `updatedAt` is in
+ * milliseconds; `summary` is the first non-empty line, cut short. */
+export interface MemoryEntry {
+  name: string;
+  size: number;
+  revision: string;
+  author: MemoryAuthor;
+  updatedAt: number;
+  summary: string;
+}
+
+export interface MemoryFile {
+  entry: MemoryEntry;
+  text: string;
+}
+
+/** The index of a Project's memory files on this core (capability `memory.v1`). Answered with
+ * `memory.state`. */
+export interface MemoryListMessage {
+  type: "memory.list";
+  requestId: string;
+  projectId: string;
+}
+
+/** One memory file's text. Answered with `memory.file`. */
+export interface MemoryGetMessage {
+  type: "memory.get";
+  requestId: string;
+  projectId: string;
+  name: string;
+}
+
+/** Create or replace one memory file as a person. `baseRevision` is the revision that was read;
+ * absent means the file must not exist yet. A stale base is refused with `conflict`, never
+ * overwritten. Answered with `memory.state`. */
+export interface MemorySetMessage {
+  type: "memory.set";
+  requestId: string;
+  projectId: string;
+  name: string;
+  text: string;
+  baseRevision?: string;
+}
+
+/** Delete one memory file as a person, only if it is still at `baseRevision`. Answered with
+ * `memory.state`. */
+export interface MemoryDeleteMessage {
+  type: "memory.delete";
+  requestId: string;
+  projectId: string;
+  name: string;
+  baseRevision: string;
+}
+
 /** Read the Instructions of a Project (`scope: "project"`) or Workspace (`"workspace"`) on this core
  * (capability `instructions.v1`). Answered with `instructions.state`. */
 export interface InstructionsGetMessage {
@@ -2461,6 +2523,8 @@ export type ClientMessage =
   | BrowserHistorySearchMessage
   | BrowserSuggestMessage
   | InstructionsGetMessage
+  | MemoryListMessage
+  | MemoryGetMessage
   | CrewGetMessage
   | CrewActMessage
   | SuggestionsGetMessage
@@ -2468,6 +2532,8 @@ export type ClientMessage =
   | InboundGetMessage
   | InboundActMessage
   | InstructionsSetMessage
+  | MemorySetMessage
+  | MemoryDeleteMessage
   | BrowserHistoryRemoveMessage
   | BrowserHistoryClearMessage
   | AttentionUpdateMessage
@@ -2714,6 +2780,32 @@ export interface BrowserSuggestResultMessage {
   type: "browser.suggest.result";
   requestId: string;
   suggestions: string[];
+}
+
+/** Reply to `memory.list`, `memory.set` and `memory.delete`: the Project's memory index, by name,
+ * after the request. `name` repeats the file a set or delete was about; `conflict` is true when
+ * it was refused because the file is not at the base revision (read it again); `error` explains
+ * any refusal. */
+export interface MemoryStateMessage {
+  type: "memory.state";
+  requestId: string;
+  projectId: string;
+  files: MemoryEntry[];
+  maxFiles: number;
+  maxChars: number;
+  name?: string;
+  conflict?: boolean;
+  error?: string;
+}
+
+/** Reply to `memory.get`: the file, or `error` (no such file, or the Project is not here). */
+export interface MemoryFileMessage {
+  type: "memory.file";
+  requestId: string;
+  projectId: string;
+  name: string;
+  file?: MemoryFile;
+  error?: string;
 }
 
 /** Reply to `instructions.get` and `instructions.set`: what is stored for the scope.
@@ -3264,6 +3356,8 @@ export type ServerMessage =
   | BrowserHistoryResultMessage
   | BrowserSuggestResultMessage
   | InstructionsStateMessage
+  | MemoryStateMessage
+  | MemoryFileMessage
   | CrewStateMessage
   | CrewActResultMessage
   | SuggestionsStateMessage

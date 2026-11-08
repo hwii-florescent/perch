@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 use crate::context_bridge::{ContextAgent, ContextPacket, ContextSource};
 use crate::filesystem::{DirectoryEntry, FileMetadata, PreviewKind};
 use crate::iterm_profile::TerminalProfile;
+use crate::memory::{Entry as MemoryEntry, File as MemoryFile};
 use crate::review::{ReviewComment, ReviewPacket};
 use crate::source_control::{
     BranchRef, DiffFile, DiffTarget, DiscardMode, GitActionReceipt, GitStatus,
@@ -1309,6 +1310,22 @@ pub enum ClientMessage {
         id: String,
     },
 
+    /// The index of a Project's memory files on this core (capability `memory.v1`). Answered
+    /// with `memory.state`.
+    #[serde(rename = "memory.list", rename_all = "camelCase")]
+    MemoryList {
+        request_id: String,
+        project_id: String,
+    },
+
+    /// One memory file's text. Answered with `memory.file`.
+    #[serde(rename = "memory.get", rename_all = "camelCase")]
+    MemoryGet {
+        request_id: String,
+        project_id: String,
+        name: String,
+    },
+
     /// The family of a session: the other members of its run and what each is doing
     /// (capability `crew.v1`). Answered with `crew.state`; a session outside any run gets no rows.
     #[serde(rename = "crew.get", rename_all = "camelCase")]
@@ -1400,6 +1417,29 @@ pub enum ClientMessage {
         text: String,
         #[serde(default)]
         folders: Vec<String>,
+    },
+
+    /// Create or replace one memory file as a person. `base_revision` is the revision that was
+    /// read; absent means the file must not exist yet. A stale base is refused with
+    /// `conflict`, never overwritten. Answered with `memory.state`.
+    #[serde(rename = "memory.set", rename_all = "camelCase")]
+    MemorySet {
+        request_id: String,
+        project_id: String,
+        name: String,
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_revision: Option<String>,
+    },
+
+    /// Delete one memory file as a person, only if it is still at `base_revision`. Answered
+    /// with `memory.state`.
+    #[serde(rename = "memory.delete", rename_all = "camelCase")]
+    MemoryDelete {
+        request_id: String,
+        project_id: String,
+        name: String,
+        base_revision: String,
     },
 
     /// Forget one page.
@@ -2400,6 +2440,37 @@ pub enum ServerMessage {
         folders: Vec<String>,
         revision: u64,
         max_chars: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
+    /// Reply to `memory.list`, `memory.set` and `memory.delete`: the Project's memory index,
+    /// by name, after the request. `name` repeats the file a set or delete was about;
+    /// `conflict` is true when it was refused because the file is not at the base revision
+    /// (read it again); `error` explains any refusal.
+    #[serde(rename = "memory.state", rename_all = "camelCase")]
+    MemoryState {
+        request_id: String,
+        project_id: String,
+        files: Vec<MemoryEntry>,
+        max_files: u32,
+        max_chars: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        conflict: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
+    /// Reply to `memory.get`: the file, or `error` (no such file, or the Project is not here).
+    #[serde(rename = "memory.file", rename_all = "camelCase")]
+    MemoryFileState {
+        request_id: String,
+        project_id: String,
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file: Option<MemoryFile>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

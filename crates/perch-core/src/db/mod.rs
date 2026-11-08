@@ -890,7 +890,7 @@ fn now_millis() -> i64 {
         .unwrap_or(0)
 }
 
-fn default_db_path() -> PathBuf {
+pub(crate) fn default_db_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     Path::new(&home).join(".perch").join("history.sqlite")
 }

@@ -90,6 +90,7 @@ mod crew_actions;
 mod instructions;
 #[cfg(test)]
 mod local_authority;
+mod memory;
 mod native_ui;
 mod recover;
 mod reporter;
@@ -266,6 +267,9 @@ type GitStatus = (Option<String>, u32, u32);
 #[derive(Clone)]
 struct AppState {
     db: Arc<HistoryDb>,
+    /// The directory that holds `memory/<project id>/` (`crate::memory`): the history
+    /// database's own directory, so it lives as long as the database and follows `PERCH_DB`.
+    memory_root: PathBuf,
     default_cwd: String,
     /// Session ids that currently have an agent turn in flight.
     running_sessions: Arc<Mutex<HashSet<String>>>,
@@ -576,8 +580,16 @@ pub async fn run(
         devices.clone(),
         phone_port,
     ));
+    let memory_root = options
+        .db_path
+        .as_deref()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .or_else(|| crate::db::default_db_path().parent().map(Path::to_path_buf))
+        .unwrap_or_default();
     let state = AppState {
         db,
+        memory_root,
         default_cwd: effective_cwd,
         running_sessions,
         session_viewers: Arc::new(Mutex::new(HashMap::new())),
@@ -855,6 +867,22 @@ pub async fn run(
         .route(
             &format!("{base_path}agent/cancel"),
             post(agent::cancel).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/memory/list"),
+            post(agent::memory_list).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/memory/read"),
+            post(agent::memory_read).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/memory/write"),
+            post(agent::memory_write).layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/memory/delete"),
+            post(agent::memory_delete).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(&format!("{base_path}workspace-file"), get(fs::file_content))
         .with_state(state);
@@ -2557,6 +2585,7 @@ fn foundation_capabilities() -> Vec<String> {
         "browser.history.v1",
         "browser.suggest.v1",
         "instructions.v1",
+        "memory.v1",
         "crew.v1",
         "crew.actions.v1",
         "suggestions.v1",
