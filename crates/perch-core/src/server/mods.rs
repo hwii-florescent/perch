@@ -122,6 +122,58 @@ pub(super) fn handle_report(
     }
 }
 
+/// The page's answer to a snapshot request.
+pub(super) fn handle_snapshot(
+    state: &Arc<ConnState>,
+    request_id: String,
+    html: String,
+    text: String,
+    error: Option<String>,
+) {
+    let mut snapshots = state.app.mod_snapshots.lock().unwrap();
+    if snapshots.len() < 16 {
+        snapshots.insert(request_id, (html, text, error));
+    }
+}
+
+/// `perch mod dom <id|app>`: ask the person's screen for what a mod (or the whole page) drew, as
+/// HTML and text, to see a result without a screenshot. The first screen to answer wins.
+pub(super) async fn agent_dom(app: &AppState, body: &Value) -> Result<Value, Failure> {
+    let id = id_of(body)?;
+    if id != "app" {
+        let policy = app.settings.get().mods;
+        if !mods::scan(&app.memory_root, &policy)
+            .iter()
+            .any(|m| m.id == id && m.enabled)
+        {
+            return Err(fail(
+                StatusCode::BAD_REQUEST,
+                format!("no enabled mod \"{id}\""),
+            ));
+        }
+    }
+    let request_id = Uuid::new_v4().to_string();
+    let _ = app
+        .hub
+        .hub_events_tx
+        .send(Arc::new(ServerMessage::ModsSnapshotRequest {
+            request_id: request_id.clone(),
+            mod_id: id.to_string(),
+        }));
+    for _ in 0..20 {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        if let Some((html, text, error)) = app.mod_snapshots.lock().unwrap().remove(&request_id) {
+            return Ok(match error {
+                Some(error) => json!({ "status": "error", "error": error }),
+                None => json!({ "status": "ok", "html": html, "text": text }),
+            });
+        }
+    }
+    Ok(
+        json!({ "status": "not loaded", "error": "no Perch window answered within 5 seconds (is one open?)" }),
+    )
+}
+
 /// `perch mod check <id>`: `ok` once the person's screen has loaded the mod's current files, `error`
 /// with why when it threw, `off` for a disabled mod, and `not loaded` when no screen reported within
 /// a few seconds (no window open). A mod that draws badly without throwing still needs a look.
@@ -497,6 +549,35 @@ mod tests {
         assert_eq!(checked["status"], "error");
         assert_eq!(checked["error"], "x is not defined");
         assert_eq!(call("check", json!({"id": "nope"})).await.0, 404);
+
+        // `dom` asks the screens and returns the first answer.
+        let mut asked = app.hub.hub_events_tx.subscribe();
+        let window = app.clone();
+        let answering = tokio::spawn(async move {
+            while let Ok(message) = asked.recv().await {
+                if let ServerMessage::ModsSnapshotRequest { request_id, mod_id } = &*message {
+                    assert_eq!(mod_id, "board");
+                    window
+                        .mod_snapshots
+                        .lock()
+                        .unwrap()
+                        .insert(request_id.clone(), ("<p>hi</p>".into(), "hi".into(), None));
+                    break;
+                }
+            }
+        });
+        let (_, dom) = call("dom", json!({"id": "board"})).await;
+        answering.await.unwrap();
+        assert_eq!(
+            (
+                dom["status"].as_str(),
+                dom["html"].as_str(),
+                dom["text"].as_str()
+            ),
+            (Some("ok"), Some("<p>hi</p>"), Some("hi"))
+        );
+        assert_eq!(call("dom", json!({"id": "nope"})).await.0, 400);
+        while screen.try_recv().is_ok() {} // the request was also broadcast to this listener
 
         assert_eq!(
             call("enable", json!({"id": "board", "enabled": false}))

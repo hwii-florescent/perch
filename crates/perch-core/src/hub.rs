@@ -1605,6 +1605,7 @@ impl HubManager {
             | ServerMessage::ModsState { .. }
             | ServerMessage::ModsChanged { .. }
             | ServerMessage::ModsOpen { .. }
+            | ServerMessage::ModsSnapshotRequest { .. }
             | ServerMessage::MemoryFileState { .. }
             | ServerMessage::CrewState { .. }
             | ServerMessage::CrewActResult { .. }

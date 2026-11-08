@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { slotFor, subscribeSlots, type SlotName, type SlotProps } from "../slots";
+import { reportSlotError, slotFor, subscribeSlots, type SlotName, type SlotProps } from "../slots";
 
 /** Shows what a mod drew for this slot (`api.slot`), else `children`, the stock interface. A mod that
  * throws falls back to the stock interface until the mod changes. */
@@ -32,6 +32,7 @@ export function Slot({ name, data, actions, className, isolate, children }: {
       };
     } catch (error) {
       console.error(`mod ${provider.modId}: slot ${name} failed, showing the stock one`, error);
+      reportSlotError(provider.modId, `slot "${name}": ${error instanceof Error ? error.message : String(error)}`);
       host.current.replaceChildren();
       setFailed(provider);
     }

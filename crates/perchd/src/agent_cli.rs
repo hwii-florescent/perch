@@ -889,7 +889,7 @@ const MOD_API: &str = include_str!("../../perch-core/src/mod_examples/perch-mod.
 
 const MOD_USAGE: &str ="usage: perch mod [list] [--json] | perch mod enable <id> | \
      perch mod disable <id> | perch mod open <id> | perch mod check <id> | \
-     perch mod api | perch mod examples | perch mod clone <example> [id] | perch mod layout <id|stock>";
+     perch mod dom <id|app> | perch mod api | perch mod examples | perch mod clone <example> [id] | perch mod layout <id|stock>";
 
 /// `perch mod`: the mods on this computer, turn one off or on, and show one.
 fn mod_cmd(args: &[String]) -> Result<(), String> {
@@ -916,6 +916,22 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
             ask("mod/open", json!({ "id": id }))?;
             println!("{id} is shown on the person's screen");
             Ok(())
+        }
+        ["dom", id] => {
+            let answer = ask("mod/dom", json!({ "id": id }))?;
+            match answer["status"].as_str() {
+                Some("ok") => {
+                    println!("{}", answer["text"].as_str().unwrap_or(""));
+                    println!("--- html ---\n{}", answer["html"].as_str().unwrap_or(""));
+                    Ok(())
+                }
+                _ => Err(format!(
+                    "{id}: {}",
+                    answer["error"]
+                        .as_str()
+                        .unwrap_or("not on the person's screen")
+                )),
+            }
         }
         ["api"] => {
             print!("{MOD_API}");
@@ -1294,6 +1310,8 @@ Commands
   perch mod open <id>     Show a mod on the person's screen now.
   perch mod check <id>    Wait for the person's window to load the mod's current files; exits
                           nonzero with the error if it threw. Run it after every edit.
+  perch mod dom <id|app>  What a mod (or the whole window) has drawn on the person's screen, as text and
+                          HTML: see the result without a screenshot. A docked mod must be open.
   perch mod api           The mod API as TypeScript types (read it before writing a mod).
   perch mod examples      The mods and layouts shipped inside Perch to start from.
   perch mod clone <example> [id]
@@ -1420,7 +1438,8 @@ Mods
     each part of `api`, layouts with and without a look) and `perch mod clone <example> [id]` copies
     one to edit.
   - After every edit run `perch mod check <id>`: it says whether the person's window loaded and
-    mounted the new files, or why not. It cannot see a mod that mounts but draws wrongly.
+    mounted the new files, or why not (a slot function that throws counts). Then `perch mod dom <id>`
+    shows what it drew, as text and HTML (`perch mod dom app` is the whole window).
   - `perch mod open <id>` shows a mod now. To undo: `perch mod disable <id>`, delete the folder, or
     the person presses ctrl+alt+shift+Escape (turns every mod off) or starts Perch with
     PERCH_MODS=off.
@@ -1904,6 +1923,7 @@ mod tests {
             "perch mod check <id>",
             "perch mod clone <example> [id]",
             "perch mod api",
+            "perch mod dom <id|app>",
             "perch mod layout <id|stock>",
             "(el, api) => cleanup?",
             "PERCH_MODS=off",

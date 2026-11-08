@@ -22,6 +22,11 @@ export interface SlotProps {
 /** Draws into `el`; called again (after its cleanup) whenever `data` changes. */
 export type SlotRender = (el: HTMLElement, props: SlotProps) => void | (() => void);
 
+let slotError: (modId: string, message: string) => void = () => {};
+/** Where a slot function's failure goes (`mods.ts` reports it, so `perch mod check` sees it). */
+export const setSlotErrorReporter = (report: typeof slotError) => { slotError = report; };
+export const reportSlotError = (modId: string, message: string) => slotError(modId, message);
+
 const claimed = new Map<string, { modId: string; render: SlotRender }>();
 const watchers = new Set<() => void>();
 const changed = () => watchers.forEach((watch) => watch());

@@ -1358,6 +1358,18 @@ pub enum ClientMessage {
         op: String,
     },
 
+    /// The page's answer to `mods.snapshot.request`: what is drawn, as HTML and as text, or why not.
+    #[serde(rename = "mods.snapshot", rename_all = "camelCase")]
+    ModsSnapshot {
+        request_id: String,
+        #[serde(default)]
+        html: String,
+        #[serde(default)]
+        text: String,
+        #[serde(default)]
+        error: Option<String>,
+    },
+
     /// The person's page says whether it loaded a mod's `revision` (capability `mods.report.v1`);
     /// `error` is why not. No reply: `perch mod check` reads it.
     #[serde(rename = "mods.report", rename_all = "camelCase")]
@@ -2533,6 +2545,11 @@ pub enum ServerMessage {
     /// Broadcast when `perch mod open` asks the person's screen to show a mod.
     #[serde(rename = "mods.open", rename_all = "camelCase")]
     ModsOpen { mod_id: String },
+
+    /// Broadcast when `perch mod dom` wants to see what a mod (or `app`, the whole page) drew; the
+    /// person's page answers with `mods.snapshot` (capability `mods.snapshot.v1`).
+    #[serde(rename = "mods.snapshot.request", rename_all = "camelCase")]
+    ModsSnapshotRequest { request_id: String, mod_id: String },
 
     /// Reply to `memory.list`, `memory.set` and `memory.delete`: the Project's memory index,
     /// by name, after the request. `name` repeats the file a set or delete was about;

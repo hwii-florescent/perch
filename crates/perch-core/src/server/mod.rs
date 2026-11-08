@@ -281,6 +281,8 @@ struct AppState {
     /// What the person's page last said about loading each mod: `(revision, error)`. `perch mod
     /// check` reads it; memory only, since a reloaded page reports again.
     mod_reports: Arc<Mutex<HashMap<String, (String, Option<String>)>>>,
+    /// Answers to `mods.snapshot.request` by request id (`perch mod dom`): `(html, text, error)`.
+    mod_snapshots: Arc<Mutex<HashMap<String, (String, String, Option<String>)>>>,
     /// Local session ids that finished a turn while unviewed (herdr's `done`
     /// state). Cleared the moment any connection views the session again.
     unseen_sessions: Arc<Mutex<HashSet<String>>>,
@@ -600,6 +602,7 @@ pub async fn run(
         running_sessions,
         session_viewers: Arc::new(Mutex::new(HashMap::new())),
         mod_reports: Arc::new(Mutex::new(HashMap::new())),
+        mod_snapshots: Arc::new(Mutex::new(HashMap::new())),
         unseen_sessions: Arc::new(Mutex::new(HashSet::new())),
         blocked_sessions: Arc::new(Mutex::new(HashSet::new())),
         stale_sessions: Arc::new(Mutex::new(HashSet::new())),
@@ -906,6 +909,10 @@ pub async fn run(
         .route(
             &format!("{base_path}agent/mod/open"),
             post(agent::mod_open).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/mod/dom"),
+            post(agent::mod_dom).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(
             &format!("{base_path}agent/mod/examples"),
@@ -2632,6 +2639,7 @@ fn foundation_capabilities() -> Vec<String> {
         "memory.v1",
         "mods.v1",
         "mods.report.v1",
+        "mods.snapshot.v1",
         "crew.v1",
         "crew.actions.v1",
         "suggestions.v1",

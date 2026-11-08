@@ -66,7 +66,11 @@ approval not mattering much.
   against a fake `api`.
 - **Checking.** The page reports each load of a mod's revision (`mods.report`, capability
   `mods.report.v1`); `perch mod check <id>` waits for the current revision and exits nonzero with the
-  error. It sees a throw, not a mod that mounts but draws wrongly.
+  error. It sees a throw (including a slot function that throws later), not a mod that mounts but
+  draws wrongly; for that, `perch mod dom <id|app>` asks the person's screen (`mods.snapshot.request`
+  / `mods.snapshot`, capability `mods.snapshot.v1`) for what a mod's view, or the whole page, drew, as
+  text and HTML. That replaces herdr's `shot` (a DOM page has no frame to dump); an agent reads the
+  structure, not pixels.
 - **Getting out.** `perch mod disable <id>` or Settings > Mods turns one off (off is kept in
   `mod-state.json` beside `mods/`); deleting the folder removes it; **mods off** (a Settings switch,
   `PERCH_MODS=off`, or ctrl+alt+shift+Escape, herdr's reset key) loads none, even when the page is

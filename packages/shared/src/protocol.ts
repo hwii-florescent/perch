@@ -2580,6 +2580,7 @@ export type ClientMessage =
   | ModsListMessage
   | ModsSetMessage
   | ModsReportMessage
+  | ModsSnapshotMessage
   | MemoryListMessage
   | MemoryGetMessage
   | CrewGetMessage
@@ -2893,6 +2894,24 @@ export interface LayoutInfo {
 /** Broadcast when the mods folder or a mod's state changed; clients ask again with `mods.list`. */
 export interface ModsChangedMessage {
   type: "mods.changed";
+}
+
+/** Broadcast when `perch mod dom` wants to see what a mod (or `app`, the whole page) drew; the
+ * page answers with `mods.snapshot` (capability `mods.snapshot.v1`). */
+export interface ModsSnapshotRequestMessage {
+  type: "mods.snapshot.request";
+  requestId: string;
+  /** A mod's id, or `app` for the whole page. */
+  modId: string;
+}
+
+/** The page's answer to `mods.snapshot.request` (capability `mods.snapshot.v1`). */
+export interface ModsSnapshotMessage {
+  type: "mods.snapshot";
+  requestId: string;
+  html?: string;
+  text?: string;
+  error?: string | null;
 }
 
 /** Broadcast when `perch mod open` asks this screen to show a mod. */
@@ -3494,6 +3513,7 @@ export type ServerMessage =
   | ModsStateMessage
   | ModsChangedMessage
   | ModsOpenMessage
+  | ModsSnapshotRequestMessage
   | MemoryFileMessage
   | CrewStateMessage
   | CrewActResultMessage

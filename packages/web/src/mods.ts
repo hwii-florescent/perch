@@ -1,6 +1,7 @@
 import type { ModsStateMessage } from "@perch/shared";
 import { getBasePath } from "./base";
 import { newId } from "./ids";
+import { setSlotErrorReporter } from "./slots";
 import { socket } from "./ws";
 
 /** Mods: folders with a `main.js` that this page imports and runs with the person's full access, as
@@ -43,7 +44,8 @@ socket.onMessage((message) => {
     latest = state;
     watchers.forEach((watch) => watch());
     settle(requestId, state);
-  } else if (message.type === "mods.changed") refreshMods();
+  } else if (message.type === "mods.snapshot.request") answerSnapshot(message.requestId, message.modId);
+  else if (message.type === "mods.changed") refreshMods();
   else if (message.type === "mods.open") openers.forEach((open) => open(message.modId));
 });
 // A dropped connection never answers: let waiting requests finish.
@@ -51,7 +53,16 @@ socket.onConnectionChange((connected) => {
   if (!connected) for (const id of [...pending.keys()]) settle(id, null);
 });
 
-export const modsAvailable = () => capabilities.includes(CAPABILITY) && socket.connected;
+/** `perch mod dom`: tells the core what a mod (or `app`, the whole page) has drawn, as HTML and text,
+ * so an agent can see the result without a screenshot. A screen that does not show the mod stays
+ * silent, so the answer comes from one that does. */
+export function answerSnapshot(requestId: string, modId: string) {
+  const el = modId === "app" ? document.body : document.querySelector<HTMLElement>(`[data-testid="mod-view-${modId}"]`);
+  if (!el) return;
+  socket.send({ type: "mods.snapshot", requestId, html: el.outerHTML.slice(0, 200_000), text: (el.innerText ?? el.textContent ?? "").slice(0, 20_000) });
+}
+
+export const modsAvailable =() => capabilities.includes(CAPABILITY) && socket.connected;
 
 function ask(build: (requestId: string) => Parameters<typeof socket.send>[0]): Promise<ModsState | null> {
   if (!modsAvailable()) return Promise.resolve(null);
@@ -84,6 +95,12 @@ export function activeLayout(state: ModsState | null) {
 export function reportMod(id: string, revision: string, error: string | null) {
   if (capabilities.includes("mods.report.v1") && socket.connected) socket.send({ type: "mods.report", id, revision, error });
 }
+
+// A slot function that throws after the mod mounted is reported against the mod's current revision.
+setSlotErrorReporter((modId, error) => {
+  const revision = latest?.mods.find((candidate) => candidate.id === modId)?.revision;
+  if (revision) reportMod(modId, revision, error);
+});
 
 /** Where a mod's code is served from (a person's token only). */
 export const modFileUrl = (id: string) => `${window.location.origin}${getBasePath()}mods/file?${new URLSearchParams({ id })}`;

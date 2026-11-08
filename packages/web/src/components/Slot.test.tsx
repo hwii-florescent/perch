@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { claimSlot } from "../slots";
+import { claimSlot, setSlotErrorReporter } from "../slots";
 import { Slot } from "./Slot";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -43,10 +43,13 @@ describe("a slot in Perch's own interface", () => {
 
   it("falls back to the stock part when the mod throws, and tries again when the mod changes", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
+    const reported = vi.fn();
+    setSlotErrorReporter(reported);
     await show({ title: "x" });
     let release = () => {};
     await act(async () => { release = claimSlot("session-row", "bad", () => { throw new Error("boom"); }); });
     expect(host.textContent).toBe("stock");
+    expect(reported).toHaveBeenCalledWith("bad", 'slot "session-row": boom'); // `perch mod check` sees it
     let releaseGood = () => {};
     await act(async () => { releaseGood = claimSlot("session-row", "good", (el) => { el.textContent = "fixed"; }); });
     expect(host.textContent).toBe("fixed");
