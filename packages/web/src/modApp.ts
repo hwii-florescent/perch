@@ -45,6 +45,8 @@ export interface ModApi {
   /** Runs a program on this computer (`timeout` ms, default 30 s; output past 1 MiB is cut). A
    * nonzero `code` is a result; it rejects if the program cannot start or runs out of time. */
   exec(cmd: string, args?: string[], options?: { cwd?: string; timeout?: number; host?: string }): Promise<ExecResult>;
+  /** Runs Perch's own `perch` command line (what herdr's `hc(args)` is to herdr-core): `perch(["ps"])`. Same results as `exec`. */
+  perch(args?: string[], options?: { cwd?: string; timeout?: number }): Promise<ExecResult>;
   /** Files anywhere on this computer by absolute or `~/` path (reads stop at 5 MiB). */
   readTextFile(path: string, on?: OnHost): Promise<string>;
   writeTextFile(path: string, text: string, on?: OnHost & { expected?: string | null }): Promise<void>;
@@ -224,6 +226,7 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
     commands: () => bridge.list(),
     run: (command, args) => bridge.run(command, args),
     exec,
+    perch: (args, options) => exec("perch", args, options),
     readTextFile,
     writeTextFile,
     statFile,

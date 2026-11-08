@@ -242,6 +242,11 @@ it measures the real AppKit close/minimise/zoom buttons (default spot, a layout'
 closing the window. No core, daemon, shells, installed app or external network. It does not
 show how the lights look to a person (colours, hover glyphs) or the vibrancy behind them.
 
+For a real key press in a windowed run (isolated `PERCH_DB`/`PERCH_HOSTS`/`PERCHD_DIR`/`PERCH_SETTINGS`, a
+mod that writes a file from `api.command`, and a `keys.json` binding to it), post the key to your
+own pid with `CGEvent.postToPid` rather than a global keystroke, which lands in whichever app is
+frontmost (often the installed Perch). Capture only your window with `screencapture -x -o -l <id>`.
+
 ## Settings-resolved command regression
 
 `npm run test -w @perch/web -- src/keybinds.scopes.test.tsx src/keybinds.test.ts src/editorKeymap.test.ts src/keybinds.close.test.tsx`

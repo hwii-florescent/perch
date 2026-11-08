@@ -523,6 +523,19 @@ async fn remote_fs(app: &AppState, host: &str, body: &Value) -> axum::response::
     .into_response()
 }
 
+/// `perch` names the control CLI that ships beside the core (what `api.perch()` runs), which is not
+/// on the core's own PATH; every other program is looked up as usual.
+fn program_path(cmd: &str) -> std::path::PathBuf {
+    program_path_with(cmd, crate::agent_identity::cli_binary())
+}
+
+fn program_path_with(cmd: &str, cli: Option<std::path::PathBuf>) -> std::path::PathBuf {
+    match cli {
+        Some(cli) if cmd == "perch" => cli,
+        _ => cmd.into(),
+    }
+}
+
 /// `POST /mods/exec {cmd, args?, cwd?, timeout?, host?}`: run a program in the person's environment (or, with
 /// a `host` id from Settings > Hosts, on that computer over ssh). The
 /// timeout is milliseconds (default 30 s, at most 10 min); output past 1 MiB is cut.
@@ -551,7 +564,7 @@ pub(super) async fn exec(
     if let Some(host) = body["host"].as_str().filter(|h| !h.is_empty()) {
         return remote_exec(&app, host, cmd, &args, body["cwd"].as_str(), wait).await;
     }
-    let mut command = tokio::process::Command::new(cmd);
+    let mut command = tokio::process::Command::new(program_path(cmd));
     command
         .args(&args)
         .stdin(std::process::Stdio::null())
@@ -1078,5 +1091,22 @@ mod tests {
             400
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod program_path_tests {
+    use super::program_path_with;
+    use std::path::PathBuf;
+
+    #[test]
+    fn only_perch_resolves_to_the_shipped_cli() {
+        let cli = Some(PathBuf::from("/app/perch"));
+        assert_eq!(
+            program_path_with("perch", cli.clone()),
+            PathBuf::from("/app/perch")
+        );
+        assert_eq!(program_path_with("git", cli), PathBuf::from("git"));
+        assert_eq!(program_path_with("perch", None), PathBuf::from("perch"));
     }
 }
