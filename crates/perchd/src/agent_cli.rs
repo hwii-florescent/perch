@@ -1109,13 +1109,13 @@ Commands
   perch send <session> [--key <key>] <text>
                           Send a message to another session in your run (`perch list` shows
                           who). Perch hands it to the receiver at once: an idle one
-                          starts a turn; a busy one's own follow-up queue takes it, to run
-                          after its turn. Never into a running turn (that is `perch steer`),
-                          never over a person's draft or a question (it waits, with the
-                          reason), and a CLI with no follow-up queue (Codex, Claude) gets
-                          it when its turn ends. The receipt says delivered, queued in the
-                          agent, handed over but unconfirmed, queued (waiting, and why) or
-                          not delivered. Up to 2000 characters arrive whole; longer
+                          starts a turn; a busy Pi or OMP takes it in its own follow-up
+                          queue, to run after its turn; a busy Codex or Claude, which have
+                          no follow-up queue, gets it as a steer into the running turn.
+                          Never over a person's draft or a question (it waits, with the
+                          reason). The receipt says delivered, queued in the agent, steered,
+                          handed over but unconfirmed, queued (waiting, and why) or not
+                          delivered. Up to 2000 characters arrive whole; longer
                           text (to 64 KiB) goes to a file and a preview and the path arrive.
                           A line that starts with / reaches the receiver quoted, not as a
                           command. You may send 50 messages in a run (a person's setting;
@@ -1194,9 +1194,11 @@ Messages
     person's setting; past it a note is not delivered, with the reason in `perch inbox`), and
     an idle lead only when no sub-session is working.
   - Messages reach the receiver at once and are the default: `perch send` starts a turn
-    on an idle receiver, or goes into a busy one's own follow-up queue (after its turn; a
-    CLI without one, Codex or Claude, gets it when the turn ends) and never interrupts it. `perch steer` and `perch interrupt` are for correcting a sub-session that
-    is going the wrong way right now (the wrong files, a loop, work you no longer want); do not
+    on an idle receiver, goes into a busy Pi's or OMP's own follow-up queue (after its turn),
+    or, for a busy Codex or Claude, which have none, arrives as a steer into the running turn
+    (the receipt says steered); it never interrupts. For Claude the receipt may add that the
+    text was taken but not yet seen joining the turn. `perch steer` and `perch interrupt` are
+    for correcting a sub-session that is going the wrong way right now (the wrong files, a loop, work you no longer want); do not
     use them to chat, to check on progress or to hurry it. A steer or an interrupt that is not
     confirmed may still have taken effect: look at `perch list`, do not repeat it blindly.
     A sub-session cannot steer or interrupt anyone.
@@ -1655,12 +1657,14 @@ mod tests {
             "going the wrong way",
             "Messages reach the receiver at once",
             "follow-up queue",
-            "queued in the\n                          agent",
+            "queued in the agent",
+            "arrives as a steer into the running turn",
+            "gets it as a steer into the running turn",
             "hold messages from other sessions for their approval",
             "cannot steer or interrupt anyone",
             "perch inbox",
             "perch cancel",
-            "never over a person's draft",
+            "Never over a person's draft",
             "cannot approve anything",
             "at most 10 times",
             "perch spawn",

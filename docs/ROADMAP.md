@@ -378,8 +378,8 @@ version; the slices below replace their implied order.
 - **Messages:** a durable core queue; handed to the receiver at once: an idle one
   starts a turn (Pi/OMP prompt, Codex `turn/start`, for Claude an input-lease take plus
   verified-empty prompt in one step); a busy Pi/OMP takes it in its own follow-up queue;
-  a busy Codex or Claude (no follow-up queue) keeps the idle wait, and the receipt says
-  so. Receipts: delivered / queued in the agent / steered. Never steers a running turn. The envelope names the sender and origin; bodies up to 2,000
+  a busy Codex or Claude (no follow-up queue) gets it as a steer into the running turn
+  (the paths `perch steer` uses). Receipts: delivered / queued in the agent / steered. The envelope names the sender and origin; bodies up to 2,000
   characters, longer ones go to the notes folder with a pointer; a leading `/` is
   neutralised so a message cannot run a command. A message never approves anything.
   Re-validated at delivery (incarnation, scope, cancellation); survives a restart

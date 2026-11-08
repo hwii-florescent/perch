@@ -526,6 +526,17 @@ impl HistoryDb {
         Ok(())
     }
 
+    /// Add a caveat to the receipt of mail already delivered (a steer Claude took but was not seen
+    /// joining the turn). Only a delivered row changes, and only its reason.
+    pub fn note_delivered_mail(&self, id: &str, reason: &str) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE agent_mail SET reason = ?2, updated_at = ?3 WHERE id = ?1 AND state = 'delivered'",
+            params![id, reason, now_millis()],
+        )?;
+        Ok(())
+    }
+
     /// Say why queued mail is still waiting, touching a row only when the reason changed.
     pub fn set_mail_wait(&self, ids: &[String], reason: &str) -> anyhow::Result<()> {
         let conn = self.conn.lock().unwrap();
@@ -1006,6 +1017,27 @@ mod tests {
         assert!(
             !db.undeliver_mail(&row.id, "late").unwrap(),
             "settled mail stays settled"
+        );
+    }
+
+    #[test]
+    fn a_caveat_is_added_to_delivered_mail_only() {
+        let Run { db, .. } = run();
+        let row = queued(&db, &send("a", "lead", "x", "k"));
+        db.note_delivered_mail(&row.id, "not yet joined").unwrap();
+        assert_eq!(
+            db.mail(&row.id).unwrap().unwrap().reason,
+            "",
+            "queued: untouched"
+        );
+        let ids = vec![row.id.clone()];
+        assert!(db.claim_mail(&ids).unwrap());
+        db.settle_mail(&ids, MailState::Delivered, "").unwrap();
+        db.note_delivered_mail(&row.id, "not yet joined").unwrap();
+        let done = db.mail(&row.id).unwrap().unwrap();
+        assert_eq!(
+            (done.state, done.reason.as_str()),
+            (MailState::Delivered, "not yet joined")
         );
     }
 

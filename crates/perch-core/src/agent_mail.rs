@@ -788,19 +788,28 @@ pub fn owed(still_queued: bool, run_ended: bool, addressed: &str, live: &Live) -
 /// Whether this agent's CLI has a follow-up queue a bridge can reach (Pi and OMP:
 /// `sendUserMessage` with `deliverAs: "followUp"`). Codex takes a start while busy as a steer into the
 /// running turn, and Claude's prompt queue feeds typed text into the running turn, so neither has a
-/// queue that waits for the turn to end: they keep the idle wait.
+/// queue that waits for the turn to end: a message that arrives during a turn is a steer for them.
 pub fn has_followup_queue(agent: &str) -> bool {
     matches!(agent, "pi" | "omp")
 }
 
+/// Whether a busy turn of this agent can take a message as a steer (the paths `perch steer` uses:
+/// Codex `turn/steer`, Claude's own prompt queue). Pi and OMP queue instead.
+pub fn can_steer(agent: &str) -> bool {
+    matches!(agent, "claude" | "codex")
+}
+
 /// How a message reached the receiving agent (owner decision, 2026-11-08: messages reach the agent
-/// at once). A steer is its own kind of message, so it is not one of these.
+/// at once). A `perch steer` is its own kind of message, so it is not one of these.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Handoff {
     /// The receiver was idle: the message started a turn.
     Started,
     /// The receiver was busy: it sits in the CLI's own follow-up queue, for after the running turn.
     QueuedInAgent,
+    /// The receiver was busy and its CLI has no follow-up queue (Claude, Codex): the message went
+    /// into the running turn as a steer.
+    Steered,
 }
 
 impl Handoff {
@@ -809,6 +818,7 @@ impl Handoff {
         match self {
             Self::Started => "",
             Self::QueuedInAgent => "queued_in_agent",
+            Self::Steered => "steered",
         }
     }
 }
@@ -855,7 +865,8 @@ pub enum Wait {
     /// The run has used its automatic deliveries to the lead (the number is the setting). Not a
     /// wait: nothing will change it, so the message is refused with this reason.
     WakeCap(u32),
-    /// Busy, and its CLI has no follow-up queue: it gets the message when its turn ends.
+    /// Busy, and Perch has no way into the running turn of this CLI (neither a follow-up queue nor a
+    /// steer): the message waits for the turn to end.
     NoFollowUpQueue(String),
 }
 
@@ -874,8 +885,8 @@ impl Wait {
                 if *count == 1 { " is" } else { "s are" }
             ),
             Self::NoFollowUpQueue(agent) => format!(
-                "the receiver is working and {agent} has no follow-up queue, so it gets this \
-                 when its turn ends"
+                "the receiver is working and Perch cannot put a message into a running {agent} \
+                 turn, so it gets this when its turn ends"
             ),
             Self::WakeCap(limit) => format!(
                 "this run has already delivered {limit} messages to its lead without anyone \
@@ -887,7 +898,8 @@ impl Wait {
 
 /// Where a message goes, or why it waits, over what is known and before the checks that need the
 /// terminal. An idle receiver starts a turn; a busy one whose CLI has a follow-up queue gets the
-/// message there; a busy one without waits. Never over a question or approval; unknown is not idle.
+/// message there; a busy Claude or Codex gets it as a steer into the running turn (owner, same day);
+/// any other busy one waits. Never over a question or approval; unknown is not idle.
 pub fn route(facts: &TargetFacts) -> Result<Handoff, Wait> {
     if !facts.alive {
         return Err(Wait::NotRunning);
@@ -899,10 +911,13 @@ pub fn route(facts: &TargetFacts) -> Result<Handoff, Wait> {
         return Err(Wait::Blocked);
     }
     let handoff = if facts.running {
-        if !facts.followup_queue {
+        if facts.followup_queue {
+            Handoff::QueuedInAgent
+        } else if can_steer(&facts.agent) {
+            Handoff::Steered
+        } else {
             return Err(Wait::NoFollowUpQueue(facts.agent.clone()));
         }
-        Handoff::QueuedInAgent
     } else if facts.idle {
         Handoff::Started
     } else {
@@ -910,7 +925,7 @@ pub fn route(facts: &TargetFacts) -> Result<Handoff, Wait> {
     };
     if facts.is_lead {
         // An idle lead whose children work is woken by the last of them, not by each; a busy lead
-        // only has the message queued behind its turn.
+        // only has the message queued behind (or steered into) its turn.
         if handoff == Handoff::Started && facts.working_children > 0 {
             return Err(Wait::WorkingChildren(facts.working_children));
         }
@@ -1217,14 +1232,62 @@ mod tests {
         assert_eq!(Handoff::QueuedInAgent.as_str(), "queued_in_agent");
     }
 
+    // Owner decision 2026-11-08 (amended): no follow-up queue means a steer, not the idle wait.
     #[test]
-    fn a_busy_receiver_without_a_follow_up_queue_keeps_the_idle_wait_and_says_so() {
-        for agent in ["codex", "claude", "opencode", ""] {
+    fn a_busy_claude_or_codex_gets_the_message_as_a_steer() {
+        assert_eq!(route(&busy("codex")), Ok(Handoff::Steered));
+        assert_eq!(route(&busy("claude")), Ok(Handoff::Steered));
+        assert_eq!(Handoff::Steered.as_str(), "steered");
+        // An idle one still starts a turn.
+        let idle = TargetFacts {
+            agent: "claude".into(),
+            ..idle_lead()
+        };
+        assert_eq!(route(&idle), Ok(Handoff::Started));
+    }
+
+    #[test]
+    fn a_busy_receiver_perch_cannot_steer_waits_for_its_turn_to_end_and_says_so() {
+        for agent in ["opencode", ""] {
             let wait = route(&busy(agent)).unwrap_err();
             assert_eq!(wait, Wait::NoFollowUpQueue(agent.into()));
-            assert!(wait.reason().contains("no follow-up queue"), "{agent}");
             assert!(wait.reason().contains("when its turn ends"));
         }
+    }
+
+    #[test]
+    fn a_steer_never_goes_over_a_question_or_with_unknown_state() {
+        for agent in ["claude", "codex"] {
+            for change in [
+                (|f: &mut TargetFacts| f.blocked = true) as fn(&mut TargetFacts),
+                |f| f.request_open = true,
+                |f| f.reported = false,
+                |f| f.alive = false,
+            ] {
+                let mut facts = busy(agent);
+                change(&mut facts);
+                assert!(route(&facts).is_err(), "{agent}");
+            }
+            let mut unknown = busy(agent);
+            unknown.running = false;
+            assert_eq!(route(&unknown), Err(Wait::NotIdle));
+        }
+    }
+
+    #[test]
+    fn a_steer_into_a_busy_lead_spends_a_wake_like_a_queued_follow_up() {
+        let lead = TargetFacts {
+            working_children: 2,
+            ..busy("claude")
+        };
+        assert_eq!(route(&lead), Ok(Handoff::Steered));
+        assert_eq!(
+            route(&TargetFacts {
+                wakes: DEFAULT_WAKES_PER_RUN,
+                ..lead
+            }),
+            Err(Wait::WakeCap(DEFAULT_WAKES_PER_RUN))
+        );
     }
 
     #[test]

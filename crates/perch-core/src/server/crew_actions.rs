@@ -515,6 +515,30 @@ fn interrupt(
     }
 }
 
+/// What a Claude steer's receipt says when the text was taken but not yet seen joining the turn.
+pub(super) const NOT_JOINED: &str = "Claude took the text but did not show it joining the running turn yet: it \
+     holds it in its own queue, to feed into the turn at its next step or to start a turn with when \
+     this one ends";
+
+/// Whether Claude's transcript shows the steer `marker` (its mail id) joining the running turn,
+/// looked for up to [`ABSORB`]. Shared by `perch steer` and a message delivered as a steer.
+pub(super) async fn wait_absorbed(key: AgentKey, marker: String) -> bool {
+    let deadline = tokio::time::Instant::now() + ABSORB;
+    let mut joined = false;
+    loop {
+        let (key, marker) = (key.clone(), marker.clone());
+        joined = tokio::task::spawn_blocking(move || {
+            crate::native_ui::claude::steer_absorbed_in_session(&key, &marker)
+        })
+        .await
+        .unwrap_or(joined);
+        if joined || tokio::time::Instant::now() >= deadline {
+            return joined;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
 /// The provider's answer to a steer, and for Claude the transcript's.
 async fn confirm_steer(
     app: &AppState,
@@ -538,30 +562,10 @@ async fn confirm_steer(
                 // Claude took the text (its `UserPromptSubmit` hook); whether its queue fed it into the
                 // running turn is in its transcript.
                 settle(MailState::Delivered, "");
-                let deadline = tokio::time::Instant::now() + ABSORB;
-                let mut joined = false;
-                loop {
-                    let (key, marker) = (key.clone(), id.clone());
-                    joined = tokio::task::spawn_blocking(move || {
-                        crate::native_ui::claude::steer_absorbed_in_session(&key, &marker)
-                    })
-                    .await
-                    .unwrap_or(joined);
-                    if joined || tokio::time::Instant::now() >= deadline {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(250)).await;
-                }
-                if joined {
+                if wait_absorbed(key, id.clone()).await {
                     (Outcome::Confirmed, String::new())
                 } else {
-                    (
-                        Outcome::NotConfirmed,
-                        "Claude took the text but did not show it joining the running turn yet: it \
-                         holds it in its own queue, to feed into the turn at its next step or to \
-                         start a turn with when this one ends"
-                            .into(),
-                    )
+                    (Outcome::NotConfirmed, NOT_JOINED.into())
                 }
             }
         },

@@ -656,15 +656,16 @@ const QUIET: Duration = Duration::from_secs(2);
 /// Deliver one prompt, everything checked and written inside one critical section under the authority
 /// lock that every PTY write and lease change also takes (`dispatch_under_current_lease`): no input
 /// reached the PTY from any client for [`QUIET`] (unknown counts as recent), the receiver is still
-/// idle, or busy with a CLI that has a follow-up queue, and nothing open (`recheck`, which says which),
-/// its input line is empty (Claude: its real process and an empty prompt; the others: nothing typed, no
-/// dialog or overlay), then claim, queue the confirmation with the bridge and, for Claude only (idle
-/// only), paste. The input lease is the holder's current one, left exactly as it was; with no holder it
-/// is borrowed for this call and returned. Pi, OMP and Codex take the prompt through their bridge and
-/// write nothing to the terminal; the Pi/OMP extension queues it as a follow-up when a turn runs
-/// (Codex would take a busy start as a steer, which is why `route` makes it wait for idle). The
-/// confirmation is Claude's `UserPromptSubmit` hook or the bridge's own answer; an unconfirmed write is
-/// never repeated.
+/// idle, or busy with a CLI that takes it (a follow-up queue, or a steer), and nothing open (`recheck`,
+/// which says which), its input line is empty (Claude: its real process and an empty prompt; the others:
+/// nothing typed, no dialog or overlay), then claim, queue the confirmation with the bridge and, for
+/// Claude only, paste. The input lease is the holder's current one, left exactly as it was; with no
+/// holder it is borrowed for this call and returned. Pi, OMP and Codex take the prompt through their
+/// bridge and write nothing to the terminal; the Pi/OMP extension queues it as a follow-up when a turn
+/// runs, and a busy Codex gets `turn/steer` (`enqueue_steer`, as `perch steer` does). A busy Claude gets
+/// the same verified paste as an idle one, which its own prompt queue feeds into the running turn.
+/// The confirmation is Claude's `UserPromptSubmit` hook or the bridge's own answer; an unconfirmed write
+/// is never repeated.
 fn deliver_native(
     app: &AppState,
     // The tab (owns the PTY, leases and lifecycle), the agent whose bridge it is, and that bridge.
@@ -699,19 +700,26 @@ fn deliver_native(
             if !claim() {
                 return Ok(Delivery::Held(Wait::Working));
             }
-            // A message that starts a turn opens its change record. One queued behind a running turn
-            // opens none now, so the running turn's record is left alone.
-            let boundary = if handoff == Handoff::QueuedInAgent {
-                Ok(())
-            } else {
+            // A message that starts a turn opens its change record. One queued behind, or steered into,
+            // a running turn opens none now, so the running turn's record is left alone.
+            let boundary = if handoff == Handoff::Started {
                 app.agent_runtime.record_turn_boundary(key, true)
+            } else {
+                Ok(())
             };
             if let Err(error) = boundary {
                 return Ok(Delivery::NotSent(format!(
                     "could not record the turn's start: {error}"
                 )));
             }
-            let reply = match bridge.enqueue(delivery_id, Some(prompt)) {
+            // A steer goes the way `perch steer` does: Codex's `turn/steer` through the bridge, and
+            // Claude's own prompt queue (the same verified write as a start, below).
+            let reply = if handoff == Handoff::Steered && agent.agent_id != "claude" {
+                bridge.enqueue_steer(delivery_id, prompt)
+            } else {
+                bridge.enqueue(delivery_id, Some(prompt))
+            };
+            let reply = match reply {
                 Ok(reply) => reply,
                 Err(error) => return Ok(Delivery::NotSent(error.to_string())),
             };
@@ -729,6 +737,30 @@ fn deliver_native(
         Ok(Some(delivery)) => delivery,
         Ok(None) => Delivery::Held(Wait::RecentInput),
         Err(error) => Delivery::Held(Wait::Input(error.to_string())),
+    }
+}
+
+/// Claude took a message steered into its running turn; whether its queue fed it into the turn is in
+/// its transcript, as for `perch steer`. If it is not seen joining, the receipt says so (it stays
+/// delivered: Claude holds it and will use it). Off the delivery loop, since it can take 25 s.
+async fn check_joined(app: AppState, row: MailRow) {
+    let Some((tab, _)) = AppWorld(&app).target_key(&row.target_session_id) else {
+        return;
+    };
+    let Some(agent) = app.agent_runtime.bridge_key(&tab) else {
+        return;
+    };
+    if agent.agent_id != "claude" || super::crew_actions::wait_absorbed(agent, row.id.clone()).await
+    {
+        return;
+    }
+    if app
+        .db
+        .note_delivered_mail(&row.id, super::crew_actions::NOT_JOINED)
+        .is_ok()
+    {
+        notify_session_updated(&app, &row.target_session_id);
+        notify_session_updated(&app, &row.sender_session_id);
     }
 }
 
@@ -767,6 +799,9 @@ pub(super) async fn run_deliveries(app: AppState) {
                     if let Ok(Some(row)) = app.db.mail(id) {
                         notify_session_updated(&app, &row.target_session_id);
                         notify_session_updated(&app, &row.sender_session_id);
+                        if row.state == MailState::Delivered && row.handoff == "steered" {
+                            tokio::spawn(check_joined(app.clone(), row));
+                        }
                     }
                 }
             }
@@ -1006,9 +1041,10 @@ mod tests {
     }
 
     // Codex (a busy start joins the running turn) and Claude (its queue feeds the running turn) have no
-    // follow-up queue: they keep the idle wait, the receipt says why, and once idle it is a plain start.
+    // follow-up queue: a message that arrives during a turn is a steer into it (owner, same day), the
+    // receipt says steered, and once idle it is a plain start.
     #[tokio::test]
-    async fn a_busy_codex_or_claude_keeps_the_idle_wait_and_the_receipt_says_so() {
+    async fn a_busy_codex_or_claude_gets_the_message_as_a_steer_and_the_receipt_says_steered() {
         for agent in ["codex", "claude"] {
             let run = run();
             let row = send(&run.db, "lead", "child", "later", "k");
@@ -1021,25 +1057,59 @@ mod tests {
                 reported: true,
                 ..Default::default()
             };
-            let Pass::Waiting(reason) = pass(&run.db, &world, "child", 0) else {
-                panic!("{agent} must wait for idle");
+            let Pass::Sent { ids, reply } = pass(&run.db, &world, "child", 0) else {
+                panic!("{agent} is steered at once");
             };
-            assert!(reason.contains("no follow-up queue"), "{reason}");
-            assert!(world.written.borrow().is_empty());
-            assert_eq!(state_of(&run.db, &row.id), (MailState::Queued, reason));
+            settle(&run.db, &ids, reply).await;
+            let delivered = run.db.mail(&row.id).unwrap().unwrap();
+            assert_eq!(delivered.state, MailState::Delivered);
+            assert_eq!(handoff_of(&delivered), "steered");
+            assert_eq!(mail_json(&delivered)["handoff"], "steered");
+            // A question or approval open still makes it wait, with the reason.
+            let again = send(&run.db, "lead", "child", "more", "k2");
+            world.facts.borrow_mut().request_open = true;
+            let Pass::Waiting(reason) = pass(&run.db, &world, "child", 0) else {
+                panic!("an open question holds a steer");
+            };
+            assert_eq!(state_of(&run.db, &again.id), (MailState::Queued, reason));
             // Its turn ended: now a plain start, with no handoff word.
-            world.facts.borrow_mut().running = false;
-            world.facts.borrow_mut().idle = true;
+            {
+                let mut facts = world.facts.borrow_mut();
+                facts.request_open = false;
+                facts.running = false;
+                facts.idle = true;
+            }
             let Pass::Sent { ids, reply } = pass(&run.db, &world, "child", 0) else {
                 panic!("idle now");
             };
             settle(&run.db, &ids, reply).await;
-            let delivered = run.db.mail(&row.id).unwrap().unwrap();
+            let delivered = run.db.mail(&again.id).unwrap().unwrap();
             assert_eq!(
                 (delivered.state, handoff_of(&delivered)),
                 (MailState::Delivered, "")
             );
         }
+    }
+
+    // A CLI Perch cannot steer keeps the idle wait, and the receipt says so.
+    #[test]
+    fn a_busy_receiver_perch_cannot_steer_keeps_the_idle_wait() {
+        let run = run();
+        let row = send(&run.db, "lead", "child", "later", "k");
+        let world = Fake::idle(Live::Known(Some(run.child_incarnation.clone())), false);
+        *world.facts.borrow_mut() = TargetFacts {
+            agent: "opencode".into(),
+            running: true,
+            alive: true,
+            reported: true,
+            ..Default::default()
+        };
+        let Pass::Waiting(reason) = pass(&run.db, &world, "child", 0) else {
+            panic!("it must wait for idle");
+        };
+        assert!(reason.contains("when its turn ends"), "{reason}");
+        assert!(world.written.borrow().is_empty());
+        assert_eq!(state_of(&run.db, &row.id), (MailState::Queued, reason));
     }
 
     #[test]

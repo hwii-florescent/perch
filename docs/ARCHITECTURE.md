@@ -349,39 +349,47 @@ contract the tests hold it to.
   as the optional `handoff` word (`agent_mail::Handoff`, column `agent_mail.handoff`, `CrewLatest.handoff`,
   `perch send`/`inbox` JSON; absent from an older core): none = it started a turn ("delivered"),
   `queued_in_agent` = it sits in the CLI's own follow-up queue for after the running turn ("queued in
-  the agent"), `steered` = it joined the running turn (a `steer` row, `perch steer`; derived from the kind).
+  the agent"), `steered` = it joined the running turn: a `steer` row (`perch steer`, derived from the
+  kind), or a message to a busy Claude or Codex (stored on the row).
   The agent's acknowledgement confirms it took the text, not that the follow-up has started; Perch records
   the hand-off from the state it re-read under the lock, so a Pi/OMP turn that ended between that read and
   the extension's own `isIdle()` shows `queued_in_agent` although it started a turn.
-- *Messages reach the receiving agent at once; delivery never steers* (a steer is a separate, explicit
-  action: see "Family strip actions"). `agent_mail::route(facts)` decides, over: the recorded incarnation
+- *Messages reach the receiving agent at once.* A CLI with no follow-up queue (Claude, Codex) gets a
+  message that arrives during a turn as a steer into the running turn (owner decision 2026-11-08,
+  amended), through the paths `perch steer` uses (see "Family strip actions"); `perch steer` itself stays
+  the explicit action. `agent_mail::route(facts)` decides, over: the recorded incarnation
   is still its live one; its runtime is alive and its native bridge has reported; nothing is blocked and
   no question or approval is open (that always waits, with the reason); and then
   1. **idle** (lifecycle Idle or Done, the bridge says no turn runs) → the message **starts a turn**; for
      a lead, no child may be working (an idle lead is woken by the last of them, not each);
   2. **a turn is running** and the CLI has a follow-up queue (`has_followup_queue`: Pi, OMP) → it goes into
      that queue (`QueuedInAgent`), with no working-children wait;
-  3. **a turn is running** and the CLI has none (Codex, Claude) → it waits for idle as before and the
-     receipt's reason says so ("the receiver is working and codex has no follow-up queue, so it gets this
-     when its turn ends");
-  4. anything else (state unreadable, lifecycle not provably idle) is not idle and waits.
-  In 1 and 2 the input line must also be readable and empty (a person's draft, a dialog or an overlay is
+  3. **a turn is running** and the CLI has none but Perch can steer it (Codex, Claude: `can_steer`) → the
+     message **steers** the running turn (`Steered`, receipt "steered"); a lead's wake rules apply as in 2;
+  4. **a turn is running** and the CLI is neither (anything else) → it waits for idle and the receipt's
+     reason says so ("... Perch cannot put a message into a running opencode turn, so it gets this when its
+     turn ends");
+  5. anything else (state unreadable, lifecycle not provably idle) is not idle and waits.
+  In 1 to 3 the input line must also be readable and empty (a person's draft, a dialog or an overlay is
   not empty), and a lead must have fewer automatic wakes in the run than the wake limit (10 by default; a
-  follow-up spends one too; at the limit the message is not delivered, with the reason). Otherwise nothing
-  is written and the message stays `queued` with the reason. The loop runs the moment something is queued (`mail_notify`), so "at once" is one pass, not a
-  poll. Nothing wakes a sleeping session, relaunches an exited one or restarts a process.
+  follow-up or a steer spends one too; at the limit the message is not delivered, with the reason).
+  Otherwise nothing is written and the message stays `queued` with the reason. The loop runs the moment
+  something is queued (`mail_notify`), so "at once" is one pass, not a poll. Nothing wakes a sleeping
+  session, relaunches an exited one or restarts a process.
 - *Per provider.* Pi and OMP: the bridge's `prompt`, which the extension turns into
   `sendUserMessage(text, {deliverAs: "followUp"})` when a turn runs and a plain start when idle
-  (`pi-extension.test.mjs` checks both). Codex: `turn/start` through the bridge, only when idle, because
-  Codex does not refuse a busy start (it joins the running turn as a steer, not a queue; slice 0), so it
-  has no follow-up queue and keeps the idle wait. Claude: the bridge's prompt plus a paste into a verified
-  empty prompt, only when idle: Claude's prompt queue feeds text typed mid-turn into the running turn at
-  its next step (the behaviour `perch steer` uses), so it is a steer, not a follow-up, and Claude keeps the
-  idle wait. A queued follow-up marks the receiver's turn origin `Agent` (so the turn it later starts is
-  never read as a person's) without touching the running turn's change record. Every provider goes through one critical section (`dispatch_under_current_lease`, under
+  (`pi-extension.test.mjs` checks both). Codex: `turn/start` through the bridge when idle; when a turn
+  runs, `enqueue_steer` (`turn/steer` with the turn the bridge saw), the call `perch steer` makes, with no
+  PTY write. Claude: the bridge's prompt plus a paste into a verified empty prompt, idle or not: when a
+  turn runs, Claude's prompt queue feeds the text into it at its next step (the behaviour `perch steer`
+  uses). Its `UserPromptSubmit` hook confirms it took the text; then, off the delivery loop, its transcript
+  is read as for `perch steer` (`crew_actions::wait_absorbed`, up to 25 s) and, if the text is not seen
+  joining the turn, the delivered receipt gains that caveat (`note_delivered_mail`). A message that
+  steers or queues behind a running turn leaves the running turn's change record alone. Every provider
+  goes through one critical section (`dispatch_under_current_lease`, under
   `agent_operation_lock` and the runtime's authority lock, the one every PTY write and lease change takes):
   the PTY has heard no input from any client for 2 s, the receiver's state is re-read (idle, or busy with a
-  follow-up queue, nothing open), its
+  follow-up queue or a steer, nothing open), its
   input line is empty (Claude: its real PID and empty prompt, `claude::prepare_input`; the others: nothing
   typed, no dialog or overlay, `typed::input_ready`), then claim, enqueue the confirmation with the bridge
   and, for Claude only, paste. Typed into a shell (`terminal` provider) cannot receive messages.
