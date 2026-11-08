@@ -2540,6 +2540,9 @@ pub enum ServerMessage {
         policy: crate::mods::Policy,
         safe_mode: bool,
         folder: String,
+        /// The core computer's home folder (`home()` for a mod); empty when unknown.
+        #[serde(default)]
+        home: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

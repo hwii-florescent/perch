@@ -1,6 +1,6 @@
 import { placeFloat, resetLayoutState, resizeNode, showStackChild, toggleNode } from "./layoutState";
 import { cloneMod, currentMods, openMod, setLayout } from "./mods";
-import { runCommand } from "./modApp";
+import { bindKey, runCommand } from "./modApp";
 import { getPaneController, splitActiveTab } from "./tiledPanes";
 import { zoomIn, zoomOut, zoomReset } from "./zoom";
 import { tauriInvoke } from "./links";
@@ -66,6 +66,7 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
   "layout.switch": { description: "Show the named layout, or the next one", args: "{name?}", run: switchLayout },
   "layout.clone": { description: "Copy a layout and show the copy", args: "{name, as?}", run: clone(true) },
   "mod.clone": { description: "Copy a mod (or an example) as <name>-copy or `as`", args: "{name, as?}", run: clone(false) },
+  "key.bind": { description: "Set the key of a command (keys null: back to its default, \"\": none)", args: "{command, keys}", run: (args) => { const { command, keys } = (args ?? {}) as { command?: unknown; keys?: unknown }; if (typeof command !== "string" || !(keys === null || typeof keys === "string")) throw new Error("key.bind needs {command: <id>, keys: \"cmd+shift+y\" | \"\" | null}."); bindKey(command, keys); } },
   "mod.open": { description: "Show a mod's overlay", args: "{name}", run: (args) => openMod(word(args, "name") ?? needsId(args)) },
   "app.theme": { description: "Choose a theme by name", args: "{name}", run: (args) => usePerchStore.getState().updateSettings({ theme: word(args, "name") ?? "" }) },
   "app.zoom_in": { description: "Zoom in", args: "{}", run: () => zoomIn() },

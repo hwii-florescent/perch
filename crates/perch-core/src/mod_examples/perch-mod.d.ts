@@ -77,6 +77,13 @@ interface ModApi {
   /** The id of the layout shown (null: Perch as shipped), and the ids of the layouts that load. */
   layout(): string | null;
   layouts(): string[];
+  /** The computer's home folder, and the folder that holds `mods/`, `layouts/` and `themes/`. */
+  home(): string;
+  appHome(): string;
+  /** Where this copy floats (`{edge, align, vertical, dragging}`), null unless a layout floats its block. */
+  placement(): { edge: string; align: string; vertical: boolean; dragging: boolean } | null;
+  /** Plays Perch's own tone for a finished (`"done"`) or blocked (`"blocked"`) session. */
+  playSound(name: "done" | "blocked"): void;
 
   // The computer
   /** Runs a program (timeout ms, default 30 s, at most 10 min; output past 1 MiB is cut). A nonzero `code` is a result; it rejects if the program cannot start or runs out of time. `host` is an id from `hosts()`: it runs there over ssh instead of on this computer. */

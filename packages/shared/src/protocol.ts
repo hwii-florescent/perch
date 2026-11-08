@@ -3009,6 +3009,8 @@ export interface ModsStateMessage {
   policy: ModsPolicy;
   safeMode: boolean;
   folder: string;
+  /** The core computer's home folder (empty when unknown). */
+  home?: string;
   error?: string;
 }
 

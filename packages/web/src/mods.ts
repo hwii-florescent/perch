@@ -4,6 +4,7 @@ import { newId } from "./ids";
 import { commandList, runCommand, setLayoutInfo } from "./modApp";
 import { setSlotErrorReporter } from "./slots";
 import { registerThemes } from "./themes";
+import { usePerchStore } from "./store";
 import { socket } from "./ws";
 
 /** Mods: folders with a `main.js` that this page imports and runs with the person's full access, as
@@ -45,7 +46,7 @@ socket.onMessage((message) => {
     const { type: _type, requestId, ...state } = message;
     latest = state;
     registerThemes(state.themes ?? []);
-    setLayoutInfo({ layout: state.layout || null, layouts: (state.layouts ?? []).filter((l) => l.root).map((l) => l.id) });
+    setLayoutInfo({ layout: state.layout || null, layouts: (state.layouts ?? []).filter((l) => l.root).map((l) => l.id), home: state.home ?? "", folder: state.folder });
     loadFonts(state);
     watchers.forEach((watch) => watch());
     settle(requestId, state);
@@ -75,6 +76,19 @@ export function answerSnapshot(requestId: string, modId: string) {
 export function answerCommand(requestId: string, command: string, args?: unknown) {
   const reply = (text: string, error?: string) => socket.send({ type: "mods.snapshot", requestId, html: "", text, error: error ?? null });
   if (command === "list") return reply(JSON.stringify(commandList()));
+  if (command === "status") {
+    const state = usePerchStore.getState();
+    return reply(JSON.stringify({
+      layout: latest?.layout || null,
+      layouts: (latest?.layouts ?? []).map((l) => ({ id: l.id, error: l.error })),
+      mods: (latest?.mods ?? []).map((m) => ({ id: m.id, enabled: m.enabled, error: m.error })),
+      safeMode: latest?.safeMode ?? false,
+      focused: { sessionId: state.sessionId, projectId: state.activeProject?.cwd ?? null, workspaceId: state.activeWorkspaceId },
+      theme: state.settings?.theme ?? null,
+      dialogs: document.querySelectorAll('[role="dialog"]').length,
+      size: { width: window.innerWidth, height: window.innerHeight },
+    }));
+  }
   if (command === "shot") {
     void import("./shot").then(({ screenshot }) => screenshot()).then((picture) => reply(picture), (error) => reply("", error instanceof Error ? error.message : String(error)));
     return;

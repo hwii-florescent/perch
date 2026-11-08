@@ -109,6 +109,10 @@ approval not mattering much.
   `layout.reset`, `layout.clone`/`mod.clone {name, as?}` (the `clone` op of `mods.set`; a cloned layout is shown),
   `mod.open {name}`, `app.theme {name}`, `app.zoom_in|out|reset`, `tab.new|next|prev|close`, `pane.split {direction}`,
   `pane.zoom`, `pane.go {direction}` and `pane.swap {direction}`. They are the same typed commands a key or `api.run` uses.
+- **More of herdr's surface.** `home()`/`appHome()`, `placement()` (a floating mod's edge/align/dragging),
+  `playSound("done"|"blocked")`, a block `agent:focused` (the focused session's terminal), `key.bind {command, keys}`
+  (so an agent can set a key through `perch mod do`) and `perch mod status` (layout, focus, theme, dialogs, each mod's
+  and layout's error).
 - **Data a mod reads.** `props()` (a `mod:` block's `props` object, at most 4 KiB, reloads the copy when it changes),
   `theme()` (colors by herdr's names, read from the page's custom properties so a layout look or theme file shows),
   `settings()` (+ `dark`, `zoom`), `keys()`, `layout()`/`layouts()`, and `notify({icon, timeout})`.

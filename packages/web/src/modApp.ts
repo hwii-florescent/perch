@@ -4,6 +4,8 @@ import type { SessionSummary } from "@perch/shared";
 import { claimSlot, type SlotRender } from "./slots";
 import { prefersDark } from "./themes";
 import { zoomFactor } from "./zoom";
+import { nodeIds, shownLayout } from "./layoutState";
+import { playBlockedTone, playDoneTone } from "./sound";
 import { exec, getShared, listDir, onShared, readTextFile, setShared, statFile, watchPath, writeTextFile, type ExecResult, type FileStat, type OnHost } from "./modHost";
 import { modUi } from "./modUi";
 import type { WorkspaceProject, WorkspaceRecord } from "./store";
@@ -82,6 +84,13 @@ export interface ModApi {
   /** The id of the layout shown (null: Perch as shipped), and the ids of the layouts that load. */
   layout(): string | null;
   layouts(): string[];
+  /** The computer's home folder, and the folder that holds `mods/`, `layouts/` and `themes/`. */
+  home(): string;
+  appHome(): string;
+  /** Where this copy floats (`{edge, align, vertical, dragging}`), null unless a layout floats its block. */
+  placement(): { edge: string; align: string; vertical: boolean; dragging: boolean } | null;
+  /** Plays Perch's own tone for a finished (`"done"`) or blocked (`"blocked"`) session. */
+  playSound(name: "done" | "blocked"): void;
   /** A modal over the app: `draw(el, close)` fills it (and may return a cleanup). Esc or clicking
    * outside closes it, as does the mod being replaced. Returns `close`. */
   overlay(draw: Draw): () => void;
@@ -116,11 +125,13 @@ export const setCommandBridge = (next: CommandBridge) => {
 };
 /** For the app's own parts that run a command by name (a toast's action). */
 export const runCommand = (command: string, args?: unknown) => bridge.run(command, args);
+/** Rebinds a command's key as the person's setting (`key.bind`). */
+export const bindKey = (command: string, keys: string | null) => bridge.bind(command, keys);
 /** Every command a key, a mod or `perch mod do` can run. */
 export const commandList = () => bridge.list();
 
 /** Which layout is shown and which load; `mods.ts` sets it as the core reports (this file cannot import it). */
-let layoutInfo: { layout: string | null; layouts: string[] } = { layout: null, layouts: [] };
+let layoutInfo: { layout: string | null; layouts: string[]; home: string; folder: string } = { layout: null, layouts: [], home: "", folder: "" };
 export const setLayoutInfo = (next: typeof layoutInfo) => { layoutInfo = next; };
 
 /** A mod's default export: draws into `el` and may return what to undo when it is replaced. */
@@ -234,6 +245,14 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
     keys: () => bridge.keys?.() ?? [],
     layout: () => layoutInfo.layout,
     layouts: () => [...layoutInfo.layouts],
+    home: () => layoutInfo.home,
+    appHome: () => layoutInfo.folder.replace(/[\\/]mods[\\/]?$/, ""),
+    placement: () => {
+      const shown = shownLayout();
+      const node = shown && [...nodeIds(shown).values()].find((n) => n.float && n.type === "block" && n.content === `mod:${modId}`);
+      return node?.id ? ((getShared(`layout.float.${node.id}`) as { edge: string; align: string; vertical: boolean; dragging: boolean } | undefined) ?? null) : null;
+    },
+    playSound: (name) => { if (name === "done") playDoneTone(); else if (name === "blocked") playBlockedTone(); else throw new Error('playSound takes "done" or "blocked".'); },
     modId,
     store: usePerchStore,
     socket,

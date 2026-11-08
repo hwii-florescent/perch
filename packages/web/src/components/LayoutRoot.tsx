@@ -11,12 +11,18 @@ import { Sidebar } from "../Sidebar";
 import { ModView } from "./ModView";
 import { SplitCanvas } from "./SplitCanvas";
 import { TabBar } from "./TabBar";
+import { usePerchStore } from "../store";
 import { PersistentTerminal } from "../views/PersistentTerminal";
 import { WorkspaceTools } from "./WorkspaceTools";
 
 // The same card the stock window draws its three panes on.
 const CARD = "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--card-radius,12px)] bg-[var(--card-bg)]";
 const OUTLINE: CSSProperties = { borderStyle: "solid", borderWidth: "var(--card-border, 0px)", borderColor: "var(--overlay-0)", boxShadow: "var(--card-shadow, none)" };
+
+function FocusedAgent() {
+  const sessionId = usePerchStore((s) => s.sessionId);
+  return sessionId ? <PersistentTerminal active sessionId={sessionId} /> : <div className="inactive-session-pane">No session is focused.</div>;
+}
 
 /** One of Perch's own panes, or a mod's view, by the name a layout gives it. */
 function Block({ content, mods, props }: { content: string; mods: ModInfo[]; props?: Record<string, unknown> }) {
@@ -28,6 +34,8 @@ function Block({ content, mods, props }: { content: string; mods: ModInfo[]; pro
     case "git": return <WorkspaceTools tab="gitReview" />;
     case "status": return <StatusBar />;
   }
+  // The focused session's terminal, whichever it is now (herdr's `{agent: "focused"}`).
+  if (content === "agent:focused") return <FocusedAgent />;
   // A live terminal of a session. A terminal shows in one place at a time: if the session is also in
   // the canvas, put it in this block or the canvas, not both.
   if (content.startsWith("terminal:")) return <PersistentTerminal active sessionId={content.slice("terminal:".length)} />;

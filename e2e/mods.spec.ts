@@ -182,11 +182,12 @@ test("api.screenshot draws the running app into a PNG", async ({ page }) => {
 
 test("a block's props, theme() and layout() reach the mod in the running app", async ({ page }) => {
   fs.mkdirSync(MOD, { recursive: true });
-  fs.writeFileSync(path.join(MOD, "main.js"), "export default (el, api) => { el.dataset.seen = JSON.stringify({ props: api.props(), accent: api.theme().accent, layout: api.layout(), layouts: api.layouts().includes('e2e-look') }); el.textContent = 'props'; }");
+  fs.writeFileSync(path.join(MOD, "main.js"), "export default (el, api) => { el.dataset.seen = JSON.stringify({ props: api.props(), accent: api.theme().accent, layout: api.layout(), layouts: api.layouts().includes('e2e-look'), home: api.home().length > 1, appHome: api.appHome().endsWith('hub'), placement: api.placement() }); el.textContent = 'props'; }");
   fs.mkdirSync(path.dirname(LAYOUT), { recursive: true });
   fs.writeFileSync(LAYOUT, JSON.stringify({ name: "E2E look", type: "row", colors: { accent: "#ff8800" }, children: [
     { type: "block", content: "canvas" },
-    { type: "block", content: "mod:e2e-hello", size: { px: 200 }, props: { file: "notes.md", n: 3 } },
+    { type: "block", id: "pb", content: "mod:e2e-hello", size: { px: 200 }, props: { file: "notes.md", n: 3 }, float: { x: 0, y: 0, width: 220, height: 80, edge: "bottom", align: "end" } },
+    { type: "block", content: "agent:focused", size: { px: 100 } },
   ] }));
   await openMods(page);
   await expect(page.locator('[data-testid="layout-e2e-look"]')).toBeVisible({ timeout: 15000 });
@@ -194,5 +195,6 @@ test("a block's props, theme() and layout() reach the mod in the running app", a
   await page.keyboard.press("Escape");
   const holder = page.locator('[data-testid="layout-mod:e2e-hello"] [data-seen]');
   await expect(holder).toHaveAttribute("data-seen", /./, { timeout: 15000 });
-  expect(JSON.parse((await holder.getAttribute("data-seen"))!)).toEqual({ props: { file: "notes.md", n: 3 }, accent: "#ff8800", layout: "e2e-look", layouts: true });
+  expect(JSON.parse((await holder.getAttribute("data-seen"))!)).toEqual({ props: { file: "notes.md", n: 3 }, accent: "#ff8800", layout: "e2e-look", layouts: true, home: true, appHome: true, placement: { edge: "bottom", align: "end", vertical: false, dragging: false } });
+  await expect(page.locator('[data-testid="layout-agent:focused"]')).toBeVisible();
 });

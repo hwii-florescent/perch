@@ -889,7 +889,7 @@ const MOD_API: &str = include_str!("../../perch-core/src/mod_examples/perch-mod.
 
 const MOD_USAGE: &str ="usage: perch mod [list] [--json] | perch mod enable <id> | \
      perch mod disable <id> | perch mod open <id> | perch mod check <id> | \
-     perch mod dom <id|app> | perch mod shot [file.png] | perch mod api | perch mod examples | perch mod clone <example> [id] | perch mod install <owner/repo[/folder]> | \
+     perch mod dom <id|app> | perch mod shot [file.png] | perch mod status | perch mod api | perch mod examples | perch mod clone <example> [id] | perch mod install <owner/repo[/folder]> | \
      perch mod commands | perch mod do <command> [json] | perch mod remove <id> [mod|layout] | perch mod layout <id|stock>";
 
 /// The core answers 200 even when the screen said no; turn that into the CLI's error.
@@ -997,6 +997,15 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
             };
             mod_do_ok(&ask("mod/do", json!({ "command": command, "args": args }))?)?;
             println!("{command} ran on the person's screen");
+            Ok(())
+        }
+        ["status"] => {
+            let answer = ask("mod/do", json!({ "command": "status" }))?;
+            mod_do_ok(&answer)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&answer["result"]).unwrap_or_default()
+            );
             Ok(())
         }
         ["shot"] | ["shot", _] => {
@@ -1410,6 +1419,8 @@ Commands
                           (/abs/path or ~/path). Copy mods/<name>/ and layouts/<name>.json from a public GitHub repo (or one
                           folder with a main.js) into place; never overwrites, and prints warnings for
                           code that runs programs, reaches the network or touches files. Read it first.
+  perch mod status        What is on screen: the layout, focus, theme, open dialogs, and each mod's and
+                          layout's error.
   perch mod shot [file.png]
                           A picture of the app (drawn from the page: terminal canvases are copied, web
                           fonts fall back); writes perch-shot.png unless you name a file.
@@ -1523,7 +1534,7 @@ Mods
     path is in `perch mod`) is a tree: {'name': 'IDE', 'type': 'row', 'gap': 4, 'children': [...]}
     where a node is 'row' or 'column' (with children) or {'type': 'block', 'content': ...}, and
     content is one of sidebar, tabs, canvas (the open session's panes), files, git, status,
-    mod:<id> (a mod's view) or terminal:<session id> (that session's live shell; a terminal shows
+    mod:<id> (a mod's view; an optional 'props' object on the block reaches it as props()), agent:focused (the focused session's terminal) or terminal:<session id> (that session's live shell; a terminal shows
     in one place at a time, so not in the canvas as well). Any node may have 'size' ({'px': 240} or {'weight': 2}, default
     weight 1), 'hidden', 'padding'; rows and columns also 'gap'. Any node may also set a look,
     and the nearest one up the tree wins (the root's restyles the whole app, a column's only its
@@ -2059,6 +2070,7 @@ mod tests {
             "perch mod api",
             "perch mod dom <id|app>",
             "perch mod shot [file.png]",
+            "perch mod status",
             "perch mod layout <id|stock>",
             "(el, api) => cleanup?",
             "PERCH_MODS=off",

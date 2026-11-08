@@ -88,6 +88,7 @@ export function nodeIds(node: LayoutNode, into = new Map<string, LayoutNode>()):
 
 let shown: LayoutNode | null = null;
 export const setShownLayout = (root: LayoutNode | null) => { shown = root; };
+export const shownLayout = () => shown;
 
 /** `layout.toggle {id, hidden?}`: hide or show a node of the shown layout by its `id`. */
 export function toggleNode(args: unknown): void {

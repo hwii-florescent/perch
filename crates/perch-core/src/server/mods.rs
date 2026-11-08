@@ -644,6 +644,7 @@ fn state_message(app: &AppState, request_id: String, error: Option<String>) -> S
         safe_mode: policy.is_off(),
         policy,
         folder: app.memory_root.join("mods").display().to_string(),
+        home: std::env::var("HOME").unwrap_or_default(),
         error,
     }
 }

@@ -490,10 +490,11 @@ fn check(node: &Node, depth: usize, walk: &mut Walk) -> Result<(), String> {
         Node::Block(b) => {
             let known = BUILTIN.contains(&b.content.as_str())
                 || b.content.strip_prefix("mod:").is_some_and(plain_id)
-                || b.content.strip_prefix("terminal:").is_some_and(plain_id);
+                || b.content.strip_prefix("terminal:").is_some_and(plain_id)
+                || b.content == "agent:focused";
             if !known || b.padding > 200 || !size_ok(&b.size) {
                 return Err(format!(
-                    "block content \"{}\" must be one of {}, mod:<id> or terminal:<session id>",
+                    "block content \"{}\" must be one of {}, mod:<id>, terminal:<session id> or agent:focused",
                     b.content,
                     BUILTIN.join(", ")
                 ));
