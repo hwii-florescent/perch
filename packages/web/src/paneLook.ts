@@ -3,17 +3,19 @@
 import { useSyncExternalStore } from "react";
 import { PANE_GAP_PX } from "./splitSets";
 
-export interface PaneLook { gap: number; lone: boolean }
-export const STOCK_PANE_LOOK: PaneLook = { gap: PANE_GAP_PX, lone: false };
+export interface PaneLook { gap: number; lone: boolean; background?: string; headerAt: "top" | "bottom"; headerReveal: "always" | "hover"; headerHeight: number }
+export const STOCK_PANE_LOOK: PaneLook = { gap: PANE_GAP_PX, lone: false, headerAt: "top", headerReveal: "always", headerHeight: 28 };
 let look = STOCK_PANE_LOOK;
 const watchers = new Set<() => void>();
 
 export function setPaneLook(next: Partial<PaneLook> | null): void {
-  const merged = { ...STOCK_PANE_LOOK, ...next };
-  if (merged.gap === look.gap && merged.lone === look.lone) return;
+  // An unset field (undefined) is the stock value, not "keep the last one".
+  const merged = { ...STOCK_PANE_LOOK, ...Object.fromEntries(Object.entries(next ?? {}).filter(([, v]) => v !== undefined)) };
+  if (JSON.stringify(merged) === JSON.stringify(look)) return;
   look = merged;
   watchers.forEach((watch) => watch());
 }
 
+export const getPaneLook = () => look;
 export const usePaneLook = () =>
   useSyncExternalStore((watch) => (watchers.add(watch), () => void watchers.delete(watch)), () => look);

@@ -222,13 +222,13 @@ export function LayoutRoot({ root }: { root: LayoutNode }) {
   pointAtLayout(root);
   useSyncExternalStore(subscribeLayoutState, layoutStateVersion);
   const dark = useSyncExternalStore(watchDark, prefersDark);
-  const { theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus, movable, paneGap, paneLone } = root;
-  const look = JSON.stringify({ theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus, movable, paneGap, paneLone, dark });
+  const { theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus, movable, paneGap, paneLone, paneBackground, paneHeaderAt, paneHeaderReveal, paneHeaderHeight } = root;
+  const look = JSON.stringify({ theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus, movable, paneGap, paneLone, paneBackground, paneHeaderAt, paneHeaderReveal, paneHeaderHeight, dark });
   // A root background paints the window behind the cards.
   useEffect(() => {
     const { dark: _dark, ...rest } = JSON.parse(look);
     setRootLook(lookVars(rest, false));
-    setPaneLook({ gap: rest.paneGap, lone: rest.paneLone });
+    setPaneLook({ gap: rest.paneGap, lone: rest.paneLone, background: rest.paneBackground, headerAt: rest.paneHeaderAt, headerReveal: rest.paneHeaderReveal, headerHeight: rest.paneHeaderHeight });
     return () => { setRootLook({}); setPaneLook(null); };
   }, [look]);
   useEffect(() => { setShownLayout(root); return () => setShownLayout(null); }, [root]);

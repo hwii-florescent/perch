@@ -315,6 +315,10 @@ export interface Look {
   paneFocus?: string;
   paneGap?: number;
   paneLone?: boolean;
+  paneBackground?: string;
+  paneHeaderAt?: "top" | "bottom";
+  paneHeaderReveal?: "always" | "hover";
+  paneHeaderHeight?: number;
   movable?: boolean;
 }
 

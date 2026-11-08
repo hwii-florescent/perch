@@ -137,6 +137,17 @@ pub struct Look {
     pub pane_gap: Option<u32>,
     #[serde(rename = "paneLone", skip_serializing_if = "Option::is_none")]
     pub pane_lone: Option<bool>,
+    /// A pane's own background (a color or gradient, same rules as `background`).
+    #[serde(rename = "paneBackground", skip_serializing_if = "Option::is_none")]
+    pub pane_background: Option<String>,
+    /// The pane header: `top` (default) or `bottom`; `always` (default) or `hover` (drawn over the
+    /// terminal on pointer-over, so the terminal never resizes); and its height in px (16 to 64).
+    #[serde(rename = "paneHeaderAt", skip_serializing_if = "Option::is_none")]
+    pub pane_header_at: Option<String>,
+    #[serde(rename = "paneHeaderReveal", skip_serializing_if = "Option::is_none")]
+    pub pane_header_reveal: Option<String>,
+    #[serde(rename = "paneHeaderHeight", skip_serializing_if = "Option::is_none")]
+    pub pane_header_height: Option<u32>,
     /// `false` takes away the grip that drags a pane to another place in a split (default true).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub movable: Option<bool>,
@@ -302,14 +313,7 @@ fn look_ok(look: &Look) -> Result<(), String> {
     match &look.background {
         None => {}
         Some(Background::Css(background)) => {
-            let lower = background.to_ascii_lowercase();
-            if background.len() > 200
-                || background
-                    .chars()
-                    .any(|c| c.is_control() || matches!(c, ';' | '{' | '}'))
-                || lower.contains("url(")
-                || lower.contains("expression")
-            {
+            if !css_background_ok(background) {
                 return Err("background is a color or a gradient (no url())".into());
             }
         }
@@ -348,6 +352,21 @@ fn look_ok(look: &Look) -> Result<(), String> {
         || look.pane_border.is_some_and(|b| b > 8)
         || look.pane_focus.as_deref().is_some_and(|c| !hex(c))
         || look.pane_gap.is_some_and(|g| g > 48)
+        || look
+            .pane_header_at
+            .as_deref()
+            .is_some_and(|a| a != "top" && a != "bottom")
+        || look
+            .pane_header_reveal
+            .as_deref()
+            .is_some_and(|r| r != "always" && r != "hover")
+        || look
+            .pane_header_height
+            .is_some_and(|h| !(16..=64).contains(&h))
+        || look
+            .pane_background
+            .as_deref()
+            .is_some_and(|b| !css_background_ok(b))
     {
         return Err(
             "paneRadius and paneGap are at most 48, paneBorder at most 8 and paneFocus #rrggbb"
@@ -491,6 +510,17 @@ fn node_id(node: &Node) -> Option<&String> {
 
 fn hex_color(text: &str) -> bool {
     text.len() == 7 && text.starts_with('#') && text[1..].chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// A color or gradient as CSS text: short, one declaration, nothing that fetches.
+fn css_background_ok(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    text.len() <= 200
+        && !text
+            .chars()
+            .any(|c| c.is_control() || matches!(c, ';' | '{' | '}'))
+        && !lower.contains("url(")
+        && !lower.contains("expression")
 }
 
 /// `backgrounds/sky.jpg`: plain names only, no dots up, no absolute path.
@@ -936,11 +966,19 @@ mod tests {
             ),
             (
                 "pane-ok.json",
-                r##"{"type":"block","content":"canvas","paneRadius":2,"paneBorder":1,"paneFocus":"#ff8800","movable":false,"paneGap":10,"paneLone":true}"##,
+                r##"{"type":"block","content":"canvas","paneRadius":2,"paneBorder":1,"paneFocus":"#ff8800","movable":false,"paneGap":10,"paneLone":true,"paneBackground":"linear-gradient(#111, #222)","paneHeaderAt":"bottom","paneHeaderReveal":"hover","paneHeaderHeight":24}"##,
             ),
             (
                 "pane-gap.json",
                 r#"{"type":"block","content":"canvas","paneGap":99}"#,
+            ),
+            (
+                "pane-header.json",
+                r#"{"type":"block","content":"canvas","paneHeaderAt":"left"}"#,
+            ),
+            (
+                "pane-bg.json",
+                r#"{"type":"block","content":"canvas","paneBackground":"url(http://x/y)"}"#,
             ),
             (
                 "shadow.json",
@@ -1001,6 +1039,14 @@ mod tests {
             "movable survives to the page"
         );
         assert_eq!(
+            (
+                pane.look.pane_header_at.as_deref(),
+                pane.look.pane_header_reveal.as_deref(),
+                pane.look.pane_header_height
+            ),
+            (Some("bottom"), Some("hover"), Some(24))
+        );
+        assert_eq!(
             (pane.look.pane_gap, pane.look.pane_lone),
             (Some(10), Some(true))
         );
@@ -1024,6 +1070,8 @@ mod tests {
             "minmax",
             "pane-bad",
             "pane-gap",
+            "pane-header",
+            "pane-bg",
             "drawer-bad",
             "stack-bad-active",
             "stack-bad-header",

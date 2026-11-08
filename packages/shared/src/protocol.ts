@@ -2914,6 +2914,11 @@ export interface LayoutLook {
   /** Space between the canvas's panes (px, at most 48), and whether a tab's only pane is framed too. */
   paneGap?: number;
   paneLone?: boolean;
+  /** A pane's background, and its header: `top`|`bottom`, `always`|`hover` (over the terminal), height 16 to 64 px. */
+  paneBackground?: string;
+  paneHeaderAt?: "top" | "bottom";
+  paneHeaderReveal?: "always" | "hover";
+  paneHeaderHeight?: number;
   /** `false` takes away the grip that drags a pane to another place in a split (default true). */
   movable?: boolean;
   /** Takes the node out of the flow and draws it over the window at this place and size (px). */

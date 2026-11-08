@@ -130,6 +130,7 @@ export function SplitCanvas() {
   /** A pane's place plus the layout's pane frame (`paneBorder`, `paneFocus`); no frame unless a layout asks. */
   const frame = (id: string, focused: boolean): CSSProperties => ({
     ...slot(id),
+    background: paneLook.background,
     // Only a split's panes are framed, unless the layout says `paneLone` (a tab's only pane too).
     border: !split && !paneLook.lone ? undefined : `var(--pane-border, 0px) solid ${focused ? "var(--pane-focus, var(--overlay-0))" : "var(--overlay-0)"}`,
   });
@@ -275,7 +276,7 @@ export function SplitCanvas() {
       {tiledSessions.map((entry) => (
         <div
           key={entry.id}
-          className={cn("absolute z-10 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-soft bg-panel-bg", flushTop(entry.id) && "rounded-t-none")}
+          className={cn("group absolute z-10 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-soft bg-panel-bg", flushTop(entry.id) && "rounded-t-none")}
           style={frame(entry.id, entry.id === activeId)}
           data-testid={entry.id === sessionId ? "split-pane-session" : `split-pane-session-${entry.id}`}
           data-pane-id={entry.id}
@@ -285,7 +286,15 @@ export function SplitCanvas() {
         >
           {split && !zoomed && <PaneGrip id={entry.id} label={entryLabel(entry)} />}
           {/* One compact row owns the name, status and actions; no floating controls over the header. */}
-          <div className="flex h-7 shrink-0 items-center gap-1.5 px-1.5 text-xs text-subtext-0" data-testid={`pane-header-${entry.id}`}
+          <div
+            className={cn(
+              "flex shrink-0 items-center gap-1.5 bg-panel-bg px-1.5 text-xs text-subtext-0",
+              // `hover`: drawn over the terminal while the pointer is on the pane, so the terminal never resizes.
+              paneLook.headerReveal === "hover" && cn("absolute inset-x-0 z-20 opacity-0 transition-opacity group-hover:opacity-100", paneLook.headerAt === "bottom" ? "bottom-0" : "top-0"),
+              paneLook.headerReveal !== "hover" && paneLook.headerAt === "bottom" && "order-last",
+            )}
+            style={{ height: paneLook.headerHeight }}
+            data-testid={`pane-header-${entry.id}`}
             onContextMenu={(event) => { event.preventDefault(); useSplitSets.getState().openMenu(entry.id, event.clientX, event.clientY); }}>
             <Slot
               name="pane-header"

@@ -135,7 +135,7 @@ describe("a layout's frame and terminal look", () => {
     const probe = document.createElement("div");
     const probeRoot = createRoot(probe);
     await act(async () => probeRoot.render(<Probe />));
-    expect(now).toEqual({ gap: 14, lone: true });
+    expect(now).toMatchObject({ gap: 14, lone: true });
     await act(async () => root.render(<div />)); // the layout goes: the stock canvas is back
     expect(now).toEqual(STOCK_PANE_LOOK);
     act(() => probeRoot.unmount());

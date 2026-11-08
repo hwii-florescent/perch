@@ -1523,7 +1523,9 @@ Mods
     titlebar none (root 'trafficLights': [x, y] moves the macOS buttons); the 'layout.float' {id, edge?, align?} command sets or,
     with no edge, resets it; a mod reads shared('layout.float.<id>') = {edge, align, vertical, dragging}). Also on any node: 'shadow' ('sm'|'md'|'lg'), 'terminalPadding' (px) and
     'terminalOpacity' (0.1 to 1) for terminals under it, and for the canvas's panes 'paneRadius',
-    'paneBorder' (px) and 'paneFocus' (#rrggbb outline of the focused pane); 'paneGap' (px between panes, at most 48), 'paneLone': true (frame a tab's only pane too; panes are
+    'paneBorder' (px) and 'paneFocus' (#rrggbb outline of the focused pane); 'paneGap' (px between panes, at most 48), 'paneBackground' (color or gradient), 'paneHeaderAt' ('top'|'bottom'), 'paneHeaderReveal'
+    ('always'|'hover': drawn over the terminal on pointer-over) and 'paneHeaderHeight' (16 to 64 px),
+    'paneLone': true (frame a tab's only pane too; panes are
     framed only when split by default) and 'movable': false removes the
     grip that drags a pane to another place in a split; 'size' also takes 'min'
     and 'max' (px, along the parent's direction). The terminal keeps its own colors and font.
