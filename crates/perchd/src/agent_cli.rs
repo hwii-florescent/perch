@@ -1355,8 +1355,10 @@ Mods
   - main.js is an ES module whose default export is `(el, api) => cleanup?`: draw into `el` with
     plain DOM, no build step. `api` is `modId`, `store` (Perch's own zustand store: getState() has
     sessions, workspaces and the rest, subscribe() for live updates), `socket` (the app's client:
-    send any message, onMessage), `focusSession(id)` and `readFile(path)` (text of a file in the
-    open local project). It runs inside Perch's page with the person's full access, so it can do
+    send any message, onMessage), `focusSession(id)`, `readFile(path)` (text of a file in the
+    open local project), `commands()` (every app command: {id, description}, the ids Settings >
+    Keyboard binds), `run(id)` (runs one, like its key; false if unknown), `notify({title, body})`
+    (a toast) and `overlay((el, close) => cleanup?)` (a modal over the app; Esc closes it). It runs inside Perch's page with the person's full access, so it can do
     anything the app can, including start terminals through `socket`; a bug in it can break the page.
   - A layout changes the whole window, as in herdr. `layouts/<id>.json` (next to `mods/`, the
     path is in `perch mod`) is a tree: {'name': 'IDE', 'type': 'row', 'gap': 4, 'children': [...]}

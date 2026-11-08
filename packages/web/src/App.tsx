@@ -19,7 +19,8 @@ import { MobileHeader } from "./components/MobileHeader";
 import { MobileSwitcher } from "./components/MobileSwitcher";
 import { Toast } from "./components/Toast";
 import { useIsMobileWidth } from "./responsive";
-import { useLeaderKey } from "./keybinds";
+import { SHORTCUTS, dispatchShortcut, useLeaderKey } from "./keybinds";
+import { setCommandBridge } from "./modApp";
 import { usePerchStore } from "./store";
 import { MobilePaneShell, type MobilePaneKind } from "./components/MobilePaneShell";
 import { LaptopUnreachable, PairingGate } from "./components/PairingGate";
@@ -162,6 +163,13 @@ export default function App() {
     setKeybindHelpOpen(true);
   }, []);
   useLeaderKey({ openNavigator, openKeybindHelp, toggleDrawer: toggleTerminal });
+  // Mods run the same commands a key does.
+  useEffect(() => {
+    setCommandBridge({
+      list: () => SHORTCUTS.map(({ id, description }) => ({ id, description })),
+      run: (command) => dispatchShortcut(command, { openNavigator, openKeybindHelp, toggleDrawer: toggleTerminal }),
+    });
+  }, [openNavigator, openKeybindHelp, toggleTerminal]);
 
   // A rejected WebSocket handshake looks exactly like an unreachable host from
   // the browser's side, so ask the host which it is whenever the socket is

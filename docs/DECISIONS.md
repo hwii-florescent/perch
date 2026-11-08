@@ -28,6 +28,10 @@ approval not mattering much.
   does not reopen what was closed); `none` runs hidden; `perch mod open <id>` shows one now.
 - **A bad version never replaces a working one.** A new version is mounted beside the old and the
   old is removed only after it mounted; a failure shows its message and keeps the last good one.
+- **Commands, toasts, overlays.** `api.commands()` / `api.run(id)` are the key commands
+  (`keybinds.ts` SHORTCUTS, run through `dispatchShortcut`; `App.tsx` supplies their handlers),
+  `api.notify({title, body})` is a toast, `api.overlay((el, close) => cleanup?)` a modal that closes
+  with Esc or when the mod is replaced. Not yet: commands with arguments, popups and floating windows.
 - **Checking.** The page reports each load of a mod's revision (`mods.report`, capability
   `mods.report.v1`); `perch mod check <id>` waits for the current revision and exits nonzero with the
   error. It sees a throw, not a mod that mounts but draws wrongly.

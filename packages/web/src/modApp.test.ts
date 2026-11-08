@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("./store", () => ({ usePerchStore: { getState: () => ({}) } }));
 vi.mock("./ws", () => ({ socket: {} }));
-import { createSwapper, type ModMount } from "./modApp";
+import { createSwapper, setCommandBridge, type ModApi, type ModMount } from "./modApp";
 
 const drawing = (text: string, cleanup = vi.fn()): ModMount => (el) => { el.textContent = text; return cleanup; };
 
@@ -47,6 +47,31 @@ describe("an app module's versions", () => {
     expect(undoOne).not.toHaveBeenCalled();
     swapper.stop();
     expect(undoOne).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs app commands through the bridge and closes a mod's overlays when it is replaced", async () => {
+    const run = vi.fn((id: string) => id === "tabs.new");
+    setCommandBridge({ list: () => [{ id: "tabs.new", description: "New tab" }], run });
+    const host = document.createElement("div");
+    let api!: ModApi;
+    const cleanup = vi.fn();
+    const mod: ModMount = (_el, a) => {
+      api = a;
+      a.overlay((el) => { el.textContent = "dialog"; return cleanup; });
+    };
+    const swapper = createSwapper(host, vi.fn(), async () => mod);
+    await swapper.load("x", "m");
+    expect(api.commands()).toEqual([{ id: "tabs.new", description: "New tab" }]);
+    expect(api.run("tabs.new")).toBe(true);
+    expect(api.run("nope")).toBe(false);
+    expect(document.body.textContent).toContain("dialog");
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(document.body.textContent).not.toContain("dialog");
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    api.overlay(() => cleanup);
+    swapper.stop(); // the mod going away takes its open overlay with it
+    expect(document.body.textContent).not.toContain("dialog");
+    expect(cleanup).toHaveBeenCalledTimes(2);
   });
 
   it("undoes a version that finishes loading after the pane was closed", async () => {
