@@ -14,14 +14,17 @@ export interface FileTab {
   scope?: string;
   /** The file's path; "" for a review. */
   path: string;
-  kind?: "review" | "browser";
+  kind?: "review" | "browser" | "mod";
+  /** A mod's pane (`kind: "mod"`): the mod it shows and the props it was opened with. */
+  mod?: string;
+  props?: Record<string, unknown>;
   /** A file opened by a single click (VS Code's preview tab, shown in italics): the next
    * previewed file replaces it in place until it is edited, double-clicked or opened for real. */
   preview?: boolean;
 }
 
 // NUL cannot occur in a path, so a review never collides with a file.
-export const fileTabKey = (tab: FileTab) => `${tab.scope ?? tab.workspaceId}\n${tab.kind === "review" ? "\0review" : tab.kind === "browser" ? `\0browser\n${tab.path}` : tab.path}`;
+export const fileTabKey = (tab: FileTab) => `${tab.scope ?? tab.workspaceId}\n${tab.kind === "review" ? "\0review" : tab.kind === "browser" ? `\0browser\n${tab.path}` : tab.kind === "mod" ? `\0mod\n${tab.path}` : tab.path}`;
 
 /** A browser tab starts blank under a unique `blank:` path (a tab is keyed by its path, so two blank
  * pages need distinct ones); the page's own address lives in the webview, not the tab. */
@@ -33,6 +36,8 @@ interface FileTabsState {
   /** The file shown in the main area instead of the session, if any. */
   active: string | null;
   open: (workspaceId: string, path: string, kind?: FileTab["kind"], scope?: string) => void;
+  /** A new tab that shows a mod's view (herdr's `tab.new {mod, props}`); returns its key. */
+  openMod: (workspaceId: string, mod: string, props?: Record<string, unknown>) => string;
   close: (key: string) => void;
   /** Show `path` as the workspace's preview tab: in `replaceKey`'s slot (that preview tab goes,
    * unrecorded), else at the end. An already open file is just shown, preview or not. */
@@ -50,7 +55,7 @@ function loadTabs(): FileTab[] {
   try {
     const parsed: unknown = JSON.parse(readViewerStored(STORAGE_KEY) ?? "[]");
     return Array.isArray(parsed)
-      ? parsed.filter((tab): tab is FileTab => typeof tab?.workspaceId === "string" && typeof tab?.path === "string" && (tab.kind === undefined || tab.kind === "review" || tab.kind === "browser"))
+      ? parsed.filter((tab): tab is FileTab => typeof tab?.workspaceId === "string" && typeof tab?.path === "string" && (tab.kind === undefined || tab.kind === "review" || tab.kind === "browser" || (tab.kind === "mod" && typeof tab.mod === "string")))
       : [];
   } catch {
     return [];
@@ -66,6 +71,11 @@ export const useFileTabs = create<FileTabsState>((set, get) => ({
     const known = state.tabs.some((tab) => fileTabKey(tab) === key);
     return { tabs: known ? state.tabs : [...state.tabs, next], active: key };
   }),
+  openMod: (workspaceId, mod, props) => {
+    const tab: FileTab = { workspaceId, path: `${mod}:${crypto.randomUUID()}`, kind: "mod", mod, ...(props ? { props } : {}) };
+    set((state) => ({ tabs: [...state.tabs, tab], active: fileTabKey(tab) }));
+    return fileTabKey(tab);
+  },
   openPreview: (workspaceId, path, replaceKey, scope) => set((state) => {
     const next: FileTab = { workspaceId, path, preview: true, ...(scope ? { scope } : {}) };
     const key = fileTabKey(next);
@@ -83,7 +93,7 @@ export const useFileTabs = create<FileTabsState>((set, get) => ({
   )),
   close: (key) => {
     const closing = get().tabs.find((tab) => fileTabKey(tab) === key);
-    if (closing) recordClosedFile(closing);
+    if (closing && closing.kind !== "mod") recordClosedFile(closing);
     set((state) => ({
       tabs: state.tabs.filter((tab) => fileTabKey(tab) !== key),
       active: state.active === key ? null : state.active,

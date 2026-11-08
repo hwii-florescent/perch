@@ -93,7 +93,7 @@ function supported(workspaceId: string): boolean {
 async function openTab(tab: FileTab): Promise<void> {
   // A browser page has no core resource; it stays a local tab.
   // A terminal-scoped tab has no core resource either: other viewers would read it at the workspace's root.
-  if (tab.kind === "browser" || tab.scope || !supported(tab.workspaceId)) return;
+  if (tab.kind === "browser" || tab.kind === "mod" || tab.scope || !supported(tab.workspaceId)) return;
   const review = tab.kind === "review";
   const reply = await ask((requestId) => ({
     type: "surface.open",

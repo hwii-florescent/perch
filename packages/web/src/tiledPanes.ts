@@ -102,6 +102,23 @@ function resize(delta: number) {
   useSplitSets.getState().resize(split.ids, sizes, strip.path);
 }
 
+/** A mod's view as a new top-row tab, beside the active tab when `direction` is given (herdr's
+ * `tab.new {mod, props}` and `pane.split {direction, mod, props}`). Returns false without a workspace. */
+export function openModTab(mod: string, props?: Record<string, unknown>, direction?: "right" | "below"): boolean {
+  const state = usePerchStore.getState();
+  const workspace = effectiveWorkspace(state);
+  if (!workspace) return false;
+  const target = currentTabs().activeId;
+  const home = useSplitSets.getState().sets.find((set) => set.ids.includes(target ?? ""));
+  if (direction && target && (home?.ids.length ?? 1) >= MAX_SPLIT) return false;
+  const key = useFileTabs.getState().openMod(workspace.id, mod, props);
+  if (direction && target) {
+    useSplitSets.getState().zoom(null);
+    dropTab(key, target, direction === "right" ? "right" : "down");
+  }
+  return true;
+}
+
 let pendingSplit = false;
 /** Split the active tab with a new Terminal tab, placed exactly as if dragged onto that side of
  * it. The session is matched to the captured workspace/host. */

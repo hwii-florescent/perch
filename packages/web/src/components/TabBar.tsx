@@ -304,7 +304,7 @@ function ResourceTabButton({ tab, id, state, tabShape, dragging, separated }: {
   // Subscribing re-renders the tab when its page's title or icon changes (tabName reads the same store).
   const page = useBrowserPages((s) => (browser ? s.pages[id] : undefined));
   const name = tabName(tab);
-  const testId = review ? `review-tab-${tab.workspaceId}` : browser ? "browser-tab" : `file-tab-${tab.path}`;
+  const testId = review ? `review-tab-${tab.workspaceId}` : browser ? "browser-tab" : tab.kind === "mod" ? `mod-tab-${tab.mod}` : `file-tab-${tab.path}`;
   return (
     <span className={TAB_SLOT} data-tab-entry={id}>
       {separated && <span className={SEPARATOR} aria-hidden="true" data-testid="tab-separator" />}

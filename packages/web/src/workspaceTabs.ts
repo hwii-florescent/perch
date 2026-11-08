@@ -139,6 +139,7 @@ export function sessionLabel(session: SessionSummary): string {
 /** A resource tab's name: a file's basename, "Changes", or a page's title (else its host). */
 export function tabName(tab: FileTab): string {
   if (tab.kind === "review") return "Changes";
+  if (tab.kind === "mod") return tab.mod ?? tab.path;
   if (tab.kind === "browser") {
     const page = useBrowserPages.getState().pages[fileTabKey(tab)];
     const url = page?.url || (isBlankBrowser(tab) ? "" : tab.path);

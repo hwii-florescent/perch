@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ModInfo } from "@perch/shared";
 import { createSwapper } from "../modApp";
-import { modFileUrl, reportMod } from "../mods";
+import { currentMods, modFileUrl, reportMod, subscribeMods } from "../mods";
 import { GHOST_BUTTON } from "./ui/icon-button";
 
 /** A mod's view: its own JavaScript, run inside Perch with the person's full access. A newer version
@@ -40,4 +40,11 @@ export function ModOverlay({ mod, onClose }: { mod: ModInfo; onClose: () => void
       </div>
     </div>
   );
+}
+
+/** A mod shown as a tab or a tile of the canvas (`tab.new {mod}`, `pane.split {mod}`). */
+export function ModPane({ modId, props }: { modId: string; props?: Record<string, unknown> }) {
+  const mod = useSyncExternalStore(subscribeMods, currentMods)?.mods.find((candidate) => candidate.id === modId);
+  if (!mod?.enabled || mod.error) return <div className="inactive-session-pane">{`mod ${modId} is off or gone.`}</div>;
+  return <ModView mod={mod} props={props} />;
 }

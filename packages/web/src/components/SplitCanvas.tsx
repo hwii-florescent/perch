@@ -15,6 +15,7 @@ import { GHOST_BUTTON } from "./ui/icon-button";
 import { AgentIcon } from "./AgentIcon";
 import { DOT_GLYPH, sessionDotState, type AgentDotState } from "../statusDot";
 import { useTabOrderVersion } from "../tabOrder";
+import { ModPane } from "./ModView";
 import { WorkspaceBrowser } from "./WorkspaceBrowser";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
@@ -323,13 +324,15 @@ export function SplitCanvas() {
           style={frame(id, id === activeKey)}
           data-pane-id={id}
           data-pane-visible={tileVisible(id)}
-          data-testid={tab.kind === "review" ? "split-pane-review" : tab.kind === "browser" ? "split-pane-browser" : `split-pane-file-${tab.path}`}
+          data-testid={tab.kind === "review" ? "split-pane-review" : tab.kind === "browser" ? "split-pane-browser" : tab.kind === "mod" ? `split-pane-mod-${tab.mod}` : `split-pane-file-${tab.path}`}
           data-tab-id={id}
           onMouseDownCapture={() => focusResource(tab)}
           onFocusCapture={split ? () => focusResource(tab) : undefined}
         >
           {tab.kind === "review" ? (
             <WorkspaceGitReviewPane workspaceId={tab.scope ?? tab.workspaceId} />
+          ) : tab.kind === "mod" ? (
+            <ModPane modId={tab.mod ?? ""} props={tab.props} />
           ) : tab.kind === "browser" ? (
             <WorkspaceBrowser tabId={id} initialUrl={isBlankBrowser(tab) ? "" : tab.path} active={id === activeId} />
           ) : (

@@ -6,7 +6,7 @@ import { useFileTabs } from "./fileTabs";
 import { useSplitSets } from "./splitSets";
 import { registerDockviewController, type DockviewController } from "./dockview/dockviewController";
 import { SHORTCUTS } from "./keybinds";
-import { getPaneController, exitSplit, splitActiveTab } from "./tiledPanes";
+import { getPaneController, exitSplit, openModTab, splitActiveTab } from "./tiledPanes";
 
 const dock = { focusPaneDirection: vi.fn(), toggleMaximizeActive: vi.fn() } as unknown as DockviewController;
 const session = (id: string, createdAt: number) => ({ id, title: id, cwd: "/p", createdAt, status: "idle", workspaceId: "w", cliProviderId: "terminal" }) as SessionSummary;
@@ -93,4 +93,18 @@ it("falls back to Dockview for session-internal panes outside tiling", () => {
   useSplitSets.setState({ sets: [] });
   run("panes.focus.left");
   expect(dock.focusPaneDirection).toHaveBeenCalledWith("left");
+});
+
+it("a mod opens as a tab, or tiles beside the active tab, and closing it leaves no closed-tab record", () => {
+  useSplitSets.setState({ sets: [] });
+  expect(openModTab("clock", { zone: "utc" })).toBe(true);
+  const [tab] = useFileTabs.getState().tabs;
+  expect(tab).toMatchObject({ kind: "mod", mod: "clock", props: { zone: "utc" }, workspaceId: "w" });
+  expect(openModTab("clock", undefined, "right")).toBe(true);
+  const [, tiled] = useFileTabs.getState().tabs;
+  expect(useSplitSets.getState().sets[0]?.ids).toContain(`w\n\0mod\n${tiled!.path}`);
+  expect(localStorage.getItem("perch.closedTabs")).toBeNull();
+  useFileTabs.getState().close(`w\n\0mod\n${tab!.path}`);
+  expect(useFileTabs.getState().tabs).toHaveLength(1);
+  expect(localStorage.getItem("perch.closedTabs") ?? "[]").toBe("[]");
 });

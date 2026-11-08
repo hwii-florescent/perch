@@ -62,7 +62,7 @@ export function recordClosedTab(session: SessionSummary): void {
 }
 
 /** Remember a file or review tab that is being closed. */
-export function recordClosedFile(tab: { workspaceId: string; scope?: string; path: string; kind?: "review" | "browser" }): void {
+export function recordClosedFile(tab: { workspaceId: string; scope?: string; path: string; kind?: "review" | "browser" | "mod" }): void {
   write([{ kind: "file", workspaceId: tab.workspaceId, ...(tab.scope ? { scope: tab.scope } : {}), path: tab.path, ...(tab.kind === "review" ? { review: true } : tab.kind === "browser" ? { browser: true } : {}), closedAt: Date.now() }, ...read()]);
 }
 

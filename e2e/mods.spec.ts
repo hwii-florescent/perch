@@ -198,3 +198,31 @@ test("a block's props, theme() and layout() reach the mod in the running app", a
   expect(JSON.parse((await holder.getAttribute("data-seen"))!)).toEqual({ props: { file: "notes.md", n: 3 }, accent: "#ff8800", layout: "e2e-look", layouts: true, home: true, appHome: true, placement: { edge: "bottom", align: "end", vertical: false, dragging: false } });
   await expect(page.locator('[data-testid="layout-agent:focused"]')).toBeVisible();
 });
+
+test("pane.split {mod, props} tiles a mod beside the tab, and panes()/agents()/machines() answer", async ({ page }) => {
+  fs.mkdirSync(MOD, { recursive: true });
+  fs.writeFileSync(path.join(MOD, "main.js"), `export default (el, api) => {
+    if (api.props().pane) { el.dataset.pane = JSON.stringify(api.props()); el.textContent = 'pane copy'; return; }
+    el.textContent = 'launcher';
+    const t = setTimeout(() => {
+      el.dataset.ran = String(api.run('pane.split', { direction: 'right', mod: 'e2e-hello', props: { pane: 1 } }));
+      el.dataset.data = JSON.stringify({ machines: api.machines().map((m) => m.id), agents: Array.isArray(api.agents()), terminals: Array.isArray(api.terminals()), panes: api.panes().length });
+    }, 800);
+    return () => clearTimeout(t);
+  };`);
+  fs.mkdirSync(path.dirname(LAYOUT), { recursive: true });
+  fs.writeFileSync(LAYOUT, JSON.stringify({ name: "E2E look", type: "row", children: [
+    { type: "block", content: "canvas" },
+    { type: "block", content: "mod:e2e-hello", size: { px: 200 } },
+  ] }));
+  await openMods(page);
+  await expect(page.locator('[data-testid="layout-e2e-look"]')).toBeVisible({ timeout: 15000 });
+  await page.locator('[data-testid="layout-e2e-look"]').getByRole("button", { name: "Use" }).click();
+  await page.keyboard.press("Escape");
+  const launcher = page.locator('[data-testid="layout-mod:e2e-hello"] [data-ran]');
+  await expect(launcher).toHaveAttribute("data-ran", "true", { timeout: 15000 });
+  const data = JSON.parse((await launcher.getAttribute("data-data"))!);
+  expect(data.machines[0]).toBe("local");
+  expect(data.agents && data.terminals).toBe(true);
+  await expect(page.locator('[data-testid="split-pane-mod-e2e-hello"] [data-pane]')).toHaveAttribute("data-pane", '{"pane":1}', { timeout: 15000 });
+});

@@ -1527,7 +1527,7 @@ Mods
     projects(), focused(), subscribe()), commands (commands(), run(id, args), command({...}),
     bind()), floating surfaces (overlay, popup, window, notify), drawing Perch's own parts
     (slot(name, render): the toast, the sidebar's session-row, a tiled pane's pane-header and the
-    terminal-menu keep their behavior and come back if the mod throws; loop(frame) and frames(list, ms, show) for animation), props() (what a layout block's 'props' object gave this copy), theme() (colors by name), settings(), keys(), layout()/layouts(), notify({title, body, level, icon, timeout, action}), the computer (exec, readTextFile, writeTextFile, watch, ... each takes {host} from hosts() to act on a Settings > Hosts computer over ssh) and shared
+    terminal-menu keep their behavior and come back if the mod throws; loop(frame) and frames(list, ms, show) for animation), props() (what a layout block's 'props' object gave this copy), theme() (colors by name), settings(), keys(), layout()/layouts(), notify({title, body, level, icon, timeout, action}), the app's data (agents(), terminals(), panes(), machines(), knownAgents(), watchFolder(dir)), the computer (exec, readTextFile, writeTextFile, watch, ... each takes {host} from hosts() to act on a Settings > Hosts computer over ssh) and shared
     state between mods. It runs inside Perch's page with the person's full access, so it can do
     anything the app can; a bug in it can break the page.
   - A layout changes the whole window, as in herdr. `layouts/<id>.json` (next to `mods/`, the
@@ -1561,7 +1561,7 @@ Mods
     More node types and fields: {'type': 'stack', 'active': <child id>, 'header': 'tabs' | 'mod:<id>',
     'children': [...]} shows one child at a time (a header mod reads shared('layout.stack.<id>') and
     runs the 'layout.stack' command with {stack, child}); any node may have an 'id' (for the
-    'layout.toggle' {id, hidden?} and 'layout.stack' commands (also layout.show/hide/select/resize/reset/switch/clone, mod.clone/open, app.theme, app.zoom_*, tab.*, pane.split/zoom/go/swap: `perch mod commands`), `perch mod do ...`) and a 'title'
+    'layout.toggle' {id, hidden?} and 'layout.stack' commands (also layout.show/hide/select/resize/reset/switch/clone, mod.clone/open, app.theme, app.zoom_*, tab.* and pane.split (with a 'mod' and 'props', a tab or tile that shows a mod's view), pane.zoom/go/swap: `perch mod commands`), `perch mod do ...`) and a 'title'
     (its tab); rows and columns take 'divider' ({'width', 'color'}) and 'resizable' (default true:
     the boundaries drag, and the sizes are kept per layout on that device); 'windowDrag': true makes
     dragging a node move the desktop window; the root may set 'preview' (an .svg or .png beside the

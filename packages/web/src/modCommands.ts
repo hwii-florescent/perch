@@ -1,7 +1,8 @@
 import { placeFloat, resetLayoutState, resizeNode, showStackChild, toggleNode } from "./layoutState";
 import { cloneMod, currentMods, openMod, setLayout } from "./mods";
-import { bindKey, runCommand } from "./modApp";
-import { getPaneController, splitActiveTab } from "./tiledPanes";
+import { bindKey, runCommand, setPanesSource } from "./modApp";
+import { focusedSplit, getPaneController, openModTab, splitActiveTab } from "./tiledPanes";
+import { currentTabs, entryLabel } from "./workspaceTabs";
 import { zoomIn, zoomOut, zoomReset } from "./zoom";
 import { tauriInvoke } from "./links";
 import { usePerchStore } from "./store";
@@ -52,6 +53,25 @@ const clone = (layout: boolean) => later(async (args) => {
   if (layout) await setLayout(made);
 });
 
+setPanesSource(() => {
+  const { tabs, activeId } = currentTabs();
+  const shown = new Set(focusedSplit()?.ids ?? [activeId]);
+  return tabs.filter((entry) => shown.has(entry.id)).map((entry) => ({
+    id: entry.id,
+    kind: entry.kind === "session" ? "session" : entry.tab.kind ?? "file",
+    title: entryLabel(entry),
+    ...(entry.kind === "resource" && entry.tab.mod ? { mod: entry.tab.mod } : {}),
+    focused: entry.id === activeId,
+  }));
+});
+
+function openModOrThrow(mod: string, args: unknown, side?: "right" | "below") {
+  if (!currentMods()?.mods.some((candidate) => candidate.id === mod && candidate.enabled && !candidate.error)) throw new Error(`No working mod named ${mod}.`);
+  const props = (args as { props?: unknown }).props;
+  if (props !== undefined && (typeof props !== "object" || props === null || Array.isArray(props))) throw new Error("props is an object.");
+  if (!openModTab(mod, props as Record<string, unknown> | undefined, side)) throw new Error("Open a project first.");
+}
+
 export const TYPED_COMMANDS: Record<string, { description: string; args: string; run: (args: unknown) => void }> = {
   "session.open": { description: "Go to a session", args: "{id}", run: (args) => usePerchStore.getState().switchSession(needsId(args)) },
   "session.close": { description: "Delete a session", args: "{id}", run: (args) => usePerchStore.getState().deleteSession(needsId(args)) },
@@ -72,11 +92,11 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
   "app.zoom_in": { description: "Zoom in", args: "{}", run: () => zoomIn() },
   "app.zoom_out": { description: "Zoom out", args: "{}", run: () => zoomOut() },
   "app.zoom_reset": { description: "Zoom back to 100%", args: "{}", run: () => zoomReset() },
-  "tab.new": { description: "A new tab", args: "{}", run: () => void runCommand("tabs.new") },
+  "tab.new": { description: "A new tab; with `mod`, a tab that shows that mod (props reach it as props())", args: "{mod?, props?}", run: (args) => { const mod = word(args, "mod"); if (mod) openModOrThrow(mod, args); else void runCommand("tabs.new"); } },
   "tab.next": { description: "The next tab", args: "{}", run: () => void runCommand("tabs.next") },
   "tab.prev": { description: "The previous tab", args: "{}", run: () => void runCommand("tabs.prev") },
   "tab.close": { description: "Close the tab", args: "{}", run: () => void runCommand("tabs.close") },
-  "pane.split": { description: "Split the tab with a new terminal pane", args: "{direction: right | down}", run: (args) => splitActiveTab(word(args, "direction") === "down" ? "below" : "right") },
+  "pane.split": { description: "Split the tab with a new terminal pane, or with `mod`, a pane that shows that mod", args: "{direction: right | down, mod?, props?}", run: (args) => { const side = word(args, "direction") === "down" ? "below" : "right"; const mod = word(args, "mod"); if (mod) openModOrThrow(mod, args, side); else splitActiveTab(side); } },
   "pane.zoom": { description: "Zoom the focused pane (again: back)", args: "{}", run: () => getPaneController()?.toggleMaximizeActive() },
   "pane.go": { description: "Focus the neighbouring pane", args: "{direction}", run: (args) => getPaneController()?.focusPaneDirection?.(direction(args)) },
   "pane.swap": { description: "Swap the focused pane with its neighbour", args: "{direction}", run: (args) => getPaneController()?.swapPaneDirection?.(direction(args)) },

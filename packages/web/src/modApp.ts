@@ -12,6 +12,7 @@ import type { WorkspaceProject, WorkspaceRecord } from "./store";
 import { isRelayMode, relayBlobUrl } from "./relay/transport";
 import { usePerchStore } from "./store";
 import { workspaceRecord } from "./terminalScope";
+import { sessionDotState } from "./statusDot";
 import { socket } from "./ws";
 
 /** Colors by name plus which appearance is on. */
@@ -48,6 +49,10 @@ export interface ModApi {
   listDir(path: string, on?: OnHost): Promise<{ name: string; isDir: boolean }[]>;
   /** Calls `changed` when a file or folder's size or modified time changes (polled every 2 s). */
   watch(path: string, changed: () => void, on?: OnHost): () => void;
+  /** Resolves with the paths that changed in `dir` (its entries, one level down; polled every 2 s) the next time any does: loop `for (;;) { await api.watchFolder(dir); refresh(); }`. Rejects when the mod is replaced. */
+  watchFolder(dir: string, on?: OnHost): Promise<string[]>;
+  /** The agents a computer can start (Settings > Agents): `{id, name, installed, isDefault}`. Start one with `store.getState().createSessionOnHost(host, cwd, id)`. */
+  knownAgents(on?: OnHost): Promise<{ id: string; name: string; installed: boolean; isDefault: boolean }[]>;
   /** State every mod sees, kept across reloads on this screen: `shared(key)`, `setShared(key,
    * value)` (JSON values; `undefined` removes) and `onShared(fn)` for changes. */
   shared(key: string): unknown;
@@ -61,6 +66,14 @@ export interface ModApi {
   /** The computers in Settings > Hosts; an `id` goes in `exec`/file calls as `host`. */
   hosts(): { id: string; name: string; enabled: boolean }[];
   focused(): { sessionId: string | null; projectId: string | null; workspaceId: string | null };
+  /** The sessions that run an agent (not a plain terminal), with their status. */
+  agents(): { id: string; title: string; provider: string; status: "working" | "idle" | "blocked" | "done"; workspaceId?: string; hostId: string; focused: boolean }[];
+  /** The sessions that are plain terminals. */
+  terminals(): { id: string; title: string; cwd: string; workspaceId?: string; hostId: string; focused: boolean }[];
+  /** What the tab on screen shows: its tiles when split, else the one tab. `kind` is session, file, review, browser or mod. */
+  panes(): { id: string; kind: string; title: string; mod?: string; focused: boolean }[];
+  /** This computer (id "local") and the computers in Settings > Hosts, with whether they can be reached now. */
+  machines(): { id: string; name: string; state: "ready" | "loading" | "unavailable" }[];
   subscribe(changed: () => void): () => void;
   /** Draws one of Perch's own interface parts instead of the stock one (`SLOTS` in `slots.ts`:
    * `toast`, `session-row`). `render(el, {data, actions})` fills `el` and may return a cleanup; it
@@ -206,6 +219,32 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
       }, { fps: Math.min(60, 1000 / Math.max(16, every)) });
     },
     watch: (path, changed, on) => track(watchPath(path, changed, 2000, on)),
+    watchFolder: (dir, on) => new Promise<string[]>((resolve, reject) => {
+      const base = dir.replace(/\/$/, "");
+      let seen: Map<string, number> | undefined;
+      const entry = { stop: () => { clearInterval(timer); open.delete(entry.stop); reject(new Error("the mod was replaced")); } };
+      const scan = async () => {
+        const now = new Map<string, number>();
+        for (const item of (await listDir(dir, on)).slice(0, 200)) now.set(item.name, (await statFile(`${base}/${item.name}`, on).catch(() => ({ modified: 0 }))).modified ?? 0);
+        const before = seen;
+        seen = now;
+        if (!before) return;
+        const changed = [...new Set([...now.keys(), ...before.keys()])].filter((name) => now.get(name) !== before.get(name)).map((name) => `${base}/${name}`);
+        if (changed.length) { clearInterval(timer); open.delete(entry.stop); resolve(changed); }
+      };
+      const timer = setInterval(() => void scan().catch(() => {}), 2000);
+      void scan().catch(() => {});
+      open.add(entry.stop);
+    }),
+    knownAgents: async (on) => {
+      const host = on?.host ?? "local";
+      const read = () => usePerchStore.getState().agentManifestsByHost[host]?.manifests;
+      if (!read()) {
+        usePerchStore.getState().fetchAgentManifests(host);
+        await new Promise<void>((done) => { const stop = usePerchStore.subscribe(() => { if (read()) { stop(); clearTimeout(timer); done(); } }); const timer = setTimeout(() => { stop(); done(); }, 5000); });
+      }
+      return (read() ?? []).filter((m) => m.enabled !== false && m.supportedModes.includes("cli")).map((m) => ({ id: m.id, name: m.displayName, installed: m.available, isDefault: m.isDefault === true }));
+    },
     shared: getShared,
     setShared,
     onShared: (watch) => track(onShared(watch)),
@@ -216,6 +255,16 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
       const { hosts, fetchHosts } = usePerchStore.getState();
       if (!hosts.length) fetchHosts(); // the list is only loaded once Settings has been opened
       return hosts.map(({ id, name, enabled }) => ({ id, name, enabled }));
+    },
+    agents: () => usePerchStore.getState().sessions.filter((s) => s.cliProviderId !== "terminal").map((s) => ({ id: s.id, title: s.title, provider: s.cliProviderId ?? "", status: sessionDotState(s) as "working" | "idle" | "blocked" | "done", workspaceId: s.workspaceId, hostId: s.hostId ?? "local", focused: s.id === usePerchStore.getState().sessionId })),
+    terminals: () => usePerchStore.getState().sessions.filter((s) => s.cliProviderId === "terminal").map((s) => ({ id: s.id, title: s.title, cwd: s.cwd, workspaceId: s.workspaceId, hostId: s.hostId ?? "local", focused: s.id === usePerchStore.getState().sessionId })),
+    panes: () => panesOnScreen(),
+    machines: () => {
+      const s = usePerchStore.getState();
+      return [
+        { id: "local", name: "This computer", state: s.connected ? "ready" : "unavailable" } as const,
+        ...s.hosts.filter((host) => host.enabled).map((host) => ({ id: host.id, name: host.name, state: ({ connected: "ready", connecting: "loading" } as const)[s.hostStates[host.id]?.state as "connected"] ?? "unavailable" })),
+      ];
     },
     focused: () => {
       const s = usePerchStore.getState();
@@ -281,6 +330,10 @@ export async function importMod(src: string): Promise<ModMount> {
 
 /** Mounts a new version into `host`, and only once it has mounted removes the old one. A version that
  * fails to load or throws leaves the previous one on screen and reports why. */
+// The tab strip pulls in the whole file store, so the canvas code hands this in (modCommands) instead of modApp importing it.
+let panesOnScreen: () => ReturnType<ModApi["panes"]> = () => [];
+export const setPanesSource = (source: typeof panesOnScreen) => { panesOnScreen = source; };
+
 export function createSwapper(host: HTMLElement, report: (error: string | null) => void, importer: (src: string) => Promise<ModMount> = importMod) {
   let undo: (() => void) | undefined;
   let live = true;

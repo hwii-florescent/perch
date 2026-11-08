@@ -24,6 +24,14 @@ interface ModApi {
   hosts(): { id: string; name: string; enabled: boolean }[];
   workspaces(): { id: string; projectId: string; state: string }[];
   focused(): { sessionId: string | null; projectId: string | null; workspaceId: string | null };
+  /** The sessions that run an agent (not a plain terminal), with their status. */
+  agents(): { id: string; title: string; provider: string; status: "working" | "idle" | "blocked" | "done"; workspaceId?: string; hostId: string; focused: boolean }[];
+  /** The sessions that are plain terminals. */
+  terminals(): { id: string; title: string; cwd: string; workspaceId?: string; hostId: string; focused: boolean }[];
+  /** What the tab on screen shows: its tiles when split, else the one tab. `kind` is session, file, review, browser or mod. */
+  panes(): { id: string; kind: string; title: string; mod?: string; focused: boolean }[];
+  /** This computer (id "local") and the computers in Settings > Hosts, with whether they can be reached now. */
+  machines(): { id: string; name: string; state: "ready" | "loading" | "unavailable" }[];
   /** Calls `changed` after any of that changes. Returns the way to stop. */
   subscribe(changed: () => void): () => void;
 
@@ -96,6 +104,10 @@ interface ModApi {
   listDir(path: string, on?: { host?: string }): Promise<{ name: string; isDir: boolean }[]>;
   /** Calls `changed` when a file or folder's size or modified time changes (polled every 2 s). */
   watch(path: string, changed: () => void, on?: { host?: string }): () => void;
+  /** Resolves with the paths that changed in `dir` (its entries, one level down; polled every 2 s) the next time any does: loop `for (;;) { await api.watchFolder(dir); refresh(); }`. Rejects when the mod is replaced. */
+  watchFolder(dir: string, on?: { host?: string }): Promise<string[]>;
+  /** The agents a computer can start (Settings > Agents): `{id, name, installed, isDefault}`. Start one with `store.getState().createSession{ host?: string }(host, cwd, id)`. */
+  knownAgents(on?: { host?: string }): Promise<{ id: string; name: string; installed: boolean; isDefault: boolean }[]>;
   /** A text file of the open local project (relative path). */
   readFile(path: string): Promise<string>;
 
