@@ -186,9 +186,24 @@ describe("an app module's versions", () => {
     vi.unstubAllGlobals();
   });
 
+  it("frames steps through a list on a schedule, calling show only when the item changes", async () => {
+    let queued: ((now: number) => void) | undefined;
+    vi.stubGlobal("requestAnimationFrame", (fn: (now: number) => void) => { queued = fn; return 1; });
+    vi.stubGlobal("cancelAnimationFrame", () => { queued = undefined; });
+    let api!: ModApi;
+    const swapper = createSwapper(document.createElement("div"), vi.fn(), async () => (_el, a) => { api = a; });
+    await swapper.load("x", "m");
+    const shown: string[] = [];
+    api.frames(["a", "b", "c"], 100, (item) => shown.push(item));
+    for (const now of [0, 20, 110, 130, 215, 310, 420]) queued?.(now);
+    expect(shown).toEqual(["a", "b", "c", "b"]); // the 310 ms tick came too soon after 215 for 10 fps
+    swapper.stop();
+    vi.unstubAllGlobals();
+  });
+
   it("documents every member of the api in the types file `perch mod api` prints, and nothing else", () => {
     const types = readFileSync("../../crates/perch-core/src/mod_examples/perch-mod.d.ts", "utf8");
-    const declared = [...types.matchAll(/^  (\w+)[(:?]/gm)].map((m) => m[1]).sort();
+    const declared = [...types.matchAll(/^  (\w+)[(:?<]/gm)].map((m) => m[1]).sort();
     const { dispose: _dispose, ...api } = modApi("x");
     expect(declared).toEqual(Object.keys(api).sort());
     for (const name of Object.keys(SLOTS)) expect(types, name).toMatch(new RegExp(`^   \\*  ${name}\\s`, "m"));

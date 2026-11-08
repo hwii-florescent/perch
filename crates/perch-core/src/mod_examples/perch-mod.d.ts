@@ -60,6 +60,8 @@ interface ModApi {
   window(options: { key?: string; title?: string; width?: number; height?: number; at?: { x: number; y: number } }, draw: Draw): () => void;
   /** Calls `frame(ms)` (milliseconds since the loop began) before each repaint, at most `fps` times a second (default 60), and pauses while the page is hidden: for motion. Stops when the mod is replaced, or call the returned function. */
   loop(frame: (ms: number) => void, options?: { fps?: number }): () => void;
+  /** Steps through `list` every `every` ms (a spinner: ["⠋", "⠙", …], 90), calling `show(item, index)` when it changes; returns the way to stop. */
+  frames<T>(list: T[], every: number, show: (item: T, index: number) => void): () => void;
   /** A toast. `action` runs a command when it is clicked. */
   notify(note: { title: string; body?: string; level?: "info" | "warning" | "error"; action?: { command: string; args?: unknown } }): void;
 

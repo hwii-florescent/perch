@@ -104,6 +104,8 @@ approval not mattering much.
   also duplicates one of your own mods or layouts (as `<id>-copy`).
 - **Traffic lights.** Root `trafficLights: [x, y]` moves the macOS window buttons (desktop command
   `set_traffic_lights`, undone when the layout goes; `--titlebar-inset` follows). Not run in a real desktop window here.
+- **Animation.** `api.loop(frame, {fps})` runs on animation frames; `api.frames(list, ms, show)` is herdr's `.frames`
+  (a spinner list stepped on a schedule, `show` called only when the item changes). Both stop with the mod.
 - **Window controls.** `window.minimize`, `window.maximize` (toggle) and `window.close` are typed commands that call
   the desktop window's IPC (`capabilities/main.json` grants exactly those three beside start-dragging); in a browser they
   throw "in the desktop app". A layout that hides the title bar draws its own buttons and runs these.

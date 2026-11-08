@@ -79,6 +79,8 @@ export interface ModApi {
    * second (default 60), and pauses while the page is hidden: for motion. Stops when the mod is
    * replaced, or call the returned function. */
   loop(frame: (ms: number) => void, options?: { fps?: number }): () => void;
+  /** Steps through `list` every `every` ms (a spinner: ["⠋", "⠙", …], 90), calling `show(item, index)` when it changes; returns the way to stop. */
+  frames<T>(list: T[], every: number, show: (item: T, index: number) => void): () => void;
 }
 type Draw = (el: HTMLElement, close: () => void) => void | (() => void);
 
@@ -122,16 +124,7 @@ export function modApi(modId: string): ModApi & { dispose(): void } {
     open.add(gone);
     return gone;
   };
-  return {
-    dispose: () => [...open].forEach((close) => close()),
-    commands: () => bridge.list(),
-    run: (command, args) => bridge.run(command, args),
-    exec,
-    readTextFile,
-    writeTextFile,
-    statFile,
-    listDir,
-    loop: (frame, { fps = 60 } = {}) => {
+  const loop: ModApi["loop"] = (frame, { fps = 60 } = {}) => {
       let id = 0, last = -Infinity, begin = -1, stopped = false;
       const step = (now: number) => {
         if (stopped) return;
@@ -143,6 +136,23 @@ export function modApi(modId: string): ModApi & { dispose(): void } {
       };
       id = requestAnimationFrame(step);
       return track(() => { stopped = true; cancelAnimationFrame(id); });
+    };
+  return {
+    dispose: () => [...open].forEach((close) => close()),
+    commands: () => bridge.list(),
+    run: (command, args) => bridge.run(command, args),
+    exec,
+    readTextFile,
+    writeTextFile,
+    statFile,
+    listDir,
+    loop,
+    frames: (list, every, show) => {
+      let shown = -1;
+      return loop((ms) => {
+        const at = Math.floor(ms / Math.max(16, every)) % Math.max(1, list.length);
+        if (at !== shown) { shown = at; show(list[at]!, at); }
+      }, { fps: Math.min(60, 1000 / Math.max(16, every)) });
     },
     watch: (path, changed, on) => track(watchPath(path, changed, 2000, on)),
     shared: getShared,
