@@ -507,6 +507,72 @@ fn list(json_output: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// The waiting suggestions as lines a person can read and type an id from.
+fn render_suggestions(answer: &Value) -> String {
+    let items = answer["suggestions"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice);
+    if items.is_empty() {
+        return "no suggested task is waiting\n".into();
+    }
+    let mut text = String::new();
+    for item in items {
+        let field = |name: &str| item[name].as_str().unwrap_or("");
+        text += &format!("{}  {}  {}\n", field("id"), field("agent"), field("task"));
+    }
+    text + "\nTo start one, a person types `perch start <id>` (or `perch start all`) in this \
+            terminal, as `!perch start <id>` in Claude or Pi; `perch dismiss <id>` drops one. \
+            An agent running them is refused.\n"
+}
+
+fn suggestions(json_output: bool) -> Result<(), String> {
+    let answer = ask("suggestions", json!({}))?;
+    if json_output {
+        println!("{answer}");
+    } else {
+        print!("{}", render_suggestions(&answer));
+    }
+    Ok(())
+}
+
+/// `perch start <id|all>` and `perch dismiss <id>`: a person's verbs. The core does the answer
+/// only if a client typed this exact line in this terminal; the arguments go as typed.
+fn answer_suggestion(verb: &str, args: &[String]) -> Result<(), String> {
+    let usage = if verb == "start" {
+        "usage: perch start <id|all>  (ids: `perch suggestions`)"
+    } else {
+        "usage: perch dismiss <id>  (ids: `perch suggestions`)"
+    };
+    let [target] = args else {
+        return Err(usage.into());
+    };
+    if verb == "dismiss" && target == "all" {
+        return Err(usage.into());
+    }
+    let answer = ask("answer", json!({ "verb": verb, "target": target }))?;
+    for result in answer["results"].as_array().into_iter().flatten() {
+        let field = |name: &str| result[name].as_str().unwrap_or("");
+        let what = match field("outcome") {
+            "started" => format!("started as {}", field("session")),
+            other => other.to_string(),
+        };
+        let why = if field("reason").is_empty() {
+            String::new()
+        } else {
+            format!(": {}", field("reason"))
+        };
+        println!("{}  {what}{why}", field("id"));
+    }
+    match answer["outcome"].as_str() {
+        Some("refused") => Err(answer["reason"]
+            .as_str()
+            .filter(|reason| !reason.is_empty())
+            .unwrap_or("nothing was started")
+            .to_string()),
+        _ => Ok(()),
+    }
+}
+
 fn stop(args: &[String]) -> Result<(), String> {
     let [target] = args else {
         return Err("usage: perch stop <session>".into());
@@ -822,6 +888,13 @@ Commands
                           a --task belong to it. Up to 5 tasks a card, 10 waiting at once.
                           Write each task as complete as for spawn. `perch list` shows
                           which are waiting and which started.
+  perch suggestions [--json]
+                          The tasks still waiting for a person, with their ids. Read-only.
+  perch start <id|all>    Person only: a person types it themselves in this terminal (in
+  perch dismiss <id>      Claude or Pi as `!perch start <id>`) to start a waiting task or
+                          drop it, without leaving the terminal. Perch does it only when
+                          a person's own keystrokes entered that line here; run by an
+                          agent it is refused and does nothing. Do not try it.
   perch list [--json]     Your run: the session that leads it and every sub-session, with
                           what Perch knows of each (state, whether it needs a person, its
                           report). Read-only.
@@ -935,6 +1008,8 @@ pub fn run(command: &str, args: &[String]) -> Result<(), String> {
         "report" => report(args),
         "spawn" => spawn(args),
         "suggest" => suggest(args),
+        "suggestions" => suggestions(args.iter().any(|arg| arg == "--json")),
+        "start" | "dismiss" => answer_suggestion(command, args),
         "read" => read(args),
         "list" => list(args.iter().any(|arg| arg == "--json")),
         "stop" => stop(args),
@@ -1292,6 +1367,38 @@ mod tests {
     }
 
     #[test]
+    fn suggestions_list_ids_and_say_that_only_a_person_starts_them() {
+        let text = render_suggestions(&json!({"suggestions": [
+            {"id": "e3c94cec-e925", "agent": "claude", "task": "build the web UI"}]}));
+        assert!(
+            text.starts_with("e3c94cec-e925  claude  build the web UI\n"),
+            "{text}"
+        );
+        assert!(text.contains("a person types `perch start <id>`"), "{text}");
+        assert!(text.contains("An agent running them is refused"), "{text}");
+        assert_eq!(
+            render_suggestions(&json!({"suggestions": []})),
+            "no suggested task is waiting\n"
+        );
+    }
+
+    #[test]
+    fn start_and_dismiss_take_exactly_one_word_before_they_ask_the_core() {
+        let none: Vec<String> = Vec::new();
+        let two = words("a b");
+        assert!(answer_suggestion("start", &none)
+            .unwrap_err()
+            .contains("usage: perch start"));
+        assert!(answer_suggestion("start", &two)
+            .unwrap_err()
+            .contains("usage: perch start"));
+        let all = words("all");
+        assert!(answer_suggestion("dismiss", &all)
+            .unwrap_err()
+            .contains("usage: perch dismiss"));
+    }
+
+    #[test]
     fn the_guide_teaches_the_new_verbs_and_the_rules_that_go_with_them() {
         for needle in [
             "perch send",
@@ -1308,6 +1415,10 @@ mod tests {
             "at most 10 times",
             "perch spawn",
             "perch suggest",
+            "perch suggestions [--json]",
+            "perch start <id|all>",
+            "perch dismiss <id>",
+            "run by an\n                          agent it is refused",
             "perch read <session> [--turns N]",
             "Never tool output or file contents",
             "through the same limits as `perch spawn`",

@@ -175,6 +175,41 @@ pub(super) async fn suggest(
     }
 }
 
+/// `POST {base}agent/suggestions`: the tasks still waiting for a person, with ids. Read-only.
+pub(super) async fn suggestions_waiting(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(suggestions::waiting(&state, &identity)),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
+/// `POST {base}agent/answer`: `perch start` / `perch dismiss`, done only when a person typed that
+/// line in the caller's terminal (`suggestions::answer_typed`).
+pub(super) async fn suggestion_answer(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(
+            suggestions::answer_typed(
+                &state,
+                &identity,
+                body["verb"].as_str().unwrap_or_default(),
+                body["target"].as_str().unwrap_or_default(),
+            )
+            .await,
+        ),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
 /// `POST {base}agent/list`: the caller's run and what Perch knows of each member.
 pub(super) async fn list(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,

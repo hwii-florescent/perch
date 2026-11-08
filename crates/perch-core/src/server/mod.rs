@@ -816,6 +816,14 @@ pub async fn run(
             post(agent::suggest).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(
+            &format!("{base_path}agent/suggestions"),
+            post(agent::suggestions_waiting).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/answer"),
+            post(agent::suggestion_answer).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
             &format!("{base_path}agent/list"),
             post(agent::list).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )

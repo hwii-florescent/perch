@@ -45,6 +45,7 @@ pub mod suggestions;
 pub mod surfaces;
 pub mod terminal;
 pub mod terminal_profile;
+pub mod typed_lines;
 pub mod uploads;
 pub mod usage;
 pub mod workspace_terminals;

@@ -184,6 +184,151 @@ fn child_state(app: &AppState, row: &SuggestionRow) -> (Option<String>, bool) {
     }
 }
 
+/// `perch suggestions`: the tasks still waiting for a person, with the ids `perch start` and
+/// `perch dismiss` take. Read-only.
+pub(super) fn waiting(app: &AppState, caller: &AgentIdentity) -> Result<Value, Failure> {
+    check_lead(app, caller)?;
+    let rows = app
+        .db
+        .suggestions_of(&caller.session_id)
+        .map_err(|error| sub_sessions::internal("read the suggestions", error))?;
+    Ok(json!({
+        "suggestions": rows
+            .into_iter()
+            .filter(|row| row.state == SuggestionState::Pending)
+            .map(|row| json!({
+                "id": row.id,
+                "card": row.card_id,
+                "agent": row.agent,
+                "model": row.model,
+                "worktree": row.worktree,
+                "task": clip(&row.task, LIST_TASK_CHARS),
+            }))
+            .collect::<Vec<_>>(),
+    }))
+}
+
+/// `perch start <id|all>` and `perch dismiss <id>`. Only a person may answer a card, and this route
+/// opens with the agent's token, so it acts only when a client typed this exact line into the
+/// caller's own terminal a moment ago (`AgentRuntimeAdapter::person_typed`): something an agent
+/// cannot do from inside its shell. `target` is the word as typed; an id may be shortened to six or
+/// more characters that name one waiting task.
+pub(super) async fn answer_typed(
+    app: &AppState,
+    caller: &AgentIdentity,
+    verb: &str,
+    target: &str,
+) -> Result<Value, Failure> {
+    let bad = |text: String| fail(StatusCode::BAD_REQUEST, text);
+    check_lead(app, caller)?;
+    let all = verb == "start" && target == "all";
+    if !matches!(verb, "start" | "dismiss")
+        || target.is_empty()
+        || target.contains(char::is_whitespace)
+    {
+        return Err(bad("perch start <id|all> or perch dismiss <id>".into()));
+    }
+    let waiting: Vec<SuggestionRow> = app
+        .db
+        .suggestions_of(&caller.session_id)
+        .map_err(|error| sub_sessions::internal("read the suggestions", error))?
+        .into_iter()
+        .filter(|row| row.state == SuggestionState::Pending)
+        .collect();
+    let picked: Vec<&SuggestionRow> = if all {
+        waiting.iter().collect()
+    } else if target.len() < 6 {
+        return Err(bad(
+            "name the task by the id `perch suggestions` shows".into()
+        ));
+    } else {
+        waiting
+            .iter()
+            .filter(|row| row.id.starts_with(target))
+            .collect()
+    };
+    if !all && picked.len() != 1 {
+        return Err(fail(
+            StatusCode::NOT_FOUND,
+            if picked.is_empty() {
+                "no waiting task has that id (`perch suggestions` lists them)"
+            } else {
+                "that id names more than one waiting task; type more of it"
+            },
+        ));
+    }
+    if picked.is_empty() {
+        return Err(fail(
+            StatusCode::NOT_FOUND,
+            "there is nothing waiting to start",
+        ));
+    }
+    let line = format!("perch {verb} {target}");
+    if !app.agent_runtime.person_typed(&caller.session_id, &line) {
+        return Err(fail(
+            StatusCode::FORBIDDEN,
+            format!(
+                "only a person can answer a suggestion. Nothing was done. A person types \
+                 `{line}` themselves in this session's terminal (in Claude or Pi, as `!{line}`), \
+                 or presses the button on the card."
+            ),
+        ));
+    }
+    let chosen = || Chosen {
+        agent: None,
+        model: None,
+        worktree: None,
+    };
+    let mut results = Vec::new();
+    let mut reason = String::new();
+    // One card at a time, as the card's own buttons do.
+    let mut cards: Vec<&str> = picked.iter().map(|row| row.card_id.as_str()).collect();
+    cards.sort_unstable();
+    cards.dedup();
+    for card in cards {
+        let acted = match (verb, all) {
+            ("start", true) => {
+                act(app, &caller.session_id, "start_all", card, None, chosen()).await
+            }
+            _ => {
+                let id = picked
+                    .iter()
+                    .find(|row| row.card_id == card)
+                    .map(|row| row.id.as_str());
+                act(app, &caller.session_id, verb, card, id, chosen()).await
+            }
+        };
+        if reason.is_empty() {
+            reason = acted.reason;
+        }
+        results.extend(acted.results);
+    }
+    announce(app, &caller.session_id);
+    let (outcome, first) = if verb == "start" {
+        outcome_of(&results)
+    } else if results.iter().any(|r| r.outcome == "dismissed") {
+        ("dismissed", String::new())
+    } else {
+        (
+            "refused",
+            results
+                .first()
+                .map(|r| r.reason.clone())
+                .unwrap_or_default(),
+        )
+    };
+    Ok(json!({
+        "outcome": outcome,
+        "reason": if reason.is_empty() { first } else { reason },
+        "results": results.iter().map(|r| json!({
+            "id": r.suggestion_id,
+            "outcome": r.outcome,
+            "reason": r.reason,
+            "session": r.child_session_id,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
 /// What `perch list` says of a lead's waiting and started suggestions.
 pub(super) fn listed(app: &AppState, lead_session_id: &str) -> Vec<Value> {
     app.db
@@ -808,6 +953,76 @@ mod tests {
             panic!("a new card");
         };
         rows
+    }
+
+    /// `perch suggestions` lists what waits; `perch start` and `perch dismiss` run with the agent's
+    /// token and do nothing unless a client typed that exact line in the lead's terminal.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_agent_cannot_answer_a_card_but_a_line_a_person_typed_does() {
+        let run = run().await;
+        let app = super::super::booted_state(run.address);
+        let rows = card(&run, "k", 2);
+        let (status, listed) = call(
+            &run,
+            "suggestions",
+            &run.lead_token,
+            json!({"session": "lead"}),
+        )
+        .await;
+        assert_eq!(status, 200, "{listed}");
+        assert_eq!(listed["suggestions"].as_array().unwrap().len(), 2);
+        assert_eq!(listed["suggestions"][0]["id"], rows[0].id.as_str());
+        let answer = |verb: &'static str, target: String| {
+            let (run, token) = (&run, run.lead_token.clone());
+            async move {
+                call(
+                    run,
+                    "answer",
+                    &token,
+                    json!({"session": "lead", "verb": verb, "target": target}),
+                )
+                .await
+            }
+        };
+        let id = rows[0].id.clone();
+        let short = id[..8].to_string();
+        // The agent alone, with any word: refused, and nothing changes.
+        for (verb, target) in [("dismiss", short.clone()), ("start", "all".to_string())] {
+            let (status, refused) = answer(verb, target).await;
+            assert_eq!(status, 403, "{refused}");
+            assert!(refused["error"].as_str().unwrap().contains("only a person"));
+        }
+        assert_eq!(run.db.suggestions_of("lead").unwrap().len(), 2);
+        assert!(run
+            .db
+            .suggestions_of("lead")
+            .unwrap()
+            .iter()
+            .all(|row| row.state == SuggestionState::Pending));
+        // The child never answers, typed or not.
+        app.agent_runtime
+            .note_terminal_input("lead", &format!("!perch dismiss {short}\r"));
+        let (status, _) = request(
+            run.address,
+            "POST",
+            "/agent/answer",
+            &[("Authorization", &format!("Bearer {}", run.child_token))],
+            &json!({"session": "child", "verb": "dismiss", "target": short}).to_string(),
+        )
+        .await;
+        assert_ne!(status, 200);
+        // A different id than the one typed does not borrow the proof.
+        let (status, _) = answer("dismiss", rows[1].id[..8].to_string()).await;
+        assert_eq!(status, 403);
+        // What a person typed is accepted once.
+        let (status, done) = answer("dismiss", short.clone()).await;
+        assert_eq!(status, 200, "{done}");
+        assert_eq!(done["outcome"], "dismissed");
+        let (status, _) = answer("dismiss", short.clone()).await;
+        assert_ne!(status, 200, "used up, and the task is answered");
+        // Too short and unknown ids never reach the proof.
+        assert_eq!(answer("dismiss", "abc".into()).await.0, 400);
+        assert_eq!(answer("dismiss", "ffffffffff".into()).await.0, 404);
     }
 
     /// Dismissing and handing a task over answer it once; the card then goes from view.
