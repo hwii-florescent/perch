@@ -85,6 +85,52 @@ pub(super) fn agent_open(
     Ok(json!({ "id": id }))
 }
 
+/// The person's page reports how loading a mod went; `perch mod check` waits for the current revision.
+pub(super) fn handle_report(
+    state: &Arc<ConnState>,
+    id: String,
+    revision: String,
+    error: Option<String>,
+) {
+    let mut reports = state.app.mod_reports.lock().unwrap();
+    if reports.len() < 256 || reports.contains_key(&id) {
+        reports.insert(id, (revision, error));
+    }
+}
+
+/// `perch mod check <id>`: `ok` once the person's screen has loaded the mod's current files, `error`
+/// with why when it threw, `off` for a disabled mod, and `not loaded` when no screen reported within
+/// a few seconds (no window open). A mod that draws badly without throwing still needs a look.
+pub(super) async fn agent_check(app: &AppState, body: &Value) -> Result<Value, Failure> {
+    let id = id_of(body)?;
+    for _ in 0..30 {
+        let policy = app.settings.get().mods;
+        let Some(info) = mods::scan(&app.memory_root, &policy)
+            .into_iter()
+            .find(|m| m.id == id)
+        else {
+            return Err(fail(StatusCode::NOT_FOUND, format!("no mod \"{id}\"")));
+        };
+        if let Some(error) = info.error {
+            return Ok(json!({ "status": "error", "error": error }));
+        }
+        if !info.enabled {
+            return Ok(json!({ "status": "off", "error": "the mod is off, or mods are off" }));
+        }
+        let report = app.mod_reports.lock().unwrap().get(id).cloned();
+        if let Some((_, error)) = report.filter(|(revision, _)| *revision == info.revision) {
+            return Ok(match error {
+                Some(error) => json!({ "status": "error", "error": error }),
+                None => json!({ "status": "ok" }),
+            });
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    Ok(
+        json!({ "status": "not loaded", "error": "no Perch window loaded it within 7 seconds (is one open?)" }),
+    )
+}
+
 /// `GET /mods/file?id=`: a mod's code for the person's own page to import. A person's token only.
 pub(super) async fn file(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -247,6 +293,25 @@ mod tests {
         assert_eq!(call("open", json!({"id": "board"})).await.0, 200);
         let shown = screen.try_recv().expect("the screen is told");
         assert!(matches!(&*shown, ServerMessage::ModsOpen { mod_id } if mod_id == "board"));
+
+        // `check` answers from what the page reported for the mod's current revision only.
+        let revision = listed["mods"][0]["revision"].as_str().unwrap().to_string();
+        let report = |revision: &str, error: Option<&str>| {
+            app.mod_reports
+                .lock()
+                .unwrap()
+                .insert("board".into(), (revision.into(), error.map(str::to_string)));
+        };
+        report(&revision, None);
+        assert_eq!(
+            call("check", json!({"id": "board"})).await.1["status"],
+            "ok"
+        );
+        report(&revision, Some("x is not defined"));
+        let (_, checked) = call("check", json!({"id": "board"})).await;
+        assert_eq!(checked["status"], "error");
+        assert_eq!(checked["error"], "x is not defined");
+        assert_eq!(call("check", json!({"id": "nope"})).await.0, 404);
 
         assert_eq!(
             call("enable", json!({"id": "board", "enabled": false}))

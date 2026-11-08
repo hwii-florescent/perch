@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ModInfo } from "@perch/shared";
 import { createSwapper } from "../modApp";
-import { modFileUrl } from "../mods";
+import { modFileUrl, reportMod } from "../mods";
 import { GHOST_BUTTON } from "./ui/icon-button";
 
 /** A mod's view: its own JavaScript, run inside Perch with the person's full access. A newer version
@@ -15,7 +15,9 @@ export function ModView({ mod, hidden }: { mod: ModInfo; hidden?: boolean }) {
     swapper.current = createSwapper(host.current!, setError);
     return () => swapper.current?.stop();
   }, []);
-  useEffect(() => { void swapper.current?.load(modFileUrl(mod.id), mod.id); }, [mod.id, mod.revision]);
+  useEffect(() => {
+    void swapper.current?.load(modFileUrl(mod.id), mod.id, (problem) => reportMod(mod.id, mod.revision, problem));
+  }, [mod.id, mod.revision]);
   return (
     <div className={hidden ? "hidden" : "relative h-full w-full min-h-0 flex-1 overflow-auto"} data-testid={`mod-view-${mod.id}`}>
       <div ref={host} className="h-full w-full" />

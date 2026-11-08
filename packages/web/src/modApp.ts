@@ -65,7 +65,8 @@ export function createSwapper(host: HTMLElement, report: (error: string | null) 
   let undo: (() => void) | undefined;
   let live = true;
   return {
-    async load(src: string, modId: string): Promise<void> {
+    /** `done` hears how this load went: `null` when it mounted, else why not. */
+    async load(src: string, modId: string, done?: (error: string | null) => void): Promise<void> {
       const next = document.createElement("div");
       next.style.cssText = "display:none;height:100%;width:100%";
       host.append(next);
@@ -78,9 +79,12 @@ export function createSwapper(host: HTMLElement, report: (error: string | null) 
         next.style.display = "";
         previous?.();
         report(null);
+        done?.(null);
       } catch (error) {
         next.remove();
-        report(error instanceof Error ? error.message : String(error));
+        const text = error instanceof Error ? error.message : String(error);
+        report(text);
+        done?.(text);
       }
     },
     stop() {

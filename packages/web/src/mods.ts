@@ -80,5 +80,10 @@ export function activeLayout(state: ModsState | null) {
   return layout?.root && !layout.error ? layout : null;
 }
 
+/** Tells the core how loading `revision` of a mod went (`perch mod check` reads it); `null` is no error. */
+export function reportMod(id: string, revision: string, error: string | null) {
+  if (capabilities.includes("mods.report.v1") && socket.connected) socket.send({ type: "mods.report", id, revision, error });
+}
+
 /** Where a mod's code is served from (a person's token only). */
 export const modFileUrl = (id: string) => `${window.location.origin}${getBasePath()}mods/file?${new URLSearchParams({ id })}`;

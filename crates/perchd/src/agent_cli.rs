@@ -885,7 +885,8 @@ fn cancel(args: &[String]) -> Result<(), String> {
 }
 
 const MOD_USAGE: &str = "usage: perch mod [list] [--json] | perch mod enable <id> | \
-     perch mod disable <id> | perch mod open <id> | perch mod layout <id|stock>";
+     perch mod disable <id> | perch mod open <id> | perch mod check <id> | \
+     perch mod layout <id|stock>";
 
 /// `perch mod`: the mods on this computer, turn one off or on, and show one.
 fn mod_cmd(args: &[String]) -> Result<(), String> {
@@ -911,6 +912,20 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
         ["open", id] => {
             ask("mod/open", json!({ "id": id }))?;
             println!("{id} is shown on the person's screen");
+            Ok(())
+        }
+        ["check", id] => {
+            let answer = ask("mod/check", json!({ "id": id }))?;
+            match answer["status"].as_str() {
+                Some("ok") => println!("{id} loaded without errors in the person's window"),
+                _ => {
+                    return Err(format!(
+                        "{id}: {}: {}",
+                        answer["status"].as_str().unwrap_or("error"),
+                        answer["error"].as_str().unwrap_or("unknown")
+                    ))
+                }
+            }
             Ok(())
         }
         ["layout", id] => {
@@ -1244,6 +1259,8 @@ Commands
   perch mod enable <id>   Turn a mod on or off.
   perch mod disable <id>
   perch mod open <id>     Show a mod on the person's screen now.
+  perch mod check <id>    Wait for the person's window to load the mod's current files; exits
+                          nonzero with the error if it threw. Run it after every edit.
   perch mod layout <id|stock>
                           Change the whole window to a layout in the layouts folder, or back to
                           Perch as shipped.
@@ -1350,6 +1367,8 @@ Mods
     sidebar (220px), a column of canvas over mod:terminal-notes (160px), and files (320px). Write
     the file, then `perch mod layout <id>` applies it at once (a file that does not parse cannot
     be chosen, and one that breaks later falls back to Perch as shipped); edits show as you save.
+  - After every edit run `perch mod check <id>`: it says whether the person's window loaded and
+    mounted the new files, or why not. It cannot see a mod that mounts but draws wrongly.
   - `perch mod open <id>` shows a mod now. To undo: `perch mod disable <id>`, delete the folder, or
     the person presses ctrl+alt+shift+Escape (turns every mod off) or starts Perch with
     PERCH_MODS=off.
@@ -1830,6 +1849,7 @@ mod tests {
             "perch memory write <name>",
             "perch memory delete <name> --base <revision>",
             "perch mod open <id>",
+            "perch mod check <id>",
             "perch mod layout <id|stock>",
             "(el, api) => cleanup?",
             "PERCH_MODS=off",

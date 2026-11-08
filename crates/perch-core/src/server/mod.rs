@@ -278,6 +278,9 @@ struct AppState {
     /// currently viewing it (i.e. it's their `active_session_id`). A session
     /// with no entry, or an entry with an empty set, has no viewers.
     session_viewers: Arc<Mutex<HashMap<String, HashSet<String>>>>,
+    /// What the person's page last said about loading each mod: `(revision, error)`. `perch mod
+    /// check` reads it; memory only, since a reloaded page reports again.
+    mod_reports: Arc<Mutex<HashMap<String, (String, Option<String>)>>>,
     /// Local session ids that finished a turn while unviewed (herdr's `done`
     /// state). Cleared the moment any connection views the session again.
     unseen_sessions: Arc<Mutex<HashSet<String>>>,
@@ -596,6 +599,7 @@ pub async fn run(
         default_cwd: effective_cwd,
         running_sessions,
         session_viewers: Arc::new(Mutex::new(HashMap::new())),
+        mod_reports: Arc::new(Mutex::new(HashMap::new())),
         unseen_sessions: Arc::new(Mutex::new(HashSet::new())),
         blocked_sessions: Arc::new(Mutex::new(HashSet::new())),
         stale_sessions: Arc::new(Mutex::new(HashSet::new())),
@@ -902,6 +906,10 @@ pub async fn run(
         .route(
             &format!("{base_path}agent/mod/open"),
             post(agent::mod_open).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/mod/check"),
+            post(agent::mod_check).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(&format!("{base_path}mods/file"), get(mods::file))
         .route(&format!("{base_path}workspace-file"), get(fs::file_content))
@@ -2607,6 +2615,7 @@ fn foundation_capabilities() -> Vec<String> {
         "instructions.v1",
         "memory.v1",
         "mods.v1",
+        "mods.report.v1",
         "crew.v1",
         "crew.actions.v1",
         "suggestions.v1",

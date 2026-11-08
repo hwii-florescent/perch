@@ -33,8 +33,11 @@ describe("an app module's versions", () => {
     };
     const report = vi.fn();
     const swapper = createSwapper(host, report, (src) => versions[src]());
-    await swapper.load("one", "m");
-    await swapper.load("broken", "m");
+    const done = vi.fn(); // what `perch mod check` is told
+    await swapper.load("one", "m", done);
+    expect(done).toHaveBeenLastCalledWith(null);
+    await swapper.load("broken", "m", done);
+    expect(done).toHaveBeenLastCalledWith("syntax error");
     expect(host.textContent).toBe("one");
     expect(report).toHaveBeenLastCalledWith("syntax error");
     await swapper.load("throws", "m");

@@ -1740,6 +1740,15 @@ export interface ModsSetMessage {
   op: "enable" | "disable" | "layout";
 }
 
+/** The person's page says whether it loaded a mod's `revision` (capability `mods.report.v1`);
+ * `error` is why not. No reply: `perch mod check` reads it. */
+export interface ModsReportMessage {
+  type: "mods.report";
+  id: string;
+  revision: string;
+  error?: string | null;
+}
+
 /** The index of a Project's memory files on this core (capability `memory.v1`). Answered with
  * `memory.state`. */
 export interface MemoryListMessage {
@@ -2570,6 +2579,7 @@ export type ClientMessage =
   | InstructionsGetMessage
   | ModsListMessage
   | ModsSetMessage
+  | ModsReportMessage
   | MemoryListMessage
   | MemoryGetMessage
   | CrewGetMessage

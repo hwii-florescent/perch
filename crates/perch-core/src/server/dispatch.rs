@@ -291,6 +291,11 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             folders,
         } => super::instructions::handle_set(state, request_id, scope, id, text, folders),
         ClientMessage::ModsList { request_id } => super::mods::handle_list(state, request_id),
+        ClientMessage::ModsReport {
+            id,
+            revision,
+            error,
+        } => super::mods::handle_report(state, id, revision, error),
         ClientMessage::ModsSet { request_id, id, op } => {
             super::mods::handle_set(state, request_id, id, op)
         }

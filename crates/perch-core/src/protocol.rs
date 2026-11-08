@@ -1358,6 +1358,16 @@ pub enum ClientMessage {
         op: String,
     },
 
+    /// The person's page says whether it loaded a mod's `revision` (capability `mods.report.v1`);
+    /// `error` is why not. No reply: `perch mod check` reads it.
+    #[serde(rename = "mods.report", rename_all = "camelCase")]
+    ModsReport {
+        id: String,
+        revision: String,
+        #[serde(default)]
+        error: Option<String>,
+    },
+
     /// The index of a Project's memory files on this core (capability `memory.v1`). Answered
     /// with `memory.state`.
     #[serde(rename = "memory.list", rename_all = "camelCase")]
