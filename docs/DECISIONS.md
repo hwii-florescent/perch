@@ -202,6 +202,27 @@ queue but it should be send right to the agent when it starts that message inste
   (those still wait, with the reason); holds and refusals; unknown state is not idle.
 - Receipts say delivered, queued in the agent, or steered.
 
+## 2026-11-08 — Runs go on without a person's prompt; limits are settings (owner)
+
+Owner, in their own message to the lead session: "I think it is better to let agents run itself
+without humans prompt. So agents can communicate back and forth between sessions and update
+progress or change progress, etc. I think we just need to keep a config on max parallel
+subsessions and so on and we should be good".
+
+- Drops "only during a turn a person opened": a lead may `perch spawn`, `steer` and `interrupt`
+  in any turn, including one opened by a sub-session's report, a Perch status note or a message.
+  The "Let leads start sub-sessions without asking" setting still decides spawn vs card.
+- Counters that reset "between one person's messages" (lead wakes, interrupts per child) become
+  per-run limits like the rest.
+- Limits become settings (Settings > Sub-sessions), defaults as today: live sub-sessions per run 4
+  (`MAX_CONCURRENT`), total per run 8 (`MAX_DESCENDANTS`), messages per run 50
+  (`MAX_MESSAGES_PER_RUN`), automatic lead wakes per run 10 (`MAX_WAKES_PER_PERSON_TURN`),
+  interrupts per sub-session 3, waiting cards 10. Each validated to a sane range; a limit reached
+  refuses with a clear reason, never queues silently.
+- Unchanged: a sub-session cannot start sub-sessions (depth 1); messages from other sessions are
+  information, never a person's approval of anything outside the run (permissions, approvals,
+  holds and refusals a person set); a person can stop any session or the whole run.
+
 ## 2026-11-07 — Suggested tasks, sender cards, `perch read`, inbound control (owner)
 
 Closes the gaps against Claude desktop's sub-sessions (desktop doc: "Work across sessions",
