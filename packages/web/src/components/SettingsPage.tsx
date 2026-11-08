@@ -18,6 +18,7 @@ import { clearHistory } from "../browserHistory";
 import { AgentCatalog } from "./AgentCatalog";
 import { useAgentChoices } from "./AgentPicker";
 // Imported rather than re-declared so the bounds the UI enforces and the ones
+import { ModsSection } from "./ModsSection";
 // `createPerchTerminal` actually clamps to cannot drift apart.
 import { MIN_SCROLLBACK, MAX_SCROLLBACK } from "../xtermSetup";
 import { newId } from "../ids";
@@ -873,7 +874,7 @@ function DevicesSection() {
   );
 }
 
-type SettingsTab = "general" | "appearance" | "agents" | "keyboard" | "terminal" | "notifications" | "hosts" | "devices" | "permissions";
+type SettingsTab = "general" | "appearance" | "agents" | "mods" | "keyboard" | "terminal" | "notifications" | "hosts" | "devices" | "permissions";
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
@@ -896,6 +897,7 @@ function TabContent({ tab }: { tab: SettingsTab }) {
     case "terminal": return <TerminalSection />;
     case "notifications": return <NotificationsSection />;
     case "hosts": return <SshHostsSection />;
+  { id: "mods", label: "Mods" },
     case "devices": return <DevicesSection />;
     case "permissions": return <MacPermissions />;
   }
@@ -909,6 +911,7 @@ function SearchBox({ value, onChange }: { value: string; onChange: (value: strin
     <input
       className={SEARCH_FIELD}
       type="search"
+    case "mods": return <ModsSection />;
       data-testid="settings-search"
       aria-label="Search settings"
       placeholder="Search settings"

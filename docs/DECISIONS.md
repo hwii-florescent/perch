@@ -12,8 +12,16 @@ conventions, not automatic approval. AGENTS is only a brief contributor entry po
 Learned from herdr's plugins (manifest of actions, events and panes; argv commands that call back
 through the CLI) plus an iframe panel that herdr lacks. Built: `mods.rs` (manifest, approval policy,
 audit log), `settings.mods`, `mods_run.rs` (actions and events run), `perch mod
-list|enable|disable|approve|run|runs`. Not built: serving panels, the Settings > Mods UI, and a
-`perch` token for a mod's own commands.
+list|enable|disable|approve|run|runs`, the person-plane messages `mods.list`/`mods.set` (capability
+`mods.v1`), `GET /mods/panel`, and Settings > Mods (policy, off switch, a preview of what approving
+runs, Approve, Run, Open, Turn on/off). Not built: a panel's data bridge (a panel is one inline HTML
+file that can draw but cannot yet read project files), docking a panel as a pane, and a `perch`
+token for a mod's own commands.
+- **Panels.** One self-contained `.html` file (no sub-assets: a sandboxed page has no cookie, so it
+  could not fetch them), served only for an Active mod from inside its folder (symlinks resolved,
+  2 MiB cap), to a person's token only, with `Content-Security-Policy: sandbox allow-scripts;
+  default-src 'none'` (no network, frames, forms or origin) and shown only in an iframe with
+  `sandbox="allow-scripts"`, never `allow-same-origin`.
 
 - **A mod is a folder** `<perch dir>/mods/<id>/perch-mod.toml` (folder name = id). It declares
   `[[actions]]` and `[[events]]` (argv, no shell, calling back through the `perch` CLI, which is the
