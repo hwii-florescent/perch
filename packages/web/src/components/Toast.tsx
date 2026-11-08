@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { cn } from "../lib/cn";
 import { usePerchStore, type ToastEntry } from "../store";
+import { Slot } from "./Slot";
 import { StatusDot } from "./StatusDot";
 import { CloseIcon } from "./ui/icons";
 import { ICON_BUTTON } from "./ui/icon-button";
@@ -33,7 +34,10 @@ function ToastItem({ toast }: { toast: ToastEntry }) {
   const heading = usage ? toast.title : blocked ? LABEL.blocked : LABEL.done;
   const detail = usage ? toast.body : toast.title || "(new session)";
 
+  const data = { id: toast.id, kind: usage ? "usage" : blocked ? "blocked" : "done", title: toast.title, body: toast.body, sessionId: toast.sessionId, sessionTitle: session?.title };
+  const actions = { open: () => { if (!usage) switchSession(toast.sessionId); dismissToast(toast.id); }, dismiss: () => dismissToast(toast.id) };
   return (
+    <Slot name="toast" data={data} actions={actions} className="pointer-events-auto">
     <div
       className={cn(menuPanel, "pointer-events-auto flex items-stretch py-0 animate-toast-in motion-reduce:animate-none")}
       onMouseEnter={() => setPaused(true)}
@@ -70,6 +74,7 @@ function ToastItem({ toast }: { toast: ToastEntry }) {
         <CloseIcon size={12} />
       </button>
     </div>
+    </Slot>
   );
 }
 

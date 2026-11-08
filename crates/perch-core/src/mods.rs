@@ -290,6 +290,15 @@ pub const EXAMPLES: &[Example] = &[
         ],
     },
     Example {
+        id: "compact-rows",
+        layout: false,
+        about: "draws the sidebar's session rows and the notification cards itself (api.slot)",
+        files: &[
+            ("main.js", include_str!("mod_examples/compact-rows/main.js")),
+            ("mod.json", include_str!("mod_examples/compact-rows/mod.json")),
+        ],
+    },
+    Example {
         id: "ide",
         layout: true,
         about: "layout: sidebar | tabs over canvas | files, no look of its own",
@@ -366,7 +375,7 @@ mod tests {
         assert!(clone_example(&root.0, "nope", None).is_err());
         assert!(clone_example(&root.0, "ide", Some("../x")).is_err());
         let mods = scan(&root.0, &policy);
-        assert_eq!(mods.len(), 3, "{mods:?}"); // command-list, session-count, mine
+        assert_eq!(mods.len(), 4, "{mods:?}"); // the three example mods, and mine
         assert!(
             mods.iter().all(|m| m.enabled && m.error.is_none()),
             "{mods:?}"

@@ -48,6 +48,7 @@ import { cn } from "./lib/cn";
 import { formatCombo } from "./keyCombo";
 import { ICON_BUTTON } from "./components/ui/icon-button";
 import { segment } from "./components/ui/segment";
+import { Slot } from "./components/Slot";
 import { CloseIcon, GearIcon, PlusIcon } from "./components/ui/icons";
 import { sessionDotState, DOT_GLYPH, type AgentDotState } from "./statusDot";
 import type { SessionSummary, SshHostEntry, HostConnectionState } from "@perch/shared";
@@ -340,7 +341,10 @@ interface SessionItemProps {
 }
 
 function SessionItem({ session, isActive, onSwitch, onDelete }: SessionItemProps) {
+  const data = { id: session.id, title: session.title, status: session.status, blocked: session.blocked, unseen: session.unseen, createdAt: session.createdAt, cwd: session.cwd, branch: session.currentBranch, active: isActive };
+  const actions = { open: () => onSwitch(session.id), remove: () => onDelete(session.id) };
   return (
+    <Slot name="session-row" data={data} actions={actions} className="pl-[0.85rem]">
     <div className="group relative flex items-stretch pl-[0.85rem]">
       <button
         type="button"
@@ -378,6 +382,7 @@ function SessionItem({ session, isActive, onSwitch, onDelete }: SessionItemProps
         🗑
       </button>
     </div>
+    </Slot>
   );
 }
 

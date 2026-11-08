@@ -1388,6 +1388,11 @@ Mods
     open local project), `commands()` (every app command: {id, description}, the ids Settings >
     Keyboard binds), `run(id)` (runs one, like its key; false if unknown), `notify({title, body})`
     (a toast) and `overlay((el, close) => cleanup?)` (a modal over the app; Esc closes it).
+    `slot(name, (el, {data, actions}) => cleanup?)` draws one of Perch's own parts instead of the
+    stock one, which keeps its behavior and returns if the mod throws. Slots: `toast` (data {id,
+    kind, title, body?, sessionId, sessionTitle?}; actions open, dismiss) and `session-row` (the
+    sidebar's rows; data {id, title, status, blocked?, unseen?, createdAt, cwd, branch?, active};
+    actions open, remove). It is called again with new `data` whenever that changes.
     `command({name, description, keys?, run})` adds a command of the mod's own (id
     mod.<modId>.<name>) to the keyboard help and Settings > Keyboard; `keys` like 'cmd+shift+y' is
     its default key, dropped if taken or without a modifier. `bind(commandId, keys)` rebinds any

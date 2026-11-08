@@ -1,5 +1,6 @@
 import { getWorkspaceFileUrl } from "./base";
 import { newId } from "./ids";
+import { claimSlot, type SlotRender } from "./slots";
 import { isRelayMode, relayBlobUrl } from "./relay/transport";
 import { usePerchStore } from "./store";
 import { workspaceRecord } from "./terminalScope";
@@ -24,6 +25,11 @@ export interface ModApi {
    * dropped if it is already taken or has no modifier. It goes when the mod is replaced; returns
    * the way to remove it sooner. */
   command(def: { name: string; description: string; keys?: string; run: () => void }): () => void;
+  /** Draws one of Perch's own interface parts instead of the stock one (`SLOTS` in `slots.ts`:
+   * `toast`, `session-row`). `render(el, {data, actions})` fills `el` and may return a cleanup; it
+   * runs again whenever `data` changes. The part keeps its behavior; if the mod throws, the stock
+   * one shows. Released when the mod is replaced; returns the way to release it sooner. */
+  slot(name: string, render: SlotRender): () => void;
   /** Rebinds a command's key like Settings > Keyboard does (`""` unbinds, `null` restores the
    * default). Throws for a key that is reserved or has no modifier. This is the person's setting:
    * it stays after the mod is gone. */
@@ -70,6 +76,12 @@ export function modApi(modId: string): ModApi & { dispose(): void } {
     commands: () => bridge.list(),
     run: (command) => bridge.run(command),
     bind: (command, keys) => bridge.bind(command, keys),
+    slot: (name, render) => {
+      const release = claimSlot(name, modId, render);
+      const gone = () => { open.delete(gone); release(); };
+      open.add(gone);
+      return gone;
+    },
     command: ({ name, description, keys, run }) => {
       if (!/^[A-Za-z0-9_-]{1,40}$/.test(name)) throw new Error("A command name is letters, digits, - and _.");
       const remove = bridge.register(`mod.${modId}.${name}`, description, keys, run);

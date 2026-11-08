@@ -38,6 +38,16 @@ approval not mattering much.
   bindable default key only; gone with the mod), and `api.bind(id, keys)` writes the person's
   override through `updateSettings`. Not yet: an agent changing keys without a mod (no agent
   settings route), and native (Tauri) menu accelerators for mod keys.
+- **Slots: a mod draws Perch's own parts.** Perch's panes are React, not mods, so instead of
+  rewriting them as mods (herdr's way) a stock component wraps its output in `<Slot name>`
+  (`components/Slot.tsx`, `slots.ts` `SLOTS`) and passes plain `data` and `actions`. `api.slot(name,
+  (el, {data, actions}) => cleanup?)` claims it; the component keeps its state, keys and timers,
+  and the stock part shows again if the mod throws or is gone. Built: `toast` (the card) and
+  `session-row` (the sidebar's rows). A slot is a few lines at its component, so the rest (tab
+  pills, project rows, menus, dialogs, the status bar) are added one at a time as they are wanted;
+  a slot a mod fills completely is how a stock part becomes replaceable. Not covered: a mod
+  changing a part's behavior or structure (a slot is the look and the actions it is given), and
+  `perch mod check` does not see a slot function that throws later, only the console does.
 - **Examples, not shipped defaults.** Perch's own panes are not mods, so there is nothing to
   duplicate as in herdr. Instead four examples ship inside the core (`mod_examples/`, `mods::EXAMPLES`):
   mods `command-list` and `session-count` (each part of `api`), layouts `ide` and `midnight` (with

@@ -122,6 +122,20 @@ describe("an app module's versions", () => {
     (list.querySelector("button") as HTMLButtonElement).click();
     expect(run).toHaveBeenCalledWith("tabs.new");
     expect(command).toHaveBeenCalledWith(expect.objectContaining({ name: "list", keys: "mod+shift+y" }));
+
+    const draws: Record<string, (box: HTMLElement, props: unknown) => void> = {};
+    const releaseSlot = vi.fn();
+    const slotApi = { slot: (name: string, draw: (box: HTMLElement, props: unknown) => void) => ((draws[name] = draw), releaseSlot) } as unknown as ModApi;
+    const undo = load("compact-rows")(document.createElement("div"), slotApi) as () => void;
+    expect(Object.keys(draws).sort()).toEqual(["session-row", "toast"]);
+    const open = vi.fn();
+    const rowBox = document.createElement("div");
+    draws["session-row"]!(rowBox, { data: { title: "fix bug", branch: "main", status: "idle", active: true }, actions: { open, remove: vi.fn() } });
+    expect(rowBox.textContent).toContain("fix bug");
+    (rowBox.firstElementChild as HTMLElement).click();
+    expect(open).toHaveBeenCalledTimes(1);
+    undo();
+    expect(releaseSlot).toHaveBeenCalledTimes(2);
   });
 
   it("undoes a version that finishes loading after the pane was closed", async () => {
