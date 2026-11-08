@@ -925,7 +925,7 @@ fn render_mods(answer: &Value) -> String {
         answer["folder"].as_str().unwrap_or("")
     );
     out += if answer["safeMode"].as_bool() == Some(true) {
-        "; SAFE MODE, PERCH_MODS=off: none are loaded)\n"
+        "; MODS ARE OFF (Settings > Mods or PERCH_MODS=off): none are loaded)\n"
     } else {
         ")\n"
     };

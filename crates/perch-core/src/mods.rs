@@ -9,8 +9,8 @@
 //! [`Status::Active`].
 //!
 //! **Approval is its own policy** ([`Policy`]), separate from Project and sub-session permissions:
-//! `ask` waits for a person, `auto-within-ceiling` approves a mod whose required capabilities all
-//! sit inside the ceiling, `auto-all` approves everything. Only a person sets the policy (the
+//! `ask` waits for a person, `auto-safe` approves a mod that only needs a panel, events and reading
+//! project files, `auto-all` approves everything; `off` turns every mod off. Only a person sets the policy (the
 //! caller passes it in; it never comes from a mod). Approval pins the manifest's hash, so a
 //! changed manifest is re-evaluated against the policy. The state and audit files sit beside the
 //! `mods/` folder, not inside a mod.
@@ -221,44 +221,40 @@ impl Manifest {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// What `auto-safe` will approve: a mod that only shows a panel, reacts to events and reads
+/// project files. Anything else (build steps, network, writing project files) still asks.
+const SAFE: [Capability; 3] = [
+    Capability::Panel,
+    Capability::Events,
+    Capability::ReadProject,
+];
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Mode {
     /// A person approves every new or changed mod.
+    #[default]
     Ask,
-    /// A mod whose required capabilities are all in the ceiling is approved by policy.
-    AutoWithinCeiling,
+    /// A mod whose needs are all in [`SAFE`] is approved by policy; the rest ask.
+    AutoSafe,
     /// Everything is approved by policy; each approval is still logged.
     AutoAll,
 }
 
 /// The mod approval policy. Set by a person only; it is an input here, never read from a mod.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Policy {
     pub mode: Mode,
-    pub ceiling: BTreeSet<Capability>,
-}
-
-impl Default for Policy {
-    fn default() -> Self {
-        Self {
-            mode: Mode::Ask,
-            ceiling: [
-                Capability::Panel,
-                Capability::Events,
-                Capability::ReadProject,
-            ]
-            .into(),
-        }
-    }
+    /// Mods off: the same as `PERCH_MODS=off`, from Settings.
+    pub off: bool,
 }
 
 impl Policy {
     fn approves(&self, required: &BTreeSet<Capability>) -> bool {
         match self.mode {
             Mode::Ask => false,
-            Mode::AutoWithinCeiling => required.is_subset(&self.ceiling),
+            Mode::AutoSafe => required.iter().all(|c| SAFE.contains(c)),
             Mode::AutoAll => true,
         }
     }
@@ -266,9 +262,14 @@ impl Policy {
     fn label(&self) -> &'static str {
         match self.mode {
             Mode::Ask => "policy:ask",
-            Mode::AutoWithinCeiling => "policy:auto-within-ceiling",
+            Mode::AutoSafe => "policy:auto-safe",
             Mode::AutoAll => "policy:auto-all",
         }
+    }
+
+    /// Mods are off: by this policy or by `PERCH_MODS=off` in the core's environment.
+    pub fn is_off(&self) -> bool {
+        self.off || safe_mode()
     }
 }
 
@@ -417,11 +418,31 @@ fn status_of(record: &Record, hash: &str) -> Status {
 /// Every mod folder with its status. A new or changed manifest is approved here only when `policy`
 /// allows; otherwise it stays pending.
 pub fn scan(root: &Path, policy: &Policy) -> Result<Vec<ModInfo>, Error> {
-    scan_with(root, policy, safe_mode())
+    scan_with(root, policy, policy.is_off())
 }
 
-/// Safe mode: `PERCH_MODS=off` in the core's environment. No mod is found, approved, run or
-/// served, and nothing is written, so stock Perch starts even when no agent or UI can turn mods off.
+/// The one gate before anything of a mod runs or is served: the mod, only if it is
+/// [`Status::Active`] under `policy`.
+pub fn active(root: &Path, policy: &Policy, id: &str) -> Result<ModInfo, Error> {
+    let found = scan(root, policy)?;
+    let Some(info) = found.into_iter().find(|info| info.id == id) else {
+        return Err(Error::NotFound(format!("no mod \"{id}\"")));
+    };
+    match &info.status {
+        Status::Active => Ok(info),
+        Status::Disabled => Err(Error::Invalid(format!("mod \"{id}\" is turned off"))),
+        Status::Pending { reason } => Err(Error::Invalid(format!(
+            "mod \"{id}\" is not approved: {reason}"
+        ))),
+        Status::Invalid { error } => {
+            Err(Error::Invalid(format!("mod \"{id}\" is invalid: {error}")))
+        }
+    }
+}
+
+/// Safe mode: `PERCH_MODS=off` in the core's environment (or `off` in the policy). No mod is
+/// found, approved, run or served, and nothing is written, so stock Perch starts even when no
+/// agent or UI can turn mods off.
 pub fn safe_mode() -> bool {
     std::env::var("PERCH_MODS").is_ok_and(|value| value.eq_ignore_ascii_case("off"))
 }
@@ -493,8 +514,8 @@ fn scan_with(root: &Path, policy: &Policy, safe: bool) -> Result<Vec<ModInfo>, E
 
 /// A person approves the manifest they looked at (`hash` from [`scan`]). Callers must make sure a
 /// person asked: an agent session or a mod must never reach this.
-pub fn approve(root: &Path, id: &str, hash: &str) -> Result<(), Error> {
-    refuse_in_safe_mode()?;
+pub fn approve(root: &Path, policy: &Policy, id: &str, hash: &str) -> Result<(), Error> {
+    refuse_when_off(policy)?;
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if !plain_id(id, true) {
         return Err(Error::Invalid(format!("\"{id}\" is not a mod id")));
@@ -524,10 +545,10 @@ pub fn approve(root: &Path, id: &str, hash: &str) -> Result<(), Error> {
     audit(root, id, &current, "approved", "person")
 }
 
-fn refuse_in_safe_mode() -> Result<(), Error> {
-    if safe_mode() {
+fn refuse_when_off(policy: &Policy) -> Result<(), Error> {
+    if policy.is_off() {
         return Err(Error::Invalid(
-            "Perch is in safe mode (PERCH_MODS=off): mods are off and cannot be changed. Restart without it."
+            "Mods are turned off (Settings > Mods, or PERCH_MODS=off), so they cannot be changed. Turn them back on first."
                 .into(),
         ));
     }
@@ -535,8 +556,8 @@ fn refuse_in_safe_mode() -> Result<(), Error> {
 }
 
 /// Turns a mod off or on without touching its approval.
-pub fn set_enabled(root: &Path, id: &str, enabled: bool) -> Result<(), Error> {
-    refuse_in_safe_mode()?;
+pub fn set_enabled(root: &Path, policy: &Policy, id: &str, enabled: bool) -> Result<(), Error> {
+    refuse_when_off(policy)?;
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if !plain_id(id, true) || !mods_dir(root).join(id).is_dir() {
         return Err(Error::NotFound(format!("no mod \"{id}\"")));
@@ -664,7 +685,7 @@ command = ["npm", "ci"]
         let info = root.one(&ask);
         assert!(matches!(info.status, Status::Pending { .. }));
 
-        approve(&root.0, "plan", &info.hash).unwrap();
+        approve(&root.0, &ask, "plan", &info.hash).unwrap();
         let info = root.one(&ask);
         assert_eq!(info.status, Status::Active);
         assert_eq!(info.approved_by.as_deref(), Some("person"));
@@ -674,20 +695,20 @@ command = ["npm", "ci"]
         assert!(matches!(changed.status, Status::Pending { .. }));
         // The hash the person looked at is stale now.
         assert!(matches!(
-            approve(&root.0, "plan", &info.hash),
+            approve(&root.0, &ask, "plan", &info.hash),
             Err(Error::Conflict(_))
         ));
-        approve(&root.0, "plan", &changed.hash).unwrap();
+        approve(&root.0, &ask, "plan", &changed.hash).unwrap();
         assert_eq!(root.one(&ask).status, Status::Active);
     }
 
     #[test]
-    fn the_ceiling_decides_what_policy_may_approve() {
+    fn auto_safe_approves_only_the_safe_kinds() {
         let root = Root::new();
         root.put("plan", PANEL);
         root.put("heavy", BUILD);
         let within = Policy {
-            mode: Mode::AutoWithinCeiling,
+            mode: Mode::AutoSafe,
             ..Policy::default()
         };
         let mods = scan(&root.0, &within).unwrap();
@@ -695,7 +716,7 @@ command = ["npm", "ci"]
         assert_eq!(by_id("plan").status, Status::Active);
         assert_eq!(
             by_id("plan").approved_by.as_deref(),
-            Some("policy:auto-within-ceiling")
+            Some("policy:auto-safe")
         );
         assert!(matches!(by_id("heavy").status, Status::Pending { .. }));
 
@@ -713,10 +734,7 @@ command = ["npm", "ci"]
     fn safe_mode_finds_and_writes_nothing() {
         let root = Root::new();
         root.put("plan", PANEL);
-        let all = Policy {
-            mode: Mode::AutoAll,
-            ..Policy::default()
-        };
+        let all = AUTO;
         assert!(scan_with(&root.0, &all, true).unwrap().is_empty());
         assert!(!root.0.join(STATE).exists() && !root.0.join(AUDIT).exists());
         assert_eq!(scan_with(&root.0, &all, false).unwrap().len(), 1);
@@ -727,13 +745,13 @@ command = ["npm", "ci"]
         let root = Root::new();
         root.put("plan", PANEL);
         let within = Policy {
-            mode: Mode::AutoWithinCeiling,
+            mode: Mode::AutoSafe,
             ..Policy::default()
         };
         assert_eq!(root.one(&within).status, Status::Active);
-        set_enabled(&root.0, "plan", false).unwrap();
+        set_enabled(&root.0, &within, "plan", false).unwrap();
         assert_eq!(root.one(&within).status, Status::Disabled);
-        set_enabled(&root.0, "plan", true).unwrap();
+        set_enabled(&root.0, &within, "plan", true).unwrap();
         assert_eq!(root.one(&within).status, Status::Active);
 
         root.put("other", PANEL); // the folder name and the manifest id disagree
@@ -743,8 +761,116 @@ command = ["npm", "ci"]
             matches!(&other.status, Status::Invalid { error } if error.contains("manifest id"))
         );
         assert!(matches!(
-            set_enabled(&root.0, "nope", true),
+            set_enabled(&root.0, &within, "nope", true),
             Err(Error::NotFound(_))
         ));
+    }
+
+    // --- Regression: a bad mod must not break Perch or reach what it was not approved for. ---
+
+    const AUTO: Policy = Policy {
+        mode: Mode::AutoAll,
+        off: false,
+    };
+
+    /// Group 1: whatever is in a mod folder, listing never fails and the good mods still load.
+    #[test]
+    fn broken_mod_folders_are_reported_and_never_break_the_rest() {
+        let root = Root::new();
+        root.put("good", &PANEL.replace("\"plan\"", "\"good\""));
+        let bad = |id: &str, bytes: &[u8]| {
+            let dir = mods_dir(&root.0).join(id);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(MANIFEST), bytes).unwrap();
+        };
+        bad("garbage", b"this is {{ not toml");
+        bad("binary", &[0xff, 0xfe, 0x00, 0x80]);
+        bad("huge", &vec![b'#'; MAX_MANIFEST_BYTES as usize + 1]);
+        bad("empty", b"");
+        std::fs::create_dir_all(mods_dir(&root.0).join("nomanifest")).unwrap();
+        // A symlinked manifest (to a file that is not a manifest) and a symlinked folder.
+        let link = mods_dir(&root.0).join("linked");
+        std::fs::create_dir_all(&link).unwrap();
+        std::os::unix::fs::symlink("/etc/hosts", link.join(MANIFEST)).unwrap();
+        std::os::unix::fs::symlink(
+            mods_dir(&root.0).join("good"),
+            mods_dir(&root.0).join("alias"),
+        )
+        .unwrap();
+
+        let mods = scan(&root.0, &AUTO).unwrap();
+        let state = |id: &str| mods.iter().find(|m| m.id == id).map(|m| m.status.clone());
+        assert_eq!(state("good"), Some(Status::Active));
+        for id in ["garbage", "binary", "huge", "empty", "nomanifest", "linked"] {
+            assert!(
+                matches!(state(id), Some(Status::Invalid { .. })),
+                "{id}: {:?}",
+                state(id)
+            );
+        }
+        assert_eq!(state("alias"), None, "a symlinked folder is not followed");
+    }
+
+    /// Group 2: only an approved, enabled mod with an unchanged manifest ever reads as Active.
+    #[test]
+    fn nothing_but_an_approved_enabled_unchanged_mod_is_active() {
+        let root = Root::new();
+        root.put("plan", PANEL);
+        let ask = Policy::default();
+        let active = |policy: &Policy| active(&root.0, policy, "plan");
+        assert!(active(&ask).is_err(), "new and unapproved");
+        let hash = root.one(&ask).hash;
+        approve(&root.0, &ask, "plan", &hash).unwrap();
+        assert!(active(&ask).is_ok());
+        set_enabled(&root.0, &ask, "plan", false).unwrap();
+        assert!(active(&ask).is_err(), "disabled");
+        set_enabled(&root.0, &ask, "plan", true).unwrap();
+        root.put("plan", &PANEL.replace("Plan\"\nentry", "Evil\"\nentry"));
+        assert!(active(&ask).is_err(), "manifest changed after approval");
+        assert!(
+            active(&Policy {
+                off: true,
+                ..ask.clone()
+            })
+            .is_err(),
+            "mods off"
+        );
+        assert!(active(&ask).is_err());
+        std::fs::write(mods_dir(&root.0).join("plan").join(MANIFEST), "x = [").unwrap();
+        assert!(active(&ask).is_err(), "now invalid");
+        // A state file that is damaged means nothing is approved, not everything.
+        std::fs::write(root.0.join(STATE), "{ not json").unwrap();
+        root.put("plan", PANEL);
+        assert!(active(&ask).is_err());
+    }
+
+    /// Group 3: a mod cannot approve itself. Approval lives beside the mods folder, never in a
+    /// mod, and nothing a mod puts in its own folder counts; turning mods off blocks changes.
+    #[test]
+    fn a_mod_cannot_approve_itself_and_off_blocks_changes() {
+        let root = Root::new();
+        root.put("plan", PANEL);
+        let ask = Policy::default();
+        let hash = root.one(&ask).hash;
+        let forged = format!(
+            r#"{{"plan":{{"enabled":true,"approved":{{"hash":"{hash}","by":"person","at":1}}}}}}"#
+        );
+        std::fs::write(mods_dir(&root.0).join("plan").join(STATE), &forged).unwrap();
+        std::fs::write(mods_dir(&root.0).join("plan").join(AUDIT), "").unwrap();
+        assert!(matches!(root.one(&ask).status, Status::Pending { .. }));
+        // Ask never approves by policy, however many times it is scanned.
+        for _ in 0..3 {
+            assert!(matches!(root.one(&ask).status, Status::Pending { .. }));
+        }
+        assert!(!root.0.join(AUDIT).exists());
+        // A short or wrong hash is not an approval.
+        assert!(approve(&root.0, &ask, "plan", &hash[..6]).is_err());
+        assert!(approve(&root.0, &ask, "../plan", &hash).is_err());
+        // Mods off: no change goes through, and nothing is listed.
+        let off = Policy { off: true, ..AUTO };
+        assert!(approve(&root.0, &off, "plan", &hash).is_err());
+        assert!(set_enabled(&root.0, &off, "plan", false).is_err());
+        assert!(scan(&root.0, &off).unwrap().is_empty());
+        assert!(!root.0.join(STATE).exists());
     }
 }

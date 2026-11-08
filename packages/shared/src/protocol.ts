@@ -384,6 +384,8 @@ export interface AgentUiPromptMessage {
   text: string;
   /** The terminal draft this composer picked up: the core clears the CLI's line (if it still holds exactly this) before sending. */
   replaces?: string;
+  /** How a message sent while a turn runs is delivered: "steer" into the running turn, or "queue" behind it. Absent is "queue". */
+  delivery?: "steer" | "queue";
 }
 export interface AgentUiAnswerMessage {
   type: "agent.ui.answer";
@@ -441,10 +443,14 @@ export type BrowserSearchEngine = "google" | "duckduckgo" | "bing" | "brave";
 
 export type ModCapability = "panel" | "events" | "read-project" | "write-project" | "network" | "build";
 
-/** How a new or changed mod is approved. `ceiling` is used by `auto-within-ceiling`. */
+/**
+ * Mods approval. `ask`: a person approves every new or changed mod. `auto-safe`: mods that only need
+ * a panel, events and reading project files are approved automatically. `auto-all`: everything is.
+ * `off`: every mod is off (same as starting Perch with PERCH_MODS=off).
+ */
 export interface ModsPolicy {
-  mode: "ask" | "auto-within-ceiling" | "auto-all";
-  ceiling: ModCapability[];
+  mode: "ask" | "auto-safe" | "auto-all";
+  off: boolean;
 }
 
 export interface SettingsData {

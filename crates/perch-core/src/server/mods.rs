@@ -41,7 +41,7 @@ pub(super) fn agent_list(app: &AppState, _caller: &AgentIdentity) -> Result<Valu
     let found = mods::scan(&app.memory_root, &policy).map_err(failure)?;
     Ok(json!({
         "mods": found,
-        "safeMode": mods::safe_mode(),
+        "safeMode": policy.is_off(),
         "policy": policy,
         "folder": app.memory_root.join("mods").display().to_string(),
     }))
@@ -54,7 +54,8 @@ pub(super) fn agent_set_enabled(
 ) -> Result<Value, Failure> {
     let id = text_of(body, "id")?;
     let enabled = body["enabled"].as_bool().unwrap_or(true);
-    mods::set_enabled(&app.memory_root, id, enabled).map_err(failure)?;
+    let policy = app.settings.get().mods;
+    mods::set_enabled(&app.memory_root, &policy, id, enabled).map_err(failure)?;
     Ok(json!({ "id": id, "enabled": enabled }))
 }
 
@@ -90,7 +91,7 @@ pub(super) fn agent_approve(
             ),
         ));
     }
-    mods::approve(&app.memory_root, id, &info.hash).map_err(failure)?;
+    mods::approve(&app.memory_root, &policy, id, &info.hash).map_err(failure)?;
     Ok(json!({ "id": id, "approved": true }))
 }
 

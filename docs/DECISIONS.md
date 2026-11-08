@@ -20,9 +20,10 @@ nothing runs or is served yet.
   reaches the phone too), plus `capabilities`. Terminal panes, link handlers and install from
   GitHub are later slices. No marketplace, no versioned SDK.
 - **Approval is its own policy (`Mode`), separate from Project and sub-session permissions.**
-  `ask` (default) waits for a person; `auto-within-ceiling` approves a mod whose required
-  capabilities all sit in the ceiling (default: panel, events, read-project); `auto-all` approves
-  everything, logged. Only a person sets it. Approval pins the manifest hash; a changed manifest is
+  Three plain choices (a configurable "ceiling" was dropped as too hard to understand): `ask`
+  (default) waits for a person; `auto-safe` approves a mod that only needs a panel, events and
+  reading project files (build steps, network and writing project files still ask); `auto-all`
+  approves everything, logged. Only a person sets it. Approval pins the manifest hash; a changed manifest is
   re-evaluated against the policy. Every approval is appended to `mod-audit.jsonl` with its source
   (`person` or `policy:<mode>`); state lives beside `mods/`, not inside a mod.
 - **Spawning is not a mod capability.** A mod calling `perch spawn`/`send` goes through the
@@ -30,16 +31,20 @@ nothing runs or is served yet.
 - **Honest limit.** Capabilities are enforced for panels (iframe sandbox) and scoped core calls. A
   mod's process runs as the user, so the manifest cannot stop it; the approval preview says so. The
   hash covers the manifest, not the scripts it points at.
-- **Who may do what.** The policy is `settings.mods` (`{mode, ceiling}`), changed only through the
+- **Who may do what.** The policy is `settings.mods` (`{mode, off}`), changed only through the
   settings route, which an agent token cannot reach. `perch mod enable|disable` is open to any
   session (off is the safe direction; on approves nothing). `perch mod approve <id> <hash>` acts
   only when a person typed that exact line in the session's terminal, like `perch start`.
-- **Reverting to stock Perch.** No master switch, bulk actions or groups: agents turn mods off one
-  by one, and a mod is a folder, so renaming the mods folder removes all of them. **Safe mode**
-  (`PERCH_MODS=off` in the core's environment) loads none, writes nothing and refuses approve and
-  enable, for when no agent or UI can be used.
+- **Reverting to stock Perch.** No bulk actions or groups: agents turn mods off one by one, and a
+  mod is a folder, so renaming the mods folder removes all of them. **Mods off** (`off` in the
+  policy, a switch in Settings > Mods; or `PERCH_MODS=off` in the core's environment for when the UI
+  cannot be used) loads none, writes nothing and refuses approve and enable.
+- **Regression tests pin containment:** broken or hostile folders (garbage, binary, oversized,
+  symlinked) are reported and never break the listing; only an approved, enabled mod with an
+  unchanged manifest is ever active; a mod cannot approve itself (state lives beside `mods/`);
+  a damaged state file means nothing is approved.
 - **Not yet decided:** per-Project "trust mods in this project" for mods inside a cloned repo (never
-  auto-approved until then), per-host policy, a Settings UI for the policy.
+  auto-approved until then), per-host policy.
 
 ## 2026-11-08 — Project tree: explicit state labels, no idle hiding (owner)
 
