@@ -223,7 +223,10 @@ pub(super) fn on_transition(
     let certainty = certainty(app, session);
     match admitted {
         Admit::Nothing => {}
-        Admit::Question => question(app, session, agent, certainty),
+        Admit::Question => {
+            question(app, session, agent, certainty);
+            mods::fire_event(app, "session.needs-you", session, agent);
+        }
         Admit::NewTurn => changed(app, app.db.resolve_attention(session, "failed", now())),
         Admit::Finished { away } => {
             let summary = if away {
@@ -232,8 +235,12 @@ pub(super) fn on_transition(
                 "Finished"
             };
             record(app, session, agent, "finished", certainty, summary);
+            mods::fire_event(app, "session.done", session, agent);
         }
-        Admit::Failed => record(app, session, agent, "failed", certainty, "Agent error"),
+        Admit::Failed => {
+            record(app, session, agent, "failed", certainty, "Agent error");
+            mods::fire_event(app, "session.failed", session, agent);
+        }
         Admit::Exited => record(app, session, agent, "exited", "verified", "Agent exited"),
     }
 }

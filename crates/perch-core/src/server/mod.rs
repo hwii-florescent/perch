@@ -895,6 +895,14 @@ pub async fn run(
             post(agent::mod_enable).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(
+            &format!("{base_path}agent/mod/run"),
+            post(agent::mod_run).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/mod/runs"),
+            post(agent::mod_runs).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
             &format!("{base_path}agent/mod/approve"),
             post(agent::mod_approve).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )

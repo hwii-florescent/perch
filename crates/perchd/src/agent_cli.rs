@@ -885,7 +885,8 @@ fn cancel(args: &[String]) -> Result<(), String> {
 }
 
 const MOD_USAGE: &str = "usage: perch mod [list] [--json] | perch mod enable <id> | \
-     perch mod disable <id> | perch mod approve <id> <hash>  (approve is a person's to type)";
+     perch mod disable <id> | perch mod run <id> <action> | perch mod runs [--json] | \
+     perch mod approve <id> <hash>  (approve is a person's to type)";
 
 /// `perch mod`: the mods on this computer, turn one off or on, and (a person) approve one.
 fn mod_cmd(args: &[String]) -> Result<(), String> {
@@ -908,6 +909,33 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
             println!("{id} is {verb}d");
             Ok(())
         }
+        ["run", id, action] => {
+            let run = ask("mod/run", json!({ "id": id, "action": action }))?;
+            print!("{}", render_run(&run));
+            if run["ok"].as_bool() == Some(true) {
+                Ok(())
+            } else {
+                Err(format!("{id} {action} did not succeed"))
+            }
+        }
+        ["runs"] | ["runs", "--json"] => {
+            let answer = ask("mod/runs", json!({}))?;
+            if args.iter().any(|arg| arg == "--json") {
+                println!("{answer}");
+            } else {
+                let runs = answer["runs"]
+                    .as_array()
+                    .map(Vec::as_slice)
+                    .unwrap_or_default();
+                if runs.is_empty() {
+                    println!("No mod has run since Perch started.");
+                }
+                for run in runs {
+                    print!("{}", render_run(run));
+                }
+            }
+            Ok(())
+        }
         ["approve", id, hash] => {
             ask("mod/approve", json!({ "id": id, "hash": hash }))?;
             println!("{id} is approved");
@@ -915,6 +943,33 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
         }
         _ => Err(MOD_USAGE.into()),
     }
+}
+
+/// One run: who ran what and how it ended, then what it printed.
+fn render_run(run: &Value) -> String {
+    let how = if run["ok"].as_bool() == Some(true) {
+        "ok".to_string()
+    } else if let Some(error) = run["error"].as_str() {
+        format!("failed: {error}")
+    } else {
+        format!("failed (exit {})", run["exitCode"])
+    };
+    let mut out = format!(
+        "{} {}  {how}  {} ms\n",
+        run["mod"].as_str().unwrap_or(""),
+        run["what"].as_str().unwrap_or(""),
+        run["millis"]
+    );
+    if let Some(text) = run["output"].as_str().filter(|text| !text.is_empty()) {
+        out += text;
+        if !text.ends_with('\n') {
+            out.push('\n');
+        }
+        if run["truncated"].as_bool() == Some(true) {
+            out += "[output cut]\n";
+        }
+    }
+    out
 }
 
 /// The mods in words: the policy, then one line per mod with what it needs and where it stands.
@@ -1239,6 +1294,10 @@ Commands
                           active, disabled, pending (waiting for a person) or invalid.
   perch mod enable <id>   Turn a mod on or off. Neither approves anything.
   perch mod disable <id>
+  perch mod run <id> <action>
+                          Run one action of an approved, enabled mod (60 seconds at most) and
+                          print what it printed. `perch mod runs` shows the latest runs,
+                          events included (since Perch started).
   perch mod approve <id> <hash>
                           Person only, like `perch start`: a person types it themselves in
                           this terminal (in Claude or Pi as `!perch mod approve ...`) with the
@@ -1328,7 +1387,10 @@ Mods
   - A mod is a folder in the mods folder (the path is in `perch mod`) holding perch-mod.toml:
     id, name and version (the id is the folder's name), `capabilities`, and any of `[[actions]]`
     and `[[events]]` (id/on, title, `command` = an argv list, run without a shell) and
-    `[[panels]]` (id, title, `entry` = a relative .html file). Write it there with the shell,
+    `[[panels]]` (id, title, `entry` = a relative .html file). `on` of an event is one of
+    session.needs-you, session.done, session.failed; the command gets PERCH_MOD_CONTEXT (JSON),
+    PERCH_MOD_DIR and PERCH_MOD_DATA (a private folder that keeps its files), runs in the mod's
+    folder with no shell, and is stopped after 30 seconds (60 for an action). Write it there with the shell,
     then run `perch mod` to see whether it was accepted. Nothing runs until a person approves it
     (or the person's own policy does): tell them it is waiting and what it needs. You cannot
     approve it, and your own session's permissions are a separate matter: a mod never widens them.

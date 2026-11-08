@@ -437,6 +437,32 @@ pub(super) async fn mod_enable(
     }
 }
 
+/// `POST {base}agent/mod/run`: run one action of an Active mod (`server/mods.rs`).
+pub(super) async fn mod_run(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(mods::agent_run(&state, &identity, &body).await),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
+/// `POST {base}agent/mod/runs`: the most recent mod runs (`server/mods.rs`).
+pub(super) async fn mod_runs(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(_) => Json(mods::agent_runs()).into_response(),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
 /// `POST {base}agent/mod/approve`: `perch mod approve`, done only when a person typed that line in
 /// the caller's terminal (`server/mods.rs`).
 pub(super) async fn mod_approve(

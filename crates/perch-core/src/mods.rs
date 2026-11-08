@@ -28,6 +28,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 
 pub const MANIFEST: &str = "perch-mod.toml";
+/// The events a mod can hook, fired from `server/attention.rs` when an agent session changes.
+pub const EVENTS: [&str; 3] = ["session.needs-you", "session.done", "session.failed"];
 const STATE: &str = "mod-state.json";
 const AUDIT: &str = "mod-audit.jsonl";
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
@@ -184,10 +186,11 @@ impl Manifest {
             check_command(&format!("action \"{}\"", action.id), &action.command)?;
         }
         for event in &self.events {
-            if !plain_id(&event.on.replace('.', "-"), false) {
+            if !EVENTS.contains(&event.on.as_str()) {
                 return Err(Error::Invalid(format!(
-                    "event name \"{}\" is not valid",
-                    event.on
+                    "unknown event \"{}\" (known: {})",
+                    event.on,
+                    EVENTS.join(", ")
                 )));
             }
             check_command(&format!("event \"{}\"", event.on), &event.command)?;
@@ -440,6 +443,42 @@ pub fn active(root: &Path, policy: &Policy, id: &str) -> Result<ModInfo, Error> 
     }
 }
 
+/// Every Active mod with its manifest and folder, for the seams that run or serve them. The
+/// manifest is read again and must still be the one that was approved.
+pub fn active_all(root: &Path, policy: &Policy) -> Result<Vec<(Manifest, PathBuf)>, Error> {
+    let mut out = Vec::new();
+    for info in scan(root, policy)? {
+        if info.status != Status::Active {
+            continue;
+        }
+        let dir = mods_dir(root).join(&info.id);
+        if let Ok((manifest, hash)) = read_mod(&dir) {
+            if hash == info.hash {
+                out.push((manifest, dir));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// [`active`] with the manifest and folder.
+pub fn load_active(root: &Path, policy: &Policy, id: &str) -> Result<(Manifest, PathBuf), Error> {
+    let info = active(root, policy, id)?;
+    let dir = mods_dir(root).join(id);
+    let (manifest, hash) = read_mod(&dir)?;
+    if hash != info.hash {
+        return Err(Error::Conflict(format!(
+            "mod \"{id}\" changed while it was starting"
+        )));
+    }
+    Ok((manifest, dir))
+}
+
+/// The folder a mod keeps its own files in (`PERCH_MOD_DATA`); outside the mod so updates keep it.
+pub fn data_dir(root: &Path, id: &str) -> PathBuf {
+    root.join("mod-data").join(id)
+}
+
 /// Safe mode: `PERCH_MODS=off` in the core's environment (or `off` in the policy). No mod is
 /// found, approved, run or served, and nothing is written, so stock Perch starts even when no
 /// agent or UI can turn mods off.
@@ -661,6 +700,10 @@ command = ["npm", "ci"]
                 "relative .html",
             ),
             (format!("{head}capabilites = []\n"), "unknown field"),
+            (
+                format!("{head}[[events]]\non = \"session.dnoe\"\ncommand = [\"x\"]\n"),
+                "unknown event",
+            ),
         ] {
             let error = invalid(&bad);
             assert!(error.contains(why), "{why}: {error}");

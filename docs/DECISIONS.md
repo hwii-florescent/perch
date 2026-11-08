@@ -10,9 +10,10 @@ conventions, not automatic approval. AGENTS is only a brief contributor entry po
 ## 2026-11-08 — Mods: folders a person or an agent writes, with their own approval policy (owner direction)
 
 Learned from herdr's plugins (manifest of actions, events and panes; argv commands that call back
-through the CLI) plus an iframe panel that herdr lacks. Slices 1 and 2 are built (`mods.rs`:
-manifest, approval policy, audit log; `settings.mods`; `perch mod list|enable|disable|approve`);
-nothing runs or is served yet.
+through the CLI) plus an iframe panel that herdr lacks. Built: `mods.rs` (manifest, approval policy,
+audit log), `settings.mods`, `mods_run.rs` (actions and events run), `perch mod
+list|enable|disable|approve|run|runs`. Not built: serving panels, the Settings > Mods UI, and a
+`perch` token for a mod's own commands.
 
 - **A mod is a folder** `<perch dir>/mods/<id>/perch-mod.toml` (folder name = id). It declares
   `[[actions]]` and `[[events]]` (argv, no shell, calling back through the `perch` CLI, which is the
@@ -26,6 +27,14 @@ nothing runs or is served yet.
   approves everything, logged. Only a person sets it. Approval pins the manifest hash; a changed manifest is
   re-evaluated against the policy. Every approval is appended to `mod-audit.jsonl` with its source
   (`person` or `policy:<mode>`); state lives beside `mods/`, not inside a mod.
+- **Running.** Only an Active mod (approved, enabled, manifest unchanged, mods not off) runs, and
+  `mods::active`/`load_active` is the one gate. Commands are argv without a shell, from the mod's
+  folder (a program is a bare name or a path inside it), killed with their process group after 30 s
+  (events) or 60 s (actions), output capped at 16 KiB, at most 4 at once, every outcome a record
+  (`perch mod runs`, in memory). Events: `session.needs-you`, `session.done`, `session.failed`
+  (from `server/attention.rs`); the manifest rejects any other name. A mod has `PERCH_MOD_DATA`, a
+  private folder outside `mods/` that survives updates. A mod's command has **no `perch` token
+  yet**, so it cannot call back into Perch; a scoped token is a later slice.
 - **Spawning is not a mod capability.** A mod calling `perch spawn`/`send` goes through the
   existing sub-session rules as an ordinary request (a card by default); mod approval never grants it.
 - **Honest limit.** Capabilities are enforced for panels (iframe sandbox) and scoped core calls. A
