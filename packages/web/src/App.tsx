@@ -6,6 +6,7 @@ import { SettingsPage } from "./components/SettingsPage";
 import { TabBar } from "./components/TabBar";
 import { Navigator } from "./components/Navigator";
 import { ContextBridge } from "./components/ContextBridge";
+import { ModsHost } from "./components/ModsHost";
 import { CloseAgentGuard } from "./components/CloseAgentGuard";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { KeybindHelp } from "./components/KeybindHelp";
@@ -338,6 +339,7 @@ export default function App() {
       <KeybindHelp open={keybindHelpOpen} onClose={() => setKeybindHelpOpen(false)} />
       <CloseAgentGuard />
       <ContextBridge />
+      <ModsHost />
       {isMobile && (
         <MobileSwitcher open={mobileSwitcherOpen} onClose={() => setMobileSwitcherOpen(false)} onPicked={() => setMobilePane("chat")} />
       )}

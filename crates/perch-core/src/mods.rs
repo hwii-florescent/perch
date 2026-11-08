@@ -97,6 +97,16 @@ pub struct Event {
     pub command: Vec<String>,
 }
 
+/// Where a panel shows: `overlay` over the app until closed, or `dock` as a pane in the workspace.
+/// Cosmetic: both are the same sandboxed iframe with the same powers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Placement {
+    #[default]
+    Overlay,
+    Dock,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Panel {
@@ -104,6 +114,16 @@ pub struct Panel {
     pub title: String,
     /// An `.html` file inside the mod's folder.
     pub entry: String,
+    #[serde(default)]
+    pub placement: Placement,
+}
+
+/// A panel as a list shows it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PanelInfo {
+    pub id: String,
+    pub title: String,
+    pub placement: Placement,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -227,11 +247,10 @@ impl Manifest {
                 .iter()
                 .map(|e| format!("on {}: {}", e.on, argv(&e.command))),
         );
-        lines.extend(
-            self.panels
-                .iter()
-                .map(|p| format!("panel {}: {}", p.id, p.entry)),
-        );
+        lines.extend(self.panels.iter().map(|p| match p.placement {
+            Placement::Overlay => format!("panel {}: {}", p.id, p.entry),
+            Placement::Dock => format!("docked panel {}: {}", p.id, p.entry),
+        }));
         lines
     }
 
@@ -332,7 +351,7 @@ pub struct ModInfo {
     pub version: String,
     pub description: String,
     pub actions: Vec<Titled>,
-    pub panels: Vec<Titled>,
+    pub panels: Vec<PanelInfo>,
     /// Everything that would run or be shown, one line each, so approval is informed.
     pub preview: Vec<String>,
     /// Pins what was looked at; [`approve`] must name it.
@@ -629,9 +648,10 @@ fn scan_with(root: &Path, policy: &Policy, safe: bool) -> Result<Vec<ModInfo>, E
                     panels: manifest
                         .panels
                         .iter()
-                        .map(|p| Titled {
+                        .map(|p| PanelInfo {
                             id: p.id.clone(),
                             title: p.title.clone(),
+                            placement: p.placement,
                         })
                         .collect(),
                     description: manifest.description,
@@ -767,6 +787,19 @@ command = ["npm", "ci"]
 
     fn invalid(text: &str) -> String {
         Manifest::parse(text).unwrap_err().to_string()
+    }
+
+    #[test]
+    fn a_panel_shows_as_an_overlay_unless_it_says_dock() {
+        let head = "id = \"m\"\nname = \"M\"\nversion = \"1\"\n[[panels]]\nid = \"p\"\ntitle = \"t\"\nentry = \"a.html\"\n";
+        let placement =
+            |extra: &str| Manifest::parse(&format!("{head}{extra}")).map(|m| m.panels[0].placement);
+        assert_eq!(placement("").unwrap(), Placement::Overlay);
+        assert_eq!(
+            placement("placement = \"dock\"\n").unwrap(),
+            Placement::Dock
+        );
+        assert!(placement("placement = \"floating\"\n").is_err());
     }
 
     #[test]

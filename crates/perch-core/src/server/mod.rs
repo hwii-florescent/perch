@@ -783,6 +783,7 @@ pub async fn run(
     tokio::spawn(agent_mail::run_deliveries(state.clone()));
     spawn_agent_hibernation_task(state.clone());
     spawn_filesystem_watch_task(state.clone());
+    mods::spawn_watch(state.clone());
 
     let phone_saved = options.phone_access_port.is_some() || state.settings.get().phone_access;
     {
@@ -893,6 +894,10 @@ pub async fn run(
         .route(
             &format!("{base_path}agent/mod/enable"),
             post(agent::mod_enable).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/mod/open"),
+            post(agent::mod_open).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(
             &format!("{base_path}agent/mod/run"),

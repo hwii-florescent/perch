@@ -23,7 +23,7 @@ const sent = () => wire.send.mock.calls.map(([message]) => message as ClientMess
 const lastRequest = () => sent().at(-1) as Extract<ClientMessage, { type: `mods.${string}` }>;
 const q = <T extends Element = HTMLElement>(testId: string) => document.querySelector(`[data-testid="${testId}"]`) as T;
 const mod = (extra: Partial<ModInfo> = {}): ModInfo => ({
-  id: "board", name: "Board", version: "1", description: "A plan board", actions: [{ id: "hi", title: "Say hi" }], panels: [{ id: "main", title: "Main" }],
+  id: "board", name: "Board", version: "1", description: "A plan board", actions: [{ id: "hi", title: "Say hi" }], panels: [{ id: "main", title: "Main", placement: "overlay" }],
   preview: ["action hi: echo hi", "panel main: index.html"], hash: "abcdef0123456789", required: ["panel"],
   status: { state: "pending", reason: "waiting for a person to approve it" }, approvedBy: null, ...extra,
 });

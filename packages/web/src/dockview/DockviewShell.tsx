@@ -1,4 +1,6 @@
-import { createContext, useContext, useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { currentMods, modPanelUrl, subscribeMods } from "../mods";
+import { ModPanelFrame } from "../components/ModPanelFrame";
 import {
   DockviewDefaultTab,
   DockviewReact,
@@ -185,12 +187,25 @@ function GitReviewPanel(props: IDockviewPanelProps) {
   return <WorkspaceGitReviewPane workspaceId={workspaceId} />;
 }
 
+/** A mod's docked panel. Looks the mod up on every change, so a mod that was turned off or removed
+ * stops showing its page at once (and a restored layout never serves a mod that is not Active). */
+function ModPanel(props: IDockviewPanelProps) {
+  const mods = useSyncExternalStore(subscribeMods, currentMods);
+  const { modId, panelId } = (props.params ?? {}) as { modId?: string; panelId?: string };
+  const mod = mods?.mods.find((candidate) => candidate.id === modId);
+  if (!modId || !panelId || mod?.status.state !== "active" || !mod.panels.some((panel) => panel.id === panelId)) {
+    return <div className="inactive-session-pane">{mods ? "This mod is off or gone." : "Loading…"}</div>;
+  }
+  return <ModPanelFrame key={mod.hash} title={props.api.title ?? modId} src={modPanelUrl(modId, panelId)} canRead={mod.required.includes("read-project")} />;
+}
+
 const components = {
   chat: ChatPanel,
   terminal: TerminalPanel,
   sessionChat: SessionChatPanel,
   files: FilesPanel,
   gitReview: GitReviewPanel,
+  modPanel: ModPanel,
 };
 
 /** Group-header "+" action (Bug 3): dockview applies `rightHeaderActionsComponent`

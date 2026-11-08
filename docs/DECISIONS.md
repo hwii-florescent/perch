@@ -17,8 +17,21 @@ list|enable|disable|approve|run|runs`, the person-plane messages `mods.list`/`mo
 runs, Approve, Run, Open, Turn on/off), a scoped `perch` token for a mod's own commands, and a
 panel's read-only file bridge (`modPanelBridge.ts`: the panel posts `read-file`, the page answers
 only that frame, only for a mod approved for `read-project`, text up to 256 KiB, through the same
-descriptor-confined `/workspace-file` route; local open project only). Not built: docking a panel
-as a pane.
+descriptor-confined `/workspace-file` route; local open project only).
+- **Mods show up where the person is, not in Settings.** Settings > Mods lists and turns off; it is
+  not the way in. The core rescans the mods folder every 2 s and broadcasts `mods.changed` when a
+  mod or its status differs (a ceiling of a 2 s delay; `notify` is the upgrade), and the web keeps
+  the latest list (`mods.ts`). `ModsHost` (mounted in `App.tsx`, so chat and terminal sessions alike)
+  shows a pill and card for each mod waiting on approval (the preview of what it runs, Approve,
+  Not now; a click is the person's approval, same as Settings). A panel with `placement = "dock"` in
+  the manifest opens as a pane (`modPanel` in the dock) the first time its mod is Active at that
+  hash, remembered in localStorage so a reload does not reopen what was closed and an edited mod
+  shows again; the default `overlay` opens only on request. `perch mod open <id> [panel]` (any
+  agent; it only shows a page the person already approved) sends `mods.open` to show one now. A
+  docked pane re-checks its mod on every change and shows "off or gone" instead of its page. Herdr
+  likewise runs no plugin UI inside its host (its panes are terminal programs shown as overlay or
+  popup) and does not sandbox plugins; Perch keeps panels sandboxed and runs no mod code in the app.
+  Not built: removing a mod from Settings, a layout a mod can declare out of Perch's own panes.
 - **Panels.** One self-contained `.html` file (no sub-assets: a sandboxed page has no cookie, so it
   could not fetch them), served only for an Active mod from inside its folder (symlinks resolved,
   2 MiB cap), to a person's token only, with `Content-Security-Policy: sandbox allow-scripts;

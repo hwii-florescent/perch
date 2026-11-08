@@ -1603,6 +1603,8 @@ impl HubManager {
             | ServerMessage::InstructionsState { .. }
             | ServerMessage::MemoryState { .. }
             | ServerMessage::ModsState { .. }
+            | ServerMessage::ModsChanged { .. }
+            | ServerMessage::ModsOpen { .. }
             | ServerMessage::MemoryFileState { .. }
             | ServerMessage::CrewState { .. }
             | ServerMessage::CrewActResult { .. }

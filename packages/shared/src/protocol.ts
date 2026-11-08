@@ -2851,7 +2851,7 @@ export interface ModInfo {
   version: string;
   description: string;
   actions: { id: string; title: string }[];
-  panels: { id: string; title: string }[];
+  panels: { id: string; title: string; placement: "overlay" | "dock" }[];
   /** Everything approving it lets run or show, one line each. */
   preview: string[];
   /** Pins what was looked at; `mods.set` approve must name it. */
@@ -2860,6 +2860,18 @@ export interface ModInfo {
   status: ModStatus;
   /** `person` or `policy:<mode>`. */
   approvedBy: string | null;
+}
+
+/** Broadcast when the mods folder or a mod's status changed; clients ask again with `mods.list`. */
+export interface ModsChangedMessage {
+  type: "mods.changed";
+}
+
+/** Broadcast when `perch mod open` asks this screen to show an Active mod's panel. */
+export interface ModsOpenMessage {
+  type: "mods.open";
+  modId: string;
+  panelId: string;
 }
 
 export interface ModRun {
@@ -3464,6 +3476,8 @@ export type ServerMessage =
   | InstructionsStateMessage
   | MemoryStateMessage
   | ModsStateMessage
+  | ModsChangedMessage
+  | ModsOpenMessage
   | MemoryFileMessage
   | CrewStateMessage
   | CrewActResultMessage

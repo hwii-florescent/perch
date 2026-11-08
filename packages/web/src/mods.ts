@@ -20,12 +20,33 @@ function settle(requestId: string, answer: ModsState | null) {
   pending.delete(requestId);
 }
 
+const openers = new Set<(modId: string, panelId: string) => void>();
+/** `perch mod open` asked this screen to show a panel. */
+export const onModOpen = (handler: (modId: string, panelId: string) => void) => {
+  openers.add(handler);
+  return () => void openers.delete(handler);
+};
+
+// The mods as this screen last heard them. Everything outside Settings reads this, so a mod an agent
+// just wrote or a person just approved shows up without asking anyone to open Settings.
+let latest: ModsState | null = null;
+const watchers = new Set<() => void>();
+export const subscribeMods = (watch: () => void) => (watchers.add(watch), () => void watchers.delete(watch));
+export const currentMods = () => latest;
+export const refreshMods = () => void listMods();
+
 socket.onMessage((message) => {
-  if (message.type === "server.info") capabilities = message.capabilities ?? [];
-  else if (message.type === "mods.state") {
+  if (message.type === "server.info") {
+    capabilities = message.capabilities ?? [];
+    refreshMods();
+  } else if (message.type === "mods.state") {
     const { type: _type, requestId, ...state } = message;
+    // Any answer (a list, an approval in Settings) is the newest word on the mods.
+    latest = state;
+    watchers.forEach((watch) => watch());
     settle(requestId, state);
-  }
+  } else if (message.type === "mods.changed") refreshMods();
+  else if (message.type === "mods.open") openers.forEach((open) => open(message.modId, message.panelId));
 });
 // A dropped connection never answers: let waiting requests finish.
 socket.onConnectionChange((connected) => {

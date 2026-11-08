@@ -504,6 +504,19 @@ pub(super) async fn mod_enable(
     }
 }
 
+/// `POST {base}agent/mod/open`: show an Active mod's panel on the person's screen (`server/mods.rs`).
+pub(super) async fn mod_open(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(mods::agent_open(&state, &identity, &body)),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
 /// `POST {base}agent/mod/run`: run one action of an Active mod (`server/mods.rs`).
 pub(super) async fn mod_run(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,

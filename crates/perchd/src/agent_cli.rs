@@ -886,7 +886,7 @@ fn cancel(args: &[String]) -> Result<(), String> {
 
 const MOD_USAGE: &str = "usage: perch mod [list] [--json] | perch mod enable <id> | \
      perch mod disable <id> | perch mod run <id> <action> | perch mod runs [--json] | \
-     perch mod approve <id> <hash>  (approve is a person's to type)";
+     perch mod open <id> [panel] | perch mod approve <id> <hash>  (approve is a person's to type)";
 
 /// `perch mod`: the mods on this computer, turn one off or on, and (a person) approve one.
 fn mod_cmd(args: &[String]) -> Result<(), String> {
@@ -939,6 +939,15 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
         ["approve", id, hash] => {
             ask("mod/approve", json!({ "id": id, "hash": hash }))?;
             println!("{id} is approved");
+            Ok(())
+        }
+        ["open", id] | ["open", id, _] => {
+            let panel = words.get(2);
+            let opened = ask("mod/open", json!({ "id": id, "panel": panel }))?;
+            println!(
+                "{id}: panel {} is shown on the person's screen",
+                opened["panel"].as_str().unwrap_or("")
+            );
             Ok(())
         }
         _ => Err(MOD_USAGE.into()),
@@ -1387,13 +1396,16 @@ Mods
   - A mod is a folder in the mods folder (the path is in `perch mod`) holding perch-mod.toml:
     id, name and version (the id is the folder's name), `capabilities`, and any of `[[actions]]`
     and `[[events]]` (id/on, title, `command` = an argv list, run without a shell) and
-    `[[panels]]` (id, title, `entry` = a relative .html file). `on` of an event is one of
+    `[[panels]]` (id, title, `entry` = a relative .html file, `placement` = 'overlay' (default) or
+    'dock', a pane in the workspace). `on` of an event is one of
     session.needs-you, session.done, session.failed; the command gets PERCH_MOD_CONTEXT (JSON),
     PERCH_MOD_DIR and PERCH_MOD_DATA (a private folder that keeps its files), runs in the mod's
     folder with no shell, and is stopped after 30 seconds (60 for an action). Write it there with the shell,
     then run `perch mod` to see whether it was accepted. Nothing runs until a person approves it
     (or the person's own policy does): tell them it is waiting and what it needs. You cannot
     approve it, and your own session's permissions are a separate matter: a mod never widens them.
+    The person sees a card to approve it in Perch itself (terminal or chat), and once it is
+    active its docked panels open by themselves; `perch mod open <id> [panel]` shows one now.
   - A mod's command can run `perch` itself (PERCH_SESSION and PERCH_TOKEN are set, and `perch` is
     on PATH) while it runs. That token opens only `perch mod`/`perch mod runs`, and `perch memory`
     for the session an event or invocation was about: reading needs `read-project` and writing

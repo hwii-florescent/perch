@@ -2516,6 +2516,15 @@ pub enum ServerMessage {
         error: Option<String>,
     },
 
+    /// Broadcast when the mods folder or a mod's status changed (written, edited, approved, turned
+    /// off). Clients ask again with `mods.list`.
+    #[serde(rename = "mods.changed")]
+    ModsChanged {},
+
+    /// Broadcast when `perch mod open` asks the person's screen to show one of an Active mod's panels.
+    #[serde(rename = "mods.open", rename_all = "camelCase")]
+    ModsOpen { mod_id: String, panel_id: String },
+
     /// Reply to `memory.list`, `memory.set` and `memory.delete`: the Project's memory index,
     /// by name, after the request. `name` repeats the file a set or delete was about;
     /// `conflict` is true when it was refused because the file is not at the base revision

@@ -75,6 +75,62 @@ pub(super) async fn agent_run(
     ))
 }
 
+/// `perch mod open <id> [panel]`: ask the person's screen to show an Active mod's panel now. It only
+/// shows the sandboxed page the person already approved, so no further permission is needed.
+pub(super) fn agent_open(
+    app: &AppState,
+    _caller: &AgentIdentity,
+    body: &Value,
+) -> Result<Value, Failure> {
+    let id = text_of(body, "id")?;
+    let policy = app.settings.get().mods;
+    let (manifest, _) = mods::load_active(&app.memory_root, &policy, id).map_err(failure)?;
+    let panel = match body["panel"].as_str() {
+        Some(panel) => manifest.panels.iter().find(|p| p.id == panel),
+        None => manifest.panels.first(),
+    }
+    .ok_or_else(|| {
+        fail(
+            StatusCode::BAD_REQUEST,
+            format!("mod \"{id}\" has no such panel"),
+        )
+    })?;
+    let _ = app
+        .hub
+        .hub_events_tx
+        .send(Arc::new(ServerMessage::ModsOpen {
+            mod_id: manifest.id.clone(),
+            panel_id: panel.id.clone(),
+        }));
+    Ok(json!({ "id": id, "panel": panel.id }))
+}
+
+/// Tells every client when the mods folder or a mod's status changes, so a mod an agent just wrote
+/// (or one a person just approved) shows up without anyone visiting Settings.
+// ponytail: a 2 s rescan of small manifests, not a file watcher; the ceiling is a change taking
+// up to 2 s to show, and the upgrade path is `notify` on the mods folder.
+pub(super) fn spawn_watch(app: AppState) {
+    tokio::spawn(async move {
+        let mut seen: Option<Vec<mods::ModInfo>> = None;
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
+        loop {
+            tick.tick().await;
+            let (root, policy) = (app.memory_root.clone(), app.settings.get().mods);
+            let Ok(Ok(now)) = tokio::task::spawn_blocking(move || mods::scan(&root, &policy)).await
+            else {
+                continue;
+            };
+            if seen.as_ref().is_some_and(|before| *before != now) {
+                let _ = app
+                    .hub
+                    .hub_events_tx
+                    .send(Arc::new(ServerMessage::ModsChanged {}));
+            }
+            seen = Some(now);
+        }
+    });
+}
+
 /// Every mod token starts with this, so a route that must not take one recognises it at once.
 pub(super) const TOKEN_PREFIX: &str = "perch_mod_";
 
@@ -887,6 +943,80 @@ command = ["sh", "-c", "echo \"$PERCH_SESSION $PERCH_TOKEN\" > \"$PERCH_MOD_DATA
                 .await;
         assert_eq!(off["mods"][0]["status"]["state"], "disabled");
         assert_eq!(get(address, &with(&person), &[]).await.0, 400);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `perch mod open` reaches the person's screen only for an Active mod's own panel.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn open_shows_only_an_active_mods_own_panel() {
+        let root = std::env::temp_dir().join(format!("perch-mods-open-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let (address, db) = boot(&root).await;
+        let app = super::super::booted_state(address);
+        let (workspace, _) = lead_with_child(&db, &nest, crate::sub_sessions::SubState::Running);
+        let token = db
+            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .unwrap()
+            .token;
+        let call = |route: &'static str, body: Value| {
+            let token = token.clone();
+            async move {
+                let mut full = json!({"session": "lead"});
+                full.as_object_mut()
+                    .unwrap()
+                    .extend(body.as_object().unwrap().clone());
+                request(
+                    address,
+                    "POST",
+                    &format!("/agent/mod/{route}"),
+                    &[("Authorization", &format!("Bearer {token}"))],
+                    &full.to_string(),
+                )
+                .await
+            }
+        };
+        let (_, listed) = call("list", json!({})).await;
+        let folder = std::path::PathBuf::from(listed["folder"].as_str().unwrap()).join("board");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("board.html"), "<p>hi</p>").unwrap();
+        std::fs::write(
+            folder.join(crate::mods::MANIFEST),
+            "id = \"board\"\nname = \"Board\"\nversion = \"1\"\n\
+             [[panels]]\nid = \"main\"\ntitle = \"Board\"\nentry = \"board.html\"\nplacement = \"dock\"\n",
+        )
+        .unwrap();
+        let mut screen = app.hub.hub_events_tx.subscribe();
+
+        // Waiting for approval: nothing is shown.
+        let (status, _) = call("open", json!({"id": "board"})).await;
+        assert_eq!(status, 400);
+        assert!(screen.try_recv().is_err());
+
+        let (_, listed) = call("list", json!({})).await;
+        assert_eq!(listed["mods"][0]["panels"][0]["placement"], "dock");
+        let hash = listed["mods"][0]["hash"].as_str().unwrap().to_string();
+        app.agent_runtime
+            .note_terminal_input("lead", &format!("!perch mod approve board {hash}\r"));
+        assert_eq!(
+            call("approve", json!({"id": "board", "hash": hash}))
+                .await
+                .0,
+            200
+        );
+        assert_eq!(
+            call("open", json!({"id": "board", "panel": "other"}))
+                .await
+                .0,
+            400
+        );
+        let (status, opened) = call("open", json!({"id": "board"})).await;
+        assert_eq!(status, 200, "{opened}");
+        let shown = screen.try_recv().expect("the screen is told");
+        assert!(matches!(
+            &*shown,
+            ServerMessage::ModsOpen { mod_id, panel_id } if mod_id == "board" && panel_id == "main"
+        ));
         let _ = std::fs::remove_dir_all(&root);
     }
 
