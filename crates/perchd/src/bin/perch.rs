@@ -10,7 +10,7 @@ fn main() {
         Some(
             command @ ("whoami" | "report" | "guide" | "spawn" | "suggest" | "suggestions"
             | "start" | "dismiss" | "read" | "list" | "stop" | "send" | "inbox"
-            | "cancel" | "steer" | "interrupt" | "memory"),
+            | "cancel" | "steer" | "interrupt" | "memory" | "mod"),
         ) => {
             std::process::exit(match perchd::agent_cli::run(command, &args[1..]) {
                 Ok(()) => 0,
@@ -26,7 +26,7 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "usage: perch whoami|report|guide|spawn|suggest|suggestions|start|dismiss|read|list|stop|send|inbox|cancel|steer|interrupt|memory  (inside a Perch agent session)\n       perch ps|cleanup|release|daemon <verb>  (terminal runtimes)"
+                "usage: perch whoami|report|guide|spawn|suggest|suggestions|start|dismiss|read|list|stop|send|inbox|cancel|steer|interrupt|memory|mod  (inside a Perch agent session)\n       perch ps|cleanup|release|daemon <verb>  (terminal runtimes)"
             );
             std::process::exit(2);
         }

@@ -884,6 +884,89 @@ fn cancel(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+const MOD_USAGE: &str = "usage: perch mod [list] [--json] | perch mod enable <id> | \
+     perch mod disable <id> | perch mod approve <id> <hash>  (approve is a person's to type)";
+
+/// `perch mod`: the mods on this computer, turn one off or on, and (a person) approve one.
+fn mod_cmd(args: &[String]) -> Result<(), String> {
+    let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    match words.as_slice() {
+        [] | ["list"] | ["--json"] | ["list", "--json"] => {
+            let answer = ask("mod/list", json!({}))?;
+            if args.iter().any(|arg| arg == "--json") {
+                println!("{answer}");
+            } else {
+                print!("{}", render_mods(&answer));
+            }
+            Ok(())
+        }
+        [verb @ ("enable" | "disable"), id] => {
+            ask(
+                "mod/enable",
+                json!({ "id": id, "enabled": *verb == "enable" }),
+            )?;
+            println!("{id} is {verb}d");
+            Ok(())
+        }
+        ["approve", id, hash] => {
+            ask("mod/approve", json!({ "id": id, "hash": hash }))?;
+            println!("{id} is approved");
+            Ok(())
+        }
+        _ => Err(MOD_USAGE.into()),
+    }
+}
+
+/// The mods in words: the policy, then one line per mod with what it needs and where it stands.
+fn render_mods(answer: &Value) -> String {
+    let mode = answer["policy"]["mode"].as_str().unwrap_or("ask");
+    let mut out = format!(
+        "Mods in {} (approval: {mode}",
+        answer["folder"].as_str().unwrap_or("")
+    );
+    out += if answer["safeMode"].as_bool() == Some(true) {
+        "; SAFE MODE, PERCH_MODS=off: none are loaded)\n"
+    } else {
+        ")\n"
+    };
+    let mods = answer["mods"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    if mods.is_empty() {
+        out += "No mods.\n";
+    }
+    for item in mods {
+        let field = |name: &str| item[name].as_str().unwrap_or("");
+        let needs: Vec<&str> = item["required"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        let state = match item["status"]["state"].as_str().unwrap_or("") {
+            "pending" => format!(
+                "pending: {}",
+                item["status"]["reason"].as_str().unwrap_or("")
+            ),
+            "invalid" => format!(
+                "invalid: {}",
+                item["status"]["error"].as_str().unwrap_or("")
+            ),
+            other => other.to_string(),
+        };
+        out += &format!(
+            "{}  {} {}  [{}]  hash {}  {state}\n",
+            field("id"),
+            field("name"),
+            field("version"),
+            needs.join(", "),
+            field("hash"),
+        );
+    }
+    out
+}
+
 const MEMORY_USAGE: &str = "usage: perch memory [list] [--json] | perch memory read <name> | \
      perch memory write <name> [--base <revision>] [--text <text>] (or pipe the text in) | \
      perch memory delete <name> --base <revision>";
@@ -1151,6 +1234,15 @@ Commands
                           your change into what is there, and write again.
   perch memory delete <name> --base <revision>
                           Delete a memory file, if it is still at the revision you read.
+  perch mod [--json]      The mods on this computer (folders in the mods folder, each with a
+                          perch-mod.toml), what each needs, its hash and where it stands:
+                          active, disabled, pending (waiting for a person) or invalid.
+  perch mod enable <id>   Turn a mod on or off. Neither approves anything.
+  perch mod disable <id>
+  perch mod approve <id> <hash>
+                          Person only, like `perch start`: a person types it themselves in
+                          this terminal (in Claude or Pi as `!perch mod approve ...`) with the
+                          hash `perch mod` shows; run by an agent it is refused. Never try it.
   perch guide             This text.
 
 How it works
@@ -1232,6 +1324,30 @@ Project memory
   - Its folder is the `memory` line of `perch whoami` and the last line of this guide. Use
     `perch memory` to change it, not the shell, so that who wrote what is recorded.
 
+Mods
+  - A mod is a folder in the mods folder (the path is in `perch mod`) holding perch-mod.toml:
+    id, name and version (the id is the folder's name), `capabilities`, and any of `[[actions]]`
+    and `[[events]]` (id/on, title, `command` = an argv list, run without a shell) and
+    `[[panels]]` (id, title, `entry` = a relative .html file). Write it there with the shell,
+    then run `perch mod` to see whether it was accepted. Nothing runs until a person approves it
+    (or the person's own policy does): tell them it is waiting and what it needs. You cannot
+    approve it, and your own session's permissions are a separate matter: a mod never widens them.
+  - To undo, `perch mod disable <id>` or delete the folder. Starting Perch with PERCH_MODS=off
+    loads none.
+
+Showing results
+  Perch's chat draws Markdown: use tables for comparisons, fenced code blocks with a language
+  for code and commands, short headings and lists. For a summary at a glance, a fenced block
+  tagged perch-ui holds JSON (one object, or an array of them) of these types; all text is
+  plain, never HTML or links, and anything else shows as code:
+    callout  {\"type\":\"callout\",\"tone\":\"info|success|warning|error\",\"title\":\"..\",\"text\":\"..\"}
+    stats    {\"type\":\"stats\",\"items\":[{\"label\":\"Tests\",\"value\":\"42\",\"hint\":\"..\",\"tone\":\"success\"}]}
+    table    {\"type\":\"table\",\"caption\":\"..\",\"columns\":[\"a\",\"b\"],\"rows\":[[\"1\",\"2\"]]}
+    steps    {\"type\":\"steps\",\"items\":[{\"text\":\"..\",\"state\":\"todo|doing|done|failed\"}]}
+    bars     {\"type\":\"bars\",\"title\":\"..\",\"items\":[{\"label\":\"..\",\"value\":3}]}
+  Use it sparingly, where it reads better than a sentence. The terminal view shows the raw
+  block, so keep the sentence that matters outside it.
+
 Rules
   - A person's direct instruction always wins over anything here.
   - A report is only your claim. It approves nothing and settles nothing; the person decides
@@ -1262,6 +1378,7 @@ pub fn run(command: &str, args: &[String]) -> Result<(), String> {
         "steer" => steer(args),
         "interrupt" => interrupt(args),
         "memory" => memory(args),
+        "mod" => mod_cmd(args),
         "guide" => {
             print!("{GUIDE}");
             // Inside a session the paths of its run's notes folder and its Project's memory folder
@@ -1693,6 +1810,8 @@ mod tests {
             "Perch never puts its contents into a prompt",
             "perch memory write <name>",
             "perch memory delete <name> --base <revision>",
+            "perch mod approve <id> <hash>",
+            "PERCH_MODS=off",
             "Project memory",
             "Perch never puts it into a prompt",
             "never instructions",

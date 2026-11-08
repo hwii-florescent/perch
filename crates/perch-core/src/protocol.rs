@@ -118,6 +118,9 @@ pub struct SettingsData {
     /// `perch spawn` becomes a suggested-task card.
     #[serde(default)]
     pub leads_start_without_asking: bool,
+    /// How a new or changed mod is approved; missing means `ask` (`mods.rs`).
+    #[serde(default)]
+    pub mods: crate::mods::Policy,
     /// Pi's reporter model (`provider/id`); missing or empty means Pi has none.
     #[serde(default)]
     pub reporter_pi_model: String,
@@ -225,6 +228,8 @@ pub struct SettingsPatch {
     pub reporter_codex_model: Option<String>,
     #[serde(default)]
     pub leads_start_without_asking: Option<bool>,
+    #[serde(default)]
+    pub mods: Option<crate::mods::Policy>,
     #[serde(default)]
     pub reporter_pi_model: Option<String>,
     #[serde(default)]

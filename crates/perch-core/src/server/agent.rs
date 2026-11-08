@@ -411,6 +411,46 @@ pub(super) async fn memory_delete(
     }
 }
 
+/// `POST {base}agent/mod/list`: every mod with its status and the approval policy (`server/mods.rs`).
+pub(super) async fn mod_list(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(mods::agent_list(&state, &identity)),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
+/// `POST {base}agent/mod/enable`: turn one mod off or back on; this approves nothing (`server/mods.rs`).
+pub(super) async fn mod_enable(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(mods::agent_set_enabled(&state, &identity, &body)),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
+/// `POST {base}agent/mod/approve`: `perch mod approve`, done only when a person typed that line in
+/// the caller's terminal (`server/mods.rs`).
+pub(super) async fn mod_approve(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(mods::agent_approve(&state, &identity, &body)),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
 /// An agent token on a route that is not `/agent/*` is refused outright, even from loopback:
 /// whoever holds one is an agent, and agents get agent operations only.
 pub(super) fn carries_agent_token(headers: &HeaderMap, params: &HashMap<String, String>) -> bool {

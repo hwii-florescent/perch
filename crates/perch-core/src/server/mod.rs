@@ -91,6 +91,7 @@ mod instructions;
 #[cfg(test)]
 mod local_authority;
 mod memory;
+mod mods;
 mod native_ui;
 mod recover;
 mod reporter;
@@ -884,6 +885,18 @@ pub async fn run(
         .route(
             &format!("{base_path}agent/memory/delete"),
             post(agent::memory_delete).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/mod/list"),
+            post(agent::mod_list).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/mod/enable"),
+            post(agent::mod_enable).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/mod/approve"),
+            post(agent::mod_approve).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(&format!("{base_path}workspace-file"), get(fs::file_content))
         .with_state(state);

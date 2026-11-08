@@ -234,6 +234,7 @@ pub enum Mode {
 
 /// The mod approval policy. Set by a person only; it is an input here, never read from a mod.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Policy {
     pub mode: Mode,
     pub ceiling: BTreeSet<Capability>,
@@ -416,9 +417,19 @@ fn status_of(record: &Record, hash: &str) -> Status {
 /// Every mod folder with its status. A new or changed manifest is approved here only when `policy`
 /// allows; otherwise it stays pending.
 pub fn scan(root: &Path, policy: &Policy) -> Result<Vec<ModInfo>, Error> {
+    scan_with(root, policy, safe_mode())
+}
+
+/// Safe mode: `PERCH_MODS=off` in the core's environment. No mod is found, approved, run or
+/// served, and nothing is written, so stock Perch starts even when no agent or UI can turn mods off.
+pub fn safe_mode() -> bool {
+    std::env::var("PERCH_MODS").is_ok_and(|value| value.eq_ignore_ascii_case("off"))
+}
+
+fn scan_with(root: &Path, policy: &Policy, safe: bool) -> Result<Vec<ModInfo>, Error> {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let dir = mods_dir(root);
-    if !dir.is_dir() {
+    if safe || !dir.is_dir() {
         return Ok(Vec::new());
     }
     let mut state = load_state(root);
@@ -483,6 +494,7 @@ pub fn scan(root: &Path, policy: &Policy) -> Result<Vec<ModInfo>, Error> {
 /// A person approves the manifest they looked at (`hash` from [`scan`]). Callers must make sure a
 /// person asked: an agent session or a mod must never reach this.
 pub fn approve(root: &Path, id: &str, hash: &str) -> Result<(), Error> {
+    refuse_in_safe_mode()?;
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if !plain_id(id, true) {
         return Err(Error::Invalid(format!("\"{id}\" is not a mod id")));
@@ -512,8 +524,19 @@ pub fn approve(root: &Path, id: &str, hash: &str) -> Result<(), Error> {
     audit(root, id, &current, "approved", "person")
 }
 
+fn refuse_in_safe_mode() -> Result<(), Error> {
+    if safe_mode() {
+        return Err(Error::Invalid(
+            "Perch is in safe mode (PERCH_MODS=off): mods are off and cannot be changed. Restart without it."
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Turns a mod off or on without touching its approval.
 pub fn set_enabled(root: &Path, id: &str, enabled: bool) -> Result<(), Error> {
+    refuse_in_safe_mode()?;
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if !plain_id(id, true) || !mods_dir(root).join(id).is_dir() {
         return Err(Error::NotFound(format!("no mod \"{id}\"")));
@@ -684,6 +707,19 @@ command = ["npm", "ci"]
         assert!(mods.iter().all(|m| m.status == Status::Active));
         let log = std::fs::read_to_string(root.0.join(AUDIT)).unwrap();
         assert_eq!(log.lines().count(), 2, "{log}");
+    }
+
+    #[test]
+    fn safe_mode_finds_and_writes_nothing() {
+        let root = Root::new();
+        root.put("plan", PANEL);
+        let all = Policy {
+            mode: Mode::AutoAll,
+            ..Policy::default()
+        };
+        assert!(scan_with(&root.0, &all, true).unwrap().is_empty());
+        assert!(!root.0.join(STATE).exists() && !root.0.join(AUDIT).exists());
+        assert_eq!(scan_with(&root.0, &all, false).unwrap().len(), 1);
     }
 
     #[test]

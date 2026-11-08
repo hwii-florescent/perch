@@ -115,6 +115,9 @@ pub struct Settings {
     /// instead (`suggestions.rs`).
     #[serde(default = "default_true")]
     pub leads_start_without_asking: bool,
+    /// How a new or changed mod is approved (`mods.rs`). Its own policy: separate from Project and
+    /// sub-session permissions, and set only by a person (agent tokens cannot reach this route).
+    pub mods: crate::mods::Policy,
     /// The per-run limits on sub-sessions, messages, wakes, interrupts and waiting suggested tasks
     /// (Settings > Sub-sessions; `RunLimits`). Validated on every change.
     pub run_limits: crate::sub_sessions::RunLimits,
@@ -155,6 +158,7 @@ impl Default for Settings {
             reporter_pi_model: String::new(),
             reporter_omp_model: String::new(),
             leads_start_without_asking: true,
+            mods: Default::default(),
             run_limits: Default::default(),
         }
     }
@@ -259,6 +263,7 @@ pub struct SettingsPatch {
     pub reporter_pi_model: Option<String>,
     pub reporter_omp_model: Option<String>,
     pub leads_start_without_asking: Option<bool>,
+    pub mods: Option<crate::mods::Policy>,
     // The per-run limits (`RunLimits`), each validated to its range.
     pub max_live_sub_sessions: Option<u32>,
     pub max_sub_sessions: Option<u32>,
@@ -464,6 +469,9 @@ impl SettingsStore {
         }
         if let Some(allowed) = patch.leads_start_without_asking {
             guard.leads_start_without_asking = allowed;
+        }
+        if let Some(policy) = patch.mods {
+            guard.mods = policy;
         }
         if let Some(model) = patch.reporter_pi_model {
             guard.reporter_pi_model = model;

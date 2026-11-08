@@ -10,8 +10,9 @@ conventions, not automatic approval. AGENTS is only a brief contributor entry po
 ## 2026-11-08 — Mods: folders a person or an agent writes, with their own approval policy (owner direction)
 
 Learned from herdr's plugins (manifest of actions, events and panes; argv commands that call back
-through the CLI) plus an iframe panel that herdr lacks. Slice 1 (`mods.rs`: manifest, approval
-policy, audit log) is built; nothing runs or is served yet.
+through the CLI) plus an iframe panel that herdr lacks. Slices 1 and 2 are built (`mods.rs`:
+manifest, approval policy, audit log; `settings.mods`; `perch mod list|enable|disable|approve`);
+nothing runs or is served yet.
 
 - **A mod is a folder** `<perch dir>/mods/<id>/perch-mod.toml` (folder name = id). It declares
   `[[actions]]` and `[[events]]` (argv, no shell, calling back through the `perch` CLI, which is the
@@ -29,8 +30,16 @@ policy, audit log) is built; nothing runs or is served yet.
 - **Honest limit.** Capabilities are enforced for panels (iframe sandbox) and scoped core calls. A
   mod's process runs as the user, so the manifest cannot stop it; the approval preview says so. The
   hash covers the manifest, not the scripts it points at.
+- **Who may do what.** The policy is `settings.mods` (`{mode, ceiling}`), changed only through the
+  settings route, which an agent token cannot reach. `perch mod enable|disable` is open to any
+  session (off is the safe direction; on approves nothing). `perch mod approve <id> <hash>` acts
+  only when a person typed that exact line in the session's terminal, like `perch start`.
+- **Reverting to stock Perch.** No master switch, bulk actions or groups: agents turn mods off one
+  by one, and a mod is a folder, so renaming the mods folder removes all of them. **Safe mode**
+  (`PERCH_MODS=off` in the core's environment) loads none, writes nothing and refuses approve and
+  enable, for when no agent or UI can be used.
 - **Not yet decided:** per-Project "trust mods in this project" for mods inside a cloned repo (never
-  auto-approved until then), per-host policy, the `mods.*` settings keys.
+  auto-approved until then), per-host policy, a Settings UI for the policy.
 
 ## 2026-11-08 — Project tree: explicit state labels, no idle hiding (owner)
 

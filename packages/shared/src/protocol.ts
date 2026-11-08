@@ -439,6 +439,14 @@ export interface CommandEntry {
 
 export type BrowserSearchEngine = "google" | "duckduckgo" | "bing" | "brave";
 
+export type ModCapability = "panel" | "events" | "read-project" | "write-project" | "network" | "build";
+
+/** How a new or changed mod is approved. `ceiling` is used by `auto-within-ceiling`. */
+export interface ModsPolicy {
+  mode: "ask" | "auto-within-ceiling" | "auto-all";
+  ceiling: ModCapability[];
+}
+
 export interface SettingsData {
   /** `null` means no default set (use process cwd). */
   defaultCwd: string | null;
@@ -504,6 +512,8 @@ export interface SettingsData {
   reporterCodexModel?: string;
   /** Leads may start sub-sessions with `perch spawn` without a person's click. Absent = off: `perch spawn` becomes a suggested-task card. */
   leadsStartWithoutAsking?: boolean;
+  /** How a new or changed mod is approved. Absent = `ask`. Its own policy, separate from sub-session permissions. */
+  mods?: ModsPolicy;
   /** Pi's and OMP's reporter models (`provider/id`); absent or empty = that harness has none. */
   reporterPiModel?: string;
   reporterOmpModel?: string;
@@ -553,6 +563,7 @@ export interface SettingsPatch {
   reporterClaudeModel?: string;
   reporterCodexModel?: string;
   leadsStartWithoutAsking?: boolean;
+  mods?: ModsPolicy;
   reporterPiModel?: string;
   reporterOmpModel?: string;
   maxLiveSubSessions?: number;
