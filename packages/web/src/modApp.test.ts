@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 
 vi.mock("./store", () => ({ usePerchStore: { getState: () => ({}) } }));
 vi.mock("./ws", () => ({ socket: {} }));
@@ -90,6 +91,37 @@ describe("an app module's versions", () => {
     expect(bind).toHaveBeenCalledWith("tabs.new", "cmd+shift+y");
     swapper.stop();
     expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs the example mods Perch ships against the api they are written for", () => {
+    const load = (name: string): ModMount =>
+      new Function(readFileSync(`../../crates/perch-core/src/mod_examples/${name}/main.js`, "utf8").replace("export default", "return"))();
+    const sessions = [{ id: "a", blocked: false }];
+    const listeners: (() => void)[] = [];
+    const run = vi.fn();
+    const notify = vi.fn();
+    const remove = vi.fn();
+    const command = vi.fn(() => remove);
+    const api = {
+      store: { getState: () => ({ sessions }), subscribe: (fn: () => void) => (listeners.push(fn), () => {}) },
+      commands: () => [{ id: "tabs.new", description: "New tab" }, { id: "x.y", description: "Other" }],
+      run, notify, command, overlay: vi.fn(),
+    } as unknown as ModApi;
+
+    const count = document.createElement("div");
+    load("session-count")(count, api);
+    expect(count.textContent).toBe("1 sessions");
+    sessions.push({ id: "b", blocked: true });
+    listeners.forEach((fn) => fn());
+    expect(count.textContent).toBe("2 sessions");
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: "A session needs you" }));
+
+    const list = document.createElement("div");
+    expect(load("command-list")(list, api)).toBe(remove);
+    expect(list.querySelectorAll("button")).toHaveLength(2);
+    (list.querySelector("button") as HTMLButtonElement).click();
+    expect(run).toHaveBeenCalledWith("tabs.new");
+    expect(command).toHaveBeenCalledWith(expect.objectContaining({ name: "list", keys: "mod+shift+y" }));
   });
 
   it("undoes a version that finishes loading after the pane was closed", async () => {

@@ -886,7 +886,7 @@ fn cancel(args: &[String]) -> Result<(), String> {
 
 const MOD_USAGE: &str = "usage: perch mod [list] [--json] | perch mod enable <id> | \
      perch mod disable <id> | perch mod open <id> | perch mod check <id> | \
-     perch mod layout <id|stock>";
+     perch mod examples | perch mod clone <example> [id] | perch mod layout <id|stock>";
 
 /// `perch mod`: the mods on this computer, turn one off or on, and show one.
 fn mod_cmd(args: &[String]) -> Result<(), String> {
@@ -912,6 +912,32 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
         ["open", id] => {
             ask("mod/open", json!({ "id": id }))?;
             println!("{id} is shown on the person's screen");
+            Ok(())
+        }
+        ["examples"] => {
+            for item in ask("mod/examples", json!({}))?
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+            {
+                println!(
+                    "{}  ({})  {}",
+                    item["id"].as_str().unwrap_or(""),
+                    item["kind"].as_str().unwrap_or(""),
+                    item["about"].as_str().unwrap_or("")
+                );
+            }
+            Ok(())
+        }
+        ["clone", example] | ["clone", example, _] => {
+            let id = ask(
+                "mod/clone",
+                json!({ "example": example, "as": words.get(2) }),
+            )?;
+            println!(
+                "copied to {}; edit it and run `perch mod check {0}` (a layout: `perch mod layout {0}`)",
+                id["id"].as_str().unwrap_or(example)
+            );
             Ok(())
         }
         ["check", id] => {
@@ -1261,6 +1287,9 @@ Commands
   perch mod open <id>     Show a mod on the person's screen now.
   perch mod check <id>    Wait for the person's window to load the mod's current files; exits
                           nonzero with the error if it threw. Run it after every edit.
+  perch mod examples      The mods and layouts shipped inside Perch to start from.
+  perch mod clone <example> [id]
+                          Copy one into the mods or layouts folder (never overwrites), then edit it.
   perch mod layout <id|stock>
                           Change the whole window to a layout in the layouts folder, or back to
                           Perch as shipped.
@@ -1379,6 +1408,9 @@ Mods
     sidebar (220px), a column of canvas over mod:terminal-notes (160px), and files (320px). Write
     the file, then `perch mod layout <id>` applies it at once (a file that does not parse cannot
     be chosen, and one that breaks later falls back to Perch as shipped); edits show as you save.
+  - Start from an example, not an empty folder: `perch mod examples` lists what ships (mods that use
+    each part of `api`, layouts with and without a look) and `perch mod clone <example> [id]` copies
+    one to edit.
   - After every edit run `perch mod check <id>`: it says whether the person's window loaded and
     mounted the new files, or why not. It cannot see a mod that mounts but draws wrongly.
   - `perch mod open <id>` shows a mod now. To undo: `perch mod disable <id>`, delete the folder, or
@@ -1862,6 +1894,7 @@ mod tests {
             "perch memory delete <name> --base <revision>",
             "perch mod open <id>",
             "perch mod check <id>",
+            "perch mod clone <example> [id]",
             "perch mod layout <id|stock>",
             "(el, api) => cleanup?",
             "PERCH_MODS=off",

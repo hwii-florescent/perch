@@ -450,6 +450,32 @@ pub(super) async fn mod_layout(
     }
 }
 
+/// `POST {base}agent/mod/examples`: the shipped examples to copy (`server/mods.rs`).
+pub(super) async fn mod_examples(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(_) => answer(Ok(mods::agent_examples())),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
+/// `POST {base}agent/mod/clone`: copy a shipped example into the mods or layouts folder (`server/mods.rs`).
+pub(super) async fn mod_clone(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(_) => answer(mods::agent_clone(&state, &body)),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
 /// `POST {base}agent/mod/check`: did the person's page load this mod's current files (`server/mods.rs`).
 pub(super) async fn mod_check(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,

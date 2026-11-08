@@ -38,6 +38,12 @@ approval not mattering much.
   bindable default key only; gone with the mod), and `api.bind(id, keys)` writes the person's
   override through `updateSettings`. Not yet: an agent changing keys without a mod (no agent
   settings route), and native (Tauri) menu accelerators for mod keys.
+- **Examples, not shipped defaults.** Perch's own panes are not mods, so there is nothing to
+  duplicate as in herdr. Instead four examples ship inside the core (`mod_examples/`, `mods::EXAMPLES`):
+  mods `command-list` and `session-count` (each part of `api`), layouts `ide` and `midnight` (with
+  and without a look). `perch mod examples` lists them and `perch mod clone <example> [id]` copies one
+  into `mods/` or `layouts/`, never over an existing id. Tests load every example and run the two mods
+  against a fake `api`.
 - **Checking.** The page reports each load of a mod's revision (`mods.report`, capability
   `mods.report.v1`); `perch mod check <id>` waits for the current revision and exits nonzero with the
   error. It sees a throw, not a mod that mounts but draws wrongly.

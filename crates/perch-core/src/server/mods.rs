@@ -36,6 +36,29 @@ pub(super) fn agent_list(app: &AppState) -> Result<Value, Failure> {
     }))
 }
 
+/// `perch mod examples`: the mods and layouts that ship inside Perch to copy.
+pub(super) fn agent_examples() -> Value {
+    json!(mods::EXAMPLES
+        .iter()
+        .map(|e| json!({ "id": e.id, "kind": if e.layout { "layout" } else { "mod" }, "about": e.about }))
+        .collect::<Vec<_>>())
+}
+
+/// `perch mod clone <example> [id]`: copy an example into the mods or layouts folder.
+pub(super) fn agent_clone(app: &AppState, body: &Value) -> Result<Value, Failure> {
+    let example = body["example"]
+        .as_str()
+        .filter(|text| !text.is_empty())
+        .ok_or_else(|| fail(StatusCode::BAD_REQUEST, "name an example to clone"))?;
+    let id = mods::clone_example(
+        &app.memory_root,
+        example,
+        body["as"].as_str().filter(|text| !text.is_empty()),
+    )
+    .map_err(failure)?;
+    Ok(json!({ "id": id }))
+}
+
 /// `perch mod layout <id|stock>`: choose the window layout; `stock` (or an empty id) is Perch as shipped.
 pub(super) fn agent_set_layout(app: &AppState, body: &Value) -> Result<Value, Failure> {
     let id = body["id"]

@@ -261,9 +261,122 @@ pub fn source(root: &Path, policy: &Policy, id: &str) -> Result<String, Error> {
     Ok(std::fs::read_to_string(file)?)
 }
 
+/// A mod or layout that ships inside Perch to copy and change (herdr ships its defaults the same way).
+/// `files` are relative to `mods/<id>/` for a mod, or to `layouts/` for a layout.
+pub struct Example {
+    pub id: &'static str,
+    pub layout: bool,
+    pub about: &'static str,
+    files: &'static [(&'static str, &'static str)],
+}
+
+pub const EXAMPLES: &[Example] = &[
+    Example {
+        id: "command-list",
+        layout: false,
+        about: "a filterable list of every app command, plus a command and key of its own (api.commands, run, command, overlay)",
+        files: &[
+            ("main.js", include_str!("mod_examples/command-list/main.js")),
+            ("mod.json", include_str!("mod_examples/command-list/mod.json")),
+        ],
+    },
+    Example {
+        id: "session-count",
+        layout: false,
+        about: "a live session count that toasts when one is blocked (api.store, notify)",
+        files: &[
+            ("main.js", include_str!("mod_examples/session-count/main.js")),
+            ("mod.json", include_str!("mod_examples/session-count/mod.json")),
+        ],
+    },
+    Example {
+        id: "ide",
+        layout: true,
+        about: "layout: sidebar | tabs over canvas | files, no look of its own",
+        files: &[("ide.json", include_str!("mod_examples/ide.json"))],
+    },
+    Example {
+        id: "midnight",
+        layout: true,
+        about: "layout: a dark theme with rounded, outlined cards and a status bar (theme, colors, radius, border)",
+        files: &[("midnight.json", include_str!("mod_examples/midnight.json"))],
+    },
+];
+
+/// `perch mod clone <example> [as <id>]`: copies a shipped example into the mods or layouts folder
+/// as `new_id` (default: its own name) and returns that id. Never overwrites: an id in use is refused.
+pub fn clone_example(root: &Path, example: &str, new_id: Option<&str>) -> Result<String, Error> {
+    let found = EXAMPLES.iter().find(|e| e.id == example).ok_or_else(|| {
+        Error::NotFound(format!(
+            "no example \"{example}\" (try: {})",
+            EXAMPLES.iter().map(|e| e.id).collect::<Vec<_>>().join(", ")
+        ))
+    })?;
+    let id = new_id.unwrap_or(found.id);
+    if !plain_id(id) {
+        return Err(Error::Invalid(
+            "an id is letters, digits, - and _ (at most 64)".into(),
+        ));
+    }
+    let (dir, taken) = if found.layout {
+        (
+            root.join("layouts"),
+            root.join("layouts").join(format!("{id}.json")),
+        )
+    } else {
+        (mods_dir(root).join(id), mods_dir(root).join(id))
+    };
+    if taken.exists() {
+        return Err(Error::Invalid(format!(
+            "\"{id}\" already exists; pass another id: perch mod clone {example} <id>"
+        )));
+    }
+    std::fs::create_dir_all(&dir)?;
+    for (name, text) in found.files {
+        let name = if found.layout {
+            format!("{id}.json")
+        } else {
+            (*name).to_string()
+        };
+        std::fs::write(dir.join(name), text)?;
+    }
+    Ok(id.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_shipped_example_loads_and_a_clone_never_overwrites() {
+        let root = Root::new();
+        let policy = Policy::default();
+        for example in EXAMPLES {
+            assert_eq!(
+                clone_example(&root.0, example.id, None).unwrap(),
+                example.id
+            );
+            assert!(
+                clone_example(&root.0, example.id, None).is_err(),
+                "{} overwritten",
+                example.id
+            );
+        }
+        clone_example(&root.0, "command-list", Some("mine")).unwrap();
+        assert!(clone_example(&root.0, "nope", None).is_err());
+        assert!(clone_example(&root.0, "ide", Some("../x")).is_err());
+        let mods = scan(&root.0, &policy);
+        assert_eq!(mods.len(), 3, "{mods:?}"); // command-list, session-count, mine
+        assert!(
+            mods.iter().all(|m| m.enabled && m.error.is_none()),
+            "{mods:?}"
+        );
+        let layouts = crate::layouts::scan(&root.0, &policy);
+        assert_eq!(layouts.len(), 2);
+        assert!(layouts.iter().all(|l| l.error.is_none()), "{layouts:?}");
+        // Cloning the layout under a new id keeps the shipped name inside the file.
+        assert!(root.0.join("layouts/ide.json").is_file());
+    }
 
     struct Root(PathBuf);
     impl Root {
