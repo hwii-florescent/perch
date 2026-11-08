@@ -1,19 +1,22 @@
 //! `perch send`, `inbox` and `cancel` on the core, the delivery loop that hands queued mail to
-//! idle receivers, and the status notes children leave their lead. Own design, slice 5; the rules
-//! are `crate::agent_mail`, the queue `db/agent_mail.rs`, the contract ARCHITECTURE ("Messages").
+//! receivers at once, and the status notes children leave their lead. Own design, slice 5; the
+//! rules are `crate::agent_mail`, the queue `db/agent_mail.rs`, the contract ARCHITECTURE
+//! ("Messages").
 //!
 //! The delivery engine ([`pass`]) holds the decisions and asks a [`World`] for everything that
-//! touches a process, so its behaviour (nothing written to a receiver that is not provably idle,
-//! one claim per message, an unconfirmed delivery never repeated) is tested without a terminal.
-//! [`AppWorld`] is the real one: it checks the receiver's lifecycle, native bridge and input
-//! line, and writes through the bridge (Pi, OMP, Codex) or, for Claude, the input lease and a
-//! verified empty prompt in one step.
+//! touches a process, so its behaviour (an idle receiver starts a turn, a busy one whose CLI has a
+//! follow-up queue gets it there, nothing is written to a receiver whose state is unknown, over a
+//! draft or over an open question, one claim per message, an unconfirmed delivery never repeated)
+//! is tested without a terminal. [`AppWorld`] is the real one: it checks the receiver's lifecycle,
+//! native bridge and input line, and writes through the bridge (Pi, OMP, Codex) or, for Claude, the
+//! input lease and a verified empty prompt in one step (idle only).
 use super::sub_sessions::{fail, internal, Failure};
 use super::*;
 use crate::agent_fleet::{AgentState, ClientIdentity, ClientKind};
 use crate::agent_identity::AgentIdentity;
 use crate::agent_mail::{
-    self, BodyText, ChildStatus, Live, MailKind, MailState, Owed, Sender, TargetFacts, Wait,
+    self, BodyText, ChildStatus, Handoff, Live, MailKind, MailState, Owed, Sender, TargetFacts,
+    Wait,
 };
 use crate::db::{Cancelled, Enqueued, MailRow, NewMail};
 use crate::sub_sessions::{Report, SubState};
@@ -29,6 +32,18 @@ const CONFIRM_TIMEOUT: Duration = Duration::from_secs(10);
 const PASS_INTERVAL: Duration = Duration::from_secs(2);
 const LIST_LIMIT: usize = 30;
 
+/// How a delivered message reached the agent, for a receipt: `queued_in_agent` (its CLI's follow-up
+/// queue), `steered` (into the running turn) or empty (it started a turn, or is not delivered).
+pub(super) fn handoff_of(row: &MailRow) -> &str {
+    if row.state != MailState::Delivered {
+        ""
+    } else if row.kind == MailKind::Steer {
+        "steered"
+    } else {
+        &row.handoff
+    }
+}
+
 fn mail_json(row: &MailRow) -> Value {
     let long = !agent_mail::fits_inline(&row.body);
     json!({
@@ -40,6 +55,7 @@ fn mail_json(row: &MailRow) -> Value {
         "to": row.target_session_id,
         "state": row.state.as_str(),
         "reason": row.reason,
+        "handoff": handoff_of(row),
         "text": if long { agent_mail::preview(&row.body) } else { row.body.clone() },
         "truncated": long,
         "at": row.created_at,
@@ -254,8 +270,8 @@ pub(super) enum Delivery {
     /// Nothing was written; the message stays queued for this reason.
     Held(Wait),
     /// The claim landed and bytes or a bridge command went out: this answers whether the
-    /// receiver took it.
-    Sent(oneshot::Receiver<Result<bool, String>>),
+    /// receiver took it, and how it was handed over.
+    Sent(oneshot::Receiver<Result<bool, String>>, Handoff),
     /// Claimed, but it is certain nothing reached the receiver: back to the queue.
     NotSent(String),
     /// Claimed and written (or maybe written), then something failed: unknown.
@@ -335,7 +351,7 @@ pub(super) fn pass(db: &HistoryDb, world: &dyn World, target: &str, now_ms: i64)
             .collect(),
     };
     let facts = world.facts(target);
-    if let Some(wait) = agent_mail::wait_reason(&facts) {
+    if let Err(wait) = agent_mail::route(&facts) {
         let reason = wait.reason();
         let _ = db.set_mail_wait(&all_ids, &reason);
         return Pass::Waiting(reason);
@@ -449,7 +465,10 @@ fn deliver_batch(
             let _ = db.set_mail_wait(all_ids, &reason);
             Pass::Waiting(reason)
         }
-        Delivery::Sent(reply) => Pass::Sent { ids, reply },
+        Delivery::Sent(reply, handoff) => {
+            let _ = db.set_mail_handoff(&ids, handoff.as_str());
+            Pass::Sent { ids, reply }
+        }
         Delivery::NotSent(reason) => {
             let _ = db.unclaim_mail(&ids, &reason);
             Pass::Waiting(reason)
@@ -536,6 +555,12 @@ impl World for AppWorld<'_> {
         };
         let app = self.0;
         let snapshot = app.native_bridge(&key).and_then(|bridge| bridge.latest());
+        // The agent on screen: a tab started as Claude may run `pi` now.
+        let agent = app
+            .agent_runtime
+            .bridge_key(&key)
+            .map(|bridge_key| bridge_key.agent_id)
+            .unwrap_or_default();
         let lifecycle = app
             .agent_runtime
             .snapshot(&key)
@@ -544,6 +569,8 @@ impl World for AppWorld<'_> {
         let children = app.db.sub_sessions_of(session).unwrap_or_default();
         let is_lead = !children.is_empty() && matches!(app.db.parent_of(session), Ok(None));
         TargetFacts {
+            followup_queue: agent_mail::has_followup_queue(&agent),
+            agent,
             alive: app.agent_runtime.runtime_alive(&key),
             reported: snapshot.is_some(),
             idle: matches!(lifecycle, Some(AgentState::Idle | AgentState::Done)),
@@ -600,13 +627,13 @@ impl World for AppWorld<'_> {
             return Delivery::Held(Wait::NotRunning);
         }
         // Looked at again under the lock: what was true a moment ago may not be.
-        if let Some(wait) = agent_mail::wait_reason(&self.facts(session)) {
+        if let Err(wait) = agent_mail::route(&self.facts(session)) {
             return Delivery::Held(wait);
         }
         let Some(bridge) = app.native_ui.get(&bridge_key) else {
             return Delivery::Held(Wait::NotReported);
         };
-        let recheck = || agent_mail::wait_reason(&self.facts(session));
+        let recheck = || agent_mail::route(&self.facts(session));
         deliver_native(
             app,
             (&key, &bridge_key, &bridge),
@@ -624,13 +651,15 @@ const QUIET: Duration = Duration::from_secs(2);
 /// Deliver one prompt, everything checked and written inside one critical section under the authority
 /// lock that every PTY write and lease change also takes (`dispatch_under_current_lease`): no input
 /// reached the PTY from any client for [`QUIET`] (unknown counts as recent), the receiver is still
-/// idle with nothing open (`recheck`), its input line is empty (Claude: its real process and an empty
-/// prompt; the others: nothing typed, no dialog or overlay), then claim, queue the confirmation with
-/// the bridge and, for Claude only, paste. The input lease is the holder's current one, left exactly as
-/// it was; with no holder it is borrowed for this call and returned. Pi, OMP and Codex take the prompt
-/// through their bridge and write nothing to the terminal (Codex would take it while busy, which is
-/// why the idle check comes first). The confirmation is Claude's `UserPromptSubmit` hook or the
-/// bridge's own answer; an unconfirmed write is never repeated.
+/// idle, or busy with a CLI that has a follow-up queue, and nothing open (`recheck`, which says which),
+/// its input line is empty (Claude: its real process and an empty prompt; the others: nothing typed, no
+/// dialog or overlay), then claim, queue the confirmation with the bridge and, for Claude only (idle
+/// only), paste. The input lease is the holder's current one, left exactly as it was; with no holder it
+/// is borrowed for this call and returned. Pi, OMP and Codex take the prompt through their bridge and
+/// write nothing to the terminal; the Pi/OMP extension queues it as a follow-up when a turn runs
+/// (Codex would take a busy start as a steer, which is why `route` makes it wait for idle). The
+/// confirmation is Claude's `UserPromptSubmit` hook or the bridge's own answer; an unconfirmed write is
+/// never repeated.
 fn deliver_native(
     app: &AppState,
     // The tab (owns the PTY, leases and lifecycle), the agent whose bridge it is, and that bridge.
@@ -638,7 +667,7 @@ fn deliver_native(
     text: (&str, &str),
     from_person: bool,
     claim: &dyn Fn() -> bool,
-    recheck: &dyn Fn() -> Option<Wait>,
+    recheck: &dyn Fn() -> Result<Handoff, Wait>,
 ) -> Delivery {
     let (key, agent, bridge) = receiver;
     let (delivery_id, prompt) = text;
@@ -649,9 +678,10 @@ fn deliver_native(
     let outcome = app
         .agent_runtime
         .dispatch_under_current_lease(key, &client, QUIET, |write| {
-            if let Some(wait) = recheck() {
-                return Ok(Delivery::Held(wait));
-            }
+            let handoff = match recheck() {
+                Ok(handoff) => handoff,
+                Err(wait) => return Ok(Delivery::Held(wait)),
+            };
             // Under the lock again: the agent on screen is still the one the checks were about.
             if app.agent_runtime.bridge_key(key).as_ref() != Some(agent) {
                 return Ok(Delivery::Held(Wait::NotRunning));
@@ -666,7 +696,15 @@ fn deliver_native(
                 return Ok(Delivery::Held(Wait::Working));
             }
             // A person's message opens a turn that is theirs; any other opens one Perch marks `Agent`.
-            let boundary = if from_person {
+            // One queued behind a running turn opens none now, so the running turn's change record is
+            // left alone; the turn is marked `Agent` anyway, because the turn the follow-up starts later
+            // must never read as a person's (fail closed: it only makes `perch spawn` ask).
+            let boundary = if handoff == Handoff::QueuedInAgent {
+                if !from_person {
+                    app.agent_runtime.note_agent_turn(key);
+                }
+                Ok(())
+            } else if from_person {
                 app.agent_runtime.record_turn_boundary(key, true)
             } else {
                 app.agent_runtime.record_agent_turn_boundary(key)
@@ -682,12 +720,12 @@ fn deliver_native(
             };
             Ok(match input {
                 Some(input) => match crate::native_ui::claude::write_input(&input, write) {
-                    Ok(()) => Delivery::Sent(reply),
+                    Ok(()) => Delivery::Sent(reply, handoff),
                     Err(error) => Delivery::Failed(format!(
                         "writing it to the terminal failed part way: {error}"
                     )),
                 },
-                None => Delivery::Sent(reply),
+                None => Delivery::Sent(reply, handoff),
             })
         });
     match outcome {
@@ -802,7 +840,8 @@ mod tests {
             self.outcome.borrow_mut().take().unwrap_or_else(|| {
                 let (tx, rx) = oneshot::channel();
                 let _ = tx.send(Ok(true));
-                Delivery::Sent(rx)
+                let handoff = agent_mail::route(&self.facts.borrow()).unwrap_or(Handoff::Started);
+                Delivery::Sent(rx, handoff)
             })
         }
     }
@@ -918,7 +957,7 @@ mod tests {
         let row = send(&run.db, "lead", "child", "hello", "k");
         let world = Fake::idle(Live::Known(Some(run.child_incarnation.clone())), false);
         let (tx, rx) = oneshot::channel::<Result<bool, String>>();
-        *world.outcome.borrow_mut() = Some(Delivery::Sent(rx));
+        *world.outcome.borrow_mut() = Some(Delivery::Sent(rx, Handoff::Started));
         drop(tx); // the bridge went away before it answered
         let Pass::Sent { ids, reply } = pass(&run.db, &world, "child", 0) else {
             panic!()
@@ -951,6 +990,80 @@ mod tests {
             state_of(&run.db, &row.id),
             (MailState::Queued, "its command queue is full".into())
         );
+    }
+
+    // Owner decision 2026-11-08, Pi/OMP path: a busy receiver whose CLI has a follow-up queue gets the
+    // message at once, and the receipt says it is queued in the agent.
+    #[tokio::test]
+    async fn a_busy_pi_gets_the_message_at_once_and_the_receipt_says_queued_in_the_agent() {
+        let run = run();
+        let row = send(&run.db, "lead", "child", "when you can", "k");
+        let world = Fake::idle(Live::Known(Some(run.child_incarnation.clone())), false);
+        *world.facts.borrow_mut() = TargetFacts {
+            agent: "pi".into(),
+            followup_queue: true,
+            running: true,
+            idle: false,
+            alive: true,
+            reported: true,
+            ..Default::default()
+        };
+        let Pass::Sent { ids, reply } = pass(&run.db, &world, "child", 0) else {
+            panic!("a busy receiver with a follow-up queue is delivered to at once");
+        };
+        settle(&run.db, &ids, reply).await;
+        let delivered = run.db.mail(&row.id).unwrap().unwrap();
+        assert_eq!(delivered.state, MailState::Delivered);
+        assert_eq!(handoff_of(&delivered), "queued_in_agent");
+        assert_eq!(mail_json(&delivered)["handoff"], "queued_in_agent");
+    }
+
+    // Codex (a busy start joins the running turn) and Claude (its queue feeds the running turn) have no
+    // follow-up queue: they keep the idle wait, the receipt says why, and once idle it is a plain start.
+    #[tokio::test]
+    async fn a_busy_codex_or_claude_keeps_the_idle_wait_and_the_receipt_says_so() {
+        for agent in ["codex", "claude"] {
+            let run = run();
+            let row = send(&run.db, "lead", "child", "later", "k");
+            let world = Fake::idle(Live::Known(Some(run.child_incarnation.clone())), false);
+            *world.facts.borrow_mut() = TargetFacts {
+                agent: agent.into(),
+                followup_queue: false,
+                running: true,
+                alive: true,
+                reported: true,
+                ..Default::default()
+            };
+            let Pass::Waiting(reason) = pass(&run.db, &world, "child", 0) else {
+                panic!("{agent} must wait for idle");
+            };
+            assert!(reason.contains("no follow-up queue"), "{reason}");
+            assert!(world.written.borrow().is_empty());
+            assert_eq!(state_of(&run.db, &row.id), (MailState::Queued, reason));
+            // Its turn ended: now a plain start, with no handoff word.
+            world.facts.borrow_mut().running = false;
+            world.facts.borrow_mut().idle = true;
+            let Pass::Sent { ids, reply } = pass(&run.db, &world, "child", 0) else {
+                panic!("idle now");
+            };
+            settle(&run.db, &ids, reply).await;
+            let delivered = run.db.mail(&row.id).unwrap().unwrap();
+            assert_eq!(
+                (delivered.state, handoff_of(&delivered)),
+                (MailState::Delivered, "")
+            );
+        }
+    }
+
+    #[test]
+    fn a_steer_receipt_reads_steered_only_once_delivered() {
+        let run = run();
+        let mut row = send(&run.db, "lead", "child", "x", "k");
+        assert_eq!(handoff_of(&row), "");
+        row.kind = MailKind::Steer;
+        assert_eq!(handoff_of(&row), "", "not delivered yet");
+        row.state = MailState::Delivered;
+        assert_eq!(handoff_of(&row), "steered");
     }
 
     #[test]

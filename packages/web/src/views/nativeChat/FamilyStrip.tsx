@@ -67,7 +67,9 @@ export function ago(at: number, now: number): string {
 /** The line that says what became of the newest message between this session and the row. */
 export function receiptNote(latest: NonNullable<CrewRow["latest"]>): string {
   switch (latest.receipt) {
-    case "delivered": return "";
+    case "delivered":
+      if (latest.handoff === "queued_in_agent") return "queued in the agent, for after its running turn";
+      return latest.handoff === "steered" ? "steered into its running turn" : "";
     case "held": return "held: waiting for its person to approve it";
     case "queued": return latest.reason ? `queued, waiting: ${latest.reason}` : "queued";
     case "delivering": return "being delivered";

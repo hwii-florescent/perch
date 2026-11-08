@@ -87,6 +87,8 @@ pub struct Traffic {
     pub body: String,
     pub state: MailState,
     pub reason: String,
+    /// How a delivered one reached the agent: `queued_in_agent`, `steered` or empty.
+    pub handoff: String,
     pub at: i64,
 }
 
@@ -99,6 +101,7 @@ pub struct Latest {
     pub at: i64,
     pub receipt: MailState,
     pub reason: String,
+    pub handoff: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,6 +139,7 @@ pub fn latest_traffic(traffic: &[Traffic]) -> Vec<(String, Latest)> {
             at: item.at,
             receipt: item.state,
             reason: item.reason.clone(),
+            handoff: item.handoff.clone(),
         };
         match newest.iter_mut().find(|(peer, _)| *peer == item.peer) {
             Some((_, current)) if line.at >= current.at => *current = line,
@@ -210,6 +214,7 @@ mod tests {
             body: body.into(),
             state: MailState::Delivered,
             reason: String::new(),
+            handoff: String::new(),
             at,
         }
     }

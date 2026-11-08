@@ -27,6 +27,8 @@ pub struct MailRow {
     pub reason: String,
     pub created_at: i64,
     pub updated_at: i64,
+    /// How it reached the agent when that was not a plain start: `queued_in_agent`. Empty otherwise.
+    pub handoff: String,
 }
 
 /// A message to admit.
@@ -61,7 +63,7 @@ pub enum Cancelled {
 
 const COLUMNS: &str = "id, run_id, kind, sender_session_id, sender_provider, sender_label,
     target_session_id, target_provider, target_incarnation, body, state, reason,
-    created_at, updated_at";
+    created_at, updated_at, handoff";
 
 fn row_from(row: &rusqlite::Row<'_>) -> rusqlite::Result<MailRow> {
     let kind: String = row.get(2)?;
@@ -82,6 +84,7 @@ fn row_from(row: &rusqlite::Row<'_>) -> rusqlite::Result<MailRow> {
         reason: row.get(11)?,
         created_at: row.get(12)?,
         updated_at: row.get(13)?,
+        handoff: row.get(14)?,
     })
 }
 
@@ -505,6 +508,18 @@ impl HistoryDb {
                 "UPDATE agent_mail SET state = ?2, reason = ?3, updated_at = ?4
                  WHERE id = ?1 AND state = 'delivering'",
                 params![id, state.as_str(), reason, now_millis()],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Record how claimed mail reached the agent, only from `delivering` (before it is settled).
+    pub fn set_mail_handoff(&self, ids: &[String], handoff: &str) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        for id in ids {
+            conn.execute(
+                "UPDATE agent_mail SET handoff = ?2 WHERE id = ?1 AND state = 'delivering'",
+                params![id, handoff],
             )?;
         }
         Ok(())

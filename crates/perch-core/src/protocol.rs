@@ -520,6 +520,10 @@ pub struct CrewLatest {
     pub at: i64,
     pub receipt: String,
     pub reason: String,
+    /// How a delivered message reached the agent: `queued_in_agent` (in its CLI's follow-up queue) or
+    /// `steered`; absent when it started a turn, and from an older core.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub handoff: String,
     /// `message` or `steer`; absent from an older core, which means `message`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub kind: String,
@@ -1335,7 +1339,8 @@ pub enum ClientMessage {
     },
 
     /// Act on one of a lead's sub-sessions from its family strip (capability `crew.actions.v1`):
-    /// `message` (queued, idle-only), `steer` (into its running turn), `interrupt` (stop its
+    /// `message` (handed over at once: an idle agent starts a turn, a busy one's follow-up queue takes
+    /// it), `steer` (into its running turn), `interrupt` (stop its
     /// current turn) or `stop` (confirmed). `session_id` is the lead whose chat shows the strip and
     /// `generation` that chat's input lease, as for typing in it. Answered with `crew.act.result`
     /// (a `sent` result may precede the final one). Nothing here is ever retried.

@@ -96,6 +96,17 @@ async function check(provider, thinkingApi = "available") {
     peer.write(JSON.stringify({ type: "steer", requestId: "s2", text: "use the other file" }) + "\n");
     await until(() => received.filter(event => event.requestId === "s2").length === 2);
     assert.equal(sentMessages.length, 1, "a repeated request id is not sent twice");
+    // A message (prompt) to a busy CLI goes into its own follow-up queue, after the running turn; to an
+    // idle one it starts a turn. This is what Perch's immediate delivery relies on.
+    peer.write(JSON.stringify({ type: "prompt", requestId: "p1", text: "when you can" }) + "\n");
+    await until(() => received.some(event => event.requestId === "p1"));
+    assert.equal(received.find(event => event.requestId === "p1").accepted, true);
+    assert.deepEqual(sentMessages.at(-1), ["when you can", { deliverAs: "followUp", expandPromptTemplates: true }]);
+    idle = true;
+    peer.write(JSON.stringify({ type: "prompt", requestId: "p2", text: "start now" }) + "\n");
+    await until(() => received.some(event => event.requestId === "p2"));
+    assert.deepEqual(sentMessages.at(-1), ["start now", { expandPromptTemplates: true }]);
+    idle = false;
     // The CLI goes idle with no event after the running snapshot (a missed settle): the extension looks
     // again by itself, so the core never keeps an idle prompt as "working".
     await until(() => received.at(-1).running === true);

@@ -726,12 +726,16 @@ fn piped_text() -> Option<String> {
 }
 
 /// One receipt in words: where the message stands and, when it waits or failed, why.
-fn receipt(state: &str, reason: &str) -> String {
+fn receipt(state: &str, reason: &str, handoff: &str) -> String {
     match (state, reason.is_empty()) {
-        ("queued", true) => "queued; it is delivered when the receiver is idle".into(),
+        ("queued", true) => "queued; Perch hands it to the receiver at once (an idle one starts a turn, a busy one's own queue takes it)".into(),
         ("queued", false) => format!("queued; waiting because {reason}"),
         ("delivering", _) => "being delivered now".into(),
-        ("delivered", _) => "delivered; the receiver confirmed it took it".into(),
+        ("delivered", _) => match handoff {
+            "queued_in_agent" => "queued in the agent: the receiver confirmed it took it into its own follow-up queue, for after its running turn".into(),
+            "steered" => "steered: the receiver confirmed it took it into its running turn".into(),
+            _ => "delivered; the receiver confirmed it took it".into(),
+        },
         ("unconfirmed", _) => {
             format!("handed over but not confirmed ({reason}); it will not be sent again")
         }
@@ -759,7 +763,14 @@ fn send(args: &[String]) -> Result<(), String> {
     if answer["duplicate"].as_bool().unwrap_or(false) {
         println!("already sent as {id} (same key); nothing new was queued");
     }
-    println!("message {id}: {}", receipt(state, reason));
+    println!(
+        "message {id}: {}",
+        receipt(
+            state,
+            reason,
+            answer["handoff"].as_str().unwrap_or_default()
+        )
+    );
     println!("See where it stands with `perch inbox`; take it back with `perch cancel {id}` while it is queued.");
     Ok(())
 }
@@ -793,7 +804,7 @@ fn render_inbox(answer: &Value) -> String {
                 field("kind"),
                 if key == "received" { "" } else { "sent" },
                 field("id"),
-                receipt(field("state"), field("reason")),
+                receipt(field("state"), field("reason"), field("handoff")),
             );
             let body = field("text");
             if !body.is_empty() {
@@ -1097,10 +1108,14 @@ Commands
                           so; \"stopping\" or an error means Perch could not confirm it.
   perch send <session> [--key <key>] <text>
                           Send a message to another session in your run (`perch list` shows
-                          who). It is queued and delivered only when the receiver is idle:
-                          never into a turn, never over a person's draft or a question. The
-                          receipt says queued, delivered, handed over but unconfirmed, or
-                          not delivered, and why. Up to 2000 characters arrive whole; longer
+                          who). Perch hands it to the receiver at once: an idle one
+                          starts a turn; a busy one's own follow-up queue takes it, to run
+                          after its turn. Never into a running turn (that is `perch steer`),
+                          never over a person's draft or a question (it waits, with the
+                          reason), and a CLI with no follow-up queue (Codex, Claude) gets
+                          it when its turn ends. The receipt says delivered, queued in the
+                          agent, handed over but unconfirmed, queued (waiting, and why) or
+                          not delivered. Up to 2000 characters arrive whole; longer
                           text (to 64 KiB) goes to a file and a preview and the path arrive.
                           A line that starts with / reaches the receiver quoted, not as a
                           command. You may send 50 messages in a run. Repeating a key sends
@@ -1115,7 +1130,7 @@ Commands
                           while the sub-session waits on a person's approval or answer. It
                           is a message for the limits (up to 2000 characters, counts toward
                           your 50) and reaches it quoted, like any message. The receipt says
-                          confirmed or sent but not confirmed; neither is repeated for you.
+                          confirmed (steered) or sent but not confirmed; neither is repeated for you.
   perch interrupt <session>
                           Stop the current turn of one of your sub-sessions and keep the
                           session (it waits for its next message). Same conditions as steer;
@@ -1172,9 +1187,10 @@ Messages
   - A lead hears from its sub-sessions as `Perch status` notes: Perch's own words on what a
     sub-session did (finished its turn, is waiting on a person, exited) and, quoted as its own
     claim, the start of its report. A lead is woken at most 10 times by these between one
-    person's messages, and only when no sub-session is working.
-  - Queued messages are the default: `perch send` waits until the receiver is idle and never
-    interrupts it. `perch steer` and `perch interrupt` are for correcting a sub-session that
+    person's messages, and an idle lead only when no sub-session is working.
+  - Messages reach the receiver at once and are the default: `perch send` starts a turn
+    on an idle receiver, or goes into a busy one's own follow-up queue (after its turn; a
+    CLI without one, Codex or Claude, gets it when the turn ends) and never interrupts it. `perch steer` and `perch interrupt` are for correcting a sub-session that
     is going the wrong way right now (the wrong files, a loop, work you no longer want); do not
     use them to chat, to check on progress or to hurry it. A steer or an interrupt that is not
     confirmed may still have taken effect: look at `perch list`, do not repeat it blindly.
@@ -1541,19 +1557,23 @@ mod tests {
 
     #[test]
     fn a_receipt_says_where_the_message_stands_and_why() {
-        assert!(receipt("queued", "").contains("when the receiver is idle"));
-        assert!(receipt("queued", "the receiver is working")
+        assert!(receipt("queued", "", "").contains("hands it to the receiver at once"));
+        assert!(receipt("queued", "the receiver is working", "")
             .contains("because the receiver is working"));
-        assert!(receipt("delivered", "").contains("confirmed"));
-        assert!(receipt("unconfirmed", "it may have arrived").contains("will not be sent again"));
+        assert!(receipt("delivered", "", "").contains("confirmed"));
+        assert!(receipt("delivered", "", "queued_in_agent").starts_with("queued in the agent"));
+        assert!(receipt("delivered", "", "steered").starts_with("steered"));
         assert!(
-            receipt("undelivered", "cancelled by its sender").contains("not delivered: cancelled")
+            receipt("unconfirmed", "it may have arrived", "").contains("will not be sent again")
         );
-        assert!(receipt("held", "held: x").starts_with("held for the approval"));
+        assert!(receipt("undelivered", "cancelled by its sender", "")
+            .contains("not delivered: cancelled"));
+        assert!(receipt("held", "held: x", "").starts_with("held for the approval"));
         assert_eq!(
             receipt(
                 "undelivered",
-                "refused: that session does not accept messages from other sessions"
+                "refused: that session does not accept messages from other sessions",
+                ""
             ),
             "not delivered: refused: that session does not accept messages from other sessions"
         );
@@ -1625,7 +1645,9 @@ mod tests {
             "perch steer",
             "perch interrupt",
             "going the wrong way",
-            "Queued messages are the default",
+            "Messages reach the receiver at once",
+            "follow-up queue",
+            "queued in the\n                          agent",
             "hold messages from other sessions for their approval",
             "cannot steer or interrupt anyone",
             "perch inbox",

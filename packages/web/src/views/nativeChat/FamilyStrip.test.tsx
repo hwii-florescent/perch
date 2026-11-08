@@ -38,6 +38,8 @@ it("counts working, waiting on you and reported, and counts a fallback last mess
 it("says what became of a message in words and nothing for a delivered one", () => {
   const latest = (receipt: string, reason = "") => ({ direction: "to", preview: "x", at: 1, receipt, reason });
   expect(receiptNote(latest("delivered"))).toBe("");
+  expect(receiptNote({ ...latest("delivered"), handoff: "queued_in_agent" })).toBe("queued in the agent, for after its running turn");
+  expect(receiptNote({ ...latest("delivered"), handoff: "steered" })).toBe("steered into its running turn");
   expect(receiptNote(latest("queued", "another view holds input control"))).toBe("queued, waiting: another view holds input control");
   expect(receiptNote(latest("unconfirmed"))).toBe("handed over, not confirmed");
   expect(receiptNote(latest("held", "held: x"))).toBe("held: waiting for its person to approve it");

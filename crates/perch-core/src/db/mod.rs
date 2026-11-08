@@ -609,6 +609,19 @@ impl HistoryDb {
         if !existing_session_columns.contains("inbound_mode") {
             conn.execute("ALTER TABLE sessions ADD COLUMN inbound_mode TEXT", [])?;
         }
+        // How delivered mail reached the agent (`agent_mail::Handoff`); empty is a plain start.
+        let has_handoff = conn
+            .prepare("PRAGMA table_info(agent_mail)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?
+            .iter()
+            .any(|name| name == "handoff");
+        if !has_handoff {
+            conn.execute(
+                "ALTER TABLE agent_mail ADD COLUMN handoff TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+        }
 
         Self::migrate_attention(&conn)?;
         Self::migrate_browser_history(&conn)?;

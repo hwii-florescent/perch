@@ -15,7 +15,8 @@
 //!   waiting, and mail whose mailbox ended is withdrawn rather than delivered (the claim and
 //!   receipt rules of `db/agent_mail.rs`, whose tests carry those cases).
 //!
-//! Changes from Orca: delivery waits for an idle receiver (Orca also delivers to working agents),
+//! Changes from Orca: a busy receiver gets a message only through its CLI's own follow-up queue
+//! (`route`; Orca also delivers to working agents), and waits when it has none,
 //! the body is quoted so peer text can never be a command, an oversized body goes to a notes file
 //! with a preview, a receipt has the word `unconfirmed`, and the caps, the wake limit and the note
 //! wording are Perch's own. Orca's priorities, threads, payloads, pointer lane for terminals and
@@ -781,9 +782,41 @@ pub fn owed(still_queued: bool, run_ended: bool, addressed: &str, live: &Live) -
     }
 }
 
+/// Whether this agent's CLI has a follow-up queue a bridge can reach (Pi and OMP:
+/// `sendUserMessage` with `deliverAs: "followUp"`). Codex takes a start while busy as a steer into the
+/// running turn, and Claude's prompt queue feeds typed text into the running turn, so neither has a
+/// queue that waits for the turn to end: they keep the idle wait.
+pub fn has_followup_queue(agent: &str) -> bool {
+    matches!(agent, "pi" | "omp")
+}
+
+/// How a message reached the receiving agent (owner decision, 2026-11-08: messages reach the agent
+/// at once). A steer is its own kind of message, so it is not one of these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Handoff {
+    /// The receiver was idle: the message started a turn.
+    Started,
+    /// The receiver was busy: it sits in the CLI's own follow-up queue, for after the running turn.
+    QueuedInAgent,
+}
+
+impl Handoff {
+    /// The stored word; a plain delivery stores none.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Started => "",
+            Self::QueuedInAgent => "queued_in_agent",
+        }
+    }
+}
+
 /// What the core reads about a receiver before it writes anything.
 #[derive(Debug, Clone, Default)]
 pub struct TargetFacts {
+    /// The agent on screen (`pi`, `codex`, ...); names the CLI in a wait reason.
+    pub agent: String,
+    /// Its CLI has a follow-up queue ([`has_followup_queue`]).
+    pub followup_queue: bool,
     pub alive: bool,
     /// The native bridge has reported a snapshot.
     pub reported: bool,
@@ -814,6 +847,8 @@ pub enum Wait {
     RecentInput,
     WorkingChildren(usize),
     WakeCap,
+    /// Busy, and its CLI has no follow-up queue: it gets the message when its turn ends.
+    NoFollowUpQueue(String),
 }
 
 impl Wait {
@@ -830,6 +865,10 @@ impl Wait {
                 "{count} sub-session{} still working",
                 if *count == 1 { " is" } else { "s are" }
             ),
+            Self::NoFollowUpQueue(agent) => format!(
+                "the receiver is working and {agent} has no follow-up queue, so it gets this \
+                 when its turn ends"
+            ),
             Self::WakeCap => format!(
                 "the receiver has been woken {MAX_WAKES_PER_PERSON_TURN} times since a person \
                  last spoke to it"
@@ -838,32 +877,40 @@ impl Wait {
     }
 }
 
-/// The idle-only rule over what is known, before the checks that need the terminal.
-pub fn wait_reason(facts: &TargetFacts) -> Option<Wait> {
+/// Where a message goes, or why it waits, over what is known and before the checks that need the
+/// terminal. An idle receiver starts a turn; a busy one whose CLI has a follow-up queue gets the
+/// message there; a busy one without waits. Never over a question or approval; unknown is not idle.
+pub fn route(facts: &TargetFacts) -> Result<Handoff, Wait> {
     if !facts.alive {
-        return Some(Wait::NotRunning);
+        return Err(Wait::NotRunning);
     }
     if !facts.reported {
-        return Some(Wait::NotReported);
+        return Err(Wait::NotReported);
     }
     if facts.blocked || facts.request_open {
-        return Some(Wait::Blocked);
+        return Err(Wait::Blocked);
     }
-    if facts.running {
-        return Some(Wait::Working);
-    }
-    if !facts.idle {
-        return Some(Wait::NotIdle);
-    }
+    let handoff = if facts.running {
+        if !facts.followup_queue {
+            return Err(Wait::NoFollowUpQueue(facts.agent.clone()));
+        }
+        Handoff::QueuedInAgent
+    } else if facts.idle {
+        Handoff::Started
+    } else {
+        return Err(Wait::NotIdle);
+    };
     if facts.is_lead {
-        if facts.working_children > 0 {
-            return Some(Wait::WorkingChildren(facts.working_children));
+        // An idle lead whose children work is woken by the last of them, not by each; a busy lead
+        // only has the message queued behind its turn.
+        if handoff == Handoff::Started && facts.working_children > 0 {
+            return Err(Wait::WorkingChildren(facts.working_children));
         }
         if facts.wakes >= MAX_WAKES_PER_PERSON_TURN {
-            return Some(Wait::WakeCap);
+            return Err(Wait::WakeCap);
         }
     }
-    None
+    Ok(handoff)
 }
 
 #[cfg(test)]
@@ -1120,6 +1167,75 @@ mod tests {
         ));
     }
 
+    fn wait_reason(facts: &TargetFacts) -> Option<Wait> {
+        route(facts).err()
+    }
+
+    /// A busy Pi (a CLI with a follow-up queue) and a busy Codex (without).
+    fn busy(agent: &str) -> TargetFacts {
+        TargetFacts {
+            agent: agent.into(),
+            followup_queue: has_followup_queue(agent),
+            running: true,
+            idle: false,
+            ..idle_lead()
+        }
+    }
+
+    // Owner decision 2026-11-08: a message reaches the agent at once.
+    #[test]
+    fn an_idle_receiver_starts_a_turn_and_a_busy_one_with_a_follow_up_queue_queues_it() {
+        assert_eq!(route(&idle_lead()), Ok(Handoff::Started));
+        assert_eq!(route(&busy("pi")), Ok(Handoff::QueuedInAgent));
+        assert_eq!(route(&busy("omp")), Ok(Handoff::QueuedInAgent));
+        assert_eq!(Handoff::Started.as_str(), "");
+        assert_eq!(Handoff::QueuedInAgent.as_str(), "queued_in_agent");
+    }
+
+    #[test]
+    fn a_busy_receiver_without_a_follow_up_queue_keeps_the_idle_wait_and_says_so() {
+        for agent in ["codex", "claude", "opencode", ""] {
+            let wait = route(&busy(agent)).unwrap_err();
+            assert_eq!(wait, Wait::NoFollowUpQueue(agent.into()));
+            assert!(wait.reason().contains("no follow-up queue"), "{agent}");
+            assert!(wait.reason().contains("when its turn ends"));
+        }
+    }
+
+    #[test]
+    fn a_queued_follow_up_never_goes_over_a_question_or_with_unknown_state() {
+        for change in [
+            (|f: &mut TargetFacts| f.blocked = true) as fn(&mut TargetFacts),
+            |f| f.request_open = true,
+            |f| f.reported = false,
+            |f| f.alive = false,
+        ] {
+            let mut facts = busy("pi");
+            change(&mut facts);
+            assert!(route(&facts).is_err());
+        }
+        // Not running and not provably idle is unknown, not idle.
+        let mut unknown = busy("pi");
+        unknown.running = false;
+        assert_eq!(route(&unknown), Err(Wait::NotIdle));
+    }
+
+    #[test]
+    fn a_busy_lead_gets_a_follow_up_even_with_working_children_but_the_wake_cap_holds() {
+        let lead = TargetFacts {
+            working_children: 2,
+            ..busy("pi")
+        };
+        assert_eq!(route(&lead), Ok(Handoff::QueuedInAgent));
+        assert_eq!(
+            route(&TargetFacts {
+                wakes: MAX_WAKES_PER_PERSON_TURN,
+                ..lead
+            }),
+            Err(Wait::WakeCap)
+        );
+    }
+
     fn idle_lead() -> TargetFacts {
         TargetFacts {
             alive: true,
@@ -1151,7 +1267,10 @@ mod tests {
         };
         assert_eq!(wait(|f| f.alive = false), Some(Wait::NotRunning));
         assert_eq!(wait(|f| f.reported = false), Some(Wait::NotReported));
-        assert_eq!(wait(|f| f.running = true), Some(Wait::Working));
+        assert_eq!(
+            wait(|f| f.running = true),
+            Some(Wait::NoFollowUpQueue(String::new()))
+        );
         assert_eq!(wait(|f| f.idle = false), Some(Wait::NotIdle));
         // A question or an approval holds delivery even when the turn looks over.
         assert_eq!(wait(|f| f.blocked = true), Some(Wait::Blocked));
@@ -1208,6 +1327,7 @@ mod tests {
             Wait::Blocked,
             Wait::Working,
             Wait::NotIdle,
+            Wait::NoFollowUpQueue("codex".into()),
             Wait::Input("a person is typing".into()),
             Wait::RecentInput,
             Wait::WorkingChildren(1),

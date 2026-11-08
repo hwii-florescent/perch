@@ -376,10 +376,11 @@ version; the slices below replace their implied order.
   events), "needs you" (pending approval or question, never a model claim), delivery
   receipts, and the agent's own `perch report`. A Stop-hook last message (first 400
   characters) is a labelled fallback. Unknown or disconnected state stays unknown.
-- **Messages:** a durable core queue; delivered only when the receiver is idle, through
-  its own queue where it has one (Pi follow-up, Codex `turn/start` at idle) or, for
-  Claude, an input-lease take plus verified-empty prompt in one step. Never steers a
-  running turn. The envelope names the sender and origin; bodies up to 2,000
+- **Messages:** a durable core queue; handed to the receiver at once: an idle one
+  starts a turn (Pi/OMP prompt, Codex `turn/start`, for Claude an input-lease take plus
+  verified-empty prompt in one step); a busy Pi/OMP takes it in its own follow-up queue;
+  a busy Codex or Claude (no follow-up queue) keeps the idle wait, and the receipt says
+  so. Receipts: delivered / queued in the agent / steered. Never steers a running turn. The envelope names the sender and origin; bodies up to 2,000
   characters, longer ones go to the notes folder with a pointer; a leading `/` is
   neutralised so a message cannot run a command. A message never approves anything.
   Re-validated at delivery (incarnation, scope, cancellation); survives a restart

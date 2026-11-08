@@ -10,7 +10,7 @@
 //! reported as such and left alone, because it may have taken effect.
 //!
 //! - **Message** (a person only): the slice 5 queue with the person as sender (`record_person_mail`);
-//!   delivery is `server/agent_mail.rs`'s, idle-only, and spends no wake.
+//!   delivery is `server/agent_mail.rs`'s (at once; a busy Pi/OMP queues it), and spends no wake.
 //! - **Steer**: a `steer` row (claimed as it is sent) for the receipt and the run's limit; Codex
 //!   `turn/steer`, Pi and OMP `deliverAs: "steer"` through the bridge; Claude through its own prompt
 //!   queue, written under the 2 s quiet window into a verified empty prompt, confirmed by its

@@ -8,7 +8,8 @@
 //! rules are Perch's own: which provider mechanism carries each action, what a lead may do that a
 //! person may, and the caps.
 //!
-//! - **Message** is the slice 5 queue: delivered only when the child is idle.
+//! - **Message** is the slice 5 queue: handed over at once when the child is idle, or busy with a CLI
+//!   that has a follow-up queue (Pi, OMP); otherwise it waits for idle.
 //! - **Steer** goes into the child's *running* turn through the provider's own mechanism (Codex
 //!   `turn/steer`, Pi and OMP `deliverAs: "steer"`, Claude's own queue, which feeds text submitted
 //!   mid-turn into the turn: probed 2026-11-07). It is refused while nothing runs and while the
@@ -16,8 +17,8 @@
 //! - **Interrupt** stops the current turn and keeps the session (the chat's Stop path).
 //! - **Stop** is the confirmed `perch stop`.
 //!
-//! A lead may steer and interrupt its own children (never message-bypass the idle rule: `perch send`
-//! stays idle-only); a child may do neither to anyone. A lead's interrupts are capped per child per
+//! A lead may steer and interrupt its own children (`perch send` never steers: it starts a turn or
+//! queues behind the running one); a child may do neither to anyone. A lead's interrupts are capped per child per
 //! person's message to the lead, and neither is allowed while the child waits on a person.
 
 use crate::sub_sessions::SubState;

@@ -339,19 +339,43 @@ contract the tests hold it to.
   (with a reason). `delivered` only when the receiver's own bridge or hook confirmed it took the text
   (Claude: the `UserPromptSubmit` event; Pi, OMP, Codex: the bridge's acknowledgement). Bytes written
   without that proof are `unconfirmed`, never `delivered` and never `undelivered`: unknown is not failure.
-- *Delivery is idle-only and never steers* (a steer is a separate, explicit action: see "Family strip actions"). A receiver is eligible only when all hold: its recorded
-  incarnation is still its live one; its runtime is alive and its native bridge has reported; its
-  lifecycle is Idle or Done and the bridge says no turn is running, nothing is blocked and no question or
-  approval is open; its input line is readable and empty (a person typing, a dialog or an overlay is not
-  empty); and, for a lead, no child is working and fewer than 10 automatic wakes were spent since a person
-  last opened a turn on it. Otherwise nothing is written and the message stays `queued` with the reason.
-  Nothing wakes a sleeping session, relaunches an exited one or restarts a process.
-- *Per provider.* Pi and OMP: the bridge's prompt (their own follow-up queue; the extension queues it if a
-  turn started in between). Codex: `turn/start` through the bridge, only on the snapshot above, because
-  Codex does not refuse a busy start (it joins the running turn; slice 0). Claude: the bridge's prompt
-  plus a paste. Every provider goes through one critical section (`dispatch_under_current_lease`, under
+  *Hand-off (owner decision, 2026-11-08).* A `delivered` receipt also says how the text reached the agent,
+  as the optional `handoff` word (`agent_mail::Handoff`, column `agent_mail.handoff`, `CrewLatest.handoff`,
+  `perch send`/`inbox` JSON; absent from an older core): none = it started a turn ("delivered"),
+  `queued_in_agent` = it sits in the CLI's own follow-up queue for after the running turn ("queued in
+  the agent"), `steered` = it joined the running turn (a `steer` row, `perch steer`; derived from the kind).
+  The agent's acknowledgement confirms it took the text, not that the follow-up has started; Perch records
+  the hand-off from the state it re-read under the lock, so a Pi/OMP turn that ended between that read and
+  the extension's own `isIdle()` shows `queued_in_agent` although it started a turn.
+- *Messages reach the receiving agent at once; delivery never steers* (a steer is a separate, explicit
+  action: see "Family strip actions"). `agent_mail::route(facts)` decides, over: the recorded incarnation
+  is still its live one; its runtime is alive and its native bridge has reported; nothing is blocked and
+  no question or approval is open (that always waits, with the reason); and then
+  1. **idle** (lifecycle Idle or Done, the bridge says no turn runs) → the message **starts a turn**; for
+     a lead, no child may be working (an idle lead is woken by the last of them, not each);
+  2. **a turn is running** and the CLI has a follow-up queue (`has_followup_queue`: Pi, OMP) → it goes into
+     that queue (`QueuedInAgent`), with no working-children wait;
+  3. **a turn is running** and the CLI has none (Codex, Claude) → it waits for idle as before and the
+     receipt's reason says so ("the receiver is working and codex has no follow-up queue, so it gets this
+     when its turn ends");
+  4. anything else (state unreadable, lifecycle not provably idle) is not idle and waits.
+  In 1 and 2 the input line must also be readable and empty (a person's draft, a dialog or an overlay is
+  not empty), and a lead must have fewer than 10 automatic wakes since a person last opened a turn on it
+  (a follow-up spends one too). Otherwise nothing is written and the message stays `queued` with the
+  reason. The loop runs the moment something is queued (`mail_notify`), so "at once" is one pass, not a
+  poll. Nothing wakes a sleeping session, relaunches an exited one or restarts a process.
+- *Per provider.* Pi and OMP: the bridge's `prompt`, which the extension turns into
+  `sendUserMessage(text, {deliverAs: "followUp"})` when a turn runs and a plain start when idle
+  (`pi-extension.test.mjs` checks both). Codex: `turn/start` through the bridge, only when idle, because
+  Codex does not refuse a busy start (it joins the running turn as a steer, not a queue; slice 0), so it
+  has no follow-up queue and keeps the idle wait. Claude: the bridge's prompt plus a paste into a verified
+  empty prompt, only when idle: Claude's prompt queue feeds text typed mid-turn into the running turn at
+  its next step (the behaviour `perch steer` uses), so it is a steer, not a follow-up, and Claude keeps the
+  idle wait. A queued follow-up marks the receiver's turn origin `Agent` (so the turn it later starts is
+  never read as a person's) without touching the running turn's change record. Every provider goes through one critical section (`dispatch_under_current_lease`, under
   `agent_operation_lock` and the runtime's authority lock, the one every PTY write and lease change takes):
-  the PTY has heard no input from any client for 2 s, the receiver is still idle with nothing open, its
+  the PTY has heard no input from any client for 2 s, the receiver's state is re-read (idle, or busy with a
+  follow-up queue, nothing open), its
   input line is empty (Claude: its real PID and empty prompt, `claude::prepare_input`; the others: nothing
   typed, no dialog or overlay, `typed::input_ready`), then claim, enqueue the confirmation with the bridge
   and, for Claude only, paste. Typed into a shell (`terminal` provider) cannot receive messages.
@@ -443,8 +467,9 @@ strip's actions are the next section.
   with the chat's input-lease `generation`, exactly as typing in it needs; without the lease the core
   refuses and sends nothing. The **lead** may steer and interrupt its own children with `perch steer` and
   `perch interrupt` (agent token). A child cannot do either to anyone (403), and a lead cannot reach a
-  session that is not its child (404). An agent has no way to message-bypass idle-only delivery: `perch
-  send` is unchanged, and a person's Message is the only queued text with a person as sender.
+  session that is not its child (404). `perch send` never steers (it starts a turn or
+  queues behind the running one, per "Messages"), and a person's Message is the only queued text with a
+  person as sender.
 - *One engine.* `crew_actions::availability(action, actor, facts)` decides, with the reason shown on the
   disabled item and in a refusal, and the core decides again under the locks mail delivery uses
   (`agent_operation_lock`, `dispatch_under_current_lease`) before anything is handed to a provider. The
@@ -569,7 +594,7 @@ person's approval, or **refuse**. It is the person's setting, in the session's r
   `unconfirmed`, `undelivered`): the delivery engine never sees it, it counts against the receiver's 32 waiting, and
   the sender's receipt says it waits for the receiving person. The sender may still `perch cancel` it. The person's
   chat shows a card (sender, text, **Deliver**, **Discard**, and all of them at once). Deliver moves it to `queued`
-  and it is delivered like any other message, when its receiver is idle (the idle-only rules are unchanged);
+  and it is delivered like any other message, at once (the hand-off rules of "Messages" apply);
   Discard makes it `undelivered: discarded by the person using that session`. Both need the chat's input lease
   (they decide text that would be typed into the session); both are done once, so a second click does nothing.
 - *Refuse.* The message gets a row at once, `undelivered`, reason `refused: that session does not accept messages
@@ -584,7 +609,7 @@ person's approval, or **refuse**. It is the person's setting, in the session's r
 - *Hidden from the receiving agent.* `perch inbox` lists what was sent to a session without any held, refused or
   discarded message: what the person holds back or turned away is not for the agent to read. Nothing is hidden
   from the person or from the sender's own view.
-- *Not changed:* idle-only delivery, quoting, the envelope, limits, receipts' retry rules.
+- *Not changed:* the delivery rules ("Messages"), quoting, the envelope, limits, receipts' retry rules.
 
 **Reading a sub-session** (`child_read.rs` rules, `sub_sessions::read`, route `/agent/read`, `perch read <session>
 [--turns N]`; slice 9c). A lead reads a bounded tail of its own child's conversation, on demand, with no model call:
