@@ -2860,7 +2860,7 @@ export interface LayoutSize {
 }
 
 /** A window layout, as in herdr's desktop app: a tree of rows, columns and blocks. A block's
- * `content` is `sidebar`, `tabs`, `canvas`, `files`, `git`, `status` or `mod:<id>`. */
+ * `content` is `sidebar`, `tabs`, `canvas`, `files`, `git`, `status`, `mod:<id>` or `terminal:<session id>`. */
 export type LayoutNode =
   | (LayoutLook & { type: "row" | "column"; size?: LayoutSize | null; hidden?: boolean; gap?: number; padding?: number; children: LayoutNode[] })
   | (LayoutLook & { type: "block"; size?: LayoutSize | null; hidden?: boolean; padding?: number; content: string });
@@ -2876,6 +2876,10 @@ export interface LayoutLook {
   font?: string;
   radius?: number;
   border?: number;
+  /** A CSS color or gradient behind the node (no `url()`). */
+  background?: string;
+  /** Takes the node out of the flow and draws it over the window at this place and size (px). */
+  float?: { x: number; y: number; width: number; height: number };
 }
 
 export interface LayoutInfo {

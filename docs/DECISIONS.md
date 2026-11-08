@@ -86,8 +86,11 @@ approval not mattering much.
   follow it and it survives the settings theme being re-applied; a deeper node sets the same custom
   properties inline (plus the ones `base.css` derives at `:root`), so only its subtree changes. A
   layout that sets a theme keeps it over the Settings picker until the stock layout is chosen.
-  The terminal keeps the server's profile. No floating or terminal blocks, pane frames or
-  per-block looks outside the page's own tree (a menu opened from a themed subtree uses the root's).
+  The terminal keeps the server's profile. A node may also have a `background` (color or gradient,
+  no `url()`; the root's paints behind the cards), a `float` (`x`, `y`, `width`, `height` px: drawn
+  over the window) and a block may be `terminal:<session id>` (a live shell via `PersistentTerminal`;
+  one place at a time, so not also in the canvas). Not built: terminal padding/opacity, pane frames,
+  and looks reaching menus opened from a themed subtree (they use the root's).
 - **Not built:** a trusted `exec`, removing a mod or layout
   from Settings, install from GitHub, per-host handling (mods run on the local host's screen).
 

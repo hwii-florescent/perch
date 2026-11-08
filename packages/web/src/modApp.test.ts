@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { SLOTS } from "./slots";
 
 const store = vi.hoisted(() => ({
   state: { sessions: [{ id: "a" }], sessionId: "a", activeProjectId: "p", activeWorkspaceId: "w", workspaceProjects: [{ id: "p" }], workspaces: [{ id: "w" }], toasts: [] as unknown[] },
@@ -167,6 +168,7 @@ describe("an app module's versions", () => {
     const declared = [...types.matchAll(/^  (\w+)[(:?]/gm)].map((m) => m[1]).sort();
     const { dispose: _dispose, ...api } = modApi("x");
     expect(declared).toEqual(Object.keys(api).sort());
+    for (const name of Object.keys(SLOTS)) expect(types, name).toMatch(new RegExp(`^   \\*  ${name}\\s`, "m"));
   });
 
   it("runs the example mods Perch ships against the api they are written for", () => {

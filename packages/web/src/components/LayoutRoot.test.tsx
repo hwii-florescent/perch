@@ -14,6 +14,7 @@ vi.mock("../Sidebar", () => ({ Sidebar: () => <div>sidebar</div> }));
 vi.mock("../StatusBar", () => ({ StatusBar: () => <div>status</div> }));
 vi.mock("./SplitCanvas", () => ({ SplitCanvas: () => <div>canvas</div> }));
 vi.mock("./TabBar", () => ({ TabBar: () => <div>tabs</div> }));
+vi.mock("../views/PersistentTerminal", () => ({ PersistentTerminal: ({ sessionId }: { sessionId: string }) => <div>{`terminal ${sessionId}`}</div> }));
 vi.mock("./WorkspaceTools", () => ({ WorkspaceTools: ({ tab }: { tab: string }) => <div>{`tools:${tab}`}</div> }));
 vi.mock("./ModView", () => ({ ModView: ({ mod }: { mod: ModInfo }) => <div>{`mod view ${mod.id}`}</div> }));
 import { activeLayout } from "../mods";
@@ -60,6 +61,22 @@ describe("a layout's look", () => {
     act(() => root.unmount());
     expect(document.documentElement.style.getPropertyValue("--accent")).not.toBe("#ff8800");
     root = createRoot(host);
+  });
+});
+
+describe("backgrounds, floating blocks and terminal blocks", () => {
+  it("paints a background, floats a block over the window and shows a session's terminal in a block", async () => {
+    const tree: LayoutNode = { type: "row", background: "linear-gradient(#111, #222)", children: [
+      { type: "block", content: "canvas", background: "#101010" },
+      { type: "block", content: "terminal:abc-1", float: { x: 20, y: 30, width: 400, height: 300 } },
+    ] };
+    await act(async () => root.render(<LayoutRoot root={tree} />));
+    expect((host.querySelector('[data-testid="layout-root"]') as HTMLElement).style.background).toContain("linear-gradient");
+    const node = (id: string) => host.querySelector(`[data-testid="layout-${id}"]`) as HTMLElement;
+    expect(node("canvas").style.background).toBe("rgb(16, 16, 16)");
+    const floating = node("terminal:abc-1");
+    expect(floating.textContent).toBe("terminal abc-1");
+    expect([floating.style.position, floating.style.left, floating.style.top, floating.style.width, floating.style.height]).toEqual(["fixed", "20px", "30px", "400px", "300px"]);
   });
 });
 

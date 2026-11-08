@@ -8,6 +8,7 @@ import { Sidebar } from "../Sidebar";
 import { ModView } from "./ModView";
 import { SplitCanvas } from "./SplitCanvas";
 import { TabBar } from "./TabBar";
+import { PersistentTerminal } from "../views/PersistentTerminal";
 import { WorkspaceTools } from "./WorkspaceTools";
 
 // The same card the stock window draws its three panes on.
@@ -24,6 +25,9 @@ function Block({ content, mods }: { content: string; mods: ModInfo[] }) {
     case "git": return <WorkspaceTools tab="gitReview" />;
     case "status": return <StatusBar />;
   }
+  // A live terminal of a session. A terminal shows in one place at a time: if the session is also in
+  // the canvas, put it in this block or the canvas, not both.
+  if (content.startsWith("terminal:")) return <PersistentTerminal active sessionId={content.slice("terminal:".length)} />;
   const mod = mods.find((candidate) => `mod:${candidate.id}` === content);
   if (!mod?.enabled || mod.error) return <div className="inactive-session-pane">{`${content} is off or gone.`}</div>;
   return <ModView mod={mod} />;
@@ -39,6 +43,9 @@ function Node({ node, mods, root }: { node: LayoutNode; mods: ModInfo[]; root?: 
     fontFamily: root ? undefined : node.font,
     flex: root ? "1 1 0%" : px != null ? `0 0 ${px}px` : `${weight ?? 1} 1 0%`,
     padding: node.padding || undefined,
+    background: node.background,
+    // Out of the flow, over the window and under dialogs.
+    ...(node.float && !root ? { position: "fixed", left: node.float.x, top: node.float.y, width: node.float.width, height: node.float.height, zIndex: 1500, flex: "none" } : {}),
   };
   if (node.type === "block") return <div className={CARD} style={{ ...style, ...OUTLINE }} data-testid={`layout-${node.content}`}><Block content={node.content} mods={mods} /></div>;
   return (
@@ -54,9 +61,10 @@ export function LayoutRoot({ root }: { root: LayoutNode }) {
   const mods = useSyncExternalStore(subscribeMods, currentMods)?.mods ?? [];
   const { theme, colors, font, radius, border } = root;
   const look = JSON.stringify({ theme, colors, font, radius, border });
+  // A root background paints the window behind the cards.
   useEffect(() => {
     setRootLook(lookVars(JSON.parse(look), false));
     return () => setRootLook({});
   }, [look]);
-  return <div className="flex min-h-0 flex-1 px-2 pt-2" data-testid="layout-root"><Node node={root} mods={mods} root /></div>;
+  return <div className="flex min-h-0 flex-1 px-2 pt-2" style={{ background: root.background }} data-testid="layout-root"><Node node={{ ...root, background: undefined }} mods={mods} root /></div>;
 }

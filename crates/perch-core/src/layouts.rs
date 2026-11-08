@@ -64,6 +64,19 @@ pub struct Look {
     pub radius: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub border: Option<u32>,
+    /// A CSS background for the node: a color or a gradient (no `url(`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background: Option<String>,
+}
+
+/// A node taken out of the flow and drawn over the window at this place and size (px).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Float {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -71,6 +84,8 @@ pub struct Look {
 pub struct Group {
     #[serde(flatten)]
     pub look: Look,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub float: Option<Float>,
     pub size: Option<Size>,
     pub hidden: bool,
     pub gap: u32,
@@ -83,6 +98,8 @@ pub struct Group {
 pub struct Block {
     #[serde(flatten)]
     pub look: Look,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub float: Option<Float>,
     pub size: Option<Size>,
     pub hidden: bool,
     pub padding: u32,
@@ -133,6 +150,18 @@ fn look_ok(look: &Look) -> Result<(), String> {
     if !text_ok(&look.theme) || !text_ok(&look.font) {
         return Err("theme and font must be short plain text".into());
     }
+    if let Some(background) = &look.background {
+        let lower = background.to_ascii_lowercase();
+        if background.len() > 200
+            || background
+                .chars()
+                .any(|c| c.is_control() || matches!(c, ';' | '{' | '}'))
+            || lower.contains("url(")
+            || lower.contains("expression")
+        {
+            return Err("background is a color or a gradient (no url())".into());
+        }
+    }
     if look.radius.is_some_and(|r| r > 48) || look.border.is_some_and(|b| b > 8) {
         return Err("radius is at most 48 and border at most 8".into());
     }
@@ -146,10 +175,18 @@ fn check(node: &Node, depth: usize, count: &mut usize) -> Result<(), String> {
             "too big: at most {MAX_DEPTH} levels and {MAX_NODES} nodes"
         ));
     }
-    look_ok(match node {
-        Node::Row(g) | Node::Column(g) => &g.look,
-        Node::Block(b) => &b.look,
-    })?;
+    let (look, float) = match node {
+        Node::Row(g) | Node::Column(g) => (&g.look, &g.float),
+        Node::Block(b) => (&b.look, &b.float),
+    };
+    look_ok(look)?;
+    if float.as_ref().is_some_and(|f| {
+        f.x.max(f.y) > 10_000
+            || !(1..=10_000).contains(&f.width)
+            || !(1..=10_000).contains(&f.height)
+    }) {
+        return Err("float needs x, y, width and height within 10000 px".into());
+    }
     match node {
         Node::Row(g) | Node::Column(g) => {
             if g.children.is_empty() || g.gap > 200 || g.padding > 200 || !size_ok(&g.size) {
@@ -161,10 +198,11 @@ fn check(node: &Node, depth: usize, count: &mut usize) -> Result<(), String> {
         }
         Node::Block(b) => {
             let known = BUILTIN.contains(&b.content.as_str())
-                || b.content.strip_prefix("mod:").is_some_and(plain_id);
+                || b.content.strip_prefix("mod:").is_some_and(plain_id)
+                || b.content.strip_prefix("terminal:").is_some_and(plain_id);
             if !known || b.padding > 200 || !size_ok(&b.size) {
                 return Err(format!(
-                    "block content \"{}\" must be one of {} or mod:<id>",
+                    "block content \"{}\" must be one of {}, mod:<id> or terminal:<session id>",
                     b.content,
                     BUILTIN.join(", ")
                 ));
@@ -330,6 +368,20 @@ mod tests {
                 "big.json",
                 r#"{"type":"block","content":"tabs","radius":500}"#,
             ),
+            (
+                "fancy.json",
+                r##"{"type":"row","background":"linear-gradient(#111, #222)","children":[
+                {"type":"block","content":"terminal:abc-123","float":{"x":20,"y":20,"width":400,"height":300}}]}"##,
+            ),
+            (
+                "url.json",
+                r#"{"type":"block","content":"tabs","background":"url(http://x/y.png)"}"#,
+            ),
+            (
+                "flat.json",
+                r#"{"type":"block","content":"tabs","float":{"x":0,"y":0,"width":0,"height":10}}"#,
+            ),
+            ("term.json", r#"{"type":"block","content":"terminal:../x"}"#),
         ]);
         let found = scan(&root, &Policy::default());
         let by = |id: &str| found.iter().find(|l| l.id == id).unwrap();
@@ -340,7 +392,8 @@ mod tests {
         assert_eq!(group.look.theme.as_deref(), Some("nord"));
         assert_eq!(group.look.colors["accent"], "#ff8800");
         assert_eq!((group.look.radius, group.look.border), (Some(4), Some(1)));
-        for bad in ["name", "hex", "big"] {
+        assert!(by("fancy").error.is_none(), "{:?}", by("fancy").error);
+        for bad in ["name", "hex", "big", "url", "flat", "term"] {
             assert!(by(bad).error.is_some(), "{bad}");
         }
         // The page reads the look off the node as camelCase-free flat keys.
