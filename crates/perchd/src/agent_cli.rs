@@ -26,6 +26,8 @@ pub const CORE_FILE: &str = "core.json";
 pub const REPORT_MAX_CHARS: usize = 4_000;
 const RESPONSE_LIMIT: u64 = 256 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(10);
+/// For `steer` and `interrupt`, whose answer waits for the receiver's confirmation.
+const ACTION_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Where a running core listens. Written by the core once it is bound.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,7 +114,11 @@ fn post(
     let mut stream =
         TcpStream::connect_timeout(&SocketAddr::from((Ipv4Addr::LOCALHOST, core.port)), TIMEOUT)
             .map_err(|_| "the Perch core did not accept the connection".to_string())?;
-    let _ = stream.set_read_timeout(Some(TIMEOUT));
+    // A steer or interrupt is answered only once the receiver confirmed it (up to ~10 s for its own
+    // answer and 25 s more for a Claude steer to show in its transcript): wait past that, and if the
+    // core still says nothing, say it may have taken effect rather than call it a failure.
+    let acting = matches!(route, "steer" | "interrupt");
+    let _ = stream.set_read_timeout(Some(if acting { ACTION_TIMEOUT } else { TIMEOUT }));
     let _ = stream.set_write_timeout(Some(TIMEOUT));
     stream
         .write_all(request.as_bytes())
@@ -121,7 +127,15 @@ fn post(
     stream
         .take(RESPONSE_LIMIT)
         .read_to_end(&mut response)
-        .map_err(|_| "the Perch core did not answer in time".to_string())?;
+        .map_err(|_| {
+            if acting {
+                "the Perch core did not answer in time. It may still have been sent: look at \
+                 `perch inbox` before sending again"
+                    .to_string()
+            } else {
+                "the Perch core did not answer in time".to_string()
+            }
+        })?;
     parse_response(&String::from_utf8_lossy(&response))
 }
 
