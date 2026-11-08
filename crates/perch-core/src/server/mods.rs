@@ -229,7 +229,8 @@ pub(super) async fn agent_do(app: &AppState, body: &Value) -> Result<Value, Fail
             command: Some(command.to_string()),
             args: body.get("args").filter(|a| !a.is_null()).cloned(),
         }));
-    for _ in 0..20 {
+    // A picture (`shot`) takes a moment to draw.
+    for _ in 0..40 {
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         if let Some((_, text, error)) = app.mod_snapshots.lock().unwrap().remove(&request_id) {
             return Ok(match error {

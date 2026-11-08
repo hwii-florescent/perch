@@ -161,3 +161,21 @@ test("a floating block is dragged by its grip, springs to the nearest edge and k
   await page.reload({ waitUntil: "networkidle" });
   await expect(page.locator('[data-testid="layout-git"]')).toHaveCSS("bottom", "12px", { timeout: 15000 });
 });
+
+test("api.screenshot draws the running app into a PNG", async ({ page }) => {
+  fs.mkdirSync(MOD, { recursive: true });
+  fs.writeFileSync(path.join(MOD, "main.js"), "export default (el, api) => { el.textContent = 'shot me'; api.screenshot().then((png) => { el.dataset.shot = png.slice(0, 22) + '|' + png.length; }, (e) => { el.dataset.shot = 'ERR ' + e.message; }); }");
+  fs.mkdirSync(path.dirname(LAYOUT), { recursive: true });
+  fs.writeFileSync(LAYOUT, JSON.stringify({ name: "E2E look", type: "row", children: [
+    { type: "block", content: "canvas" },
+    { type: "block", content: "mod:e2e-hello", size: { px: 200 } },
+  ] }));
+  await openMods(page);
+  await expect(page.locator('[data-testid="layout-e2e-look"]')).toBeVisible({ timeout: 15000 });
+  await page.locator('[data-testid="layout-e2e-look"]').getByRole("button", { name: "Use" }).click();
+  await page.keyboard.press("Escape");
+  const holder = page.locator('[data-testid="layout-mod:e2e-hello"] [data-shot]');
+  await expect(holder).toHaveAttribute("data-shot", /^data:image\/png;base64,\|\d+$|^data:image\/png;base64,.*\|\d+$/, { timeout: 20000 });
+  const size = Number((await holder.getAttribute("data-shot"))!.split("|")[1]);
+  expect(size).toBeGreaterThan(3000); // a picture with content, not a blank pixel
+});

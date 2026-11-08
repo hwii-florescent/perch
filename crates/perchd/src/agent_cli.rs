@@ -889,7 +889,7 @@ const MOD_API: &str = include_str!("../../perch-core/src/mod_examples/perch-mod.
 
 const MOD_USAGE: &str ="usage: perch mod [list] [--json] | perch mod enable <id> | \
      perch mod disable <id> | perch mod open <id> | perch mod check <id> | \
-     perch mod dom <id|app> | perch mod api | perch mod examples | perch mod clone <example> [id] | perch mod install <owner/repo[/folder]> | \
+     perch mod dom <id|app> | perch mod shot [file.png] | perch mod api | perch mod examples | perch mod clone <example> [id] | perch mod install <owner/repo[/folder]> | \
      perch mod commands | perch mod do <command> [json] | perch mod remove <id> [mod|layout] | perch mod layout <id|stock>";
 
 /// The core answers 200 even when the screen said no; turn that into the CLI's error.
@@ -997,6 +997,20 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
             };
             mod_do_ok(&ask("mod/do", json!({ "command": command, "args": args }))?)?;
             println!("{command} ran on the person's screen");
+            Ok(())
+        }
+        ["shot"] | ["shot", _] => {
+            use base64::Engine;
+            let answer = ask("mod/do", json!({ "command": "shot" }))?;
+            mod_do_ok(&answer)?;
+            let picture = answer["result"].as_str().unwrap_or_default();
+            let bytes = picture
+                .strip_prefix("data:image/png;base64,")
+                .and_then(|data| base64::engine::general_purpose::STANDARD.decode(data).ok())
+                .ok_or("the window did not send a picture")?;
+            let file = words.get(1).copied().unwrap_or("perch-shot.png");
+            std::fs::write(file, bytes).map_err(|e| format!("could not write {file}: {e}"))?;
+            println!("{file}");
             Ok(())
         }
         ["install", source] => {
@@ -1396,6 +1410,9 @@ Commands
                           (/abs/path or ~/path). Copy mods/<name>/ and layouts/<name>.json from a public GitHub repo (or one
                           folder with a main.js) into place; never overwrites, and prints warnings for
                           code that runs programs, reaches the network or touches files. Read it first.
+  perch mod shot [file.png]
+                          A picture of the app (drawn from the page: terminal canvases are copied, web
+                          fonts fall back); writes perch-shot.png unless you name a file.
   perch mod commands      The app commands a key, a mod or `perch mod do` can run.
   perch mod do <command> [json]
                           Run one on the person's screen (a command with arguments takes them as JSON),
@@ -2041,6 +2058,7 @@ mod tests {
             "perch mod commands",
             "perch mod api",
             "perch mod dom <id|app>",
+            "perch mod shot [file.png]",
             "perch mod layout <id|stock>",
             "(el, api) => cleanup?",
             "PERCH_MODS=off",

@@ -78,6 +78,8 @@ export interface ModApi {
   /** Calls `frame(ms)` (milliseconds since the loop began) before each repaint, at most `fps` times a
    * second (default 60), and pauses while the page is hidden: for motion. Stops when the mod is
    * replaced, or call the returned function. */
+  /** A picture of the app as a PNG data URL (drawn from the page: terminal canvases are copied, web fonts fall back). */
+  screenshot(): Promise<string>;
   loop(frame: (ms: number) => void, options?: { fps?: number }): () => void;
   /** Steps through `list` every `every` ms (a spinner: ["⠋", "⠙", …], 90), calling `show(item, index)` when it changes; returns the way to stop. */
   frames<T>(list: T[], every: number, show: (item: T, index: number) => void): () => void;
@@ -146,6 +148,7 @@ export function modApi(modId: string): ModApi & { dispose(): void } {
     writeTextFile,
     statFile,
     listDir,
+    screenshot: () => import("./shot").then(({ screenshot }) => screenshot()),
     loop,
     frames: (list, every, show) => {
       let shown = -1;

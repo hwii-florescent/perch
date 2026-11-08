@@ -74,6 +74,10 @@ export function answerSnapshot(requestId: string, modId: string) {
 export function answerCommand(requestId: string, command: string, args?: unknown) {
   const reply = (text: string, error?: string) => socket.send({ type: "mods.snapshot", requestId, html: "", text, error: error ?? null });
   if (command === "list") return reply(JSON.stringify(commandList()));
+  if (command === "shot") {
+    void import("./shot").then(({ screenshot }) => screenshot()).then((picture) => reply(picture), (error) => reply("", error instanceof Error ? error.message : String(error)));
+    return;
+  }
   try {
     if (runCommand(command, args)) reply("true");
     else reply("", `no command "${command}" (perch mod commands lists them)`);

@@ -104,6 +104,10 @@ approval not mattering much.
   also duplicates one of your own mods or layouts (as `<id>-copy`).
 - **Traffic lights.** Root `trafficLights: [x, y]` moves the macOS window buttons (desktop command
   `set_traffic_lights`, undone when the layout goes; `--titlebar-inset` follows). Not run in a real desktop window here.
+- **Screenshots.** `perch mod shot [file.png]` (the `shot` command through `mod/do`) and `api.screenshot()` give a PNG of
+  the app drawn from the page's own DOM (`shot.ts`: computed styles inlined, SVG foreignObject, canvas), at most 1600 px
+  wide. Terminal canvases are copied as pictures, web fonts fall back to system ones and the desktop's native Browser pane
+  is not in the page, so it is a faithful view of the layout, not an OS capture.
 - **Animation.** `api.loop(frame, {fps})` runs on animation frames; `api.frames(list, ms, show)` is herdr's `.frames`
   (a spinner list stepped on a schedule, `show` called only when the item changes). Both stop with the mod.
 - **Window controls.** `window.minimize`, `window.maximize` (toggle) and `window.close` are typed commands that call
