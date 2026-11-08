@@ -208,8 +208,9 @@ queue but it should be send right to the agent when it starts that message inste
   follow-up (the default for `perch send` and Perch status notes), or in the running turn for
   `perch steer`.
 - Through each CLI's approved native path only (Pi/OMP extension `sendUserMessage` with
-  `deliverAs`; Claude and Codex as their bridges allow). A CLI with no follow-up queue keeps the
-  idle wait, and the receipt says so.
+  `deliverAs`; Claude and Codex as their bridges allow). A CLI with no follow-up queue (Claude,
+  Codex) gets the message as a steer into the running turn instead of waiting for idle (owner,
+  same day: "I would accept a steer here instead of waiting for idle"); the receipt says steered.
 - Unchanged: never typed into a PTY; never over a person's draft or an open question or approval
   (those still wait, with the reason); holds and refusals; unknown state is not idle.
 - Receipts say delivered, queued in the agent, or steered.
