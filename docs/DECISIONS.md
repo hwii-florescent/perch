@@ -28,9 +28,13 @@ descriptor-confined `/workspace-file` route; local open project only).
   hash, remembered in localStorage so a reload does not reopen what was closed and an edited mod
   shows again; the default `overlay` opens only on request. `perch mod open <id> [panel]` (any
   agent; it only shows a page the person already approved) sends `mods.open` to show one now. A
-  docked pane re-checks its mod on every change and shows "off or gone" instead of its page. Herdr
-  likewise runs no plugin UI inside its host (its panes are terminal programs shown as overlay or
-  popup) and does not sandbox plugins; Perch keeps panels sandboxed and runs no mod code in the app.
+  docked pane re-checks its mod on every change and shows "off or gone" instead of its page. Herdr's
+  desktop app (herdr-app) goes further than this: its whole window is files (layouts, keys, mods)
+  that an agent edits with live reload, a last-good fallback and a reset key, and a mod is trusted
+  JavaScript inside the app with the person's full access and no sandbox ("not a security
+  boundary"); its older terminal app only runs plugin commands in panes. Perch keeps panels
+  sandboxed and runs no mod code in the app; what a panel can see and do grows through approved
+  capabilities, not by trusting its code.
   Not built: removing a mod from Settings, a layout a mod can declare out of Perch's own panes.
 - **Panels.** One self-contained `.html` file (no sub-assets: a sandboxed page has no cookie, so it
   could not fetch them), served only for an Active mod from inside its folder (symlinks resolved,
