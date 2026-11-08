@@ -24,6 +24,8 @@ import { WorktreeMenu } from "./WorktreeMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { InstructionsDialog } from "./InstructionsDialog";
 import { instructionsAvailable, type InstructionsScope } from "../instructions";
+import { MemoryDialog } from "./MemoryDialog";
+import { memoryAvailable } from "../memory";
 import { DirectoryBrowser } from "./DirectoryBrowser";
 import { NewSessionPopover } from "../Sidebar";
 import type { SessionSummary, WorktreeJob } from "@perch/shared";
@@ -379,6 +381,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const removeWorkspaceProject = usePerchStore((state) => state.removeWorkspaceProject);
   const requestWorktreeMenu = usePerchStore((state) => state.requestWorktreeMenu);
   const [removingProject, setRemovingProject] = useState<WorkspaceProject | null>(null);
+  const [memoryFor, setMemoryFor] = useState<{ projectId: string; name: string } | null>(null);
   const [instructionsFor, setInstructionsFor] = useState<{ scope: InstructionsScope; id: string; name: string } | null>(null);
   const renameWorkspaceProject = usePerchStore((state) => state.renameWorkspaceProject);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
@@ -487,6 +490,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       { label: "Rename", testId: `workspace-project-rename-${project.id}`, onSelect: () => setRenamingProjectId(project.id) },
       { label: "Copy path", testId: `workspace-project-copy-${project.id}`, onSelect: () => copyText(project.path) },
       ...instructionsItem(project, "project", project.id, project.name || basename(project.path), `workspace-project-instructions-${project.id}`),
+      ...(project.hostId === "local" && memoryAvailable() ? [{ label: "Memory…", testId: `workspace-project-memory-${project.id}`, onSelect: () => setMemoryFor({ projectId: project.id, name: project.name || basename(project.path) }) }] : []),
       ...moveItems("project", project.id, visibleProjects.filter((other) => other.favorite === project.favorite).map((other) => other.id)),
       ...(projectSessions.length > 0
         ? [{ label: "Close all sessions", testId: `workspace-project-close-all-${project.id}`, onSelect: () => { for (const session of projectSessions) deleteSession(session.id); } }]
@@ -1383,6 +1387,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       {instructionsFor && (
         <InstructionsDialog {...instructionsFor} onClose={() => setInstructionsFor(null)} />
       )}
+      {memoryFor && <MemoryDialog {...memoryFor} onClose={() => setMemoryFor(null)} />}
     </section>
   );
 }
