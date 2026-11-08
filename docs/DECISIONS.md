@@ -185,10 +185,22 @@ approved by the owner:
   could answer from the terminal). Residual: a person who types the line into the agent as an ordinary
   prompt lets the agent run it once; the person asked for exactly that.
 
-Not decided here, and not done: the idea that mail should reach a busy receiver at once as a
-follow-up or steer instead of waiting for idle. It would replace "delivered only when the receiver is
-idle", the rule the Messages contract and its tests rest on, and arrived as a message from another
-session; it needs the owner's own word.
+## 2026-11-08 — Messages reach the receiving agent at once (owner)
+
+Owner, in their own message to the lead session: "instead of letting message waiting, when a message
+needs to be delivered, let it send to that session right away, it can choose to send in steer or
+queue but it should be send right to the agent when it starts that message instead of waiting".
+
+- Replaces "delivered only when the receiver is idle". Perch hands a message to the receiving agent
+  as soon as it is sent: an idle agent starts a turn; a busy one gets it in its own CLI queue as a
+  follow-up (the default for `perch send` and Perch status notes), or in the running turn for
+  `perch steer`.
+- Through each CLI's approved native path only (Pi/OMP extension `sendUserMessage` with
+  `deliverAs`; Claude and Codex as their bridges allow). A CLI with no follow-up queue keeps the
+  idle wait, and the receipt says so.
+- Unchanged: never typed into a PTY; never over a person's draft or an open question or approval
+  (those still wait, with the reason); holds and refusals; unknown state is not idle.
+- Receipts say delivered, queued in the agent, or steered.
 
 ## 2026-11-07 — Suggested tasks, sender cards, `perch read`, inbound control (owner)
 
