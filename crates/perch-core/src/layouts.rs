@@ -129,6 +129,11 @@ pub struct Look {
     pub pane_border: Option<u32>,
     #[serde(rename = "paneFocus", skip_serializing_if = "Option::is_none")]
     pub pane_focus: Option<String>,
+    /// Space between the canvas's panes (px, at most 48), and whether a tab's only pane is framed too.
+    #[serde(rename = "paneGap", skip_serializing_if = "Option::is_none")]
+    pub pane_gap: Option<u32>,
+    #[serde(rename = "paneLone", skip_serializing_if = "Option::is_none")]
+    pub pane_lone: Option<bool>,
     /// `false` takes away the grip that drags a pane to another place in a split (default true).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub movable: Option<bool>,
@@ -339,8 +344,12 @@ fn look_ok(look: &Look) -> Result<(), String> {
     if look.pane_radius.is_some_and(|r| r > 48)
         || look.pane_border.is_some_and(|b| b > 8)
         || look.pane_focus.as_deref().is_some_and(|c| !hex(c))
+        || look.pane_gap.is_some_and(|g| g > 48)
     {
-        return Err("paneRadius is at most 48, paneBorder at most 8 and paneFocus #rrggbb".into());
+        return Err(
+            "paneRadius and paneGap are at most 48, paneBorder at most 8 and paneFocus #rrggbb"
+                .into(),
+        );
     }
     if look.terminal_padding.is_some_and(|p| p > 64)
         || look
@@ -921,7 +930,11 @@ mod tests {
             ),
             (
                 "pane-ok.json",
-                r##"{"type":"block","content":"canvas","paneRadius":2,"paneBorder":1,"paneFocus":"#ff8800","movable":false}"##,
+                r##"{"type":"block","content":"canvas","paneRadius":2,"paneBorder":1,"paneFocus":"#ff8800","movable":false,"paneGap":10,"paneLone":true}"##,
+            ),
+            (
+                "pane-gap.json",
+                r#"{"type":"block","content":"canvas","paneGap":99}"#,
             ),
             (
                 "shadow.json",
@@ -980,6 +993,10 @@ mod tests {
             Some(false),
             "movable survives to the page"
         );
+        assert_eq!(
+            (pane.look.pane_gap, pane.look.pane_lone),
+            (Some(10), Some(true))
+        );
         let Some(Node::Row(look)) = &by("term-look").root else {
             panic!("a row")
         };
@@ -999,6 +1016,7 @@ mod tests {
             "pad",
             "minmax",
             "pane-bad",
+            "pane-gap",
             "drawer-bad",
             "stack-bad-active",
             "stack-bad-header",

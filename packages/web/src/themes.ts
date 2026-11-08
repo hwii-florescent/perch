@@ -313,6 +313,8 @@ export interface Look {
   paneRadius?: number;
   paneBorder?: number;
   paneFocus?: string;
+  paneGap?: number;
+  paneLone?: boolean;
   movable?: boolean;
 }
 

@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useSyncExternalStore, type CSSProperties, type PointerEvent } from "react";
+import { setPaneLook } from "../paneLook";
 import { lookVars, prefersDark, setRootLook } from "../themes";
 import { activeOverride, floatOverride, hiddenOverride, layoutStateVersion, pointAtLayout, publishFloat, publishStack, setActive, setFloat, setShownLayout, setSizes, sizeOverride, snapSpot, subscribeLayoutState } from "../layoutState";
 import type { LayoutNode, ModInfo } from "@perch/shared";
@@ -220,13 +221,14 @@ export function LayoutRoot({ root }: { root: LayoutNode }) {
   pointAtLayout(root);
   useSyncExternalStore(subscribeLayoutState, layoutStateVersion);
   const dark = useSyncExternalStore(watchDark, prefersDark);
-  const { theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus, movable } = root;
-  const look = JSON.stringify({ theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus, movable, dark });
+  const { theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus, movable, paneGap, paneLone } = root;
+  const look = JSON.stringify({ theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus, movable, paneGap, paneLone, dark });
   // A root background paints the window behind the cards.
   useEffect(() => {
     const { dark: _dark, ...rest } = JSON.parse(look);
     setRootLook(lookVars(rest, false));
-    return () => setRootLook({});
+    setPaneLook({ gap: rest.paneGap, lone: rest.paneLone });
+    return () => { setRootLook({}); setPaneLook(null); };
   }, [look]);
   useEffect(() => { setShownLayout(root); return () => setShownLayout(null); }, [root]);
   useEffect(() => { publishStacks(root); });

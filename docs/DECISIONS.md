@@ -106,7 +106,8 @@ approval not mattering much.
   edge and third (`snapSpot`), kept per layout in `layoutState` like the other clicks (`layout.float {id, edge?, align?}`
   sets or resets it; dropped on top/bottom a drawer's `peek` is dropped). A mod draws against `shared("layout.float.<id>")`
   (edge, align, vertical, dragging). Panes of a split show a top-edge grip that starts the existing tab drag
-  (`beginTabDrag`), so a drop on another pane's side moves it; a layout's `movable: false` hides it (`--pane-grip`).
+  (`beginTabDrag`), so a drop on another pane's side moves it; a layout's `movable: false` hides it (`--pane-grip`). `paneGap` (px between panes) and `paneLone`
+  (frame a tab's only pane; otherwise only a split's panes are framed) reach the canvas through `paneLook.ts`.
 - **Layout structure, themes, fonts.** A `stack` node shows one child (`active`, `header`: `tabs` or a mod
   that reads `shared("layout.stack.<id>")` and runs `layout.stack`); nodes take `id`/`title`,
   `divider`/`resizable` (boundaries drag; sizes, hidden nodes and stack picks are kept per layout, keyed

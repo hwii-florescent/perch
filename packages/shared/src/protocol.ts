@@ -2909,6 +2909,9 @@ export interface LayoutLook {
   paneRadius?: number;
   paneBorder?: number;
   paneFocus?: string;
+  /** Space between the canvas's panes (px, at most 48), and whether a tab's only pane is framed too. */
+  paneGap?: number;
+  paneLone?: boolean;
   /** `false` takes away the grip that drags a pane to another place in a split (default true). */
   movable?: boolean;
   /** Takes the node out of the flow and draws it over the window at this place and size (px). */

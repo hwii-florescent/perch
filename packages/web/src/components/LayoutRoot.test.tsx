@@ -125,6 +125,20 @@ describe("a layout's frame and terminal look", () => {
     const html = document.documentElement.style;
     expect([html.getPropertyValue("--radius-pane"), html.getPropertyValue("--pane-border"), html.getPropertyValue("--pane-focus")]).toEqual(["3px", "1px", "#ff8800"]);
     expect(html.getPropertyValue("--pane-grip")).toBe("none"); // movable: false takes the pane grip away
+    // paneGap and paneLone are not CSS: the canvas reads them from paneLook while the layout is shown.
+    const { usePaneLook, STOCK_PANE_LOOK } = await import("../paneLook");
+    expect(usePaneLook).toBeTypeOf("function");
+    const seen = await import("../paneLook");
+    await act(async () => root.render(<LayoutRoot root={{ type: "block", content: "canvas", paneGap: 14, paneLone: true }} />));
+    let now = STOCK_PANE_LOOK;
+    const Probe = () => { now = seen.usePaneLook(); return null; };
+    const probe = document.createElement("div");
+    const probeRoot = createRoot(probe);
+    await act(async () => probeRoot.render(<Probe />));
+    expect(now).toEqual({ gap: 14, lone: true });
+    await act(async () => root.render(<div />)); // the layout goes: the stock canvas is back
+    expect(now).toEqual(STOCK_PANE_LOOK);
+    act(() => probeRoot.unmount());
   });
 
   it("drags a float by its grip, springs it to the nearest edge and third, keeps the spot, and a command puts it back", async () => {

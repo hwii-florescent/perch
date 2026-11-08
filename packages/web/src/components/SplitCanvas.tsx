@@ -10,6 +10,7 @@ import { acquirePassthrough, focusMainResponder } from "../browserNative";
 import { activateTab, entryLabel, workspaceTabs, type TabEntry } from "../workspaceTabs";
 import { closeTab, exitSplit } from "../tiledPanes";
 import { beginTabDrag } from "../tabDrag";
+import { usePaneLook } from "../paneLook";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import { AgentIcon } from "./AgentIcon";
 import { DOT_GLYPH, sessionDotState, type AgentDotState } from "../statusDot";
@@ -60,6 +61,7 @@ function PaneGrip({ id, label }: { id: string; label: string }) {
 }
 
 export function SplitCanvas() {
+  const paneLook = usePaneLook();
   const sessions = usePerchStore((s) => s.sessions);
   const sessionId = usePerchStore((s) => s.sessionId);
   const activeHostId = usePerchStore((s) => s.activeHostId);
@@ -128,13 +130,14 @@ export function SplitCanvas() {
   /** A pane's place plus the layout's pane frame (`paneBorder`, `paneFocus`); no frame unless a layout asks. */
   const frame = (id: string, focused: boolean): CSSProperties => ({
     ...slot(id),
-    border: `var(--pane-border, 0px) solid ${focused ? "var(--pane-focus, var(--overlay-0))" : "var(--overlay-0)"}`,
+    // Only a split's panes are framed, unless the layout says `paneLone` (a tab's only pane too).
+    border: !split && !paneLook.lone ? undefined : `var(--pane-border, 0px) solid ${focused ? "var(--pane-focus, var(--overlay-0))" : "var(--overlay-0)"}`,
   });
   const slot = (id: string) => {
     const shared = placed?.panes.get(id);
     if (!shared) return undefined;
     if (zoomed) return tileVisible(id) ? { inset: 0 } : { display: "none" };
-    const r = gapped(shared, box);
+    const r = gapped(shared, box, paneLook.gap);
     return { left: r.x, top: r.y, width: r.w, height: r.h };
   };
   // The canvas hangs from the main card's tab strip: a pane on the top edge (or alone) has square
@@ -262,6 +265,7 @@ export function SplitCanvas() {
         data-testid={primaryHidden ? "split-dock-parked" : "split-pane-session"}
         data-pane-id={primaryHidden ? undefined : sessionId ?? undefined}
         data-pane-visible={!primaryHidden && !fileShown}
+        style={!split && paneLook.lone ? frame(sessionId ?? "", true) : undefined}
         onMouseDownCapture={focusSession}
         onFocusCapture={split ? focusSession : undefined}
       >
