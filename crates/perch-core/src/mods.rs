@@ -208,6 +208,33 @@ impl Manifest {
         Ok(())
     }
 
+    /// What approving this manifest lets run or show, one line each (commands as argv).
+    pub fn preview(&self) -> Vec<String> {
+        let argv = |command: &[String]| command.join(" ");
+        let mut lines = Vec::new();
+        lines.extend(
+            self.build
+                .iter()
+                .map(|b| format!("build: {}", argv(&b.command))),
+        );
+        lines.extend(
+            self.actions
+                .iter()
+                .map(|a| format!("action {}: {}", a.id, argv(&a.command))),
+        );
+        lines.extend(
+            self.events
+                .iter()
+                .map(|e| format!("on {}: {}", e.on, argv(&e.command))),
+        );
+        lines.extend(
+            self.panels
+                .iter()
+                .map(|p| format!("panel {}: {}", p.id, p.entry)),
+        );
+        lines
+    }
+
     /// Declared capabilities plus those the manifest's own contents imply.
     pub fn required(&self) -> BTreeSet<Capability> {
         let mut set: BTreeSet<_> = self.capabilities.iter().copied().collect();
@@ -290,12 +317,24 @@ pub enum Status {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+/// An action or panel as a list shows it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Titled {
+    pub id: String,
+    pub title: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModInfo {
     pub id: String,
     pub name: String,
     pub version: String,
+    pub description: String,
+    pub actions: Vec<Titled>,
+    pub panels: Vec<Titled>,
+    /// Everything that would run or be shown, one line each, so approval is informed.
+    pub preview: Vec<String>,
     /// Pins what was looked at; [`approve`] must name it.
     pub hash: String,
     pub required: Vec<Capability>,
@@ -474,6 +513,44 @@ pub fn load_active(root: &Path, policy: &Policy, id: &str) -> Result<(Manifest, 
     Ok((manifest, dir))
 }
 
+/// The header a panel is served with. `sandbox` gives it an opaque origin even if opened outside
+/// an iframe; with no network, no frames, no forms and inline-only script and style, a panel can
+/// only draw and talk to the page that embeds it.
+pub const PANEL_CSP: &str =
+    "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; \
+    style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'";
+const MAX_PANEL_BYTES: u64 = 2 * 1024 * 1024;
+
+/// A panel's single HTML file, for an Active mod. The path is confined to the mod's folder after
+/// symlinks resolve, and the file is size-capped.
+pub fn panel_html(
+    root: &Path,
+    policy: &Policy,
+    id: &str,
+    panel: &str,
+) -> Result<(String, BTreeSet<Capability>), Error> {
+    let (manifest, dir) = load_active(root, policy, id)?;
+    let entry = manifest
+        .panels
+        .iter()
+        .find(|p| p.id == panel)
+        .ok_or_else(|| Error::NotFound(format!("mod \"{id}\" has no panel \"{panel}\"")))?;
+    let (base, file) = (dir.canonicalize()?, dir.join(&entry.entry).canonicalize()?);
+    if !file.starts_with(&base) {
+        return Err(Error::Invalid(format!(
+            "panel \"{panel}\" points outside its mod"
+        )));
+    }
+    if std::fs::metadata(&file)?.len() > MAX_PANEL_BYTES {
+        return Err(Error::Invalid(format!(
+            "panel \"{panel}\" is larger than {MAX_PANEL_BYTES} bytes"
+        )));
+    }
+    let html = String::from_utf8(std::fs::read(&file)?)
+        .map_err(|_| Error::Invalid(format!("panel \"{panel}\" is not UTF-8")))?;
+    Ok((html, manifest.required()))
+}
+
 /// The folder a mod keeps its own files in (`PERCH_MOD_DATA`); outside the mod so updates keep it.
 pub fn data_dir(root: &Path, id: &str) -> PathBuf {
     root.join("mod-data").join(id)
@@ -508,6 +585,10 @@ fn scan_with(root: &Path, policy: &Policy, safe: bool) -> Result<Vec<ModInfo>, E
                 id: name,
                 name: String::new(),
                 version: String::new(),
+                description: String::new(),
+                actions: Vec::new(),
+                panels: Vec::new(),
+                preview: Vec::new(),
                 hash: String::new(),
                 required: Vec::new(),
                 status: Status::Invalid {
@@ -536,6 +617,24 @@ fn scan_with(root: &Path, policy: &Policy, safe: bool) -> Result<Vec<ModInfo>, E
                 found.push(ModInfo {
                     status: status_of(record, &hash),
                     approved_by: record.approved.as_ref().map(|a| a.by.clone()),
+                    preview: manifest.preview(),
+                    actions: manifest
+                        .actions
+                        .iter()
+                        .map(|a| Titled {
+                            id: a.id.clone(),
+                            title: a.title.clone(),
+                        })
+                        .collect(),
+                    panels: manifest
+                        .panels
+                        .iter()
+                        .map(|p| Titled {
+                            id: p.id.clone(),
+                            title: p.title.clone(),
+                        })
+                        .collect(),
+                    description: manifest.description,
                     id: manifest.id,
                     name: manifest.name,
                     version: manifest.version,
@@ -885,6 +984,53 @@ command = ["npm", "ci"]
         std::fs::write(root.0.join(STATE), "{ not json").unwrap();
         root.put("plan", PANEL);
         assert!(active(&ask).is_err());
+    }
+
+    /// Panels: served only for an Active mod, from inside its folder, with the locked-down header.
+    #[test]
+    fn a_panel_is_served_only_from_an_active_mod_and_only_from_its_own_folder() {
+        let root = Root::new();
+        root.put("plan", PANEL);
+        let dir = mods_dir(&root.0).join("plan");
+        std::fs::write(dir.join("index.html"), "<p>hi</p>").unwrap();
+        let ask = Policy::default();
+        assert!(
+            panel_html(&root.0, &ask, "plan", "board").is_err(),
+            "not approved yet"
+        );
+        let hash = root.one(&ask).hash;
+        approve(&root.0, &ask, "plan", &hash).unwrap();
+        let (html, needs) = panel_html(&root.0, &ask, "plan", "board").unwrap();
+        assert_eq!(html, "<p>hi</p>");
+        assert_eq!(needs, [Capability::Panel].into());
+        assert!(matches!(
+            panel_html(&root.0, &ask, "plan", "nope"),
+            Err(Error::NotFound(_))
+        ));
+        // A symlink that leads out of the folder is refused, and so is an oversized file.
+        std::fs::remove_file(dir.join("index.html")).unwrap();
+        std::fs::write(root.0.join("secret.html"), "secret").unwrap();
+        std::os::unix::fs::symlink(root.0.join("secret.html"), dir.join("index.html")).unwrap();
+        let escaped = panel_html(&root.0, &ask, "plan", "board")
+            .unwrap_err()
+            .to_string();
+        assert!(escaped.contains("outside"), "{escaped}");
+        std::fs::remove_file(dir.join("index.html")).unwrap();
+        std::fs::write(
+            dir.join("index.html"),
+            vec![b'x'; MAX_PANEL_BYTES as usize + 1],
+        )
+        .unwrap();
+        assert!(panel_html(&root.0, &ask, "plan", "board").is_err());
+        // The header shuts the network and frames; nothing in it opens a door.
+        for needle in [
+            "sandbox allow-scripts",
+            "default-src 'none'",
+            "form-action 'none'",
+        ] {
+            assert!(PANEL_CSP.contains(needle), "{needle}");
+        }
+        assert!(!PANEL_CSP.contains("connect-src") && !PANEL_CSP.contains("allow-same-origin"));
     }
 
     /// Group 3: a mod cannot approve itself. Approval lives beside the mods folder, never in a

@@ -68,6 +68,16 @@ pub(super) async fn agent_run(
     body: &Value,
 ) -> Result<Value, Failure> {
     let (id, action_id) = (text_of(body, "id")?, text_of(body, "action")?);
+    let invoked = json!({ "invokedBy": caller.session_id });
+    Ok(json!(run_action(app, id, action_id, invoked).await?))
+}
+
+async fn run_action(
+    app: &AppState,
+    id: &str,
+    action_id: &str,
+    context: Value,
+) -> Result<mods_run::RunRecord, Failure> {
     let policy = app.settings.get().mods;
     let (manifest, dir) = mods::load_active(&app.memory_root, &policy, id).map_err(failure)?;
     let action = manifest
@@ -80,17 +90,119 @@ pub(super) async fn agent_run(
                 format!("mod \"{id}\" has no action \"{action_id}\""),
             )
         })?;
-    let record = mods_run::run(Spec {
+    Ok(mods_run::run(Spec {
         mod_id: id.into(),
         what: format!("action:{action_id}"),
         data_dir: mods::data_dir(&app.memory_root, id),
         dir,
         command: action.command.clone(),
-        context: json!({ "invokedBy": caller.session_id }).to_string(),
+        context: context.to_string(),
         timeout: mods_run::ACTION_TIMEOUT,
     })
-    .await;
-    Ok(json!(record))
+    .await)
+}
+
+/// `GET {base}mods/panel?id=&panel=`: one panel's HTML for an Active mod, for a sandboxed iframe.
+/// Authorized like every page route (a person's token; an agent token is refused), and sent with a
+/// header that gives the page no network, no frames and no origin (`mods::PANEL_CSP`).
+pub(super) async fn panel(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<HashMap<String, String>>,
+) -> axum::response::Response {
+    if let Err(status) = authorize_request(&app, &peer, &headers, &params) {
+        return (status, "device access denied").into_response();
+    }
+    let (Some(id), Some(panel)) = (params.get("id"), params.get("panel")) else {
+        return (StatusCode::BAD_REQUEST, "id and panel are required").into_response();
+    };
+    let policy = app.settings.get().mods;
+    match mods::panel_html(&app.memory_root, &policy, id, panel) {
+        Ok((html, _)) => (
+            [
+                ("content-type", "text/html; charset=utf-8"),
+                ("content-security-policy", mods::PANEL_CSP),
+                ("x-content-type-options", "nosniff"),
+                ("referrer-policy", "no-referrer"),
+                ("cache-control", "no-store"),
+            ],
+            html,
+        )
+            .into_response(),
+        Err(error) => {
+            let (status, text) = failure(error);
+            (status, text).into_response()
+        }
+    }
+}
+
+/// The reply to `mods.list` and `mods.set`.
+fn state_message(
+    app: &AppState,
+    request_id: String,
+    error: Option<String>,
+    run: Option<mods_run::RunRecord>,
+) -> ServerMessage {
+    let policy = app.settings.get().mods;
+    let (found, scan_error) = match mods::scan(&app.memory_root, &policy) {
+        Ok(found) => (found, None),
+        Err(error) => (Vec::new(), Some(error.to_string())),
+    };
+    ServerMessage::ModsState {
+        request_id,
+        mods: found,
+        safe_mode: policy.is_off(),
+        policy,
+        folder: app.memory_root.join("mods").display().to_string(),
+        run,
+        error: error.or(scan_error),
+    }
+}
+
+pub(super) fn handle_list(state: &Arc<ConnState>, request_id: String) {
+    let _ = state
+        .out_tx
+        .send(state_message(&state.app, request_id, None, None));
+}
+
+/// A person's click: approve (naming the hash they looked at), turn off or on, or run an action.
+/// This is the WebSocket plane, which an agent token cannot reach, so a click is the proof.
+pub(super) fn handle_set(
+    state: &Arc<ConnState>,
+    request_id: String,
+    id: String,
+    op: String,
+    hash: Option<String>,
+    action: Option<String>,
+) {
+    let app = state.app.clone();
+    let policy = app.settings.get().mods;
+    let outcome = match (op.as_str(), hash, action) {
+        ("approve", Some(hash), _) => mods::approve(&app.memory_root, &policy, &id, &hash),
+        ("enable", ..) => mods::set_enabled(&app.memory_root, &policy, &id, true),
+        ("disable", ..) => mods::set_enabled(&app.memory_root, &policy, &id, false),
+        ("run", _, Some(action)) => {
+            let out = state.out_tx.clone();
+            tokio::spawn(async move {
+                let context = json!({ "invokedBy": "person" });
+                let message = match run_action(&app, &id, &action, context).await {
+                    Ok(record) => state_message(&app, request_id, None, Some(record)),
+                    Err((_, error)) => state_message(&app, request_id, Some(error), None),
+                };
+                let _ = out.send(message);
+            });
+            return;
+        }
+        _ => Err(Error::Invalid(
+            "approve needs the hash, run needs the action; ops are approve, enable, disable, run"
+                .into(),
+        )),
+    };
+    let error = outcome.err().map(|error| error.to_string());
+    let _ = state
+        .out_tx
+        .send(state_message(&app, request_id, error, None));
 }
 
 /// `perch mod runs`: the most recent runs of actions and events, newest last.
@@ -274,7 +386,142 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    const RUNNER: &str = "id = \"runner\"\nname = \"Runner\"\nversion = \"1\"\n\
+    /// A raw GET: status, the header block (lower-cased) and the body.
+    async fn get(address: SocketAddr, path: &str, extra: &[(&str, &str)]) -> (u16, String, String) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut text = format!(
+            "GET {path} HTTP/1.0\r\nHost: 127.0.0.1:{}\r\n",
+            address.port()
+        );
+        for (name, value) in extra {
+            text.push_str(&format!("{name}: {value}\r\n"));
+        }
+        text.push_str("\r\n");
+        let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+        stream.write_all(text.as_bytes()).await.unwrap();
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).await.unwrap();
+        let response = String::from_utf8_lossy(&response).into_owned();
+        let (head, body) = response.split_once("\r\n\r\n").unwrap();
+        let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+        (status, head.to_lowercase(), body.to_string())
+    }
+
+    const WITH_PANEL: &str = "id = \"board\"\nname = \"Board\"\nversion = \"1\"\n\
+        [[actions]]\nid = \"hi\"\ntitle = \"Hi\"\ncommand = [\"echo\", \"hi\"]\n\
+        [[panels]]\nid = \"main\"\ntitle = \"Main\"\nentry = \"index.html\"\n";
+
+    /// A person's clicks over the socket approve and run; the panel page needs a person's token and
+    /// is sent locked down, and only while the mod is Active.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_person_approves_and_runs_over_the_socket_and_a_panel_is_served_locked_down() {
+        use futures::{SinkExt, StreamExt};
+        let root = std::env::temp_dir().join(format!("perch-mods-ui-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let local_ui = crate::local_ui::LocalUi::in_process();
+        let person = local_ui.token().to_string();
+        let (address, db) = super::super::sub_sessions::tests::boot_with(&root, local_ui).await;
+        let (workspace, _) = lead_with_child(&db, &nest, crate::sub_sessions::SubState::Running);
+        let agent = db
+            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .unwrap()
+            .token;
+        let (mut socket, _) = tokio_tungstenite::connect_async(
+            crate::hub::socket_request(&format!("ws://{address}/ws"), Some(&person)).unwrap(),
+        )
+        .await
+        .unwrap();
+        let mut ask = async |message: Value| -> Value {
+            socket
+                .send(tokio_tungstenite::tungstenite::Message::Text(
+                    message.to_string(),
+                ))
+                .await
+                .unwrap();
+            loop {
+                let next = tokio::time::timeout(std::time::Duration::from_secs(10), socket.next())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                if let tokio_tungstenite::tungstenite::Message::Text(text) = next {
+                    let value: Value = serde_json::from_str(&text).unwrap();
+                    if value["type"] == "mods.state" {
+                        return value;
+                    }
+                }
+            }
+        };
+        let listed = ask(json!({"type": "mods.list", "requestId": "1"})).await;
+        assert_eq!(listed["policy"]["mode"], "ask");
+        let dir = std::path::PathBuf::from(listed["folder"].as_str().unwrap()).join("board");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(crate::mods::MANIFEST), WITH_PANEL).unwrap();
+        std::fs::write(dir.join("index.html"), "<p>board</p>").unwrap();
+
+        let listed = ask(json!({"type": "mods.list", "requestId": "2"})).await;
+        let item = &listed["mods"][0];
+        assert_eq!(item["status"]["state"], "pending");
+        let preview: Vec<&str> = item["preview"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l.as_str().unwrap())
+            .collect();
+        assert_eq!(preview, ["action hi: echo hi", "panel main: index.html"]);
+        let hash = item["hash"].as_str().unwrap().to_string();
+        let panel = "/mods/panel?id=board&panel=main";
+        let with = |token: &str| format!("{panel}&token={token}");
+
+        // Not approved: not served, even to a person.
+        assert_eq!(get(address, &with(&person), &[]).await.0, 400);
+        // A stale hash approves nothing; the right one does.
+        let stale = ask(json!({"type": "mods.set", "requestId": "3", "id": "board", "op": "approve", "hash": "0000000000000000"})).await;
+        assert!(
+            stale["error"].as_str().unwrap().contains("changed"),
+            "{stale}"
+        );
+        assert_eq!(stale["mods"][0]["status"]["state"], "pending");
+        let done = ask(json!({"type": "mods.set", "requestId": "4", "id": "board", "op": "approve", "hash": hash})).await;
+        assert_eq!(done["mods"][0]["status"]["state"], "active", "{done}");
+        let ran = ask(json!({"type": "mods.set", "requestId": "5", "id": "board", "op": "run", "action": "hi"})).await;
+        assert_eq!(ran["run"]["ok"], true, "{ran}");
+        assert_eq!(ran["run"]["output"].as_str().unwrap().trim(), "hi");
+
+        // The page: a person gets it with the lock-down header; no token or an agent's token do not.
+        let (status, head, body) = get(address, &with(&person), &[]).await;
+        assert_eq!((status, body.as_str()), (200, "<p>board</p>"));
+        for needle in [
+            "content-security-policy: sandbox allow-scripts; default-src 'none'",
+            "x-content-type-options: nosniff",
+            "cache-control: no-store",
+        ] {
+            assert!(head.contains(needle), "{needle}\n{head}");
+        }
+        assert_eq!(get(address, panel, &[]).await.0, 401);
+        assert_eq!(get(address, &with(&agent), &[]).await.0, 403);
+        assert_eq!(
+            get(
+                address,
+                &format!("/mods/panel?id=board&panel=nope&token={person}"),
+                &[]
+            )
+            .await
+            .0,
+            404
+        );
+
+        // Off, and the page is gone with it.
+        let off =
+            ask(json!({"type": "mods.set", "requestId": "6", "id": "board", "op": "disable"}))
+                .await;
+        assert_eq!(off["mods"][0]["status"]["state"], "disabled");
+        assert_eq!(get(address, &with(&person), &[]).await.0, 400);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    const RUNNER: &str ="id = \"runner\"\nname = \"Runner\"\nversion = \"1\"\n\
         [[actions]]\nid = \"hello\"\ntitle = \"Hello\"\ncommand = [\"echo\", \"hello from a mod\"]\n\
         [[events]]\non = \"session.done\"\n\
         command = [\"sh\", \"-c\", \"echo $PERCH_MOD_CONTEXT > \\\"$PERCH_MOD_DATA/fired\\\"\"]\n";

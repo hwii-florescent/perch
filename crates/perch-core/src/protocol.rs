@@ -1345,6 +1345,23 @@ pub enum ClientMessage {
         id: String,
     },
 
+    /// The mods on this core (capability `mods.v1`). Answered with `mods.state`.
+    #[serde(rename = "mods.list", rename_all = "camelCase")]
+    ModsList { request_id: String },
+
+    /// A person's change to one mod: `op` is `approve` (needs the `hash` they looked at),
+    /// `enable`, `disable` or `run` (needs `action`). Answered with `mods.state`.
+    #[serde(rename = "mods.set", rename_all = "camelCase")]
+    ModsSet {
+        request_id: String,
+        id: String,
+        op: String,
+        #[serde(default)]
+        hash: Option<String>,
+        #[serde(default)]
+        action: Option<String>,
+    },
+
     /// The index of a Project's memory files on this core (capability `memory.v1`). Answered
     /// with `memory.state`.
     #[serde(rename = "memory.list", rename_all = "camelCase")]
@@ -1723,6 +1740,10 @@ pub enum ClientMessage {
         /// still holds exactly this) before sending, so the message replaces it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         replaces: Option<String>,
+        /// How a message sent while a turn runs is delivered: `steer` into the running turn, or `queue`
+        /// behind it. Absent (an older client) is `queue`. Ignored when no turn runs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delivery: Option<String>,
     },
     #[serde(rename = "agent.ui.answer", rename_all = "camelCase")]
     AgentUiAnswer {
@@ -2476,6 +2497,21 @@ pub enum ServerMessage {
         folders: Vec<String>,
         revision: u64,
         max_chars: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
+    /// Reply to `mods.list` and `mods.set`: every mod with its status, the approval policy, whether
+    /// mods are off, the mods folder, and for `run` what the run did. `error` explains a refusal.
+    #[serde(rename = "mods.state", rename_all = "camelCase")]
+    ModsState {
+        request_id: String,
+        mods: Vec<crate::mods::ModInfo>,
+        policy: crate::mods::Policy,
+        safe_mode: bool,
+        folder: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run: Option<crate::mods_run::RunRecord>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

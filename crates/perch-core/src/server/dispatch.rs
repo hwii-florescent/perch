@@ -81,6 +81,7 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             generation,
             text,
             replaces,
+            delivery,
         } => native_ui::control(
             state,
             raw_text,
@@ -88,7 +89,7 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             session_id,
             provider_id,
             generation,
-            Some((operation_id, text, replaces)),
+            Some((operation_id, text, replaces, delivery)),
         ),
         ClientMessage::AgentUiAnswer {
             request_id,
@@ -289,6 +290,14 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             text,
             folders,
         } => super::instructions::handle_set(state, request_id, scope, id, text, folders),
+        ClientMessage::ModsList { request_id } => super::mods::handle_list(state, request_id),
+        ClientMessage::ModsSet {
+            request_id,
+            id,
+            op,
+            hash,
+            action,
+        } => super::mods::handle_set(state, request_id, id, op, hash, action),
         ClientMessage::MemoryList {
             request_id,
             project_id,

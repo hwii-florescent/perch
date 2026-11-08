@@ -766,6 +766,14 @@ pub(super) mod tests {
 
     /// A core booted over HTTP with its state, on a database under `root`.
     pub(in crate::server) async fn boot(root: &std::path::Path) -> (SocketAddr, Arc<HistoryDb>) {
+        boot_with(root, crate::local_ui::LocalUi::in_process()).await
+    }
+
+    /// [`boot`] with a local UI the test holds, so it can present that token as a person.
+    pub(in crate::server) async fn boot_with(
+        root: &std::path::Path,
+        local_ui: Arc<crate::local_ui::LocalUi>,
+    ) -> (SocketAddr, Arc<HistoryDb>) {
         let db_path = root.join("history.sqlite");
         let db = Arc::new(HistoryDb::open(&db_path).unwrap());
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
@@ -780,7 +788,7 @@ pub(super) mod tests {
                 devices_path: Some(root.join("devices.json")),
                 ready_tx: Some(ready_tx),
                 phone_access_port: None,
-                local_ui: crate::local_ui::LocalUi::in_process(),
+                local_ui,
             },
             db.clone(),
             root.display().to_string(),

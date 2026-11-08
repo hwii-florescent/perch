@@ -906,6 +906,7 @@ pub async fn run(
             &format!("{base_path}agent/mod/approve"),
             post(agent::mod_approve).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
+        .route(&format!("{base_path}mods/panel"), get(mods::panel))
         .route(&format!("{base_path}workspace-file"), get(fs::file_content))
         .with_state(state);
 
@@ -2608,6 +2609,7 @@ fn foundation_capabilities() -> Vec<String> {
         "browser.suggest.v1",
         "instructions.v1",
         "memory.v1",
+        "mods.v1",
         "crew.v1",
         "crew.actions.v1",
         "suggestions.v1",

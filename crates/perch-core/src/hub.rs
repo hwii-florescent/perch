@@ -1602,6 +1602,7 @@ impl HubManager {
             | ServerMessage::BrowserSuggestResult { .. }
             | ServerMessage::InstructionsState { .. }
             | ServerMessage::MemoryState { .. }
+            | ServerMessage::ModsState { .. }
             | ServerMessage::MemoryFileState { .. }
             | ServerMessage::CrewState { .. }
             | ServerMessage::CrewActResult { .. }

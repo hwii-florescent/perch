@@ -1732,6 +1732,23 @@ export interface MemoryFile {
   text: string;
 }
 
+/** The mods on this core (capability `mods.v1`). Answered with `mods.state`. */
+export interface ModsListMessage {
+  type: "mods.list";
+  requestId: string;
+}
+
+/** A person's change to one mod: `approve` (names the `hash` they looked at), `enable`, `disable`
+ * or `run` (names the `action`). Answered with `mods.state`. */
+export interface ModsSetMessage {
+  type: "mods.set";
+  requestId: string;
+  id: string;
+  op: "approve" | "enable" | "disable" | "run";
+  hash?: string;
+  action?: string;
+}
+
 /** The index of a Project's memory files on this core (capability `memory.v1`). Answered with
  * `memory.state`. */
 export interface MemoryListMessage {
@@ -2560,6 +2577,8 @@ export type ClientMessage =
   | BrowserHistorySearchMessage
   | BrowserSuggestMessage
   | InstructionsGetMessage
+  | ModsListMessage
+  | ModsSetMessage
   | MemoryListMessage
   | MemoryGetMessage
   | CrewGetMessage
@@ -2817,6 +2836,56 @@ export interface BrowserSuggestResultMessage {
   type: "browser.suggest.result";
   requestId: string;
   suggestions: string[];
+}
+
+export type ModStatus =
+  | { state: "active" }
+  | { state: "disabled" }
+  /** Waiting for a person: nothing of it runs or is shown. */
+  | { state: "pending"; reason: string }
+  | { state: "invalid"; error: string };
+
+export interface ModInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  actions: { id: string; title: string }[];
+  panels: { id: string; title: string }[];
+  /** Everything approving it lets run or show, one line each. */
+  preview: string[];
+  /** Pins what was looked at; `mods.set` approve must name it. */
+  hash: string;
+  required: ModCapability[];
+  status: ModStatus;
+  /** `person` or `policy:<mode>`. */
+  approvedBy: string | null;
+}
+
+export interface ModRun {
+  mod: string;
+  what: string;
+  ok: boolean;
+  exitCode: number | null;
+  timedOut: boolean;
+  error: string | null;
+  output: string;
+  truncated: boolean;
+  at: number;
+  millis: number;
+}
+
+/** Reply to `mods.list` and `mods.set`: every mod, the approval policy, whether mods are off, the
+ * mods folder, and for `run` what the run did. `error` explains a refusal. */
+export interface ModsStateMessage {
+  type: "mods.state";
+  requestId: string;
+  mods: ModInfo[];
+  policy: ModsPolicy;
+  safeMode: boolean;
+  folder: string;
+  run?: ModRun;
+  error?: string;
 }
 
 /** Reply to `memory.list`, `memory.set` and `memory.delete`: the Project's memory index, by name,
@@ -3394,6 +3463,7 @@ export type ServerMessage =
   | BrowserSuggestResultMessage
   | InstructionsStateMessage
   | MemoryStateMessage
+  | ModsStateMessage
   | MemoryFileMessage
   | CrewStateMessage
   | CrewActResultMessage

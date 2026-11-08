@@ -12,7 +12,7 @@
 //!   and `PERCH_MOD_CONTEXT` (JSON) are set.
 //!
 //! ponytail: the last [`KEEP`] runs are kept in memory, not on disk, and are lost at restart.
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Component, Path, PathBuf};
@@ -29,7 +29,7 @@ pub const OUTPUT_CAP: usize = 16 * 1024;
 const MAX_RUNNING: usize = 4;
 const KEEP: usize = 50;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunRecord {
     #[serde(rename = "mod")]
