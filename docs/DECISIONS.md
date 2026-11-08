@@ -32,6 +32,12 @@ approval not mattering much.
   (`keybinds.ts` SHORTCUTS, run through `dispatchShortcut`; `App.tsx` supplies their handlers),
   `api.notify({title, body})` is a toast, `api.overlay((el, close) => cleanup?)` a modal that closes
   with Esc or when the mod is replaced. Not yet: commands with arguments, popups and floating windows.
+- **Keys.** Perch already has herdr's `keys.json` as `settings.keybindings` (Settings > Keyboard),
+  so there is no second file. `api.command({name, description, keys?, run})` adds `mod.<id>.<name>`
+  to the same `SHORTCUTS` table (help, Settings, `run` and the key listener all see it; a free,
+  bindable default key only; gone with the mod), and `api.bind(id, keys)` writes the person's
+  override through `updateSettings`. Not yet: an agent changing keys without a mod (no agent
+  settings route), and native (Tauri) menu accelerators for mod keys.
 - **Checking.** The page reports each load of a mod's revision (`mods.report`, capability
   `mods.report.v1`); `perch mod check <id>` waits for the current revision and exits nonzero with the
   error. It sees a throw, not a mod that mounts but draws wrongly.

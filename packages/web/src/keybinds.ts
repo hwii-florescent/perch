@@ -310,6 +310,37 @@ export function shortcutsBoundTo(spec: string, id: string, mac = IS_MAC): Shortc
   });
 }
 
+/** A key a person (or a mod) may bind: valid, not reserved, and with a modifier or an F-key so it
+ * never steals typing. The same rule `effectiveSpec` applies to Settings overrides. */
+export function bindableCombo(combo: string, mac = IS_MAC): boolean {
+  if (!validCombo(combo) || reservedCombo(combo, mac)) return false;
+  const c = parseCombo(combo, mac);
+  return c.cmd || c.ctrl || c.alt || /^F\d+$/.test(c.code);
+}
+
+/** Adds a command a mod defined (id `mod.<mod>.<name>`) to the same table the app's own commands
+ * live in, so Settings > Keyboard, the help and `run` all see it. `keys` is its default key, kept
+ * only if it is bindable and no other command already uses it. Registering an id again replaces it;
+ * the returned remover puts back what it replaced, and does nothing if a newer version took over. */
+export function registerCommand(id: string, description: string, keys: string | undefined, run: () => void): () => void {
+  const taken = keys && (!bindableCombo(keys) || shortcutsBoundTo(keys, id).length > 0);
+  if (taken) console.warn(`${id}: "${keys}" is not a free key, so the command has none`);
+  const mine: Shortcut = { id, group: "global", description, keys: [taken ? "" : keys ?? "", taken ? "" : keys ?? ""], run };
+  const at = SHORTCUTS.findIndex((s) => s.id === id);
+  const previous = at < 0 ? undefined : SHORTCUTS[at];
+  if (at < 0) SHORTCUTS.push(mine);
+  else SHORTCUTS[at] = mine;
+  return () => {
+    retired.add(mine);
+    const now = SHORTCUTS.indexOf(mine);
+    if (now < 0) return;
+    if (previous && !retired.has(previous)) SHORTCUTS[now] = previous;
+    else SHORTCUTS.splice(now, 1);
+  };
+}
+/** Mod commands whose mod has let them go; one that a newer version replaced must not come back. */
+const retired = new WeakSet<Shortcut>();
+
 /** The current binding, including the effective prefix for modal follow-up keys. */
 export function shortcutLabel(id: string, mac = IS_MAC): string | null {
   const s = SHORTCUTS.find((s) => s.id === id);

@@ -19,7 +19,7 @@ import { MobileHeader } from "./components/MobileHeader";
 import { MobileSwitcher } from "./components/MobileSwitcher";
 import { Toast } from "./components/Toast";
 import { useIsMobileWidth } from "./responsive";
-import { SHORTCUTS, dispatchShortcut, useLeaderKey } from "./keybinds";
+import { SHORTCUTS, bindableCombo, dispatchShortcut, registerCommand, useLeaderKey } from "./keybinds";
 import { setCommandBridge } from "./modApp";
 import { usePerchStore } from "./store";
 import { MobilePaneShell, type MobilePaneKind } from "./components/MobilePaneShell";
@@ -168,6 +168,14 @@ export default function App() {
     setCommandBridge({
       list: () => SHORTCUTS.map(({ id, description }) => ({ id, description })),
       run: (command) => dispatchShortcut(command, { openNavigator, openKeybindHelp, toggleDrawer: toggleTerminal }),
+      register: registerCommand,
+      bind: (command, keys) => {
+        if (keys && !bindableCombo(keys)) throw new Error(`"${keys}" cannot be bound: it is reserved or has no modifier.`);
+        const next = { ...usePerchStore.getState().settings?.keybindings };
+        if (keys === null) delete next[command];
+        else next[command] = keys;
+        usePerchStore.getState().updateSettings({ keybindings: next });
+      },
     });
   }, [openNavigator, openKeybindHelp, toggleTerminal]);
 

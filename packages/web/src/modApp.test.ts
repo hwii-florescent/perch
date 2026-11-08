@@ -74,6 +74,24 @@ describe("an app module's versions", () => {
     expect(cleanup).toHaveBeenCalledTimes(2);
   });
 
+  it("registers a mod's commands under its own name and removes them with the mod", async () => {
+    const remove = vi.fn();
+    const register = vi.fn(() => remove);
+    const bind = vi.fn();
+    setCommandBridge({ list: () => [], run: () => false, register, bind });
+    let api!: ModApi;
+    const swapper = createSwapper(document.createElement("div"), vi.fn(), async () => (_el, a) => { api = a; });
+    await swapper.load("x", "board");
+    const run = () => {};
+    api.command({ name: "go", description: "Go", keys: "cmd+shift+y", run });
+    expect(register).toHaveBeenCalledWith("mod.board.go", "Go", "cmd+shift+y", run);
+    expect(() => api.command({ name: "bad name!", description: "", run })).toThrow();
+    api.bind("tabs.new", "cmd+shift+y");
+    expect(bind).toHaveBeenCalledWith("tabs.new", "cmd+shift+y");
+    swapper.stop();
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
   it("undoes a version that finishes loading after the pane was closed", async () => {
     const host = document.createElement("div");
     const undo = vi.fn();

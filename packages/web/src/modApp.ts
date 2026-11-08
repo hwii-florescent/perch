@@ -19,6 +19,15 @@ export interface ModApi {
   commands(): { id: string; description: string }[];
   /** Runs an app command by id (`tabs.new`, `global.settings`, ...); false for an unknown id. */
   run(command: string): boolean;
+  /** Adds a command of the mod's own, id `mod.<modId>.<name>`: it shows in the keyboard help and
+   * Settings > Keyboard and `run` can start it. `keys` (e.g. "cmd+shift+y") is its default key,
+   * dropped if it is already taken or has no modifier. It goes when the mod is replaced; returns
+   * the way to remove it sooner. */
+  command(def: { name: string; description: string; keys?: string; run: () => void }): () => void;
+  /** Rebinds a command's key like Settings > Keyboard does (`""` unbinds, `null` restores the
+   * default). Throws for a key that is reserved or has no modifier. This is the person's setting:
+   * it stays after the mod is gone. */
+  bind(command: string, keys: string | null): void;
   /** Shows a notification toast. */
   notify(note: { title: string; body?: string }): void;
   /** A modal over the app: `draw(el, close)` fills it (and may return a cleanup). Esc or clicking
@@ -30,8 +39,10 @@ export interface ModApi {
 export interface CommandBridge {
   list(): { id: string; description: string }[];
   run(command: string): boolean;
+  register(id: string, description: string, keys: string | undefined, run: () => void): () => void;
+  bind(command: string, keys: string | null): void;
 }
-let bridge: CommandBridge = { list: () => [], run: () => false };
+let bridge: CommandBridge = { list: () => [], run: () => false, register: () => () => {}, bind: () => {} };
 export const setCommandBridge = (next: CommandBridge) => {
   bridge = next;
 };
@@ -58,6 +69,14 @@ export function modApi(modId: string): ModApi & { dispose(): void } {
     dispose: () => [...open].forEach((close) => close()),
     commands: () => bridge.list(),
     run: (command) => bridge.run(command),
+    bind: (command, keys) => bridge.bind(command, keys),
+    command: ({ name, description, keys, run }) => {
+      if (!/^[A-Za-z0-9_-]{1,40}$/.test(name)) throw new Error("A command name is letters, digits, - and _.");
+      const remove = bridge.register(`mod.${modId}.${name}`, description, keys, run);
+      const gone = () => { open.delete(gone); remove(); };
+      open.add(gone);
+      return gone;
+    },
     notify: ({ title, body }) =>
       usePerchStore.setState((s) => ({ toasts: [...s.toasts, { id: newId(), sessionId: `mod:${modId}`, title, body, kind: "usage" as const }] })),
     overlay: (draw) => {

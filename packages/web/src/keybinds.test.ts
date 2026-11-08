@@ -3,9 +3,37 @@ import { describe, expect, it } from "vitest";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { Terminal } from "@xterm/xterm";
-import { SHORTCUTS, effectiveSpec, keybindEntries, shortcutsBoundTo, shortcutFor, terminalKeyHandler, useLeaderKey, nestShortcutHints, useNestShortcutHints, shortcutAppliesTo } from "./keybinds";
+import { SHORTCUTS, bindableCombo, registerCommand, effectiveSpec, keybindEntries, shortcutsBoundTo, shortcutFor, terminalKeyHandler, useLeaderKey, nestShortcutHints, useNestShortcutHints, shortcutAppliesTo } from "./keybinds";
 import { IS_MAC, comboMatches, formatCombo, normalizeCombo, parseCombo, recordCombo } from "./keyCombo";
 import { usePerchStore } from "./store";
+
+it("a mod's command joins the table with a free default key, and a newer version replaces then restores it", () => {
+  const ran: string[] = [];
+  const key = IS_MAC ? "cmd+shift+y" : "ctrl+shift+y";
+  const one = registerCommand("mod.t.go", "Go", key, () => ran.push("one"));
+  const find = () => SHORTCUTS.find((s) => s.id === "mod.t.go")!;
+  expect(effectiveSpec(find())).toBe(key);
+  expect(keybindEntries().some((e) => e.description === "Go")).toBe(true);
+  const two = registerCommand("mod.t.go", "Go again", undefined, () => ran.push("two"));
+  expect(SHORTCUTS.filter((s) => s.id === "mod.t.go")).toHaveLength(1);
+  one(); // the old version going away must not remove the newer one
+  find().run({} as never);
+  expect(ran).toEqual(["two"]);
+  two(); // the older, already retired version does not come back
+  expect(SHORTCUTS.some((s) => s.id === "mod.t.go")).toBe(false);
+  // A new version that fails after registering gives the working one back.
+  const old = registerCommand("mod.t.go", "Old", undefined, () => ran.push("old"));
+  registerCommand("mod.t.go", "New", undefined, () => {})();
+  expect(find().description).toBe("Old");
+  old();
+  // A key with no modifier, or one another command already uses, is dropped; the command stays.
+  const plain = registerCommand("mod.t.plain", "Plain", "y", () => {});
+  const taken = registerCommand("mod.t.taken", "Taken", IS_MAC ? "cmd+t" : "ctrl+t", () => {});
+  expect(effectiveSpec(SHORTCUTS.find((s) => s.id === "mod.t.plain")!)).toBeNull();
+  expect(bindableCombo("y")).toBe(false);
+  expect(bindableCombo("cmd+shift+y")).toBe(true);
+  plain(); taken();
+});
 
 it("cancels the leader on keyup without swallowing ordinary Space or text input", async () => {
   let navigations = 0;
