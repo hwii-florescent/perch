@@ -244,14 +244,12 @@ test.describe("Phase 1: theme system", () => {
 
           if (phone) await page.getByTestId("mobile-switch").click();
           const area = phone ? page.getByTestId("mobile-switcher") : page.locator(".sidebar");
-          const badge = area.locator('.agent-status-dot[data-provider="codex"]').first();
+          // Session rows carry a plain agent mark (no ring or tile); the status is the row's own text.
+          const badge = area.locator('.agent-mark[data-provider="codex"]').first();
           await expect(badge).toBeVisible();
-          await expect(badge).toHaveCSS("background-color", rgb(p.panelBg));
           await expect(badge.locator("svg")).toHaveCSS("fill", rgb(p.text));
-          await expect(badge).toHaveCSS("border-top-color", rgb(p.green));
-          for (const [provider, color] of [["pi", p.yellow], ["claude", p.red], ["omp", p.teal]] as const) {
-            const mark = area.locator(`.agent-status-dot[data-provider="${provider}"]`).first();
-            await expect(mark).toHaveCSS("border-top-color", rgb(color));
+          for (const provider of ["pi", "claude", "omp"] as const) {
+            const mark = area.locator(`.agent-mark[data-provider="${provider}"]`).first();
             const path = mark.locator("path").first();
             if (provider === "pi") {
               await expect(path).toHaveCSS("fill", rgb(p.text));
@@ -264,17 +262,9 @@ test.describe("Phase 1: theme system", () => {
 
           if (!phone) {
             const selected = page.getByTestId("workspace-session-theme-codex");
-            await expect(selected).toHaveAttribute("aria-current", "true");
-            await expect(badge).toHaveCSS("outline-color", rgb(p.text));
-            await expect(badge).toHaveCSS("outline-width", "1px");
+            await expect(selected).toHaveAttribute("aria-current", "page");
             await selected.hover();
-            await expect(badge).toHaveCSS("background-color", rgb(p.surface0));
             await expect(badge.locator("svg")).toHaveCSS("fill", rgb(p.text));
-            const other = page.getByTestId("workspace-session-theme-pi");
-            await page.keyboard.press("Tab"); // establish keyboard :focus-visible
-            await other.focus();
-            await expect(other.locator(".agent-status-dot")).toHaveCSS("outline-color", rgb(p.text));
-            await expect(other.locator(".agent-status-dot")).toHaveCSS("outline-width", "1px");
 
             await page.getByTestId("workspace-project-menu-theme-project").click();
             const menuItem = page.getByRole("menu").locator(".pane-context-menu__item").first();
