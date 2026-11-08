@@ -14,9 +14,9 @@ through the CLI) plus an iframe panel that herdr lacks. Built: `mods.rs` (manife
 audit log), `settings.mods`, `mods_run.rs` (actions and events run), `perch mod
 list|enable|disable|approve|run|runs`, the person-plane messages `mods.list`/`mods.set` (capability
 `mods.v1`), `GET /mods/panel`, and Settings > Mods (policy, off switch, a preview of what approving
-runs, Approve, Run, Open, Turn on/off). Not built: a panel's data bridge (a panel is one inline HTML
-file that can draw but cannot yet read project files), docking a panel as a pane, and a `perch`
-token for a mod's own commands.
+runs, Approve, Run, Open, Turn on/off), and a scoped `perch` token for a mod's own commands. Not
+built: a panel's data bridge (a panel is one inline HTML file that can draw but cannot yet read
+project files) and docking a panel as a pane.
 - **Panels.** One self-contained `.html` file (no sub-assets: a sandboxed page has no cookie, so it
   could not fetch them), served only for an Active mod from inside its folder (symlinks resolved,
   2 MiB cap), to a person's token only, with `Content-Security-Policy: sandbox allow-scripts;
@@ -41,10 +41,15 @@ token for a mod's own commands.
   (events) or 60 s (actions), output capped at 16 KiB, at most 4 at once, every outcome a record
   (`perch mod runs`, in memory). Events: `session.needs-you`, `session.done`, `session.failed`
   (from `server/attention.rs`); the manifest rejects any other name. A mod has `PERCH_MOD_DATA`, a
-  private folder outside `mods/` that survives updates. A mod's command has **no `perch` token
-  yet**, so it cannot call back into Perch; a scoped token is a later slice.
-- **Spawning is not a mod capability.** A mod calling `perch spawn`/`send` goes through the
-  existing sub-session rules as an ordinary request (a card by default); mod approval never grants it.
+  private folder outside `mods/` that survives updates.
+- **A mod's `perch` token.** Each run gets `PERCH_SESSION`/`PERCH_TOKEN` (prefix `perch_mod_`, in
+  memory, revoked when the command ends or after its time limit) and `perch` on `PATH`. It opens
+  only `mod list`, `mod runs` and `memory` for the session the event or invocation was about:
+  read needs `read-project`, write and delete need `write-project`, as approved. Entries it
+  writes are recorded as written by "mod <id>". Every other agent route refuses it, and so do the
+  person's routes. A run no session started (a person's click) has no Project memory to use.
+- **Spawning is not a mod capability.** A mod token cannot `perch spawn`, `send`, `suggest`, `stop`,
+  `steer` or approve at all, so no mod approval, however automatic, can start work or message an agent.
 - **Honest limit.** Capabilities are enforced for panels (iframe sandbox) and scoped core calls. A
   mod's process runs as the user, so the manifest cannot stop it; the approval preview says so. The
   hash covers the manifest, not the scripts it points at.

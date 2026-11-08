@@ -87,6 +87,15 @@ impl Author {
         }
     }
 
+    /// A mod, running on behalf of `session`.
+    pub fn module(mod_id: &str, session: &str) -> Self {
+        Self {
+            kind: "mod".into(),
+            session: Some(session.into()),
+            label: format!("mod {mod_id}"),
+        }
+    }
+
     fn outside() -> Self {
         Self {
             kind: "outside".into(),

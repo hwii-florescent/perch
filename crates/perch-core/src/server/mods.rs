@@ -37,7 +37,7 @@ fn text_of<'a>(body: &'a Value, key: &str) -> Result<&'a str, Failure> {
         })
 }
 
-pub(super) fn agent_list(app: &AppState, _caller: &AgentIdentity) -> Result<Value, Failure> {
+pub(super) fn agent_list(app: &AppState) -> Result<Value, Failure> {
     let policy = app.settings.get().mods;
     let found = mods::scan(&app.memory_root, &policy).map_err(failure)?;
     Ok(json!({
@@ -69,7 +69,165 @@ pub(super) async fn agent_run(
 ) -> Result<Value, Failure> {
     let (id, action_id) = (text_of(body, "id")?, text_of(body, "action")?);
     let invoked = json!({ "invokedBy": caller.session_id });
-    Ok(json!(run_action(app, id, action_id, invoked).await?))
+    let session = Some(caller.session_id.as_str());
+    Ok(json!(
+        run_action(app, id, action_id, invoked, session).await?
+    ))
+}
+
+/// Every mod token starts with this, so a route that must not take one recognises it at once.
+pub(super) const TOKEN_PREFIX: &str = "perch_mod_";
+
+/// What a mod's token stands for while its command runs: the mod, the session whose event or
+/// invocation started it (if any), and what the person approved it to need.
+#[derive(Clone, Debug)]
+pub(super) struct ModCaller {
+    pub mod_id: String,
+    pub session: Option<String>,
+    pub required: std::collections::BTreeSet<crate::mods::Capability>,
+}
+
+impl ModCaller {
+    /// What the `perch` command sends as `session` and finds in `PERCH_SESSION`.
+    pub fn subject(&self) -> String {
+        self.session
+            .clone()
+            .unwrap_or_else(|| format!("mod:{}", self.mod_id))
+    }
+}
+
+struct Grant {
+    caller: ModCaller,
+    expires: std::time::Instant,
+}
+
+// ponytail: in this process only, keyed by the token's hash; a core restart ends every run anyway.
+static GRANTS: std::sync::LazyLock<std::sync::Mutex<HashMap<String, Grant>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// A token for one run. Dropping it (the run is over) revokes it.
+pub(super) struct RunToken {
+    pub token: String,
+    pub subject: String,
+    key: String,
+}
+
+impl Drop for RunToken {
+    fn drop(&mut self) {
+        GRANTS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.key);
+    }
+}
+
+fn issue(caller: ModCaller, ttl: std::time::Duration) -> RunToken {
+    let hex: String = [Uuid::new_v4(), Uuid::new_v4()]
+        .iter()
+        .flat_map(|id| id.as_bytes().iter().map(|byte| format!("{byte:02x}")))
+        .collect();
+    let token = format!("{TOKEN_PREFIX}{hex}");
+    let key = crate::agent_identity::hash_token(&token);
+    let subject = caller.subject();
+    let expires = std::time::Instant::now() + ttl;
+    let mut grants = GRANTS.lock().unwrap_or_else(|e| e.into_inner());
+    grants.retain(|_, grant| grant.expires > std::time::Instant::now());
+    grants.insert(key.clone(), Grant { caller, expires });
+    RunToken {
+        token,
+        subject,
+        key,
+    }
+}
+
+/// Who a mod token stands for, if it is live.
+pub(super) fn authenticate(token: &str) -> Option<ModCaller> {
+    let key = crate::agent_identity::hash_token(token);
+    let grants = GRANTS.lock().unwrap_or_else(|e| e.into_inner());
+    grants
+        .get(&key)
+        .filter(|grant| grant.expires > std::time::Instant::now())
+        .map(|grant| grant.caller.clone())
+}
+
+/// The environment of a mod's command: a scoped `perch` identity and the `perch` binary on `PATH`.
+fn command_env(token: &RunToken) -> Vec<(String, String)> {
+    let mut env = vec![
+        (perchd::agent_cli::SESSION_ENV.into(), token.subject.clone()),
+        (perchd::agent_cli::TOKEN_ENV.into(), token.token.clone()),
+    ];
+    if let Some(binary) = crate::agent_identity::cli_binary() {
+        if let Some(dir) = binary.parent() {
+            let path = std::env::var_os("PATH").unwrap_or_default();
+            let mut paths = vec![dir.to_path_buf()];
+            paths.extend(std::env::split_paths(&path));
+            if let Ok(joined) = std::env::join_paths(paths) {
+                env.push(("PATH".into(), joined.to_string_lossy().into_owned()));
+            }
+        }
+        env.push(("PERCH_BIN".into(), binary.display().to_string()));
+    }
+    env
+}
+
+/// What the memory routes need to act for a mod: the session the run is about (so the Project),
+/// and only if the person approved the mod for it. A mod reads memory with `read-project` and
+/// changes it with `write-project`; a run with no session (a person's click) has no Project.
+pub(super) fn memory_identity(
+    app: &AppState,
+    caller: &ModCaller,
+    write: bool,
+) -> Result<AgentIdentity, Failure> {
+    let need = if write {
+        mods::Capability::WriteProject
+    } else {
+        mods::Capability::ReadProject
+    };
+    if !caller.required.contains(&need) {
+        let name = if write {
+            "write-project"
+        } else {
+            "read-project"
+        };
+        return Err(fail(
+            StatusCode::FORBIDDEN,
+            format!("mod \"{}\" was not approved for {name}; its perch-mod.toml must list it in `capabilities`", caller.mod_id),
+        ));
+    }
+    let Some(session) = caller.session.clone() else {
+        return Err(fail(
+            StatusCode::BAD_REQUEST,
+            "this run is not about a session, so there is no Project memory for it to use",
+        ));
+    };
+    let workspace_id = app
+        .db
+        .get_session(&session)
+        .map_err(|error| internal("read the session", error))?
+        .and_then(|row| row.workspace_id)
+        .unwrap_or_default();
+    Ok(AgentIdentity {
+        workspace_id,
+        session_id: session,
+        provider_id: "mod".into(),
+        incarnation: format!("mod:{}", caller.mod_id),
+    })
+}
+
+/// A token for a run of `manifest`'s command, live for as long as the run may last.
+fn run_token(
+    manifest: &mods::Manifest,
+    session: Option<&str>,
+    timeout: std::time::Duration,
+) -> RunToken {
+    issue(
+        ModCaller {
+            mod_id: manifest.id.clone(),
+            session: session.map(str::to_string),
+            required: manifest.required(),
+        },
+        timeout + std::time::Duration::from_secs(5),
+    )
 }
 
 async fn run_action(
@@ -77,6 +235,7 @@ async fn run_action(
     id: &str,
     action_id: &str,
     context: Value,
+    session: Option<&str>,
 ) -> Result<mods_run::RunRecord, Failure> {
     let policy = app.settings.get().mods;
     let (manifest, dir) = mods::load_active(&app.memory_root, &policy, id).map_err(failure)?;
@@ -90,16 +249,20 @@ async fn run_action(
                 format!("mod \"{id}\" has no action \"{action_id}\""),
             )
         })?;
-    Ok(mods_run::run(Spec {
+    let token = run_token(&manifest, session, mods_run::ACTION_TIMEOUT);
+    let record = mods_run::run(Spec {
         mod_id: id.into(),
         what: format!("action:{action_id}"),
         data_dir: mods::data_dir(&app.memory_root, id),
         dir,
         command: action.command.clone(),
         context: context.to_string(),
+        env: command_env(&token),
         timeout: mods_run::ACTION_TIMEOUT,
     })
-    .await)
+    .await;
+    drop(token);
+    Ok(record)
 }
 
 /// `GET {base}mods/panel?id=&panel=`: one panel's HTML for an Active mod, for a sandboxed iframe.
@@ -186,7 +349,7 @@ pub(super) fn handle_set(
             let out = state.out_tx.clone();
             tokio::spawn(async move {
                 let context = json!({ "invokedBy": "person" });
-                let message = match run_action(&app, &id, &action, context).await {
+                let message = match run_action(&app, &id, &action, context, None).await {
                     Ok(record) => state_message(&app, request_id, None, Some(record)),
                     Err((_, error)) => state_message(&app, request_id, Some(error), None),
                 };
@@ -219,21 +382,28 @@ pub(super) fn fire_event(app: &AppState, event: &'static str, session: &str, age
     }
     let root = app.memory_root.clone();
     let context = json!({ "event": event, "session": session, "agent": agent }).to_string();
+    let session = session.to_string();
     tokio::spawn(async move {
         let Ok(active) = mods::active_all(&root, &policy) else {
             return;
         };
         for (manifest, dir) in active {
             for hook in manifest.events.iter().filter(|hook| hook.on == event) {
-                tokio::spawn(mods_run::run(Spec {
+                let token = run_token(&manifest, Some(&session), mods_run::EVENT_TIMEOUT);
+                let spec = Spec {
                     mod_id: manifest.id.clone(),
                     what: format!("event:{event}"),
                     dir: dir.clone(),
                     data_dir: mods::data_dir(&root, &manifest.id),
                     command: hook.command.clone(),
                     context: context.clone(),
+                    env: command_env(&token),
                     timeout: mods_run::EVENT_TIMEOUT,
-                }));
+                };
+                tokio::spawn(async move {
+                    mods_run::run(spec).await;
+                    drop(token); // the run is over: the token opens nothing now
+                });
             }
         }
     });
@@ -405,6 +575,205 @@ mod tests {
         let (head, body) = response.split_once("\r\n\r\n").unwrap();
         let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
         (status, head.to_lowercase(), body.to_string())
+    }
+
+    const HOLD: &str = r#"[[actions]]
+id = "hold"
+title = "Hold"
+command = ["sh", "-c", "echo \"$PERCH_SESSION $PERCH_TOKEN\" > \"$PERCH_MOD_DATA/tok\"; sleep 3"]
+"#;
+
+    /// A mod's command gets a `perch` token for the length of its run: it opens `mod list`/`runs` and
+    /// the memory of the session it was started for (only if approved for `read-project` /
+    /// `write-project`), nothing else, and it dies with the run.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_mods_token_is_scoped_to_its_run_its_approval_and_its_session() {
+        let root = std::env::temp_dir().join(format!("perch-mods-token-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let local_ui = crate::local_ui::LocalUi::in_process();
+        let person = local_ui.token().to_string();
+        let (address, db) = super::super::sub_sessions::tests::boot_with(&root, local_ui).await;
+        let app = super::super::booted_state(address);
+        let (workspace, _) = lead_with_child(&db, &nest, crate::sub_sessions::SubState::Running);
+        let agent = db
+            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .unwrap()
+            .token;
+        let post = |route: String, token: String, body: Value| async move {
+            request(
+                address,
+                "POST",
+                &format!("/agent/{route}"),
+                &[("Authorization", &format!("Bearer {token}"))],
+                &body.to_string(),
+            )
+            .await
+        };
+        let (_, listed) = post("mod/list".into(), agent.clone(), json!({"session": "lead"})).await;
+        let folder = std::path::PathBuf::from(listed["folder"].as_str().unwrap());
+        // Two mods: one approved for the Project's memory, one that asked for nothing.
+        for (id, caps) in [
+            (
+                "scoped",
+                "capabilities = [\"read-project\", \"write-project\"]\n",
+            ),
+            ("plain", ""),
+        ] {
+            let dir = folder.join(id);
+            std::fs::create_dir_all(&dir).unwrap();
+            let manifest = format!("id = \"{id}\"\nname = \"{id}\"\nversion = \"1\"\n{caps}{HOLD}");
+            std::fs::write(dir.join(crate::mods::MANIFEST), manifest).unwrap();
+        }
+        let (_, listed) = post("mod/list".into(), agent.clone(), json!({"session": "lead"})).await;
+        for item in listed["mods"].as_array().unwrap() {
+            let (id, hash) = (item["id"].as_str().unwrap(), item["hash"].as_str().unwrap());
+            app.agent_runtime
+                .note_terminal_input("lead", &format!("!perch mod approve {id} {hash}\r"));
+            let (status, done) = post(
+                "mod/approve".into(),
+                agent.clone(),
+                json!({"session": "lead", "id": id, "hash": hash}),
+            )
+            .await;
+            assert_eq!(status, 200, "{done}");
+        }
+        // Start both; each writes its subject and token where the test can read them, then waits.
+        let runs: Vec<_> = ["scoped", "plain"]
+            .into_iter()
+            .map(|id| {
+                tokio::spawn(post(
+                    "mod/run".into(),
+                    agent.clone(),
+                    json!({"session": "lead", "id": id, "action": "hold"}),
+                ))
+            })
+            .collect();
+        let mut tokens = Vec::new();
+        for id in ["scoped", "plain"] {
+            let file = crate::mods::data_dir(&app.memory_root, id).join("tok");
+            for _ in 0..60 {
+                if file.exists() && std::fs::metadata(&file).unwrap().len() > 10 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            let text = std::fs::read_to_string(&file).expect("the command ran");
+            let (subject, token) = text.trim().split_once(' ').unwrap();
+            assert_eq!(
+                subject, "lead",
+                "an agent-started run is about that agent's session"
+            );
+            assert!(token.starts_with(TOKEN_PREFIX));
+            tokens.push(token.to_string());
+        }
+        let (scoped, plain) = (tokens[0].clone(), tokens[1].clone());
+
+        // What a mod token opens: the lists, and the memory its approval covers.
+        let ses = json!({"session": "lead"});
+        assert_eq!(
+            post("mod/list".into(), scoped.clone(), ses.clone()).await.0,
+            200
+        );
+        assert_eq!(
+            post("mod/runs".into(), scoped.clone(), ses.clone()).await.0,
+            200
+        );
+        let write = json!({"session": "lead", "name": "from-mod.md", "text": "a note"});
+        let (status, wrote) = post("memory/write".into(), scoped.clone(), write.clone()).await;
+        assert_eq!(status, 200, "{wrote}");
+        assert_eq!(wrote["entry"]["author"]["kind"], "mod");
+        assert_eq!(wrote["entry"]["author"]["label"], "mod scoped");
+        assert_eq!(
+            post(
+                "memory/read".into(),
+                scoped.clone(),
+                json!({"session": "lead", "name": "from-mod.md"})
+            )
+            .await
+            .0,
+            200
+        );
+        // The session's own agent sees who wrote it.
+        let (_, files) = post("memory/list".into(), agent.clone(), ses.clone()).await;
+        assert_eq!(files["files"][0]["author"]["kind"], "mod");
+        // A mod that asked for nothing gets nothing; it cannot even read.
+        assert_eq!(
+            post("memory/write".into(), plain.clone(), write.clone())
+                .await
+                .0,
+            403
+        );
+        assert_eq!(
+            post("memory/list".into(), plain.clone(), ses.clone())
+                .await
+                .0,
+            403
+        );
+        assert_eq!(
+            post("mod/list".into(), plain.clone(), ses.clone()).await.0,
+            200
+        );
+
+        // What a mod token never opens: another run's subject, every other agent route, and the
+        // person's routes (the panel page, even with a valid person's page request).
+        assert_eq!(
+            post(
+                "mod/list".into(),
+                scoped.clone(),
+                json!({"session": "other"})
+            )
+            .await
+            .0,
+            403
+        );
+        for route in [
+            "spawn",
+            "suggest",
+            "send",
+            "stop",
+            "steer",
+            "interrupt",
+            "read",
+            "list",
+            "whoami",
+            "report",
+            "mod/approve",
+            "mod/enable",
+            "mod/run",
+        ] {
+            let (status, _) = post(route.into(), scoped.clone(), json!({"session": "lead", "id": "scoped", "hash": "abcdef0", "action": "hold", "target": "child", "text": "x"})).await;
+            assert_eq!(status, 401, "{route}");
+        }
+        assert_eq!(
+            get(
+                address,
+                &format!("/mods/panel?id=scoped&panel=x&token={scoped}"),
+                &[]
+            )
+            .await
+            .0,
+            403
+        );
+        assert_eq!(
+            get(
+                address,
+                &format!("/mods/panel?id=scoped&panel=x&token={person}"),
+                &[]
+            )
+            .await
+            .0,
+            404,
+            "the person's own token still works there (an active mod, no such panel)"
+        );
+
+        // The run ends and the token dies with it.
+        for run in runs {
+            assert_eq!(run.await.unwrap().0, 200);
+        }
+        assert_eq!(post("mod/list".into(), scoped, ses.clone()).await.0, 401);
+        assert_eq!(post("mod/list".into(), plain, ses).await.0, 401);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     const WITH_PANEL: &str = "id = \"board\"\nname = \"Board\"\nversion = \"1\"\n\

@@ -1711,7 +1711,7 @@ export interface CrewStateMessage {
 /** Who wrote a memory file: `person`, `agent` (`session` is its session id) or `outside` (the
  * content on disk is not what Perch recorded: edited outside Perch). */
 export interface MemoryAuthor {
-  kind: "person" | "agent" | "outside";
+  kind: "person" | "agent" | "mod" | "outside";
   session?: string;
   label: string;
 }

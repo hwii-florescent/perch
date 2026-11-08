@@ -67,6 +67,61 @@ fn authorize(
     Ok(identity)
 }
 
+/// Who is calling one of the few routes a mod may also use (`mod/list`, `mod/runs`, `memory/*`).
+enum Caller {
+    Agent(AgentIdentity),
+    Mod(mods::ModCaller),
+}
+
+/// [`authorize`], or a live mod token. A mod token opens only the routes that call this; every
+/// other agent route still takes `authorize` and so refuses it.
+fn authorize_any(
+    state: &AppState,
+    peer: &SocketAddr,
+    headers: &HeaderMap,
+    body: &Value,
+) -> Result<Caller, (StatusCode, &'static str)> {
+    let Some(token) = bearer(headers).filter(|token| token.starts_with(mods::TOKEN_PREFIX)) else {
+        return authorize(state, peer, headers, body).map(Caller::Agent);
+    };
+    if headers.contains_key(axum::http::header::ORIGIN) || !local_request(peer, headers) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "mod requests are accepted only from this computer",
+        ));
+    }
+    let Some(caller) = mods::authenticate(token) else {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "this mod token is unknown or its run has ended",
+        ));
+    };
+    if body["session"].as_str() != Some(caller.subject().as_str()) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "this token belongs to a different run",
+        ));
+    }
+    Ok(Caller::Mod(caller))
+}
+
+/// The session identity the memory routes work for, and who to record as the author when it is
+/// not the session itself (`None`: the session's agent).
+fn identity_for_memory(
+    state: &AppState,
+    caller: Caller,
+    write: bool,
+) -> Result<(AgentIdentity, Option<crate::memory::Author>), sub_sessions::Failure> {
+    match caller {
+        Caller::Agent(identity) => Ok((identity, None)),
+        Caller::Mod(module) => {
+            let identity = mods::memory_identity(state, &module, write)?;
+            let author = crate::memory::Author::module(&module.mod_id, &identity.session_id);
+            Ok((identity, Some(author)))
+        }
+    }
+}
+
 /// `POST {base}agent/whoami`: which run the token belongs to.
 pub(super) async fn whoami(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -366,8 +421,11 @@ pub(super) async fn memory_list(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    match authorize(&state, &peer, &headers, &body) {
-        Ok(identity) => answer(memory::agent_list(&state, &identity)),
+    match authorize_any(&state, &peer, &headers, &body) {
+        Ok(caller) => answer(
+            identity_for_memory(&state, caller, false)
+                .and_then(|(i, _)| memory::agent_list(&state, &i)),
+        ),
         Err((status, error)) => refuse(status, error),
     }
 }
@@ -379,8 +437,11 @@ pub(super) async fn memory_read(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    match authorize(&state, &peer, &headers, &body) {
-        Ok(identity) => answer(memory::agent_read(&state, &identity, &body)),
+    match authorize_any(&state, &peer, &headers, &body) {
+        Ok(caller) => answer(
+            identity_for_memory(&state, caller, false)
+                .and_then(|(i, _)| memory::agent_read(&state, &i, &body)),
+        ),
         Err((status, error)) => refuse(status, error),
     }
 }
@@ -392,8 +453,11 @@ pub(super) async fn memory_write(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    match authorize(&state, &peer, &headers, &body) {
-        Ok(identity) => answer(memory::agent_write(&state, &identity, &body)),
+    match authorize_any(&state, &peer, &headers, &body) {
+        Ok(caller) => answer(
+            identity_for_memory(&state, caller, true)
+                .and_then(|(i, author)| memory::agent_write(&state, &i, &body, author)),
+        ),
         Err((status, error)) => refuse(status, error),
     }
 }
@@ -405,8 +469,11 @@ pub(super) async fn memory_delete(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    match authorize(&state, &peer, &headers, &body) {
-        Ok(identity) => answer(memory::agent_delete(&state, &identity, &body)),
+    match authorize_any(&state, &peer, &headers, &body) {
+        Ok(caller) => answer(
+            identity_for_memory(&state, caller, true)
+                .and_then(|(i, _)| memory::agent_delete(&state, &i, &body)),
+        ),
         Err((status, error)) => refuse(status, error),
     }
 }
@@ -418,8 +485,8 @@ pub(super) async fn mod_list(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    match authorize(&state, &peer, &headers, &body) {
-        Ok(identity) => answer(mods::agent_list(&state, &identity)),
+    match authorize_any(&state, &peer, &headers, &body) {
+        Ok(_) => answer(mods::agent_list(&state)),
         Err((status, error)) => refuse(status, error),
     }
 }
@@ -457,7 +524,7 @@ pub(super) async fn mod_runs(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    match authorize(&state, &peer, &headers, &body) {
+    match authorize_any(&state, &peer, &headers, &body) {
         Ok(_) => Json(mods::agent_runs()).into_response(),
         Err((status, error)) => refuse(status, error),
     }
@@ -484,7 +551,9 @@ pub(super) fn carries_agent_token(headers: &HeaderMap, params: &HashMap<String, 
         .into_iter()
         .chain(params.get("token").map(String::as_str))
         .chain(cookie_value(headers, "perch_device").as_deref())
-        .any(agent_identity::looks_like_agent_token)
+        .any(|token| {
+            agent_identity::looks_like_agent_token(token) || token.starts_with(mods::TOKEN_PREFIX)
+        })
 }
 
 #[cfg(test)]

@@ -1394,6 +1394,11 @@ Mods
     then run `perch mod` to see whether it was accepted. Nothing runs until a person approves it
     (or the person's own policy does): tell them it is waiting and what it needs. You cannot
     approve it, and your own session's permissions are a separate matter: a mod never widens them.
+  - A mod's command can run `perch` itself (PERCH_SESSION and PERCH_TOKEN are set, and `perch` is
+    on PATH) while it runs. That token opens only `perch mod`/`perch mod runs`, and `perch memory`
+    for the session an event or invocation was about: reading needs `read-project` and writing
+    `write-project` in the mod's `capabilities`, and the person approved those. It cannot spawn,
+    send, suggest, stop or approve, and it stops working when the command ends.
   - To undo, `perch mod disable <id>` or delete the folder. Starting Perch with PERCH_MODS=off
     loads none.
 

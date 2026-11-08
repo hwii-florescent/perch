@@ -54,6 +54,8 @@ pub struct Spec {
     pub data_dir: PathBuf,
     pub command: Vec<String>,
     pub context: String,
+    /// Extra environment for the command (a scoped `perch` token, `PATH`).
+    pub env: Vec<(String, String)>,
     pub timeout: Duration,
 }
 
@@ -175,6 +177,7 @@ async fn run_one(spec: &Spec, started: Instant) -> RunRecord {
         .env("PERCH_MOD_DATA", &spec.data_dir)
         .env("PERCH_MOD_RUN", &spec.what)
         .env("PERCH_MOD_CONTEXT", &spec.context)
+        .envs(spec.env.iter().map(|(name, value)| (name, value)))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -252,6 +255,7 @@ mod tests {
                 data_dir: self.0.join("data"),
                 command: command.iter().map(|word| word.to_string()).collect(),
                 context: "{\"x\":1}".into(),
+                env: Vec::new(),
                 timeout,
             }
         }
