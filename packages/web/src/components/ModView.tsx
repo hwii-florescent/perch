@@ -46,5 +46,5 @@ export function ModOverlay({ mod, onClose }: { mod: ModInfo; onClose: () => void
 export function ModPane({ modId, props }: { modId: string; props?: Record<string, unknown> }) {
   const mod = useSyncExternalStore(subscribeMods, currentMods)?.mods.find((candidate) => candidate.id === modId);
   if (!mod?.enabled || mod.error) return <div className="inactive-session-pane">{`mod ${modId} is off or gone.`}</div>;
-  return <ModView mod={mod} props={props} />;
+  return <div tabIndex={-1} data-mod-pane className="flex h-full w-full min-h-0 flex-1 [outline:none]"><ModView mod={mod} props={props} /></div>;
 }

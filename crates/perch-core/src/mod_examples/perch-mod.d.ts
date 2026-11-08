@@ -41,7 +41,9 @@ interface ModApi {
   /** Runs a command like its key does; `session.open`, `session.close`, `project.focus` and `workspace.focus` take `{id}`. False for an unknown id. */
   run(command: string, args?: unknown): boolean;
   /** Adds `mod.<modId>.<name>` to the keyboard help and Settings > Keyboard. `keys` ("mod+shift+y") is its default key, dropped if taken or without a modifier. */
-  command(def: { name: string; description: string; keys?: string; run: (args?: unknown) => void }): () => void;
+  command(def: { name: string; description: string; keys?: string; run?: (args?: unknown) => void }): () => void;
+  /** Resolves with the next `{name, args}` of a command this mod registered without `run` (herdr's `nextCommand()`): `for (;;) { const c = await api.nextCommand(); … }`. Rejects when the mod is replaced. */
+  nextCommand(): Promise<{ name: string; args?: unknown }>;
   /** Rebinds a command's key as the person's setting ("" unbinds, null restores the default). Throws for a reserved or modifier-less key. */
   bind(command: string, keys: string | null): void;
 

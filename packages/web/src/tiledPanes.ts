@@ -33,6 +33,8 @@ function select(id: string) {
   if (!entry) return;
   useSplitSets.getState().zoom(null);
   activateTab(entry);
+  // A mod's tile takes the keyboard when pane.go lands on it (herdr's `focusable` mods).
+  if (entry.kind === "resource" && entry.tab.kind === "mod") requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-pane-id="${CSS.escape(id)}"] [data-mod-pane]`)?.focus());
 }
 
 /** The pane next to the active one in `direction`, by the layout's geometry (nested splits included). */

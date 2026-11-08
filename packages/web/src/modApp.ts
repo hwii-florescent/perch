@@ -38,7 +38,9 @@ export interface ModApi {
    * Settings > Keyboard and `run(id, args)` can start it (`run` receives the args). `keys` (e.g.
    * "cmd+shift+y") is its default key, dropped if it is already taken or has no modifier. It goes
    * when the mod is replaced; returns the way to remove it sooner. */
-  command(def: { name: string; description: string; keys?: string; run: (args?: unknown) => void }): () => void;
+  command(def: { name: string; description: string; keys?: string; run?: (args?: unknown) => void }): () => void;
+  /** Resolves with the next `{name, args}` of a command this mod registered without `run` (herdr's `nextCommand()`): `for (;;) { const c = await api.nextCommand(); … }`. Rejects when the mod is replaced. */
+  nextCommand(): Promise<{ name: string; args?: unknown }>;
   /** Runs a program on this computer (`timeout` ms, default 30 s; output past 1 MiB is cut). A
    * nonzero `code` is a result; it rejects if the program cannot start or runs out of time. */
   exec(cmd: string, args?: string[], options?: { cwd?: string; timeout?: number; host?: string }): Promise<ExecResult>;
@@ -184,6 +186,8 @@ function theme(): ModTheme {
 export function modApi(modId: string, given: Record<string, unknown> = {}): ModApi & { dispose(): void } {
   const open = new Set<() => void>();
   const ui = modUi(modId, open);
+  let waiting: ((value: { name: string; args?: unknown }) => void)[] = [];
+  const queued: { name: string; args?: unknown }[] = [];
   /** Things the mod started that its replacement must stop (watchers, subscriptions). */
   const track = (stop: () => void) => {
     const gone = () => { open.delete(gone); stop(); };
@@ -315,9 +319,18 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
       open.add(gone);
       return gone;
     },
+    nextCommand: () => new Promise((resolve, reject) => {
+      if (queued.length) return resolve(queued.shift()!);
+      const waiter = (value: { name: string; args?: unknown }) => { open.delete(stop); resolve(value); };
+      const stop = () => { open.delete(stop); waiting = waiting.filter((w) => w !== waiter); reject(new Error("the mod was replaced")); };
+      waiting.push(waiter);
+      open.add(stop);
+    }),
     command: ({ name, description, keys, run }) => {
       if (!/^[A-Za-z0-9_-]{1,40}$/.test(name)) throw new Error("A command name is letters, digits, - and _.");
-      const remove = bridge.register(`mod.${modId}.${name}`, description, keys, run);
+      // Without `run` the command is queued for nextCommand().
+      const handler = run ?? ((args?: unknown) => { const next = { name, args }; const w = waiting.shift(); if (w) w(next); else queued.push(next); });
+      const remove = bridge.register(`mod.${modId}.${name}`, description, keys, handler);
       const gone = () => { open.delete(gone); remove(); };
       open.add(gone);
       return gone;

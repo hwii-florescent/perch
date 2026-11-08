@@ -207,6 +207,23 @@ describe("an app module's versions", () => {
     vi.unstubAllGlobals();
   });
 
+  it("a command without run is delivered to nextCommand, queued if nobody waits", async () => {
+    let api!: ModApi;
+    const swapper = createSwapper(document.createElement("div"), vi.fn(), async () => (_el, a) => { api = a; });
+    await swapper.load("x", "m");
+    const registered: Record<string, (args?: unknown) => void> = {};
+    setCommandBridge({ list: () => [], run: () => false, register: (id, _d, _k, run) => { registered[id] = run; return () => {}; }, bind: () => {} });
+    api.command({ name: "go", description: "go" });
+    registered["mod.m.go"]!({ n: 1 }); // nobody waiting yet: queued
+    expect(await api.nextCommand()).toEqual({ name: "go", args: { n: 1 } });
+    const waiting = api.nextCommand();
+    registered["mod.m.go"]!();
+    expect(await waiting).toEqual({ name: "go", args: undefined });
+    const pending = api.nextCommand();
+    swapper.stop();
+    await expect(pending).rejects.toThrow("replaced");
+  });
+
   it("loop calls a frame function at most fps times a second, with elapsed time, until the mod goes", async () => {
     let queued: ((now: number) => void) | undefined;
     vi.stubGlobal("requestAnimationFrame", (fn: (now: number) => void) => { queued = fn; return 1; });
