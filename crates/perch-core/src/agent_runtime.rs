@@ -268,6 +268,9 @@ pub struct AgentRuntimeAdapter {
     /// When each session's PTY last received input from any client, and when this core began
     /// listening (the bound of what "quiet" can mean for a session never heard from).
     last_input: Mutex<HashMap<String, std::time::Instant>>,
+    /// The lines clients typed into each session's PTY (`typed_lines.rs`): the proof a person
+    /// asked for `perch start` and `perch dismiss`.
+    typed: Mutex<HashMap<String, crate::typed_lines::TypedLines>>,
     born: std::time::Instant,
     /// Told whenever a person opens a turn (`note_person_input`): a lead's automatic wakes start again.
     person_turn: std::sync::OnceLock<PersonTurnListener>,
@@ -302,6 +305,7 @@ impl AgentRuntimeAdapter {
             turn_boundary: Arc::new(std::sync::OnceLock::new()),
             turn_origins: Mutex::new(HashMap::new()),
             last_input: Mutex::new(HashMap::new()),
+            typed: Mutex::new(HashMap::new()),
             born: std::time::Instant::now(),
             person_turn: std::sync::OnceLock::new(),
             exit_listener: std::sync::OnceLock::new(),
@@ -1643,11 +1647,35 @@ impl AgentRuntimeAdapter {
 
     /// Remember that some client's bytes are reaching this session's PTY now (a person typing, a
     /// terminal's own reports). Core-originated writes are not recorded: they are checked, not heard.
-    fn note_terminal_input(&self, session_id: &str) {
+    pub(crate) fn note_terminal_input(&self, session_id: &str, data: &str) {
+        let now = std::time::Instant::now();
         self.last_input
             .lock()
             .unwrap()
-            .insert(session_id.to_string(), std::time::Instant::now());
+            .insert(session_id.to_string(), now);
+        self.typed
+            .lock()
+            .unwrap()
+            .entry(session_id.to_string())
+            .or_default()
+            .feed(data, now);
+    }
+
+    /// Did a client type `command` and press Enter in this session's terminal a moment ago? Used
+    /// up by the answer: one typed line proves one request. An agent cannot make this true: its
+    /// own commands and Perch's writes never pass through here.
+    pub fn person_typed(&self, session_id: &str, command: &str) -> bool {
+        self.typed
+            .lock()
+            .unwrap()
+            .get_mut(session_id)
+            .is_some_and(|typed| {
+                typed.take(
+                    command,
+                    std::time::Instant::now(),
+                    crate::typed_lines::FRESH,
+                )
+            })
     }
 
     /// Whether no client has sent input to this session's PTY for `window`. Unknown counts as recent:
@@ -1733,7 +1761,7 @@ impl AgentRuntimeAdapter {
         at_ms: u64,
     ) -> Result<(), RuntimeAdapterError> {
         if !data.is_empty() {
-            self.note_terminal_input(&key.session_id);
+            self.note_terminal_input(&key.session_id, data);
         }
         let native_ready = self.has_native_status(&key.session_id);
         if data.contains(['\r', '\n'])

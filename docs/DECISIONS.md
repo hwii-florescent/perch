@@ -22,7 +22,8 @@ Amends the one-tree sidebar decision below.
 ## 2026-11-08 — Project memory: plain files in Perch's own directory (owner)
 
 Settles the "proposed" part of 2026-11-07 (Projects parity). Slice 1 (core and `perch memory`) is
-built; the Project home UI is the next slice.
+built; slice 2 is a "Memory…" dialog on the Project menu (list, edit, create, delete; a stale save keeps
+the draft and offers their version). A Project home page is not built.
 
 - **Storage.** Plain Markdown files in `<directory of the history database, default ~/.perch>/memory/
   <project id>/` (0700 dirs, 0600 files), like the notes folder but **not** under `/tmp`: the notes
@@ -180,6 +181,59 @@ the empty gutters between them had no edge. Decided after mockups on real screen
 - **Not verified:** the macOS app (the traffic lights are re-centred 8px lower in
   `glass.rs`, with the lights 8px further in and a 78px left padding, unchecked on a real window), WebKit, and the
   split-pane look with real split sets.
+
+## 2026-11-08 — Answering a suggested task from the terminal (proposal, not approved)
+
+A lead shown as its terminal has no chat, so its cards were invisible. Two additions, both to be
+approved by the owner:
+
+- **A quiet count** over a lead's terminal ("2 suggested tasks") that opens the same cards. Nothing
+  appears when none waits.
+- **`perch suggestions`, `perch start <id|all>`, `perch dismiss <id>`.** Only a person may start a
+  task, but these run with the agent's token. Chosen: the core acts only if a client typed that exact
+  line into the lead's own terminal in the last 2 minutes (in Claude or Pi as `!perch start <id>`), and
+  the line is spent by use. An agent cannot type into its own PTY as a client. Rejected: a Y/N prompt on
+  a TTY (an agent can allocate a PTY and answer it) and refusing agent tokens outright (then nothing
+  could answer from the terminal). Residual: a person who types the line into the agent as an ordinary
+  prompt lets the agent run it once; the person asked for exactly that.
+
+## 2026-11-08 — Messages reach the receiving agent at once (owner)
+
+Owner, in their own message to the lead session: "instead of letting message waiting, when a message
+needs to be delivered, let it send to that session right away, it can choose to send in steer or
+queue but it should be send right to the agent when it starts that message instead of waiting".
+
+- Replaces "delivered only when the receiver is idle". Perch hands a message to the receiving agent
+  as soon as it is sent: an idle agent starts a turn; a busy one gets it in its own CLI queue as a
+  follow-up (the default for `perch send` and Perch status notes), or in the running turn for
+  `perch steer`.
+- Through each CLI's approved native path only (Pi/OMP extension `sendUserMessage` with
+  `deliverAs`; Claude and Codex as their bridges allow). A CLI with no follow-up queue keeps the
+  idle wait, and the receipt says so.
+- Unchanged: never typed into a PTY; never over a person's draft or an open question or approval
+  (those still wait, with the reason); holds and refusals; unknown state is not idle.
+- Receipts say delivered, queued in the agent, or steered.
+
+## 2026-11-08 — Runs go on without a person's prompt; limits are settings (owner)
+
+Owner, in their own message to the lead session: "I think it is better to let agents run itself
+without humans prompt. So agents can communicate back and forth between sessions and update
+progress or change progress, etc. I think we just need to keep a config on max parallel
+subsessions and so on and we should be good".
+
+- Drops "only during a turn a person opened": a lead may `perch spawn`, `steer` and `interrupt`
+  in any turn, including one opened by a sub-session's report, a Perch status note or a message.
+  The "Let leads start sub-sessions without asking" setting still decides spawn vs card.
+- Counters that reset "between one person's messages" (lead wakes, interrupts per child) become
+  per-run limits like the rest.
+- Limits become settings (Settings > Sub-sessions), defaults as today: live sub-sessions per run 4
+  (`MAX_CONCURRENT`), total per run 8 (`MAX_DESCENDANTS`), messages per run 50
+  (`MAX_MESSAGES_PER_RUN`), automatic lead wakes per run 10 (`MAX_WAKES_PER_PERSON_TURN`),
+  interrupts per sub-session 3, waiting cards 10. Each validated to a sane range; a limit reached
+  refuses with a clear reason, never queues silently.
+- Unchanged: a sub-session cannot start sub-sessions (depth 1); messages from other sessions are
+  information, never a person's approval of anything outside the run (permissions, approvals,
+  holds and refusals a person set); a person can stop any session or the whole run.
 
 ## 2026-11-07 — Suggested tasks, sender cards, `perch read`, inbound control (owner)
 

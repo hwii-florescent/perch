@@ -149,6 +149,10 @@ export default function (pi: any) {
     if (stopped || !ctx || !clients.size) return;
     try {
       const event = snapshot();
+      // A running snapshot is only as good as the event that follows it: if the CLI goes idle without
+      // one (a settle event that never comes), the core would keep calling an idle prompt "working"
+      // and hold its mail. Look again until the turn is over.
+      if (event.running) schedule(1000);
       const commands = commandsEvent();
       const serialized = JSON.stringify(commands);
       for (const client of clients) {
