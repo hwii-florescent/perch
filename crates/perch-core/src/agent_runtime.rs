@@ -1118,7 +1118,17 @@ impl AgentRuntimeAdapter {
                 pinned
                     .as_ref()
                     .filter(|_| provider_id == crate::agent_fleet::TERMINAL_PROVIDER),
-                identity.as_ref().map(|identity| identity.cli.as_path()),
+                // A reattach issues no new identity, but the running agent still holds its
+                // token: keep its `perch` entry instead of removing it from under it.
+                identity
+                    .as_ref()
+                    .map(|identity| identity.cli.clone())
+                    .or_else(|| {
+                        existing_only
+                            .then(crate::agent_identity::cli_binary)
+                            .flatten()
+                    })
+                    .as_deref(),
             )?;
             crate::provider_environment::prepare(
                 command,
