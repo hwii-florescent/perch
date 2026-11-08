@@ -57,20 +57,24 @@ export function modUi(modId: string, open: Set<() => void>) {
 
     /** A window that stays until closed, over the app and under modals: drag it by its title bar, and
      * the one pressed last is on top. A `key` remembers where it was put, and opening the same key
-     * again replaces the old one. */
-    window(options: { key?: string; title?: string; width?: number; height?: number; at?: { x: number; y: number } }, draw: Draw) {
+     * again replaces the old one. `frame: "none"` drops the border, shadow and title bar: the mod
+     * draws its own, and a press it does not stop (`stopPropagation`) drags the window. */
+    window(options: { key?: string; title?: string; width?: number; height?: number; at?: { x: number; y: number }; frame?: "none" }, draw: Draw) {
       const name = options.key && `${modId}:${options.key}`;
       if (name) windows.get(name)?.close();
       const box = document.createElement("div");
       box.setAttribute("data-testid", `mod-api-window-${modId}`);
       const place = (name && spots.get(name)) || options.at || { x: 80 + (zTop % 7) * 24, y: 80 + (zTop % 7) * 24 };
-      box.style.cssText = `${PANEL}position:fixed;z-index:${++zTop};left:${place.x}px;top:${place.y}px;width:${options.width ?? 360}px;height:${options.height ?? 240}px;display:flex;flex-direction:column;overflow:hidden;`;
-      const bar = document.createElement("div");
-      bar.textContent = options.title ?? "";
-      bar.style.cssText = "flex:none;padding:4px 8px;cursor:move;font-size:12px;opacity:.8;user-select:none;background:rgba(255,255,255,.06)";
-      const body = document.createElement("div");
-      body.style.cssText = "flex:1;min-height:0;overflow:auto;padding:8px";
-      box.append(bar, body);
+      const bare = options.frame === "none";
+      box.style.cssText = `${bare ? "" : PANEL}position:fixed;z-index:${++zTop};left:${place.x}px;top:${place.y}px;width:${options.width ?? 360}px;height:${options.height ?? 240}px;display:flex;flex-direction:column;overflow:hidden;`;
+      const bar = bare ? box : document.createElement("div");
+      const body = bare ? box : document.createElement("div");
+      if (!bare) {
+        bar.textContent = options.title ?? "";
+        bar.style.cssText = "flex:none;padding:4px 8px;cursor:move;font-size:12px;opacity:.8;user-select:none;background:rgba(255,255,255,.06)";
+        body.style.cssText = "flex:1;min-height:0;overflow:auto;padding:8px";
+        box.append(bar, body);
+      }
       box.addEventListener("mousedown", () => { box.style.zIndex = String(++zTop); }, true);
       bar.addEventListener("mousedown", (down) => {
         const from = { x: down.clientX - box.offsetLeft, y: down.clientY - box.offsetTop };

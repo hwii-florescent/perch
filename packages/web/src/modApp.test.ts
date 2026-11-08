@@ -137,6 +137,12 @@ describe("an app module's versions", () => {
     expect(document.body.textContent).toContain("second");
     expect(document.body.textContent).not.toContain("first");
 
+    // frame "none": no title bar or chrome, the mod's element is the window and a press it leaves alone drags it.
+    api.window({ key: "bare", title: "NOT SHOWN", at: { x: 10, y: 20 }, frame: "none" }, (box) => { box.innerHTML = "<b>mine</b>"; });
+    const bare = [...document.querySelectorAll<HTMLElement>("[data-testid^='mod-api-window']")].find((w) => w.textContent === "mine")!;
+    expect(bare.textContent).not.toContain("NOT SHOWN");
+    expect(bare.style.boxShadow).toBe("");
+
     swapper.stop();
     expect(document.body.textContent).not.toContain("second");
     api.setShared("theme", 1);
@@ -166,6 +172,12 @@ describe("an app module's versions", () => {
     await api.readTextFile("~/b", { host: "vps" });
     await api.listDir("/etc");
     expect(calls.map((c) => c.body.host)).toEqual(["vps", "vps", undefined]);
+    // `expected` guards the write: a file that is not what the mod read is left alone.
+    calls.length = 0;
+    await expect(api.writeTextFile("/tmp/x", "t", { expected: "old" })).rejects.toThrow("changed since it was read");
+    expect(calls.some((c) => c.body.op === "write")).toBe(false);
+    await api.writeTextFile("/tmp/x", "t", { expected: null });
+    expect(calls.at(-1)?.body.op).toBe("write");
     vi.unstubAllGlobals();
   });
 

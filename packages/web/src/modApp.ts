@@ -43,7 +43,7 @@ export interface ModApi {
   exec(cmd: string, args?: string[], options?: { cwd?: string; timeout?: number; host?: string }): Promise<ExecResult>;
   /** Files anywhere on this computer by absolute or `~/` path (reads stop at 5 MiB). */
   readTextFile(path: string, on?: OnHost): Promise<string>;
-  writeTextFile(path: string, text: string, on?: OnHost): Promise<void>;
+  writeTextFile(path: string, text: string, on?: OnHost & { expected?: string | null }): Promise<void>;
   statFile(path: string, on?: OnHost): Promise<FileStat>;
   listDir(path: string, on?: OnHost): Promise<{ name: string; isDir: boolean }[]>;
   /** Calls `changed` when a file or folder's size or modified time changes (polled every 2 s). */
@@ -99,7 +99,7 @@ export interface ModApi {
   popup(anchor: HTMLElement | { x: number; y: number }, draw: Draw): () => void;
   /** A window that stays until closed, under modals and over the app: drag it by its title bar. A
    * `key` remembers where it was put and replaces an open window with the same key. */
-  window(options: { key?: string; title?: string; width?: number; height?: number; at?: { x: number; y: number } }, draw: Draw): () => void;
+  window(options: { key?: string; title?: string; width?: number; height?: number; at?: { x: number; y: number }; frame?: "none" }, draw: Draw): () => void;
   /** A picture of the app as a PNG data URL (drawn from the page: terminal canvases are copied, web fonts fall back). */
   screenshot(): Promise<string>;
   /** Calls `frame(ms)` (milliseconds since the loop began) before each repaint, at most `fps` times a

@@ -30,7 +30,14 @@ export const exec = (cmd: string, args: string[] = [], options: { cwd?: string; 
 export interface OnHost { host?: string }
 const fs = <T>(op: string, path: string, text?: string, host?: string) => post<T>("mods/fs", { op, path, text, host });
 export const readTextFile = async (path: string, on: OnHost = {}) => (await fs<{ text: string }>("read", path, undefined, on.host)).text;
-export const writeTextFile = async (path: string, text: string, on: OnHost = {}) => void (await fs("write", path, text, on.host));
+/** `expected` is the text the file must hold now (null: it must not exist); a different file rejects and nothing is written. */
+export async function writeTextFile(path: string, text: string, on: OnHost & { expected?: string | null } = {}) {
+  if (on.expected !== undefined) {
+    const now = (await statFile(path, on)).exists ? await readTextFile(path, on) : null;
+    if (now !== on.expected) throw new Error(`${path} changed since it was read`);
+  }
+  await fs("write", path, text, on.host);
+}
 export const statFile = (path: string, on: OnHost = {}) => fs<FileStat>("stat", path, undefined, on.host);
 export const listDir = async (path: string, on: OnHost = {}) => (await fs<{ entries: { name: string; isDir: boolean }[] }>("list", path, undefined, on.host)).entries;
 

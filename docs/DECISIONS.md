@@ -113,6 +113,9 @@ approval not mattering much.
   `playSound("done"|"blocked")`, a block `agent:focused` (the focused session's terminal), `key.bind {command, keys}`
   (so an agent can set a key through `perch mod do`) and `perch mod status` (layout, focus, theme, dialogs, each mod's
   and layout's error).
+- **Guarded writes, bare windows.** `writeTextFile(path, text, {expected})` writes only if the file still holds `expected`
+  (null: must not exist); `window({frame: "none"})` drops the chrome and a press the mod leaves alone drags it.
+  herdr's `keep` is not needed: a mod reopens its own window when it starts.
 - **Data a mod reads.** `props()` (a `mod:` block's `props` object, at most 4 KiB, reloads the copy when it changes),
   `theme()` (colors by herdr's names, read from the page's custom properties so a layout look or theme file shows),
   `settings()` (+ `dark`, `zoom`), `keys()`, `layout()`/`layouts()`, and `notify({icon, timeout})`.

@@ -56,8 +56,8 @@ interface ModApi {
   overlay(draw: Draw): () => void;
   /** A small panel next to an element or a {x, y} point; Esc or a click elsewhere closes it. */
   popup(anchor: HTMLElement | { x: number; y: number }, draw: Draw): () => void;
-  /** A window that stays until closed: drag it by its title bar. A `key` remembers where it was put and replaces an open one with the same key. */
-  window(options: { key?: string; title?: string; width?: number; height?: number; at?: { x: number; y: number } }, draw: Draw): () => void;
+  /** A window that stays until closed: drag it by its title bar. A `key` remembers where it was put and replaces an open one with the same key. `frame: "none"` drops the border, shadow and title bar: draw your own, and a press you do not stop (`stopPropagation`) drags the window. */
+  window(options: { key?: string; title?: string; width?: number; height?: number; at?: { x: number; y: number }; frame?: "none" }, draw: Draw): () => void;
   /** Calls `frame(ms)` (milliseconds since the loop began) before each repaint, at most `fps` times a second (default 60), and pauses while the page is hidden: for motion. Stops when the mod is replaced, or call the returned function. */
   /** A picture of the app as a PNG data URL (drawn from the page: terminal canvases are copied, web fonts fall back). */
   screenshot(): Promise<string>;
@@ -90,7 +90,8 @@ interface ModApi {
   exec(cmd: string, args?: string[], options?: { cwd?: string; timeout?: number; host?: string }): Promise<{ code: number | null; stdout: string; stderr: string }>;
   /** Files anywhere by absolute or ~/ path (reads stop at 5 MiB). The last argument `{host}` acts on that host over ssh. */
   readTextFile(path: string, on?: { host?: string }): Promise<string>;
-  writeTextFile(path: string, text: string, on?: { host?: string }): Promise<void>;
+  /** `expected`: the text the file must hold now (null: it must not exist); if it differs this rejects and writes nothing. */
+  writeTextFile(path: string, text: string, on?: { host?: string; expected?: string | null }): Promise<void>;
   statFile(path: string, on?: { host?: string }): Promise<{ exists: boolean; isDir?: boolean; size?: number; modified?: number }>;
   listDir(path: string, on?: { host?: string }): Promise<{ name: string; isDir: boolean }[]>;
   /** Calls `changed` when a file or folder's size or modified time changes (polled every 2 s). */
