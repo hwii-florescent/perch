@@ -83,7 +83,7 @@ fn refusal_status(refusal: &agent_mail::SendRefusal) -> StatusCode {
     match refusal {
         ToSelf => StatusCode::BAD_REQUEST,
         OtherRun => StatusCode::FORBIDDEN,
-        NotRunning | CannotReceive | RunLimit | QueueFull | InboundRefuses | InboundHolds => {
+        NotRunning | CannotReceive | RunLimit(_) | QueueFull | InboundRefuses | InboundHolds => {
             StatusCode::CONFLICT
         }
     }
@@ -286,13 +286,11 @@ pub(super) trait World {
     fn notes_file(&self, run: &str, name: &str, text: &str) -> anyhow::Result<String>;
     /// Check the receiver again under the delivery lock, call `claim` (once, just before the first
     /// byte) and write `prompt`. `claim` is false when another pass already holds the message.
-    /// `from_person`: a person wrote it (the family strip), so the turn it opens is the person's.
     fn deliver(
         &self,
         session: &str,
         delivery_id: &str,
         prompt: &str,
-        from_person: bool,
         claim: &dyn Fn() -> bool,
     ) -> Delivery;
 }
@@ -353,6 +351,14 @@ pub(super) fn pass(db: &HistoryDb, world: &dyn World, target: &str, now_ms: i64)
     let facts = world.facts(target);
     if let Err(wait) = agent_mail::route(&facts) {
         let reason = wait.reason();
+        // The run's limit on automatic deliveries to its lead is reached and nothing resets it: the
+        // mail is refused with that reason, never left queued for good (owner decision 2026-11-08).
+        if matches!(wait, Wait::WakeCap(_)) && db.mail_wakes(target).is_ok() {
+            for item in &owed {
+                let _ = db.undeliver_mail(&item.id, &reason);
+            }
+            return Pass::Idle;
+        }
         let _ = db.set_mail_wait(&all_ids, &reason);
         return Pass::Waiting(reason);
     }
@@ -459,7 +465,7 @@ fn deliver_batch(
         }
         true
     };
-    match world.deliver(target, delivery_id, prompt, from_person, &claim) {
+    match world.deliver(target, delivery_id, prompt, &claim) {
         Delivery::Held(wait) => {
             let reason = wait.reason();
             let _ = db.set_mail_wait(all_ids, &reason);
@@ -586,8 +592,9 @@ impl World for AppWorld<'_> {
             } else {
                 0
             },
-            // A count that cannot be read counts as spent.
+            // A count that cannot be read counts as spent (`pass` then waits instead of refusing).
             wakes: app.db.mail_wakes(session).unwrap_or(u32::MAX),
+            max_wakes: app.db.limits().wakes,
         }
     }
 
@@ -610,7 +617,6 @@ impl World for AppWorld<'_> {
         session: &str,
         delivery_id: &str,
         prompt: &str,
-        from_person: bool,
         claim: &dyn Fn() -> bool,
     ) -> Delivery {
         let app = self.0;
@@ -638,7 +644,6 @@ impl World for AppWorld<'_> {
             app,
             (&key, &bridge_key, &bridge),
             (delivery_id, prompt),
-            from_person,
             claim,
             &recheck,
         )
@@ -665,7 +670,6 @@ fn deliver_native(
     // The tab (owns the PTY, leases and lifecycle), the agent whose bridge it is, and that bridge.
     receiver: (&AgentKey, &AgentKey, &Arc<crate::native_ui::NativeBridge>),
     text: (&str, &str),
-    from_person: bool,
     claim: &dyn Fn() -> bool,
     recheck: &dyn Fn() -> Result<Handoff, Wait>,
 ) -> Delivery {
@@ -695,19 +699,12 @@ fn deliver_native(
             if !claim() {
                 return Ok(Delivery::Held(Wait::Working));
             }
-            // A person's message opens a turn that is theirs; any other opens one Perch marks `Agent`.
-            // One queued behind a running turn opens none now, so the running turn's change record is
-            // left alone; the turn is marked `Agent` anyway, because the turn the follow-up starts later
-            // must never read as a person's (fail closed: it only makes `perch spawn` ask).
+            // A message that starts a turn opens its change record. One queued behind a running turn
+            // opens none now, so the running turn's record is left alone.
             let boundary = if handoff == Handoff::QueuedInAgent {
-                if !from_person {
-                    app.agent_runtime.note_agent_turn(key);
-                }
                 Ok(())
-            } else if from_person {
-                app.agent_runtime.record_turn_boundary(key, true)
             } else {
-                app.agent_runtime.record_agent_turn_boundary(key)
+                app.agent_runtime.record_turn_boundary(key, true)
             };
             if let Err(error) = boundary {
                 return Ok(Delivery::NotSent(format!(
@@ -781,7 +778,6 @@ pub(super) async fn run_deliveries(app: AppState) {
 mod tests {
     use super::*;
     use crate::agent_identity::IdentityStore;
-    use crate::sub_sessions::TurnOrigin;
     use std::cell::{Cell, RefCell};
 
     /// A world with nothing real behind it: the receiver's facts and the outcome of a write are
@@ -804,6 +800,7 @@ mod tests {
                     reported: true,
                     idle: true,
                     is_lead,
+                    max_wakes: agent_mail::DEFAULT_WAKES_PER_RUN,
                     ..Default::default()
                 }),
                 outcome: RefCell::new(None),
@@ -825,14 +822,7 @@ mod tests {
             self.files.borrow_mut().push((name.into(), text.into()));
             Ok(format!("/notes/{run}/{name}"))
         }
-        fn deliver(
-            &self,
-            _: &str,
-            _: &str,
-            prompt: &str,
-            _: bool,
-            claim: &dyn Fn() -> bool,
-        ) -> Delivery {
+        fn deliver(&self, _: &str, _: &str, prompt: &str, claim: &dyn Fn() -> bool) -> Delivery {
             if self.claims_refused.get() || !claim() {
                 return Delivery::Held(Wait::Working);
             }
@@ -867,20 +857,17 @@ mod tests {
             .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
             .unwrap();
         let reserved = db
-            .reserve_sub_session(
-                &crate::db::SubSessionSpec {
-                    child_session_id: "child",
-                    parent_session_id: "lead",
-                    parent_incarnation: &lead.incarnation,
-                    workspace: &workspace,
-                    cwd: "/tmp/perch-mail-engine-nest",
-                    provider_id: "codex",
-                    model: None,
-                    spawn_key: "k",
-                    task: "fix the parser",
-                },
-                Some(TurnOrigin::Person),
-            )
+            .reserve_sub_session(&crate::db::SubSessionSpec {
+                child_session_id: "child",
+                parent_session_id: "lead",
+                parent_incarnation: &lead.incarnation,
+                workspace: &workspace,
+                cwd: "/tmp/perch-mail-engine-nest",
+                provider_id: "codex",
+                model: None,
+                spawn_key: "k",
+                task: "fix the parser",
+            })
             .unwrap();
         assert!(matches!(reserved, crate::db::Reserved::New(_)));
         db.set_cli_provider("child", "codex").unwrap();
@@ -1231,8 +1218,8 @@ mod tests {
             1,
             "a delivery to a lead spends a wake"
         );
-        // The tenth wake is the last until a person speaks.
-        for n in 1..agent_mail::MAX_WAKES_PER_PERSON_TURN {
+        // The tenth wake is the last of the run.
+        for n in 1..agent_mail::DEFAULT_WAKES_PER_RUN {
             run.db
                 .enqueue_note(
                     ("child", "codex", "t"),
@@ -1249,26 +1236,41 @@ mod tests {
         }
         assert_eq!(
             run.db.mail_wakes("lead").unwrap(),
-            agent_mail::MAX_WAKES_PER_PERSON_TURN
+            agent_mail::DEFAULT_WAKES_PER_RUN
         );
-        let held = run
+        let refused = run
             .db
             .enqueue_note(("child", "codex", "t"), ("lead", "claude"), "eleventh")
             .unwrap()
             .unwrap();
         world.facts.borrow_mut().wakes = run.db.mail_wakes("lead").unwrap();
-        let Pass::Waiting(reason) = pass(&run.db, &world, "lead", 0) else {
-            panic!()
-        };
-        assert!(reason.contains("woken 10 times"), "{reason}");
-        assert_eq!(state_of(&run.db, &held.id).0, MailState::Queued);
-        // A person speaking to the lead gives the wakes back and the note goes.
-        run.db.reset_mail_wakes("lead").unwrap();
-        world.facts.borrow_mut().wakes = 0;
-        assert!(matches!(
-            pass(&run.db, &world, "lead", 0),
-            Pass::Sent { .. }
-        ));
+        // Owner decision 2026-11-08: the limit is per run and nothing resets it, so the mail is
+        // refused with the reason, not left queued for good.
+        assert!(matches!(pass(&run.db, &world, "lead", 0), Pass::Idle));
+        let (state, reason) = state_of(&run.db, &refused.id);
+        assert_eq!(state, MailState::Undelivered);
+        assert!(
+            reason.contains("already delivered 10 messages to its lead"),
+            "{reason}"
+        );
+        assert!(reason.contains("Settings > Sub-sessions"));
+    }
+
+    #[test]
+    fn the_wake_limit_is_the_setting() {
+        let run = run();
+        let world = Fake::idle(Live::Known(Some(run.lead_incarnation.clone())), true);
+        world.facts.borrow_mut().max_wakes = 2;
+        world.facts.borrow_mut().wakes = 2;
+        let note = run
+            .db
+            .enqueue_note(("child", "codex", "t"), ("lead", "claude"), "n")
+            .unwrap()
+            .unwrap();
+        assert!(matches!(pass(&run.db, &world, "lead", 0), Pass::Idle));
+        let (state, reason) = state_of(&run.db, &note.id);
+        assert_eq!(state, MailState::Undelivered);
+        assert!(reason.contains("already delivered 2 messages"), "{reason}");
     }
 
     #[test]

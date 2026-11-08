@@ -367,10 +367,9 @@ version; the slices below replace their implied order.
 - **One `perch` binary.** Agent commands at top level (`whoami`, `guide`, `spawn`,
   `list`, `send`, `inbox`, `report`, `stop`); perchd's current connect-only verbs move
   under `perch daemon …` and stay as aliases.
-- **Who may spawn:** only during a turn a person opened (typed in Chat or Terminal),
-  never a turn opened by a delivered message; checked by the core from the prompt
-  ledger and provider events. Children cannot spawn (depth 1). Same rule as Claude
-  desktop's side sessions.
+- **Who may spawn:** any turn of a lead (owner decision 2026-11-08; the person-opened-turn
+  rule was dropped), bounded by per-run limits that are settings. Children cannot spawn
+  (depth 1).
 - **Same Workspace by default**; a child gets a worktree only with `perch spawn --worktree`.
 - **Reports are claims, not proof.** Separate records for lifecycle (perchd/provider
   events), "needs you" (pending approval or question, never a model claim), delivery
@@ -484,7 +483,7 @@ UI rows from step 0 continue between slices.
    makes `perch list` the caller's run (decided); the daemon list becomes `perch daemon list`.
 4. **Spawn, list, stop and reports. Done 2026-11-06**:
    `perch spawn|list|stop`, parent link (`sessions.parent_session_id`) and `sub_sessions`
-   records, limits (4 live, 8 total, depth 1) and the person-turn rule admitted in one
+   records, limits (4 live, 8 total, depth 1; since 2026-11-08 per-run settings, no person-turn rule) admitted in one
    transaction before anything starts, an idempotency key, stop confirmed by perchd, reports
    as labelled claims with a last-message fallback, bare `list`/`serve`/`connect` aliases
    gone, `perch guide` extended. Live: a haiku lead spawned a haiku child, read its report and

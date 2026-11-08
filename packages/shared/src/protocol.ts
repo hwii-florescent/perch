@@ -507,6 +507,16 @@ export interface SettingsData {
   /** Pi's and OMP's reporter models (`provider/id`); absent or empty = that harness has none. */
   reporterPiModel?: string;
   reporterOmpModel?: string;
+  /**
+   * Per-run sub-session limits (Settings > Sub-sessions). Absent from an older core = today's defaults:
+   * 4 live, 8 total, 50 messages, 10 automatic lead wakes, 3 interrupts per sub-session, 10 waiting cards.
+   */
+  maxLiveSubSessions?: number;
+  maxSubSessions?: number;
+  maxMessagesPerRun?: number;
+  maxLeadWakesPerRun?: number;
+  maxInterruptsPerSubSession?: number;
+  maxWaitingSuggestions?: number;
 }
 
 /**
@@ -545,6 +555,12 @@ export interface SettingsPatch {
   leadsStartWithoutAsking?: boolean;
   reporterPiModel?: string;
   reporterOmpModel?: string;
+  maxLiveSubSessions?: number;
+  maxSubSessions?: number;
+  maxMessagesPerRun?: number;
+  maxLeadWakesPerRun?: number;
+  maxInterruptsPerSubSession?: number;
+  maxWaitingSuggestions?: number;
 }
 
 export type HostMode = "perch" | "direct";

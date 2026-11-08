@@ -593,9 +593,12 @@ function NotificationsSection() {
       </SettingRow>
     </SettingsGroup>
     <SettingsGroup title="Sub-sessions">
-      <SettingRow title="Let leads start sub-sessions without asking" description="Off: when an agent wants to start a sub-session it puts a suggested task in its chat, and nothing starts until you press Start. On: it starts one itself, during a turn you opened.">
+      <SettingRow title="Let leads start sub-sessions without asking" description="Off: when an agent wants to start a sub-session it puts a suggested task in its chat, and nothing starts until you press Start. On: it starts one itself, in any turn, and the limits below bound the run. You can stop any of them.">
         <Switch label="Let leads start sub-sessions without asking" testId="settings-leads-start-without-asking" checked={settings?.leadsStartWithoutAsking ?? true} onChange={(checked) => updateSettings({ leadsStartWithoutAsking: checked })} />
       </SettingRow>
+      {RUN_LIMIT_FIELDS.map((field) => (
+        <RunLimitRow key={field.key} field={field} saved={settings?.[field.key]} disabled={!settings} onCommit={(value) => updateSettings({ [field.key]: value })} />
+      ))}
     </SettingsGroup>
     <SettingsGroup title="Sub-session summaries">
       <SettingRow title="Summarise finished turns" description="When a sub-session finishes a turn without reporting, a small model writes a short summary for the session that started it. Off keeps the start of its last message.">
@@ -615,6 +618,49 @@ function NotificationsSection() {
       </SettingRow>
     </SettingsGroup>
     </>
+  );
+}
+
+// The per-run sub-session limits. Ranges and defaults mirror `RunLimits` in
+// crates/perch-core/src/sub_sessions.rs, which is what validates them; the core also
+// refuses a total below the live limit.
+type RunLimitKey = "maxLiveSubSessions" | "maxSubSessions" | "maxMessagesPerRun" | "maxLeadWakesPerRun" | "maxInterruptsPerSubSession" | "maxWaitingSuggestions";
+interface RunLimitField { key: RunLimitKey; title: string; description: string; fallback: number; min: number; max: number }
+const RUN_LIMIT_FIELDS: RunLimitField[] = [
+  { key: "maxLiveSubSessions", title: "Live sub-sessions per run", description: "Running at once under one lead.", fallback: 4, min: 1, max: 16 },
+  { key: "maxSubSessions", title: "Sub-sessions per run", description: "All a lead may start in a run, stopped ones included. At least the live limit.", fallback: 8, min: 1, max: 64 },
+  { key: "maxMessagesPerRun", title: "Messages per run", description: "Messages the run's agents may send each other. Notes do not count.", fallback: 50, min: 1, max: 1000 },
+  { key: "maxLeadWakesPerRun", title: "Automatic lead wakes per run", description: "Times a message may start a turn for the lead by itself.", fallback: 10, min: 1, max: 100 },
+  { key: "maxInterruptsPerSubSession", title: "Interrupts per sub-session", description: "Times a lead may interrupt the same sub-session.", fallback: 3, min: 1, max: 20 },
+  { key: "maxWaitingSuggestions", title: "Waiting suggested tasks", description: "Suggested-task cards waiting for you before new ones are refused.", fallback: 10, min: 1, max: 50 },
+];
+
+function RunLimitRow({ field, saved, disabled, onCommit }: { field: RunLimitField; saved: number | undefined; disabled: boolean; onCommit: (value: number) => void }) {
+  const [text, setText] = useState(String(saved ?? field.fallback));
+  useEffect(() => setText(String(saved ?? field.fallback)), [saved, field.fallback]);
+  const parsed = Number(text);
+  const valid = text.trim() !== "" && Number.isInteger(parsed) && parsed >= field.min && parsed <= field.max;
+  // Show what was typed; save only a value in range (as the scrollback box does).
+  const change = (value: string) => {
+    setText(value);
+    const next = Number(value);
+    if (value.trim() !== "" && Number.isInteger(next) && next >= field.min && next <= field.max && next !== (saved ?? field.fallback)) onCommit(next);
+  };
+  return (
+    <SettingRow title={field.title} description={valid ? `${field.description} ${field.min}–${field.max}.` : `Enter a whole number from ${field.min} to ${field.max}.`}>
+      <input
+        type="number"
+        className={INPUT_PORT}
+        data-testid={`settings-${field.key}`}
+        aria-label={field.title}
+        aria-invalid={!valid}
+        min={field.min}
+        max={field.max}
+        disabled={disabled}
+        value={text}
+        onChange={(e) => change(e.target.value)}
+      />
+    </SettingRow>
   );
 }
 

@@ -5,8 +5,7 @@
 //! "Suggested tasks").
 //!
 //! A suggestion starts nothing by itself. Start is the person's own click: it goes through the
-//! same admission, limits, key and launch as `perch spawn` (`sub_sessions::start`), with the click
-//! standing for the turn a person opened. The person must hold the lead chat's input lease, as for
+//! same admission, limits, key and launch as `perch spawn` (`sub_sessions::start`). The person must hold the lead chat's input lease, as for
 //! typing in it. Clicking Start twice starts one sub-session: the step `pending` to `starting` is
 //! taken once and the spawn key names the child.
 use super::sub_sessions::{self, fail, key_of, reconcile, Failure, SpawnRequest};
@@ -134,7 +133,8 @@ pub(super) fn suggest(
             worktree: entry["worktree"].as_bool().unwrap_or(false),
         });
     }
-    suggestions::check_batch(items.len(), 0).map_err(bad)?;
+    suggestions::check_batch(items.len(), 0, app.db.limits().waiting_cards as usize)
+        .map_err(bad)?;
     let added = app
         .db
         .add_suggestions(&caller.session_id, &key, &items)
@@ -511,7 +511,7 @@ async fn start_one(
             tracing::warn!(%error, "could not keep the result of a suggestion");
         }
     };
-    match sub_sessions::start(app, &identity, request, true).await {
+    match sub_sessions::start(app, &identity, request).await {
         Ok(answer) => {
             let child = answer["session"].as_str().unwrap_or_default().to_string();
             settle(SuggestionState::Started, Some(&child), "");
@@ -1128,20 +1128,17 @@ mod tests {
             let id: &'static str = Box::leak(format!("extra{n}").into_boxed_str());
             let crate::db::Reserved::New(_) = run
                 .db
-                .reserve_sub_session(
-                    &crate::db::SubSessionSpec {
-                        child_session_id: id,
-                        parent_session_id: "lead",
-                        parent_incarnation: &lead.incarnation,
-                        workspace: &workspace,
-                        cwd: &nest,
-                        provider_id: "codex",
-                        model: None,
-                        spawn_key: id,
-                        task: "x",
-                    },
-                    Some(crate::sub_sessions::TurnOrigin::Person),
-                )
+                .reserve_sub_session(&crate::db::SubSessionSpec {
+                    child_session_id: id,
+                    parent_session_id: "lead",
+                    parent_incarnation: &lead.incarnation,
+                    workspace: &workspace,
+                    cwd: &nest,
+                    provider_id: "codex",
+                    model: None,
+                    spawn_key: id,
+                    task: "x",
+                })
                 .unwrap()
             else {
                 panic!("recorded");
@@ -1253,20 +1250,17 @@ mod tests {
         let key = suggestions::spawn_key(&rows[0].id);
         let crate::db::Reserved::New(child) = run
             .db
-            .reserve_sub_session(
-                &crate::db::SubSessionSpec {
-                    child_session_id: "made",
-                    parent_session_id: "lead",
-                    parent_incarnation: &lead.incarnation,
-                    workspace: &workspace,
-                    cwd: "/tmp",
-                    provider_id: "codex",
-                    model: None,
-                    spawn_key: &key,
-                    task: "task 0",
-                },
-                Some(crate::sub_sessions::TurnOrigin::Person),
-            )
+            .reserve_sub_session(&crate::db::SubSessionSpec {
+                child_session_id: "made",
+                parent_session_id: "lead",
+                parent_incarnation: &lead.incarnation,
+                workspace: &workspace,
+                cwd: "/tmp",
+                provider_id: "codex",
+                model: None,
+                spawn_key: &key,
+                task: "task 0",
+            })
             .unwrap()
         else {
             panic!("recorded");
@@ -1344,16 +1338,26 @@ mod tests {
         )
         .await;
         assert_eq!(status, 403);
-        // With the setting on, the person-turn rule applies as before (no turn here, so refused).
+        // With the setting on it is a spawn, admitted by the run's limits alone (any turn may spawn).
+        // The limit is set to what the lead already has so the test starts no real agent.
         app.settings
             .update(crate::settings::SettingsPatch {
                 leads_start_without_asking: Some(true),
                 ..Default::default()
             })
             .unwrap();
+        run.db.set_limits(crate::sub_sessions::RunLimits {
+            live: 1,
+            total: 1,
+            ..Default::default()
+        });
         let (status, answer) = call(&run, "spawn", &run.lead_token, body("s2")).await;
-        assert_eq!(status, 403, "{answer}");
-        assert!(answer["error"].as_str().unwrap().contains("a person"));
+        assert_eq!(status, 409, "{answer}");
+        assert!(answer["error"]
+            .as_str()
+            .unwrap()
+            .contains("Settings > Sub-sessions"));
+        assert!(answer.get("suggested").is_none(), "{answer}");
         assert_eq!(run.db.suggestions_of("lead").unwrap().len(), 1);
     }
 

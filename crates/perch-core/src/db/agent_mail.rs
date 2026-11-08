@@ -227,6 +227,7 @@ impl HistoryDb {
             } else {
                 run_messages as usize
             },
+            max_messages: self.limits().messages as usize,
             target_pending: pending_for(&tx, new.target_session_id)?,
         };
         if let Err(refusal) = agent_mail::admit_send(&context) {
@@ -695,21 +696,6 @@ impl HistoryDb {
         Ok(())
     }
 
-    /// A person opened a turn on the lead: its automatic wakes start again.
-    pub fn reset_mail_wakes(&self, lead_session_id: &str) -> anyhow::Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "DELETE FROM agent_mail_wakes WHERE lead_session_id = ?1",
-            params![lead_session_id],
-        )?;
-        // The lead's interrupt allowance starts again with it.
-        conn.execute(
-            "DELETE FROM agent_interrupts WHERE lead_session_id = ?1",
-            params![lead_session_id],
-        )?;
-        Ok(())
-    }
-
     /// A deleted lead takes its run's mail with it; mail still waiting for a deleted receiver
     /// can no longer arrive.
     pub(super) fn delete_agent_mail_locked(
@@ -743,7 +729,6 @@ mod tests {
     use super::*;
     use crate::agent_fleet::AgentKey;
     use crate::agent_identity::IdentityStore;
-    use crate::sub_sessions::TurnOrigin;
 
     struct Run {
         db: HistoryDb,
@@ -766,20 +751,17 @@ mod tests {
             .unwrap();
         for child in ["a", "b"] {
             let reserved = db
-                .reserve_sub_session(
-                    &crate::db::SubSessionSpec {
-                        child_session_id: child,
-                        parent_session_id: "lead",
-                        parent_incarnation: "run-1",
-                        workspace: &workspace,
-                        cwd: "/tmp/perch-agent-mail-nest",
-                        provider_id: "codex",
-                        model: None,
-                        spawn_key: child,
-                        task: "t",
-                    },
-                    Some(TurnOrigin::Person),
-                )
+                .reserve_sub_session(&crate::db::SubSessionSpec {
+                    child_session_id: child,
+                    parent_session_id: "lead",
+                    parent_incarnation: "run-1",
+                    workspace: &workspace,
+                    cwd: "/tmp/perch-agent-mail-nest",
+                    provider_id: "codex",
+                    model: None,
+                    spawn_key: child,
+                    task: "t",
+                })
                 .unwrap();
             assert!(matches!(reserved, Reserved::New(_)));
             db.set_cli_provider(child, "codex").unwrap();
@@ -904,8 +886,18 @@ mod tests {
         assert_eq!(
             db.enqueue_message(&send("b", "lead", "x", "past-fifty"))
                 .unwrap(),
-            Enqueued::Refused(SendRefusal::RunLimit)
+            Enqueued::Refused(SendRefusal::RunLimit(agent_mail::MAX_MESSAGES_PER_RUN))
         );
+        // The limit is the setting.
+        db.set_limits(crate::sub_sessions::RunLimits {
+            messages: 60,
+            ..Default::default()
+        });
+        assert!(matches!(
+            db.enqueue_message(&send("b", "lead", "x", "past-fifty-again"))
+                .unwrap(),
+            Enqueued::New(_)
+        ));
     }
 
     #[test]
@@ -1044,7 +1036,7 @@ mod tests {
     }
 
     #[test]
-    fn wakes_count_per_lead_and_a_person_resets_them() {
+    fn wakes_count_per_lead_over_its_run() {
         let Run { db, .. } = run();
         assert_eq!(db.mail_wakes("lead").unwrap(), 0);
         for _ in 0..3 {
@@ -1052,8 +1044,6 @@ mod tests {
         }
         assert_eq!(db.mail_wakes("lead").unwrap(), 3);
         assert_eq!(db.mail_wakes("a").unwrap(), 0);
-        db.reset_mail_wakes("lead").unwrap();
-        assert_eq!(db.mail_wakes("lead").unwrap(), 0);
     }
 
     #[test]
@@ -1103,7 +1093,7 @@ mod tests {
         assert_eq!(
             db.enqueue_message(&send("lead", "b", "one too many", "k50"))
                 .unwrap(),
-            Enqueued::Refused(SendRefusal::RunLimit)
+            Enqueued::Refused(SendRefusal::RunLimit(agent_mail::MAX_MESSAGES_PER_RUN))
         );
         // What the person wrote is the person's: it still goes in, as the person, with no sender run.
         let Enqueued::New(person) = db
@@ -1173,7 +1163,7 @@ mod tests {
     }
 
     #[test]
-    fn a_leads_interrupts_are_counted_per_child_and_start_again_when_a_person_writes_to_the_lead() {
+    fn a_leads_interrupts_are_counted_per_child_over_the_run() {
         let Run { db, .. } = run();
         assert_eq!(db.lead_interrupts("a").unwrap(), 0);
         db.spend_lead_interrupt("lead", "a").unwrap();
@@ -1186,16 +1176,7 @@ mod tests {
             ),
             (2, 1)
         );
-        // A person opening a turn on the lead resets the wakes, and the allowance with them.
-        db.reset_mail_wakes("lead").unwrap();
-        assert_eq!(
-            (
-                db.lead_interrupts("a").unwrap(),
-                db.lead_interrupts("b").unwrap()
-            ),
-            (0, 0)
-        );
-        db.spend_lead_interrupt("lead", "a").unwrap();
+        // Nothing a person does gives them back; deleting the lead ends the run and its counts.
         db.delete_session("lead").unwrap();
         assert_eq!(db.lead_interrupts("a").unwrap(), 0);
     }

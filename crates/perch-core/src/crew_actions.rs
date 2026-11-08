@@ -27,7 +27,7 @@ use crate::sub_sessions::SubState;
 pub const PERSON: &str = "person";
 /// The longest text of a steer, in characters. A steer is never moved to a notes file.
 pub const STEER_MAX_CHARS: usize = 2_000;
-/// Interrupts a lead may send one child between two messages a person sent the lead.
+/// Default: interrupts a lead may send one child over its run. A setting.
 pub const MAX_LEAD_INTERRUPTS_PER_CHILD: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,8 +81,10 @@ pub struct ChildFacts {
     pub running: bool,
     /// Perch's own state says it waits on a person: a pending approval or question.
     pub blocked: bool,
-    /// Interrupts the lead has sent it since a person last wrote to the lead.
+    /// Interrupts the lead has sent it over the run.
     pub lead_interrupts: u32,
+    /// The run's limit on them, a setting.
+    pub max_interrupts: u32,
 }
 
 /// The agents a message, steer or interrupt can reach: those with a native bridge Perch launched.
@@ -136,10 +138,11 @@ pub fn availability(action: Action, actor: Actor, facts: &ChildFacts) -> Result<
                             .into(),
                     );
                 }
-                if facts.lead_interrupts >= MAX_LEAD_INTERRUPTS_PER_CHILD {
+                if facts.lead_interrupts >= facts.max_interrupts {
                     return Err(format!(
-                        "you have interrupted it {MAX_LEAD_INTERRUPTS_PER_CHILD} times since a \
-                         person last wrote to you; ask the person"
+                        "you have interrupted it {} times, the most the person allows \
+                         (Settings > Sub-sessions); ask the person",
+                        facts.max_interrupts
                     ));
                 }
             }
@@ -200,6 +203,7 @@ mod tests {
             running: true,
             blocked: false,
             lead_interrupts: 0,
+            max_interrupts: MAX_LEAD_INTERRUPTS_PER_CHILD,
         }
     }
 
@@ -292,7 +296,11 @@ mod tests {
         child.lead_interrupts = MAX_LEAD_INTERRUPTS_PER_CHILD;
         let refused = availability(Action::Interrupt, Actor::Lead, &child).unwrap_err();
         assert!(refused.contains("ask the person"), "{refused}");
+        assert!(refused.contains("interrupted it 3 times"), "{refused}");
         assert!(availability(Action::Interrupt, Actor::Person, &child).is_ok());
+        // The limit is the setting.
+        child.max_interrupts = 5;
+        assert!(availability(Action::Interrupt, Actor::Lead, &child).is_ok());
     }
 
     #[test]

@@ -284,20 +284,26 @@ the core, not the agent, decides:
 
 - *Admission before dispatch*, in one transaction that also writes the child's session row
   (`sessions.parent_session_id`) and its record (`sub_sessions`): not a child itself (depth 1),
-  a turn a person opened, at most 4 live children and 8 ever, and the key (`--key`, else one per
+  at most `live` live children and `total` ever (`RunLimits`, below), and the key (`--key`, else one per
   invocation) names the spawn, so a retry returns the first child and starts nothing. A refusal
-  creates nothing.
-- *Person-opened turn*: `AgentRuntimeAdapter` records who opened each session's turn, in memory
-  only. A person submitting input (terminal Enter, chat send, Context Bridge send) while no turn is
-  running marks it `Person`; an Enter inside a running turn changes nothing; input Perch delivers for
-  an agent (a child's first message; slice 5's messages) marks it `Agent`; a new process starts with
-  no mark. Spawn needs the lead to be Working or Blocked now **and** the mark to be `Person`. After a
-  core restart a running lead's mark is unknown and spawn is refused until a person speaks again.
-  A turn that opens before the provider has settled a fresh launch to idle is not marked either.
+  creates nothing and names the limit and where it is set.
+- *Runs go on without a person's prompt* (owner decision 2026-11-08). Spawn, steer and interrupt need
+  no turn a person opened: any turn of the lead may use them, including one a delivered message
+  started, so the core no longer tracks who opened a turn (the in-memory origin mark and its
+  listeners are gone). What bounds a run is `RunLimits` (`sub_sessions.rs`), every counter **per run**
+  and never reset by a person's message: live sub-sessions 4, sub-sessions ever 8, messages 50,
+  automatic lead wakes 10, interrupts per sub-session 3, waiting suggestion cards 10. They are the
+  person's settings (Settings > Sub-sessions; `Settings.run_limits`, flat optional `max_*` fields on
+  the wire `Settings`/`SettingsPatch`), validated on update (each 1 to its ceiling: 16, 64, 1000, 100,
+  20, 50; total never below live) and repaired to the defaults if a stored file is out of range. The
+  core holds them in `HistoryDb::limits()`, set at boot and on every settings update, and each
+  admission rule reads them there. A limit reached refuses with the reason (and, for spawn, a 409
+  naming Settings > Sub-sessions); nothing is queued silently. Unchanged: depth 1, a message is
+  information and never approval, holds and refusals, and a person can stop anything.
 - *The child* is launched like any session (same registration, Instructions pin, own token and
   native bridge) with nobody viewing it, and its first message is the task: the last argument of
-  its command line, so no input lease is taken and nothing is typed into a prompt. Its first turn is
-  marked `Agent`. Provider flags go before it and parse after it (checked on all four CLIs).
+  its command line, so no input lease is taken and nothing is typed into a prompt. Provider flags go
+  before it and parse after it (checked on all four CLIs).
 - *Unknown is not exit.* A launch not confirmed either way is `start_unknown`; a stop not confirmed
   is `stop_unknown`; both, and `starting`/`stopping`, still count against the limits. Only a
   perchd-confirmed exit settles a record (`exited`, or `stopped` after a stop). A launch in flight
@@ -360,9 +366,9 @@ contract the tests hold it to.
      when its turn ends");
   4. anything else (state unreadable, lifecycle not provably idle) is not idle and waits.
   In 1 and 2 the input line must also be readable and empty (a person's draft, a dialog or an overlay is
-  not empty), and a lead must have fewer than 10 automatic wakes since a person last opened a turn on it
-  (a follow-up spends one too). Otherwise nothing is written and the message stays `queued` with the
-  reason. The loop runs the moment something is queued (`mail_notify`), so "at once" is one pass, not a
+  not empty), and a lead must have fewer automatic wakes in the run than the wake limit (10 by default; a
+  follow-up spends one too; at the limit the message is not delivered, with the reason). Otherwise nothing
+  is written and the message stays `queued` with the reason. The loop runs the moment something is queued (`mail_notify`), so "at once" is one pass, not a
   poll. Nothing wakes a sleeping session, relaunches an exited one or restarts a process.
 - *Per provider.* Pi and OMP: the bridge's `prompt`, which the extension turns into
   `sendUserMessage(text, {deliverAs: "followUp"})` when a turn runs and a plain start when idle
@@ -416,8 +422,6 @@ contract the tests hold it to.
   command or a mode switch (the prompt starts with a `────` rule line, never a character from the
   sender). Peer text is data; the guide tells agents the
   same. A message never answers a dialog and never approves anything: delivery refuses while one is open.
-- *Turn origin.* A delivered message opens a turn Perch marks `Agent` (after the change-record barrier,
-  which would otherwise mark it a person's), so the person-turn rule refuses `perch spawn` there.
 - *Notes from children.* When a child's turn ends, it becomes blocked, or its exit is confirmed, Perch
   queues a `note` for its lead: status words, whether it is waiting on a person (Perch's own state), and
   the first 400 characters of its own `perch report`, else the cheap model's summary (`Summary by <model>`),
@@ -426,9 +430,10 @@ contract the tests hold it to.
   absent model only delays a note, never changes what it can say. A
   newer note from the same child replaces one still queued. Queued notes of a lead go in **one** delivery
   (a roster, one line per child, headed as status rather than instruction); messages go one per delivery.
-- *Wake cap.* Delivering anything to a lead spends one of 10 wakes; a person opening a turn on the lead
-  (terminal Enter, chat send, Context Bridge send) resets it, durably, through a listener on the same
-  `note_person_input` that marks the turn `Person`. A core restart does not reset it.
+- *Wake cap.* Delivering anything to a lead spends one of the run's wakes (10 by default, a setting); a
+  person's message does not reset it, and a core restart does not either (the count is durable). At the
+  cap a delivery is refused with the reason (`Wait::WakeCap`) and the message is undelivered, not left
+  waiting; a wake count that cannot be read waits instead, since unknown is not "none left".
 
 **Family strip and notes folder** (`crew.rs` read model, `server/crew.rs`, `packages/web/src/crew.ts`,
 `views/nativeChat/FamilyStrip.tsx`; slice 6). The read model sends, stops and approves nothing; the
@@ -476,7 +481,7 @@ strip's actions are the next section.
   rows of `crew.state` carry the person's `actions` with each reason. The strip asks again while its menu
   is open, since what can be sent changes with the child's turn without a session update.
 - *Message* (person only): the slice 5 queue with sender `person` (`record_person_mail`): same limits
-  except that it does not count toward the run's 50, spends no wake and opens a turn that is the person's;
+  except that it does not count toward the run's message limit and spends no wake;
   the banner names the person, still opens with Perch's rule line and leaves the person's words unquoted.
 - *Steer* (person or lead): only while a turn runs and never while the child waits on a person's approval
   or answer (a steer cannot answer or approve anything). A `steer` row in `agent_mail` is claimed as it is
@@ -490,8 +495,9 @@ strip's actions are the next section.
   within 25 s is `not confirmed`.
 - *Interrupt*: the chat's Stop path (`queue_cancel`: Claude's Esc into a verified process, Codex
   `turn/interrupt`, Pi/OMP abort), confirmed only when the provider answers **and** reports the turn over.
-  A lead's is refused while the child waits on a person and capped at 3 per child between two messages a
-  person sends the lead (`agent_interrupts`, reset with the wakes; counted when sent, confirmed or not).
+  A lead's is refused while the child waits on a person and capped per child for the run (3 by default, a
+  setting; `agent_interrupts`, never reset; counted when sent, confirmed or not), refused with the limit
+  and where to change it.
   A person's may also stop a turn that waits on a prompt (as the chat's Stop does).
 - *Stop*: `stop_child` unchanged: confirmed by perchd, otherwise `Stop not confirmed`.
 - *Receipts, never retried.* `crew.act.result` carries `queued`, `sent` (the provider has it, answer

@@ -111,10 +111,13 @@ pub struct Settings {
     #[serde(default = "default_reporter_codex_model")]
     pub reporter_codex_model: String,
     /// Lets a lead start sub-sessions with `perch spawn` without a person's click (the
-    /// default, still only during a turn a person opened). Off: `perch spawn` puts a
-    /// suggested-task card in the lead's chat instead (`suggestions.rs`).
+    /// default, in any turn). Off: `perch spawn` puts a suggested-task card in the lead's chat
+    /// instead (`suggestions.rs`).
     #[serde(default = "default_true")]
     pub leads_start_without_asking: bool,
+    /// The per-run limits on sub-sessions, messages, wakes, interrupts and waiting suggested tasks
+    /// (Settings > Sub-sessions; `RunLimits`). Validated on every change.
+    pub run_limits: crate::sub_sessions::RunLimits,
     /// The model the reporter asks of Pi (`provider/id`); empty means Pi has no reporter.
     #[serde(default)]
     pub reporter_pi_model: String,
@@ -152,6 +155,7 @@ impl Default for Settings {
             reporter_pi_model: String::new(),
             reporter_omp_model: String::new(),
             leads_start_without_asking: true,
+            run_limits: Default::default(),
         }
     }
 }
@@ -255,6 +259,13 @@ pub struct SettingsPatch {
     pub reporter_pi_model: Option<String>,
     pub reporter_omp_model: Option<String>,
     pub leads_start_without_asking: Option<bool>,
+    // The per-run limits (`RunLimits`), each validated to its range.
+    pub max_live_sub_sessions: Option<u32>,
+    pub max_sub_sessions: Option<u32>,
+    pub max_messages_per_run: Option<u32>,
+    pub max_lead_wakes_per_run: Option<u32>,
+    pub max_interrupts_per_sub_session: Option<u32>,
+    pub max_waiting_suggestions: Option<u32>,
 }
 
 /// Deserialize a field where `absent`, `null`, and `"value"` are distinct:
@@ -313,6 +324,10 @@ impl SettingsStore {
                     s.browser_search_engine = default_browser_search_engine();
                 }
                 s.chat_mode = normalize_chat_mode(&s.chat_mode);
+                // A hand-edited file never leaves a run with a limit outside its range.
+                if s.run_limits.validate().is_err() {
+                    s.run_limits = Default::default();
+                }
                 Some(s)
             }
             Err(e) => {
@@ -359,6 +374,23 @@ impl SettingsStore {
             crate::sub_sessions::check_model(model).map_err(|message| anyhow::anyhow!(message))?;
         }
         let mut guard = self.inner.lock().unwrap();
+        // The limits are checked together, with the stored ones for what the patch leaves out, before
+        // anything is applied: a refusal changes nothing.
+        let old = guard.run_limits;
+        let limits = crate::sub_sessions::RunLimits {
+            live: patch.max_live_sub_sessions.unwrap_or(old.live),
+            total: patch.max_sub_sessions.unwrap_or(old.total),
+            messages: patch.max_messages_per_run.unwrap_or(old.messages),
+            wakes: patch.max_lead_wakes_per_run.unwrap_or(old.wakes),
+            interrupts: patch
+                .max_interrupts_per_sub_session
+                .unwrap_or(old.interrupts),
+            waiting_cards: patch.max_waiting_suggestions.unwrap_or(old.waiting_cards),
+        };
+        limits
+            .validate()
+            .map_err(|message| anyhow::anyhow!(message))?;
+        guard.run_limits = limits;
         match patch.default_cwd {
             None => {}                              // absent → unchanged
             Some(None) => guard.default_cwd = None, // null → clear
@@ -576,6 +608,66 @@ mod keybinding_tests {
             serde_json::from_value(serde_json::json!({"browserSearchSuggestions": true})).unwrap();
         store.update(on).unwrap();
         assert!(SettingsStore::load(&path).get().browser_search_suggestions);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // Owner decision 2026-11-08: the per-run limits are settings with today's defaults, validated.
+    #[test]
+    fn run_limits_default_round_trip_and_reject_out_of_range_changing_nothing() {
+        let dir =
+            std::env::temp_dir().join(format!("perch-limits-settings-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"theme":"light"}"#).unwrap();
+        let store = SettingsStore::load(&path);
+        assert_eq!(
+            store.get().run_limits,
+            crate::sub_sessions::RunLimits::default()
+        );
+        assert_eq!(
+            (
+                store.get().run_limits.live,
+                store.get().run_limits.total,
+                store.get().run_limits.messages,
+                store.get().run_limits.wakes,
+                store.get().run_limits.interrupts,
+                store.get().run_limits.waiting_cards,
+            ),
+            (4, 8, 50, 10, 3, 10)
+        );
+        let patch =
+            |value: serde_json::Value| -> SettingsPatch { serde_json::from_value(value).unwrap() };
+        store
+            .update(patch(
+                serde_json::json!({"maxLiveSubSessions": 6, "maxSubSessions": 12}),
+            ))
+            .unwrap();
+        let loaded = SettingsStore::load(&path).get();
+        assert_eq!((loaded.run_limits.live, loaded.run_limits.total), (6, 12));
+        // Out of range, or a total below the live limit: refused with the reason, nothing changes.
+        let error = store
+            .update(patch(
+                serde_json::json!({"theme": "dark", "maxMessagesPerRun": 5000}),
+            ))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("messages per run must be 1 to 1000"),
+            "{error}"
+        );
+        let error = store
+            .update(patch(serde_json::json!({"maxSubSessions": 5})))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("cannot be fewer than live"), "{error}");
+        assert_eq!(store.get().run_limits, loaded.run_limits);
+        assert_ne!(store.get().theme, "dark");
+        // A hand-edited file with a bad limit loads as the defaults.
+        std::fs::write(&path, r#"{"runLimits":{"live":0}}"#).unwrap();
+        assert_eq!(
+            SettingsStore::load(&path).get().run_limits,
+            crate::sub_sessions::RunLimits::default()
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

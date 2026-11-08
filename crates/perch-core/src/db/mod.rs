@@ -55,6 +55,10 @@ pub use providers::ProviderPreference;
 
 pub struct HistoryDb {
     conn: Mutex<Connection>,
+    /// The per-run limits the admission rules read (sub-sessions, messages, suggested tasks). The core
+    /// sets them from Settings at boot and whenever they change; the defaults are today's numbers.
+    // ponytail: held here, not passed to each call, so the many admission paths keep their signatures.
+    limits: Mutex<crate::sub_sessions::RunLimits>,
 }
 
 /// Borrow the application's existing SQLite connection for bounded auxiliary
@@ -87,9 +91,18 @@ impl HistoryDb {
         let conn = Connection::open(db_path)?;
         let db = Self {
             conn: Mutex::new(conn),
+            limits: Mutex::new(Default::default()),
         };
         db.migrate()?;
         Ok(db)
+    }
+
+    pub fn limits(&self) -> crate::sub_sessions::RunLimits {
+        *self.limits.lock().unwrap()
+    }
+
+    pub fn set_limits(&self, limits: crate::sub_sessions::RunLimits) {
+        *self.limits.lock().unwrap() = limits;
     }
 
     /// Additive migration: creates the full-shape tables for fresh installs,

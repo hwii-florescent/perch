@@ -451,6 +451,8 @@ pub async fn run(
     #[cfg(not(test))]
     let settings = Arc::new(SettingsStore::load_default());
     tracing::info!("[perch] settings loaded from {:?}", settings.path);
+    // The admission rules (sub-sessions, messages, suggestions) read the person's per-run limits.
+    db.set_limits(settings.get().run_limits);
 
     // Load hosts store (custom path or default).
     let hosts = Arc::new(if let Some(p) = options.hosts_path {
@@ -733,17 +735,8 @@ pub async fn run(
     if let Err(error) = state.db.mark_delivering_mail_unconfirmed() {
         tracing::warn!("could not recover mail delivery states: {error}");
     }
-    // A person speaking to a lead gives it its automatic wakes back; a confirmed exit withdraws
-    // the mail still waiting for the process that ended.
+    // A confirmed exit withdraws the mail still waiting for the process that ended.
     {
-        let db = state.db.clone();
-        state
-            .agent_runtime
-            .set_person_turn_listener(Arc::new(move |key| {
-                if let Err(error) = db.reset_mail_wakes(&key.session_id) {
-                    tracing::warn!(%error, "could not reset a lead's mail wakes");
-                }
-            }))?;
         let app = state.clone();
         state.agent_runtime.set_exit_listener(Arc::new(move |key| {
             agent_mail::note_child(&app, key, crate::agent_mail::ChildStatus::Exited, None);

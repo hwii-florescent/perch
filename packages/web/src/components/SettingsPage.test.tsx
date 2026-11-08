@@ -179,6 +179,37 @@ it("sets the usage alert thresholds from Notifications and follows the saved val
   }
 });
 
+it("saves a sub-session limit only when it is in range and follows the saved value", async () => {
+  window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
+  const updateSettings = vi.fn();
+  usePerchStore.setState({ settingsOpen: true, settings: { theme: "perch" } as never, fetchSettings: vi.fn(), fetchHosts: vi.fn(), updateSettings });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<SettingsPage />));
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="settings-nav-notifications"]')!.click());
+    const live = host.querySelector<HTMLInputElement>('[data-testid="settings-maxLiveSubSessions"]')!;
+    expect(live.value).toBe("4");
+    expect(host.querySelector<HTMLInputElement>('[data-testid="settings-maxLeadWakesPerRun"]')!.value).toBe("10");
+    const type = async (box: HTMLInputElement, value: string) => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      await act(async () => { set.call(box, value); box.dispatchEvent(new Event("input", { bubbles: true })); });
+    };
+    await type(live, "99");
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(live.getAttribute("aria-invalid")).toBe("true");
+    expect(host.textContent).toContain("Enter a whole number from 1 to 16");
+    await type(live, "6");
+    expect(updateSettings).toHaveBeenCalledWith({ maxLiveSubSessions: 6 });
+    act(() => usePerchStore.setState({ settings: { theme: "perch", maxLiveSubSessions: 2 } as never }));
+    expect(live.value).toBe("2");
+  } finally {
+    act(() => root.unmount());
+    host.remove();
+  }
+});
+
 it("turns the sub-session summaries off and saves a model only when it changed", async () => {
   window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
   const updateSettings = vi.fn();

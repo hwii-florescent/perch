@@ -124,6 +124,20 @@ pub struct SettingsData {
     /// OMP's reporter model (`provider/id`); missing or empty means OMP has none.
     #[serde(default)]
     pub reporter_omp_model: String,
+    /// The per-run limits (Settings > Sub-sessions); absent from an older core, which means today's
+    /// defaults (4 live, 8 total, 50 messages, 10 wakes, 3 interrupts, 10 waiting cards).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_live_sub_sessions: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_sub_sessions: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_messages_per_run: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_lead_wakes_per_run: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_interrupts_per_sub_session: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_waiting_suggestions: Option<u32>,
 }
 
 fn default_theme() -> String {
@@ -215,6 +229,18 @@ pub struct SettingsPatch {
     pub reporter_pi_model: Option<String>,
     #[serde(default)]
     pub reporter_omp_model: Option<String>,
+    #[serde(default)]
+    pub max_live_sub_sessions: Option<u32>,
+    #[serde(default)]
+    pub max_sub_sessions: Option<u32>,
+    #[serde(default)]
+    pub max_messages_per_run: Option<u32>,
+    #[serde(default)]
+    pub max_lead_wakes_per_run: Option<u32>,
+    #[serde(default)]
+    pub max_interrupts_per_sub_session: Option<u32>,
+    #[serde(default)]
+    pub max_waiting_suggestions: Option<u32>,
 }
 
 /// Deserialize a JSON field where absent, null, and a value are all distinct.

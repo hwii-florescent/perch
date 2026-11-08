@@ -80,7 +80,8 @@ impl HistoryDb {
             params![lead_session_id],
             |row| row.get(0),
         )?;
-        if let Err(reason) = suggestions::check_batch(items.len(), pending as usize) {
+        let max_pending = self.limits().waiting_cards as usize;
+        if let Err(reason) = suggestions::check_batch(items.len(), pending as usize, max_pending) {
             return Ok(Added::Refused(reason));
         }
         let card_id = uuid::Uuid::new_v4().to_string();

@@ -126,6 +126,7 @@ pub(super) fn child_facts(app: &AppState, row: &SubSessionRow) -> ChildFacts {
             .db
             .lead_interrupts(&row.child_session_id)
             .unwrap_or(u32::MAX),
+        max_interrupts: app.db.limits().interrupts,
     }
 }
 
@@ -154,7 +155,7 @@ fn refusal_status(refusal: &agent_mail::SendRefusal) -> StatusCode {
     match refusal {
         ToSelf => StatusCode::BAD_REQUEST,
         OtherRun => StatusCode::FORBIDDEN,
-        NotRunning | CannotReceive | RunLimit | QueueFull | InboundRefuses | InboundHolds => {
+        NotRunning | CannotReceive | RunLimit(_) | QueueFull | InboundRefuses | InboundHolds => {
             StatusCode::CONFLICT
         }
     }

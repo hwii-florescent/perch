@@ -3,7 +3,7 @@
 //! checked and the rows written in one transaction, so two spawns racing cannot both pass a
 //! count that only one of them fits under.
 use super::*;
-use crate::sub_sessions::{self, Refusal, SpawnContext, SubState, TurnOrigin};
+use crate::sub_sessions::{self, Refusal, SpawnContext, SubState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubSessionRow {
@@ -65,13 +65,8 @@ fn row_from(row: &rusqlite::Row<'_>) -> rusqlite::Result<SubSessionRow> {
 }
 
 impl HistoryDb {
-    /// Admit and record a spawn: the key's earlier child if there is one, else the limits and
-    /// the turn rule, then the child's session row and its record, atomically.
-    pub fn reserve_sub_session(
-        &self,
-        spec: &SubSessionSpec<'_>,
-        turn: Option<TurnOrigin>,
-    ) -> anyhow::Result<Reserved> {
+    /// Admit and record a spawn: the key's earlier child if there is one, else the run's limits, then the child's session row and its record, atomically.
+    pub fn reserve_sub_session(&self, spec: &SubSessionSpec<'_>) -> anyhow::Result<Reserved> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
         let existing = tx
@@ -108,9 +103,9 @@ impl HistoryDb {
         };
         let context = SpawnContext {
             caller_is_child,
-            turn,
             live_children: count(true)?,
             all_children: count(false)?,
+            limits: self.limits(),
         };
         if let Err(refusal) = sub_sessions::admit(&context) {
             return Ok(Reserved::Refused(refusal));
@@ -320,7 +315,7 @@ mod tests {
 
     fn reserve(db: &HistoryDb, workspace: &WorkspaceRow, n: usize) -> Reserved {
         let (child, key) = (format!("child-{n}"), format!("key-{n}"));
-        db.reserve_sub_session(&spec(workspace, &child, &key), Some(TurnOrigin::Person))
+        db.reserve_sub_session(&spec(workspace, &child, &key))
             .unwrap()
     }
 
@@ -345,10 +340,7 @@ mod tests {
             panic!()
         };
         let again = db
-            .reserve_sub_session(
-                &spec(&workspace, "child-other", "key-1"),
-                Some(TurnOrigin::Person),
-            )
+            .reserve_sub_session(&spec(&workspace, "child-other", "key-1"))
             .unwrap();
         assert_eq!(again, Reserved::Existing(first));
         assert_eq!(db.sub_sessions_of("lead").unwrap().len(), 1);
@@ -363,7 +355,7 @@ mod tests {
         }
         assert_eq!(
             reserve(&db, &workspace, 5),
-            Reserved::Refused(Refusal::Concurrent)
+            Reserved::Refused(Refusal::Concurrent(4))
         );
         assert!(!db.session_exists("child-5").unwrap());
         // Stopped children free their slot but still count toward the total.
@@ -384,7 +376,7 @@ mod tests {
         }
         assert_eq!(
             reserve(&db, &workspace, 9),
-            Reserved::Refused(Refusal::Descendants)
+            Reserved::Refused(Refusal::Descendants(8))
         );
     }
 
@@ -400,12 +392,12 @@ mod tests {
             .unwrap();
         assert_eq!(
             reserve(&db, &workspace, 5),
-            Reserved::Refused(Refusal::Concurrent)
+            Reserved::Refused(Refusal::Concurrent(4))
         );
     }
 
     #[test]
-    fn a_child_cannot_spawn_and_a_turn_not_opened_by_a_person_cannot_either() {
+    fn a_child_cannot_spawn() {
         let (db, workspace) = db_with_lead();
         reserve(&db, &workspace, 1);
         let from_child = SubSessionSpec {
@@ -413,18 +405,28 @@ mod tests {
             ..spec(&workspace, "grandchild", "k")
         };
         assert_eq!(
-            db.reserve_sub_session(&from_child, Some(TurnOrigin::Person))
-                .unwrap(),
+            db.reserve_sub_session(&from_child).unwrap(),
             Reserved::Refused(Refusal::Depth)
         );
-        for turn in [Some(TurnOrigin::Agent), None] {
-            assert_eq!(
-                db.reserve_sub_session(&spec(&workspace, "c2", "k2"), turn)
-                    .unwrap(),
-                Reserved::Refused(Refusal::NotPersonTurn)
-            );
-        }
-        assert!(!db.session_exists("c2").unwrap());
+        assert!(!db.session_exists("grandchild").unwrap());
+    }
+
+    // Owner decision 2026-11-08: the limits are settings the database reads at admission.
+    #[test]
+    fn the_run_limits_come_from_the_settings_held_by_the_database() {
+        let (db, workspace) = db_with_lead();
+        db.set_limits(sub_sessions::RunLimits {
+            live: 1,
+            total: 2,
+            ..Default::default()
+        });
+        reserve(&db, &workspace, 1);
+        assert_eq!(
+            reserve(&db, &workspace, 2),
+            Reserved::Refused(Refusal::Concurrent(1))
+        );
+        db.set_limits(sub_sessions::RunLimits::default());
+        reserve(&db, &workspace, 2);
     }
 
     #[test]

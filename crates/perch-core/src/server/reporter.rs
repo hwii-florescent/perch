@@ -329,7 +329,7 @@ fn plan(
         return Err(Skip::Stopped);
     }
     let sent = app.db.run_agent_messages(session).unwrap_or(usize::MAX);
-    if sent >= crate::agent_mail::MAX_MESSAGES_PER_RUN {
+    if sent >= app.db.limits().messages as usize {
         return Err(Skip::RunLimit);
     }
     let model_of = |runner: Runner| match runner {

@@ -15,7 +15,7 @@ use crate::agent_fleet::{
 };
 use crate::agent_identity::AgentIdentity;
 use crate::db::{Reserved, SubSessionRow, SubSessionSpec};
-use crate::sub_sessions::{self, Report, ReportSource, SubState, TurnOrigin};
+use crate::sub_sessions::{self, Report, ReportSource, SubState};
 use serde_json::{json, Value};
 
 /// An error for the agent: the status to answer with and the text it reads.
@@ -137,23 +137,22 @@ fn child_json(row: &SubSessionRow, state: SubState, duplicate: bool) -> Value {
     })
 }
 
-/// `perch spawn`, with the lead allowed to start without asking: the turn must be one a person opened.
+/// `perch spawn`, with the lead allowed to start without asking. Any turn may spawn (owner decision
+/// 2026-11-08); the run's limits bound it.
 pub(super) async fn spawn(
     app: &AppState,
     caller: &AgentIdentity,
     request: SpawnRequest,
 ) -> Result<Value, Failure> {
-    start(app, caller, request, false).await
+    start(app, caller, request).await
 }
 
-/// Start a sub-session of `caller`. `by_person` is a person's own click on a suggested task: that
-/// click is the person's action, so the turn rule is met by it. Everything else (depth, limits, the
-/// key, the launch) is the same as for `perch spawn`.
+/// Start a sub-session of `caller`: depth, the run's limits, the key and the launch, the same for
+/// `perch spawn` and a person's Start on a suggested task.
 pub(super) async fn start(
     app: &AppState,
     caller: &AgentIdentity,
     request: SpawnRequest,
-    by_person: bool,
 ) -> Result<Value, Failure> {
     let lead = app
         .db
@@ -188,21 +187,6 @@ pub(super) async fn start(
             format!("{} is disabled in Perch's Agents settings", request.agent),
         ));
     }
-    let lead_key = AgentKey::new(&workspace.id, &caller.session_id, &caller.provider_id)
-        .map_err(|error| internal("name the session", error))?;
-    // The turn must be running now: a process left behind by an earlier turn is not one.
-    let in_turn = app
-        .agent_runtime
-        .snapshot(&lead_key)
-        .is_ok_and(|snapshot| matches!(snapshot.state, AgentState::Working | AgentState::Blocked));
-    let turn = if by_person {
-        Some(TurnOrigin::Person)
-    } else {
-        in_turn
-            .then(|| app.agent_runtime.turn_origin(&lead_key))
-            .flatten()
-    };
-
     let child_id = Uuid::new_v4().to_string();
     let spec = SubSessionSpec {
         child_session_id: &child_id,
@@ -217,14 +201,14 @@ pub(super) async fn start(
     };
     let row = match app
         .db
-        .reserve_sub_session(&spec, turn)
+        .reserve_sub_session(&spec)
         .map_err(|error| internal("record the sub-session", error))?
     {
         Reserved::Refused(refusal) => {
             use sub_sessions::Refusal;
             let status = match refusal {
-                Refusal::Concurrent | Refusal::Descendants => StatusCode::CONFLICT,
-                Refusal::Depth | Refusal::NotPersonTurn => StatusCode::FORBIDDEN,
+                Refusal::Concurrent(_) | Refusal::Descendants(_) => StatusCode::CONFLICT,
+                Refusal::Depth => StatusCode::FORBIDDEN,
             };
             return Err(fail(status, refusal.message()));
         }
@@ -445,8 +429,6 @@ fn launch(app: &AppState, row: &SubSessionRow, cwd: &str) -> Result<(), LaunchFa
         .map_err(|error| failure(error.to_string()))?;
     // Nobody views a child; the agent keeps running in perchd without the launcher.
     let _ = app.agent_runtime.detach(&key, &client);
-    // Its first turn is the task Perch delivered, not one a person opened.
-    app.agent_runtime.note_agent_turn(&key);
     if let Err(error) = native_ui::observe(app, key.clone()) {
         tracing::warn!(%error, "native UI observation unavailable for a sub-session");
     }
@@ -781,7 +763,6 @@ pub(super) mod tests {
     use super::super::agent::tests::request;
     use super::*;
     use crate::agent_identity::IdentityStore;
-    use crate::sub_sessions::TurnOrigin;
 
     /// A core booted over HTTP with its state, on a database under `root`.
     pub(in crate::server) async fn boot(root: &std::path::Path) -> (SocketAddr, Arc<HistoryDb>) {
@@ -819,7 +800,7 @@ pub(super) mod tests {
         let nest = root.join("nest");
         std::fs::create_dir_all(&nest).unwrap();
         let (address, db) = boot(&root).await;
-        // This test is about the person-turn rule, which applies once leads may start without asking.
+        // Leads may start without asking, so `perch spawn` is admitted by the limits, not made a card.
         super::super::booted_state(address)
             .settings
             .update(crate::settings::SettingsPatch {
@@ -872,16 +853,6 @@ pub(super) mod tests {
         }
         assert!(db.sub_sessions_of("lead").unwrap().is_empty());
 
-        // A lead that is not in a turn Perch saw a person open may not spawn, and no session or
-        // record is made by the refusal.
-        let (status, answer) = call("spawn", lead.token.clone(), spawn_body("k1", "lead")).await;
-        assert_eq!(status, 403, "{answer}");
-        assert!(
-            answer["error"].as_str().unwrap().contains("a person"),
-            "{answer}"
-        );
-        assert!(db.sub_sessions_of("lead").unwrap().is_empty());
-
         // A child the lead started earlier, recorded as the core would have.
         let nest_path = nest.to_string_lossy().into_owned();
         let spec = |child: &'static str, key: &'static str| crate::db::SubSessionSpec {
@@ -895,10 +866,7 @@ pub(super) mod tests {
             spawn_key: key,
             task: "fix the parser",
         };
-        let Reserved::New(child) = db
-            .reserve_sub_session(&spec("child", "k1"), Some(TurnOrigin::Person))
-            .unwrap()
-        else {
+        let Reserved::New(child) = db.reserve_sub_session(&spec("child", "k1")).unwrap() else {
             panic!("the child should have been recorded");
         };
         db.move_sub_session(
@@ -912,7 +880,26 @@ pub(super) mod tests {
             .issue(&AgentKey::new(&workspace.id, "child", "codex").unwrap())
             .unwrap();
 
-        // The same key again returns that child and starts nothing, even with no turn running.
+        // Any turn may spawn (owner decision 2026-11-08), so what refuses it is the run's limits, which
+        // are the person's settings; the refusal says so and records nothing. (A spawn that was admitted
+        // would launch a real agent, which a test must not do.)
+        db.set_limits(crate::sub_sessions::RunLimits {
+            live: 1,
+            total: 1,
+            ..Default::default()
+        });
+        let (status, answer) = call("spawn", lead.token.clone(), spawn_body("k9", "lead")).await;
+        assert_eq!(status, 409, "{answer}");
+        let error = answer["error"].as_str().unwrap();
+        assert!(
+            error.contains("already have 1 sub-sessions running"),
+            "{error}"
+        );
+        assert!(error.contains("Settings > Sub-sessions"), "{error}");
+        assert_eq!(db.sub_sessions_of("lead").unwrap().len(), 1);
+        db.set_limits(Default::default());
+
+        // The same key again returns that child and starts nothing.
         let (status, answer) = call("spawn", lead.token.clone(), spawn_body("k1", "lead")).await;
         assert_eq!(status, 200, "{answer}");
         assert_eq!(answer["session"], "child");
@@ -1032,20 +1019,17 @@ pub(super) mod tests {
             .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
             .unwrap();
         let Reserved::New(child) = db
-            .reserve_sub_session(
-                &crate::db::SubSessionSpec {
-                    child_session_id: "child",
-                    parent_session_id: "lead",
-                    parent_incarnation: &lead.incarnation,
-                    workspace: &workspace,
-                    cwd: &cwd,
-                    provider_id: child_provider,
-                    model: None,
-                    spawn_key: "k",
-                    task: "fix the parser",
-                },
-                Some(TurnOrigin::Person),
-            )
+            .reserve_sub_session(&crate::db::SubSessionSpec {
+                child_session_id: "child",
+                parent_session_id: "lead",
+                parent_incarnation: &lead.incarnation,
+                workspace: &workspace,
+                cwd: &cwd,
+                provider_id: child_provider,
+                model: None,
+                spawn_key: "k",
+                task: "fix the parser",
+            })
             .unwrap()
         else {
             panic!("the child should have been recorded");
@@ -1215,20 +1199,17 @@ pub(super) mod tests {
             .create_project("local", &plain.to_string_lossy(), Some("plain"), None)
             .unwrap();
         let Reserved::New(second) = db
-            .reserve_sub_session(
-                &crate::db::SubSessionSpec {
-                    child_session_id: "child-two",
-                    parent_session_id: "lead",
-                    parent_incarnation: &child.parent_incarnation,
-                    workspace: &plain_nest,
-                    cwd: &plain.to_string_lossy(),
-                    provider_id: "codex",
-                    model: None,
-                    spawn_key: "k2",
-                    task: "again",
-                },
-                Some(TurnOrigin::Person),
-            )
+            .reserve_sub_session(&crate::db::SubSessionSpec {
+                child_session_id: "child-two",
+                parent_session_id: "lead",
+                parent_incarnation: &child.parent_incarnation,
+                workspace: &plain_nest,
+                cwd: &plain.to_string_lossy(),
+                provider_id: "codex",
+                model: None,
+                spawn_key: "k2",
+                task: "again",
+            })
             .unwrap()
         else {
             panic!("the second child should have been recorded");

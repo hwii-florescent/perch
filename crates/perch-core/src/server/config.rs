@@ -65,11 +65,19 @@ pub(super) fn handle_settings_update(
         leads_start_without_asking: patch.leads_start_without_asking,
         reporter_pi_model: patch.reporter_pi_model,
         reporter_omp_model: patch.reporter_omp_model,
+        max_live_sub_sessions: patch.max_live_sub_sessions,
+        max_sub_sessions: patch.max_sub_sessions,
+        max_messages_per_run: patch.max_messages_per_run,
+        max_lead_wakes_per_run: patch.max_lead_wakes_per_run,
+        max_interrupts_per_sub_session: patch.max_interrupts_per_sub_session,
+        max_waiting_suggestions: patch.max_waiting_suggestions,
     };
     let phone_access = patch.phone_access;
     let relay_url = patch.relay_url;
     match state.app.settings.update(store_patch) {
         Ok(updated) => {
+            // The admission rules read the limits the database holds.
+            state.app.db.set_limits(updated.run_limits);
             if phone_access.is_some() {
                 apply_phone_access(state.app.clone());
             }
@@ -260,6 +268,12 @@ pub(super) fn settings_to_wire(s: &crate::settings::Settings) -> SettingsData {
         leads_start_without_asking: s.leads_start_without_asking,
         reporter_pi_model: s.reporter_pi_model.clone(),
         reporter_omp_model: s.reporter_omp_model.clone(),
+        max_live_sub_sessions: Some(s.run_limits.live),
+        max_sub_sessions: Some(s.run_limits.total),
+        max_messages_per_run: Some(s.run_limits.messages),
+        max_lead_wakes_per_run: Some(s.run_limits.wakes),
+        max_interrupts_per_sub_session: Some(s.run_limits.interrupts),
+        max_waiting_suggestions: Some(s.run_limits.waiting_cards),
     }
 }
 

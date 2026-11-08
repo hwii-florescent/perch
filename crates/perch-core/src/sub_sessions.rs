@@ -19,10 +19,73 @@
 //! of Claude Projects and sub-sessions"). Unknown is never read as exited: a child whose start
 //! or stop was not confirmed keeps counting against the limits.
 
-/// Children of one lead that may be live at once.
+/// Default: children of one lead that may be live at once.
 pub const MAX_CONCURRENT: usize = 4;
-/// Children one lead may ever have started, stopped ones included.
+/// Default: children one lead may ever have started, stopped ones included.
 pub const MAX_DESCENDANTS: usize = 8;
+
+/// The per-run limits a person sets (Settings > Sub-sessions; owner decision 2026-11-08: runs go on
+/// without a person's prompt, so these are what bound them). Every counter is per run, never reset by
+/// a person's message. The defaults are today's constants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RunLimits {
+    /// Live sub-sessions per run.
+    pub live: u32,
+    /// Sub-sessions a run may ever start.
+    pub total: u32,
+    /// Messages the run's agents may send (notes do not count).
+    pub messages: u32,
+    /// Automatic deliveries to the lead.
+    pub wakes: u32,
+    /// Interrupts the lead may send each sub-session.
+    pub interrupts: u32,
+    /// Suggested-task cards waiting for the person.
+    pub waiting_cards: u32,
+}
+
+impl Default for RunLimits {
+    fn default() -> Self {
+        Self {
+            live: MAX_CONCURRENT as u32,
+            total: MAX_DESCENDANTS as u32,
+            messages: crate::agent_mail::MAX_MESSAGES_PER_RUN as u32,
+            wakes: crate::agent_mail::DEFAULT_WAKES_PER_RUN,
+            interrupts: crate::crew_actions::MAX_LEAD_INTERRUPTS_PER_CHILD,
+            waiting_cards: crate::suggestions::MAX_PENDING as u32,
+        }
+    }
+}
+
+impl RunLimits {
+    /// Each limit's allowed range (name, value, lowest, highest).
+    fn ranges(&self) -> [(&'static str, u32, u32, u32); 6] {
+        [
+            ("live sub-sessions per run", self.live, 1, 16),
+            ("sub-sessions per run", self.total, 1, 64),
+            ("messages per run", self.messages, 1, 1_000),
+            ("automatic lead wakes per run", self.wakes, 1, 100),
+            ("interrupts per sub-session", self.interrupts, 1, 20),
+            ("waiting suggested tasks", self.waiting_cards, 1, 50),
+        ]
+    }
+
+    /// Reject a value outside its range, or a total below the live limit, with the reason a person reads.
+    pub fn validate(&self) -> Result<(), String> {
+        for (name, value, low, high) in self.ranges() {
+            if !(low..=high).contains(&value) {
+                return Err(format!("{name} must be {low} to {high}, not {value}"));
+            }
+        }
+        if self.total < self.live {
+            return Err(format!(
+                "sub-sessions per run ({}) cannot be fewer than live sub-sessions per run ({})",
+                self.total, self.live
+            ));
+        }
+        Ok(())
+    }
+}
 /// Root sessions are depth 0; a child is depth 1 and may not spawn.
 pub const MAX_DEPTH: usize = 1;
 /// The longest task `perch spawn` accepts, in characters. The task and Perch's note to the
@@ -115,10 +178,10 @@ impl SubState {
 pub enum Refusal {
     /// The caller is itself a child.
     Depth,
-    /// No turn opened by a person is running in the caller.
-    NotPersonTurn,
-    Concurrent,
-    Descendants,
+    /// The run's live limit (the number is the setting at the time).
+    Concurrent(u32),
+    /// The run's total limit.
+    Descendants(u32),
 }
 
 impl Refusal {
@@ -130,55 +193,39 @@ impl Refusal {
                  Complete this task yourself.",
                 MAX_DEPTH + 1
             ),
-            Self::NotPersonTurn => "Sub-sessions can be started only during a turn a person \
-                 opened in this session. This turn was not, or Perch cannot tell. Do the work \
-                 yourself, or say what you would have delegated and let the person decide."
-                .into(),
-            Self::Concurrent => format!(
-                "You already have {MAX_CONCURRENT} sub-sessions running. Wait for one to finish, \
-                 or stop one you no longer need with `perch stop <session>`."
+            Self::Concurrent(limit) => format!(
+                "You already have {limit} sub-sessions running, the most the person allows \
+                 (Settings > Sub-sessions). Wait for one to finish, or stop one you no longer \
+                 need with `perch stop <session>`."
             ),
-            Self::Descendants => format!(
-                "This run has already started {MAX_DESCENDANTS} sub-sessions, the most it may. \
-                 Continue with the ones you have or do the rest yourself."
+            Self::Descendants(limit) => format!(
+                "This run has already started {limit} sub-sessions, the most the person allows \
+                 (Settings > Sub-sessions). Continue with the ones you have or do the rest yourself."
             ),
         }
     }
 }
 
-/// Who opened the turn a session is in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TurnOrigin {
-    /// A person typed it, in the terminal or in the chat, or sent it by an explicit action.
-    Person,
-    /// Perch delivered it for an agent: a sub-session's first message or a message between
-    /// sessions.
-    Agent,
-}
-
 /// What the core knows about the caller and its children when a spawn arrives.
 pub struct SpawnContext {
     pub caller_is_child: bool,
-    /// The caller's current turn, if Perch saw it open. `None` is "cannot tell".
-    pub turn: Option<TurnOrigin>,
     pub live_children: usize,
     pub all_children: usize,
+    pub limits: RunLimits,
 }
 
 /// The one admission rule, applied before anything is dispatched. Depth first, so a child gets
-/// the "do it yourself" text whatever else is true.
+/// the "do it yourself" text whatever else is true. Any turn may spawn (owner decision 2026-11-08):
+/// the run's limits are what bound it.
 pub fn admit(context: &SpawnContext) -> Result<(), Refusal> {
     if context.caller_is_child {
         return Err(Refusal::Depth);
     }
-    if context.turn != Some(TurnOrigin::Person) {
-        return Err(Refusal::NotPersonTurn);
+    if context.live_children >= context.limits.live as usize {
+        return Err(Refusal::Concurrent(context.limits.live));
     }
-    if context.live_children >= MAX_CONCURRENT {
-        return Err(Refusal::Concurrent);
-    }
-    if context.all_children >= MAX_DESCENDANTS {
-        return Err(Refusal::Descendants);
+    if context.all_children >= context.limits.total as usize {
+        return Err(Refusal::Descendants(context.limits.total));
     }
     Ok(())
 }
@@ -341,14 +388,15 @@ mod tests {
     fn context() -> SpawnContext {
         SpawnContext {
             caller_is_child: false,
-            turn: Some(TurnOrigin::Person),
             live_children: 0,
             all_children: 0,
+            limits: RunLimits::default(),
         }
     }
 
+    // Owner decision 2026-11-08: no turn origin is asked for; the limits are what bound a run.
     #[test]
-    fn a_person_turn_with_room_is_admitted() {
+    fn any_turn_with_room_is_admitted() {
         assert_eq!(admit(&context()), Ok(()));
     }
 
@@ -369,20 +417,104 @@ mod tests {
     fn a_child_is_refused_for_depth_before_anything_else() {
         let refusal = admit(&SpawnContext {
             caller_is_child: true,
-            turn: None,
             live_children: 9,
             all_children: 9,
+            ..context()
         });
         assert_eq!(refusal, Err(Refusal::Depth));
     }
 
     #[test]
-    fn only_a_turn_a_person_opened_may_spawn() {
-        for turn in [Some(TurnOrigin::Agent), None] {
-            assert_eq!(
-                admit(&SpawnContext { turn, ..context() }),
-                Err(Refusal::NotPersonTurn)
-            );
+    fn the_limits_are_the_settings_not_fixed_numbers() {
+        let limits = RunLimits {
+            live: 2,
+            total: 3,
+            ..RunLimits::default()
+        };
+        let at = |live, all| {
+            admit(&SpawnContext {
+                live_children: live,
+                all_children: all,
+                limits,
+                ..context()
+            })
+        };
+        assert_eq!(at(1, 2), Ok(()));
+        assert_eq!(at(2, 2), Err(Refusal::Concurrent(2)));
+        assert_eq!(at(0, 3), Err(Refusal::Descendants(3)));
+        assert!(Refusal::Concurrent(2)
+            .message()
+            .contains("You already have 2"));
+        assert!(Refusal::Descendants(3)
+            .message()
+            .contains("started 3 sub-sessions"));
+    }
+
+    #[test]
+    fn limits_are_validated_to_their_ranges_with_a_reason() {
+        assert_eq!(RunLimits::default().validate(), Ok(()));
+        for (limits, text) in [
+            (
+                RunLimits {
+                    live: 0,
+                    ..Default::default()
+                },
+                "live sub-sessions per run must be 1 to 16",
+            ),
+            (
+                RunLimits {
+                    live: 17,
+                    total: 20,
+                    ..Default::default()
+                },
+                "must be 1 to 16",
+            ),
+            (
+                RunLimits {
+                    total: 65,
+                    ..Default::default()
+                },
+                "sub-sessions per run must be 1 to 64",
+            ),
+            (
+                RunLimits {
+                    messages: 1_001,
+                    ..Default::default()
+                },
+                "messages per run must be 1 to 1000",
+            ),
+            (
+                RunLimits {
+                    wakes: 0,
+                    ..Default::default()
+                },
+                "wakes per run must be 1 to 100",
+            ),
+            (
+                RunLimits {
+                    interrupts: 21,
+                    ..Default::default()
+                },
+                "interrupts per sub-session must be 1 to 20",
+            ),
+            (
+                RunLimits {
+                    waiting_cards: 51,
+                    ..Default::default()
+                },
+                "waiting suggested tasks must be 1 to 50",
+            ),
+            (
+                RunLimits {
+                    live: 8,
+                    total: 4,
+                    ..Default::default()
+                },
+                "cannot be fewer than live",
+            ),
+        ] {
+            let error = limits.validate().unwrap_err();
+            assert!(error.contains(text), "{error}");
         }
     }
 
@@ -396,20 +528,19 @@ mod tests {
             })
         };
         assert_eq!(at(3, 3), Ok(()));
-        assert_eq!(at(4, 4), Err(Refusal::Concurrent));
+        assert_eq!(at(4, 4), Err(Refusal::Concurrent(4)));
         assert_eq!(at(0, 7), Ok(()));
-        assert_eq!(at(0, 8), Err(Refusal::Descendants));
+        assert_eq!(at(0, 8), Err(Refusal::Descendants(8)));
         // Four live children are refused as concurrent even when the total is over too.
-        assert_eq!(at(4, 8), Err(Refusal::Concurrent));
+        assert_eq!(at(4, 8), Err(Refusal::Concurrent(4)));
     }
 
     #[test]
     fn every_refusal_tells_the_agent_what_to_do_next() {
         for refusal in [
             Refusal::Depth,
-            Refusal::NotPersonTurn,
-            Refusal::Concurrent,
-            Refusal::Descendants,
+            Refusal::Concurrent(4),
+            Refusal::Descendants(8),
         ] {
             let message = refusal.message();
             assert!(

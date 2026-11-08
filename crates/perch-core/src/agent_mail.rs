@@ -31,12 +31,12 @@ pub const INLINE_MAX_CHARS: usize = 2_000;
 pub const BODY_MAX_BYTES: usize = 64 * 1024;
 /// The preview of a body that went to a file, in characters.
 pub const PREVIEW_CHARS: usize = 300;
-/// Messages one run may send. Notes are Perch's own and do not count.
+/// Default: messages one run may send. Notes are Perch's own and do not count. A setting.
 pub const MAX_MESSAGES_PER_RUN: usize = 50;
 /// Messages and notes waiting for one receiver.
 pub const MAX_PENDING_PER_TARGET: usize = 32;
-/// Automatic deliveries to a lead between two turns a person opened on it.
-pub const MAX_WAKES_PER_PERSON_TURN: u32 = 10;
+/// Default: automatic deliveries to a lead over its run. A setting; never reset by a person.
+pub const DEFAULT_WAKES_PER_RUN: u32 = 10;
 /// The longest label for a sender in a header.
 const LABEL_MAX_CHARS: usize = 60;
 const RULE: &str = "────────────────────────────────────────────────────────────";
@@ -669,7 +669,8 @@ pub enum SendRefusal {
     OtherRun,
     NotRunning,
     CannotReceive,
-    RunLimit,
+    /// The run's message limit (the number is the setting at the time).
+    RunLimit(usize),
     QueueFull,
     /// A steer to a session that refuses messages from other sessions.
     InboundRefuses,
@@ -687,9 +688,9 @@ impl SendRefusal {
                 "that session cannot receive messages (it is a terminal, not an agent Perch started)"
                     .into()
             }
-            Self::RunLimit => format!(
-                "this run has sent {MAX_MESSAGES_PER_RUN} messages, the most it may. Do the rest \
-                 yourself, or put what you have to say in your report."
+            Self::RunLimit(limit) => format!(
+                "this run has sent {limit} messages, the most the person allows (Settings > \
+                 Sub-sessions). Do the rest yourself, or put what you have to say in your report."
             ),
             Self::QueueFull => format!(
                 "{MAX_PENDING_PER_TARGET} messages already wait for that session. Wait until it \
@@ -714,6 +715,8 @@ pub struct SendContext {
     /// The receiver is an agent Perch started, with a native bridge: not a terminal.
     pub target_is_agent: bool,
     pub run_messages: usize,
+    /// The run's message limit, a setting.
+    pub max_messages: usize,
     pub target_pending: usize,
 }
 
@@ -731,8 +734,8 @@ pub fn admit_send(context: &SendContext) -> Result<(), SendRefusal> {
     if !context.target_live {
         return Err(SendRefusal::NotRunning);
     }
-    if context.run_messages >= MAX_MESSAGES_PER_RUN {
-        return Err(SendRefusal::RunLimit);
+    if context.run_messages >= context.max_messages {
+        return Err(SendRefusal::RunLimit(context.max_messages));
     }
     if context.target_pending >= MAX_PENDING_PER_TARGET {
         return Err(SendRefusal::QueueFull);
@@ -829,7 +832,10 @@ pub struct TargetFacts {
     pub is_lead: bool,
     /// Children of this receiver that are working, or whose state cannot be read.
     pub working_children: usize,
+    /// Automatic deliveries to this lead so far in its run.
     pub wakes: u32,
+    /// The run's limit on them, a setting.
+    pub max_wakes: u32,
 }
 
 /// Why a delivery is waiting. Nothing is written while one holds.
@@ -846,7 +852,9 @@ pub enum Wait {
     /// Perch started: unknown is recent. Retried on a later pass.
     RecentInput,
     WorkingChildren(usize),
-    WakeCap,
+    /// The run has used its automatic deliveries to the lead (the number is the setting). Not a
+    /// wait: nothing will change it, so the message is refused with this reason.
+    WakeCap(u32),
     /// Busy, and its CLI has no follow-up queue: it gets the message when its turn ends.
     NoFollowUpQueue(String),
 }
@@ -869,9 +877,9 @@ impl Wait {
                 "the receiver is working and {agent} has no follow-up queue, so it gets this \
                  when its turn ends"
             ),
-            Self::WakeCap => format!(
-                "the receiver has been woken {MAX_WAKES_PER_PERSON_TURN} times since a person \
-                 last spoke to it"
+            Self::WakeCap(limit) => format!(
+                "this run has already delivered {limit} messages to its lead without anyone \
+                 asking, the most the person allows (Settings > Sub-sessions)"
             ),
         }
     }
@@ -906,8 +914,8 @@ pub fn route(facts: &TargetFacts) -> Result<Handoff, Wait> {
         if handoff == Handoff::Started && facts.working_children > 0 {
             return Err(Wait::WorkingChildren(facts.working_children));
         }
-        if facts.wakes >= MAX_WAKES_PER_PERSON_TURN {
-            return Err(Wait::WakeCap);
+        if facts.wakes >= facts.max_wakes {
+            return Err(Wait::WakeCap(facts.max_wakes));
         }
     }
     Ok(handoff)
@@ -1068,6 +1076,7 @@ mod tests {
             target_live: true,
             target_is_agent: true,
             run_messages: 0,
+            max_messages: MAX_MESSAGES_PER_RUN,
             target_pending: 0,
         }
     }
@@ -1087,7 +1096,10 @@ mod tests {
             })
         };
         assert_eq!(at(MAX_MESSAGES_PER_RUN - 1, 0), Ok(()));
-        assert_eq!(at(MAX_MESSAGES_PER_RUN, 0), Err(SendRefusal::RunLimit));
+        assert_eq!(
+            at(MAX_MESSAGES_PER_RUN, 0),
+            Err(SendRefusal::RunLimit(MAX_MESSAGES_PER_RUN))
+        );
         assert_eq!(at(0, MAX_PENDING_PER_TARGET - 1), Ok(()));
         assert_eq!(at(0, MAX_PENDING_PER_TARGET), Err(SendRefusal::QueueFull));
         for refusal in [
@@ -1095,11 +1107,24 @@ mod tests {
             SendRefusal::OtherRun,
             SendRefusal::NotRunning,
             SendRefusal::CannotReceive,
-            SendRefusal::RunLimit,
+            SendRefusal::RunLimit(50),
             SendRefusal::QueueFull,
         ] {
             assert!(!refusal.message().is_empty());
         }
+    }
+
+    // Owner decision 2026-11-08: the message limit is the setting, and the refusal names it.
+    #[test]
+    fn the_message_limit_is_the_setting_and_the_refusal_names_it() {
+        let refusal = admit_send(&SendContext {
+            run_messages: 3,
+            max_messages: 3,
+            ..context()
+        })
+        .unwrap_err();
+        assert_eq!(refusal, SendRefusal::RunLimit(3));
+        assert!(refusal.message().contains("sent 3 messages"));
     }
 
     #[test]
@@ -1229,10 +1254,10 @@ mod tests {
         assert_eq!(route(&lead), Ok(Handoff::QueuedInAgent));
         assert_eq!(
             route(&TargetFacts {
-                wakes: MAX_WAKES_PER_PERSON_TURN,
+                wakes: DEFAULT_WAKES_PER_RUN,
                 ..lead
             }),
-            Err(Wait::WakeCap)
+            Err(Wait::WakeCap(DEFAULT_WAKES_PER_RUN))
         );
     }
 
@@ -1242,6 +1267,7 @@ mod tests {
             reported: true,
             idle: true,
             is_lead: true,
+            max_wakes: DEFAULT_WAKES_PER_RUN,
             ..Default::default()
         }
     }
@@ -1285,7 +1311,7 @@ mod tests {
     }
 
     #[test]
-    fn a_lead_waits_for_its_working_children_and_for_a_person_after_ten_wakes() {
+    fn an_idle_lead_waits_for_its_working_children_and_is_refused_after_its_wake_limit() {
         assert_eq!(
             wait_reason(&TargetFacts {
                 working_children: 2,
@@ -1295,17 +1321,26 @@ mod tests {
         );
         assert_eq!(
             wait_reason(&TargetFacts {
-                wakes: MAX_WAKES_PER_PERSON_TURN - 1,
+                wakes: DEFAULT_WAKES_PER_RUN - 1,
                 ..idle_lead()
             }),
             None
         );
         assert_eq!(
             wait_reason(&TargetFacts {
-                wakes: MAX_WAKES_PER_PERSON_TURN,
+                wakes: DEFAULT_WAKES_PER_RUN,
                 ..idle_lead()
             }),
-            Some(Wait::WakeCap)
+            Some(Wait::WakeCap(DEFAULT_WAKES_PER_RUN))
+        );
+        // The limit is the setting.
+        assert_eq!(
+            wait_reason(&TargetFacts {
+                wakes: 2,
+                max_wakes: 2,
+                ..idle_lead()
+            }),
+            Some(Wait::WakeCap(2))
         );
         // Neither rule applies to a child, which has no children and is not woken by a cap.
         assert_eq!(
@@ -1332,7 +1367,7 @@ mod tests {
             Wait::RecentInput,
             Wait::WorkingChildren(1),
             Wait::WorkingChildren(3),
-            Wait::WakeCap,
+            Wait::WakeCap(10),
         ] {
             assert!(!wait.reason().is_empty());
         }

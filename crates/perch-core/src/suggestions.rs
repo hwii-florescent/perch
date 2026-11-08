@@ -6,13 +6,13 @@
 //! Own design, after the behaviour Claude desktop documents for a suggested task (a card with
 //! Start, Do it here, Options and Start all); nothing is copied. A suggestion starts nothing. It
 //! is a task, an agent and options written down for a person to accept; accepting it is the
-//! person's own action, so it needs no turn a person opened and goes through the same limits as
+//! person's own action, and it goes through the same limits as
 //! `perch spawn`. Nothing here ever starts, retries or plans work.
 
 /// Tasks one `perch suggest` may carry: one card.
 pub const MAX_PER_CARD: usize = 5;
-/// Suggestions a lead may have waiting for a person at once. A lead that fills this has to wait
-/// for the person; it cannot bury them in cards.
+/// Default: suggestions a lead may have waiting for a person at once. A setting. A lead that fills
+/// this has to wait for the person; it cannot bury them in cards.
 pub const MAX_PENDING: usize = 10;
 
 /// Where one suggestion stands.
@@ -81,7 +81,7 @@ pub fn check_task(task: &str) -> Result<&str, String> {
 
 /// Refuse a card of more tasks than it may hold, or one that would put more waiting suggestions in
 /// front of the person than a lead may have.
-pub fn check_batch(count: usize, pending: usize) -> Result<(), String> {
+pub fn check_batch(count: usize, pending: usize, max_pending: usize) -> Result<(), String> {
     if count == 0 {
         return Err("suggest at least one task: perch suggest --task <text>".into());
     }
@@ -90,10 +90,11 @@ pub fn check_batch(count: usize, pending: usize) -> Result<(), String> {
             "one card holds at most {MAX_PER_CARD} tasks; suggest the most useful ones"
         ));
     }
-    if pending + count > MAX_PENDING {
+    if pending + count > max_pending {
         return Err(format!(
-            "{pending} of your suggestions are still waiting for the person (at most {MAX_PENDING} \
-             at once). Wait for them to answer before suggesting more."
+            "{pending} of your suggestions are still waiting for the person (at most {max_pending} \
+             at once, a setting in Settings > Sub-sessions). Wait for them to answer before \
+             suggesting more."
         ));
     }
     Ok(())
@@ -136,13 +137,18 @@ mod tests {
 
     #[test]
     fn a_card_is_limited_and_a_lead_cannot_bury_the_person() {
-        assert!(check_batch(0, 0).is_err());
-        assert!(check_batch(1, 0).is_ok());
-        assert!(check_batch(MAX_PER_CARD, 0).is_ok());
-        assert!(check_batch(MAX_PER_CARD + 1, 0).is_err());
-        assert!(check_batch(1, MAX_PENDING - 1).is_ok());
-        let refused = check_batch(2, MAX_PENDING - 1).unwrap_err();
+        let check = |count, pending| check_batch(count, pending, MAX_PENDING);
+        assert!(check(0, 0).is_err());
+        assert!(check(1, 0).is_ok());
+        assert!(check(MAX_PER_CARD, 0).is_ok());
+        assert!(check(MAX_PER_CARD + 1, 0).is_err());
+        assert!(check(1, MAX_PENDING - 1).is_ok());
+        let refused = check(2, MAX_PENDING - 1).unwrap_err();
         assert!(refused.contains("still waiting"), "{refused}");
+        // The waiting limit is the setting.
+        assert!(check_batch(1, 2, 3).is_ok());
+        let refused = check_batch(2, 2, 3).unwrap_err();
+        assert!(refused.contains("at most 3 at once"), "{refused}");
     }
 
     #[test]
