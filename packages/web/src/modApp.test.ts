@@ -354,4 +354,21 @@ describe("an app module's versions", () => {
     expect(undo).toHaveBeenCalledTimes(1);
     expect(host.children).toHaveLength(0);
   });
+
+  it("finds a persistent terminal by its session id as well as its terminal id", () => {
+    const sendTerminalInput = vi.fn();
+    Object.assign(store.state, { cliTerminalIds: {}, sendTerminalInput });
+    const host = document.createElement("div");
+    host.innerHTML = '<div data-session-id="sess" data-terminal-id="term"></div><div data-session-id="opening"></div>';
+    document.body.append(host);
+    try {
+      const api = modApi("m");
+      api.sendText("sess", "ls\r");
+      api.sendText("term", "pwd\r");
+      expect(sendTerminalInput.mock.calls).toEqual([["term", "ls\r"], ["term", "pwd\r"]]);
+      expect(() => api.sendText("opening", "x")).toThrow("No terminal opening");
+    } finally {
+      host.remove();
+    }
+  });
 });

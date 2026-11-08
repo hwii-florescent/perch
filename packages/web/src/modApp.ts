@@ -423,10 +423,11 @@ let panesOnScreen: () => ReturnType<ModApi["panes"]> = () => [];
 // xtermSetup pulls in the file store too, so the canvas code hands the reader over (modCommands).
 let terminalText: (root: Element, lines?: number) => string | null = () => null;
 export const setTerminalReader = (reader: typeof terminalText) => { terminalText = reader; };
-/** The element of a terminal on screen, by its terminal id or its session's. */
+/** The element of a terminal on screen, by its terminal id or its session's (a persistent terminal names both). */
 const terminalElement = (id: string): Element => {
   const terminalId = usePerchStore.getState().cliTerminalIds[id] ?? id;
-  return document.querySelector(`[data-terminal-id="${CSS.escape(terminalId)}"]`) ?? document.createElement("div");
+  const quoted = CSS.escape(terminalId);
+  return document.querySelector(`[data-terminal-id="${quoted}"], [data-session-id="${quoted}"][data-terminal-id]`) ?? document.createElement("div");
 };
 export const setPanesSource = (source: typeof panesOnScreen) => { panesOnScreen = source; };
 

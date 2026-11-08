@@ -238,7 +238,7 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
   // A phone holds the size of this computer's terminal: the notice offers it back, in place of "Fit here".
   const phoneSized = !isMobile && shared && !resizing && !!terminalId && sizedByOtherDevice(status);
   const label = !connected ? "Reconnecting…" : phoneSized ? null : sleeping || exitCode !== null ? null : error && !terminalId ? "Agent unavailable" : !status ? "Opening agent…" : controlling ? null : shared ? (isMobile ? "Shared terminal" : null) : status.inputOwner ? "Another view is typing in this agent" : "Viewing agent";
-  return <div className="terminal terminal--persistent" data-testid="persistent-agent-terminal" data-terminal-id={terminalId ?? undefined} data-controlling={controlling || undefined} data-writable={writable || undefined}>
+  return <div className="terminal terminal--persistent" data-testid="persistent-agent-terminal" data-session-id={sessionId} data-terminal-id={terminalId ?? undefined} data-controlling={controlling || undefined} data-writable={writable || undefined}>
     {label && <div className={cn(glass, "absolute top-2 right-3 z-[2] flex items-center gap-1 py-0.5 pr-0.5 pl-3 text-[0.8rem] text-subtext-0")}>
       <span role="status">{label}</span>
       {!terminalId && error && connected && <button type="button" className={button({ variant: "soft", size: "md", className: "[.app--mobile_&]:min-h-11" })} disabled={pending} onClick={startOver}>Retry CLI</button>}
