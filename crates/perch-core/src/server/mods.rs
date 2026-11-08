@@ -8,6 +8,7 @@ use super::*;
 use crate::agent_identity::AgentIdentity;
 use crate::layouts;
 use crate::mods::{self, Error};
+use axum::Json;
 use serde_json::{json, Value};
 
 fn failure(error: Error) -> Failure {
@@ -185,6 +186,167 @@ pub(super) async fn file(
     }
 }
 
+/// The person's page asking for what a mod may do on this computer: run a program or use a file, as
+/// herdr's `exec` and file functions do. Same gate as the mod's code (a person's token, never an
+/// agent's, and nothing while mods are off), since a mod is trusted code the person chose to run.
+fn mod_host_gate(
+    app: &AppState,
+    peer: &SocketAddr,
+    headers: &HeaderMap,
+) -> Result<(), (StatusCode, &'static str)> {
+    authorize_request(app, peer, headers, &HashMap::new())
+        .map_err(|status| (status, "device access denied"))?;
+    if app.settings.get().mods.is_off() {
+        return Err((StatusCode::FORBIDDEN, "mods are off"));
+    }
+    Ok(())
+}
+
+fn plain_error(status: StatusCode, text: impl ToString) -> axum::response::Response {
+    (status, Json(json!({ "error": text.to_string() }))).into_response()
+}
+
+/// `~/x` and absolute paths only: a mod names a place on the computer, not "somewhere near here".
+fn host_path(text: &str) -> Result<PathBuf, String> {
+    let path = match text.strip_prefix("~/") {
+        Some(rest) => PathBuf::from(std::env::var_os("HOME").ok_or("no home folder")?).join(rest),
+        None => PathBuf::from(text),
+    };
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Err("a path must be absolute or start with ~/".into())
+    }
+}
+
+const MAX_OUTPUT: usize = 1024 * 1024;
+const MAX_FILE: u64 = 5 * 1024 * 1024;
+
+/// `POST /mods/exec {cmd, args?, cwd?, timeout?}`: run a program in the person's environment. The
+/// timeout is milliseconds (default 30 s, at most 10 min); output past 1 MiB is cut.
+pub(super) async fn exec(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> axum::response::Response {
+    if let Err((status, text)) = mod_host_gate(&app, &peer, &headers) {
+        return (status, text).into_response();
+    }
+    let Some(cmd) = body["cmd"].as_str().filter(|c| !c.is_empty()) else {
+        return plain_error(StatusCode::BAD_REQUEST, "exec needs `cmd`");
+    };
+    let args: Vec<String> = body["args"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut command = tokio::process::Command::new(cmd);
+    command
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
+    if let Some(cwd) = body["cwd"].as_str() {
+        match host_path(cwd) {
+            Ok(dir) => command.current_dir(dir),
+            Err(error) => return plain_error(StatusCode::BAD_REQUEST, error),
+        };
+    }
+    let wait =
+        std::time::Duration::from_millis(body["timeout"].as_u64().unwrap_or(30_000).min(600_000));
+    let cut = |bytes: Vec<u8>| {
+        String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_OUTPUT)]).into_owned()
+    };
+    match tokio::time::timeout(wait, command.output()).await {
+        Err(_) => plain_error(
+            StatusCode::REQUEST_TIMEOUT,
+            format!("{cmd} ran past {} ms", wait.as_millis()),
+        ),
+        Ok(Err(error)) => plain_error(
+            StatusCode::BAD_REQUEST,
+            format!("could not start {cmd}: {error}"),
+        ),
+        Ok(Ok(out)) => Json(json!({
+            "code": out.status.code(),
+            "stdout": cut(out.stdout),
+            "stderr": cut(out.stderr),
+        }))
+        .into_response(),
+    }
+}
+
+/// `POST /mods/fs {op: read|write|stat|list, path, text?}` on absolute or `~/` paths. Reads stop at
+/// 5 MiB. Write replaces the file (parent folders are made).
+pub(super) async fn fs(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> axum::response::Response {
+    if let Err((status, text)) = mod_host_gate(&app, &peer, &headers) {
+        return (status, text).into_response();
+    }
+    let path = match body["path"].as_str().map(host_path) {
+        Some(Ok(path)) => path,
+        Some(Err(error)) => return plain_error(StatusCode::BAD_REQUEST, error),
+        None => return plain_error(StatusCode::BAD_REQUEST, "fs needs `path`"),
+    };
+    let done = tokio::task::spawn_blocking(move || -> Result<Value, std::io::Error> {
+        Ok(match body["op"].as_str() {
+            Some("read") => {
+                if std::fs::metadata(&path)?.len() > MAX_FILE {
+                    return Err(std::io::Error::other("larger than 5 MiB"));
+                }
+                json!({ "text": std::fs::read_to_string(&path)? })
+            }
+            Some("write") => {
+                let text = body["text"].as_str().unwrap_or_default();
+                if text.len() as u64 > MAX_FILE {
+                    return Err(std::io::Error::other("larger than 5 MiB"));
+                }
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&path, text)?;
+                json!({})
+            }
+            Some("stat") => match std::fs::metadata(&path) {
+                Ok(m) => json!({
+                    "exists": true,
+                    "isDir": m.is_dir(),
+                    "size": m.len(),
+                    "modified": m.modified().ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_millis() as u64),
+                }),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => json!({ "exists": false }),
+                Err(error) => return Err(error),
+            },
+            Some("list") => {
+                let mut names: Vec<Value> = std::fs::read_dir(&path)?
+                    .filter_map(Result::ok)
+                    .filter_map(|e| {
+                        Some(json!({ "name": e.file_name().into_string().ok()?, "isDir": e.file_type().ok()?.is_dir() }))
+                    })
+                    .take(5000)
+                    .collect();
+                names.sort_by_key(|n| n["name"].as_str().unwrap_or_default().to_string());
+                json!({ "entries": names })
+            }
+            _ => return Err(std::io::Error::other("op is read, write, stat or list")),
+        })
+    })
+    .await;
+    match done {
+        Ok(Ok(value)) => Json(value).into_response(),
+        Ok(Err(error)) => plain_error(StatusCode::BAD_REQUEST, error),
+        Err(error) => plain_error(StatusCode::INTERNAL_SERVER_ERROR, error),
+    }
+}
+
 fn state_message(app: &AppState, request_id: String, error: Option<String>) -> ServerMessage {
     let policy = app.settings.get().mods;
     ServerMessage::ModsState {
@@ -359,6 +521,104 @@ mod tests {
         assert_eq!(listed["layouts"].as_array().unwrap().len(), 2);
         assert_eq!(call("layout", json!({"id": "stock"})).await.0, 200);
         assert_eq!(call("list", json!({})).await.1["layout"], Value::Null);
+
+        // What a mod may do on this computer is the person's alone: an agent's token is refused,
+        // the person's works, and nothing runs while mods are off.
+        let person = format!("Bearer {}", app.local_ui.token());
+        let host = |route: &'static str, auth: String, body: Value| async move {
+            request(
+                address,
+                "POST",
+                route,
+                &[("Authorization", &auth)],
+                &body.to_string(),
+            )
+            .await
+        };
+        let file = root.join("note.txt");
+        let path = file.display().to_string();
+        let agent = format!("Bearer {token}");
+        assert_eq!(
+            host(
+                "/mods/fs",
+                agent.clone(),
+                json!({"op": "read", "path": path})
+            )
+            .await
+            .0,
+            403
+        );
+        assert_eq!(
+            host("/mods/exec", agent, json!({"cmd": "echo"})).await.0,
+            403
+        );
+        assert_eq!(
+            host(
+                "/mods/fs",
+                person.clone(),
+                json!({"op": "write", "path": path, "text": "hi"})
+            )
+            .await
+            .0,
+            200
+        );
+        assert_eq!(
+            host(
+                "/mods/fs",
+                person.clone(),
+                json!({"op": "read", "path": path})
+            )
+            .await
+            .1["text"],
+            "hi"
+        );
+        assert_eq!(
+            host(
+                "/mods/fs",
+                person.clone(),
+                json!({"op": "stat", "path": path})
+            )
+            .await
+            .1["size"],
+            2
+        );
+        assert_eq!(
+            host(
+                "/mods/fs",
+                person.clone(),
+                json!({"op": "read", "path": "relative.txt"})
+            )
+            .await
+            .0,
+            400
+        );
+        let echoed = host(
+            "/mods/exec",
+            person.clone(),
+            json!({"cmd": "echo", "args": ["a", "b"]}),
+        )
+        .await
+        .1;
+        assert_eq!(
+            (echoed["code"].as_i64(), echoed["stdout"].as_str()),
+            (Some(0), Some("a b\n"))
+        );
+        assert_eq!(
+            host(
+                "/mods/exec",
+                person.clone(),
+                json!({"cmd": "sleep", "args": ["5"], "timeout": 100})
+            )
+            .await
+            .0,
+            408
+        );
+        assert_eq!(
+            host("/mods/exec", person, json!({"cmd": "no-such-program-here"}))
+                .await
+                .0,
+            400
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

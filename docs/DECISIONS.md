@@ -32,6 +32,15 @@ approval not mattering much.
   (`keybinds.ts` SHORTCUTS, run through `dispatchShortcut`; `App.tsx` supplies their handlers),
   `api.notify({title, body})` is a toast, `api.overlay((el, close) => cleanup?)` a modal that closes
   with Esc or when the mod is replaced. Not yet: commands with arguments, popups and floating windows.
+- **The computer, data, shared state, surfaces.** `api.exec` and `readTextFile`/`writeTextFile`/
+  `statFile`/`listDir`/`watch` go through `POST /mods/exec` and `/mods/fs` (person's token only, an
+  agent's is refused, nothing while mods are off; not over the relay; local host only). `api.shared`
+  is state every mod sees, kept in localStorage. `api.sessions/projects/workspaces/focused/subscribe`
+  hand mods plain data. `api.run(id, args)` takes arguments for a mod's own commands and for the
+  typed stock ones in `modCommands.ts` (`session.open`, `session.close`, `project.focus`,
+  `workspace.focus`). `notify` has `level` and an `action` command. `popup` and `window` join
+  `overlay` (`modUi.ts`). `perch mod api` prints the typed reference
+  (`mod_examples/perch-mod.d.ts`); a test fails if it and `ModApi` disagree.
 - **Keys.** Perch already has herdr's `keys.json` as `settings.keybindings` (Settings > Keyboard),
   so there is no second file. `api.command({name, description, keys?, run})` adds `mod.<id>.<name>`
   to the same `SHORTCUTS` table (help, Settings, `run` and the key listener all see it; a free,

@@ -120,6 +120,9 @@ export interface ToastEntry {
   kind?: "done" | "blocked" | "usage";
   /** A usage alert's detail line. */
   body?: string;
+  /** A mod's notification: how serious it looks, and the command a click runs. */
+  level?: "info" | "warning" | "error";
+  action?: { command: string; args?: unknown };
 }
 
 interface PendingTerminal {

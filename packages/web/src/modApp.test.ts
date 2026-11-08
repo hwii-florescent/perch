@@ -2,9 +2,19 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 
-vi.mock("./store", () => ({ usePerchStore: { getState: () => ({}) } }));
+const store = vi.hoisted(() => ({
+  state: { sessions: [{ id: "a" }], sessionId: "a", activeProjectId: "p", activeWorkspaceId: "w", workspaceProjects: [{ id: "p" }], workspaces: [{ id: "w" }], toasts: [] as unknown[] },
+  listeners: new Set<() => void>(),
+}));
+vi.mock("./store", () => ({
+  usePerchStore: {
+    getState: () => store.state,
+    setState: (patch: unknown) => Object.assign(store.state, typeof patch === "function" ? (patch as (s: unknown) => object)(store.state) : patch),
+    subscribe: (fn: () => void) => (store.listeners.add(fn), () => store.listeners.delete(fn)),
+  },
+}));
 vi.mock("./ws", () => ({ socket: {} }));
-import { createSwapper, setCommandBridge, type ModApi, type ModMount } from "./modApp";
+import { createSwapper, modApi, setCommandBridge, type ModApi, type ModMount } from "./modApp";
 
 const drawing = (text: string, cleanup = vi.fn()): ModMount => (el) => { el.textContent = text; return cleanup; };
 
@@ -91,6 +101,72 @@ describe("an app module's versions", () => {
     expect(bind).toHaveBeenCalledWith("tabs.new", "cmd+shift+y");
     swapper.stop();
     expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives mods Perch's data, shared state, richer toasts and the floating surfaces, all undone with the mod", async () => {
+    const swapper = createSwapper(document.createElement("div"), vi.fn(), async () => (_el, a) => { api = a; });
+    let api!: ModApi;
+    await swapper.load("x", "m");
+
+    expect(api.sessions()).toEqual([{ id: "a" }]);
+    expect(api.focused()).toEqual({ sessionId: "a", projectId: "p", workspaceId: "w" });
+    const changed = vi.fn();
+    api.subscribe(changed);
+    store.listeners.forEach((fn) => fn());
+    expect(changed).toHaveBeenCalledTimes(1);
+
+    const heard = vi.fn();
+    api.onShared(heard);
+    api.setShared("theme", { dark: true });
+    expect(api.shared("theme")).toEqual({ dark: true });
+    expect(heard).toHaveBeenCalledWith("theme", { dark: true });
+
+    api.notify({ title: "Build", level: "error", action: { command: "session.open", args: { id: "a" } } });
+    expect(store.state.toasts).toEqual([expect.objectContaining({ title: "Build", level: "error", action: { command: "session.open", args: { id: "a" } } })]);
+
+    const anchor = document.createElement("button");
+    document.body.append(anchor);
+    api.popup(anchor, (box) => { box.textContent = "menu"; });
+    expect(document.body.textContent).toContain("menu");
+    document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(document.body.textContent).not.toContain("menu"); // a click elsewhere closes it
+
+    api.window({ key: "w", title: "T" }, (box) => { box.textContent = "first"; });
+    api.window({ key: "w", title: "T" }, (box) => { box.textContent = "second"; }); // same key replaces
+    expect(document.body.textContent).toContain("second");
+    expect(document.body.textContent).not.toContain("first");
+
+    swapper.stop();
+    expect(document.body.textContent).not.toContain("second");
+    api.setShared("theme", 1);
+    expect(heard).toHaveBeenCalledTimes(1); // its listener went with it
+    anchor.remove();
+  });
+
+  it("runs programs and uses files through the core's person-only routes", async () => {
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body) as Record<string, unknown>;
+      calls.push({ url, body });
+      return body.cmd === "boom"
+        ? new Response(JSON.stringify({ error: "could not start boom" }), { status: 400 })
+        : new Response(JSON.stringify({ code: 0, stdout: "hi\n", stderr: "", text: "contents" }), { status: 200 });
+    }));
+    let api!: ModApi;
+    await createSwapper(document.createElement("div"), vi.fn(), async () => (_el, a) => { api = a; }).load("x", "m");
+    expect((await api.exec("echo", ["hi"], { cwd: "~/" })).stdout).toBe("hi\n");
+    expect(await api.readTextFile("~/a.txt")).toBe("contents");
+    await api.writeTextFile("/tmp/x", "t");
+    expect(calls.map((c) => [new URL(c.url).pathname.split("/").pop(), c.body.cmd ?? c.body.op])).toEqual([["exec", "echo"], ["fs", "read"], ["fs", "write"]]);
+    await expect(api.exec("boom")).rejects.toThrow("could not start boom");
+    vi.unstubAllGlobals();
+  });
+
+  it("documents every member of the api in the types file `perch mod api` prints, and nothing else", () => {
+    const types = readFileSync("../../crates/perch-core/src/mod_examples/perch-mod.d.ts", "utf8");
+    const declared = [...types.matchAll(/^  (\w+)[(:?]/gm)].map((m) => m[1]).sort();
+    const { dispose: _dispose, ...api } = modApi("x");
+    expect(declared).toEqual(Object.keys(api).sort());
   });
 
   it("runs the example mods Perch ships against the api they are written for", () => {

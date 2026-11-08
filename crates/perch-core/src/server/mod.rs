@@ -920,6 +920,14 @@ pub async fn run(
             post(agent::mod_check).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(&format!("{base_path}mods/file"), get(mods::file))
+        .route(
+            &format!("{base_path}mods/exec"),
+            post(mods::exec).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}mods/fs"),
+            post(mods::fs).layer(axum::extract::DefaultBodyLimit::max(6 * 1024 * 1024)),
+        )
         .route(&format!("{base_path}workspace-file"), get(fs::file_content))
         .with_state(state);
 

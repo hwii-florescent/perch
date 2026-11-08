@@ -64,6 +64,8 @@ export interface Shortcut {
   /** Built-in defaults [macOS, other platforms]; `null` = none there. */
   keys: [string, string | null];
   run: (handlers: LeaderKeyHandlers) => void;
+  /** A mod's command, which can also take arguments from `api.run(id, args)`. */
+  runWith?: (args?: unknown) => void;
   /**
    * `terminal`: needs the xterm instance, so `terminalSearch.ts` runs it (the
    * global listener skips it). `outsideTerminal`: in a terminal the key
@@ -322,10 +324,10 @@ export function bindableCombo(combo: string, mac = IS_MAC): boolean {
  * live in, so Settings > Keyboard, the help and `run` all see it. `keys` is its default key, kept
  * only if it is bindable and no other command already uses it. Registering an id again replaces it;
  * the returned remover puts back what it replaced, and does nothing if a newer version took over. */
-export function registerCommand(id: string, description: string, keys: string | undefined, run: () => void): () => void {
+export function registerCommand(id: string, description: string, keys: string | undefined, run: (args?: unknown) => void): () => void {
   const taken = keys && (!bindableCombo(keys) || shortcutsBoundTo(keys, id).length > 0);
   if (taken) console.warn(`${id}: "${keys}" is not a free key, so the command has none`);
-  const mine: Shortcut = { id, group: "global", description, keys: [taken ? "" : keys ?? "", taken ? "" : keys ?? ""], run };
+  const mine: Shortcut = { id, group: "global", description, keys: [taken ? "" : keys ?? "", taken ? "" : keys ?? ""], run: () => run(), runWith: run };
   const at = SHORTCUTS.findIndex((s) => s.id === id);
   const previous = at < 0 ? undefined : SHORTCUTS[at];
   if (at < 0) SHORTCUTS.push(mine);

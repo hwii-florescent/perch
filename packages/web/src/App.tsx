@@ -21,6 +21,7 @@ import { Toast } from "./components/Toast";
 import { useIsMobileWidth } from "./responsive";
 import { SHORTCUTS, bindableCombo, dispatchShortcut, registerCommand, useLeaderKey } from "./keybinds";
 import { setCommandBridge } from "./modApp";
+import { TYPED_COMMANDS } from "./modCommands";
 import { usePerchStore } from "./store";
 import { MobilePaneShell, type MobilePaneKind } from "./components/MobilePaneShell";
 import { LaptopUnreachable, PairingGate } from "./components/PairingGate";
@@ -166,8 +167,17 @@ export default function App() {
   // Mods run the same commands a key does.
   useEffect(() => {
     setCommandBridge({
-      list: () => SHORTCUTS.map(({ id, description }) => ({ id, description })),
-      run: (command) => dispatchShortcut(command, { openNavigator, openKeybindHelp, toggleDrawer: toggleTerminal }),
+      list: () => [
+        ...SHORTCUTS.map(({ id, description }) => ({ id, description })),
+        ...Object.entries(TYPED_COMMANDS).map(([id, { description, args }]) => ({ id, description, args })),
+      ],
+      run: (command, args) => {
+        const typed = TYPED_COMMANDS[command];
+        if (typed) return typed.run(args), true;
+        const own = SHORTCUTS.find((s) => s.id === command)?.runWith;
+        if (own) return own(args), true;
+        return dispatchShortcut(command, { openNavigator, openKeybindHelp, toggleDrawer: toggleTerminal });
+      },
       register: registerCommand,
       bind: (command, keys) => {
         if (keys && !bindableCombo(keys)) throw new Error(`"${keys}" cannot be bound: it is reserved or has no modifier.`);

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { cn } from "../lib/cn";
 import { usePerchStore, type ToastEntry } from "../store";
+import { runCommand } from "../modApp";
 import { Slot } from "./Slot";
 import { StatusDot } from "./StatusDot";
 import { CloseIcon } from "./ui/icons";
@@ -34,8 +35,14 @@ function ToastItem({ toast }: { toast: ToastEntry }) {
   const heading = usage ? toast.title : blocked ? LABEL.blocked : LABEL.done;
   const detail = usage ? toast.body : toast.title || "(new session)";
 
-  const data = { id: toast.id, kind: usage ? "usage" : blocked ? "blocked" : "done", title: toast.title, body: toast.body, sessionId: toast.sessionId, sessionTitle: session?.title };
-  const actions = { open: () => { if (!usage) switchSession(toast.sessionId); dismissToast(toast.id); }, dismiss: () => dismissToast(toast.id) };
+  const open = () => {
+    if (toast.action) runCommand(toast.action.command, toast.action.args);
+    else if (!usage) switchSession(toast.sessionId);
+    dismissToast(toast.id);
+  };
+  const data = { id: toast.id, kind: usage ? "usage" : blocked ? "blocked" : "done", level: toast.level, title: toast.title, body: toast.body, sessionId: toast.sessionId, sessionTitle: session?.title };
+  const actions = { open, dismiss: () => dismissToast(toast.id) };
+  const ring = toast.level === "error" ? "border-red" : toast.level === "warning" || usage ? "border-yellow" : blocked ? "border-red" : "border-teal";
   return (
     <Slot name="toast" data={data} actions={actions} className="pointer-events-auto">
     <div
@@ -49,15 +56,12 @@ function ToastItem({ toast }: { toast: ToastEntry }) {
         type="button"
         className="flex min-w-0 flex-1 cursor-pointer items-center gap-[0.65rem] bg-transparent px-[0.8rem] py-[0.65rem] text-left text-fg [border:none] [font-family:inherit] hover:bg-surface-0 focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:-2px]"
         data-testid={`toast-${toast.sessionId}`}
-        onClick={() => {
-          if (!usage) switchSession(toast.sessionId);
-          dismissToast(toast.id);
-        }}
+        onClick={open}
       >
         {session && !usage ? (
           <StatusDot session={session} />
         ) : (
-          <span className={cn("inline-flex h-5 w-5 shrink-0 rounded-full border-[1.5px]", usage ? "border-yellow" : blocked ? "border-red" : "border-teal")} aria-hidden="true" />
+          <span className={cn("inline-flex h-5 w-5 shrink-0 rounded-full border-[1.5px]", ring)} aria-hidden="true" />
         )}
         <span className="min-w-0">
           <span className="block overflow-hidden text-[0.82rem] font-semibold text-ellipsis whitespace-nowrap">{heading}</span>

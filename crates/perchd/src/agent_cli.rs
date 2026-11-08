@@ -884,9 +884,12 @@ fn cancel(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-const MOD_USAGE: &str = "usage: perch mod [list] [--json] | perch mod enable <id> | \
+/// The mod API as TypeScript types, shipped with the core so the CLI and a mod author read one file.
+const MOD_API: &str = include_str!("../../perch-core/src/mod_examples/perch-mod.d.ts");
+
+const MOD_USAGE: &str ="usage: perch mod [list] [--json] | perch mod enable <id> | \
      perch mod disable <id> | perch mod open <id> | perch mod check <id> | \
-     perch mod examples | perch mod clone <example> [id] | perch mod layout <id|stock>";
+     perch mod api | perch mod examples | perch mod clone <example> [id] | perch mod layout <id|stock>";
 
 /// `perch mod`: the mods on this computer, turn one off or on, and show one.
 fn mod_cmd(args: &[String]) -> Result<(), String> {
@@ -912,6 +915,10 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
         ["open", id] => {
             ask("mod/open", json!({ "id": id }))?;
             println!("{id} is shown on the person's screen");
+            Ok(())
+        }
+        ["api"] => {
+            print!("{MOD_API}");
             Ok(())
         }
         ["examples"] => {
@@ -1287,6 +1294,7 @@ Commands
   perch mod open <id>     Show a mod on the person's screen now.
   perch mod check <id>    Wait for the person's window to load the mod's current files; exits
                           nonzero with the error if it threw. Run it after every edit.
+  perch mod api           The mod API as TypeScript types (read it before writing a mod).
   perch mod examples      The mods and layouts shipped inside Perch to start from.
   perch mod clone <example> [id]
                           Copy one into the mods or layouts folder (never overwrites), then edit it.
@@ -1382,22 +1390,14 @@ Mods
     {'name', 'description', 'place': 'dock' (a pane, the default) | 'overlay' | 'none' (no view,
     it only runs), 'entry': 'main.js'}.
   - main.js is an ES module whose default export is `(el, api) => cleanup?`: draw into `el` with
-    plain DOM, no build step. `api` is `modId`, `store` (Perch's own zustand store: getState() has
-    sessions, workspaces and the rest, subscribe() for live updates), `socket` (the app's client:
-    send any message, onMessage), `focusSession(id)`, `readFile(path)` (text of a file in the
-    open local project), `commands()` (every app command: {id, description}, the ids Settings >
-    Keyboard binds), `run(id)` (runs one, like its key; false if unknown), `notify({title, body})`
-    (a toast) and `overlay((el, close) => cleanup?)` (a modal over the app; Esc closes it).
-    `slot(name, (el, {data, actions}) => cleanup?)` draws one of Perch's own parts instead of the
-    stock one, which keeps its behavior and returns if the mod throws. Slots: `toast` (data {id,
-    kind, title, body?, sessionId, sessionTitle?}; actions open, dismiss) and `session-row` (the
-    sidebar's rows; data {id, title, status, blocked?, unseen?, createdAt, cwd, branch?, active};
-    actions open, remove). It is called again with new `data` whenever that changes.
-    `command({name, description, keys?, run})` adds a command of the mod's own (id
-    mod.<modId>.<name>) to the keyboard help and Settings > Keyboard; `keys` like 'cmd+shift+y' is
-    its default key, dropped if taken or without a modifier. `bind(commandId, keys)` rebinds any
-    command's key as the person's setting ('' unbinds, null restores the default). It runs inside Perch's page with the person's full access, so it can do
-    anything the app can, including start terminals through `socket`; a bug in it can break the page.
+    plain DOM, no build step. `perch mod api` prints the full typed reference (TypeScript types with
+    comments); read it before writing a mod. In short, `api` gives: Perch's data (sessions(),
+    projects(), focused(), subscribe()), commands (commands(), run(id, args), command({...}),
+    bind()), floating surfaces (overlay, popup, window, notify), drawing Perch's own parts
+    (slot(name, render): the toast and the sidebar's session-row keep their behavior and come back
+    if the mod throws), the computer (exec, readTextFile, writeTextFile, watch, ...) and shared
+    state between mods. It runs inside Perch's page with the person's full access, so it can do
+    anything the app can; a bug in it can break the page.
   - A layout changes the whole window, as in herdr. `layouts/<id>.json` (next to `mods/`, the
     path is in `perch mod`) is a tree: {'name': 'IDE', 'type': 'row', 'gap': 4, 'children': [...]}
     where a node is 'row' or 'column' (with children) or {'type': 'block', 'content': ...}, and
@@ -1900,6 +1900,7 @@ mod tests {
             "perch mod open <id>",
             "perch mod check <id>",
             "perch mod clone <example> [id]",
+            "perch mod api",
             "perch mod layout <id|stock>",
             "(el, api) => cleanup?",
             "PERCH_MODS=off",
