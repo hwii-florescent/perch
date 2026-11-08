@@ -172,39 +172,42 @@ test.describe("Keybindings + Navigator (Phase 4)", () => {
   // K5 — leader,v splits a terminal pane; leader,z maximizes/restores;
   // leader,x closes the active terminal pane.
   // -------------------------------------------------------------------------
-  test("K5. leader,v / leader,z / leader,x drive the dockview panes", async ({ page }) => {
+  test("K5. leader,v / leader,z / leader,x split, zoom and close the tiled panes", async ({ page }) => {
     await freshPage(page);
 
     const terminal = page.locator(".terminal__surface");
-    const chat = page.locator(".chat");
+    const tiles = page.locator("[data-pane-id]");
 
-    await expect(terminal).toHaveCount(0);
-    await expect(chat).toBeVisible({ timeout: 10000 });
-
-    // leader,v -> split a new terminal pane.
+    // leader,v -> a terminal if the workspace has none, then leader,v again tiles one beside it.
+    // (Sessions from earlier runs may exist, so count relative to where this starts.)
+    if ((await tiles.count()) === 0 || (await terminal.count()) === 0) {
+      await leaderChord(page, "v");
+      await expect(terminal).not.toHaveCount(0, { timeout: 10000 });
+      // The session must be listed before a second split has something to tile beside.
+      await expect.poll(() => page.evaluate(() => window.usePerchStore.getState().sessions.length)).toBeGreaterThan(0);
+    }
+    const before = await terminal.count();
     await leaderChord(page, "v");
-    await expect(terminal).toBeVisible({ timeout: 10000 });
-    await expect(chat).toBeVisible();
+    await expect(terminal).toHaveCount(before + 1, { timeout: 15000 });
+    await expect(tiles.first()).toHaveAttribute("data-pane-visible", "true");
 
     await page.screenshot({ path: "artifacts/k5-split.png" });
 
-    // leader,z -> maximize the active (terminal) pane group; the sibling chat
-    // panel's group is hidden while maximized.
+    // leader,z -> zoom the active pane: the other tile is hidden.
     await leaderChord(page, "z");
-    await expect(chat).not.toBeVisible({ timeout: 10000 });
-    await expect(terminal).toBeVisible();
+    await expect(tiles.first()).toHaveAttribute("data-pane-visible", "false", { timeout: 10000 });
+    await expect(tiles.last()).toHaveAttribute("data-pane-visible", "true");
 
     await page.screenshot({ path: "artifacts/k5-maximized.png" });
 
-    // leader,z again -> restore; chat reappears.
+    // leader,z again -> restore both tiles.
     await leaderChord(page, "z");
-    await expect(chat).toBeVisible({ timeout: 10000 });
-    await expect(terminal).toBeVisible();
+    await expect(tiles.first()).toHaveAttribute("data-pane-visible", "true", { timeout: 10000 });
+    await expect(tiles.last()).toHaveAttribute("data-pane-visible", "true");
 
-    // leader,x -> close the active terminal pane, leaving just chat.
+    // leader,x -> close the active pane.
     await leaderChord(page, "x");
-    await expect(terminal).toHaveCount(0, { timeout: 10000 });
-    await expect(chat).toBeVisible();
+    await expect(terminal).toHaveCount(before, { timeout: 10000 });
 
     await page.screenshot({ path: "artifacts/k5-closed.png" });
   });
