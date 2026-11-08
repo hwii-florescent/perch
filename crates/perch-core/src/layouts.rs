@@ -127,6 +127,9 @@ pub struct Look {
     pub pane_border: Option<u32>,
     #[serde(rename = "paneFocus", skip_serializing_if = "Option::is_none")]
     pub pane_focus: Option<String>,
+    /// `false` takes away the grip that drags a pane to another place in a split (default true).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub movable: Option<bool>,
 }
 
 /// A node taken out of the flow and drawn over the window at this place and size (px).
@@ -814,7 +817,7 @@ mod tests {
             ),
             (
                 "pane-ok.json",
-                r##"{"type":"block","content":"canvas","paneRadius":2,"paneBorder":1,"paneFocus":"#ff8800"}"##,
+                r##"{"type":"block","content":"canvas","paneRadius":2,"paneBorder":1,"paneFocus":"#ff8800","movable":false}"##,
             ),
             (
                 "shadow.json",
@@ -865,6 +868,14 @@ mod tests {
         assert_eq!(stack.active.as_deref(), Some("b"));
         assert!(by("drawer").error.is_none(), "{:?}", by("drawer").error);
         assert!(by("pane-ok").error.is_none(), "{:?}", by("pane-ok").error);
+        let Some(Node::Block(pane)) = &by("pane-ok").root else {
+            panic!("a block")
+        };
+        assert_eq!(
+            pane.look.movable,
+            Some(false),
+            "movable survives to the page"
+        );
         let Some(Node::Row(look)) = &by("term-look").root else {
             panic!("a row")
         };

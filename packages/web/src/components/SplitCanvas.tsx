@@ -9,6 +9,7 @@ import { gapped, layout, MIN_PANE_PX, useSplitSets, visibleSplit, type Strip } f
 import { acquirePassthrough, focusMainResponder } from "../browserNative";
 import { activateTab, entryLabel, workspaceTabs, type TabEntry } from "../workspaceTabs";
 import { closeTab, exitSplit } from "../tiledPanes";
+import { beginTabDrag } from "../tabDrag";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import { AgentIcon } from "./AgentIcon";
 import { DOT_GLYPH, sessionDotState, type AgentDotState } from "../statusDot";
@@ -44,6 +45,20 @@ const STATE_WORD: Record<AgentDotState, string> = { blocked: "Waiting for you", 
  * be rebuilt for a layout change); it is only resized, and only while its
  * session is in the set.
  */
+/** The grip at a split pane's top edge: drag it onto another pane's side to move the pane there. A layout
+ * turns it off with `movable: false`. */
+function PaneGrip({ id, label }: { id: string; label: string }) {
+  return (
+    <div
+      className="absolute inset-x-0 top-0 z-20 flex h-2 cursor-grab justify-center [display:var(--pane-grip,flex)]"
+      data-testid={`pane-grip-${id}`}
+      onPointerDown={(event) => beginTabDrag(event, id, label)}
+    >
+      <span className="mt-0.5 h-1 w-10 rounded-full bg-overlay-1 opacity-0 transition-opacity [div:hover>&]:opacity-100" />
+    </div>
+  );
+}
+
 export function SplitCanvas() {
   const sessions = usePerchStore((s) => s.sessions);
   const sessionId = usePerchStore((s) => s.sessionId);
@@ -264,6 +279,7 @@ export function SplitCanvas() {
           onMouseDownCapture={() => { if (activeId !== entry.id) activateTab(entry); }}
           onFocusCapture={() => { if (activeId !== entry.id) activateTab(entry); }}
         >
+          {split && !zoomed && <PaneGrip id={entry.id} label={entryLabel(entry)} />}
           {/* One compact row owns the name, status and actions; no floating controls over the header. */}
           <div className="flex h-7 shrink-0 items-center gap-1.5 px-1.5 text-xs text-subtext-0" data-testid={`pane-header-${entry.id}`}
             onContextMenu={(event) => { event.preventDefault(); useSplitSets.getState().openMenu(entry.id, event.clientX, event.clientY); }}>
@@ -306,6 +322,7 @@ export function SplitCanvas() {
           ) : (
             <WorkspaceFilesView layout="editor" workspaceId={tab.scope ?? tab.workspaceId} initialPath={tab.path} />
           )}
+          {split && !zoomed && <PaneGrip id={id} label={tab.path || id} />}
           {focusBar(id === activeKey)}
         </div>
       ))}

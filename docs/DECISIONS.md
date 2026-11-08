@@ -101,6 +101,11 @@ approval not mattering much.
   looks reaching menus opened from a themed subtree (they use the root's), `stack` nodes, gradients as
   images, light/dark theme pairs, per-pane header mods, and mod-fonts folders. `perch mod clone <id>`
   also duplicates one of your own mods or layouts (as `<id>-copy`).
+- **Floating spots and movable panes.** A float has a grip along its top edge; on release it takes the nearest window
+  edge and third (`snapSpot`), kept per layout in `layoutState` like the other clicks (`layout.float {id, edge?, align?}`
+  sets or resets it; dropped on top/bottom a drawer's `peek` is dropped). A mod draws against `shared("layout.float.<id>")`
+  (edge, align, vertical, dragging). Panes of a split show a top-edge grip that starts the existing tab drag
+  (`beginTabDrag`), so a drop on another pane's side moves it; a layout's `movable: false` hides it (`--pane-grip`).
 - **Layout structure, themes, fonts.** A `stack` node shows one child (`active`, `header`: `tabs` or a mod
   that reads `shared("layout.stack.<id>")` and runs `layout.stack`); nodes take `id`/`title`,
   `divider`/`resizable` (boundaries drag; sizes, hidden nodes and stack picks are kept per layout, keyed

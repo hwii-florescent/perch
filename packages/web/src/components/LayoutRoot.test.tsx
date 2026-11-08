@@ -110,7 +110,7 @@ describe("a layout's frame and terminal look", () => {
   });
 
   it("docks a float to an edge, makes a drawer of one that peeks, and frames panes", async () => {
-    const tree: LayoutNode = { type: "row", paneRadius: 3, paneBorder: 1, paneFocus: "#ff8800", children: [
+    const tree: LayoutNode = { type: "row", paneRadius: 3, paneBorder: 1, paneFocus: "#ff8800", movable: false, children: [
       { type: "block", content: "sidebar", float: { x: 0, y: 0, width: 300, height: 200, edge: "left", align: "center", peek: 40 } },
       { type: "block", content: "files", float: { x: 0, y: 0, width: 200, height: 100, edge: "bottom", align: "end" } },
     ] };
@@ -124,6 +124,39 @@ describe("a layout's frame and terminal look", () => {
     expect([node("files").style.bottom, node("files").style.right]).toEqual(["12px", "12px"]);
     const html = document.documentElement.style;
     expect([html.getPropertyValue("--radius-pane"), html.getPropertyValue("--pane-border"), html.getPropertyValue("--pane-focus")]).toEqual(["3px", "1px", "#ff8800"]);
+    expect(html.getPropertyValue("--pane-grip")).toBe("none"); // movable: false takes the pane grip away
+  });
+
+  it("drags a float by its grip, springs it to the nearest edge and third, keeps the spot, and a command puts it back", async () => {
+    const { placeFloat, snapSpot } = await import("../layoutState");
+    expect(snapSpot(10, 400, 1000, 800)).toEqual({ edge: "left", align: "center" });
+    expect(snapSpot(900, 20, 1000, 800)).toEqual({ edge: "top", align: "end" });
+    expect(snapSpot(500, 790, 1000, 800)).toEqual({ edge: "bottom", align: "center" });
+    expect(snapSpot(990, 100, 1000, 800)).toEqual({ edge: "right", align: "start" });
+
+    const tree: LayoutNode = { type: "row", children: [
+      { type: "block", id: "board", content: "files", float: { x: 0, y: 0, width: 200, height: 100, edge: "left", align: "start", peek: 40 } },
+    ] };
+    await act(async () => root.render(<LayoutRoot root={tree} />));
+    const board = () => host.querySelector('[data-testid="layout-files"]') as HTMLElement;
+    expect(board().className).toContain("layout-drawer");
+    // Dropped near the bottom edge, in the middle: it docks there and, no longer on a side, stops being a drawer.
+    board().getBoundingClientRect = () => ({ left: 400, top: 650, width: 200, height: 100, right: 600, bottom: 750, x: 400, y: 650, toJSON() {} });
+    const grip = host.querySelector('[data-testid="float-grip"]')!;
+    await act(async () => { grip.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 50, clientY: 50 })); });
+    await act(async () => { window.dispatchEvent(new MouseEvent("pointermove", { clientX: 80, clientY: 90 })); });
+    expect(board().style.translate).toBe("30px 40px");
+    await act(async () => { window.dispatchEvent(new MouseEvent("pointerup", { clientX: 80, clientY: 90 })); });
+    expect(board().style.translate).toBe("");
+    expect(board().className).not.toContain("layout-drawer");
+    expect([board().style.bottom, board().style.left]).toEqual(["12px", "calc(50% - 100px)"]);
+
+    await act(async () => placeFloat({ id: "board", edge: "right", align: "end" }));
+    expect([board().style.right, board().style.bottom]).toEqual(["12px", "12px"]);
+    await act(async () => placeFloat({ id: "board" })); // no edge: back to the file's spot
+    expect(board().style.left).toBe("12px");
+    expect(board().className).toContain("layout-drawer");
+    expect(() => placeFloat({ id: "nope", edge: "left" })).toThrow('No floating node "nope"');
   });
 
   it("shows one child of a stack under a tab strip, hides and shows nodes by command, and drags a boundary", async () => {

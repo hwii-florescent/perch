@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useSyncExternalStore, type CSSProperties, type PointerEvent } from "react";
 import { lookVars, prefersDark, setRootLook } from "../themes";
-import { activeOverride, hiddenOverride, layoutStateVersion, pointAtLayout, publishStack, setActive, setShownLayout, setSizes, sizeOverride, subscribeLayoutState } from "../layoutState";
+import { activeOverride, floatOverride, hiddenOverride, layoutStateVersion, pointAtLayout, publishFloat, publishStack, setActive, setFloat, setShownLayout, setSizes, sizeOverride, snapSpot, subscribeLayoutState } from "../layoutState";
 import type { LayoutNode, ModInfo } from "@perch/shared";
 import { currentMods, subscribeMods } from "../mods";
 import { cn } from "../lib/cn";
@@ -45,6 +45,45 @@ function floatStyle(float: NonNullable<LayoutNode["float"]>): CSSProperties {
     align === "start" ? { [start]: EDGE_GAP } : align === "end" ? { [end]: EDGE_GAP } : { [start]: `calc(50% - ${size / 2}px)` };
   const hide = peek != null ? { "--float-hide": `${edge === "left" ? "-" : ""}${width - peek + EDGE_GAP}px` } : {};
   return { ...base, ...(vertical ? along("top", "bottom", height) : along("left", "right", width)), [edge]: EDGE_GAP, ...hide } as CSSProperties;
+}
+
+/** Where a floating node is now: where the person dropped it, else what the file says. A drawer (peek)
+ * only makes sense on a side, so it is a plain float once dropped on the top or bottom. */
+function floatNow(node: LayoutNode, path: string): NonNullable<LayoutNode["float"]> | undefined {
+  const spot = node.float && floatOverride(node.id ?? path);
+  if (!node.float || !spot) return node.float;
+  return { ...node.float, ...spot, peek: spot.edge === "left" || spot.edge === "right" ? node.float.peek : undefined };
+}
+
+/** The strip along a floating node's top edge that moves it. On release the node springs to the nearest
+ * edge and third of the window and that spot is kept (herdr's floating spots). While moving it only
+ * shifts with `translate`, which nothing else here touches. */
+function FloatGrip({ id, spot }: { id: string; spot: { edge: string; align: string } }) {
+  const drag = (event: PointerEvent<HTMLDivElement>) => {
+    const frame = event.currentTarget.parentElement;
+    if (!frame || event.button !== 0) return;
+    event.preventDefault();
+    const [x, y] = [event.clientX, event.clientY];
+    const move = (e: globalThis.PointerEvent) => {
+      frame.style.translate = `${e.clientX - x}px ${e.clientY - y}px`;
+      frame.style.outline = "2px solid var(--accent)";
+    };
+    const up = (e: globalThis.PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const box = frame.getBoundingClientRect(); // still shifted: this is where it was dropped
+      frame.style.translate = "";
+      frame.style.outline = "";
+      publishFloat(id, spot, false);
+      if (Math.abs(e.clientX - x) + Math.abs(e.clientY - y) > 3) {
+        setFloat(id, snapSpot(box.left + box.width / 2, box.top + box.height / 2, window.innerWidth, window.innerHeight));
+      }
+    };
+    publishFloat(id, spot, true);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  return <div className="absolute inset-x-0 top-0 z-10 h-1.5 cursor-grab bg-[var(--accent)] opacity-0 transition-opacity hover:opacity-60" onPointerDown={drag} data-testid="float-grip" />;
 }
 
 /** The node's size, as the person last dragged it or else as the file says. */
@@ -107,6 +146,8 @@ function StackHeader({ node, active, mods }: { node: Extract<LayoutNode, { type:
 
 function Node({ node, mods, root, inRow, path, parentPath, index }: { node: LayoutNode; mods: ModInfo[]; root?: boolean; inRow?: boolean; path: string; parentPath: string; index: number }) {
   if (!shownNode(node)) return null;
+  const float = root ? undefined : floatNow(node, path);
+  const grip = float && <FloatGrip id={node.id ?? path} spot={{ edge: float.edge ?? "", align: float.align ?? "" }} />;
   const { px, weight, min, max } = root ? ({} as NonNullable<LayoutNode["size"]>) : sizeOf(node, parentPath, index);
   // The root's look is on <html> (menus and dialogs outside this tree follow it); below it, the
   // custom properties cascade to the children from here.
@@ -119,24 +160,26 @@ function Node({ node, mods, root, inRow, path, parentPath, index }: { node: Layo
     // Along the parent's direction; a root has none.
     ...(root ? {} : inRow ? { minWidth: min, maxWidth: max } : { minHeight: min, maxHeight: max }),
     // Out of the flow, over the window and under dialogs.
-    ...(node.float && !root ? floatStyle(node.float) : {}),
+    ...(float ? floatStyle(float) : {}),
   };
   const common = { "data-node-id": node.id, "data-tauri-drag-region": node.windowDrag ? true : undefined };
-  if (node.type === "block") return <div className={cn(CARD, node.float?.peek != null && "layout-drawer")} style={{ ...style, ...OUTLINE }} data-testid={`layout-${node.content}`} {...common}><Block content={node.content} mods={mods} /></div>;
+  if (node.type === "block") return <div className={cn(CARD, "relative", float?.peek != null && "layout-drawer")} style={{ ...style, ...OUTLINE }} data-testid={`layout-${node.content}`} {...common}>{grip}<Block content={node.content} mods={mods} /></div>;
   if (node.type === "stack") {
     const ids = node.children.map((child, i) => child.id ?? String(i));
     const current = Math.max(0, ids.indexOf(activeOverride(node.id) ?? node.active ?? ids[0]!));
     return (
       <div className="flex min-h-0 min-w-0 flex-col" style={style} data-testid={`layout-stack-${node.id ?? path}`} {...common}>
+        {grip}
         <StackHeader node={node} active={ids[current]!} mods={mods} />
         <Node node={node.children[current]!} mods={mods} path={`${path}/${current}`} parentPath={path} index={current} inRow={false} />
       </div>
     );
   }
   const row = node.type === "row";
-  const visible = node.children.map((child, i) => (shownNode(child) ? i : -1)).filter((i) => i >= 0);
+  const visible = node.children.map((child, i) => (shownNode(child) && !child.float ? i : -1)).filter((i) => i >= 0);
   return (
     <div className={cn("flex min-h-0 min-w-0", row ? "flex-row" : "flex-col")} style={{ ...style, gap: node.gap || undefined }} {...common}>
+      {grip}
       {node.children.map((child, i) => {
         const before = visible[visible.indexOf(i) - 1];
         const line = before !== undefined && (node.resizable !== false || node.divider);
@@ -153,13 +196,15 @@ function Node({ node, mods, root, inRow, path, parentPath, index }: { node: Layo
   );
 }
 
-/** Publishes each stack's children and shown child for a mod that draws its header. */
-function publishStacks(node: LayoutNode) {
+/** Publishes each stack's children and shown child for a mod that draws its header, and where each docked float sits. */
+function publishStacks(node: LayoutNode, path = "r") {
+  const float = path === "r" ? undefined : floatNow(node, path);
+  if (float?.edge && node.id) publishFloat(node.id, { edge: float.edge, align: float.align ?? "center" });
   if (node.type === "stack" && node.id) {
     const ids = node.children.map((child, i) => child.id ?? String(i));
     publishStack(node.id, node.children.map((child, i) => ({ id: ids[i]!, title: child.title ?? child.id ?? `Tab ${i + 1}` })), activeOverride(node.id) ?? node.active ?? ids[0]!);
   }
-  if ("children" in node) node.children.forEach(publishStacks);
+  if ("children" in node) node.children.forEach((child, i) => publishStacks(child, `${path}/${i}`));
 }
 
 const watchDark = (watch: () => void) => {
@@ -175,8 +220,8 @@ export function LayoutRoot({ root }: { root: LayoutNode }) {
   pointAtLayout(root);
   useSyncExternalStore(subscribeLayoutState, layoutStateVersion);
   const dark = useSyncExternalStore(watchDark, prefersDark);
-  const { theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus } = root;
-  const look = JSON.stringify({ theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus, dark });
+  const { theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus, movable } = root;
+  const look = JSON.stringify({ theme, colors, font, radius, border, shadow, terminalPadding, terminalOpacity, paneRadius, paneBorder, paneFocus, movable, dark });
   // A root background paints the window behind the cards.
   useEffect(() => {
     const { dark: _dark, ...rest } = JSON.parse(look);

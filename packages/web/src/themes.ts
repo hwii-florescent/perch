@@ -313,6 +313,7 @@ export interface Look {
   paneRadius?: number;
   paneBorder?: number;
   paneFocus?: string;
+  movable?: boolean;
 }
 
 const SHADOWS = { sm: "0 1px 3px rgb(0 0 0 / 0.3)", md: "0 4px 14px rgb(0 0 0 / 0.35)", lg: "0 10px 32px rgb(0 0 0 / 0.45)" };
@@ -347,6 +348,7 @@ export function lookVars(look: Look, derived: boolean): Record<string, string> {
   if (look.paneRadius != null) vars["--radius-pane"] = `${look.paneRadius}px`;
   if (look.paneBorder != null) vars["--pane-border"] = `${look.paneBorder}px`;
   if (look.paneFocus) vars["--pane-focus"] = look.paneFocus;
+  if (look.movable === false) vars["--pane-grip"] = "none";
   if (look.terminalOpacity != null) vars["--terminal-opacity"] = String(look.terminalOpacity);
   return vars;
 }

@@ -2909,6 +2909,8 @@ export interface LayoutLook {
   paneRadius?: number;
   paneBorder?: number;
   paneFocus?: string;
+  /** `false` takes away the grip that drags a pane to another place in a split (default true). */
+  movable?: boolean;
   /** Takes the node out of the flow and draws it over the window at this place and size (px). */
   float?: {
     x: number; y: number; width: number; height: number;

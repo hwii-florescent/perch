@@ -1517,9 +1517,12 @@ Mods
     'float': {'x', 'y', 'width', 'height'} (px) is drawn over the window instead of in the flow;
     add 'edge' ('top'|'right'|'bottom'|'left', 12px in) and 'align' ('start'|'center'|'end') to
     dock it to a side instead of x, y, and 'peek' (px, left or right edge) to make it a drawer that
-    slides out on hover. Also on any node: 'shadow' ('sm'|'md'|'lg'), 'terminalPadding' (px) and
+    slides out on hover. A person drags a float by the strip along its top edge; on release it springs to
+    the nearest edge and third and the spot is kept (the 'layout.float' {id, edge?, align?} command sets or,
+    with no edge, resets it; a mod reads shared('layout.float.<id>') = {edge, align, vertical, dragging}). Also on any node: 'shadow' ('sm'|'md'|'lg'), 'terminalPadding' (px) and
     'terminalOpacity' (0.1 to 1) for terminals under it, and for the canvas's panes 'paneRadius',
-    'paneBorder' (px) and 'paneFocus' (#rrggbb outline of the focused pane); 'size' also takes 'min'
+    'paneBorder' (px) and 'paneFocus' (#rrggbb outline of the focused pane); 'movable': false removes the
+    grip that drags a pane to another place in a split; 'size' also takes 'min'
     and 'max' (px, along the parent's direction). The terminal keeps its own colors and font.
     More node types and fields: {'type': 'stack', 'active': <child id>, 'header': 'tabs' | 'mod:<id>',
     'children': [...]} shows one child at a time (a header mod reads shared('layout.stack.<id>') and

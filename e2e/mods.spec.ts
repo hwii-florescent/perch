@@ -13,11 +13,13 @@ const MOD = path.join(HOME, "mods", "e2e-hello");
 const LAYOUT = path.join(HOME, "layouts", "e2e-look.json");
 const STACK = path.join(HOME, "layouts", "e2e-stack.json");
 const THEME = path.join(HOME, "themes", "e2e-dusk.json");
+const FLOAT = path.join(HOME, "layouts", "e2e-float.json");
 
 test.afterEach(() => {
   fs.rmSync(MOD, { recursive: true, force: true });
   fs.rmSync(LAYOUT, { force: true });
   fs.rmSync(STACK, { force: true });
+  fs.rmSync(FLOAT, { force: true });
   fs.rmSync(THEME, { force: true });
   fs.rmSync(path.join(HOME, "layout-state.json"), { force: true });
   fs.rmSync(path.join(HOME, "mods-removed"), { recursive: true, force: true });
@@ -125,4 +127,37 @@ test("a stack, a divider, a theme file and a draggable boundary work in the runn
   await page.reload({ waitUntil: "networkidle" });
   await expect(page.locator('[data-testid="layout-sidebar"]')).toBeVisible({ timeout: 15000 });
   expect(Math.abs((await page.locator('[data-testid="layout-sidebar"]').boundingBox())!.width - after)).toBeLessThan(2);
+});
+
+test("a floating block is dragged by its grip, springs to the nearest edge and keeps the spot", async ({ page }) => {
+  fs.mkdirSync(path.dirname(FLOAT), { recursive: true });
+  fs.writeFileSync(FLOAT, JSON.stringify({
+    name: "E2E float", type: "row",
+    children: [
+      { type: "block", content: "sidebar", size: { px: 240 } },
+      { type: "block", content: "canvas" },
+      { type: "block", id: "board", content: "git", float: { x: 300, y: 200, width: 260, height: 120 } },
+    ],
+  }));
+  await openMods(page);
+  await expect(page.locator('[data-testid="layout-e2e-float"]')).toBeVisible({ timeout: 15000 });
+  await page.locator('[data-testid="layout-e2e-float"]').getByRole("button", { name: "Use" }).click();
+  await page.keyboard.press("Escape");
+
+  const board = page.locator('[data-testid="layout-git"]');
+  await expect(board).toBeVisible({ timeout: 10000 });
+  const grip = board.locator('[data-testid="float-grip"]');
+  const box = (await grip.boundingBox())!;
+  const view = page.viewportSize()!;
+  await page.mouse.move(box.x + box.width / 2, box.y + 2);
+  await page.mouse.down();
+  await page.mouse.move(view.width / 2, view.height - 80, { steps: 8 });
+  await page.mouse.up();
+
+  // Dropped near the bottom, over the middle: it docks to the bottom edge, centred.
+  await expect(board).toHaveCSS("bottom", "12px");
+  const placed = (await board.boundingBox())!;
+  expect(Math.abs(placed.x + placed.width / 2 - view.width / 2)).toBeLessThan(2);
+  await page.reload({ waitUntil: "networkidle" });
+  await expect(page.locator('[data-testid="layout-git"]')).toHaveCSS("bottom", "12px", { timeout: 15000 });
 });
