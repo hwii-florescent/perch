@@ -27,6 +27,7 @@ pub mod instructions;
 pub mod iterm_profile;
 pub mod local_ui;
 pub mod memory;
+pub mod mods;
 pub mod native_ui;
 pub mod permissions;
 pub mod protocol;

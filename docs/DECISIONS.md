@@ -7,6 +7,31 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-08 — Mods: folders a person or an agent writes, with their own approval policy (owner direction)
+
+Learned from herdr's plugins (manifest of actions, events and panes; argv commands that call back
+through the CLI) plus an iframe panel that herdr lacks. Slice 1 (`mods.rs`: manifest, approval
+policy, audit log) is built; nothing runs or is served yet.
+
+- **A mod is a folder** `<perch dir>/mods/<id>/perch-mod.toml` (folder name = id). It declares
+  `[[actions]]` and `[[events]]` (argv, no shell, calling back through the `perch` CLI, which is the
+  whole API) and `[[panels]]` (an `.html` page for a sandboxed iframe served by the core, so it
+  reaches the phone too), plus `capabilities`. Terminal panes, link handlers and install from
+  GitHub are later slices. No marketplace, no versioned SDK.
+- **Approval is its own policy (`Mode`), separate from Project and sub-session permissions.**
+  `ask` (default) waits for a person; `auto-within-ceiling` approves a mod whose required
+  capabilities all sit in the ceiling (default: panel, events, read-project); `auto-all` approves
+  everything, logged. Only a person sets it. Approval pins the manifest hash; a changed manifest is
+  re-evaluated against the policy. Every approval is appended to `mod-audit.jsonl` with its source
+  (`person` or `policy:<mode>`); state lives beside `mods/`, not inside a mod.
+- **Spawning is not a mod capability.** A mod calling `perch spawn`/`send` goes through the
+  existing sub-session rules as an ordinary request (a card by default); mod approval never grants it.
+- **Honest limit.** Capabilities are enforced for panels (iframe sandbox) and scoped core calls. A
+  mod's process runs as the user, so the manifest cannot stop it; the approval preview says so. The
+  hash covers the manifest, not the scripts it points at.
+- **Not yet decided:** per-Project "trust mods in this project" for mods inside a cloned repo (never
+  auto-approved until then), per-host policy, the `mods.*` settings keys.
+
 ## 2026-11-08 — Project tree: explicit state labels, no idle hiding (owner)
 
 Amends the one-tree sidebar decision below.
