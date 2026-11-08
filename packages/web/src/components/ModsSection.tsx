@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { ModInfo } from "@perch/shared";
 import { usePerchStore } from "../store";
-import { currentMods, enableMod, refreshMods, subscribeMods } from "../mods";
+import { currentMods, enableMod, refreshMods, setLayout, subscribeMods } from "../mods";
 import { SettingsGroup, SettingRow } from "./ui/setting-row";
 import { Switch } from "./ui/switch";
 import { GHOST_BUTTON } from "./ui/icon-button";
@@ -45,6 +45,19 @@ export function ModsSection() {
           </div>
         ))}
         {message && <p className="py-2 text-[0.8rem] text-red" role="alert" data-testid="mods-message">{message}</p>}
+      </SettingsGroup>
+      <SettingsGroup title="Window layout">
+        {[{ id: null, name: "Perch as shipped", error: null }, ...(state?.layouts ?? [])].map((layout) => (
+          <div key={layout.id ?? "stock"} className="flex flex-wrap items-center justify-between gap-2 border-b border-surface-1 py-[0.8rem] last:border-b-0" data-testid={`layout-${layout.id ?? "stock"}`}>
+            <div className="min-w-0">
+              <div className="text-[0.85rem] font-medium text-fg">{layout.name}</div>
+              <div className={MUTED}>{layout.error ? `Cannot load: ${layout.error}` : (state?.layout ?? null) === layout.id ? "In use" : ""}</div>
+            </div>
+            {!layout.error && (state?.layout ?? null) !== layout.id && (
+              <button type="button" className={GHOST_BUTTON} onClick={async () => setMessage((await setLayout(layout.id))?.error ?? null)}>Use</button>
+            )}
+          </div>
+        ))}
       </SettingsGroup>
     </>
   );

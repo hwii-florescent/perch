@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { LayoutRoot } from "./components/LayoutRoot";
+import { activeLayout, currentMods, subscribeMods } from "./mods";
 import { StatusBar } from "./StatusBar";
 import { Sidebar } from "./Sidebar";
 import { SplitCanvas } from "./components/SplitCanvas";
@@ -197,6 +199,8 @@ export default function App() {
   if (isMobile && gaveUp && !everConnected && !connected) return <LaptopUnreachable />;
 
   const showSidebar = !isMobile && !sidebarCollapsed;
+  // A chosen layout (a mod's doing) replaces the stock cards; none, or one that stops parsing, is stock.
+  const layout = activeLayout(useSyncExternalStore(subscribeMods, currentMods));
   const sidebarWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, sidebarWidthRaw));
   const toolsMax = Math.max(TOOLS_MIN, window.innerWidth - (showSidebar ? sidebarWidth : 0) - 4 * GUTTER - MAIN_MIN);
   const toolsWidth = Math.min(toolsMax, Math.max(TOOLS_MIN, toolsWidthRaw));
@@ -260,6 +264,8 @@ export default function App() {
             />
           </main>
         </div>
+      ) : layout?.root ? (
+        <LayoutRoot root={layout.root} />
       ) : (
         // Three full-height cards (sidebar, main, drawer) on --backdrop. Each card carries
         // its own 44px head row: the sidebar toggle, the tabs, the drawer's Files/Git switch.
@@ -331,7 +337,7 @@ export default function App() {
         </div>
       )}
 
-      {!isMobile && <StatusBar />}
+      {!isMobile && !layout && <StatusBar />}
       <SettingsPage />
       <MacPermissionSetup enabled={!onboardingOpen} />
       <Navigator open={navigatorOpen} onClose={() => setNavigatorOpen(false)} />

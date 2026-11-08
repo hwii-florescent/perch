@@ -437,6 +437,19 @@ pub(super) async fn mod_enable(
     }
 }
 
+/// `POST {base}agent/mod/layout`: choose the window layout, or `stock` (`server/mods.rs`).
+pub(super) async fn mod_layout(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(_) => answer(mods::agent_set_layout(&state, &body)),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
 /// `POST {base}agent/mod/open`: show an enabled mod on the person's screen (`server/mods.rs`).
 pub(super) async fn mod_open(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,

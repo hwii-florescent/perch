@@ -6,6 +6,7 @@
 use super::sub_sessions::{fail, internal, Failure};
 use super::*;
 use crate::agent_identity::AgentIdentity;
+use crate::layouts;
 use crate::mods::{self, Error};
 use serde_json::{json, Value};
 
@@ -28,9 +29,21 @@ pub(super) fn agent_list(app: &AppState) -> Result<Value, Failure> {
     let policy = app.settings.get().mods;
     Ok(json!({
         "mods": mods::scan(&app.memory_root, &policy),
+        "layouts": layouts::scan(&app.memory_root, &policy),
+        "layout": layouts::current(&app.memory_root),
         "off": policy.is_off(),
-        "folder": app.memory_root.join("mods").display().to_string(),
+        "folder": app.memory_root.display().to_string(),
     }))
+}
+
+/// `perch mod layout <id|stock>`: choose the window layout; `stock` (or an empty id) is Perch as shipped.
+pub(super) fn agent_set_layout(app: &AppState, body: &Value) -> Result<Value, Failure> {
+    let id = body["id"]
+        .as_str()
+        .filter(|id| !id.is_empty() && *id != "stock");
+    let policy = app.settings.get().mods;
+    layouts::set_current(&app.memory_root, &policy, id).map_err(failure)?;
+    Ok(json!({ "layout": id }))
 }
 
 /// `perch mod enable|disable <id>`.
@@ -108,6 +121,8 @@ fn state_message(app: &AppState, request_id: String, error: Option<String>) -> S
     ServerMessage::ModsState {
         request_id,
         mods: mods::scan(&app.memory_root, &policy),
+        layouts: layouts::scan(&app.memory_root, &policy),
+        layout: layouts::current(&app.memory_root),
         safe_mode: policy.is_off(),
         policy,
         folder: app.memory_root.join("mods").display().to_string(),
@@ -128,7 +143,12 @@ pub(super) fn handle_set(state: &Arc<ConnState>, request_id: String, id: String,
     let outcome = match op.as_str() {
         "enable" => mods::set_enabled(&app.memory_root, &policy, &id, true),
         "disable" => mods::set_enabled(&app.memory_root, &policy, &id, false),
-        _ => Err(Error::Invalid("ops are enable and disable".into())),
+        "layout" => layouts::set_current(
+            &app.memory_root,
+            &policy,
+            Some(id.as_str()).filter(|id| !id.is_empty()),
+        ),
+        _ => Err(Error::Invalid("ops are enable, disable and layout".into())),
     };
     let error = outcome.err().map(|error| error.to_string());
     let _ = state.out_tx.send(state_message(app, request_id, error));
@@ -140,12 +160,20 @@ pub(super) fn handle_set(state: &Arc<ConnState>, request_id: String, id: String,
 // to 2 s to show, and the upgrade path is `notify` on the mods folder.
 pub(super) fn spawn_watch(app: AppState) {
     tokio::spawn(async move {
-        let mut seen: Option<Vec<mods::ModInfo>> = None;
+        type Seen = (Vec<mods::ModInfo>, Vec<layouts::LayoutInfo>, Option<String>);
+        let mut seen: Option<Seen> = None;
         let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
         loop {
             tick.tick().await;
             let (root, policy) = (app.memory_root.clone(), app.settings.get().mods);
-            let Ok(now) = tokio::task::spawn_blocking(move || mods::scan(&root, &policy)).await
+            let Ok(now) = tokio::task::spawn_blocking(move || {
+                (
+                    mods::scan(&root, &policy),
+                    layouts::scan(&root, &policy),
+                    layouts::current(&root),
+                )
+            })
+            .await
             else {
                 continue;
             };
@@ -200,9 +228,17 @@ mod tests {
             }
         };
         let (_, listed) = call("list", json!({})).await;
-        let folder = std::path::PathBuf::from(listed["folder"].as_str().unwrap()).join("board");
+        let home = std::path::PathBuf::from(listed["folder"].as_str().unwrap());
+        let folder = home.join("mods").join("board");
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(folder.join("main.js"), "export default () => {}").unwrap();
+        std::fs::create_dir_all(home.join("layouts")).unwrap();
+        std::fs::write(
+            home.join("layouts").join("solo.json"),
+            r#"{"type":"block","content":"mod:board"}"#,
+        )
+        .unwrap();
+        std::fs::write(home.join("layouts").join("bad.json"), "{").unwrap();
         let mut screen = app.hub.hub_events_tx.subscribe();
 
         let (_, listed) = call("list", json!({})).await;
@@ -226,6 +262,15 @@ mod tests {
                 .0,
             404
         );
+
+        // A layout is chosen only if it parses; `stock` goes back to Perch as shipped.
+        assert_eq!(call("layout", json!({"id": "bad"})).await.0, 400);
+        assert_eq!(call("layout", json!({"id": "solo"})).await.0, 200);
+        let (_, listed) = call("list", json!({})).await;
+        assert_eq!(listed["layout"], "solo");
+        assert_eq!(listed["layouts"].as_array().unwrap().len(), 2);
+        assert_eq!(call("layout", json!({"id": "stock"})).await.0, 200);
+        assert_eq!(call("list", json!({})).await.1["layout"], Value::Null);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -32,8 +32,19 @@ approval not mattering much.
   `mod-state.json` beside `mods/`); deleting the folder removes it; **mods off** (a Settings switch,
   `PERCH_MODS=off`, or ctrl+alt+shift+Escape, herdr's reset key) loads none, even when the page is
   broken. Settings > Mods only lists, turns off and on, and holds that switch.
-- **Not built:** layouts a mod can declare (herdr's JSON layouts), a trusted `exec`, removing a
-  mod from Settings, install from GitHub, per-host handling (mods run on the local host's screen).
+- **Layouts change the whole window** (herdr's JSON layouts, much smaller). `layouts/<id>.json`
+  next to `mods/` is a tree: `row`/`column` with `children`, or a `block` whose `content` is one of
+  Perch's own panes (`sidebar`, `tabs`, `canvas`, `files`, `git`, `status`, the same components the
+  stock window uses) or `mod:<id>`; any node may have `size` (`px` or `weight`), `hidden`, `padding`,
+  and groups a `gap`. The core only checks the shape (`layouts.rs`: 8 levels, 64 nodes, known
+  content) and a file that does not parse cannot be chosen. The choice is `layout-state.json` and
+  rides in `mods.state` (`layouts`, `layout`), so `perch mod layout <id|stock>`, Settings > Mods >
+  Window layout and the watcher's `mods.changed` all see it. `App.tsx` draws `LayoutRoot` in place
+  of the three stock cards (and drops the stock status bar) only when a layout is chosen and still
+  parses; nothing chosen, a broken file, mods off or the reset key all give stock Perch.
+  Structure only: no colors, borders, floating blocks or terminal blocks (a mod draws those).
+- **Not built:** herdr's look properties on layouts, a trusted `exec`, removing a mod or layout
+  from Settings, install from GitHub, per-host handling (mods run on the local host's screen).
 
 ## 2026-11-08 — Project tree: explicit state labels, no idle hiding (owner)
 

@@ -69,5 +69,16 @@ export const listMods = () => ask((requestId) => ({ type: "mods.list", requestId
 export const enableMod = (id: string, enabled: boolean) =>
   ask((requestId) => ({ type: "mods.set", requestId, id, op: enabled ? "enable" : "disable" }));
 
+/** Choose the window layout; `null` goes back to Perch as shipped. */
+export const setLayout = (id: string | null) =>
+  ask((requestId) => ({ type: "mods.set", requestId, id: id ?? "", op: "layout" }));
+
+/** The layout to draw, if one is chosen and still parses; otherwise stock Perch. Mods being off
+ * leaves no layouts at all, so the reset key also restores the stock window. */
+export function activeLayout(state: ModsState | null) {
+  const layout = state?.layouts?.find((candidate) => candidate.id === state.layout);
+  return layout?.root && !layout.error ? layout : null;
+}
+
 /** Where a mod's code is served from (a person's token only). */
 export const modFileUrl = (id: string) => `${window.location.origin}${getBasePath()}mods/file?${new URLSearchParams({ id })}`;

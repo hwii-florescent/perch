@@ -1349,7 +1349,8 @@ pub enum ClientMessage {
     #[serde(rename = "mods.list", rename_all = "camelCase")]
     ModsList { request_id: String },
 
-    /// A person's change to one mod: `op` is `enable` or `disable`. Answered with `mods.state`.
+    /// A person's change to one mod: `op` is `enable` or `disable`; `layout` chooses the layout named
+    /// `id` (an empty `id` goes back to stock Perch). Answered with `mods.state`.
     #[serde(rename = "mods.set", rename_all = "camelCase")]
     ModsSet {
         request_id: String,
@@ -2502,6 +2503,11 @@ pub enum ServerMessage {
     ModsState {
         request_id: String,
         mods: Vec<crate::mods::ModInfo>,
+        /// The window layouts in `layouts/`, and the one chosen (absent: stock Perch).
+        #[serde(default)]
+        layouts: Vec<crate::layouts::LayoutInfo>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layout: Option<String>,
         policy: crate::mods::Policy,
         safe_mode: bool,
         folder: String,

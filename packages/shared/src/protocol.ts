@@ -1731,12 +1731,13 @@ export interface ModsListMessage {
   requestId: string;
 }
 
-/** A person's change to one mod: `enable` or `disable`. Answered with `mods.state`. */
+/** A person's change to one mod: `enable` or `disable`; `layout` chooses the layout named `id` (an
+ * empty `id` goes back to stock Perch). Answered with `mods.state`. */
 export interface ModsSetMessage {
   type: "mods.set";
   requestId: string;
   id: string;
-  op: "enable" | "disable";
+  op: "enable" | "disable" | "layout";
 }
 
 /** The index of a Project's memory files on this core (capability `memory.v1`). Answered with
@@ -2842,6 +2843,26 @@ export interface ModInfo {
   error: string | null;
 }
 
+/** `{px}` (fixed) or `{weight}` (a share of what fixed siblings leave; default 1). */
+export interface LayoutSize {
+  px?: number;
+  weight?: number;
+}
+
+/** A window layout, as in herdr's desktop app: a tree of rows, columns and blocks. A block's
+ * `content` is `sidebar`, `tabs`, `canvas`, `files`, `git`, `status` or `mod:<id>`. */
+export type LayoutNode =
+  | { type: "row" | "column"; size?: LayoutSize | null; hidden?: boolean; gap?: number; padding?: number; children: LayoutNode[] }
+  | { type: "block"; size?: LayoutSize | null; hidden?: boolean; padding?: number; content: string };
+
+export interface LayoutInfo {
+  id: string;
+  name: string;
+  root: LayoutNode | null;
+  /** Why the file cannot be used, if it cannot. */
+  error: string | null;
+}
+
 /** Broadcast when the mods folder or a mod's state changed; clients ask again with `mods.list`. */
 export interface ModsChangedMessage {
   type: "mods.changed";
@@ -2859,6 +2880,9 @@ export interface ModsStateMessage {
   type: "mods.state";
   requestId: string;
   mods: ModInfo[];
+  /** The layouts in `layouts/`, and the one chosen (absent: stock Perch). */
+  layouts?: LayoutInfo[];
+  layout?: string;
   policy: ModsPolicy;
   safeMode: boolean;
   folder: string;

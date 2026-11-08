@@ -885,7 +885,7 @@ fn cancel(args: &[String]) -> Result<(), String> {
 }
 
 const MOD_USAGE: &str = "usage: perch mod [list] [--json] | perch mod enable <id> | \
-     perch mod disable <id> | perch mod open <id>";
+     perch mod disable <id> | perch mod open <id> | perch mod layout <id|stock>";
 
 /// `perch mod`: the mods on this computer, turn one off or on, and show one.
 fn mod_cmd(args: &[String]) -> Result<(), String> {
@@ -913,13 +913,21 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
             println!("{id} is shown on the person's screen");
             Ok(())
         }
+        ["layout", id] => {
+            ask("mod/layout", json!({ "id": id }))?;
+            println!("window layout is now {id}");
+            Ok(())
+        }
         _ => Err(MOD_USAGE.into()),
     }
 }
 
-/// The mods in words: where they live, then one line per mod.
+/// The mods and layouts in words: where they live, then one line each.
 fn render_mods(answer: &Value) -> String {
-    let mut out = format!("Mods in {}", answer["folder"].as_str().unwrap_or(""));
+    let mut out = format!(
+        "mods/ and layouts/ in {}",
+        answer["folder"].as_str().unwrap_or("")
+    );
     if answer["off"].as_bool() == Some(true) {
         out += " (MODS ARE OFF: Settings > Mods or PERCH_MODS=off; none are loaded)";
     }
@@ -943,6 +951,22 @@ fn render_mods(answer: &Value) -> String {
             field("id"),
             field("name"),
             field("place")
+        );
+    }
+    let layouts = answer["layouts"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let chosen = answer["layout"].as_str().unwrap_or("stock");
+    out += &format!("Window layout: {chosen}\n");
+    for item in layouts {
+        let id = item["id"].as_str().unwrap_or("");
+        let note = item["error"]
+            .as_str()
+            .map_or(String::new(), |e| format!("  cannot load: {e}"));
+        out += &format!(
+            "  layout {id}  {}{note}\n",
+            item["name"].as_str().unwrap_or("")
         );
     }
     out
@@ -1220,6 +1244,9 @@ Commands
   perch mod enable <id>   Turn a mod on or off.
   perch mod disable <id>
   perch mod open <id>     Show a mod on the person's screen now.
+  perch mod layout <id|stock>
+                          Change the whole window to a layout in the layouts folder, or back to
+                          Perch as shipped.
   perch guide             This text.
 
 How it works
@@ -1314,6 +1341,15 @@ Mods
     send any message, onMessage), `focusSession(id)` and `readFile(path)` (text of a file in the
     open local project). It runs inside Perch's page with the person's full access, so it can do
     anything the app can, including start terminals through `socket`; a bug in it can break the page.
+  - A layout changes the whole window, as in herdr. `layouts/<id>.json` (next to `mods/`, the
+    path is in `perch mod`) is a tree: {'name': 'IDE', 'type': 'row', 'gap': 4, 'children': [...]}
+    where a node is 'row' or 'column' (with children) or {'type': 'block', 'content': ...}, and
+    content is one of sidebar, tabs, canvas (the open session's panes), files, git, status, or
+    mod:<id> (a mod's view). Any node may have 'size' ({'px': 240} or {'weight': 2}, default
+    weight 1), 'hidden', 'padding'; rows and columns also 'gap'. Example, an IDE: a row of
+    sidebar (220px), a column of canvas over mod:terminal-notes (160px), and files (320px). Write
+    the file, then `perch mod layout <id>` applies it at once (a file that does not parse cannot
+    be chosen, and one that breaks later falls back to Perch as shipped); edits show as you save.
   - `perch mod open <id>` shows a mod now. To undo: `perch mod disable <id>`, delete the folder, or
     the person presses ctrl+alt+shift+Escape (turns every mod off) or starts Perch with
     PERCH_MODS=off.
@@ -1794,6 +1830,7 @@ mod tests {
             "perch memory write <name>",
             "perch memory delete <name> --base <revision>",
             "perch mod open <id>",
+            "perch mod layout <id|stock>",
             "(el, api) => cleanup?",
             "PERCH_MODS=off",
             "Project memory",

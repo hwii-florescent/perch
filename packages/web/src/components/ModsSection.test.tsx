@@ -4,8 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModInfo } from "@perch/shared";
 
-const mods = vi.hoisted(() => ({ state: null as unknown, enableMod: vi.fn(async () => null), updateSettings: vi.fn(), off: false }));
-vi.mock("../mods", () => ({ currentMods: () => mods.state, subscribeMods: () => () => {}, refreshMods: () => {}, enableMod: mods.enableMod }));
+const mods = vi.hoisted(() => ({ state: null as unknown, enableMod: vi.fn(async () => null), setLayout: vi.fn(async () => null), updateSettings: vi.fn(), off: false }));
+vi.mock("../mods", () => ({ currentMods: () => mods.state, subscribeMods: () => () => {}, refreshMods: () => {}, enableMod: mods.enableMod, setLayout: mods.setLayout }));
 vi.mock("../store", () => ({
   usePerchStore: (select: (s: unknown) => unknown) => select({ settings: { mods: { off: mods.off } }, updateSettings: mods.updateSettings }),
 }));
@@ -30,6 +30,20 @@ describe("Settings > Mods", () => {
     expect(mods.enableMod).toHaveBeenCalledWith("board", false);
     await act(async () => q("mod-old")!.querySelector("button")!.click());
     expect(mods.enableMod).toHaveBeenCalledWith("old", true);
+  });
+
+  it("lists layouts, marks the one in use, and chooses one or goes back to stock", async () => {
+    const block = { type: "block", content: "canvas" };
+    mods.state = { mods: [], folder: "/x/mods", policy: { off: false }, safeMode: false, layout: "ide", layouts: [{ id: "ide", name: "IDE", root: block, error: null }, { id: "solo", name: "Solo", root: block, error: null }, { id: "bad", name: "bad", root: null, error: "unknown content" }] };
+    await act(async () => root.render(<ModsSection />));
+    expect(q("layout-ide")?.textContent).toContain("In use");
+    expect(q("layout-ide")?.querySelector("button")).toBeNull();
+    expect(q("layout-bad")?.textContent).toContain("Cannot load: unknown content");
+    expect(q("layout-bad")?.querySelector("button")).toBeNull();
+    await act(async () => q("layout-solo")!.querySelector("button")!.click());
+    expect(mods.setLayout).toHaveBeenCalledWith("solo");
+    await act(async () => q("layout-stock")!.querySelector("button")!.click());
+    expect(mods.setLayout).toHaveBeenCalledWith(null);
   });
 
   it("says how to make a mod when there are none, and the off switch sets the one setting", async () => {

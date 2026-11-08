@@ -91,7 +91,7 @@ fn mods_dir(root: &Path) -> PathBuf {
     root.join("mods")
 }
 
-fn plain_id(id: &str) -> bool {
+pub(crate) fn plain_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
         && id
