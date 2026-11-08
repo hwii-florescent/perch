@@ -515,6 +515,19 @@ pub(super) async fn mod_install(
     }
 }
 
+/// `POST {base}agent/mod/do`: run an app command on the person's screen (`server/mods.rs`).
+pub(super) async fn mod_do(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(_) => answer(mods::agent_do(&state, &body).await),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
 /// `POST {base}agent/mod/check`: did the person's page load this mod's current files (`server/mods.rs`).
 pub(super) async fn mod_check(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,

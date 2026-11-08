@@ -2923,6 +2923,10 @@ export interface ModsSnapshotRequestMessage {
   requestId: string;
   /** A mod's id, or `app` for the whole page. */
   modId: string;
+  /** `perch mod do`: run this app command with `args` instead (`list` answers with the commands as
+   * JSON in `text`). */
+  command?: string;
+  args?: unknown;
 }
 
 /** The page's answer to `mods.snapshot.request` (capability `mods.snapshot.v1`). */

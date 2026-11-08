@@ -186,6 +186,8 @@ pub(super) async fn agent_dom(app: &AppState, body: &Value) -> Result<Value, Fai
         .send(Arc::new(ServerMessage::ModsSnapshotRequest {
             request_id: request_id.clone(),
             mod_id: id.to_string(),
+            command: None,
+            args: None,
         }));
     for _ in 0..20 {
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
@@ -193,6 +195,48 @@ pub(super) async fn agent_dom(app: &AppState, body: &Value) -> Result<Value, Fai
             return Ok(match error {
                 Some(error) => json!({ "status": "error", "error": error }),
                 None => json!({ "status": "ok", "html": html, "text": text }),
+            });
+        }
+    }
+    Ok(
+        json!({ "status": "not loaded", "error": "no Perch window answered within 5 seconds (is one open?)" }),
+    )
+}
+
+/// `perch mod do <command> [json]` and `perch mod commands`: runs an app command on the person's
+/// screen (what a key or a mod's `api.run` does), or with `list` returns the commands. The first
+/// screen to answer wins; a command nobody recognises answers `error`.
+pub(super) async fn agent_do(app: &AppState, body: &Value) -> Result<Value, Failure> {
+    let command = body["command"]
+        .as_str()
+        .filter(|c| !c.is_empty() && c.len() <= 100 && !c.chars().any(char::is_control))
+        .ok_or_else(|| {
+            fail(
+                StatusCode::BAD_REQUEST,
+                "name a command (perch mod commands lists them)",
+            )
+        })?;
+    if app.settings.get().mods.is_off() {
+        return Err(fail(StatusCode::BAD_REQUEST, "mods are off"));
+    }
+    let request_id = Uuid::new_v4().to_string();
+    let _ = app
+        .hub
+        .hub_events_tx
+        .send(Arc::new(ServerMessage::ModsSnapshotRequest {
+            request_id: request_id.clone(),
+            mod_id: String::new(),
+            command: Some(command.to_string()),
+            args: body.get("args").filter(|a| !a.is_null()).cloned(),
+        }));
+    for _ in 0..20 {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        if let Some((_, text, error)) = app.mod_snapshots.lock().unwrap().remove(&request_id) {
+            return Ok(match error {
+                Some(error) => json!({ "status": "error", "error": error }),
+                None => {
+                    json!({ "status": "ok", "result": serde_json::from_str::<Value>(&text).unwrap_or(Value::String(text)) })
+                }
             });
         }
     }
@@ -586,7 +630,10 @@ mod tests {
         let window = app.clone();
         let answering = tokio::spawn(async move {
             while let Ok(message) = asked.recv().await {
-                if let ServerMessage::ModsSnapshotRequest { request_id, mod_id } = &*message {
+                if let ServerMessage::ModsSnapshotRequest {
+                    request_id, mod_id, ..
+                } = &*message
+                {
                     assert_eq!(mod_id, "board");
                     window
                         .mod_snapshots
@@ -608,6 +655,40 @@ mod tests {
             (Some("ok"), Some("<p>hi</p>"), Some("hi"))
         );
         assert_eq!(call("dom", json!({"id": "nope"})).await.0, 400);
+
+        // `do` sends the command and args to the screens and returns the first answer, parsed.
+        let mut asked = app.hub.hub_events_tx.subscribe();
+        let window = app.clone();
+        let answering = tokio::spawn(async move {
+            while let Ok(message) = asked.recv().await {
+                if let ServerMessage::ModsSnapshotRequest {
+                    request_id,
+                    command,
+                    args,
+                    ..
+                } = &*message
+                {
+                    assert_eq!(command.as_deref(), Some("session.open"));
+                    assert_eq!(args.as_ref().unwrap()["session"], "s1");
+                    window.mod_snapshots.lock().unwrap().insert(
+                        request_id.clone(),
+                        (String::new(), "[{\"id\":\"a\"}]".into(), None),
+                    );
+                    break;
+                }
+            }
+        });
+        let (_, done) = call(
+            "do",
+            json!({"command": "session.open", "args": {"session": "s1"}}),
+        )
+        .await;
+        answering.await.unwrap();
+        assert_eq!(
+            (done["status"].as_str(), done["result"][0]["id"].as_str()),
+            (Some("ok"), Some("a"))
+        );
+        assert_eq!(call("do", json!({"command": ""})).await.0, 400);
         while screen.try_recv().is_ok() {} // the request was also broadcast to this listener
 
         assert_eq!(

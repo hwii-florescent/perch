@@ -890,7 +890,18 @@ const MOD_API: &str = include_str!("../../perch-core/src/mod_examples/perch-mod.
 const MOD_USAGE: &str ="usage: perch mod [list] [--json] | perch mod enable <id> | \
      perch mod disable <id> | perch mod open <id> | perch mod check <id> | \
      perch mod dom <id|app> | perch mod api | perch mod examples | perch mod clone <example> [id] | perch mod install <owner/repo[/folder]> | \
-     perch mod remove <id> [mod|layout] | perch mod layout <id|stock>";
+     perch mod commands | perch mod do <command> [json] | perch mod remove <id> [mod|layout] | perch mod layout <id|stock>";
+
+/// The core answers 200 even when the screen said no; turn that into the CLI's error.
+fn mod_do_ok(answer: &Value) -> Result<(), String> {
+    match answer["status"].as_str() {
+        Some("ok") => Ok(()),
+        _ => Err(answer["error"]
+            .as_str()
+            .unwrap_or("the person's window did not run it")
+            .to_string()),
+    }
+}
 
 /// `perch mod`: the mods on this computer, turn one off or on, and show one.
 fn mod_cmd(args: &[String]) -> Result<(), String> {
@@ -962,6 +973,30 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
                 "copied to {}; edit it and run `perch mod check {0}` (a layout: `perch mod layout {0}`)",
                 id["id"].as_str().unwrap_or(example)
             );
+            Ok(())
+        }
+        ["commands"] => {
+            let answer = ask("mod/do", json!({ "command": "list" }))?;
+            mod_do_ok(&answer)?;
+            for item in answer["result"].as_array().into_iter().flatten() {
+                println!(
+                    "{}  {}  {}",
+                    item["id"].as_str().unwrap_or(""),
+                    item["args"].as_str().unwrap_or(""),
+                    item["description"].as_str().unwrap_or("")
+                );
+            }
+            Ok(())
+        }
+        ["do", command] | ["do", command, _] => {
+            let args = match words.get(2) {
+                Some(text) => Some(serde_json::from_str::<serde_json::Value>(text).map_err(
+                    |e| format!("the arguments must be JSON, e.g. '{{\"session\":\"abc\"}}': {e}"),
+                )?),
+                None => None,
+            };
+            mod_do_ok(&ask("mod/do", json!({ "command": command, "args": args }))?)?;
+            println!("{command} ran on the person's screen");
             Ok(())
         }
         ["install", source] => {
@@ -1360,6 +1395,10 @@ Commands
                           Copy mods/<name>/ and layouts/<name>.json from a public GitHub repo (or one
                           folder with a main.js) into place; never overwrites, and prints warnings for
                           code that runs programs, reaches the network or touches files. Read it first.
+  perch mod commands      The app commands a key, a mod or `perch mod do` can run.
+  perch mod do <command> [json]
+                          Run one on the person's screen (a command with arguments takes them as JSON),
+                          e.g. to focus a session or open a mod you just wrote.
   perch mod remove <id> [mod|layout]
                           Move a mod or layout to mods-removed/ (not deleted).
   perch mod layout <id|stock>
@@ -1975,6 +2014,8 @@ mod tests {
             "perch mod clone <example> [id]",
             "perch mod install <owner/repo[/folder]>",
             "perch mod remove <id> [mod|layout]",
+            "perch mod do <command> [json]",
+            "perch mod commands",
             "perch mod api",
             "perch mod dom <id|app>",
             "perch mod layout <id|stock>",

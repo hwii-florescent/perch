@@ -2548,9 +2548,18 @@ pub enum ServerMessage {
     ModsOpen { mod_id: String },
 
     /// Broadcast when `perch mod dom` wants to see what a mod (or `app`, the whole page) drew; the
-    /// person's page answers with `mods.snapshot` (capability `mods.snapshot.v1`).
+    /// person's page answers with `mods.snapshot` (capability `mods.snapshot.v1`). With `command`
+    /// (`perch mod do`) the page runs that app command with `args` instead (`list` answers with the
+    /// commands, as JSON in `text`).
     #[serde(rename = "mods.snapshot.request", rename_all = "camelCase")]
-    ModsSnapshotRequest { request_id: String, mod_id: String },
+    ModsSnapshotRequest {
+        request_id: String,
+        mod_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        args: Option<serde_json::Value>,
+    },
 
     /// Reply to `memory.list`, `memory.set` and `memory.delete`: the Project's memory index,
     /// by name, after the request. `name` repeats the file a set or delete was about;

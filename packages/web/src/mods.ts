@@ -1,6 +1,7 @@
 import type { ModsStateMessage } from "@perch/shared";
 import { getBasePath } from "./base";
 import { newId } from "./ids";
+import { commandList, runCommand } from "./modApp";
 import { setSlotErrorReporter } from "./slots";
 import { socket } from "./ws";
 
@@ -44,7 +45,10 @@ socket.onMessage((message) => {
     latest = state;
     watchers.forEach((watch) => watch());
     settle(requestId, state);
-  } else if (message.type === "mods.snapshot.request") answerSnapshot(message.requestId, message.modId);
+  } else if (message.type === "mods.snapshot.request") {
+    if (message.command) answerCommand(message.requestId, message.command, message.args);
+    else answerSnapshot(message.requestId, message.modId);
+  }
   else if (message.type === "mods.changed") refreshMods();
   else if (message.type === "mods.open") openers.forEach((open) => open(message.modId));
 });
@@ -60,6 +64,19 @@ export function answerSnapshot(requestId: string, modId: string) {
   const el = modId === "app" ? document.body : document.querySelector<HTMLElement>(`[data-testid="mod-view-${modId}"]`);
   if (!el) return;
   socket.send({ type: "mods.snapshot", requestId, html: el.outerHTML.slice(0, 200_000), text: (el.innerText ?? el.textContent ?? "").slice(0, 20_000) });
+}
+
+/** `perch mod do`: runs an app command as a key would, or lists them (`list`); the answer is JSON in
+ * `text`, or `error` for a command that is not there. */
+export function answerCommand(requestId: string, command: string, args?: unknown) {
+  const reply = (text: string, error?: string) => socket.send({ type: "mods.snapshot", requestId, html: "", text, error: error ?? null });
+  if (command === "list") return reply(JSON.stringify(commandList()));
+  try {
+    if (runCommand(command, args)) reply("true");
+    else reply("", `no command "${command}" (perch mod commands lists them)`);
+  } catch (error) {
+    reply("", error instanceof Error ? error.message : String(error));
+  }
 }
 
 export const modsAvailable =() => capabilities.includes(CAPABILITY) && socket.connected;

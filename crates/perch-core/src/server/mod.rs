@@ -923,6 +923,10 @@ pub async fn run(
             post(agent::mod_clone).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(
+            &format!("{base_path}agent/mod/do"),
+            post(agent::mod_do).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
             &format!("{base_path}agent/mod/remove"),
             post(agent::mod_remove).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )

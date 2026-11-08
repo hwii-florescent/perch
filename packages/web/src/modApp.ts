@@ -89,6 +89,8 @@ export const setCommandBridge = (next: CommandBridge) => {
 };
 /** For the app's own parts that run a command by name (a toast's action). */
 export const runCommand = (command: string, args?: unknown) => bridge.run(command, args);
+/** Every command a key, a mod or `perch mod do` can run. */
+export const commandList = () => bridge.list();
 
 /** A mod's default export: draws into `el` and may return what to undo when it is replaced. */
 export type ModMount = (el: HTMLElement, api: ModApi) => void | (() => void) | Promise<void | (() => void)>;

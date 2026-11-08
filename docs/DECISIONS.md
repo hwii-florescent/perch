@@ -101,6 +101,10 @@ approval not mattering much.
   looks reaching menus opened from a themed subtree (they use the root's), `stack` nodes, gradients as
   images, light/dark theme pairs, per-pane header mods, and mod-fonts folders. `perch mod clone <id>`
   also duplicates one of your own mods or layouts (as `<id>-copy`).
+- **Driving the window.** `perch mod commands` lists the app commands (the ones keys, `api.commands` and
+  `api.run` use) and `perch mod do <command> [json]` runs one on the person's screen, as herdr's
+  `herdr-app commands` / `do`: it reuses the `mods.snapshot.request` round trip (`command`, `args`), so a
+  command with no window open answers `not loaded`, and an unknown one answers its error.
 - **Install and remove.** `perch mod install <owner/repo[/folder]>` (or a github.com link, incl.
   `/tree/<branch>/…`) shallow-clones a public repo and copies `mods/<name>/` and `layouts/<name>.json`
   (or a lone `main.js` as one mod); it never overwrites, stops before copying anything if a name is
@@ -207,10 +211,16 @@ Herdr's attention to it; a second list was tried and dropped (it repeated every 
 - **A chat row says its state at the end, the way Herdr does:** "Needs you" and "Done" as a small tinted
   word, a quiet dot for Working, nothing for Idle; the harness mark has no state ring. A folded project
   shows the same badge for its most urgent state, with a count. An unreachable host shows none.
-- **Agents only:** plain terminals get no sidebar row (they stay tabs). A terminal where an agent was
-  started by hand is listed while that agent runs (observed `currentProviderId`). **Show terminals** in the
-  Organize menu lists them too; it is per viewer, off by default. A session with no harness recorded
-  (native chat) is listed.
+- **Project agents only:** plain terminals in projects get no sidebar row (they stay tabs). A terminal
+  where an agent was started by hand is listed while that agent runs (observed `currentProviderId`).
+  **Show terminals** in the Organize menu lists project terminals too; it is per viewer, off by default.
+  A session with no harness recorded (native chat) is listed.
+- **Quickchat always lists all its sessions**, including plain terminals, regardless of **Show terminals**.
+  By status keeps them under a Quickchat heading within each relevant status section; In one list mixes
+  them into the newest-first order with a muted Quickchat label, not a separate or duplicated section.
+- **In one list uses the tree's row presentation:** a plain harness mark, no coloured state ring, and
+  the same trailing state badge (nothing for Idle or an unreachable host). Project or Quickchat names
+  stay muted beside the chat title.
 - **Saved choices:** `status` and `list` keep meaning what they did; `project` and the retired
   `workspace` open the tree. The Compact/List session setting and the Sessions section are gone.
 - **Phone:** the same tree and the same Organize menu; no separate switcher.
