@@ -278,10 +278,14 @@ probes need an explicitly authorized host and confirmed cleanup, never a
 placeholder hostname or a private host discovered on this machine.
 
 **Machine add over real ssh.** `scripts/machine-over-real-ssh.sh` starts a user-mode `sshd` on
-127.0.0.1:2299 (key login only, sessions run with a temp `$HOME`), runs the ignored
+a free 127.0.0.1 port (key login only; sessions and the test process both run with temp `$HOME`s, so no
+control socket reaches your real `~/.ssh`), runs the ignored
 `machine_install` test through real OpenSSH (probe, upload, atomic replace, shared control master),
-then stops the sshd and the master. It proves the ssh plumbing, not a remote host: a loopback
-substitute is not evidence for the remote-workspace gates above.
+then stops the sshd and the master, including on build/test failure or interruption.
+`python3 scripts/check-machine-ssh-failure.py` injects a failed Cargo build and checks that its diagnostic
+is visible, no stale executable runs, and the fixture directory/processes are removed.
+These checks prove the ssh plumbing, not a remote host: a loopback substitute is not evidence for the
+remote-workspace gates above.
 
 Claude normally bypasses permissions here: use `AskUserQuestion` to exercise
 Needs You. Bracketed paste wraps the prompt in `<pasted_content …>`; hook

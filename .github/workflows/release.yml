@@ -117,6 +117,11 @@ jobs:
           - os: macos-latest
             name: macos-aarch64
             triple: aarch64-apple-darwin
+          # Built on the arm runner (cross-compiled; the smoke test checks its architecture), so an
+          # Intel Mac gets the asset the probe and Install perch-core ask for.
+          - os: macos-latest
+            name: macos-x86_64
+            triple: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
     env:
       # The core tells a probe which release it came from, so an install fetches its own version.
@@ -135,8 +140,13 @@ jobs:
       - name: Name, smoke-test and checksum
         run: |
           cp "target/${{ matrix.triple }}/release/perch-core" "perch-core-${{ matrix.name }}"
-          # --version answers without booting a server; it is what a machine probe runs.
-          "./perch-core-${{ matrix.name }}" --version
+          # --version answers without booting a server; it is what a machine probe runs. The Intel Mac
+          # build is cross-compiled on an arm runner: check its architecture instead of relying on Rosetta.
+          if [ "${{ matrix.name }}" = macos-x86_64 ]; then
+            [ "$(lipo -archs "perch-core-${{ matrix.name }}")" = x86_64 ]
+          else
+            "./perch-core-${{ matrix.name }}" --version
+          fi
           if [ "$(uname)" = Linux ]; then
             file "perch-core-${{ matrix.name }}"
             sha256sum "perch-core-${{ matrix.name }}" > "perch-core-${{ matrix.name }}.sha256"
