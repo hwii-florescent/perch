@@ -6,6 +6,11 @@ use perch_core::server::CliArgs;
 
 fn main() -> anyhow::Result<()> {
     perch_core::daemon::run_if_requested();
+    // `machine::probe` asks a remote core for this, so it must answer without booting a server.
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!("perch-core {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     serve()
 }
 

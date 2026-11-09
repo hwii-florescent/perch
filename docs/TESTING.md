@@ -277,6 +277,12 @@ cleanup to your own paths/processes; do not use broad kill commands. Remote
 probes need an explicitly authorized host and confirmed cleanup, never a
 placeholder hostname or a private host discovered on this machine.
 
+**Machine add over real ssh.** `scripts/machine-over-real-ssh.sh` starts a user-mode `sshd` on
+127.0.0.1:2299 (key login only, sessions run with a temp `$HOME`), runs the ignored
+`machine_install` test through real OpenSSH (probe, upload, atomic replace, shared control master),
+then stops the sshd and the master. It proves the ssh plumbing, not a remote host: a loopback
+substitute is not evidence for the remote-workspace gates above.
+
 Claude normally bypasses permissions here: use `AskUserQuestion` to exercise
 Needs You. Bracketed paste wraps the prompt in `<pasted_content …>`; hook
 assertions match with `contains`, not equality.
