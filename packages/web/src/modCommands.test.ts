@@ -70,3 +70,34 @@ it("terminal.pin pins a listed session that is not on screen", async () => {
   TYPED_COMMANDS["terminal.pin"]!.run({ terminal: "s-off" });
   expect(isPinned("s-off")).toBe(false);
 });
+
+it("project.select, next, prev and close follow the sidebar order and ask before ending a project", async () => {
+  const { usePerchStore } = await import("./store");
+  const { TYPED_COMMANDS } = await import("./modCommands");
+  const focus = vi.fn();
+  const remove = vi.fn();
+  const mine = (id: string) => ({ id, hostId: "local", path: `/${id}`, name: id });
+  usePerchStore.setState({
+    activeHostId: "local",
+    activeProjectId: "b",
+    workspaceProjects: [mine("a"), mine("b"), mine("c"), { ...mine("z"), hostId: "other" }] as never,
+    workspaceOrderByHost: { local: { projects: ["c", "a", "b"], sessions: [] } },
+    focusWorkspaceProject: focus as never,
+    removeWorkspaceProject: remove as never,
+  });
+  const run = (name: string, args: object = {}) => TYPED_COMMANDS[name]!.run(args);
+  // Sidebar order is c, a, b; b is shown, so next wraps to c and prev is a.
+  run("project.next");
+  run("project.prev");
+  run("project.select", { index: 1 });
+  run("project.select", { id: "b" });
+  expect(focus.mock.calls.map(([id]) => id)).toEqual(["c", "a", "c", "b"]);
+  expect(() => run("project.select", { index: 9 })).toThrow(/no project 9/);
+  expect(() => run("project.select")).toThrow(/needs/);
+  expect(() => run("project.close", { id: "a" })).toThrow(/confirmed: true/);
+  expect(() => run("project.close", { id: "nope", confirmed: true })).toThrow(/no project nope/);
+  expect(remove).not.toHaveBeenCalled();
+  run("project.close", { id: "a", confirmed: true });
+  expect(remove).toHaveBeenCalledWith("a");
+  expect(() => run("terminal.open", { place: "up" })).toThrow(/"tab", "right" or "down"/);
+});

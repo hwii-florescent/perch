@@ -1,6 +1,6 @@
 import { placeFloat, resetLayoutState, resizeNode, showStackChild, toggleNode } from "./layoutState";
 import { cloneMod, currentMods, openMod, setLayout } from "./mods";
-import { bindKey, runCommand, setPanesSource, setTerminalReader } from "./modApp";
+import { bindKey, inAgentOrder, runCommand, setPanesSource, setTerminalReader } from "./modApp";
 import { pasteIntoTerminal, scrollTerminal, terminalSelection, terminalText } from "./xtermSetup";
 import { closeTopOverlay } from "./modUi";
 import { writeTextFile } from "./modHost";
@@ -12,6 +12,7 @@ import { useFileTabs } from "./fileTabs";
 import { isPinned, setPinned } from "./pinnedTerminals";
 import { runInWorkspace } from "./runs";
 import { usePerchStore } from "./store";
+import { orderProjects } from "./sidebarOrder";
 
 /** App commands that take arguments, for `api.run(id, args)` (keys cannot run these, so they are not
  * in the keybinding table). Add one here and it is listed by `api.commands()` and the guide. */
@@ -109,7 +110,7 @@ const numberArg = (args: unknown, key: string) => {
 /** `agent.next` / `agent.prev`: the next session that is an agent (not a plain terminal), wrapping round. */
 const stepAgent = (step: 1 | -1) => () => {
   const { sessions, sessionId, switchSession } = usePerchStore.getState();
-  const agents = sessions.filter((session) => session.cliProviderId !== "terminal");
+  const agents = inAgentOrder(sessions.filter((session) => session.cliProviderId !== "terminal"));
   if (!agents.length) throw new Error("There are no agents.");
   const at = agents.findIndex((session) => session.id === sessionId);
   switchSession(agents[(at + step + agents.length) % agents.length]!.id);
@@ -139,6 +140,19 @@ const programIn = (args: unknown) => {
   const quote = (part: string) => `'${part.replace(/'/g, "'\\''")}'`;
   const command = [...argv as string[], ...(word(args, "task") ? [word(args, "task")!] : [])].map(quote).join(" ");
   return async (workspaceId: string) => showWhenListed(await runInWorkspace(workspaceId, command));
+};
+
+/** The projects of the computer on screen, in the order the sidebar shows them. */
+const projectsOnScreen = () => {
+  const { workspaceProjects, activeHostId, workspaceOrderByHost } = usePerchStore.getState();
+  return orderProjects(workspaceProjects.filter((project) => project.hostId === activeHostId), workspaceOrderByHost?.[activeHostId]?.projects);
+};
+/** Show the project `step` away from the shown one (wrapping), or the one at `index` (1 = first) or named by `id`. */
+const stepProject = (step: number) => () => {
+  const projects = projectsOnScreen();
+  if (!projects.length) throw new Error("There are no projects.");
+  const at = projects.findIndex((project) => project.id === usePerchStore.getState().activeProjectId);
+  usePerchStore.getState().focusWorkspaceProject(projects[(at + step + projects.length) % projects.length]!.id);
 };
 
 export const TYPED_COMMANDS: Record<string, { description: string; args: string; run: (args: unknown) => void }> = {
@@ -258,6 +272,26 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
       else fail("The new project has no workspace");
     });
     const timer = setTimeout(() => { stop(); fail("The project was not added in time"); }, 30_000);
+  } },
+  "project.select": { description: "Show a project by position (1 = first, as the sidebar orders them) or id", args: "{index | id}", run: (args) => {
+    const index = numberArg(args, "index");
+    const project = index !== undefined ? projectsOnScreen()[index - 1] : projectsOnScreen().find((candidate) => candidate.id === word(args, "id"));
+    if (!project) throw new Error(index !== undefined ? `There is no project ${index}.` : "This command needs {index} or {id}.");
+    usePerchStore.getState().focusWorkspaceProject(project.id);
+  } },
+  "project.next": { description: "Show the next project", args: "{}", run: stepProject(1) },
+  "project.prev": { description: "Show the previous project", args: "{}", run: stepProject(-1) },
+  "project.close": { description: "Delete a project and end its sessions (the folder stays on disk); asks nothing, so it needs {confirmed: true}", args: "{id, confirmed: true}", run: (args) => {
+    const id = needsId(args);
+    if ((args as { confirmed?: unknown }).confirmed !== true) throw new Error("This ends the project's agents and shells: pass {confirmed: true} to go ahead.");
+    if (!usePerchStore.getState().workspaceProjects.some((project) => project.id === id)) throw new Error(`There is no project ${id}.`);
+    usePerchStore.getState().removeWorkspaceProject(id);
+  } },
+  "terminal.open": { description: "Start a terminal: as a new tab (place \"tab\", the default), or to the \"right\" or \"down\" of the focused pane", args: "{place?: tab | right | down}", run: (args) => {
+    const place = word(args, "place") ?? "tab";
+    if (place === "tab") return void runCommand("tabs.new");
+    if (place !== "right" && place !== "down") throw new Error('{place} is "tab", "right" or "down".');
+    splitActiveTab(place === "down" ? "below" : "right");
   } },
   "layout.set": { description: "Replace the shown layout's tree (the file layouts/<name>.json; it reloads at once). A layout must be shown: layout.switch first", args: "{layout: {type, children, ...}}", run: (args) => {
     const tree = (args as { layout?: unknown } | null)?.layout;

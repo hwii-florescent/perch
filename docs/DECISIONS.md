@@ -117,7 +117,7 @@ approval not mattering much.
   `task` as its last argument), `terminal.copy|paste {terminal?}`, `overlay.close` (the top dialog or popup), `project.new
   {folder, name?, argv?, task?}` (with `argv`, runs the program in the new project once it is added: herdr's `space.new`
   with `argv`), `terminal.pin {terminal?, pinned?}` (kept on this device; `agents()` and `terminals()` report `pinned`, a
-  mod's own sidebar can order by it, Perch's views do not), `terminal.show|peek|keep {terminal|id}` (all three show the
+  mod's own sidebar can order by it, Perch's views do not), `project.select {index|id}`, `project.next|prev`, `project.close {id, confirmed: true}` (herdr's `space.*`), `terminal.open {place}`, `api.themes()` and `api.setAgentOrder(ids)`, `terminal.show|peek|keep {terminal|id}` (all three show the
   session: perchd keeps every terminal running, so none is hidden or parked) and `layout.set {layout}` (rewrites the shown layout's file; it hot reloads). `settings.json` also takes
   herdr's `minimum_contrast` (as `minimumContrast`, 1 to 21), `clipboard_write` (`clipboardWrite`, OSC 52),
   `pane_scrollbars` (`paneScrollbars`), `option_as_alt` (`optionAsAlt`: `auto` and `on` are alike because a web view

@@ -26,6 +26,10 @@ interface ModApi {
   focused(): { sessionId: string | null; projectId: string | null; workspaceId: string | null };
   /** The sessions that run an agent (not a plain terminal), with their status. */
   agents(): { id: string; title: string; provider: string; status: "working" | "idle" | "blocked" | "done"; workspaceId?: string; hostId: string; focused: boolean; pinned: boolean }[];
+  /** Make `agent.next` and `agent.prev` walk the agents in this order (session ids), as a mod's own list shows them. In memory only: agents left out follow in the app's order, unknown ids are ignored; an empty list goes back to the app's order. */
+  setAgentOrder(ids: string[]): void;
+  /** Every theme `app.theme` can use (the shipped ones, then your themes/*.json): its name, whether it is light, and its colors. */
+  themes(): { name: string; light: boolean; colors: Record<string, string> }[];
   /** The sessions that are plain terminals. */
   terminals(): { id: string; title: string; cwd: string; workspaceId?: string; hostId: string; focused: boolean; pinned: boolean }[];
   /** What the tab on screen shows: its tiles when split, else the one tab. `kind` is session, file, review, browser or mod. */

@@ -150,6 +150,30 @@ describe("an app module's versions", () => {
     anchor.remove();
   });
 
+  it("themes() lists every theme with its colors and appearance, and setAgentOrder() reorders agents for agent.next", async () => {
+    const swapper = createSwapper(document.createElement("div"), vi.fn(), async () => (_el, a) => { api = a; });
+    let api!: ModApi;
+    await swapper.load("x", "m");
+    const themes = api.themes();
+    expect(themes.length).toBeGreaterThan(3);
+    expect(new Set(themes.map((t) => t.name)).size).toBe(themes.length);
+    for (const theme of themes) {
+      expect(theme.colors.text, theme.name).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(theme.colors).not.toHaveProperty("colorScheme");
+      expect(typeof theme.light).toBe("boolean");
+    }
+    expect(themes.some((t) => t.light) && themes.some((t) => !t.light)).toBe(true);
+
+    const { inAgentOrder } = await import("./modApp");
+    const agents = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    expect(inAgentOrder(agents)).toBe(agents); // no order: the app's own
+    api.setAgentOrder(["c", "zzz", "a"]);
+    expect(inAgentOrder(agents).map((agent) => agent.id)).toEqual(["c", "a", "b"]);
+    expect(() => api.setAgentOrder("a" as never)).toThrow(/list of session ids/);
+    api.setAgentOrder([]);
+    expect(inAgentOrder(agents)).toBe(agents);
+  });
+
   it("runs programs and uses files through the core's person-only routes", async () => {
     const calls: { url: string; body: Record<string, unknown> }[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {

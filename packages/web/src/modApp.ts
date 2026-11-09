@@ -2,7 +2,7 @@ import { getWorkspaceFileUrl } from "./base";
 import { newId } from "./ids";
 import type { SessionSummary } from "@perch/shared";
 import { claimSlot, type SlotRender } from "./slots";
-import { prefersDark } from "./themes";
+import { prefersDark, resolveTheme, THEME_NAMES } from "./themes";
 import { zoomFactor } from "./zoom";
 import { nodeIds, shownLayout } from "./layoutState";
 import { playBlockedTone, playDoneTone } from "./sound";
@@ -80,6 +80,10 @@ export interface ModApi {
   focused(): { sessionId: string | null; projectId: string | null; workspaceId: string | null };
   /** The sessions that run an agent (not a plain terminal), with their status. */
   agents(): { id: string; title: string; provider: string; status: "working" | "idle" | "blocked" | "done"; workspaceId?: string; hostId: string; focused: boolean; pinned: boolean }[];
+  /** Make `agent.next` and `agent.prev` walk the agents in this order (session ids), as a mod's own list shows them. In memory only: agents left out follow in the app's order, unknown ids are ignored; an empty list goes back to the app's order. */
+  setAgentOrder(ids: string[]): void;
+  /** Every theme `app.theme` can use (the shipped ones, then your themes/*.json): its name, whether it is light, and its colors. */
+  themes(): { name: string; light: boolean; colors: Record<string, string> }[];
   /** The sessions that are plain terminals. */
   terminals(): { id: string; title: string; cwd: string; workspaceId?: string; hostId: string; focused: boolean; pinned: boolean }[];
   /** What the tab on screen shows: its tiles when split, else the one tab. `kind` is session, file, review, browser or mod. */
@@ -327,6 +331,14 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
       return hosts.map(({ id, name, enabled }) => ({ id, name, enabled }));
     },
     agents: () => usePerchStore.getState().sessions.filter((s) => s.cliProviderId !== "terminal").map((s) => ({ id: s.id, title: s.title, provider: s.cliProviderId ?? "", status: sessionDotState(s) as "working" | "idle" | "blocked" | "done", workspaceId: s.workspaceId, hostId: s.hostId ?? "local", focused: s.id === usePerchStore.getState().sessionId, pinned: isPinned(s.id) })),
+    setAgentOrder: (ids) => {
+      if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) throw new Error("setAgentOrder takes a list of session ids.");
+      agentOrder = ids;
+    },
+    themes: () => THEME_NAMES.map((name) => {
+      const { colorScheme, ...colors } = resolveTheme(name);
+      return { name, light: colorScheme === "light", colors: colors as Record<string, string> };
+    }),
     terminals: () => usePerchStore.getState().sessions.filter((s) => s.cliProviderId === "terminal").map((s) => ({ id: s.id, title: s.title, cwd: s.cwd, workspaceId: s.workspaceId, hostId: s.hostId ?? "local", focused: s.id === usePerchStore.getState().sessionId , pinned: isPinned(s.id) })),
     panes: () => panesOnScreen(),
     readTerminal: (id, lines) => {
@@ -429,6 +441,13 @@ const terminalElement = (id: string): Element => {
   const terminalId = usePerchStore.getState().cliTerminalIds[id] ?? id;
   const quoted = CSS.escape(terminalId);
   return document.querySelector(`[data-terminal-id="${quoted}"], [data-session-id="${quoted}"][data-terminal-id]`) ?? document.createElement("div");
+};
+/** The order `agent.next` and `agent.prev` follow once a mod called `setAgentOrder`. */
+let agentOrder: string[] = [];
+/** `agents` in that order: the named ones first, the rest after in their own order. */
+export const inAgentOrder = <T extends { id: string }>(agents: T[]): T[] => {
+  const rank = (id: string) => { const at = agentOrder.indexOf(id); return at === -1 ? Infinity : at; };
+  return agentOrder.length ? [...agents].sort((a, b) => rank(a.id) - rank(b.id)) : agents;
 };
 export const setPanesSource = (source: typeof panesOnScreen) => { panesOnScreen = source; };
 
