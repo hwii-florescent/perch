@@ -66,6 +66,9 @@ pub struct Member {
     pub report: Option<MemberReport>,
     /// A message to it would be accepted (a live agent Perch started).
     pub can_message: bool,
+    /// A child of an earlier conversation of the lead's tab: still shown, and still the person's
+    /// to open or stop, but not the current lead's child.
+    pub previous_run: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -203,6 +206,7 @@ mod tests {
             needs_you: None,
             report: None,
             can_message: true,
+            previous_run: false,
         }
     }
 

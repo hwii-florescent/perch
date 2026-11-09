@@ -1,0 +1,91 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 033a627..cfd108c 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -117,6 +117,11 @@ jobs:
+           - os: macos-latest
+             name: macos-aarch64
+             triple: aarch64-apple-darwin
++          # Built on the arm runner (cross-compiled, run under Rosetta for the smoke test), so an
++          # Intel Mac gets the asset the probe and Install perch-core ask for.
++          - os: macos-latest
++            name: macos-x86_64
++            triple: x86_64-apple-darwin
+     runs-on: ${{ matrix.os }}
+     env:
+       # The core tells a probe which release it came from, so an install fetches its own version.
+diff --git a/docs/TESTING.md b/docs/TESTING.md
+index d994496..58c8dbc 100644
+--- a/docs/TESTING.md
++++ b/docs/TESTING.md
+@@ -278,7 +278,8 @@ probes need an explicitly authorized host and confirmed cleanup, never a
+ placeholder hostname or a private host discovered on this machine.
+ 
+ **Machine add over real ssh.** `scripts/machine-over-real-ssh.sh` starts a user-mode `sshd` on
+-127.0.0.1:2299 (key login only, sessions run with a temp `$HOME`), runs the ignored
++a free 127.0.0.1 port (key login only; sessions and the test process both run with temp `$HOME`s, so no
++control socket reaches your real `~/.ssh`), runs the ignored
+ `machine_install` test through real OpenSSH (probe, upload, atomic replace, shared control master),
+ then stops the sshd and the master. It proves the ssh plumbing, not a remote host: a loopback
+ substitute is not evidence for the remote-workspace gates above.
+diff --git a/scripts/machine-over-real-ssh.sh b/scripts/machine-over-real-ssh.sh
+index af8ec7b..10e6d9e 100755
+--- a/scripts/machine-over-real-ssh.sh
++++ b/scripts/machine-over-real-ssh.sh
+@@ -1,17 +1,20 @@
+ #!/bin/sh
+-# Runs the opt-in `machine_install` test over real OpenSSH: a throwaway user-mode sshd on
+-# 127.0.0.1:2299 (key login only) whose sessions run with a temp $HOME, so nothing of yours is touched.
++# Runs the opt-in `machine_install` test over real OpenSSH: a throwaway user-mode sshd on a free
++# 127.0.0.1 port (key login only) whose sessions run with a temp $HOME. The test process runs with a
++# temp $HOME too, so its ssh control socket (~/.ssh/perch-cm) never lands in your real ~/.ssh.
+ # Stops the sshd and the ssh control master it created when done.
+ set -u
+ ROOT=$(cd "$(dirname "$0")/.." && pwd)
+-D=$(mktemp -d)
+-mkdir -p "$D/home"
++# Short path: the control socket must fit macOS's ~104-byte sun_path.
++D=$(mktemp -d /tmp/pm.XXXXXX)
++mkdir -p "$D/home" "$D/localhome"
++PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])') || exit 1
+ cd "$D" || exit 1
+ ssh-keygen -q -t ed25519 -N '' -f hostkey
+ ssh-keygen -q -t ed25519 -N '' -f userkey
+ cp userkey.pub authorized_keys
+ cat > sshd_config <<CFG
+-Port 2299
++Port $PORT
+ ListenAddress 127.0.0.1
+ HostKey $D/hostkey
+ PidFile $D/sshd.pid
+@@ -25,7 +28,7 @@ CFG
+ cat > ssh_config <<CFG
+ Host box
+   HostName 127.0.0.1
+-  Port 2299
++  Port $PORT
+   IdentityFile $D/userkey
+   IdentitiesOnly yes
+   StrictHostKeyChecking no
+@@ -35,11 +38,18 @@ printf '#!/bin/sh\nexec ssh -F %s/ssh_config "$@"\n' "$D" > ssh-wrapper
+ chmod 755 ssh-wrapper
+ /usr/sbin/sshd -f sshd_config -E "$D/sshd.log" || exit 1
+ sleep 1
+-(cd "$ROOT" && PERCH_MACHINE_SSH="$D/ssh-wrapper" PERCH_MACHINE_HOME="$D/home" \
+-  cargo test -p perch-core --test machine_install -- --ignored)
++# Build first with the real HOME (cargo/rustup need it), then run the test binary with the temp one.
++BIN=$(cd "$ROOT" && cargo test -p perch-core --test machine_install --no-run --message-format=json 2>/dev/null \
++  | python3 -c 'import sys,json
++for l in sys.stdin:
++    try: m=json.loads(l)
++    except ValueError: continue
++    if m.get("executable") and m.get("target",{}).get("name")=="machine_install": print(m["executable"])' | tail -1)
++[ -x "$BIN" ] || { echo "could not build machine_install" >&2; kill "$(cat "$D/sshd.pid")"; rm -rf "$D"; exit 1; }
++HOME="$D/localhome" PERCH_MACHINE_SSH="$D/ssh-wrapper" PERCH_MACHINE_HOME="$D/home" "$BIN" --ignored
+ status=$?
+ # The test's ssh calls share a control master (~/.ssh/perch-cm/%C); close the one that reached our sshd.
+-for pid in $(lsof -nP -iTCP:2299 -sTCP:ESTABLISHED -a -c ssh -t 2>/dev/null); do kill "$pid" 2>/dev/null; done
++for pid in $(lsof -nP -iTCP:$PORT -sTCP:ESTABLISHED -a -c ssh -t 2>/dev/null); do kill "$pid" 2>/dev/null; done
+ kill "$(cat "$D/sshd.pid")" 2>/dev/null
+ rm -rf "$D"
+ exit $status

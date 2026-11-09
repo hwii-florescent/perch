@@ -306,6 +306,31 @@ Amends "Examples, not shipped defaults" and "Slots" below; the rest of the mods 
   docked, overlaid or run hidden on their own.
 - **Fixed built-ins.** Sanitizers (`markdown.ts`, `SafeHtml.tsx`, `uiBlocks.ts`) are not cloneable.
 
+## 2026-11-09 — Agent launch parity and conversation-scoped runs (owner)
+
+The owner chose all three lifecycle rules. An agent typed into a Perch shell has the same Perch
+capabilities as one from the picker, and a fresh conversation owns a fresh run, not everything ever
+started in its tab.
+
+- Previous children keep running, labelled "Earlier conversation". The new lead cannot list, read,
+  message, steer, stop or hear from them (reports addressed to an earlier run are never queued for the
+  new one); the person can still open, message and stop them.
+- Explicitly resuming a known conversation restores its former run and children. Reconnecting a
+  surviving process after a core or app update keeps the current run.
+- A child that runs `/new` or `/clear` stays under its original lead and run and keeps the depth
+  limit; its notes say "(conversation N)" and `perch list` shows which conversation its report is from.
+- A normal exit followed by a fresh launch (even of another harness) starts a fresh run. Only a
+  provider-confirmed new conversation moves a run: typed, cancelled or failed commands do not.
+
+## 2026-11-09 — No automatic lead-notification cap (owner)
+
+Owner: "remove the noti limit for me", after inbox receipts confirmed the per-run cap prevented
+sub-session reports from reaching the lead.
+
+- Remove the per-run automatic-delivery cap and its Settings control, not merely raise the default.
+- Keep the other sub-session/message limits, input-safety checks, approval holds and delivery receipts.
+- Legacy saved wake limits do not restrict delivery; do not replay previously undelivered notifications.
+
 ## 2026-11-08 — Mods: trusted JavaScript that changes Perch itself, as in herdr-app (owner direction)
 
 Copies herdr's desktop app, not its older plugins: a person prompts an agent, the agent writes a

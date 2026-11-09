@@ -1,0 +1,245 @@
+{
+  "baseCommit": "8a02934e9b3b7743f6377cb41ce6dedfd1cb1807",
+  "files": [
+    {
+      "path": "crates/perch-core/src/agent_runtime.rs",
+      "sha256": "cd94fa5543d241fa89dc628ce79646235d3514b5ab6f2213b547da0926d5bc5b",
+      "bytes": 140847
+    },
+    {
+      "path": "crates/perch-core/src/native_ui/claude.rs",
+      "sha256": "775347240095d0e5720da2d011972c29c552a842af4e44897b7ff2f8e450e5d2",
+      "bytes": 78488
+    },
+    {
+      "path": "crates/perch-core/src/native_ui/codex.rs",
+      "sha256": "6019c0cc13bf1faf344f6d07a7a8d816dc87dc42df4547e9f207575a1a4f85ae",
+      "bytes": 45616
+    },
+    {
+      "path": "crates/perch-core/src/native_ui/dialog.rs",
+      "sha256": "9955d9dd174fca2b90faa911614a11b095cf3ab03cb0bae18c413c64595dfac3",
+      "bytes": 27547
+    },
+    {
+      "path": "crates/perch-core/src/native_ui/edits.rs",
+      "sha256": "7071adecf0ff94ad52b84542782f0e8657fed959e28712de42d98b78b76b4200",
+      "bytes": 71671
+    },
+    {
+      "path": "crates/perch-core/src/native_ui/history.rs",
+      "sha256": "14504c81172058d9762e247d4e986fe5e868f158b9bda06d0e5df6ece99affcf",
+      "bytes": 10255
+    },
+    {
+      "path": "crates/perch-core/src/native_ui/mod.rs",
+      "sha256": "21409358e26c7c78705b3bdbc5dd315a8edcac70301d1283640009c8f3209b9d",
+      "bytes": 48506
+    },
+    {
+      "path": "crates/perch-core/src/native_ui/pi-extension.test.mjs",
+      "sha256": "9779658e12ec80f43d54e47a4f4668210161bbbfae4e443de92895cf9442d242",
+      "bytes": 9216
+    },
+    {
+      "path": "crates/perch-core/src/native_ui/pi-extension.ts",
+      "sha256": "95ad8abc5957a30293e54ced54393e0ff964062960e660282fa7d5145e39537d",
+      "bytes": 17962
+    },
+    {
+      "path": "crates/perch-core/src/native_ui/transcript.rs",
+      "sha256": "acce870b209e2f7a6ce2caedb65e555d4da813da0fe2739edf4cbc06054b56d0",
+      "bytes": 66500
+    },
+    {
+      "path": "crates/perch-core/src/server/native_ui.rs",
+      "sha256": "e7b9ef5751c629548a77a1e51bbcc3ee5a126f1260c36ed13ffde679d64aeb74",
+      "bytes": 46843
+    },
+    {
+      "path": "docs/NATIVE-UI-PARITY.md",
+      "sha256": "cdf971a43ef778f0279f4494b76b0da6fe418510b366edbfd9fd60d57ba7e38e",
+      "bytes": 24426
+    },
+    {
+      "path": "docs/ROADMAP.md",
+      "sha256": "031fd174b1920158d7d6c9b4798532c1cc81481454bf1a40c0fd897e3f7dbfa7",
+      "bytes": 42601
+    },
+    {
+      "path": "e2e/sidebar.spec.ts",
+      "sha256": "4cf6ae700801523e0e2b293759bcf946b9a0f6c23d9cdbcdd6e403f1fdd038c7",
+      "bytes": 26668
+    },
+    {
+      "path": "packages/web/src/chatFont.ts",
+      "sha256": "652badd1c660a2d035fc876be97e957de9bc79f7f18c1396bf3f9a77e79953ec",
+      "bytes": 1482
+    },
+    {
+      "path": "packages/web/src/chatSend.ts",
+      "sha256": "cfcfbfc1463323753cc9b0294671b1736057cfd0f3b57a00433bf160afa59e7f",
+      "bytes": 1326
+    },
+    {
+      "path": "packages/web/src/components/SettingsPage.tsx",
+      "sha256": "f558dc753215ae8a2764f6b13d35d496932c9293e782e5a4b196a6d769775eb0",
+      "bytes": 57200
+    },
+    {
+      "path": "packages/web/src/components/StatusSidebar.test.tsx",
+      "sha256": "8a532fb75185b668ffc30467a26527f38d1189500d5f47a6aee9b9ef6055d2c5",
+      "bytes": 24705
+    },
+    {
+      "path": "packages/web/src/components/WorkspaceOverview.tsx",
+      "sha256": "a76de41917ebc17cbbbf6f9d24d2974bdd554fa30753eedd72cf80fae83d2843",
+      "bytes": 83265
+    },
+    {
+      "path": "packages/web/src/components/ui/chat.ts",
+      "sha256": "203c187c270f8f776079c129cf51112ac044c7fd7cdbb1c7c40f4deb2fdf22ec",
+      "bytes": 4656
+    },
+    {
+      "path": "packages/web/src/contextMenuGuard.test.ts",
+      "sha256": "bfe3d2e84763e496ef9fcc0e8412901a39c5c6e9b7d330a7d24d8c0532abb740",
+      "bytes": 1175
+    },
+    {
+      "path": "packages/web/src/contextMenuGuard.ts",
+      "sha256": "b16d8e381a42e2c243bbead9e959efb74f22a61af83fda5ebe44095f5dcf7c04",
+      "bytes": 1402
+    },
+    {
+      "path": "packages/web/src/editorSyntax.ts",
+      "sha256": "e9c2983ecd03c78103c35dbe9d9f4d37e4597ddb4a6c7ee1f96202accc4353d0",
+      "bytes": 2809
+    },
+    {
+      "path": "packages/web/src/main.tsx",
+      "sha256": "d3756460b5bb53f2bb359a622616a334cf893c587c4731aef4e16cbe62aa07b1",
+      "bytes": 3314
+    },
+    {
+      "path": "packages/web/src/markdown.ts",
+      "sha256": "be407971394c1865767fc516f1a1a14f081df75bdba5e65d38472ef9701f385a",
+      "bytes": 6789
+    },
+    {
+      "path": "packages/web/src/markdownSplit.test.ts",
+      "sha256": "7e1db34891285ae94802e2a24d75d7a3d5eca6732d932a47b6e0d9f370147d2e",
+      "bytes": 991
+    },
+    {
+      "path": "packages/web/src/styles/chat.css",
+      "sha256": "c079cfefde70336df35fc804d79e1b9eea6366b6fae90574f87e1d382ce3d57e",
+      "bytes": 5884
+    },
+    {
+      "path": "packages/web/src/views/NativeCliChat.tsx",
+      "sha256": "a168adce51edcff5aa5b65d9623bf0f05659dcddcf71b4f5a8637b0cd3ca5d74",
+      "bytes": 41644
+    },
+    {
+      "path": "packages/web/src/views/nativeChat/CodeBlock.tsx",
+      "sha256": "32d67ed697f118bb28a153a862fec1b5a42afc6c0c9e9e67c8aa805a54b3c0a6",
+      "bytes": 2576
+    },
+    {
+      "path": "packages/web/src/views/nativeChat/CopyButton.tsx",
+      "sha256": "fb09ca2549ae023ad2f8b94f271de6490b645b28d2dfe69676f6a54206efd76a",
+      "bytes": 1541
+    },
+    {
+      "path": "packages/web/src/views/nativeChat/RequestCard.tsx",
+      "sha256": "4d4b7516d28671f80cf5f8f1e03d74c61598eab766700050973d5293982cac06",
+      "bytes": 4448
+    },
+    {
+      "path": "packages/web/src/views/nativeChat/SafeHtml.tsx",
+      "sha256": "faf9aa788c31fcdd0d339c1e4abdb6262ed8664bf0a976864c6d3917afebcfd3",
+      "bytes": 642
+    },
+    {
+      "path": "packages/web/src/views/nativeChat/UiBlocksView.test.tsx",
+      "sha256": "b5aeeaf355e891f13f2387b8d7e0ddee68797e6fbdc250f7474e381dabd7a1e3",
+      "bytes": 1709
+    },
+    {
+      "path": "packages/web/src/views/nativeChat/UiBlocksView.tsx",
+      "sha256": "5c0f54fe68b5492f5e8ee9e59b14e058529722984ae34c3a0b29207e6e01899d",
+      "bytes": 3611
+    },
+    {
+      "path": "packages/web/src/views/nativeChat/sendState.test.ts",
+      "sha256": "f3fa25e6c0bdd3c23611be98ac2f9a74b794584e1fc6dbf54429437682b9eb9f",
+      "bytes": 2516
+    },
+    {
+      "path": "packages/web/src/views/nativeChat/sendState.ts",
+      "sha256": "f2ae52987be6a7fa4ca5368bc12baf0b2788555c7eda914674fd1f6fb09e7d2e",
+      "bytes": 2345
+    },
+    {
+      "path": "packages/web/src/views/nativeChat/uiBlocks.test.ts",
+      "sha256": "82256fe2658edfcf2d16a87882924b0c45d0ff6444d76821732a8f80ef572ed7",
+      "bytes": 866
+    },
+    {
+      "path": "packages/web/src/views/nativeChat/uiBlocks.ts",
+      "sha256": "a25d101b6122724e2c86c832b243c442827383d1620abff84f601f926c9d86ca",
+      "bytes": 3582
+    },
+    {
+      "path": "plans/261108-2212-cloneable-stock-ui/design.md",
+      "sha256": "fac1a3e77593ce1e9f6a454d4be598dbc068390347bb9dfe2263d2b7f4468be4",
+      "bytes": 26516
+    },
+    {
+      "path": "plans/261108-2212-cloneable-stock-ui/parity-matrix.md",
+      "sha256": "37722822c9243810bd3a6e4be036ca2732a40c33414fe58f9ae1d66dbd4592b4",
+      "bytes": 12398
+    },
+    {
+      "path": "plans/261108-2212-cloneable-stock-ui/phase-01-start.md",
+      "sha256": "eb93e4a3ba3633f391314908804401b6a18d54c67afd6b33be90902e97f66b8d",
+      "bytes": 13980
+    },
+    {
+      "path": "plans/261108-2212-cloneable-stock-ui/phase-02-navigation.md",
+      "sha256": "686170580456486e53abf36d41e0c5541df9d38ddbd5cf28230bcbba3737cdf0",
+      "bytes": 8367
+    },
+    {
+      "path": "plans/261108-2212-cloneable-stock-ui/phase-03-resource-surfaces.md",
+      "sha256": "6c10e954e017e035b243d18b4725d202a0779d6c248682cc6aa55f790b3c4bec",
+      "bytes": 9422
+    },
+    {
+      "path": "plans/261108-2212-cloneable-stock-ui/phase-04-app-chrome.md",
+      "sha256": "ef79fe6ae34ef7bc1c7c42caf8e3c3b3f8c68b87d7d4d23eadd02d8e02285e49",
+      "bytes": 9390
+    },
+    {
+      "path": "plans/261108-2212-cloneable-stock-ui/phase-05-parity-and-rollout.md",
+      "sha256": "260d1aeda593144e5e4e03f20c637d6eab30701f1c511982a2bab0ad07363927",
+      "bytes": 9348
+    },
+    {
+      "path": "plans/261108-2212-cloneable-stock-ui/plan.md",
+      "sha256": "73e6c3d7cef4568a5666cb38c1367be36ccbbd32a8026f077191446681f7ba97",
+      "bytes": 5145
+    },
+    {
+      "path": "plans/261108-2212-cloneable-stock-ui/validation.md",
+      "sha256": "ed257f5bce9123a0ff5892ca81c817e8115663ada63f2f839fe51832f3d67095",
+      "bytes": 8133
+    },
+    {
+      "path": "plans/journals/2026-11-09-cloneable-stock-ui-planning-and-review-corrections.md",
+      "sha256": "60fd58fdfa7440735361507a624ab13335cf231847626c71711dfb41e67ba9ab",
+      "bytes": 2336
+    }
+  ]
+}

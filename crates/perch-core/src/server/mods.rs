@@ -1862,7 +1862,7 @@ mod tests {
         let app = super::super::booted_state(address);
         let (workspace, _) = lead_with_child(&db, &nest, crate::sub_sessions::SubState::Running);
         let token = db
-            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .issue_in_current_run(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
             .unwrap()
             .token;
         let call = |route: &'static str, body: Value| {

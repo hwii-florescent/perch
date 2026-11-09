@@ -156,13 +156,14 @@ pub struct SettingsData {
     #[serde(default)]
     pub reporter_omp_model: String,
     /// The per-run limits (Settings > Sub-sessions); absent from an older core, which means today's
-    /// defaults (4 live, 8 total, 50 messages, 10 wakes, 3 interrupts, 10 waiting cards).
+    /// defaults (4 live, 8 total, 50 messages, 3 interrupts, 10 waiting cards).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_live_sub_sessions: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_sub_sessions: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_messages_per_run: Option<u32>,
+    /// Legacy field, no longer emitted or enforced; automatic lead deliveries are unlimited.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_lead_wakes_per_run: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -296,6 +297,7 @@ pub struct SettingsPatch {
     pub max_sub_sessions: Option<u32>,
     #[serde(default)]
     pub max_messages_per_run: Option<u32>,
+    /// Legacy field accepted for compatibility, with no delivery limit effect.
     #[serde(default)]
     pub max_lead_wakes_per_run: Option<u32>,
     #[serde(default)]
@@ -551,6 +553,10 @@ pub struct CrewRow {
     pub latest: Option<CrewLatest>,
     /// A message to it would be accepted now.
     pub can_message: bool,
+    /// A child of an earlier conversation of the lead's tab (still running, still the person's to
+    /// open or stop, not the current lead's). Absent for every other row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_run: Option<bool>,
     /// What a person may do to this child from the strip, each with the reason it is not offered
     /// (capability `crew.actions.v1`). Only a lead's `worker` rows have it.
     #[serde(default, skip_serializing_if = "Option::is_none")]

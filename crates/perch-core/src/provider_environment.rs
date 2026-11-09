@@ -113,6 +113,7 @@ fn prepare_with_parent(
     }
     environment.remove(perchd::agent_cli::SESSION_ENV);
     environment.remove(perchd::agent_cli::TOKEN_ENV);
+    environment.remove(perchd::agent_cli::LAUNCH_ENV);
     // The core's own launcher-chosen UI credential (`local_ui`) is never an agent's.
     environment.remove(crate::local_ui::TOKEN_ENV);
     environment.extend(scoped.iter().cloned());

@@ -48,13 +48,12 @@ function ModelInput({ draftKey, value, onCommit, testId, label, disabled, allowE
 
 // The per-run sub-session limits. Ranges and defaults mirror `RunLimits` in crates/perch-core/src/sub_sessions.rs,
 // which is what validates them; the core also refuses a total below the live limit.
-type RunLimitKey = "maxLiveSubSessions" | "maxSubSessions" | "maxMessagesPerRun" | "maxLeadWakesPerRun" | "maxInterruptsPerSubSession" | "maxWaitingSuggestions";
+type RunLimitKey = "maxLiveSubSessions" | "maxSubSessions" | "maxMessagesPerRun" | "maxInterruptsPerSubSession" | "maxWaitingSuggestions";
 interface RunLimitField { key: RunLimitKey; title: string; description: string; fallback: number; min: number; max: number }
 const RUN_LIMIT_FIELDS: RunLimitField[] = [
   { key: "maxLiveSubSessions", title: "Live sub-sessions per run", description: "Running at once under one lead.", fallback: 4, min: 1, max: 16 },
   { key: "maxSubSessions", title: "Sub-sessions per run", description: "All a lead may start in a run, stopped ones included. At least the live limit.", fallback: 8, min: 1, max: 64 },
   { key: "maxMessagesPerRun", title: "Messages per run", description: "Messages the run's agents may send each other. Notes do not count.", fallback: 50, min: 1, max: 1000 },
-  { key: "maxLeadWakesPerRun", title: "Automatic lead wakes per run", description: "Times a message may start a turn for the lead by itself.", fallback: 10, min: 1, max: 100 },
   { key: "maxInterruptsPerSubSession", title: "Interrupts per sub-session", description: "Times a lead may interrupt the same sub-session.", fallback: 3, min: 1, max: 20 },
   { key: "maxWaitingSuggestions", title: "Waiting suggested tasks", description: "Suggested-task cards waiting for you before new ones are refused.", fallback: 10, min: 1, max: 50 },
 ];

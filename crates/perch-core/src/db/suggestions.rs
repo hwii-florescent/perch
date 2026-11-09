@@ -63,6 +63,10 @@ impl HistoryDb {
     ) -> anyhow::Result<Added> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
+        // A card belongs to the run that made it, and its key is unique within that run.
+        let run = super::agent_runs::run_of(&tx, lead_session_id)?
+            .unwrap_or_else(|| lead_session_id.to_string());
+        let key = &super::scoped_key(&run, lead_session_id, key);
         let earlier = {
             let mut stmt = tx.prepare(&format!(
                 "SELECT {COLUMNS} FROM suggestions
@@ -76,8 +80,9 @@ impl HistoryDb {
         }
         let pending: i64 = tx.query_row(
             "SELECT COUNT(*) FROM suggestions
-             WHERE lead_session_id = ?1 AND state IN ('pending', 'starting')",
-            params![lead_session_id],
+             WHERE lead_session_id = ?1 AND state IN ('pending', 'starting')
+               AND COALESCE(NULLIF(run_id, ''), lead_session_id) = ?2",
+            params![lead_session_id, run],
             |row| row.get(0),
         )?;
         let max_pending = self.limits().waiting_cards as usize;
@@ -90,8 +95,8 @@ impl HistoryDb {
             tx.execute(
                 "INSERT INTO suggestions
                     (id, lead_session_id, card_id, card_key, position, task, agent, model,
-                     worktree, state, reason, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending', '', ?10, ?10)",
+                     worktree, state, reason, created_at, updated_at, run_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending', '', ?10, ?10, ?11)",
                 params![
                     uuid::Uuid::new_v4().to_string(),
                     lead_session_id,
@@ -102,7 +107,8 @@ impl HistoryDb {
                     item.agent,
                     item.model,
                     item.worktree as i64,
-                    now
+                    now,
+                    run
                 ],
             )?;
         }
@@ -125,6 +131,20 @@ impl HistoryDb {
              ORDER BY created_at, card_id, position"
         ))?;
         let rows = stmt.query_map(params![lead_session_id], row_from)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// A lead's suggestions in its current run: what an agent is told of, never an earlier
+    /// conversation's.
+    pub fn suggestions_in_run(&self, lead_session_id: &str) -> anyhow::Result<Vec<SuggestionRow>> {
+        let run = self.run_of(lead_session_id)?;
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLUMNS} FROM suggestions
+             WHERE lead_session_id = ?1 AND COALESCE(NULLIF(run_id, ''), lead_session_id) = ?2
+             ORDER BY created_at, card_id, position"
+        ))?;
+        let rows = stmt.query_map(params![lead_session_id, run], row_from)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
@@ -388,9 +408,9 @@ mod tests {
             let conn = db.conn.lock().unwrap();
             conn.execute(
                 "INSERT INTO sub_sessions
-                    (child_session_id, parent_session_id, parent_incarnation, workspace_id,
-                     provider_id, spawn_key, state, task, created_at, updated_at)
-                 VALUES ('child', 'lead', 'i', 'w', 'codex', ?1, 'start_unknown', 'one', 0, 0)",
+                    (child_session_id, parent_session_id, parent_incarnation, parent_run_id,
+                     workspace_id, provider_id, spawn_key, state, task, created_at, updated_at)
+                 VALUES ('child', 'lead', 'i', 'lead', 'w', 'codex', ?1, 'start_unknown', 'one', 0, 0)",
                 params![suggestions::spawn_key(&rows[0].id)],
             )
             .unwrap();

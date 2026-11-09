@@ -201,6 +201,15 @@ Useful existing coverage (not a claim of a fresh passing run):
   and first message were seen but its turn hit a usage limit. What a model will not do on cue (a spawn on
   a message-opened turn, the fifth child) is tested without models in `server/sub_sessions.rs`,
   `db/sub_sessions.rs` and `agent_runtime.rs`.
+- `agent-runs.spec.ts` (same config; needs `perch` beside the core; run outside a Perch shell; haiku only, three lead
+  turns and one short child turn): a picker-launched Claude lead starts a haiku child; `/clear` begins a fresh run
+  (the child stays in the first one, and the new lead's `perch stop` of it is refused); the person `/exit`s Claude and
+  types `claude --resume <first conversation>` into the same shell, which is issued its own identity through the
+  shell's launcher (`launch_pid`, replacing the picker's) and gets the first run and the child back; `perch whoami`
+  from it names the new incarnation. Asserts the SQLite file, and that no `perch_agent_` secret reaches the chat, `ps`
+  or the core log. Verified live 2026-11-09 (Claude 2.1.319). Provider semantics seen directly: Claude `/clear`
+  gives a new `session_id` (`SessionStart` source `clear`) and `--resume` keeps the id; Pi `/new` gives a new
+  session file/id and `--session` keeps it. Codex and OMP resets are not probed.
 - `agent-mail.spec.ts` (same config; needs `perch` beside the core; `PERCH_E2E_CHILD=claude` for a haiku
   child, the default is a luna Codex one): a haiku lead starts a child whose task is `perch send` to the
   lead; the window stays open on the lead (its view holds the input lease; delivery rides it unchanged);
@@ -387,10 +396,14 @@ probes need an explicitly authorized host and confirmed cleanup, never a
 placeholder hostname or a private host discovered on this machine.
 
 **Machine add over real ssh.** `scripts/machine-over-real-ssh.sh` starts a user-mode `sshd` on
-127.0.0.1:2299 (key login only, sessions run with a temp `$HOME`), runs the ignored
+a free 127.0.0.1 port (key login only; sessions and the test process both run with temp `$HOME`s, so no
+control socket reaches your real `~/.ssh`), runs the ignored
 `machine_install` test through real OpenSSH (probe, upload, atomic replace, shared control master),
-then stops the sshd and the master. It proves the ssh plumbing, not a remote host: a loopback
-substitute is not evidence for the remote-workspace gates above.
+then stops the sshd and the master, including on build/test failure or interruption.
+`python3 scripts/check-machine-ssh-failure.py` injects a failed Cargo build and checks that its diagnostic
+is visible, no stale executable runs, and the fixture directory/processes are removed.
+These checks prove the ssh plumbing, not a remote host: a loopback substitute is not evidence for the
+remote-workspace gates above.
 
 Claude normally bypasses permissions here: use `AskUserQuestion` to exercise
 Needs You. Bracketed paste wraps the prompt in `<pasted_content …>`; hook

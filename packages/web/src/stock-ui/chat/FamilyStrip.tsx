@@ -187,7 +187,7 @@ function Row({ row, now, onOpen, onAct, unavailable, onRefresh }: { row: CrewRow
       <button type="button" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} details of ${name}`} onClick={() => setOpen(!open)}
         className="flex min-h-6 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-ui bg-transparent px-[0.4rem] text-left text-fg [border:0] hover:bg-surface-1">
         <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", DOT[tone])} />
-        <span className="min-w-0 truncate">{ROLE[row.role] ? <span className="text-subtext-0">{ROLE[row.role]} · </span> : null}{name}</span>
+        <span className="min-w-0 truncate">{ROLE[row.role] ? <span className="text-subtext-0">{ROLE[row.role]} · </span> : null}{row.previousRun ? <span className="text-subtext-0" data-testid="native-cli-family-previous">Earlier conversation · </span> : null}{name}</span>
         <span className={cn("ml-auto shrink-0", tone === "needs" ? "text-yellow" : tone === "alert" ? "text-red" : "text-subtext-0")} data-testid="native-cli-family-state">{word}</span>
         <Chevron open={open} className="shrink-0 text-subtext-0" />
       </button>
@@ -201,6 +201,7 @@ function Row({ row, now, onOpen, onAct, unavailable, onRefresh }: { row: CrewRow
     {row.report && <p className="m-0 truncate pl-5 text-subtext-0" data-testid="native-cli-family-report" data-source={row.report.source}>{reportLabel}: {row.report.text}</p>}
     {open && <dl className="m-0 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 py-1 pl-5 text-[0.8rem] [overflow-wrap:anywhere]" data-testid="native-cli-family-details">
       <dt className="text-subtext-0">Agent</dt><dd className="m-0">{row.provider}{row.dispatch ? ` · ${row.dispatch}` : ""}</dd>
+      {row.previousRun && <><dt className="text-subtext-0">Run</dt><dd className="m-0">Started in an earlier conversation of this tab. It keeps running; the agent in this conversation cannot message, read or stop it. You can.</dd></>}
       {row.task && <><dt className="text-subtext-0">Task</dt><dd className="m-0 whitespace-pre-wrap">{row.task}</dd></>}
       {row.needsYou && <><dt className="text-yellow">Asks you</dt><dd className="m-0 whitespace-pre-wrap">{row.needsYou.preview}</dd></>}
       {latest && <><dt className="text-subtext-0">{latest.direction === "to" ? "You wrote" : "It wrote"}</dt><dd className="m-0 whitespace-pre-wrap">{latest.preview}{note && <span className="text-subtext-0"> ({note})</span>}</dd></>}

@@ -126,7 +126,7 @@ impl HistoryDb {
     /// What the agents of `session_id`'s run have sent, for the reporter's message-limit guard.
     pub fn run_agent_messages(&self, session_id: &str) -> anyhow::Result<usize> {
         let conn = self.conn.lock().unwrap();
-        let Some(run) = agent_mail::run_of(&conn, session_id)? else {
+        let Some(run) = super::agent_runs::run_of(&conn, session_id)? else {
             return Ok(0);
         };
         let count: i64 = conn.query_row(

@@ -343,6 +343,8 @@ struct AppState {
     mail_notify: Arc<tokio::sync::Notify>,
     /// Children whose turn summary is being written (`reporter.rs`): one model call at a time each.
     reporter_in_flight: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Children whose lead was told they went quiet, until they speak again (`agent_mail.rs`).
+    quiet_told: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Local agent-attached (CLI-mode) terminals, one PTY per session id
     /// shared across every viewing connection — see `AgentTerminalRegistry`'s
     /// doc comment. Lives in `AppState` (not `ConnState`) on purpose: it must
@@ -620,6 +622,7 @@ pub async fn run(
         git_poll_notify: Arc::new(tokio::sync::Notify::new()),
         mail_notify: Arc::new(tokio::sync::Notify::new()),
         reporter_in_flight: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        quiet_told: Arc::new(Mutex::new(std::collections::HashSet::new())),
         devices,
         local_ui: options.local_ui.clone(),
         phone: phone.clone(),
@@ -748,10 +751,11 @@ pub async fn run(
     // A confirmed exit withdraws the mail still waiting for the process that ended.
     {
         let app = state.clone();
-        state.agent_runtime.set_exit_listener(Arc::new(move |key| {
-            agent_mail::note_child(&app, key, crate::agent_mail::ChildStatus::Exited, None);
-            app.mail_notify.notify_one();
-        }))?;
+        state
+            .agent_runtime
+            .set_exit_listener(Arc::new(move |_key| {
+                app.mail_notify.notify_one();
+            }))?;
     }
     attention::reconcile_at_boot(&state);
     // Read before recovery turns them Reconnecting with another reason.
@@ -827,6 +831,10 @@ pub async fn run(
         .route(
             &format!("{base_path}agent/whoami"),
             post(agent::whoami).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/launch"),
+            post(agent::launch).layer(axum::extract::DefaultBodyLimit::max(4 * 1024)),
         )
         .route(
             &format!("{base_path}agent/report"),
@@ -1044,24 +1052,30 @@ pub async fn run(
     Ok(())
 }
 
-/// Revoke the token of every run whose process perchd confirms has exited.
+/// Revoke the token of every run whose process perchd confirms has exited. A tab is known to perchd
+/// by the runtime that owns its process (the shell, or the picker's agent), which is not always the
+/// agent whose token it is: an agent typed into a shell is issued under its own name.
 fn revoke_ended_agent_identities(db: &HistoryDb) {
-    let Ok(active) = db.active_agent_identities() else {
+    let exited = |key: &AgentKey| {
+        crate::daemon::session_state(&crate::agent_runtime::terminal_key(key))
+            == crate::daemon::RuntimeState::Exited
+    };
+    let Ok(active) = db.active_agent_owners() else {
         return;
     };
-    for identity in active {
-        let Ok(key) = AgentKey::new(
-            &identity.workspace_id,
-            &identity.session_id,
-            &identity.provider_id,
-        ) else {
-            continue;
-        };
-        if crate::daemon::session_state(&crate::agent_runtime::terminal_key(&key))
-            == crate::daemon::RuntimeState::Exited
-        {
-            if let Err(error) = db.revoke_agent_incarnation(&identity.incarnation) {
+    for (incarnation, owner) in active {
+        if exited(&owner) {
+            if let Err(error) = db.revoke_agent_incarnation(&incarnation) {
                 tracing::warn!(%error, "could not revoke an ended run's agent token");
+            }
+        }
+    }
+    if let Ok(launchers) = db.active_launcher_owners() {
+        for (token_hash, owner) in launchers {
+            if exited(&owner) {
+                if let Err(error) = db.revoke_launcher(&token_hash) {
+                    tracing::warn!(%error, "could not revoke an ended shell's launcher");
+                }
             }
         }
     }
@@ -1564,6 +1578,7 @@ fn spawn_agent_lifecycle_task(state: AppState) {
             let _operation = state.agent_operation_lock.lock().unwrap();
             let snapshots = state.agent_runtime.lifecycle().list();
             refresh_stale_sessions(&state, &snapshots);
+            agent_mail::tell_leads_of_quiet_children(&state, &snapshots);
             seen.retain(|key, _| snapshots.iter().any(|snapshot| &snapshot.key == key));
             for snapshot in snapshots {
                 if !state
@@ -1633,35 +1648,21 @@ fn spawn_agent_turn_state_task(state: AppState, mut open_turns: attention::OpenT
             };
             use crate::agent_fleet::AgentState;
             attention::on_transition(&state, &key, &transition, starts_turn, &mut open_turns);
-            // A child of a lead leaving a turn, or stopping on a person, is news to the lead.
-            if transition.changed {
-                if let Some(status) =
-                    crate::agent_mail::child_status_edge(Some(transition.from), transition.to)
-                {
-                    let worker = state.clone();
-                    let child = key.clone();
-                    let ended_ms = wall_clock_millis();
-                    tokio::spawn(async move {
-                        // The transcript the bridge reads trails the hook that ended the turn.
-                        if status == crate::agent_mail::ChildStatus::FinishedTurn {
-                            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-                        }
-                        let snapshot = worker
-                            .native_bridge(&child)
-                            .and_then(|bridge| bridge.latest());
-                        // The turn's notes are kept before the lead hears of it, so the note
-                        // carries them; a model that is slow or absent only delays the note.
-                        if status == crate::agent_mail::ChildStatus::FinishedTurn {
-                            reporter::summarise_turn(&worker, &child, snapshot.as_ref(), ended_ms)
-                                .await;
-                        }
-                        let said = snapshot.as_ref().and_then(agent_mail::last_assistant_text);
-                        let _ = tokio::task::spawn_blocking(move || {
-                            agent_mail::note_child(&worker, &child, status, said.as_deref());
-                        })
-                        .await;
-                    });
-                }
+            // A finished turn is summarised for `perch list` and the family strip; the lead is
+            // not woken. It hears of a child only through the child's own `perch report`.
+            if transition.changed
+                && crate::agent_mail::child_status_edge(Some(transition.from), transition.to)
+                    == Some(crate::agent_mail::ChildStatus::FinishedTurn)
+            {
+                let (worker, child, ended_ms) = (state.clone(), key.clone(), wall_clock_millis());
+                tokio::spawn(async move {
+                    // The transcript the bridge reads trails the hook that ended the turn.
+                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                    let snapshot = worker
+                        .native_bridge(&child)
+                        .and_then(|bridge| bridge.latest());
+                    reporter::summarise_turn(&worker, &child, snapshot.as_ref(), ended_ms).await;
+                });
             }
             let running = match transition.to {
                 // Repainting a completed terminal is output, not a new turn.

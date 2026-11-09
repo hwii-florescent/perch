@@ -95,6 +95,8 @@ pub(super) struct SpawnRequest {
     pub task: String,
     pub key: String,
     pub worktree: bool,
+    /// Minutes of silence before `perch list` marks the child quiet; `None` = the default.
+    pub quiet_after: Option<u32>,
 }
 
 impl SpawnRequest {
@@ -117,12 +119,19 @@ impl SpawnRequest {
         let key = sub_sessions::check_key(body["key"].as_str().unwrap_or_default())
             .map_err(bad)?
             .to_string();
+        let quiet_after = match body.get("quietAfter").filter(|value| !value.is_null()) {
+            Some(value) => {
+                Some(sub_sessions::check_quiet_after(value.as_u64().unwrap_or(0)).map_err(bad)?)
+            }
+            None => None,
+        };
         Ok(Self {
             agent: agent.to_string(),
             model,
             task,
             key,
             worktree: body["worktree"].as_bool().unwrap_or(false),
+            quiet_after,
         })
     }
 }
@@ -218,6 +227,11 @@ pub(super) async fn start(
         }
         Reserved::New(row) => row,
     };
+    if let Some(minutes) = request.quiet_after {
+        if let Err(error) = app.db.set_quiet_after(&row.child_session_id, minutes) {
+            tracing::warn!(%error, "could not keep a sub-session's quiet threshold");
+        }
+    }
 
     let mut cwd = lead.cwd.clone();
     if request.worktree {
@@ -448,14 +462,8 @@ fn launch(app: &AppState, row: &SubSessionRow, cwd: &str) -> Result<(), LaunchFa
 }
 
 /// A member's report, always a claim: its own `perch report` of the latest turn, else (for a child
-/// only) the running summary a cheap model wrote, else the start of its last message, labelled as
-/// the fallback it is.
-pub(super) fn member_report(
-    app: &AppState,
-    session_id: &str,
-    key: Option<&AgentKey>,
-    is_child: bool,
-) -> Option<Report> {
+/// only) the running summary a cheap model wrote, else nothing.
+pub(super) fn member_report(app: &AppState, session_id: &str, is_child: bool) -> Option<Report> {
     let own = app.db.latest_session_report(session_id).ok().flatten();
     if !is_child {
         return own.map(|(text, at)| Report {
@@ -465,19 +473,11 @@ pub(super) fn member_report(
             model: None,
         });
     }
-    let said = key
-        .and_then(|key| app.native_bridge(key))
-        .and_then(|bridge| bridge.latest())
-        .and_then(|latest| agent_mail::last_assistant_text(&latest));
-    resolve_child_report(app, session_id, said.as_deref())
+    resolve_child_report(app, session_id)
 }
 
-/// A child's report from what is recorded and `said`, its last message when the caller has it.
-pub(super) fn resolve_child_report(
-    app: &AppState,
-    child_session_id: &str,
-    said: Option<&str>,
-) -> Option<Report> {
+/// A child's report from what is recorded: its own, else the running summary.
+pub(super) fn resolve_child_report(app: &AppState, child_session_id: &str) -> Option<Report> {
     sub_sessions::choose_report(
         app.db
             .latest_session_report(child_session_id)
@@ -485,8 +485,6 @@ pub(super) fn resolve_child_report(
             .flatten(),
         app.db.session_summary(child_session_id).ok().flatten(),
         app.settings.get().reporter_enabled,
-        said,
-        wall_clock_millis(),
     )
 }
 
@@ -507,11 +505,23 @@ fn member_json(
         .map(|row| row.title)
         .unwrap_or_default();
     let key = key_of(app, session_id, provider).ok();
-    let lifecycle = key
+    let snapshot = key
         .as_ref()
-        .and_then(|key| app.agent_runtime.snapshot(key).ok())
-        .map(|snapshot| snapshot.state);
-    let report = member_report(app, session_id, key.as_ref(), child.is_some());
+        .and_then(|key| app.agent_runtime.snapshot(key).ok());
+    let lifecycle = snapshot.as_ref().map(|snapshot| snapshot.state);
+    let quiet = snapshot.as_ref().and_then(|snapshot| {
+        sub_sessions::quiet_minutes(
+            child.is_some() && snapshot.state == AgentState::Working,
+            snapshot.last_activity_ms.max(snapshot.last_transition_ms),
+            now_millis(),
+            app.db
+                .quiet_after(session_id)
+                .ok()
+                .flatten()
+                .unwrap_or(sub_sessions::DEFAULT_QUIET_AFTER_MINUTES),
+        )
+    });
+    let report = member_report(app, session_id, child.is_some());
     json!({
         "session": session_id,
         "role": if child.is_some() { "child" } else { "lead" },
@@ -522,7 +532,12 @@ fn member_json(
         "dispatch": child.map(|(_, state)| state.as_str()),
         "state": lifecycle.map_or(Value::String("unknown".into()), |state| json!(state)),
         "needsYou": lifecycle == Some(AgentState::Blocked),
+        "quietMinutes": quiet,
         "task": child.map(|(row, _)| row.task.clone()),
+        // Which of the member's conversations it is in now, and which one its report came from:
+        // a child that was reset is still this child, and its old report is not its new word.
+        "conversation": app.db.conversation_ordinal(session_id).unwrap_or(0),
+        "reportConversation": app.db.latest_report_conversation(session_id).unwrap_or(0),
         "report": report.map(|report| json!({
             "text": report.text,
             "source": report.source.as_str(),
@@ -553,9 +568,15 @@ pub(super) async fn list(app: &AppState, caller: &AgentIdentity) -> Result<Value
                 .unwrap_or_default()
         };
         let mut members = vec![member_json(&app, &caller, &lead_id, &lead_provider, None)];
+        // Only the children of the caller's own run: an earlier conversation's are not its to see.
+        let run = app
+            .db
+            .run_of(&caller.session_id)
+            .map_err(|error| internal("read the session", error))?
+            .unwrap_or_default();
         for row in app
             .db
-            .sub_sessions_of(&lead_id)
+            .sub_sessions_in_run(&run)
             .map_err(|error| internal("read the sub-sessions", error))?
         {
             let state = reconcile(&app, &row);
@@ -604,7 +625,11 @@ pub(super) async fn read(
             .db
             .sub_session(&target)
             .map_err(|error| internal("read the sub-session", error))?
-            .filter(|row| row.parent_session_id == caller.session_id)
+            .filter(|row| {
+                app.db
+                    .owns_child(&caller.session_id, &row.child_session_id)
+                    .unwrap_or(false)
+            })
             .ok_or_else(|| {
                 fail(
                     StatusCode::NOT_FOUND,
@@ -650,7 +675,11 @@ pub(super) async fn stop(
             .db
             .sub_session(&target)
             .map_err(|error| internal("read the sub-session", error))?
-            .filter(|row| row.parent_session_id == caller.session_id)
+            .filter(|row| {
+                app.db
+                    .owns_child(&caller.session_id, &row.child_session_id)
+                    .unwrap_or(false)
+            })
             .ok_or_else(|| {
                 fail(
                     StatusCode::NOT_FOUND,
@@ -760,6 +789,36 @@ pub(super) fn stop_children_of(app: &AppState, lead_session_id: &str) -> Result<
 
 #[cfg(test)]
 pub(super) mod tests {
+    #[test]
+    fn a_spawn_request_checks_the_leads_quiet_threshold() {
+        let body = |extra: Value| {
+            let mut body = json!({"agent": "claude", "task": "do it", "key": "k1"});
+            body.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            body
+        };
+        assert_eq!(
+            SpawnRequest::parse(&body(json!({}))).unwrap().quiet_after,
+            None
+        );
+        assert_eq!(
+            SpawnRequest::parse(&body(json!({"quietAfter": 45})))
+                .unwrap()
+                .quiet_after,
+            Some(45)
+        );
+        assert_eq!(
+            SpawnRequest::parse(&body(json!({"quietAfter": null})))
+                .unwrap()
+                .quiet_after,
+            None
+        );
+        for bad in [json!(0), json!(241), json!("soon")] {
+            assert!(SpawnRequest::parse(&body(json!({"quietAfter": bad}))).is_err());
+        }
+    }
+
     use super::super::agent::tests::request;
     use super::*;
     use crate::agent_identity::IdentityStore;
@@ -823,7 +882,7 @@ pub(super) mod tests {
             .unwrap();
         db.set_cli_provider("lead", "claude").unwrap();
         let lead = db
-            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .issue_in_current_run(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
             .unwrap();
         let call = |route: &'static str, token: String, body: Value| async move {
             request(
@@ -1024,7 +1083,7 @@ pub(super) mod tests {
             .unwrap();
         db.set_cli_provider("lead", "claude").unwrap();
         let lead = db
-            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .issue_in_current_run(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
             .unwrap();
         let Reserved::New(child) = db
             .reserve_sub_session(&crate::db::SubSessionSpec {
@@ -1048,6 +1107,72 @@ pub(super) mod tests {
                 .unwrap();
         }
         (workspace, child)
+    }
+
+    /// A fresh conversation of the lead's tab (here: a new launch) owns a fresh run. The children
+    /// of the earlier one keep running and are the person's to see, but the new lead cannot list,
+    /// read, stop or steer them, cannot message them, and hears nothing they report later.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_new_conversation_of_a_lead_cannot_reach_the_children_of_an_earlier_one() {
+        let root = std::env::temp_dir().join(format!("perch-sub-runs-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let (address, db) = boot(&root).await;
+        let (workspace, _) = lead_with_child(&db, &nest, SubState::Running);
+        let old_child = db
+            .issue(&AgentKey::new(&workspace.id, "child", "codex").unwrap())
+            .unwrap();
+        let before =
+            db.issue_in_current_run(&AgentKey::new(&workspace.id, "lead", "claude").unwrap());
+        assert!(before.is_ok());
+        // The tab's agent exits and a new one is launched: the plain `issue` of a launch.
+        let lead = db
+            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .unwrap();
+        let call = |route: &'static str, token: String, body: Value| async move {
+            request(
+                address,
+                "POST",
+                &format!("/agent/{route}"),
+                &[("Authorization", &format!("Bearer {token}"))],
+                &body.to_string(),
+            )
+            .await
+        };
+        let (status, answer) = call("list", lead.token.clone(), json!({"session": "lead"})).await;
+        assert_eq!(status, 200, "{answer}");
+        assert_eq!(answer["members"].as_array().unwrap().len(), 1, "{answer}");
+        for route in ["stop", "read", "steer", "interrupt"] {
+            let (status, answer) = call(
+                route,
+                lead.token.clone(),
+                json!({"session": "lead", "target": "child", "text": "x", "key": "k1"}),
+            )
+            .await;
+            assert_eq!(status, 404, "{route}: {answer}");
+        }
+        let (status, answer) = call(
+            "send",
+            lead.token.clone(),
+            json!({"session": "lead", "target": "child", "text": "hello", "key": "k2"}),
+        )
+        .await;
+        assert_eq!(status, 403, "{answer}");
+        // The old child reports late: nothing is queued for the new lead, in any state.
+        let (status, _) = call(
+            "report",
+            old_child.token.clone(),
+            json!({"session": "child", "text": "too late"}),
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert!(db.mail_to("lead", 10).unwrap().is_empty());
+        // The person still sees the child, marked as an earlier conversation's.
+        let rows = crate::server::crew::rows_for(&crate::server::booted_state(address), "lead");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].session_id, "child");
+        assert_eq!(rows[0].previous_run, Some(true));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// Deleting a lead (also what archiving its Workspace does) ends its live children first, each
@@ -1244,7 +1369,7 @@ pub(super) mod tests {
         // A Pi child: its bridge is a plain socket, which this test can stand in for.
         let (workspace, _) = lead_with_child_of(&db, &nest, SubState::Running, "pi");
         let lead = db
-            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .issue_in_current_run(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
             .unwrap();
         let child = db
             .issue(&AgentKey::new(&workspace.id, "child", "pi").unwrap())

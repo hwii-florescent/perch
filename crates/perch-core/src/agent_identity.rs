@@ -23,6 +23,10 @@ use std::path::PathBuf;
 /// without a database lookup.
 pub const TOKEN_PREFIX: &str = "perch_agent_";
 
+/// What a Perch shell holds so that an agent typed into it can be given an identity of its own
+/// (`PERCH_LAUNCH`). It starts with [`TOKEN_PREFIX`], so every route but `/agent/launch` refuses it.
+pub const LAUNCHER_PREFIX: &str = "perch_agent_launch_";
+
 /// What a session is told, in its Instructions, about reaching Perch. Appended at launch to
 /// whatever Instructions the session pinned, only when [`cli_binary`] is available.
 pub const POINTER: &str =
@@ -39,6 +43,11 @@ pub fn mint_token() -> String {
     bytes.extend_from_slice(uuid::Uuid::new_v4().as_bytes());
     let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
     format!("{TOKEN_PREFIX}{hex}")
+}
+
+/// A fresh launcher secret, in the same form as an agent token.
+pub fn mint_launcher() -> String {
+    mint_token().replacen(TOKEN_PREFIX, LAUNCHER_PREFIX, 1)
 }
 
 pub fn hash_token(token: &str) -> String {
@@ -67,21 +76,42 @@ pub struct AgentIdentity {
     pub incarnation: String,
 }
 
+/// A Perch shell's launcher, once authenticated: the tab runtime it was issued to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LauncherIdentity {
+    pub workspace_id: String,
+    pub session_id: String,
+    /// The provider of the runtime perchd keys the tab's process by (a shell, or the picker's agent).
+    pub owner_provider_id: String,
+}
+
 /// The persistence the runtime needs, kept behind a trait so `agent_runtime` does not hold a
 /// database (`db/agent_identity.rs` implements it).
 pub trait IdentityStore: Send + Sync {
     /// Revoke the session's earlier incarnations and issue a new one.
     fn issue(&self, key: &AgentKey) -> anyhow::Result<Issued>;
-    /// End the session's live incarnation. Revoking twice is fine.
+    /// A launcher for the tab runtime `key`, replacing the session's earlier ones. Only its hash is kept.
+    fn issue_launcher(&self, key: &AgentKey) -> anyhow::Result<String>;
+    /// End the identity issued to one agent process of the session (confirmed exited or replaced).
+    fn revoke_launch(&self, session_id: &str, pid: u32) -> anyhow::Result<()>;
+    /// End the session's live incarnation and launcher. Revoking twice is fine.
     fn revoke_session(&self, key: &AgentKey) -> anyhow::Result<()>;
 }
 
 /// The environment of an agent's process.
-pub fn launch_environment(session_id: &str, issued: &Issued) -> Vec<(String, String)> {
-    vec![
-        (perchd::agent_cli::SESSION_ENV.into(), session_id.into()),
-        (perchd::agent_cli::TOKEN_ENV.into(), issued.token.clone()),
-    ]
+pub fn launch_environment(
+    session_id: &str,
+    issued: Option<&Issued>,
+    launcher: Option<&str>,
+) -> Vec<(String, String)> {
+    let mut environment = vec![(perchd::agent_cli::SESSION_ENV.into(), session_id.into())];
+    if let Some(issued) = issued {
+        environment.push((perchd::agent_cli::TOKEN_ENV.into(), issued.token.clone()));
+    }
+    if let Some(launcher) = launcher {
+        environment.push((perchd::agent_cli::LAUNCH_ENV.into(), launcher.to_string()));
+    }
+    environment
 }
 
 /// Add [`POINTER`] to what a session pinned (or to nothing). The returned copy is for the
@@ -171,7 +201,7 @@ mod tests {
             token: "perch_agent_x".into(),
         };
         assert_eq!(
-            launch_environment("s1", &issued),
+            launch_environment("s1", Some(&issued), None),
             vec![
                 ("PERCH_SESSION".to_string(), "s1".to_string()),
                 ("PERCH_TOKEN".to_string(), "perch_agent_x".to_string())

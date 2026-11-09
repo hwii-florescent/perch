@@ -1,0 +1,72 @@
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { registerSW } from "virtual:pwa-register";
+import { claimViewer } from "./viewer";
+import { installRelayTransport } from "./relay/transport";
+import { trackVisibleViewport } from "./visibleViewport";
+import { installContextMenuGuard } from "./contextMenuGuard";
+
+// Opened from a relay link: send the app's data routes through the sealed tunnel.
+// Before anything can make a request; a no-op on the LAN and the desktop app.
+installRelayTransport();
+
+// PWA service worker. Registering through virtual:pwa-register (rather than
+// the plugin's plain injected register call) matters: in autoUpdate mode this
+// helper reloads open tabs as soon as a freshly-deployed build's worker takes
+// control. Without it, a tab keeps running the old precached bundle across
+// deploys until it happens to be reloaded twice. The periodic update() makes
+// even idle tabs notice a deploy (the browser only checks for a new worker on
+// navigation otherwise), so a rebuild propagates everywhere within a minute.
+registerSW({
+  immediate: true,
+  onRegisteredSW(_url, registration) {
+    if (registration) {
+      setInterval(() => registration.update(), 60_000);
+    }
+  },
+});
+
+const container = document.getElementById("root");
+if (!container) {
+  throw new Error("missing #root element");
+}
+
+// perch is an app, not a web page: no browser context menu. Surfaces with a menu of their own
+// preventDefault it before this runs; text fields (outside terminals) keep the OS one for cut/copy/paste.
+// This also swallows the menu macOS opens for Ctrl+Enter in a terminal's hidden textarea.
+installContextMenuGuard();
+document.addEventListener("contextmenu", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (target?.closest("input, textarea, [contenteditable='true']") && !target.closest(".xterm")) return;
+  event.preventDefault();
+});
+
+// The window's viewer id is settled first: the stores read their per-viewer storage as they load.
+await claimViewer();
+// App first, and its whole module graph with it (the store connects as it loads): a store
+// loaded ahead of the modules that watch it would deliver its first messages unheard.
+const [{ default: App }] = await Promise.all([import("./App"), import("./styles/index.css")]);
+const { usePerchStore } = await import("./store");
+
+// Expose the Zustand store on window so e2e tests can drive/assert state
+// directly (e.g. injecting a synthetic chat message to exercise rendering
+// paths — like an Edit-tool diff — that aren't worth spinning up a real
+// agent turn for). Harmless in production: it's just a getState/setState/
+// subscribe handle, same shape `usePerchStore` already has everywhere else.
+declare global {
+  interface Window {
+    usePerchStore: typeof usePerchStore;
+    /** Set by the macOS app before load when its window has vibrancy (crates/perch-desktop/src/glass.rs). */
+    __PERCH_GLASS__?: boolean;
+  }
+}
+window.usePerchStore = usePerchStore;
+// Glass shell: base.css turns --shell-bg translucent. Web mode and other platforms never set it.
+if (window.__PERCH_GLASS__) document.documentElement.dataset.glass = "1";
+trackVisibleViewport();
+
+createRoot(container).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);

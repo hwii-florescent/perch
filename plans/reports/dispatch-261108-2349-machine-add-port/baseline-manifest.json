@@ -1,0 +1,11 @@
+{
+  "baseCommit": "8a02934e9b3b7743f6377cb41ce6dedfd1cb1807",
+  "files": [
+    {
+      "path": "plans/261108-2145-machine-add-port/plan.md",
+      "sha256": "24f79fa28f99cce7276e8cc63ec0eab37e75c948921a3cf69c30e1721eb7d5f1",
+      "bytes": 6997
+    }
+  ],
+  "policy": "HEAD plus this plan only; do not copy unrelated native-chat/stock-UI changes"
+}

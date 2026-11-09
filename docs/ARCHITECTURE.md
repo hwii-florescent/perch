@@ -359,15 +359,40 @@ token; only `pair`, `ws`, `workspace-file`, `clipboard-image`, `upload`,
 the computer itself. `relay.json` beside `devices.json` holds its identity.
 `wire.rs` and `wire.ts` must change together (`wire.fixture.json`).
 
-Agents are a fourth caller, and the narrowest. Each new local launch of a Claude, Codex, Pi,
-OMP or Terminal session gets an incarnation and a bearer token (`PERCH_TOKEN`, with
-`PERCH_SESSION`); the core stores only its SHA-256 (`agent_identity.rs`, `db/agent_identity.rs`).
-The token opens `/agent/*` (`server/agent.rs`) for its own session and nothing else:
-`authorize_request` refuses it on every other route, loopback included, and `/agent/*` takes
-no device or local UI token. A reattach never mints (the process
-keeps its environment); a confirmed exit, a newer launch, session deletion and a boot-time
-check against perchd end a run's token, and the post-exit login shell has none. An agent that
-omits its token gets nothing from any route. The `perch`
+Agents are a fourth caller, and the narrowest. Four things are kept apart: the terminal owner
+(perchd's runtime key), the process credential, the provider conversation and the family *run*.
+An incarnation and a bearer token (`PERCH_TOKEN`, with `PERCH_SESSION`) are issued to each agent
+process; the core stores only the SHA-256 (`agent_identity.rs`, `db/agent_identity.rs`). A picker's
+agent gets its token at launch. A shell holds no agent token: it holds a *launcher*
+(`PERCH_LAUNCH`, hash only, `perch_agent_launch_…`) that opens only `/agent/launch`. The shell's agent
+shims run `perch __launch`, which asks the core for the identity of the process it is about to
+`exec` into; the core issues it only to the pid its own launch marker names, descended from that
+shell, once per pid (an agent or tool asking again gets nothing), and the token reaches the agent
+only in its environment (never argv, output or a shell's `eval`). `in_shell` keeps the launcher out
+of a picker agent's environment and returns it to the login shell. A confirmed invocation end
+(`refresh_current_providers`), a newer launch, a confirmed runtime exit, session deletion and the
+boot check (by the tab's own runtime key, `owner_provider_id`) end an identity; the launcher ends
+with the shell runtime. A reattach never mints, and shells started before this keep the terminal-level
+token they hold. The token opens `/agent/*` (`server/agent.rs`) for its own session and nothing else:
+`authorize_request` refuses it on every other route, loopback included. A launch is a new run.
+
+A **run** (`db/agent_runs.rs`) is the family of children, mail, suggestions and notes a conversation
+owns. The lead's first run is named by its session id (no row, so old rows stay valid); every
+later run is a uuid in `agent_runs`, current in `sessions.run_id`. A child is bound to the run it
+was started in (`sub_sessions.parent_run_id`, spawn keys unique within it) however its own
+conversation resets; `db.owns_child` and `run_of` are the single authorization path used by list,
+read, stop, steer, interrupt, send, report notes, suggestions and the delivery pass. A run begins at a
+launch (`issue`, `issue_for_launch`) and at a provider-confirmed new conversation:
+`server/native_ui.rs::observe_run_boundary` feeds the adapters' conversation ids to
+`HistoryDb::observe_conversation` (the first one since a launch joins its run; an unseen one in a
+session that had one begins a fresh run; a known one restores its own run; another session's is
+ignored). Nothing is inferred from typed input; an adapter with no id gives no boundary. A person's
+strip still lists every child of the tab, marking earlier runs (`previousRun`). Changing the schema
+makes `<db>.pre-run-identity.bak` first (`VACUUM INTO`); `sub_sessions` is rebuilt once.
+Limits: a stale snapshot of an old conversation arriving after a newer one would read as a resume
+(adapters publish the latest only); a provider that gives a resumed conversation a new id reads as a
+fresh conversation (fail closed). An agent that omits its token gets nothing from
+any route. The `perch`
 command finds the core through `<daemon dir>/core.json` (0600, read on every call). It reaches
 the agent through a `perch` entry in the session's private shim directory that `exec`s the real
 binary by absolute path; **a packaged build must ship `perch` beside the core**, or agents get
@@ -392,9 +417,10 @@ the core, not the agent, decides:
   started, so the core no longer tracks who opened a turn (the in-memory origin mark and its
   listeners are gone). What bounds a run is `RunLimits` (`sub_sessions.rs`), every counter **per run**
   and never reset by a person's message: live sub-sessions 4, sub-sessions ever 8, messages 50,
-  automatic lead wakes 10, interrupts per sub-session 3, waiting suggestion cards 10. They are the
+  interrupts per sub-session 3, waiting suggestion cards 10. Automatic lead notifications have no
+  per-run delivery limit (owner decision 2026-11-09). The remaining limits are the
   person's settings (Settings > Sub-sessions; `Settings.run_limits`, flat optional `max_*` fields on
-  the wire `Settings`/`SettingsPatch`), validated on update (each 1 to its ceiling: 16, 64, 1000, 100,
+  the wire `Settings`/`SettingsPatch`), validated on update (each 1 to its ceiling: 16, 64, 1000,
   20, 50; total never below live) and repaired to the defaults if a stored file is out of range. The
   core holds them in `HistoryDb::limits()`, set at boot and on every settings update, and each
   admission rule reads them there. A limit reached refuses with the reason (and, for spawn, a 409
@@ -465,14 +491,13 @@ contract the tests hold it to.
   2. **a turn is running** and the CLI has a follow-up queue (`has_followup_queue`: Pi, OMP) → it goes into
      that queue (`QueuedInAgent`), with no working-children wait;
   3. **a turn is running** and the CLI has none but Perch can steer it (Codex, Claude: `can_steer`) → the
-     message **steers** the running turn (`Steered`, receipt "steered"); a lead's wake rules apply as in 2;
+     message **steers** the running turn (`Steered`, receipt "steered"), with no working-children wait;
   4. **a turn is running** and the CLI is neither (anything else) → it waits for idle and the receipt's
      reason says so ("... Perch cannot put a message into a running opencode turn, so it gets this when its
      turn ends");
   5. anything else (state unreadable, lifecycle not provably idle) is not idle and waits.
   In 1 to 3 the input line must also be readable and empty (a person's draft, a dialog or an overlay is
-  not empty), and a lead must have fewer automatic wakes in the run than the wake limit (10 by default; a
-  follow-up or a steer spends one too; at the limit the message is not delivered, with the reason).
+  not empty). Automatic deliveries to the lead have no per-run count limit.
   Otherwise nothing is written and the message stays `queued` with the reason. The loop runs the moment
   something is queued (`mail_notify`), so "at once" is one pass, not a poll. Nothing wakes a sleeping
   session, relaunches an exited one or restarts a process.
@@ -538,10 +563,11 @@ contract the tests hold it to.
   absent model only delays a note, never changes what it can say. A
   newer note from the same child replaces one still queued. Queued notes of a lead go in **one** delivery
   (a roster, one line per child, headed as status rather than instruction); messages go one per delivery.
-- *Wake cap.* Delivering anything to a lead spends one of the run's wakes (10 by default, a setting); a
-  person's message does not reset it, and a core restart does not either (the count is durable). At the
-  cap a delivery is refused with the reason (`Wait::WakeCap`) and the message is undelivered, not left
-  waiting; a wake count that cannot be read waits instead, since unknown is not "none left".
+- *No wake cap* (owner decision 2026-11-09). Reports and quiet-child notes keep reaching the lead
+  throughout a run, subject to the existing process, input and working-children checks. The legacy
+  `runLimits.wakes` / `maxLeadWakesPerRun` setting and historical delivery counts no longer gate
+  delivery. The wire field is retained for compatibility but no longer emitted, and Settings shows no
+  wake-limit control. Notifications already marked `undelivered` remain so; an update never replays them.
 
 **Family strip and notes folder** (`crew.rs` read model, `server/crew.rs`, `packages/web/src/crew.ts`,
 `views/nativeChat/FamilyStrip.tsx`; slice 6). The read model sends, stops and approves nothing; the
@@ -556,9 +582,9 @@ strip's actions are the next section.
   status word:** `lifecycle` (Perch's runtime state; unreadable is `unknown`, never idle) with the child's
   `dispatch` record, `needsYou` (a pending approval or question from Perch's own blocked state and
   request, never an agent's claim), the newest message with its delivery `receipt` and reason, and the
-  agent's `report` with its source (`report`, `summary` with the `model` that wrote it, or the fallback
-  `last-message`). The strip's headline counts working, waiting on you and reported (a report or a summary;
-  a fallback does not count).
+  agent's `report` with its source (`report`, or `summary` with the `model` that wrote it; none when there is neither, and the
+  child's last message is never shown in their place). The strip's headline counts working, waiting on you
+  and reported (a report or a summary).
 - *Freshness.* The strip asks again when a family member's session updates. Mail receipts change without
   one, so the mail code calls `notify_session_updated` for both ends when a message is queued, cancelled
   or settled. No polling.
@@ -644,13 +670,17 @@ finished turn is summarised by a small model so the expensive one never writes a
   prompt.)
 - *Output.* `{status, text}` with status `done`, `blocked`, `needs_you` or `failed`; the object is found in
   the answer (a code fence or a line of talk is tolerated), a bad status or an empty text is refused, a text
-  over 400 characters is cut and marked. Refused or failed: the 400-character last-message fallback, stored as
-  the notes so an older summary is never shown as the latest.
+  over 160 characters (one short sentence) is cut and marked. Refused or failed, or a turn with no events to
+  summarise: nothing is written and the earlier notes stay.
 - *Precedence.* The child's own `perch report` made since the notes were last written (that is, during this
-  turn) wins and is stored as the notes without asking a model; else the model's summary; else the last
-  message (`sub_sessions::choose_report`). `perch guide` and the first message no longer ask a child to report.
-- *Guards.* One call per child at a time (`reporter_in_flight`; a turn that ends meanwhile keeps the last
-  message), none for a child that is stopping or stopped, none once the run's agents sent 50 messages, none
+  turn) wins and is stored as the notes without asking a model; else the model's summary; else nothing
+  (`sub_sessions::choose_report`). A finished turn wakes no lead: the lead is woken only by a child's
+  explicit `perch report` (`server/agent_mail.rs` `note_report`) or by a child going quiet (working with no
+  output past its lead's `--quiet-after`, default 10 minutes; one note per stall, re-armed when it speaks
+  again: `tell_leads_of_quiet_children`), and reads the summary and the `QUIET` marker with `perch list`.
+  The first message asks a child to report when it is done or blocked.
+- *Guards.* One call per child at a time (`reporter_in_flight`; a turn that ends meanwhile keeps the earlier
+  notes), none for a child that is stopping or stopped, none once the run's agents sent 50 messages, none
   with the setting off, none without a runnable CLI. Never blocks the child. Each call is a `reporter_runs`
   row, counted in the usage popover's spend estimate as "Perch reporter" (`usage::spend::spend_with`; the
   CLIs are run without a saved session, so no agent log holds them). Codex gives one total, counted as input.

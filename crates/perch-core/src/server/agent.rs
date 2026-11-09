@@ -98,6 +98,84 @@ pub(super) async fn whoami(
     .into_response()
 }
 
+/// `POST {base}agent/launch`: a Perch shell's `perch __launch` asks for the identity of the agent it is
+/// about to become. The bearer is the shell's launcher, which opens nothing else. The core issues
+/// only to the process its own launch marker names, descended from that shell, once: an agent (or a
+/// tool it runs) asking again, or any other process, gets nothing.
+pub(super) async fn launch(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    if headers.contains_key(axum::http::header::ORIGIN) || !local_request(&peer, &headers) {
+        return refuse(
+            StatusCode::FORBIDDEN,
+            "agent requests are accepted only from this computer",
+        );
+    }
+    let Some(token) =
+        bearer(&headers).filter(|token| token.starts_with(agent_identity::LAUNCHER_PREFIX))
+    else {
+        return refuse(StatusCode::UNAUTHORIZED, "no launcher token was sent");
+    };
+    let launcher = match state.db.authenticate_launcher(token) {
+        Ok(Some(launcher)) => launcher,
+        Ok(None) => {
+            return refuse(
+                StatusCode::UNAUTHORIZED,
+                "this launcher is unknown or its shell has ended",
+            )
+        }
+        Err(error) => {
+            tracing::error!(%error, "launcher lookup failed");
+            return refuse(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Perch could not check the launcher",
+            );
+        }
+    };
+    let provider = body["provider"].as_str().unwrap_or_default().to_string();
+    let pid = body["pid"].as_u64().and_then(|pid| u32::try_from(pid).ok());
+    if body["session"].as_str() != Some(launcher.session_id.as_str())
+        || !crate::native_ui::PROVIDERS.contains(&provider.as_str())
+        || pid.is_none_or(|pid| pid <= 1)
+    {
+        return refuse(
+            StatusCode::BAD_REQUEST,
+            "this is not a launch Perch can name",
+        );
+    }
+    let pid = pid.unwrap_or_default();
+    let app = state.clone();
+    let issued = tokio::task::spawn_blocking(move || {
+        let owner = AgentKey::new(
+            &launcher.workspace_id,
+            &launcher.session_id,
+            &launcher.owner_provider_id,
+        )
+        .map_err(|error| error.to_string())?;
+        app.agent_runtime.verify_launch(&owner, &provider, pid)?;
+        app.db
+            .issue_for_launch(&launcher, &provider, pid)
+            .map_err(|error| {
+                tracing::error!(%error, "could not issue an agent identity");
+                "Perch could not issue an identity".to_string()
+            })?
+            .ok_or_else(|| "that agent already has its identity".to_string())
+            .inspect(|_| notify_session_updated(&app, &launcher.session_id))
+    })
+    .await;
+    match issued {
+        Ok(Ok(issued)) => Json(json!({ "token": issued.token })).into_response(),
+        Ok(Err(why)) => {
+            tracing::info!(%why, "an agent launch was not issued an identity");
+            refuse(StatusCode::FORBIDDEN, &why)
+        }
+        Err(_) => refuse(StatusCode::INTERNAL_SERVER_ERROR, "Perch could not launch"),
+    }
+}
+
 /// `POST {base}agent/report`: leave a report on this run. A claim, never a result.
 pub(super) async fn report(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -123,7 +201,20 @@ pub(super) async fn report(
         );
     }
     match state.db.record_agent_report(&identity.incarnation, text) {
-        Ok(true) => Json(json!({ "ok": true })).into_response(),
+        Ok(true) => {
+            if let Ok(child) = crate::agent_fleet::AgentKey::new(
+                &identity.workspace_id,
+                &identity.session_id,
+                &identity.provider_id,
+            ) {
+                let (app, text) = (state.clone(), text.to_string());
+                let _ = tokio::task::spawn_blocking(move || {
+                    super::agent_mail::note_report(&app, &child, &text)
+                })
+                .await;
+            }
+            Json(json!({ "ok": true })).into_response()
+        }
         Ok(false) => refuse(StatusCode::UNAUTHORIZED, "this run has ended"),
         Err(error) => {
             tracing::error!(%error, "agent report could not be saved");
@@ -684,6 +775,74 @@ pub(super) mod tests {
     }
 
     /// What an agent token may and may not do, over real HTTP against a booted core.
+    /// `agent/launch` opens only with a shell's launcher and issues nothing it cannot verify: an
+    /// agent token, a launcher naming another session or a provider Perch does not know, a launcher
+    /// whose shell is not running, and a launcher presented anywhere else are all refused, and no
+    /// identity is created by any of them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_launch_route_fails_closed_and_a_launcher_opens_nothing_else() {
+        use super::super::sub_sessions::tests::boot;
+        let root = std::env::temp_dir().join(format!("perch-agent-launch-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let (address, db) = boot(&root).await;
+        let tab = AgentKey::new("nest", "tab", "terminal").unwrap();
+        let launcher = db.issue_launcher(&tab).unwrap();
+        let agent = db
+            .issue(&AgentKey::new("nest", "other", "claude").unwrap())
+            .unwrap();
+        let ask = |token: String, body: Value| async move {
+            request(
+                address,
+                "POST",
+                "/agent/launch",
+                &[("Authorization", &format!("Bearer {token}"))],
+                &body.to_string(),
+            )
+            .await
+        };
+        let good = json!({"session": "tab", "provider": "pi", "pid": 4242});
+        // An agent token is not a launcher.
+        assert_eq!(ask(agent.token.clone(), good.clone()).await.0, 401);
+        assert_eq!(
+            ask("perch_agent_launch_unknown".into(), good.clone())
+                .await
+                .0,
+            401
+        );
+        // Named wrongly: another session, an unknown provider, no or a reserved pid.
+        for bad in [
+            json!({"session": "other", "provider": "pi", "pid": 4242}),
+            json!({"session": "tab", "provider": "rm", "pid": 4242}),
+            json!({"session": "tab", "provider": "pi"}),
+            json!({"session": "tab", "provider": "pi", "pid": 1}),
+        ] {
+            assert_eq!(ask(launcher.clone(), bad).await.0, 400);
+        }
+        // Well formed, but no running shell of Perch's started that process: refused.
+        let (status, answer) = ask(launcher.clone(), good.clone()).await;
+        assert_eq!(status, 403, "{answer}");
+        assert!(db
+            .active_agent_identities()
+            .unwrap()
+            .iter()
+            .all(|i| i.session_id != "tab"));
+        // The launcher opens nothing else: not an agent route, not any other.
+        let whoami = json!({"session": "tab"}).to_string();
+        let headers = [("Authorization", format!("Bearer {launcher}"))];
+        let headers: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        assert_eq!(
+            request(address, "POST", "/agent/whoami", &headers, &whoami)
+                .await
+                .0,
+            401
+        );
+        assert_ne!(
+            request(address, "GET", "/pair", &headers, "").await.1["paired"],
+            true
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn an_agent_token_opens_only_its_own_run_on_the_agent_routes() {
         let root = std::env::temp_dir().join(format!("perch-agent-http-{}", Uuid::new_v4()));

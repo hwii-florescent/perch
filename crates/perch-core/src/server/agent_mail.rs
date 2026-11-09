@@ -19,7 +19,7 @@ use crate::agent_mail::{
     Wait,
 };
 use crate::db::{Cancelled, Enqueued, MailRow, NewMail};
-use crate::sub_sessions::{Report, SubState};
+use crate::sub_sessions::{Report, ReportSource, SubState};
 use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -66,7 +66,12 @@ fn mail_json(row: &MailRow) -> Value {
 pub(super) fn sender_label(app: &AppState, session_id: &str, provider: &str) -> String {
     if let Ok(Some(child)) = app.db.sub_session(session_id) {
         let line = child.task.lines().next().unwrap_or_default();
-        return agent_mail::clean_label(line, provider);
+        let label = agent_mail::clean_label(line, provider);
+        // A child that was reset is still this child; say which of its conversations is speaking.
+        return match app.db.conversation_ordinal(session_id) {
+            Ok(ordinal) if ordinal > 1 => format!("{label} (conversation {ordinal})"),
+            _ => label,
+        };
     }
     let title = app
         .db
@@ -197,72 +202,80 @@ pub(super) fn cancel(app: &AppState, caller: &AgentIdentity, id: &str) -> Result
     }
 }
 
-/// A child's lifecycle changed or its process ended: tell its lead, in Perch's own words with
-/// the child's claim quoted. A newer note from the same child replaces one still waiting.
-pub(super) fn note_child(
+/// Working children silent past their own threshold get one note to their lead each time they
+/// go quiet (`sub_sessions::newly_quiet`); `perch list` shows the same children as QUIET. Called
+/// from the lifecycle loop every second, so the cheap filters come before any database read.
+pub(super) fn tell_leads_of_quiet_children(
     app: &AppState,
-    child: &AgentKey,
-    status: ChildStatus,
-    last_assistant: Option<&str>,
+    snapshots: &[crate::agent_fleet::AgentSnapshot],
 ) {
-    let Ok(Some(lead)) = app.db.parent_of(&child.session_id) else {
-        return;
-    };
-    let Ok(Some(record)) = app.db.sub_session(&child.session_id) else {
-        return;
-    };
-    // The lead stopped it: it knows.
-    if status == ChildStatus::Exited
-        && matches!(record.state, SubState::Stopping | SubState::Stopped)
+    let now = now_millis();
+    let mut quiet = std::collections::HashMap::new();
+    for snapshot in snapshots
+        .iter()
+        .filter(|snapshot| snapshot.state == crate::agent_fleet::AgentState::Working)
     {
-        return;
+        let evidence = snapshot.last_activity_ms.max(snapshot.last_transition_ms);
+        // The shortest threshold a lead can set is a minute.
+        if now.saturating_sub(evidence) < 60_000 {
+            continue;
+        }
+        let id = &snapshot.key.session_id;
+        if !matches!(app.db.parent_of(id), Ok(Some(_))) {
+            continue;
+        }
+        let after = app
+            .db
+            .quiet_after(id)
+            .ok()
+            .flatten()
+            .unwrap_or(crate::sub_sessions::DEFAULT_QUIET_AFTER_MINUTES);
+        if let Some(minutes) = crate::sub_sessions::quiet_minutes(true, evidence, now, after) {
+            quiet.insert(id.clone(), (snapshot.key.clone(), minutes));
+        }
     }
-    let Ok(Some(lead_row)) = app.db.get_session(&lead) else {
-        return;
-    };
-    let lead_provider = lead_row.cli_provider_id.unwrap_or_default();
-    // The reporter has already written this turn's summary, when it was going to.
-    let report = super::sub_sessions::resolve_child_report(app, &child.session_id, last_assistant)
-        .and_then(|report| {
-            Some(Report {
-                text: crate::sub_sessions::fallback_report(&report.text)?,
-                ..report
-            })
-        });
-    // A finished turn is news even when the child said nothing: the note then says it reported
-    // nothing, which the lead needs to know as much as a claim.
-    let label = sender_label(app, &child.session_id, &child.agent_id);
-    let body = agent_mail::note_line(
-        &label,
-        &child.agent_id,
-        &child.session_id,
-        status,
-        report.as_ref(),
-    );
-    match app.db.enqueue_note(
-        (&child.session_id, &child.agent_id, &label),
-        (&lead, &lead_provider),
-        &body,
-    ) {
-        Ok(Some(_)) => {
-            tracing::info!(child = %child.session_id, ?status, "queued a status note for the lead");
-            app.mail_notify.notify_one();
-        }
-        Ok(None) => {
-            tracing::info!(child = %child.session_id, "no status note: the lead has no live identity")
-        }
-        Err(error) => tracing::warn!(%error, "could not queue a status note for a lead"),
+    let ids = quiet.keys().cloned().collect();
+    let fresh = crate::sub_sessions::newly_quiet(&mut app.quiet_told.lock().unwrap(), &ids);
+    for id in fresh {
+        let (key, minutes) = &quiet[&id];
+        note_lead(app, key, ChildStatus::Quiet(*minutes), None);
     }
 }
 
-/// The last thing an assistant said in a snapshot, for a note's fallback claim.
-pub(super) fn last_assistant_text(snapshot: &crate::protocol::NativeUiSnapshot) -> Option<String> {
-    snapshot
-        .messages
-        .iter()
-        .rev()
-        .find(|message| message.role == "assistant" && !message.text.trim().is_empty())
-        .map(|message| message.text.clone())
+/// A child ran `perch report`: tell its lead, with the report quoted as the child's own claim.
+/// This is the only note a lead gets; Perch queues none when a turn ends. A newer note from the
+/// same child replaces one still waiting.
+pub(super) fn note_report(app: &AppState, child: &AgentKey, text: &str) {
+    let report = Report {
+        text: text.to_string(),
+        source: ReportSource::Reported,
+        at: wall_clock_millis(),
+        model: None,
+    };
+    note_lead(app, child, ChildStatus::Reported, Some(&report));
+}
+
+/// Queue a note from `child` to its lead, if it has one with a live identity.
+fn note_lead(app: &AppState, child: &AgentKey, status: ChildStatus, report: Option<&Report>) {
+    let Ok(Some(lead)) = app.db.parent_of(&child.session_id) else {
+        return;
+    };
+    let Ok(Some(lead_row)) = app.db.get_session(&lead) else {
+        return;
+    };
+    let label = sender_label(app, &child.session_id, &child.agent_id);
+    let body = agent_mail::note_line(&label, &child.agent_id, &child.session_id, status, report);
+    match app.db.enqueue_note(
+        (&child.session_id, &child.agent_id, &label),
+        (&lead, &lead_row.cli_provider_id.unwrap_or_default()),
+        &body,
+    ) {
+        Ok(Some(_)) => app.mail_notify.notify_one(),
+        Ok(None) => {
+            tracing::info!(child = %child.session_id, "no note: the lead has no live identity")
+        }
+        Err(error) => tracing::warn!(%error, "could not queue a note for a lead"),
+    }
 }
 
 /// How one delivery attempt to a receiver ended.
@@ -316,9 +329,13 @@ pub(super) fn pass(db: &HistoryDb, world: &dyn World, target: &str, now_ms: i64)
     let mut owed = Vec::new();
     let mut unreadable = false;
     for item in queued {
-        let run_ended = match db.get_session(&item.run_id) {
-            Ok(session) => session.is_none(),
-            Err(_) => {
+        // The run ended with its lead's session, or the receiver is no longer in it: a lead that
+        // began another conversation is not the one this was written to.
+        let run_ended = match (db.run_exists(&item.run_id), db.run_of(target)) {
+            (Ok(exists), Ok(receiver_run)) => {
+                !exists || receiver_run.is_some_and(|run| run != item.run_id)
+            }
+            _ => {
                 unreadable = true;
                 continue;
             }
@@ -351,14 +368,6 @@ pub(super) fn pass(db: &HistoryDb, world: &dyn World, target: &str, now_ms: i64)
     let facts = world.facts(target);
     if let Err(wait) = agent_mail::route(&facts) {
         let reason = wait.reason();
-        // The run's limit on automatic deliveries to its lead is reached and nothing resets it: the
-        // mail is refused with that reason, never left queued for good (owner decision 2026-11-08).
-        if matches!(wait, Wait::WakeCap(_)) && db.mail_wakes(target).is_ok() {
-            for item in &owed {
-                let _ = db.undeliver_mail(&item.id, &reason);
-            }
-            return Pass::Idle;
-        }
         let _ = db.set_mail_wait(&all_ids, &reason);
         return Pass::Waiting(reason);
     }
@@ -572,7 +581,14 @@ impl World for AppWorld<'_> {
             .snapshot(&key)
             .ok()
             .map(|snapshot| snapshot.state);
-        let children = app.db.sub_sessions_of(session).unwrap_or_default();
+        // The children of the receiver's current run: an earlier conversation's are not its to wait on.
+        let children = app
+            .db
+            .run_of(session)
+            .ok()
+            .flatten()
+            .map(|run| app.db.sub_sessions_in_run(&run).unwrap_or_default())
+            .unwrap_or_default();
         let is_lead = !children.is_empty() && matches!(app.db.parent_of(session), Ok(None));
         TargetFacts {
             followup_queue: agent_mail::has_followup_queue(&agent),
@@ -592,9 +608,6 @@ impl World for AppWorld<'_> {
             } else {
                 0
             },
-            // A count that cannot be read counts as spent (`pass` then waits instead of refusing).
-            wakes: app.db.mail_wakes(session).unwrap_or(u32::MAX),
-            max_wakes: app.db.limits().wakes,
         }
     }
 
@@ -835,7 +848,6 @@ mod tests {
                     reported: true,
                     idle: true,
                     is_lead,
-                    max_wakes: agent_mail::DEFAULT_WAKES_PER_RUN,
                     ..Default::default()
                 }),
                 outcome: RefCell::new(None),
@@ -889,7 +901,7 @@ mod tests {
             .unwrap();
         db.set_cli_provider("lead", "claude").unwrap();
         let lead = db
-            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .issue_in_current_run(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
             .unwrap();
         let reserved = db
             .reserve_sub_session(&crate::db::SubSessionSpec {
@@ -1249,7 +1261,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_lead_is_woken_with_one_roster_when_no_child_works_and_at_most_ten_times() {
+    async fn a_lead_gets_reports_beyond_the_old_wake_limit_when_no_child_works() {
         let run = run();
         run.db
             .enqueue_note(
@@ -1288,8 +1300,8 @@ mod tests {
             1,
             "a delivery to a lead spends a wake"
         );
-        // The tenth wake is the last of the run.
-        for n in 1..agent_mail::DEFAULT_WAKES_PER_RUN {
+        // Reports must keep arriving beyond both the old default (10) and setting ceiling (100).
+        for n in 1..=101 {
             run.db
                 .enqueue_note(
                     ("child", "codex", "t"),
@@ -1298,49 +1310,37 @@ mod tests {
                 )
                 .unwrap()
                 .unwrap();
-            world.facts.borrow_mut().wakes = run.db.mail_wakes("lead").unwrap();
             let Pass::Sent { ids, reply } = pass(&run.db, &world, "lead", 0) else {
                 panic!("wake {n}")
             };
             settle(&run.db, &ids, reply).await;
         }
-        assert_eq!(
-            run.db.mail_wakes("lead").unwrap(),
-            agent_mail::DEFAULT_WAKES_PER_RUN
-        );
-        let refused = run
-            .db
-            .enqueue_note(("child", "codex", "t"), ("lead", "claude"), "eleventh")
-            .unwrap()
-            .unwrap();
-        world.facts.borrow_mut().wakes = run.db.mail_wakes("lead").unwrap();
-        // Owner decision 2026-11-08: the limit is per run and nothing resets it, so the mail is
-        // refused with the reason, not left queued for good.
-        assert!(matches!(pass(&run.db, &world, "lead", 0), Pass::Idle));
-        let (state, reason) = state_of(&run.db, &refused.id);
-        assert_eq!(state, MailState::Undelivered);
-        assert!(
-            reason.contains("already delivered 10 messages to its lead"),
-            "{reason}"
-        );
-        assert!(reason.contains("Settings > Sub-sessions"));
+        assert_eq!(world.written.borrow().len(), 102);
+        assert!(run.db.queued_mail_for("lead").unwrap().is_empty());
     }
 
-    #[test]
-    fn the_wake_limit_is_the_setting() {
+    #[tokio::test]
+    async fn legacy_wake_settings_and_counts_do_not_restrict_reports() {
         let run = run();
+        run.db.set_limits(crate::sub_sessions::RunLimits {
+            wakes: 1,
+            ..Default::default()
+        });
+        // Existing runs keep their historical count; it must not hold new reports.
+        for _ in 0..100 {
+            run.db.spend_mail_wake("lead").unwrap();
+        }
         let world = Fake::idle(Live::Known(Some(run.lead_incarnation.clone())), true);
-        world.facts.borrow_mut().max_wakes = 2;
-        world.facts.borrow_mut().wakes = 2;
         let note = run
             .db
-            .enqueue_note(("child", "codex", "t"), ("lead", "claude"), "n")
+            .enqueue_note(("child", "codex", "t"), ("lead", "claude"), "new report")
             .unwrap()
             .unwrap();
-        assert!(matches!(pass(&run.db, &world, "lead", 0), Pass::Idle));
-        let (state, reason) = state_of(&run.db, &note.id);
-        assert_eq!(state, MailState::Undelivered);
-        assert!(reason.contains("already delivered 2 messages"), "{reason}");
+        let Pass::Sent { ids, reply } = pass(&run.db, &world, "lead", 0) else {
+            panic!("legacy wake settings must not block reports")
+        };
+        settle(&run.db, &ids, reply).await;
+        assert_eq!(state_of(&run.db, &note.id).0, MailState::Delivered);
     }
 
     #[test]
@@ -1409,7 +1409,7 @@ mod tests {
         );
     }
 
-    /// Not an automatic wake: a person's message to a lead spends none of its ten.
+    /// A person's message is not included in the historical automatic-delivery count.
     #[test]
     fn a_persons_message_spends_no_wake() {
         let run = run();
@@ -1433,6 +1433,36 @@ mod tests {
         );
     }
 
+    /// A lead hears of a child through the child's own `perch report` and nothing else.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_report_notes_the_lead_and_nothing_else_does() {
+        use super::super::agent::tests::request;
+        use super::super::sub_sessions::tests::{boot, lead_with_child};
+        let root = std::env::temp_dir().join(format!("perch-mail-report-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let (address, db) = boot(&root).await;
+        let (workspace, _) = lead_with_child(&db, &nest, SubState::Running);
+        db.issue_in_current_run(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .unwrap();
+        let child = db
+            .issue(&AgentKey::new(&workspace.id, "child", "codex").unwrap())
+            .unwrap();
+        assert!(db.mail_to("lead", 10).unwrap().is_empty());
+        let (status, body) = request(
+            address,
+            "POST",
+            "/agent/report",
+            &[("Authorization", &format!("Bearer {}", child.token))],
+            &json!({"session": "child", "text": "parser fixed"}).to_string(),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        let notes = db.mail_to("lead", 10).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].body.contains("parser fixed"), "{}", notes[0].body);
+    }
+
     /// `send`, `inbox` and `cancel` over real HTTP against a booted core, up to the point of
     /// writing to an agent: who may send to whom, what is queued and why it waits, what a retry or a
     /// cancel does. The receiver is not running, so the live loop leaves everything queued.
@@ -1446,7 +1476,7 @@ mod tests {
         let (address, db) = boot(&root).await;
         let (workspace, _) = lead_with_child(&db, &nest, SubState::Running);
         let lead = db
-            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .issue_in_current_run(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
             .unwrap();
         let child = db
             .issue(&AgentKey::new(&workspace.id, "child", "codex").unwrap())

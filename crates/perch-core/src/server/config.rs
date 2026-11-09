@@ -372,7 +372,7 @@ pub(super) fn settings_to_wire(s: &crate::settings::Settings) -> SettingsData {
         max_live_sub_sessions: Some(s.run_limits.live),
         max_sub_sessions: Some(s.run_limits.total),
         max_messages_per_run: Some(s.run_limits.messages),
-        max_lead_wakes_per_run: Some(s.run_limits.wakes),
+        max_lead_wakes_per_run: None, // Legacy wire field; automatic deliveries are unlimited.
         max_interrupts_per_sub_session: Some(s.run_limits.interrupts),
         max_waiting_suggestions: Some(s.run_limits.waiting_cards),
     }

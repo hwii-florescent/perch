@@ -146,7 +146,7 @@ pub struct Settings {
     /// How a new or changed mod is approved (`mods.rs`). Its own policy: separate from Project and
     /// sub-session permissions, and set only by a person (agent tokens cannot reach this route).
     pub mods: crate::mods::Policy,
-    /// The per-run limits on sub-sessions, messages, wakes, interrupts and waiting suggested tasks
+    /// The per-run limits on sub-sessions, messages, interrupts and waiting suggested tasks
     /// (Settings > Sub-sessions; `RunLimits`). Validated on every change.
     pub run_limits: crate::sub_sessions::RunLimits,
     /// The model the reporter asks of Pi (`provider/id`); empty means Pi has no reporter.
@@ -332,6 +332,7 @@ pub struct SettingsPatch {
     pub max_live_sub_sessions: Option<u32>,
     pub max_sub_sessions: Option<u32>,
     pub max_messages_per_run: Option<u32>,
+    /// Legacy field retained for compatibility; no longer restricts delivery.
     pub max_lead_wakes_per_run: Option<u32>,
     pub max_interrupts_per_sub_session: Option<u32>,
     pub max_waiting_suggestions: Option<u32>,
@@ -796,7 +797,13 @@ mod keybinding_tests {
         assert!(error.contains("cannot be fewer than live"), "{error}");
         assert_eq!(store.get().run_limits, loaded.run_limits);
         assert_ne!(store.get().theme, "dark");
-        // A hand-edited file with a bad limit loads as the defaults.
+        // Legacy wake limits remain readable but do not validate or restrict delivery.
+        store
+            .update(patch(serde_json::json!({"maxLeadWakesPerRun": 0})))
+            .unwrap();
+        assert_eq!(SettingsStore::load(&path).get().run_limits.live, 6);
+        assert_eq!(SettingsStore::load(&path).get().run_limits.wakes, 0);
+        // A hand-edited file with a bad active limit loads as the defaults.
         std::fs::write(&path, r#"{"runLimits":{"live":0}}"#).unwrap();
         assert_eq!(
             SettingsStore::load(&path).get().run_limits,

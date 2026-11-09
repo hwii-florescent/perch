@@ -1445,6 +1445,8 @@ declare module "@perch/sdk" {
     latest?: CrewLatest;
     /** A message to it would be accepted now. */
     canMessage: boolean;
+    /** A child of an earlier conversation of the lead's tab: still running, not the current lead's. */
+    previousRun?: boolean;
     /** What a person may do to this child from the strip, each with the reason it is not offered
      * (capability `crew.actions.v1`). Only a lead's `worker` rows have it. */
     actions?: CrewActions;

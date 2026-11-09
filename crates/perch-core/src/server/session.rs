@@ -777,6 +777,8 @@ pub(super) fn delete_session(app: &AppState, session_id: &str) -> anyhow::Result
     super::sub_sessions::stop_children_of(app, session_id)
         .map_err(|error| anyhow::anyhow!("{error}; session retained"))?;
     let _agent_operation = app.agent_operation_lock.lock().unwrap();
+    // Read before the rows go: each run the lead began has a notes folder of its own.
+    let runs = app.db.runs_of_session(session_id).unwrap_or_default();
     let agent_keys = app
         .agent_runtime
         .lifecycle()
@@ -811,6 +813,9 @@ pub(super) fn delete_session(app: &AppState, session_id: &str) -> anyhow::Result
     app.cli_active_sessions.lock().unwrap().remove(session_id);
     // A lead's run ends with it: its notes folder is scratch for the run, so it goes too.
     crate::native_ui::remove_notes_dir(session_id);
+    for run in &runs {
+        crate::native_ui::remove_notes_dir(run);
+    }
     // Fan out to every connection: the row a session.updated would look up
     // is gone.
     let _ = app

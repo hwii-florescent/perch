@@ -88,16 +88,7 @@ fn row_from(row: &rusqlite::Row<'_>) -> rusqlite::Result<MailRow> {
     })
 }
 
-/// The lead of the run `session` is in: its parent if it is a child, else itself. `None` when
-/// the session does not exist.
-pub(super) fn run_of(conn: &Connection, session_id: &str) -> rusqlite::Result<Option<String>> {
-    conn.query_row(
-        "SELECT COALESCE(parent_session_id, id) FROM sessions WHERE id = ?1",
-        params![session_id],
-        |row| row.get(0),
-    )
-    .optional()
-}
+use super::agent_runs::run_of;
 
 fn live_incarnation_of(conn: &Connection, session_id: &str) -> rusqlite::Result<Option<String>> {
     conn.query_row(
@@ -182,19 +173,6 @@ impl HistoryDb {
         let from_person = new.sender_session_id == crate::crew_actions::PERSON;
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
-        let existing = tx
-            .query_row(
-                &format!(
-                    "SELECT {COLUMNS} FROM agent_mail
-                     WHERE sender_session_id = ?1 AND idem_key = ?2"
-                ),
-                params![new.sender_session_id, new.key],
-                row_from,
-            )
-            .optional()?;
-        if let Some(existing) = existing {
-            return Ok(Enqueued::Existing(existing));
-        }
         let target_run = run_of(&tx, new.target_session_id)?;
         let sender_run = if from_person {
             target_run.clone()
@@ -208,6 +186,25 @@ impl HistoryDb {
         let run = sender_run
             .clone()
             .ok_or_else(|| anyhow::anyhow!("the sending session no longer exists"))?;
+        // An agent's key is unique within its run; a person's is the card's own.
+        let idem_key = if from_person {
+            new.key.to_string()
+        } else {
+            super::scoped_key(&run, new.sender_session_id, new.key)
+        };
+        let existing = tx
+            .query_row(
+                &format!(
+                    "SELECT {COLUMNS} FROM agent_mail
+                     WHERE sender_session_id = ?1 AND idem_key = ?2"
+                ),
+                params![new.sender_session_id, idem_key],
+                row_from,
+            )
+            .optional()?;
+        if let Some(existing) = existing {
+            return Ok(Enqueued::Existing(existing));
+        }
         let incarnation = live_incarnation_of(&tx, new.target_session_id)?;
         // What an agent of the run sent counts, a person's does not.
         let run_messages: i64 = tx.query_row(
@@ -265,7 +262,7 @@ impl HistoryDb {
                 new.target_provider,
                 incarnation,
                 new.body,
-                new.key,
+                idem_key,
                 now,
                 kind.as_str(),
                 state.as_str(),
@@ -339,7 +336,8 @@ impl HistoryDb {
 
     /// Queue Perch's own status note from `child` to `lead`. A note of the same child still
     /// waiting is replaced, so a lead is told a child's latest state once, not each step.
-    /// `None` when the lead has no live identity to address.
+    /// `None` when the lead has no live identity to address, or is no longer in the run the child
+    /// belongs to (it began another conversation): a child's word never reaches a later one.
     pub fn enqueue_note(
         &self,
         child: (&str, &str, &str),
@@ -350,6 +348,11 @@ impl HistoryDb {
         let (lead_id, lead_provider) = lead;
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
+        let run = run_of(&tx, child_id)?;
+        if run.is_none() || run != run_of(&tx, lead_id)? {
+            return Ok(None);
+        }
+        let run = run.unwrap_or_default();
         let Some(incarnation) = live_incarnation_of(&tx, lead_id)? else {
             return Ok(None);
         };
@@ -378,7 +381,7 @@ impl HistoryDb {
                  VALUES (?1, ?2, 'note', ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, 'queued', '', ?10, ?10)",
                 params![
                     id,
-                    lead_id,
+                    run,
                     child_id,
                     child_provider,
                     child_label,
@@ -674,11 +677,6 @@ impl HistoryDb {
             .unwrap();
     }
 
-    /// The run a session is in: its lead's id. `None` when the session does not exist.
-    pub fn run_of(&self, session_id: &str) -> anyhow::Result<Option<String>> {
-        Ok(run_of(&self.conn.lock().unwrap(), session_id)?)
-    }
-
     /// The incarnation of a session that has not ended, if any.
     pub fn live_incarnation(&self, session_id: &str) -> anyhow::Result<Option<String>> {
         Ok(live_incarnation_of(&self.conn.lock().unwrap(), session_id)?)
@@ -714,7 +712,8 @@ impl HistoryDb {
         session_id: &str,
     ) -> anyhow::Result<()> {
         conn.execute(
-            "DELETE FROM agent_mail WHERE run_id = ?1",
+            "DELETE FROM agent_mail WHERE run_id = ?1
+               OR run_id IN (SELECT run_id FROM agent_runs WHERE session_id = ?1)",
             params![session_id],
         )?;
         conn.execute(
@@ -806,9 +805,10 @@ mod tests {
     fn a_message_inside_the_run_is_queued_for_the_incarnation_it_was_addressed_to() {
         let Run { db, .. } = run();
         let row = queued(&db, &send("a", "lead", "done", "k1"));
+        let lead_run = db.run_of("lead").unwrap().unwrap();
         assert_eq!(
             (row.run_id.as_str(), row.state),
-            ("lead", MailState::Queued)
+            (lead_run.as_str(), MailState::Queued)
         );
         assert_eq!(
             row.target_incarnation,
@@ -1127,6 +1127,7 @@ mod tests {
                 .unwrap(),
             Enqueued::Refused(SendRefusal::RunLimit(agent_mail::MAX_MESSAGES_PER_RUN))
         );
+        let lead_run = db.run_of("lead").unwrap().unwrap();
         // What the person wrote is the person's: it still goes in, as the person, with no sender run.
         let Enqueued::New(person) = db
             .record_person_mail(
@@ -1143,7 +1144,7 @@ mod tests {
                 person.run_id.as_str(),
                 person.state
             ),
-            ("person", "lead", MailState::Queued)
+            ("person", lead_run.as_str(), MailState::Queued)
         );
         // The same request again returns the first and queues nothing.
         assert!(matches!(

@@ -632,6 +632,17 @@ pub(super) async fn agent_action(
                 action.as_str()
             ))
         })?;
+    // Only children of the caller's own run: an earlier conversation's are not its to steer.
+    if !app
+        .db
+        .owns_child(&caller.session_id, target)
+        .unwrap_or(false)
+    {
+        return Err(fail(
+            StatusCode::NOT_FOUND,
+            "that is not one of your sub-sessions",
+        ));
+    }
     let key = if action == Action::Steer {
         agent_mail::check_key(body["key"].as_str().unwrap_or_default())
             .map_err(bad)?
@@ -773,7 +784,7 @@ mod tests {
         let (address, db) = boot(&root).await;
         let (workspace, _) = lead_with_child(&db, &nest, SubState::Running);
         let lead = db
-            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .issue_in_current_run(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
             .unwrap();
         let child = db
             .issue(&AgentKey::new(&workspace.id, "child", "codex").unwrap())

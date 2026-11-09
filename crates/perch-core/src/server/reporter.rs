@@ -5,12 +5,12 @@
 //! just ended:
 //! - the child's own `perch report` of the turn, when it made one: no model is asked;
 //! - else a model's summary of the previous notes plus this turn (`Summary by <model>`);
-//! - else the start of its last message, when no model was asked or it did not answer.
+//! - else nothing: the earlier notes stay, and nothing is invented from the last message.
 //!
 //! Nothing here blocks the child or runs between turns. One model call per child at a time, none for
 //! a stopped child, none once the run is over its message limit, none when the setting is off, and
 //! none for a CLI the user does not have. A call that fails or answers in the wrong shape leaves the
-//! last-message fallback, never nothing.
+//! previous notes, never a guess.
 use super::*;
 use crate::agent_fleet::AgentKey;
 use crate::db::{ReporterRun, StoredSummary};
@@ -33,18 +33,6 @@ enum Skip {
     InFlight,
     NoRunner,
     NoFacts,
-}
-
-/// A running notes row from what the child said last, so a summary of an earlier turn is never
-/// shown as the latest.
-fn fallback(said: Option<&str>, as_of: i64) -> Option<StoredSummary> {
-    Some(StoredSummary {
-        text: sub_sessions::fallback_report(said?)?,
-        status: String::new(),
-        source: "last-message".into(),
-        model: None,
-        as_of,
-    })
 }
 
 /// Whether `program` is an executable file on the PATH the core runs with.
@@ -228,7 +216,6 @@ async fn summarise_with<F, Fut>(
         return;
     }
     let session = &child.session_id;
-    let said = snapshot.and_then(super::agent_mail::last_assistant_text);
     let store = |row: Option<StoredSummary>| {
         if let Some(row) = row {
             if let Err(error) = app.db.store_summary(session, &row) {
@@ -256,14 +243,12 @@ async fn summarise_with<F, Fut>(
     let (runner, model, facts) = match plan {
         Ok(plan) => plan,
         Err(skip) => {
-            tracing::info!(child = %session, ?skip, "no summary asked for; keeping the last message");
-            store(fallback(said.as_deref(), ended_ms));
+            tracing::info!(child = %session, ?skip, "no summary asked for; the earlier notes stay");
             return;
         }
     };
     let Some(_flight) = InFlight::take(app, session) else {
-        tracing::info!(child = %session, skip = ?Skip::InFlight, "no summary asked for; keeping the last message");
-        store(fallback(said.as_deref(), ended_ms));
+        tracing::info!(child = %session, skip = ?Skip::InFlight, "no summary asked for; the earlier notes stay");
         return;
     };
     let prompt = reporter::prompt(previous.as_ref().map(|row| row.text.as_str()), &facts);
@@ -304,8 +289,7 @@ async fn summarise_with<F, Fut>(
             as_of: ended_ms,
         })),
         Err(error) => {
-            tracing::warn!(child = %session, %error, "the reporter gave no summary; keeping the last message");
-            store(fallback(said.as_deref(), ended_ms));
+            tracing::warn!(child = %session, %error, "the reporter gave no summary; the earlier notes stay");
         }
     }
 }
@@ -538,7 +522,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_call_that_fails_or_answers_badly_leaves_the_last_message_not_an_old_summary() {
+    async fn a_call_that_fails_or_answers_badly_leaves_the_earlier_notes_and_invents_nothing() {
         let f = fixture(SubState::Running).await;
         run_turn(
             &f,
@@ -551,20 +535,8 @@ mod tests {
         for bad in [Err("timed out".to_string()), reply("I think it went well")] {
             run_turn(&f, "The newest thing said.", 2_000, true, bad).await;
             let kept = stored(&f).unwrap();
-            assert_eq!(kept.source, "last-message");
-            assert_eq!(kept.text, "The newest thing said.");
-            assert_eq!(kept.model, None);
-            // Put a summary back for the next case.
-            f.app
-                .db
-                .store_summary(
-                    "child",
-                    &StoredSummary {
-                        as_of: 1_000,
-                        ..kept
-                    },
-                )
-                .unwrap();
+            assert_eq!(kept.source, "summary");
+            assert_eq!(kept.as_of, 1_000, "no row was written for the failed turn");
         }
     }
 
@@ -616,11 +588,17 @@ mod tests {
         assert!(run_turn(&stopped, "x", 1, true, reply("{}"))
             .await
             .is_empty());
-        assert_eq!(stored(&stopped).unwrap().source, "last-message");
+        assert!(
+            stored(&stopped).is_none(),
+            "nothing is invented when no model is asked"
+        );
 
         let f = fixture(SubState::Running).await;
         assert!(run_turn(&f, "x", 1, false, reply("{}")).await.is_empty());
-        assert_eq!(stored(&f).unwrap().source, "last-message");
+        assert!(
+            stored(&f).is_none(),
+            "nothing is invented when no model is asked"
+        );
 
         let busy = fixture(SubState::Running).await;
         busy.app
@@ -629,7 +607,10 @@ mod tests {
             .unwrap()
             .insert("child".into());
         assert!(run_turn(&busy, "x", 1, true, reply("{}")).await.is_empty());
-        assert_eq!(stored(&busy).unwrap().source, "last-message");
+        assert!(
+            stored(&busy).is_none(),
+            "nothing is invented when no model is asked"
+        );
         // The call that was running frees the child when it ends, whatever its result.
         busy.app.reporter_in_flight.lock().unwrap().clear();
         let ok = run_turn(

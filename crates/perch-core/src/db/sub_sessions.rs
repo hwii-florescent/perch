@@ -11,6 +11,9 @@ pub struct SubSessionRow {
     pub parent_session_id: String,
     /// The lead's run when it spawned, so a record says whose authority started the child.
     pub parent_incarnation: String,
+    /// The lead's run when it spawned: the child belongs to it for good, however the lead's tab or
+    /// the child's own conversation changes.
+    pub parent_run_id: String,
     pub workspace_id: String,
     pub provider_id: String,
     pub model: Option<String>,
@@ -43,39 +46,68 @@ pub enum Reserved {
     Refused(Refusal),
 }
 
-const COLUMNS: &str = "child_session_id, parent_session_id, parent_incarnation, workspace_id,
-    provider_id, model, spawn_key, state, task, created_at, updated_at";
+pub(super) const COLUMNS: &str = "child_session_id, parent_session_id, parent_incarnation,
+    parent_run_id, workspace_id, provider_id, model, spawn_key, state, task, created_at,
+    updated_at";
 
-fn row_from(row: &rusqlite::Row<'_>) -> rusqlite::Result<SubSessionRow> {
-    let state: String = row.get(7)?;
+pub(super) fn row_from(row: &rusqlite::Row<'_>) -> rusqlite::Result<SubSessionRow> {
+    let state: String = row.get(8)?;
     Ok(SubSessionRow {
         child_session_id: row.get(0)?,
         parent_session_id: row.get(1)?,
         parent_incarnation: row.get(2)?,
-        workspace_id: row.get(3)?,
-        provider_id: row.get(4)?,
-        model: row.get(5)?,
-        spawn_key: row.get(6)?,
+        parent_run_id: row.get(3)?,
+        workspace_id: row.get(4)?,
+        provider_id: row.get(5)?,
+        model: row.get(6)?,
+        spawn_key: row.get(7)?,
         // A state this build does not know is unknown, which still counts as live.
         state: SubState::parse(&state).unwrap_or(SubState::StartUnknown),
-        task: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
+        task: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
     })
 }
 
 impl HistoryDb {
+    /// Record the lead's own quiet threshold for a child it just started.
+    pub fn set_quiet_after(&self, child_session_id: &str, minutes: u32) -> anyhow::Result<()> {
+        self.conn.lock().unwrap().execute(
+            "UPDATE sub_sessions SET quiet_after_minutes = ?2 WHERE child_session_id = ?1",
+            params![child_session_id, minutes],
+        )?;
+        Ok(())
+    }
+
+    /// A child's quiet threshold in minutes, when its lead chose one.
+    pub fn quiet_after(&self, child_session_id: &str) -> anyhow::Result<Option<u32>> {
+        Ok(self
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT quiet_after_minutes FROM sub_sessions WHERE child_session_id = ?1",
+                params![child_session_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
     /// Admit and record a spawn: the key's earlier child if there is one, else the run's limits, then the child's session row and its record, atomically.
     pub fn reserve_sub_session(&self, spec: &SubSessionSpec<'_>) -> anyhow::Result<Reserved> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
+        // The lead's current run: the key, the limits and the new child all belong to it.
+        let run = super::agent_runs::run_of(&tx, spec.parent_session_id)?
+            .ok_or_else(|| anyhow::anyhow!("the lead session no longer exists"))?;
         let existing = tx
             .query_row(
                 &format!(
                     "SELECT {COLUMNS} FROM sub_sessions
-                     WHERE parent_session_id = ?1 AND spawn_key = ?2"
+                     WHERE parent_run_id = ?1 AND spawn_key = ?2"
                 ),
-                params![spec.parent_session_id, spec.spawn_key],
+                params![run, spec.spawn_key],
                 row_from,
             )
             .optional()?;
@@ -92,9 +124,8 @@ impl HistoryDb {
             .ok_or_else(|| anyhow::anyhow!("the lead session no longer exists"))?;
         let live_placeholders = vec!["?"; SubState::LIVE.len()].join(",");
         let count = |live_only: bool| -> anyhow::Result<usize> {
-            let mut sql =
-                "SELECT COUNT(*) FROM sub_sessions WHERE parent_session_id = ?".to_string();
-            let mut values: Vec<&dyn rusqlite::ToSql> = vec![&spec.parent_session_id];
+            let mut sql = "SELECT COUNT(*) FROM sub_sessions WHERE parent_run_id = ?".to_string();
+            let mut values: Vec<&dyn rusqlite::ToSql> = vec![&run];
             if live_only {
                 sql += &format!(" AND state IN ({live_placeholders})");
                 values.extend(SubState::LIVE.iter().map(|s| s as &dyn rusqlite::ToSql));
@@ -127,9 +158,9 @@ impl HistoryDb {
         )?;
         tx.execute(
             "INSERT INTO sub_sessions
-                (child_session_id, parent_session_id, parent_incarnation, workspace_id,
-                 provider_id, model, spawn_key, state, task, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'starting', ?8, ?9, ?9)",
+                (child_session_id, parent_session_id, parent_incarnation, parent_run_id,
+                 workspace_id, provider_id, model, spawn_key, state, task, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?10, ?4, ?5, ?6, ?7, 'starting', ?8, ?9, ?9)",
             params![
                 spec.child_session_id,
                 spec.parent_session_id,
@@ -139,7 +170,8 @@ impl HistoryDb {
                 spec.model,
                 spec.spawn_key,
                 spec.task,
-                now
+                now,
+                run
             ],
         )?;
         let row = tx.query_row(
@@ -164,28 +196,30 @@ impl HistoryDb {
             .optional()?)
     }
 
-    /// The child a lead's spawn key started, if any record of it exists.
+    /// The child a lead's spawn key started in its current run, if any record of it exists.
     pub fn sub_session_by_key(
         &self,
         parent_session_id: &str,
         spawn_key: &str,
     ) -> anyhow::Result<Option<SubSessionRow>> {
-        Ok(self
-            .conn
-            .lock()
-            .unwrap()
+        let conn = self.conn.lock().unwrap();
+        let Some(run) = super::agent_runs::run_of(&conn, parent_session_id)? else {
+            return Ok(None);
+        };
+        Ok(conn
             .query_row(
                 &format!(
                     "SELECT {COLUMNS} FROM sub_sessions
-                     WHERE parent_session_id = ?1 AND spawn_key = ?2"
+                     WHERE parent_run_id = ?1 AND spawn_key = ?2"
                 ),
-                params![parent_session_id, spawn_key],
+                params![run, spawn_key],
                 row_from,
             )
             .optional()?)
     }
 
-    /// Every child a lead started, oldest first.
+    /// Every child a lead tab ever started, in any of its runs, oldest first: what a person sees.
+    /// An agent's own children are [`HistoryDb::sub_sessions_in_run`].
     pub fn sub_sessions_of(&self, parent_session_id: &str) -> anyhow::Result<Vec<SubSessionRow>> {
         let conn = self.conn.lock().unwrap();
         let mut statement = conn.prepare(&format!(
@@ -317,6 +351,18 @@ mod tests {
         let (child, key) = (format!("child-{n}"), format!("key-{n}"));
         db.reserve_sub_session(&spec(workspace, &child, &key))
             .unwrap()
+    }
+
+    #[test]
+    fn a_leads_quiet_threshold_is_kept_per_child() {
+        let (db, workspace) = db_with_lead();
+        reserve(&db, &workspace, 1);
+        reserve(&db, &workspace, 2);
+        assert_eq!(db.quiet_after("child-1").unwrap(), None);
+        db.set_quiet_after("child-1", 45).unwrap();
+        assert_eq!(db.quiet_after("child-1").unwrap(), Some(45));
+        assert_eq!(db.quiet_after("child-2").unwrap(), None);
+        assert_eq!(db.quiet_after("nobody").unwrap(), None);
     }
 
     #[test]
