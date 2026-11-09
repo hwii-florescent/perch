@@ -458,9 +458,9 @@ strip's actions are the next section.
   status word:** `lifecycle` (Perch's runtime state; unreadable is `unknown`, never idle) with the child's
   `dispatch` record, `needsYou` (a pending approval or question from Perch's own blocked state and
   request, never an agent's claim), the newest message with its delivery `receipt` and reason, and the
-  agent's `report` with its source (`report`, `summary` with the `model` that wrote it, or the fallback
-  `last-message`). The strip's headline counts working, waiting on you and reported (a report or a summary;
-  a fallback does not count).
+  agent's `report` with its source (`report`, or `summary` with the `model` that wrote it; none when there is neither, and the
+  child's last message is never shown in their place). The strip's headline counts working, waiting on you
+  and reported (a report or a summary).
 - *Freshness.* The strip asks again when a family member's session updates. Mail receipts change without
   one, so the mail code calls `notify_session_updated` for both ends when a message is queued, cancelled
   or settled. No polling.
@@ -546,13 +546,15 @@ finished turn is summarised by a small model so the expensive one never writes a
   prompt.)
 - *Output.* `{status, text}` with status `done`, `blocked`, `needs_you` or `failed`; the object is found in
   the answer (a code fence or a line of talk is tolerated), a bad status or an empty text is refused, a text
-  over 400 characters is cut and marked. Refused or failed: the 400-character last-message fallback, stored as
-  the notes so an older summary is never shown as the latest.
+  over 160 characters (one short sentence) is cut and marked. Refused or failed, or a turn with no events to
+  summarise: nothing is written and the earlier notes stay.
 - *Precedence.* The child's own `perch report` made since the notes were last written (that is, during this
-  turn) wins and is stored as the notes without asking a model; else the model's summary; else the last
-  message (`sub_sessions::choose_report`). `perch guide` and the first message no longer ask a child to report.
-- *Guards.* One call per child at a time (`reporter_in_flight`; a turn that ends meanwhile keeps the last
-  message), none for a child that is stopping or stopped, none once the run's agents sent 50 messages, none
+  turn) wins and is stored as the notes without asking a model; else the model's summary; else nothing
+  (`sub_sessions::choose_report`). A finished turn wakes no lead: the lead is woken only by a child's
+  explicit `perch report` (`server/agent_mail.rs` `note_report`), and reads the summary with `perch list`.
+  The first message asks a child to report when it is done or blocked.
+- *Guards.* One call per child at a time (`reporter_in_flight`; a turn that ends meanwhile keeps the earlier
+  notes), none for a child that is stopping or stopped, none once the run's agents sent 50 messages, none
   with the setting off, none without a runnable CLI. Never blocks the child. Each call is a `reporter_runs`
   row, counted in the usage popover's spend estimate as "Perch reporter" (`usage::spend::spend_with`; the
   CLIs are run without a saved session, so no agent log holds them). Codex gives one total, counted as input.

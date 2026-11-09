@@ -380,12 +380,15 @@ pub enum ChildStatus {
     FinishedTurn,
     WaitingOnPerson,
     Exited,
+    /// The child ran `perch report`.
+    Reported,
 }
 
 impl ChildStatus {
     fn words(self) -> &'static str {
         match self {
             Self::FinishedTurn => "finished its turn",
+            Self::Reported => "sent a report",
             Self::WaitingOnPerson => "is waiting on a person (an approval or a question)",
             Self::Exited => "has exited",
         }

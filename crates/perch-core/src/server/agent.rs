@@ -123,7 +123,20 @@ pub(super) async fn report(
         );
     }
     match state.db.record_agent_report(&identity.incarnation, text) {
-        Ok(true) => Json(json!({ "ok": true })).into_response(),
+        Ok(true) => {
+            if let Ok(child) = crate::agent_fleet::AgentKey::new(
+                &identity.workspace_id,
+                &identity.session_id,
+                &identity.provider_id,
+            ) {
+                let (app, text) = (state.clone(), text.to_string());
+                let _ = tokio::task::spawn_blocking(move || {
+                    super::agent_mail::note_report(&app, &child, &text)
+                })
+                .await;
+            }
+            Json(json!({ "ok": true })).into_response()
+        }
         Ok(false) => refuse(StatusCode::UNAUTHORIZED, "this run has ended"),
         Err(error) => {
             tracing::error!(%error, "agent report could not be saved");

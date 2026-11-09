@@ -101,13 +101,11 @@ fn member_of(
                 .collect()
         }),
         needs_you,
-        report: member_report(app, session_id, key.as_ref(), child.is_some()).map(|report| {
-            MemberReport {
-                text: crew::preview(&report.text),
-                source: report.source,
-                at: report.at,
-                model: report.model,
-            }
+        report: member_report(app, session_id, child.is_some()).map(|report| MemberReport {
+            text: crew::preview(&report.text),
+            source: report.source,
+            at: report.at,
+            model: report.model,
         }),
         can_message,
     }

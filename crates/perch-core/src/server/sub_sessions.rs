@@ -448,14 +448,8 @@ fn launch(app: &AppState, row: &SubSessionRow, cwd: &str) -> Result<(), LaunchFa
 }
 
 /// A member's report, always a claim: its own `perch report` of the latest turn, else (for a child
-/// only) the running summary a cheap model wrote, else the start of its last message, labelled as
-/// the fallback it is.
-pub(super) fn member_report(
-    app: &AppState,
-    session_id: &str,
-    key: Option<&AgentKey>,
-    is_child: bool,
-) -> Option<Report> {
+/// only) the running summary a cheap model wrote, else nothing.
+pub(super) fn member_report(app: &AppState, session_id: &str, is_child: bool) -> Option<Report> {
     let own = app.db.latest_session_report(session_id).ok().flatten();
     if !is_child {
         return own.map(|(text, at)| Report {
@@ -465,19 +459,11 @@ pub(super) fn member_report(
             model: None,
         });
     }
-    let said = key
-        .and_then(|key| app.native_bridge(key))
-        .and_then(|bridge| bridge.latest())
-        .and_then(|latest| agent_mail::last_assistant_text(&latest));
-    resolve_child_report(app, session_id, said.as_deref())
+    resolve_child_report(app, session_id)
 }
 
-/// A child's report from what is recorded and `said`, its last message when the caller has it.
-pub(super) fn resolve_child_report(
-    app: &AppState,
-    child_session_id: &str,
-    said: Option<&str>,
-) -> Option<Report> {
+/// A child's report from what is recorded: its own, else the running summary.
+pub(super) fn resolve_child_report(app: &AppState, child_session_id: &str) -> Option<Report> {
     sub_sessions::choose_report(
         app.db
             .latest_session_report(child_session_id)
@@ -485,8 +471,6 @@ pub(super) fn resolve_child_report(
             .flatten(),
         app.db.session_summary(child_session_id).ok().flatten(),
         app.settings.get().reporter_enabled,
-        said,
-        wall_clock_millis(),
     )
 }
 
@@ -507,11 +491,18 @@ fn member_json(
         .map(|row| row.title)
         .unwrap_or_default();
     let key = key_of(app, session_id, provider).ok();
-    let lifecycle = key
+    let snapshot = key
         .as_ref()
-        .and_then(|key| app.agent_runtime.snapshot(key).ok())
-        .map(|snapshot| snapshot.state);
-    let report = member_report(app, session_id, key.as_ref(), child.is_some());
+        .and_then(|key| app.agent_runtime.snapshot(key).ok());
+    let lifecycle = snapshot.as_ref().map(|snapshot| snapshot.state);
+    let quiet = snapshot.as_ref().and_then(|snapshot| {
+        sub_sessions::quiet_minutes(
+            child.is_some() && snapshot.state == AgentState::Working,
+            snapshot.last_activity_ms.max(snapshot.last_transition_ms),
+            now_millis(),
+        )
+    });
+    let report = member_report(app, session_id, child.is_some());
     json!({
         "session": session_id,
         "role": if child.is_some() { "child" } else { "lead" },
@@ -522,6 +513,7 @@ fn member_json(
         "dispatch": child.map(|(_, state)| state.as_str()),
         "state": lifecycle.map_or(Value::String("unknown".into()), |state| json!(state)),
         "needsYou": lifecycle == Some(AgentState::Blocked),
+        "quietMinutes": quiet,
         "task": child.map(|(row, _)| row.task.clone()),
         "report": report.map(|report| json!({
             "text": report.text,

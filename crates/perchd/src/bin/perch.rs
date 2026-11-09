@@ -24,6 +24,19 @@ fn main() {
         Some("ps" | "cleanup" | "release") => {
             std::process::exit(perchd::cli_main(&args, vec!["perchd".into()]))
         }
+        None | Some("help" | "--help" | "-h") => match args.get(1) {
+            Some(verb) => match perchd::agent_cli::verb_help(verb) {
+                Some(text) => print!("{text}"),
+                None => {
+                    eprintln!("perch: unknown command: {verb}");
+                    std::process::exit(2);
+                }
+            },
+            None => {
+                print!("{}", perchd::agent_cli::short_guide());
+                println!("\nperch ps|cleanup|release|daemon <verb>  (terminal runtimes)");
+            }
+        },
         _ => {
             eprintln!(
                 "usage: perch whoami|report|guide|spawn|suggest|suggestions|start|dismiss|read|list|stop|send|inbox|cancel|steer|interrupt|memory|mod|exec  (inside a Perch agent session)\n       perch ps|cleanup|release|daemon <verb>  (terminal runtimes)"

@@ -277,15 +277,26 @@ pub fn check_key(key: &str) -> Result<&str, String> {
     }
 }
 
+/// A working child with no output and no state change for this long is shown as quiet in
+/// `perch list`. ponytail: one fixed threshold for every child; a setting is the upgrade path.
+pub const QUIET_AFTER_MS: u64 = 10 * 60 * 1000;
+
+/// Whole minutes a working child has been silent, once that reaches [`QUIET_AFTER_MS`]. A child
+/// that is blocked on a person is flagged as that instead, and an idle or finished one is not
+/// quiet, it is done.
+pub fn quiet_minutes(working: bool, last_evidence_ms: u64, now_ms: u64) -> Option<u64> {
+    let silent = now_ms.saturating_sub(last_evidence_ms);
+    (working && silent >= QUIET_AFTER_MS).then_some(silent / 60_000)
+}
+
 /// The first message of a child: Perch's note, then the task. Plain text, never starting with
 /// a dash or a slash, so the agent's command line cannot read it as an option or a command.
 pub fn first_message(parent_session: &str, task: &str) -> String {
     format!(
         "Perch started you as a sub-session of session {parent_session}. This message is your \
-         task. When you finish, or if you are blocked, say so in your last message and then stop \
-         and wait: Perch tells the session that started you what you did. Run `perch report \
-         <text>` only to hand over something specific, such as a result or what blocks you. Run \
-         `perch guide` for how Perch works.\n\nTask: {task}"
+         task. When you finish, or if you are blocked, run `perch report <text>` with the result or \
+         what blocks you, then stop and wait: the session that started you hears only what you \
+         report. Run `perch guide` for how Perch works.\n\nTask: {task}"
     )
 }
 
@@ -322,8 +333,8 @@ pub struct Report {
     pub model: Option<String>,
 }
 
-/// The child's own `perch report` of the turn that just ended, else the running summary, else the
-/// start of its last message. A `perch report` is of the latest turn when it is newer than the
+/// The child's own `perch report` of the turn that just ended, else the running summary, else
+/// nothing: the child's last message is never shown in its place. A `perch report` is of the latest turn when it is newer than the
 /// turn the stored notes cover; older, the notes already hold it. `use_summaries` is the
 /// reporter's setting: off, the stored notes (a model's summaries and the fallbacks kept beside them)
 /// are no longer shown.
@@ -331,10 +342,9 @@ pub fn choose_report(
     own: Option<(String, i64)>,
     stored: Option<crate::db::StoredSummary>,
     use_summaries: bool,
-    last_message: Option<&str>,
-    now: i64,
 ) -> Option<Report> {
-    let stored = stored.filter(|_| use_summaries);
+    // Rows an earlier version stored from the last message are not shown.
+    let stored = stored.filter(|row| use_summaries && row.source != "last-message");
     if let Some((text, at)) = own {
         if stored.as_ref().is_none_or(|row| at > row.as_of) {
             return Some(Report {
@@ -345,24 +355,17 @@ pub fn choose_report(
             });
         }
     }
-    if let Some(row) = stored {
+    stored.map(|row| {
         let source = match row.source.as_str() {
             "summary" => ReportSource::Summary,
-            "report" => ReportSource::Reported,
-            _ => ReportSource::LastMessage,
+            _ => ReportSource::Reported,
         };
-        return Some(Report {
+        Report {
             text: row.text,
             source,
             at: row.as_of,
             model: row.model.filter(|_| source == ReportSource::Summary),
-        });
-    }
-    fallback_report(last_message?).map(|text| Report {
-        text,
-        source: ReportSource::LastMessage,
-        at: now,
-        model: None,
+        }
     })
 }
 
@@ -646,9 +649,8 @@ mod tests {
     fn the_first_message_names_the_parent_and_the_task_and_is_not_an_option_or_command() {
         let message = first_message("lead-1", "fix it");
         assert!(message.contains("session lead-1"));
-        // A report is optional: Perch summarises the turn for the lead.
-        assert!(message.contains("perch report") && message.contains("only to hand over"));
-        assert!(!message.contains("run `perch report <summary>`"));
+        // The lead hears only what the child reports.
+        assert!(message.contains("run `perch report <text>`") && message.contains("hears only"));
         assert!(message.ends_with("Task: fix it"));
         assert!(!message.starts_with(['-', '/']));
     }
@@ -685,66 +687,55 @@ mod tests {
     }
 
     #[test]
-    fn the_childs_own_report_of_this_turn_beats_the_summary_and_the_summary_beats_the_last_message()
-    {
+    fn the_childs_own_report_of_this_turn_beats_the_summary_and_nothing_stands_in_for_both() {
         let own = Some(("my report".to_string(), 200));
-        let newer = choose_report(
-            own.clone(),
-            Some(stored("summary", 100)),
-            true,
-            Some("said"),
-            9,
-        )
-        .unwrap();
+        let newer = choose_report(own.clone(), Some(stored("summary", 100)), true).unwrap();
         assert_eq!(
             (newer.text.as_str(), newer.source),
             ("my report", ReportSource::Reported)
         );
         // A report the notes already cover is of an earlier turn.
-        let older = choose_report(
-            own.clone(),
-            Some(stored("summary", 300)),
-            true,
-            Some("said"),
-            9,
-        )
-        .unwrap();
+        let older = choose_report(own.clone(), Some(stored("summary", 300)), true).unwrap();
         assert_eq!(older.source, ReportSource::Summary);
         assert_eq!(older.model.as_deref(), Some("claude-haiku-4-5"));
         assert_eq!(older.at, 300);
-        let said = choose_report(None, None, true, Some("said"), 9).unwrap();
-        assert_eq!((said.source, said.at), (ReportSource::LastMessage, 9));
-        let alone = choose_report(own, None, true, None, 9).unwrap();
+        assert_eq!(choose_report(None, None, true), None);
+        let alone = choose_report(own, None, true).unwrap();
         assert_eq!(alone.source, ReportSource::Reported);
-        assert_eq!(choose_report(None, None, true, Some("  "), 9), None);
     }
 
     #[test]
-    fn notes_kept_from_a_report_or_a_fallback_keep_their_own_label() {
-        let report = choose_report(None, Some(stored("report", 5)), true, None, 9).unwrap();
+    fn notes_kept_from_a_report_keep_their_label_and_a_stored_last_message_is_not_shown() {
+        let report = choose_report(None, Some(stored("report", 5)), true).unwrap();
         assert_eq!(
             (report.source, report.model),
             (ReportSource::Reported, None)
         );
-        let last = choose_report(
-            None,
-            Some(stored("last-message", 5)),
-            true,
-            Some("newer"),
-            9,
-        )
-        .unwrap();
-        assert_eq!(last.source, ReportSource::LastMessage);
         assert_eq!(
-            last.text, "notes last-message",
-            "the stored fallback is of the latest turn"
+            choose_report(None, Some(stored("last-message", 5)), true),
+            None
+        );
+    }
+
+    #[test]
+    fn only_a_working_child_silent_for_ten_minutes_is_quiet() {
+        let now = 100 * 60_000;
+        assert_eq!(quiet_minutes(true, now - 9 * 60_000, now), None);
+        assert_eq!(quiet_minutes(true, now - 10 * 60_000, now), Some(10));
+        assert_eq!(
+            quiet_minutes(true, now - 25 * 60_000 - 5_000, now),
+            Some(25)
+        );
+        assert_eq!(quiet_minutes(false, 0, now), None);
+        assert_eq!(
+            quiet_minutes(true, now + 5, now),
+            None,
+            "a clock step back is not quiet"
         );
     }
 
     #[test]
     fn with_the_reporter_off_an_old_model_summary_is_no_longer_shown() {
-        let off = choose_report(None, Some(stored("summary", 5)), false, Some("said"), 9).unwrap();
-        assert_eq!(off.source, ReportSource::LastMessage);
-        assert_eq!(off.text, "said");
+        assert_eq!(choose_report(None, Some(stored("summary", 5)), false), None);
     }
 }

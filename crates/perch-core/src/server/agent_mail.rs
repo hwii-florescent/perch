@@ -19,7 +19,7 @@ use crate::agent_mail::{
     Wait,
 };
 use crate::db::{Cancelled, Enqueued, MailRow, NewMail};
-use crate::sub_sessions::{Report, SubState};
+use crate::sub_sessions::{Report, ReportSource, SubState};
 use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -197,72 +197,41 @@ pub(super) fn cancel(app: &AppState, caller: &AgentIdentity, id: &str) -> Result
     }
 }
 
-/// A child's lifecycle changed or its process ended: tell its lead, in Perch's own words with
-/// the child's claim quoted. A newer note from the same child replaces one still waiting.
-pub(super) fn note_child(
-    app: &AppState,
-    child: &AgentKey,
-    status: ChildStatus,
-    last_assistant: Option<&str>,
-) {
+/// A child ran `perch report`: tell its lead, with the report quoted as the child's own claim.
+/// This is the only note a lead gets; Perch queues none when a turn ends. A newer note from the
+/// same child replaces one still waiting.
+pub(super) fn note_report(app: &AppState, child: &AgentKey, text: &str) {
     let Ok(Some(lead)) = app.db.parent_of(&child.session_id) else {
         return;
     };
-    let Ok(Some(record)) = app.db.sub_session(&child.session_id) else {
-        return;
-    };
-    // The lead stopped it: it knows.
-    if status == ChildStatus::Exited
-        && matches!(record.state, SubState::Stopping | SubState::Stopped)
-    {
-        return;
-    }
     let Ok(Some(lead_row)) = app.db.get_session(&lead) else {
         return;
     };
-    let lead_provider = lead_row.cli_provider_id.unwrap_or_default();
-    // The reporter has already written this turn's summary, when it was going to.
-    let report = super::sub_sessions::resolve_child_report(app, &child.session_id, last_assistant)
-        .and_then(|report| {
-            Some(Report {
-                text: crate::sub_sessions::fallback_report(&report.text)?,
-                ..report
-            })
-        });
-    // A finished turn is news even when the child said nothing: the note then says it reported
-    // nothing, which the lead needs to know as much as a claim.
     let label = sender_label(app, &child.session_id, &child.agent_id);
+    let report = Report {
+        text: text.to_string(),
+        source: ReportSource::Reported,
+        at: wall_clock_millis(),
+        model: None,
+    };
     let body = agent_mail::note_line(
         &label,
         &child.agent_id,
         &child.session_id,
-        status,
-        report.as_ref(),
+        ChildStatus::Reported,
+        Some(&report),
     );
     match app.db.enqueue_note(
         (&child.session_id, &child.agent_id, &label),
-        (&lead, &lead_provider),
+        (&lead, &lead_row.cli_provider_id.unwrap_or_default()),
         &body,
     ) {
-        Ok(Some(_)) => {
-            tracing::info!(child = %child.session_id, ?status, "queued a status note for the lead");
-            app.mail_notify.notify_one();
-        }
+        Ok(Some(_)) => app.mail_notify.notify_one(),
         Ok(None) => {
-            tracing::info!(child = %child.session_id, "no status note: the lead has no live identity")
+            tracing::info!(child = %child.session_id, "no note: the lead has no live identity")
         }
-        Err(error) => tracing::warn!(%error, "could not queue a status note for a lead"),
+        Err(error) => tracing::warn!(%error, "could not queue a report note for a lead"),
     }
-}
-
-/// The last thing an assistant said in a snapshot, for a note's fallback claim.
-pub(super) fn last_assistant_text(snapshot: &crate::protocol::NativeUiSnapshot) -> Option<String> {
-    snapshot
-        .messages
-        .iter()
-        .rev()
-        .find(|message| message.role == "assistant" && !message.text.trim().is_empty())
-        .map(|message| message.text.clone())
 }
 
 /// How one delivery attempt to a receiver ended.
@@ -1431,6 +1400,36 @@ mod tests {
             1,
             "an agent's still spends one"
         );
+    }
+
+    /// A lead hears of a child through the child's own `perch report` and nothing else.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_report_notes_the_lead_and_nothing_else_does() {
+        use super::super::agent::tests::request;
+        use super::super::sub_sessions::tests::{boot, lead_with_child};
+        let root = std::env::temp_dir().join(format!("perch-mail-report-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let (address, db) = boot(&root).await;
+        let (workspace, _) = lead_with_child(&db, &nest, SubState::Running);
+        db.issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .unwrap();
+        let child = db
+            .issue(&AgentKey::new(&workspace.id, "child", "codex").unwrap())
+            .unwrap();
+        assert!(db.mail_to("lead", 10).unwrap().is_empty());
+        let (status, body) = request(
+            address,
+            "POST",
+            "/agent/report",
+            &[("Authorization", &format!("Bearer {}", child.token))],
+            &json!({"session": "child", "text": "parser fixed"}).to_string(),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        let notes = db.mail_to("lead", 10).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].body.contains("parser fixed"), "{}", notes[0].body);
     }
 
     /// `send`, `inbox` and `cancel` over real HTTP against a booted core, up to the point of
