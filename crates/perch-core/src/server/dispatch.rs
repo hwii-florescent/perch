@@ -548,6 +548,17 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
         ClientMessage::PhoneAccessGet { request_id } => {
             config::handle_phone_access_get(state, request_id)
         }
+        ClientMessage::MachineHosts { request_id } => {
+            config::handle_machine_hosts(state, request_id)
+        }
+        ClientMessage::MachineProbe {
+            request_id,
+            ssh_host,
+        } => config::handle_machine(state, request_id, ssh_host, false),
+        ClientMessage::MachineInstall {
+            request_id,
+            ssh_host,
+        } => config::handle_machine(state, request_id, ssh_host, true),
         ClientMessage::DeviceRevoke {
             request_id,
             device_id,

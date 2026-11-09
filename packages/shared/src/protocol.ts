@@ -1878,6 +1878,55 @@ export interface PhoneAccessGetMessage {
   type: "phone.access.get";
   requestId: string;
 }
+/** The host names `~/.ssh/config` offers. */
+export interface MachineHostsMessage {
+  type: "machine.hosts";
+  requestId: string;
+}
+/** Look at a computer over ssh: its system, tmux, and whether `perch-core` is there. */
+export interface MachineProbeMessage {
+  type: "machine.probe";
+  requestId: string;
+  sshHost: string;
+}
+/** Put `perch-core` on that computer (replacing a copy that is there), then look again. */
+export interface MachineInstallMessage {
+  type: "machine.install";
+  requestId: string;
+  sshHost: string;
+}
+/** What a probe found on a computer. */
+export interface MachineProbe {
+  os: "linux" | "macos";
+  arch: "x86_64" | "aarch64";
+  home: string;
+  tmux: boolean;
+  corePath?: string;
+  coreVersion?: string;
+}
+/** Something went wrong with a computer, and what to do next. `needs_login`: ssh wants a person (run `loginArgv` in a terminal). */
+export interface MachineFault {
+  kind: "needs_login" | "unreachable" | "failed";
+  message: string;
+  hint: string;
+}
+export interface MachineHostsResultMessage {
+  type: "machine.hosts";
+  requestId: string;
+  hosts: string[];
+}
+/** The answer to `machine.probe` and `machine.install`. */
+export interface MachineResultMessage {
+  type: "machine.result";
+  requestId: string;
+  sshHost: string;
+  probe?: MachineProbe;
+  /** Where the core was put, for an install. */
+  installedPath?: string;
+  error?: MachineFault;
+  /** The command to run in a terminal when `error.kind` is `needs_login`. */
+  loginArgv?: string[];
+}
 /** One URL a phone can open to reach this host: the same Wi-Fi (`lan`), the
  * tailnet, or the relay (`relay`: carries a #fragment key, so a pairing code is
  * appended with `&pair=`, not `#pair=`). */
@@ -2658,6 +2707,9 @@ export type ClientMessage =
   | DevicePairCancelMessage
   | DeviceListMessage
   | PhoneAccessGetMessage
+  | MachineHostsMessage
+  | MachineProbeMessage
+  | MachineInstallMessage
   | DeviceRevokeMessage
   | SettingsGetMessage
   | SettingsUpdateMessage
@@ -3668,6 +3720,8 @@ export type ServerMessage =
   | DevicePairCodeMessage
   | DeviceListResultMessage
   | PhoneAccessStatusMessage
+  | MachineHostsResultMessage
+  | MachineResultMessage
   | GitStatusResultMessage
   | GitRefsResultMessage
   | GitDiffResultMessage

@@ -197,6 +197,89 @@ pub(super) fn handle_phone_access_get(state: &Arc<ConnState>, request_id: String
     });
 }
 
+pub(super) fn handle_machine_hosts(state: &Arc<ConnState>, request_id: String) {
+    let hosts = std::env::var_os("HOME")
+        .map(|home| crate::machine::ssh_config_hosts(std::path::Path::new(&home)))
+        .unwrap_or_default();
+    let _ = state
+        .out_tx
+        .send(ServerMessage::MachineHosts { request_id, hosts });
+}
+
+/// `machine.probe` (look) and `machine.install` (put `perch-core` there, then look again). ssh can
+/// take seconds, so the answer comes later as `machine.result`; a failure carries what to do next.
+pub(super) fn handle_machine(
+    state: &Arc<ConnState>,
+    request_id: String,
+    ssh_host: String,
+    install: bool,
+) {
+    let out = state.out_tx.clone();
+    let reply = move |probe, installed_path, error: Option<crate::machine::MachineError>| {
+        let login_argv = error
+            .as_ref()
+            .filter(|e| e.kind == crate::machine::Fault::NeedsLogin)
+            .map(|_| crate::machine::login_argv(&ssh_host));
+        ServerMessage::MachineResult {
+            request_id: request_id.clone(),
+            ssh_host: ssh_host.clone(),
+            probe,
+            installed_path,
+            error,
+            login_argv,
+        }
+    };
+    // A paired phone looks at machines but does not put programs on them.
+    if install && state.device_id.is_some() {
+        let _ = out.send(reply(
+            None,
+            None,
+            Some(crate::machine::MachineError {
+                kind: crate::machine::Fault::Failed,
+                message: "Installing on a machine can only be done on the computer itself.".into(),
+                hint: "Open Perch on the computer and add the machine there.".into(),
+            }),
+        ));
+        return;
+    }
+    let target = reply(None, None, None);
+    let ServerMessage::MachineResult { ssh_host, .. } = &target else {
+        unreachable!()
+    };
+    if let Err(message) = crate::ssh::validate_upload_host(ssh_host) {
+        let _ = out.send(reply(
+            None,
+            None,
+            Some(crate::machine::MachineError {
+                kind: crate::machine::Fault::Failed,
+                message,
+                hint: "Use a name from ~/.ssh/config or user@host.".into(),
+            }),
+        ));
+        return;
+    }
+    let ssh_host = ssh_host.clone();
+    tokio::spawn(async move {
+        let message = match run_machine(&ssh_host, install).await {
+            Ok((probe, path)) => reply(Some(probe), path, None),
+            Err(error) => reply(None, None, Some(error)),
+        };
+        let _ = out.send(message);
+    });
+}
+
+async fn run_machine(
+    ssh_host: &str,
+    install: bool,
+) -> Result<(crate::machine::Probe, Option<String>), crate::machine::MachineError> {
+    let found = crate::machine::probe(ssh_host).await?;
+    if !install {
+        return Ok((found, None));
+    }
+    let path = crate::machine::install(ssh_host, &found).await?;
+    Ok((crate::machine::probe(ssh_host).await?, Some(path)))
+}
+
 pub(super) fn handle_hosts_list(state: &Arc<ConnState>) {
     let hosts = state.app.hosts.list();
     let _ = state.out_tx.send(ServerMessage::HostsList {

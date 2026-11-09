@@ -1576,6 +1576,8 @@ impl HubManager {
             | ServerMessage::DevicePairCode { .. }
             | ServerMessage::DeviceListResult { .. }
             | ServerMessage::PhoneAccessStatus { .. }
+            | ServerMessage::MachineHosts { .. }
+            | ServerMessage::MachineResult { .. }
             | ServerMessage::SettingsCurrent { .. }
             | ServerMessage::HostsList { .. }
             | ServerMessage::HostsUpdated { .. }

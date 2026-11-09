@@ -25,6 +25,7 @@ import { newId } from "../ids";
 import { HostStateDot } from "./HostStateDot";
 import { cn } from "../lib/cn";
 import { SettingsGroup, SettingRow, SettingsQuery } from "./ui/setting-row";
+import { MachineCheck, SSH_CONFIG_HOSTS } from "./MachineCheck";
 import { Switch } from "./ui/switch";
 import { Select, type SelectOption } from "./ui/select";
 import { KeybindingsSection } from "./KeybindingsSection";
@@ -327,6 +328,7 @@ function SshHostsSection() {
           ariaLabel="New host mode"
           title="direct = remote only needs claude/codex + tmux; perch = remote runs its own perch"
           value={newMode}
+          list={SSH_CONFIG_HOSTS}
           onChange={(value) => setNewMode(value as HostMode)}
           options={[{ value: "direct", label: "direct" }, { value: "perch", label: "perch" }]}
         />
@@ -356,6 +358,7 @@ function SshHostsSection() {
           placeholder="Remote start cmd (optional, {port} placeholder)"
           value={newRemoteCmd}
           data-testid="host-remote-cmd-input"
+      <MachineCheck sshHost={newSshHost} onCore={() => setNewMode("perch")} />
           onChange={(e) => setNewRemoteCmd(e.target.value)}
         />
       </div>

@@ -6,7 +6,7 @@
 //! a probe that hits one reports `NeedsLogin` and [`login_argv`] is the command to run in one.
 
 use crate::ssh::{mux_opts, run_remote, run_remote_with_input, shell_quote};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Where the core lands on the remote, relative to `$HOME` (already on the PATH perch gives remote
@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 const REMOTE_BIN: &str = ".local/bin/perch-core";
 
 /// What a probe found on the remote.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Probe {
     /// `linux` or `macos`.
@@ -28,7 +28,7 @@ pub struct Probe {
     pub core_version: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Fault {
     /// ssh wants a password, a code or a host-key answer from a person.
@@ -39,7 +39,7 @@ pub enum Fault {
 }
 
 /// A failure a person can act on: what happened and the next step.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MachineError {
     pub kind: Fault,
     pub message: String,

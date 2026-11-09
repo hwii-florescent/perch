@@ -346,7 +346,7 @@ pub async fn copy_file(
     scp_file(ssh_host, local, remote).await
 }
 
-fn validate_upload_host(host: &str) -> Result<(), String> {
+pub fn validate_upload_host(host: &str) -> Result<(), String> {
     if host.is_empty()
         || host.starts_with('-')
         || !host

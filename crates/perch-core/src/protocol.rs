@@ -1917,6 +1917,24 @@ pub enum ClientMessage {
     #[serde(rename = "phone.access.get", rename_all = "camelCase")]
     PhoneAccessGet { request_id: String },
 
+    /// The host names `~/.ssh/config` offers (Add machine's picker).
+    #[serde(rename = "machine.hosts", rename_all = "camelCase")]
+    MachineHosts { request_id: String },
+
+    /// Look at a computer over ssh: its system, tmux, and whether `perch-core` is there.
+    #[serde(rename = "machine.probe", rename_all = "camelCase")]
+    MachineProbe {
+        request_id: String,
+        ssh_host: String,
+    },
+
+    /// Put `perch-core` on that computer (replacing a copy that is there), then look again.
+    #[serde(rename = "machine.install", rename_all = "camelCase")]
+    MachineInstall {
+        request_id: String,
+        ssh_host: String,
+    },
+
     /// Revoke one paired device. Its token stops working immediately.
     #[serde(rename = "device.revoke", rename_all = "camelCase")]
     DeviceRevoke {
@@ -3084,6 +3102,30 @@ pub enum ServerMessage {
     WorkspaceRunStarted {
         request_id: String,
         session_id: String,
+    },
+
+    /// The answer to `machine.hosts`.
+    #[serde(rename = "machine.hosts", rename_all = "camelCase")]
+    MachineHosts {
+        request_id: String,
+        hosts: Vec<String>,
+    },
+
+    /// The answer to `machine.probe` and `machine.install`: what was found (`probe`), where the
+    /// core was put (`installed_path`, for an install), or what went wrong (`error`, with the
+    /// command to run in a terminal when ssh needs a person: `login_argv`).
+    #[serde(rename = "machine.result", rename_all = "camelCase")]
+    MachineResult {
+        request_id: String,
+        ssh_host: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        probe: Option<crate::machine::Probe>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        installed_path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<crate::machine::MachineError>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        login_argv: Option<Vec<String>>,
     },
 
     /// Whether phones can reach this host and where. `always_on` = the main
