@@ -130,6 +130,11 @@ Useful existing coverage (not a claim of a fresh passing run):
   kept) and stops it after a confirm step. Four haiku turns. Run it outside a Perch shell (as the native specs).
   Not covered live: Codex, Pi and OMP steer or interrupt, and a lead's own `perch steer`/`perch interrupt`
   (unit and HTTP tests in `crew_actions.rs`, `server/crew_actions.rs`, `native_ui`).
+- `agent-mods.spec.ts` (same config; needs `perch` beside the core): a haiku lead is asked to make Perch show a todo
+  list; it reads `perch guide`, `perch mod api` and `perch mod examples`, writes a mod, enables it and opens it. The
+  test asserts the mod's `main.js` in the core's folder, then that the page draws the heading, an input and a button
+  outside the chat and that adding an item shows it. One lead turn, about 30 s, 8 shell commands in the verified run.
+  Run it outside a Perch shell: strip `PERCH_*` and the Perch wrapper directory from `PATH`.
 - `reporter.spec.ts` (same config; needs `perch` beside the core, and a signed-in `claude` on the PATH the core
   runs with): a haiku lead starts a haiku child whose task is one command and one sentence; the child does
   not run `perch report`; the test reads `session_summaries`, `reporter_runs` and the lead's note from SQLite
