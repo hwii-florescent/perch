@@ -1078,6 +1078,43 @@ mod tests {
         ] {
             assert_eq!(host("/agent/exec", agent.clone(), body).await.0, 400);
         }
+        // On a listed host the program runs and its output and exit code come back: a stand-in `ssh`
+        // runs the remote command line here (the same helper the file tests use).
+        let shim_dir = root.join("shim");
+        std::fs::create_dir_all(&shim_dir).unwrap();
+        let shim = shim_dir.join("ssh");
+        std::fs::write(
+            &shim,
+            "#!/bin/sh\nwhile [ \"$1\" = -o ]; do shift 2; done\nshift\nexec sh -c \"$1\"\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("PERCH_SSH", &shim);
+        app.hosts
+            .upsert(crate::hosts::SshHost {
+                id: "box".into(),
+                name: "box".into(),
+                ssh_host: "box".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let ran = host(
+            "/agent/exec",
+            agent.clone(),
+            json!({"session": "lead", "host": "box", "cmd": "sh", "args": ["-c", "echo \"$1\"; echo oops >&2; exit 3", "x", "a b"], "cwd": "/tmp"}),
+        )
+        .await;
+        std::env::remove_var("PERCH_SSH");
+        assert_eq!(ran.0, 200, "{:?}", ran.1);
+        assert_eq!(
+            (
+                ran.1["code"].as_i64(),
+                ran.1["stdout"].as_str(),
+                ran.1["stderr"].as_str()
+            ),
+            (Some(3), Some("a b\n"), Some("oops\n"))
+        );
         assert_eq!(
             host(
                 "/agent/exec",
