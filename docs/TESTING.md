@@ -136,7 +136,7 @@ Useful existing coverage (not a claim of a fresh passing run):
   outside the chat and that adding an item shows it. The same lead is then asked to turn Perch into an IDE: the test
   reads the layout file it wrote (files, panes and git blocks) and expects the page to draw `layout-files`,
   `layout-canvas` and `layout-git`. Two lead turns, about 50 s in the verified run. The screenshot in the run's
-  artifacts shows the right-hand panel (the git block) looking the same as the explorer, which I did not investigate, and one of the agent's
+  artifacts shows the git block as the explorer, which is stock behavior in a folder that is not a git checkout (`WorkspaceTools`), and one of the agent's
   five commands in the second turn failed before it recovered: the test checks the result, not the path.
   Run it outside a Perch shell: strip `PERCH_*` and the Perch wrapper directory from `PATH`.
 - `reporter.spec.ts` (same config; needs `perch` beside the core, and a signed-in `claude` on the PATH the core
