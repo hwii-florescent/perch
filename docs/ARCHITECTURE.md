@@ -551,7 +551,9 @@ finished turn is summarised by a small model so the expensive one never writes a
 - *Precedence.* The child's own `perch report` made since the notes were last written (that is, during this
   turn) wins and is stored as the notes without asking a model; else the model's summary; else nothing
   (`sub_sessions::choose_report`). A finished turn wakes no lead: the lead is woken only by a child's
-  explicit `perch report` (`server/agent_mail.rs` `note_report`), and reads the summary with `perch list`.
+  explicit `perch report` (`server/agent_mail.rs` `note_report`) or by a child going quiet (working with no
+  output past its lead's `--quiet-after`, default 10 minutes; one note per stall, re-armed when it speaks
+  again: `tell_leads_of_quiet_children`), and reads the summary and the `QUIET` marker with `perch list`.
   The first message asks a child to report when it is done or blocked.
 - *Guards.* One call per child at a time (`reporter_in_flight`; a turn that ends meanwhile keeps the earlier
   notes), none for a child that is stopping or stopped, none once the run's agents sent 50 messages, none

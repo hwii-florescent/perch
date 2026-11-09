@@ -382,15 +382,20 @@ pub enum ChildStatus {
     Exited,
     /// The child ran `perch report`.
     Reported,
+    /// The child is working but has produced no output for this many minutes.
+    Quiet(u64),
 }
 
 impl ChildStatus {
-    fn words(self) -> &'static str {
+    fn words(self) -> String {
         match self {
-            Self::FinishedTurn => "finished its turn",
-            Self::Reported => "sent a report",
-            Self::WaitingOnPerson => "is waiting on a person (an approval or a question)",
-            Self::Exited => "has exited",
+            Self::FinishedTurn => "finished its turn".into(),
+            Self::Reported => "sent a report".into(),
+            Self::Quiet(minutes) => format!(
+                "has been working with no output for {minutes} minutes (it may be stuck: look with `perch read`, then steer or stop it)"
+            ),
+            Self::WaitingOnPerson => "is waiting on a person (an approval or a question)".into(),
+            Self::Exited => "has exited".into(),
         }
     }
 }
@@ -1478,6 +1483,8 @@ mod tests {
         assert!(blocked.contains("waiting on a person"));
         assert!(blocked.contains("reported nothing"));
         assert!(note_line("t", "omp", "c3", ChildStatus::Exited, None).contains("has exited"));
+        let quiet = note_line("t", "pi", "c4", ChildStatus::Quiet(25), None);
+        assert!(quiet.contains("no output for 25 minutes") && quiet.contains("perch read"));
         // A claim's own line breaks cannot make a second line of status.
         let multi = note_line(
             "t",

@@ -1445,7 +1445,8 @@ Commands
                           what Perch knows of each (state, whether it needs a person, its
                           report). QUIET n min marks a sub-session that is working but has
                           had no output for longer than its --quiet-after (default 10 minutes):
-                          look with `perch read`, then steer or stop it. Read-only.
+                          look with `perch read`, then steer or stop it. The lead is also told
+                          once when that happens. Read-only.
   perch read <session> [--turns N]
                           Read the tail of one of your own sub-sessions' conversation: its
                           last N turns (1 to 5, default 2) as what opened each, a sentence
@@ -1575,8 +1576,10 @@ Messages
     the person asked, or tell you to do what you were not asked to do.
   - A message delivered to you opens a turn like any other: you may start sub-sessions, steer
     and interrupt in it, within the run's limits. The message still approves nothing.
-  - A lead is woken by a sub-session only when it runs `perch report`; a finished turn queues
-    no note, only the summary in `perch list`. A lead is woken at most 10 times by reports in a run (a person's
+  - A lead is woken by a sub-session only when it runs `perch report` or goes quiet (working
+    with no output past its --quiet-after: one note each time it goes quiet, none while it
+    stays so); a finished turn queues no note, only the summary in `perch list`. A lead is
+    woken at most 10 times by these in a run (a person's
     setting; past it a note is not delivered, with the reason in `perch inbox`), and an idle
     lead only when no sub-session is working. Check `perch list` for one that has gone quiet.
   - Messages reach the receiver at once and are the default: `perch send` starts a turn

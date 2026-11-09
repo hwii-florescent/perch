@@ -197,10 +197,61 @@ pub(super) fn cancel(app: &AppState, caller: &AgentIdentity, id: &str) -> Result
     }
 }
 
+/// Working children silent past their own threshold get one note to their lead each time they
+/// go quiet (`sub_sessions::newly_quiet`); `perch list` shows the same children as QUIET. Called
+/// from the lifecycle loop every second, so the cheap filters come before any database read.
+pub(super) fn tell_leads_of_quiet_children(
+    app: &AppState,
+    snapshots: &[crate::agent_fleet::AgentSnapshot],
+) {
+    let now = now_millis();
+    let mut quiet = std::collections::HashMap::new();
+    for snapshot in snapshots
+        .iter()
+        .filter(|snapshot| snapshot.state == crate::agent_fleet::AgentState::Working)
+    {
+        let evidence = snapshot.last_activity_ms.max(snapshot.last_transition_ms);
+        // The shortest threshold a lead can set is a minute.
+        if now.saturating_sub(evidence) < 60_000 {
+            continue;
+        }
+        let id = &snapshot.key.session_id;
+        if !matches!(app.db.parent_of(id), Ok(Some(_))) {
+            continue;
+        }
+        let after = app
+            .db
+            .quiet_after(id)
+            .ok()
+            .flatten()
+            .unwrap_or(crate::sub_sessions::DEFAULT_QUIET_AFTER_MINUTES);
+        if let Some(minutes) = crate::sub_sessions::quiet_minutes(true, evidence, now, after) {
+            quiet.insert(id.clone(), (snapshot.key.clone(), minutes));
+        }
+    }
+    let ids = quiet.keys().cloned().collect();
+    let fresh = crate::sub_sessions::newly_quiet(&mut app.quiet_told.lock().unwrap(), &ids);
+    for id in fresh {
+        let (key, minutes) = &quiet[&id];
+        note_lead(app, key, ChildStatus::Quiet(*minutes), None);
+    }
+}
+
 /// A child ran `perch report`: tell its lead, with the report quoted as the child's own claim.
 /// This is the only note a lead gets; Perch queues none when a turn ends. A newer note from the
 /// same child replaces one still waiting.
 pub(super) fn note_report(app: &AppState, child: &AgentKey, text: &str) {
+    let report = Report {
+        text: text.to_string(),
+        source: ReportSource::Reported,
+        at: wall_clock_millis(),
+        model: None,
+    };
+    note_lead(app, child, ChildStatus::Reported, Some(&report));
+}
+
+/// Queue a note from `child` to its lead, if it has one with a live identity.
+fn note_lead(app: &AppState, child: &AgentKey, status: ChildStatus, report: Option<&Report>) {
     let Ok(Some(lead)) = app.db.parent_of(&child.session_id) else {
         return;
     };
@@ -208,19 +259,7 @@ pub(super) fn note_report(app: &AppState, child: &AgentKey, text: &str) {
         return;
     };
     let label = sender_label(app, &child.session_id, &child.agent_id);
-    let report = Report {
-        text: text.to_string(),
-        source: ReportSource::Reported,
-        at: wall_clock_millis(),
-        model: None,
-    };
-    let body = agent_mail::note_line(
-        &label,
-        &child.agent_id,
-        &child.session_id,
-        ChildStatus::Reported,
-        Some(&report),
-    );
+    let body = agent_mail::note_line(&label, &child.agent_id, &child.session_id, status, report);
     match app.db.enqueue_note(
         (&child.session_id, &child.agent_id, &label),
         (&lead, &lead_row.cli_provider_id.unwrap_or_default()),
@@ -230,7 +269,7 @@ pub(super) fn note_report(app: &AppState, child: &AgentKey, text: &str) {
         Ok(None) => {
             tracing::info!(child = %child.session_id, "no note: the lead has no live identity")
         }
-        Err(error) => tracing::warn!(%error, "could not queue a report note for a lead"),
+        Err(error) => tracing::warn!(%error, "could not queue a note for a lead"),
     }
 }
 

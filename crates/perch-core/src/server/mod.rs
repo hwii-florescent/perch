@@ -341,6 +341,8 @@ struct AppState {
     mail_notify: Arc<tokio::sync::Notify>,
     /// Children whose turn summary is being written (`reporter.rs`): one model call at a time each.
     reporter_in_flight: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Children whose lead was told they went quiet, until they speak again (`agent_mail.rs`).
+    quiet_told: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Local agent-attached (CLI-mode) terminals, one PTY per session id
     /// shared across every viewing connection — see `AgentTerminalRegistry`'s
     /// doc comment. Lives in `AppState` (not `ConnState`) on purpose: it must
@@ -618,6 +620,7 @@ pub async fn run(
         git_poll_notify: Arc::new(tokio::sync::Notify::new()),
         mail_notify: Arc::new(tokio::sync::Notify::new()),
         reporter_in_flight: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        quiet_told: Arc::new(Mutex::new(std::collections::HashSet::new())),
         devices,
         local_ui: options.local_ui.clone(),
         phone: phone.clone(),
@@ -1546,6 +1549,7 @@ fn spawn_agent_lifecycle_task(state: AppState) {
             let _operation = state.agent_operation_lock.lock().unwrap();
             let snapshots = state.agent_runtime.lifecycle().list();
             refresh_stale_sessions(&state, &snapshots);
+            agent_mail::tell_leads_of_quiet_children(&state, &snapshots);
             seen.retain(|key, _| snapshots.iter().any(|snapshot| &snapshot.key == key));
             for snapshot in snapshots {
                 if !state

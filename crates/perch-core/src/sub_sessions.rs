@@ -304,6 +304,20 @@ pub fn quiet_minutes(
     (working && silent >= u64::from(quiet_after) * 60_000).then_some(silent / 60_000)
 }
 
+/// Children to tell their lead about now: each one quiet that was not already told. `told` keeps
+/// the children told while they stay quiet and drops the others, so a child that speaks again and
+/// later stalls again is told again, and one that stays quiet is told once.
+pub fn newly_quiet(
+    told: &mut std::collections::HashSet<String>,
+    quiet_now: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    told.retain(|id| quiet_now.contains(id));
+    let mut fresh: Vec<String> = quiet_now.difference(told).cloned().collect();
+    fresh.sort();
+    told.extend(fresh.iter().cloned());
+    fresh
+}
+
 /// The first message of a child: Perch's note, then the task. Plain text, never starting with
 /// a dash or a slash, so the agent's command line cannot read it as an option or a command.
 pub fn first_message(parent_session: &str, task: &str) -> String {
@@ -749,6 +763,27 @@ mod tests {
             quiet_minutes(true, now + 5, now, 10),
             None,
             "a clock step back is not quiet"
+        );
+    }
+
+    #[test]
+    fn a_quiet_child_is_told_once_and_again_only_after_it_spoke() {
+        let set = |ids: &[&str]| ids.iter().map(|id| id.to_string()).collect();
+        let mut told = std::collections::HashSet::new();
+        assert_eq!(newly_quiet(&mut told, &set(&["a"])), ["a"]);
+        assert!(
+            newly_quiet(&mut told, &set(&["a"])).is_empty(),
+            "still quiet: not again"
+        );
+        assert_eq!(newly_quiet(&mut told, &set(&["a", "b"])), ["b"]);
+        assert!(
+            newly_quiet(&mut told, &set(&[])).is_empty(),
+            "both spoke again"
+        );
+        assert_eq!(
+            newly_quiet(&mut told, &set(&["a"])),
+            ["a"],
+            "a second stall is news"
         );
     }
 
