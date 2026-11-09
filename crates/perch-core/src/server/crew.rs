@@ -34,6 +34,7 @@ fn member_of(
     session_id: &str,
     provider: &str,
     child: Option<(&crate::db::SubSessionRow, SubState)>,
+    current_run: &str,
 ) -> Member {
     let title = app
         .db
@@ -108,14 +109,22 @@ fn member_of(
             model: report.model,
         }),
         can_message,
+        previous_run: child.is_some_and(|(row, _)| row.parent_run_id != current_run),
     }
 }
 
 /// The run `viewer` is in, lead first, or nothing when it is in none.
 fn members(app: &AppState, viewer: &str) -> Vec<Member> {
-    let Ok(Some(lead)) = app.db.run_of(viewer) else {
+    let Ok(Some(_)) = app.db.run_of(viewer) else {
         return Vec::new();
     };
+    let lead = app
+        .db
+        .parent_of(viewer)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| viewer.to_string());
+    // Every child the lead tab ever started: a person sees the earlier conversations' too, marked.
     let children = app.db.sub_sessions_of(&lead).unwrap_or_default();
     if children.is_empty() {
         return Vec::new();
@@ -127,7 +136,8 @@ fn members(app: &AppState, viewer: &str) -> Vec<Member> {
         .flatten()
         .and_then(|row| row.cli_provider_id)
         .unwrap_or_default();
-    let mut members = vec![member_of(app, &lead, &lead_provider, None)];
+    let current_run = app.db.run_of(viewer).ok().flatten().unwrap_or_default();
+    let mut members = vec![member_of(app, &lead, &lead_provider, None, &current_run)];
     for row in &children {
         let state = reconcile(app, row);
         members.push(member_of(
@@ -135,6 +145,7 @@ fn members(app: &AppState, viewer: &str) -> Vec<Member> {
             &row.child_session_id,
             &row.provider_id,
             Some((row, state)),
+            &current_run,
         ));
     }
     members
@@ -158,7 +169,7 @@ fn traffic(app: &AppState, viewer: &str) -> Vec<Traffic> {
         at: row.created_at,
     };
     // What a person wrote to a child from this strip is the viewing lead's own traffic.
-    let viewer_is_lead = matches!(app.db.run_of(viewer), Ok(Some(lead)) if lead == viewer);
+    let viewer_is_lead = matches!(app.db.parent_of(viewer), Ok(None));
     let from_person: Vec<crate::db::MailRow> = if viewer_is_lead {
         app.db
             .sub_sessions_of(viewer)
@@ -217,6 +228,7 @@ pub(super) fn rows_for(app: &AppState, viewer: &str) -> Vec<CrewRow> {
                 kind: latest.kind.as_str().into(),
             }),
             can_message: row.member.can_message,
+            previous_run: row.member.previous_run.then_some(true),
         })
         .collect()
 }

@@ -827,7 +827,6 @@ mod tests {
     use super::super::sub_sessions::tests::{boot, lead_with_child};
     use super::*;
     use crate::agent_fleet::AgentKey;
-    use crate::agent_identity::IdentityStore;
 
     /// A stand-in `ssh` that runs the remote command line here, so the remote scripts and the stdin
     /// write are exercised for real (what a host would see, minus the network).
@@ -893,7 +892,7 @@ mod tests {
         let app = super::super::booted_state(address);
         let (workspace, _) = lead_with_child(&db, &nest, crate::sub_sessions::SubState::Running);
         let token = db
-            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .issue_in_current_run(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
             .unwrap()
             .token;
         let call = |route: &'static str, body: Value| {

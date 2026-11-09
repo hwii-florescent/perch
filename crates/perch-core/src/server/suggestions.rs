@@ -193,7 +193,7 @@ pub(super) fn waiting(app: &AppState, caller: &AgentIdentity) -> Result<Value, F
     check_lead(app, caller)?;
     let rows = app
         .db
-        .suggestions_of(&caller.session_id)
+        .suggestions_in_run(&caller.session_id)
         .map_err(|error| sub_sessions::internal("read the suggestions", error))?;
     Ok(json!({
         "suggestions": rows
@@ -233,7 +233,7 @@ pub(super) async fn answer_typed(
     }
     let waiting: Vec<SuggestionRow> = app
         .db
-        .suggestions_of(&caller.session_id)
+        .suggestions_in_run(&caller.session_id)
         .map_err(|error| sub_sessions::internal("read the suggestions", error))?
         .into_iter()
         .filter(|row| row.state == SuggestionState::Pending)
@@ -335,7 +335,7 @@ pub(super) async fn answer_typed(
 /// What `perch list` says of a lead's waiting and started suggestions.
 pub(super) fn listed(app: &AppState, lead_session_id: &str) -> Vec<Value> {
     app.db
-        .suggestions_of(lead_session_id)
+        .suggestions_in_run(lead_session_id)
         .unwrap_or_default()
         .into_iter()
         .filter(|row| {
@@ -786,7 +786,7 @@ mod tests {
             crate::sub_sessions::SubState::Running,
         );
         let lead = db
-            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .issue_in_current_run(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
             .unwrap();
         let child = db
             .issue(&AgentKey::new(&workspace.id, "child", "codex").unwrap())

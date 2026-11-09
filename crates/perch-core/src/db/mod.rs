@@ -17,6 +17,8 @@ use crate::agent_persistence::SqliteConnectionAdapter;
 use crate::review::{ReviewComment, ReviewPacket};
 
 mod agent_identity;
+mod agent_runs;
+pub use agent_runs::{scoped_key, Observed};
 mod attention;
 pub use attention::{AttentionAdmit, AttentionRow, ATTENTION_WINDOW_MS};
 mod browser_history;
@@ -89,12 +91,46 @@ impl HistoryDb {
             std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(db_path)?;
+        Self::back_up_before_run_identity(&conn, db_path)?;
         let db = Self {
             conn: Mutex::new(conn),
             limits: Mutex::new(Default::default()),
         };
         db.migrate()?;
         Ok(db)
+    }
+
+    fn has_column(conn: &Connection, table: &str, column: &str) -> anyhow::Result<bool> {
+        Ok(conn
+            .prepare(&format!("PRAGMA table_info({table})"))?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?
+            .iter()
+            .any(|name| name == column))
+    }
+
+    /// Run identity changes the schema of a database that already holds children and mail. Before
+    /// the first such change, keep a consistent copy beside it (never over an earlier one); a
+    /// copy that cannot be made stops the open rather than risk the data.
+    fn back_up_before_run_identity(conn: &Connection, path: &Path) -> anyhow::Result<()> {
+        let has_sessions = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sessions'",
+                [],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !has_sessions || Self::has_column(conn, "sessions", "conversation_ordinal")? {
+            return Ok(());
+        }
+        let mut backup = path.as_os_str().to_owned();
+        backup.push(".pre-run-identity.bak");
+        let backup = PathBuf::from(backup);
+        if !backup.exists() {
+            conn.execute("VACUUM INTO ?1", params![backup.to_string_lossy()])?;
+        }
+        Ok(())
     }
 
     pub fn limits(&self) -> crate::sub_sessions::RunLimits {
@@ -404,6 +440,38 @@ impl HistoryDb {
             );
             CREATE INDEX IF NOT EXISTS agent_identities_session
                 ON agent_identities(session_id);
+            -- What may start an agent in a Perch shell (`agent_runs.rs`): one per tab runtime, only
+            -- the hash stored. It opens `/agent/launch` and nothing else, and outlives each agent.
+            CREATE TABLE IF NOT EXISTS agent_launchers (
+                token_hash TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                owner_provider_id TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                revoked_at INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS agent_launchers_session ON agent_launchers(session_id);
+            -- A lead's conversations that began a run of their own (`agent_runs.rs`). The run a
+            -- session had before this table existed is named by the session's id and has no row.
+            CREATE TABLE IF NOT EXISTS agent_runs (
+                run_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS agent_runs_session ON agent_runs(session_id);
+            -- Provider conversations Perch has seen in a session, and the run each belongs to, so
+            -- resuming one restores its run. `ordinal` counts the session's conversations.
+            CREATE TABLE IF NOT EXISTS agent_conversations (
+                provider_id TEXT NOT NULL,
+                conversation_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (provider_id, conversation_id)
+            );
+            CREATE INDEX IF NOT EXISTS agent_conversations_session
+                ON agent_conversations(session_id);
             -- One row per child a lead started (`sub_sessions.rs`). The link that nests the
             -- child is `sessions.parent_session_id`; this holds the spawn itself.
             CREATE TABLE IF NOT EXISTS sub_sessions (
@@ -511,12 +579,66 @@ impl HistoryDb {
                 )?;
             }
         }
+        // A child belongs to the lead's *run*, and a spawn key is unique within one, so a fresh
+        // conversation of the same tab may reuse a key. SQLite cannot change a UNIQUE constraint,
+        // so an older table is rebuilt once (a fresh one is empty); each old child joins the run
+        // named by its lead's session id, which is the run that lead has until it starts another.
+        if !Self::has_column(&conn, "sub_sessions", "parent_run_id")? {
+            let rebuilt = conn.execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE sub_sessions_new (
+                    child_session_id TEXT PRIMARY KEY,
+                    parent_session_id TEXT NOT NULL,
+                    parent_incarnation TEXT NOT NULL,
+                    parent_run_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL,
+                    provider_id TEXT NOT NULL,
+                    model TEXT,
+                    spawn_key TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    task TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    quiet_after_minutes INTEGER,
+                    UNIQUE (parent_run_id, spawn_key)
+                 );
+                 INSERT INTO sub_sessions_new
+                    SELECT child_session_id, parent_session_id, parent_incarnation,
+                           parent_session_id, workspace_id, provider_id, model, spawn_key, state,
+                           task, created_at, updated_at, quiet_after_minutes
+                    FROM sub_sessions;
+                 DROP TABLE sub_sessions;
+                 ALTER TABLE sub_sessions_new RENAME TO sub_sessions;
+                 COMMIT;",
+            );
+            if let Err(error) = rebuilt {
+                let _ = conn.execute_batch("ROLLBACK");
+                return Err(error.into());
+            }
+        }
         // The table above needs `sessions`, which an old database already has; the column
         // below is added after the table list so that a fresh one has both.
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS sub_sessions_parent
-                ON sub_sessions(parent_session_id);",
+                ON sub_sessions(parent_session_id);
+             CREATE INDEX IF NOT EXISTS sub_sessions_run ON sub_sessions(parent_run_id);",
         )?;
+        for (table, column, ddl) in [
+            // The agent process an incarnation was issued to (one issue per process), the tab
+            // runtime's own provider (what perchd keys the process by), and the conversation a
+            // report was left in.
+            ("agent_identities", "launch_pid", "INTEGER"),
+            ("agent_identities", "owner_provider_id", "TEXT"),
+            ("agent_identities", "report_conversation", "INTEGER"),
+            ("suggestions", "run_id", "TEXT NOT NULL DEFAULT ''"),
+        ] {
+            if !Self::has_column(&conn, table, column)? {
+                conn.execute(
+                    &format!("ALTER TABLE {table} ADD COLUMN {column} {ddl}"),
+                    [],
+                )?;
+            }
+        }
 
         let mut existing_columns = std::collections::HashSet::new();
         {
@@ -634,6 +756,17 @@ impl HistoryDb {
         }
         // What the session does with messages from other sessions: `hold` or `refuse`
         // (`agent_mail::InboundMode`); NULL accepts them.
+        // The lead's current run (`agent_runs.rs`; NULL is the run named by the session's own id)
+        // and the ordinal of its current provider conversation (0: none seen since the launch).
+        if !existing_session_columns.contains("run_id") {
+            conn.execute("ALTER TABLE sessions ADD COLUMN run_id TEXT", [])?;
+        }
+        if !existing_session_columns.contains("conversation_ordinal") {
+            conn.execute(
+                "ALTER TABLE sessions ADD COLUMN conversation_ordinal INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
         if !existing_session_columns.contains("inbound_mode") {
             conn.execute("ALTER TABLE sessions ADD COLUMN inbound_mode TEXT", [])?;
         }

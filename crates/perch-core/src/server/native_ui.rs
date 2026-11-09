@@ -119,6 +119,14 @@ fn observe_runtime(
                         .set_opencode_session_id(&key.session_id, &snapshot.provider_session_id);
                 }
             }
+            // The provider's own word that this is the conversation the agent is in: the one place a
+            // run boundary is decided (a shell-typed agent and a picker's both come through here).
+            observe_run_boundary(
+                app,
+                &key.session_id,
+                &provider,
+                &snapshot.provider_session_id,
+            );
             // Also establish native authority after resuming an already-known
             // identity; terminal repaints must not override these events.
             if shell.is_none() && !snapshot.provider_session_id.is_empty() {
@@ -167,6 +175,24 @@ fn observe_runtime(
                 }));
         }),
     )
+}
+
+/// Record the conversation a native adapter reports and move the session's run when it is a
+/// boundary (`HistoryDb::observe_conversation`). A run that changed is announced so the family strip
+/// refetches, and mail waiting on the new run is tried.
+fn observe_run_boundary(app: &AppState, session_id: &str, provider: &str, conversation: &str) {
+    match app
+        .db
+        .observe_conversation(session_id, provider, conversation)
+    {
+        Ok(crate::db::Observed::Fresh(_) | crate::db::Observed::Resumed(_)) => {
+            notify_session_updated(app, session_id);
+            app.mail_notify.notify_one();
+        }
+        Ok(_) => {}
+        // Unknown is not a boundary: the run stays as it was.
+        Err(error) => tracing::warn!(%error, "could not record a provider conversation"),
+    }
 }
 
 /// `key` owns the PTY, leases and lifecycle; `bridge` owns the native connection. They are the

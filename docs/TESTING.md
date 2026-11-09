@@ -112,6 +112,15 @@ Useful existing coverage (not a claim of a fresh passing run):
   and first message were seen but its turn hit a usage limit. What a model will not do on cue (a spawn on
   a message-opened turn, the fifth child) is tested without models in `server/sub_sessions.rs`,
   `db/sub_sessions.rs` and `agent_runtime.rs`.
+- `agent-runs.spec.ts` (same config; needs `perch` beside the core; run outside a Perch shell; haiku only, three lead
+  turns and one short child turn): a picker-launched Claude lead starts a haiku child; `/clear` begins a fresh run
+  (the child stays in the first one, and the new lead's `perch stop` of it is refused); the person `/exit`s Claude and
+  types `claude --resume <first conversation>` into the same shell, which is issued its own identity through the
+  shell's launcher (`launch_pid`, replacing the picker's) and gets the first run and the child back; `perch whoami`
+  from it names the new incarnation. Asserts the SQLite file, and that no `perch_agent_` secret reaches the chat, `ps`
+  or the core log. Verified live 2026-11-09 (Claude 2.1.319). Provider semantics seen directly: Claude `/clear`
+  gives a new `session_id` (`SessionStart` source `clear`) and `--resume` keeps the id; Pi `/new` gives a new
+  session file/id and `--session` keeps it. Codex and OMP resets are not probed.
 - `agent-mail.spec.ts` (same config; needs `perch` beside the core; `PERCH_E2E_CHILD=claude` for a haiku
   child, the default is a luna Codex one): a haiku lead starts a child whose task is `perch send` to the
   lead; the window stays open on the lead (its view holds the input lease; delivery rides it unchanged);

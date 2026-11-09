@@ -10,7 +10,9 @@ fn main() {
         Some(
             command @ ("whoami" | "report" | "guide" | "spawn" | "suggest" | "suggestions"
             | "start" | "dismiss" | "read" | "list" | "stop" | "send" | "inbox"
-            | "cancel" | "steer" | "interrupt" | "memory" | "mod" | "exec"),
+            | "cancel" | "steer" | "interrupt" | "memory" | "mod" | "exec"
+            // Not for people: what a Perch shell's agent shim runs in place of the agent.
+            | "__launch"),
         ) => {
             std::process::exit(match perchd::agent_cli::run(command, &args[1..]) {
                 Ok(()) => 0,

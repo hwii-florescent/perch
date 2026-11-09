@@ -18,7 +18,7 @@
 //! Changes from Orca: a busy receiver gets a message only through its CLI's own follow-up queue
 //! (`route`; Orca also delivers to working agents), and waits when it has none,
 //! the body is quoted so peer text can never be a command, an oversized body goes to a notes file
-//! with a preview, a receipt has the word `unconfirmed`, and the caps, the wake limit and the note
+//! with a preview, a receipt has the word `unconfirmed`, and the message caps and the note
 //! wording are Perch's own. Orca's priorities, threads, payloads, pointer lane for terminals and
 //! journal parking are not ported.
 
@@ -35,8 +35,6 @@ pub const PREVIEW_CHARS: usize = 300;
 pub const MAX_MESSAGES_PER_RUN: usize = 50;
 /// Messages and notes waiting for one receiver.
 pub const MAX_PENDING_PER_TARGET: usize = 32;
-/// Default: automatic deliveries to a lead over its run. A setting; never reset by a person.
-pub const DEFAULT_WAKES_PER_RUN: u32 = 10;
 /// The longest label for a sender in a header.
 const LABEL_MAX_CHARS: usize = 60;
 const RULE: &str = "────────────────────────────────────────────────────────────";
@@ -850,10 +848,6 @@ pub struct TargetFacts {
     pub is_lead: bool,
     /// Children of this receiver that are working, or whose state cannot be read.
     pub working_children: usize,
-    /// Automatic deliveries to this lead so far in its run.
-    pub wakes: u32,
-    /// The run's limit on them, a setting.
-    pub max_wakes: u32,
 }
 
 /// Why a delivery is waiting. Nothing is written while one holds.
@@ -870,9 +864,6 @@ pub enum Wait {
     /// Perch started: unknown is recent. Retried on a later pass.
     RecentInput,
     WorkingChildren(usize),
-    /// The run has used its automatic deliveries to the lead (the number is the setting). Not a
-    /// wait: nothing will change it, so the message is refused with this reason.
-    WakeCap(u32),
     /// Busy, and Perch has no way into the running turn of this CLI (neither a follow-up queue nor a
     /// steer): the message waits for the turn to end.
     NoFollowUpQueue(String),
@@ -895,10 +886,6 @@ impl Wait {
             Self::NoFollowUpQueue(agent) => format!(
                 "the receiver is working and Perch cannot put a message into a running {agent} \
                  turn, so it gets this when its turn ends"
-            ),
-            Self::WakeCap(limit) => format!(
-                "this run has already delivered {limit} messages to its lead without anyone \
-                 asking, the most the person allows (Settings > Sub-sessions)"
             ),
         }
     }
@@ -936,9 +923,6 @@ pub fn route(facts: &TargetFacts) -> Result<Handoff, Wait> {
         // only has the message queued behind (or steered into) its turn.
         if handoff == Handoff::Started && facts.working_children > 0 {
             return Err(Wait::WorkingChildren(facts.working_children));
-        }
-        if facts.wakes >= facts.max_wakes {
-            return Err(Wait::WakeCap(facts.max_wakes));
         }
     }
     Ok(handoff)
@@ -1283,19 +1267,12 @@ mod tests {
     }
 
     #[test]
-    fn a_steer_into_a_busy_lead_spends_a_wake_like_a_queued_follow_up() {
+    fn a_busy_lead_accepts_a_steer_even_with_working_children() {
         let lead = TargetFacts {
             working_children: 2,
             ..busy("claude")
         };
         assert_eq!(route(&lead), Ok(Handoff::Steered));
-        assert_eq!(
-            route(&TargetFacts {
-                wakes: DEFAULT_WAKES_PER_RUN,
-                ..lead
-            }),
-            Err(Wait::WakeCap(DEFAULT_WAKES_PER_RUN))
-        );
     }
 
     #[test]
@@ -1317,19 +1294,12 @@ mod tests {
     }
 
     #[test]
-    fn a_busy_lead_gets_a_follow_up_even_with_working_children_but_the_wake_cap_holds() {
+    fn a_busy_lead_gets_a_follow_up_even_with_working_children() {
         let lead = TargetFacts {
             working_children: 2,
             ..busy("pi")
         };
         assert_eq!(route(&lead), Ok(Handoff::QueuedInAgent));
-        assert_eq!(
-            route(&TargetFacts {
-                wakes: DEFAULT_WAKES_PER_RUN,
-                ..lead
-            }),
-            Err(Wait::WakeCap(DEFAULT_WAKES_PER_RUN))
-        );
     }
 
     fn idle_lead() -> TargetFacts {
@@ -1338,7 +1308,6 @@ mod tests {
             reported: true,
             idle: true,
             is_lead: true,
-            max_wakes: DEFAULT_WAKES_PER_RUN,
             ..Default::default()
         }
     }
@@ -1382,7 +1351,7 @@ mod tests {
     }
 
     #[test]
-    fn an_idle_lead_waits_for_its_working_children_and_is_refused_after_its_wake_limit() {
+    fn only_an_idle_lead_waits_for_its_working_children() {
         assert_eq!(
             wait_reason(&TargetFacts {
                 working_children: 2,
@@ -1390,35 +1359,11 @@ mod tests {
             }),
             Some(Wait::WorkingChildren(2))
         );
-        assert_eq!(
-            wait_reason(&TargetFacts {
-                wakes: DEFAULT_WAKES_PER_RUN - 1,
-                ..idle_lead()
-            }),
-            None
-        );
-        assert_eq!(
-            wait_reason(&TargetFacts {
-                wakes: DEFAULT_WAKES_PER_RUN,
-                ..idle_lead()
-            }),
-            Some(Wait::WakeCap(DEFAULT_WAKES_PER_RUN))
-        );
-        // The limit is the setting.
-        assert_eq!(
-            wait_reason(&TargetFacts {
-                wakes: 2,
-                max_wakes: 2,
-                ..idle_lead()
-            }),
-            Some(Wait::WakeCap(2))
-        );
-        // Neither rule applies to a child, which has no children and is not woken by a cap.
+        // A child has no working-children wait.
         assert_eq!(
             wait_reason(&TargetFacts {
                 is_lead: false,
                 working_children: 3,
-                wakes: 99,
                 ..idle_lead()
             }),
             None
@@ -1438,7 +1383,6 @@ mod tests {
             Wait::RecentInput,
             Wait::WorkingChildren(1),
             Wait::WorkingChildren(3),
-            Wait::WakeCap(10),
         ] {
             assert!(!wait.reason().is_empty());
         }

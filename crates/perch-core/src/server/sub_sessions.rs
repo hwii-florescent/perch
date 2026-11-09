@@ -534,6 +534,10 @@ fn member_json(
         "needsYou": lifecycle == Some(AgentState::Blocked),
         "quietMinutes": quiet,
         "task": child.map(|(row, _)| row.task.clone()),
+        // Which of the member's conversations it is in now, and which one its report came from:
+        // a child that was reset is still this child, and its old report is not its new word.
+        "conversation": app.db.conversation_ordinal(session_id).unwrap_or(0),
+        "reportConversation": app.db.latest_report_conversation(session_id).unwrap_or(0),
         "report": report.map(|report| json!({
             "text": report.text,
             "source": report.source.as_str(),
@@ -564,9 +568,15 @@ pub(super) async fn list(app: &AppState, caller: &AgentIdentity) -> Result<Value
                 .unwrap_or_default()
         };
         let mut members = vec![member_json(&app, &caller, &lead_id, &lead_provider, None)];
+        // Only the children of the caller's own run: an earlier conversation's are not its to see.
+        let run = app
+            .db
+            .run_of(&caller.session_id)
+            .map_err(|error| internal("read the session", error))?
+            .unwrap_or_default();
         for row in app
             .db
-            .sub_sessions_of(&lead_id)
+            .sub_sessions_in_run(&run)
             .map_err(|error| internal("read the sub-sessions", error))?
         {
             let state = reconcile(&app, &row);
@@ -615,7 +625,11 @@ pub(super) async fn read(
             .db
             .sub_session(&target)
             .map_err(|error| internal("read the sub-session", error))?
-            .filter(|row| row.parent_session_id == caller.session_id)
+            .filter(|row| {
+                app.db
+                    .owns_child(&caller.session_id, &row.child_session_id)
+                    .unwrap_or(false)
+            })
             .ok_or_else(|| {
                 fail(
                     StatusCode::NOT_FOUND,
@@ -661,7 +675,11 @@ pub(super) async fn stop(
             .db
             .sub_session(&target)
             .map_err(|error| internal("read the sub-session", error))?
-            .filter(|row| row.parent_session_id == caller.session_id)
+            .filter(|row| {
+                app.db
+                    .owns_child(&caller.session_id, &row.child_session_id)
+                    .unwrap_or(false)
+            })
             .ok_or_else(|| {
                 fail(
                     StatusCode::NOT_FOUND,
@@ -864,7 +882,7 @@ pub(super) mod tests {
             .unwrap();
         db.set_cli_provider("lead", "claude").unwrap();
         let lead = db
-            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .issue_in_current_run(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
             .unwrap();
         let call = |route: &'static str, token: String, body: Value| async move {
             request(
@@ -1065,7 +1083,7 @@ pub(super) mod tests {
             .unwrap();
         db.set_cli_provider("lead", "claude").unwrap();
         let lead = db
-            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .issue_in_current_run(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
             .unwrap();
         let Reserved::New(child) = db
             .reserve_sub_session(&crate::db::SubSessionSpec {
@@ -1089,6 +1107,72 @@ pub(super) mod tests {
                 .unwrap();
         }
         (workspace, child)
+    }
+
+    /// A fresh conversation of the lead's tab (here: a new launch) owns a fresh run. The children
+    /// of the earlier one keep running and are the person's to see, but the new lead cannot list,
+    /// read, stop or steer them, cannot message them, and hears nothing they report later.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_new_conversation_of_a_lead_cannot_reach_the_children_of_an_earlier_one() {
+        let root = std::env::temp_dir().join(format!("perch-sub-runs-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let (address, db) = boot(&root).await;
+        let (workspace, _) = lead_with_child(&db, &nest, SubState::Running);
+        let old_child = db
+            .issue(&AgentKey::new(&workspace.id, "child", "codex").unwrap())
+            .unwrap();
+        let before =
+            db.issue_in_current_run(&AgentKey::new(&workspace.id, "lead", "claude").unwrap());
+        assert!(before.is_ok());
+        // The tab's agent exits and a new one is launched: the plain `issue` of a launch.
+        let lead = db
+            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .unwrap();
+        let call = |route: &'static str, token: String, body: Value| async move {
+            request(
+                address,
+                "POST",
+                &format!("/agent/{route}"),
+                &[("Authorization", &format!("Bearer {token}"))],
+                &body.to_string(),
+            )
+            .await
+        };
+        let (status, answer) = call("list", lead.token.clone(), json!({"session": "lead"})).await;
+        assert_eq!(status, 200, "{answer}");
+        assert_eq!(answer["members"].as_array().unwrap().len(), 1, "{answer}");
+        for route in ["stop", "read", "steer", "interrupt"] {
+            let (status, answer) = call(
+                route,
+                lead.token.clone(),
+                json!({"session": "lead", "target": "child", "text": "x", "key": "k1"}),
+            )
+            .await;
+            assert_eq!(status, 404, "{route}: {answer}");
+        }
+        let (status, answer) = call(
+            "send",
+            lead.token.clone(),
+            json!({"session": "lead", "target": "child", "text": "hello", "key": "k2"}),
+        )
+        .await;
+        assert_eq!(status, 403, "{answer}");
+        // The old child reports late: nothing is queued for the new lead, in any state.
+        let (status, _) = call(
+            "report",
+            old_child.token.clone(),
+            json!({"session": "child", "text": "too late"}),
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert!(db.mail_to("lead", 10).unwrap().is_empty());
+        // The person still sees the child, marked as an earlier conversation's.
+        let rows = crate::server::crew::rows_for(&crate::server::booted_state(address), "lead");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].session_id, "child");
+        assert_eq!(rows[0].previous_run, Some(true));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// Deleting a lead (also what archiving its Workspace does) ends its live children first, each
@@ -1285,7 +1369,7 @@ pub(super) mod tests {
         // A Pi child: its bridge is a plain socket, which this test can stand in for.
         let (workspace, _) = lead_with_child_of(&db, &nest, SubState::Running, "pi");
         let lead = db
-            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .issue_in_current_run(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
             .unwrap();
         let child = db
             .issue(&AgentKey::new(&workspace.id, "child", "pi").unwrap())

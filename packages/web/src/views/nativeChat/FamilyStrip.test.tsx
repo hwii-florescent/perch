@@ -76,6 +76,14 @@ it("shows a lead with a working child, one waiting on a person and one that repo
   expect(reported.querySelector('[data-testid="native-cli-family-details"]')!.textContent).toContain("its own claim, not verified");
 });
 
+it("marks a child of an earlier conversation and says what the current agent cannot do to it", () => {
+  act(() => root.render(<FamilyStrip now={NOW} onOpen={() => {}} rows={[row({ sessionId: "old", previousRun: true, task: "fix the parser" }), row({ sessionId: "new", task: "write tests" })]} />));
+  const rows = Array.from(host.querySelectorAll('[data-testid="native-cli-family-row"]'));
+  expect(rows.map((entry) => !!entry.querySelector('[data-testid="native-cli-family-previous"]'))).toEqual([true, false]);
+  act(() => (rows[0]!.querySelector("button") as HTMLButtonElement).click());
+  expect(rows[0]!.querySelector('[data-testid="native-cli-family-details"]')!.textContent).toContain("cannot message, read or stop it. You can.");
+});
+
 it("names the model that wrote a summary and counts it with the reports", () => {
   const summary = row({ lifecycle: "idle", report: { text: "Fixed the parser; tests pass.", source: "summary", model: "claude-haiku-4-5", at: NOW } });
   act(() => root.render(<FamilyStrip now={NOW} onOpen={() => {}} rows={[summary]} />));

@@ -29,6 +29,7 @@ pub fn scrub_nested_agent_env() {
         // An agent identity from the shell this core was started in is that agent's, not ours.
         perchd::agent_cli::SESSION_ENV,
         perchd::agent_cli::TOKEN_ENV,
+        perchd::agent_cli::LAUNCH_ENV,
         // A launcher's local UI token is read once by `LocalUi::standalone` before this runs;
         // anything still set (a desktop launch) must not reach a child.
         crate::local_ui::TOKEN_ENV,

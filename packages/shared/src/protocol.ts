@@ -533,11 +533,12 @@ export interface SettingsData {
   reporterOmpModel?: string;
   /**
    * Per-run sub-session limits (Settings > Sub-sessions). Absent from an older core = today's defaults:
-   * 4 live, 8 total, 50 messages, 10 automatic lead wakes, 3 interrupts per sub-session, 10 waiting cards.
+   * 4 live, 8 total, 50 messages, 3 interrupts per sub-session, 10 waiting cards.
    */
   maxLiveSubSessions?: number;
   maxSubSessions?: number;
   maxMessagesPerRun?: number;
+  /** @deprecated Legacy field; automatic lead deliveries are unlimited. */
   maxLeadWakesPerRun?: number;
   maxInterruptsPerSubSession?: number;
   maxWaitingSuggestions?: number;
@@ -593,6 +594,7 @@ export interface SettingsPatch {
   maxLiveSubSessions?: number;
   maxSubSessions?: number;
   maxMessagesPerRun?: number;
+  /** @deprecated Accepted for compatibility; does not limit delivery. */
   maxLeadWakesPerRun?: number;
   maxInterruptsPerSubSession?: number;
   maxWaitingSuggestions?: number;
@@ -1637,6 +1639,8 @@ export interface CrewRow {
   latest?: CrewLatest;
   /** A message to it would be accepted now. */
   canMessage: boolean;
+  /** A child of an earlier conversation of the lead's tab: still running, not the current lead's. */
+  previousRun?: boolean;
   /** What a person may do to this child from the strip, each with the reason it is not offered
    * (capability `crew.actions.v1`). Only a lead's `worker` rows have it. */
   actions?: CrewActions;

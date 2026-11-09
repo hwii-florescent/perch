@@ -395,8 +395,10 @@ impl HistoryDb {
         conn.execute("DELETE FROM messages WHERE session_id = ?1", params![id])?;
         Self::delete_session_instructions_locked(&conn, id)?;
         Self::delete_agent_identities_locked(&conn, id)?;
+        Self::delete_agent_launchers_locked(&conn, id)?;
         Self::delete_sub_sessions_locked(&conn, id)?;
         Self::delete_agent_mail_locked(&conn, id)?;
+        Self::delete_agent_runs_locked(&conn, id)?;
         Self::delete_suggestions_locked(&conn, id)?;
         Self::delete_summary_locked(&conn, id)?;
         conn.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;

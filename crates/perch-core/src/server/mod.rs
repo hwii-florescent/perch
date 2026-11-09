@@ -831,6 +831,10 @@ pub async fn run(
             post(agent::whoami).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(
+            &format!("{base_path}agent/launch"),
+            post(agent::launch).layer(axum::extract::DefaultBodyLimit::max(4 * 1024)),
+        )
+        .route(
             &format!("{base_path}agent/report"),
             post(agent::report).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
@@ -1029,24 +1033,30 @@ pub async fn run(
     Ok(())
 }
 
-/// Revoke the token of every run whose process perchd confirms has exited.
+/// Revoke the token of every run whose process perchd confirms has exited. A tab is known to perchd
+/// by the runtime that owns its process (the shell, or the picker's agent), which is not always the
+/// agent whose token it is: an agent typed into a shell is issued under its own name.
 fn revoke_ended_agent_identities(db: &HistoryDb) {
-    let Ok(active) = db.active_agent_identities() else {
+    let exited = |key: &AgentKey| {
+        crate::daemon::session_state(&crate::agent_runtime::terminal_key(key))
+            == crate::daemon::RuntimeState::Exited
+    };
+    let Ok(active) = db.active_agent_owners() else {
         return;
     };
-    for identity in active {
-        let Ok(key) = AgentKey::new(
-            &identity.workspace_id,
-            &identity.session_id,
-            &identity.provider_id,
-        ) else {
-            continue;
-        };
-        if crate::daemon::session_state(&crate::agent_runtime::terminal_key(&key))
-            == crate::daemon::RuntimeState::Exited
-        {
-            if let Err(error) = db.revoke_agent_incarnation(&identity.incarnation) {
+    for (incarnation, owner) in active {
+        if exited(&owner) {
+            if let Err(error) = db.revoke_agent_incarnation(&incarnation) {
                 tracing::warn!(%error, "could not revoke an ended run's agent token");
+            }
+        }
+    }
+    if let Ok(launchers) = db.active_launcher_owners() {
+        for (token_hash, owner) in launchers {
+            if exited(&owner) {
+                if let Err(error) = db.revoke_launcher(&token_hash) {
+                    tracing::warn!(%error, "could not revoke an ended shell's launcher");
+                }
             }
         }
     }

@@ -191,7 +191,7 @@ it("saves a sub-session limit only when it is in range and follows the saved val
     await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="settings-nav-notifications"]')!.click());
     const live = host.querySelector<HTMLInputElement>('[data-testid="settings-maxLiveSubSessions"]')!;
     expect(live.value).toBe("4");
-    expect(host.querySelector<HTMLInputElement>('[data-testid="settings-maxLeadWakesPerRun"]')!.value).toBe("10");
+    expect(host.querySelector('[data-testid="settings-maxLeadWakesPerRun"]')).toBeNull();
     const type = async (box: HTMLInputElement, value: string) => {
       const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
       await act(async () => { set.call(box, value); box.dispatchEvent(new Event("input", { bubbles: true })); });

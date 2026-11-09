@@ -44,12 +44,15 @@ const RUNTIME_VIEWER: &str = "__perch_runtime__";
 /// and exit 0, so the exit status can't tell a kill from a quit.
 ///
 /// The agent's Perch identity is unset once the agent is gone: the shell that follows is
-/// the person's, and must not hold a credential for a run that has ended.
+/// the person's, and must not hold a credential for a run that has ended. The launcher
+/// (`PERCH_LAUNCH`) is the shell's, not the agent's: it is kept out of the agent's environment and
+/// given back to the shell, so the next agent typed there is issued its own identity.
 fn in_shell(argv: Vec<String>, marker: &Path, cores: &Path) -> Vec<String> {
     [
         "/bin/sh",
         "-c",
-        "trap : INT; m=$1; c=$2; shift 2; \"$@\"; unset PERCH_TOKEN PERCH_SESSION; up=; \
+        "trap : INT; m=$1; c=$2; shift 2; l=${PERCH_LAUNCH-}; unset PERCH_LAUNCH; \"$@\"; \
+         unset PERCH_TOKEN; [ -z \"$l\" ] && unset PERCH_SESSION || export PERCH_LAUNCH=$l; up=; \
          for p in \"$c\"/*; do kill -0 \"${p##*/}\" 2>/dev/null && up=1; done; \
          [ \"$up\" ] || { mkdir -p \"${m%/*}\" && : > \"$m\"; }; \
          exec \"${PERCH_SHELL:-${SHELL:-/bin/sh}}\" -l",
@@ -346,9 +349,19 @@ impl AgentRuntimeAdapter {
         let Some(cli) = crate::agent_identity::cli_binary() else {
             return Ok(None);
         };
-        let issued = store.issue(key)?;
+        // A plain shell has no agent yet: it holds only the means to have each agent typed into it
+        // issued its own identity (`/agent/launch`). A picker's agent is itself the agent, and its
+        // shell afterwards gets the launcher back (`in_shell`).
+        let issued = (provider_id != crate::agent_fleet::TERMINAL_PROVIDER)
+            .then(|| store.issue(key))
+            .transpose()?;
+        let launcher = store.issue_launcher(key)?;
         Ok(Some(LaunchIdentity {
-            environment: crate::agent_identity::launch_environment(&key.session_id, &issued),
+            environment: crate::agent_identity::launch_environment(
+                &key.session_id,
+                issued.as_ref(),
+                Some(&launcher),
+            ),
             cli,
         }))
     }
@@ -485,7 +498,14 @@ impl AgentRuntimeAdapter {
                     .is_some_and(|(pid, _)| *pid == agent.pid)
             });
             if runtime.shell_agent != launched {
-                if runtime.shell_agent.is_some() {
+                if let Some(ended) = runtime.shell_agent.as_ref() {
+                    // That invocation's identity ends with it; the shell's launcher stays for
+                    // the next one the person starts.
+                    if let Some(identities) = self.identities.get() {
+                        if let Err(error) = identities.revoke_launch(&key.session_id, ended.pid) {
+                            tracing::warn!(%error, "could not retire an ended agent's identity");
+                        }
+                    }
                     // A successful process snapshot confirmed that invocation
                     // ended or was replaced. This is not a silence timeout.
                     runtime.native_status.store(false, Ordering::Release);
@@ -731,6 +751,49 @@ impl AgentRuntimeAdapter {
                 .flatten()
                 .as_ref()
                 == Some(agent)
+    }
+
+    /// Whether process `pid` is the agent `provider` just launched through a shim in the tab `owner`
+    /// runs, and so may be issued an identity: the shim's own launch marker names exactly this
+    /// provider and pid, and the process descends from the tab's shell. Anything uncertain (no
+    /// running tab, no marker, an unreadable process table) says no.
+    pub fn verify_launch(&self, owner: &AgentKey, provider: &str, pid: u32) -> Result<(), String> {
+        let root = self
+            .active
+            .lock()
+            .unwrap()
+            .get(owner)
+            .and_then(|runtime| {
+                let terminal = &runtime.handle.terminal;
+                terminal
+                    .process_id
+                    .filter(|_| terminal.daemon_session.is_some())
+            })
+            .ok_or("this shell is not running under Perch")?;
+        let launched = crate::shell_integration::launched(owner)
+            .ok()
+            .flatten()
+            .ok_or("no agent was started in this shell")?;
+        if launched.pid != pid || launched.key.agent_id != provider {
+            return Err("that is not the agent this shell just started".into());
+        }
+        let output = std::process::Command::new("ps")
+            .args(["-ax", "-o", "pid=,ppid=,stat=,comm=,args="])
+            .output()
+            .map_err(|_| "Perch could not read the process table")?;
+        let text = String::from_utf8_lossy(&output.stdout).into_owned();
+        let processes = process_snapshot(&text);
+        let mut ancestor = pid;
+        for _ in 0..processes.len() {
+            if ancestor == root {
+                return Ok(());
+            }
+            match processes.get(&ancestor) {
+                Some(process) => ancestor = process.parent,
+                None => break,
+            }
+        }
+        Err("that process is not in this shell".into())
     }
 
     pub(crate) fn set_native_status(&self, key: &AgentKey) {

@@ -264,11 +264,20 @@ rm -f -- {socket}
 umask 077
 printf '%s %s\n' {provider} "$$" > "$perch_active.$$" && mv -f -- "$perch_active.$$" "$perch_active" || exec "$perch_executable" "$@"
 PATH="$perch_bin:$PATH"; export PATH
+# A shell that holds a launcher has this agent issued an identity of its own, then becomes it.
+if [ -n "${{PERCH_LAUNCH-}}" ] && [ -x {cli} ]; then
+  exec {cli} __launch {provider} {exec} "$@"
+fi
 exec {exec} "$@"
 "#,
                 bin = quoted(&bin),
                 active = quoted(&dir.join("active")),
-                socket = quoted(&paths.socket)
+                socket = quoted(&paths.socket),
+                // Absent, the test above is never true: `[ -x '' ]` fails.
+                cli = quote(
+                    &cli.map(|cli| cli.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                )
             );
             write(&bin.join(provider), &script, 0o700)?;
         }
@@ -823,6 +832,67 @@ mod tests {
         assert!(!dir.join("bin/perch").exists());
         let _ = fs::remove_dir_all(&real);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A shell that holds a launcher (`PERCH_LAUNCH`) has each agent typed into it started through
+    /// `perch __launch`, which names the provider and the real executable; one without runs the
+    /// agent as before. Without a CLI beside the core the shim never reaches for it.
+    #[test]
+    fn a_typed_agent_is_started_through_the_launch_exchange_only_when_the_shell_holds_a_launcher() {
+        let key =
+            AgentKey::new("shell-launch", uuid::Uuid::new_v4().to_string(), "terminal").unwrap();
+        let root = std::env::temp_dir().join(format!("perch-launch-{}", uuid::Uuid::new_v4()));
+        let bin = root.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        write(
+            &bin.join("pi"),
+            "#!/bin/sh\nprintf 'plain pi:%s' \"$*\"\n",
+            0o700,
+        )
+        .unwrap();
+        let cli = root.join("perch-cli");
+        write(&cli, "#!/bin/sh\nprintf 'launch:%s' \"$*\"\n", 0o700).unwrap();
+        let ask = |cli: Option<&Path>, launcher: bool| {
+            let command = prepare(
+                &key,
+                vec!["/bin/sh".into(), "-c".into(), "pi one two".into()],
+                None,
+                cli,
+            )
+            .unwrap();
+            let mut run = Command::new(&command[0]);
+            run.args(&command[1..])
+                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                .env_remove("PERCH_LAUNCH");
+            if launcher {
+                run.env("PERCH_LAUNCH", "perch_agent_launch_x");
+            }
+            String::from_utf8(run.output().unwrap().stdout).unwrap()
+        };
+        let launched = ask(Some(&cli), true);
+        assert!(
+            launched.starts_with(&format!("launch:__launch pi {}", bin.join("pi").display())),
+            "{launched}"
+        );
+        assert!(launched.ends_with(" one two"), "{launched}");
+        assert_eq!(
+            ask(Some(&cli), false),
+            "plain pi:--extension".to_string() + &launched_tail(&key) + " one two"
+        );
+        assert!(
+            ask(None, true).starts_with("plain pi:"),
+            "no CLI, no exchange"
+        );
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(directory(&key).unwrap());
+    }
+
+    fn launched_tail(key: &AgentKey) -> String {
+        let bridge = bridge_key(key, "pi").unwrap();
+        format!(
+            " {}",
+            native_ui::paths(&bridge).unwrap().extension.display()
+        )
     }
 
     /// An agent typed into a shell starts with that shell session's pinned Instructions, ahead

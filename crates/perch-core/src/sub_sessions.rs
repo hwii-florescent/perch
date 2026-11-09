@@ -36,7 +36,7 @@ pub struct RunLimits {
     pub total: u32,
     /// Messages the run's agents may send (notes do not count).
     pub messages: u32,
-    /// Automatic deliveries to the lead.
+    /// Legacy setting retained for saved-file compatibility; automatic lead deliveries are unlimited.
     pub wakes: u32,
     /// Interrupts the lead may send each sub-session.
     pub interrupts: u32,
@@ -50,7 +50,7 @@ impl Default for RunLimits {
             live: MAX_CONCURRENT as u32,
             total: MAX_DESCENDANTS as u32,
             messages: crate::agent_mail::MAX_MESSAGES_PER_RUN as u32,
-            wakes: crate::agent_mail::DEFAULT_WAKES_PER_RUN,
+            wakes: 10, // Legacy value, no longer enforced.
             interrupts: crate::crew_actions::MAX_LEAD_INTERRUPTS_PER_CHILD,
             waiting_cards: crate::suggestions::MAX_PENDING as u32,
         }
@@ -59,12 +59,11 @@ impl Default for RunLimits {
 
 impl RunLimits {
     /// Each limit's allowed range (name, value, lowest, highest).
-    fn ranges(&self) -> [(&'static str, u32, u32, u32); 6] {
+    fn ranges(&self) -> [(&'static str, u32, u32, u32); 5] {
         [
             ("live sub-sessions per run", self.live, 1, 16),
             ("sub-sessions per run", self.total, 1, 64),
             ("messages per run", self.messages, 1, 1_000),
-            ("automatic lead wakes per run", self.wakes, 1, 100),
             ("interrupts per sub-session", self.interrupts, 1, 20),
             ("waiting suggested tasks", self.waiting_cards, 1, 50),
         ]
@@ -514,13 +513,6 @@ mod tests {
                     ..Default::default()
                 },
                 "messages per run must be 1 to 1000",
-            ),
-            (
-                RunLimits {
-                    wakes: 0,
-                    ..Default::default()
-                },
-                "wakes per run must be 1 to 100",
             ),
             (
                 RunLimits {

@@ -1,0 +1,148 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 033a627..cc3cf4c 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -117,6 +117,11 @@ jobs:
+           - os: macos-latest
+             name: macos-aarch64
+             triple: aarch64-apple-darwin
++          # Built on the arm runner (cross-compiled; the smoke test checks its architecture), so an
++          # Intel Mac gets the asset the probe and Install perch-core ask for.
++          - os: macos-latest
++            name: macos-x86_64
++            triple: x86_64-apple-darwin
+     runs-on: ${{ matrix.os }}
+     env:
+       # The core tells a probe which release it came from, so an install fetches its own version.
+@@ -135,8 +140,13 @@ jobs:
+       - name: Name, smoke-test and checksum
+         run: |
+           cp "target/${{ matrix.triple }}/release/perch-core" "perch-core-${{ matrix.name }}"
+-          # --version answers without booting a server; it is what a machine probe runs.
+-          "./perch-core-${{ matrix.name }}" --version
++          # --version answers without booting a server; it is what a machine probe runs. The Intel Mac
++          # build is cross-compiled on an arm runner: check its architecture instead of relying on Rosetta.
++          if [ "${{ matrix.name }}" = macos-x86_64 ]; then
++            [ "$(lipo -archs "perch-core-${{ matrix.name }}")" = x86_64 ]
++          else
++            "./perch-core-${{ matrix.name }}" --version
++          fi
+           if [ "$(uname)" = Linux ]; then
+             file "perch-core-${{ matrix.name }}"
+             sha256sum "perch-core-${{ matrix.name }}" > "perch-core-${{ matrix.name }}.sha256"
+diff --git a/docs/TESTING.md b/docs/TESTING.md
+index d994496..58c8dbc 100644
+--- a/docs/TESTING.md
++++ b/docs/TESTING.md
+@@ -278,7 +278,8 @@ probes need an explicitly authorized host and confirmed cleanup, never a
+ placeholder hostname or a private host discovered on this machine.
+ 
+ **Machine add over real ssh.** `scripts/machine-over-real-ssh.sh` starts a user-mode `sshd` on
+-127.0.0.1:2299 (key login only, sessions run with a temp `$HOME`), runs the ignored
++a free 127.0.0.1 port (key login only; sessions and the test process both run with temp `$HOME`s, so no
++control socket reaches your real `~/.ssh`), runs the ignored
+ `machine_install` test through real OpenSSH (probe, upload, atomic replace, shared control master),
+ then stops the sshd and the master. It proves the ssh plumbing, not a remote host: a loopback
+ substitute is not evidence for the remote-workspace gates above.
+diff --git a/plans/261108-2145-machine-add-port/plan.md b/plans/261108-2145-machine-add-port/plan.md
+index fd731bc..ea4e306 100644
+--- a/plans/261108-2145-machine-add-port/plan.md
++++ b/plans/261108-2145-machine-add-port/plan.md
+@@ -1,6 +1,6 @@
+ # Port herdr's machine-add flow to Perch's SSH hosts
+ 
+-Status: scouted, not started. Decision from the owner: "Our current SSH hosts inside perch is not working as smooth and clear as herdr's so it might be worth it to port full machine add."
++Status: route A partly done (slices 1–4 committed, release `core` job unrun); `--via`, exec through the core and no-tmux are excluded on purpose. See "Acceptance status" below. Decision from the owner: "Our current SSH hosts inside perch is not working as smooth and clear as herdr's so it might be worth it to port full machine add."
+ 
+ ## Outcome
+ 
+@@ -65,3 +65,17 @@ No release/download service. No Windows remotes. No change to how `direct` hosts
+ - `--via` and the framed stdio line: the hub's transport is an ssh port-forward tunnel; replacing it with a stdio WS client is a rewrite of `hub.rs` connection handling. Ask before starting.
+ - Exec through the host's core: no benefit for a one-shot command over a tunnel Perch does not use for it.
+ - A no-tmux start path: tmux stays a stated prerequisite (the probe reports it).
++
++## Acceptance status (2026-11-09)
++
++| Item | Class | Evidence |
++|---|---|---|
++| Mac/Linux host with only ssh becomes a `perch`-mode host from Settings | Met for the plumbing, **blocked** for the end-to-end claim | Probe, upload and atomic replace pass through a real OpenSSH to a throwaway loopback sshd (`scripts/machine-over-real-ssh.sh`); the download path is proven only against `file://` assets. The release `core` job has never run, so no published asset exists; no real remote or cross-OS host was available. "Only ssh" also conflicts with the stated tmux prerequisite (probe reports it). |
++| Password host says so and Log in fixes it | Met (unit/stand-in) | `needs_login` fault and the login argv are tested; a real password prompt needs a person and was not exercised. |
++| Failures are one sentence with a next step, no local fallback | Met | Faults carry a hint; `machine_install` covers checksum mismatch keeping the old copy. |
++| `perch exec --on` output comes from the remote core | **Blocked by exclusion** | Superseded by the owner decision (ssh login; a core in the middle adds nothing). Not a bug. |
++| Release assets exist for every target the probe accepts | Was unmet, fixed | The `core` matrix lacked `macos-x86_64` although a probe accepts Intel Macs; added (cross-built, unrun in CI). |
++
++Test-harness fix: the real-ssh script now picks a free port and runs the test with a temp `$HOME`; before, the control socket landed in the real `~/.ssh/perch-cm` and port 2299 was fixed.
++
++Re-verified on main 1bdc408 (2026-11-09): `cargo build`, `cargo fmt --check`, machine unit and `machine_install` tests, `protocol_parity`, `MachineCheck` vitest (3) and `npm run build` pass without patches; the real-OpenSSH script passes on a free loopback port. Release CI, a published asset and a real or cross-OS remote are still unexercised.
+diff --git a/scripts/machine-over-real-ssh.sh b/scripts/machine-over-real-ssh.sh
+index af8ec7b..f93baa2 100755
+--- a/scripts/machine-over-real-ssh.sh
++++ b/scripts/machine-over-real-ssh.sh
+@@ -1,17 +1,29 @@
+ #!/bin/sh
+-# Runs the opt-in `machine_install` test over real OpenSSH: a throwaway user-mode sshd on
+-# 127.0.0.1:2299 (key login only) whose sessions run with a temp $HOME, so nothing of yours is touched.
++# Runs the opt-in `machine_install` test over real OpenSSH: a throwaway user-mode sshd on a free
++# 127.0.0.1 port (key login only) whose sessions run with a temp $HOME. The test process runs with a
++# temp $HOME too, so its ssh control socket (~/.ssh/perch-cm) never lands in your real ~/.ssh.
+ # Stops the sshd and the ssh control master it created when done.
+ set -u
+ ROOT=$(cd "$(dirname "$0")/.." && pwd)
+-D=$(mktemp -d)
+-mkdir -p "$D/home"
++# Short path: the control socket must fit macOS's ~104-byte sun_path.
++D=$(mktemp -d /tmp/pm.XXXXXX)
++mkdir -p "$D/home" "$D/localhome"
++# Whatever happens (failure, ctrl-C), stop what we started: the ssh control master the test left (asked
++# politely over its own socket), then our sshd, then the temp dir.
++cleanup() {
++  [ -f "$D/ssh_config" ] && ssh -F "$D/ssh_config" -o "ControlPath=$D/localhome/.ssh/perch-cm/%C" -O exit box >/dev/null 2>&1
++  [ -f "$D/sshd.pid" ] && kill "$(cat "$D/sshd.pid")" 2>/dev/null
++  rm -rf "$D"
++}
++trap cleanup EXIT
++trap 'exit 130' INT TERM
++PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])') || exit 1
+ cd "$D" || exit 1
+ ssh-keygen -q -t ed25519 -N '' -f hostkey
+ ssh-keygen -q -t ed25519 -N '' -f userkey
+ cp userkey.pub authorized_keys
+ cat > sshd_config <<CFG
+-Port 2299
++Port $PORT
+ ListenAddress 127.0.0.1
+ HostKey $D/hostkey
+ PidFile $D/sshd.pid
+@@ -25,7 +37,7 @@ CFG
+ cat > ssh_config <<CFG
+ Host box
+   HostName 127.0.0.1
+-  Port 2299
++  Port $PORT
+   IdentityFile $D/userkey
+   IdentitiesOnly yes
+   StrictHostKeyChecking no
+@@ -33,13 +45,16 @@ Host box
+ CFG
+ printf '#!/bin/sh\nexec ssh -F %s/ssh_config "$@"\n' "$D" > ssh-wrapper
+ chmod 755 ssh-wrapper
+-/usr/sbin/sshd -f sshd_config -E "$D/sshd.log" || exit 1
++/usr/sbin/sshd -f sshd_config -E "$D/sshd.log" || { cat "$D/sshd.log" >&2; exit 1; }
+ sleep 1
+-(cd "$ROOT" && PERCH_MACHINE_SSH="$D/ssh-wrapper" PERCH_MACHINE_HOME="$D/home" \
+-  cargo test -p perch-core --test machine_install -- --ignored)
++# Build first with the real HOME (cargo/rustup need it), then run the test binary with the temp one.
++BIN=$(cd "$ROOT" && cargo test -p perch-core --test machine_install --no-run --message-format=json 2>/dev/null \
++  | python3 -c 'import sys,json
++for l in sys.stdin:
++    try: m=json.loads(l)
++    except ValueError: continue
++    if m.get("executable") and m.get("target",{}).get("name")=="machine_install": print(m["executable"])' | tail -1)
++[ -x "$BIN" ] || { echo "could not build machine_install" >&2; exit 1; }
++HOME="$D/localhome" PERCH_MACHINE_SSH="$D/ssh-wrapper" PERCH_MACHINE_HOME="$D/home" "$BIN" --ignored
+ status=$?
+-# The test's ssh calls share a control master (~/.ssh/perch-cm/%C); close the one that reached our sshd.
+-for pid in $(lsof -nP -iTCP:2299 -sTCP:ESTABLISHED -a -c ssh -t 2>/dev/null); do kill "$pid" 2>/dev/null; done
+-kill "$(cat "$D/sshd.pid")" 2>/dev/null
+-rm -rf "$D"
+ exit $status
