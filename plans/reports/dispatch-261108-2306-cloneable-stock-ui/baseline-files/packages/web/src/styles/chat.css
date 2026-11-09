@@ -1,0 +1,209 @@
+/* --- Chat ---------------------------------------------------------------- */
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  /* `.chat`'s real parent at runtime is dockview-react's `.dv-react-part`
+   * portal wrapper, which is `display: block` (not flex/grid) and sizes
+   * itself via an *inline* `height: 100%` (see
+   * dockview-react/dist/esm/dockview/reactContentPart.js) rather than any
+   * flex layout. `flex: 1; min-height: 0` only constrains an element when
+   * its parent is a flex/grid container — under a block parent they're
+   * no-ops, so `.chat` fell back to block default `height: auto` and grew
+   * to fit all of its content (every message ever seeded/streamed) instead
+   * of being clipped to the dockview panel's actual allotted height. That
+   * silently defeated `.chat__list`'s own `overflow-y: auto` (nothing ever
+   * exceeded `.chat`'s content-sized height, so `.chat__list` never had
+   * internal overflow to scroll) and let long transcripts spill out past
+   * the visible panel. Mirror `.dv-react-part`'s own trick: an explicit
+   * `height: 100%` lets `.chat` inherit the parent's definite (percentage
+   * or pixel) height regardless of the parent's display type, so the
+   * inner `flex: 1; min-height: 0` chain (`.chat__list-container` →
+   * `.chat__list`) has something real to be bounded by. */
+  height: 100%;
+  /* Keep the chat subtree in its own stacking context so it can never win the
+   * hit-test over the pane header's action buttons — see the
+   * `.dv-tabs-and-actions-container` rule above. */
+  isolation: isolate;
+}
+
+/* --- Markdown output (C2) ---------------------------------------------------
+ * Descendants of the markdown HTML (`dangerouslySetInnerHTML`) can only be
+ * styled from here. The rest of the chat shell (list, pill, message, worked-for,
+ * error) is in components/ui/chat.ts. */
+
+.message__markdown p {
+  margin: 0 0 0.5em;
+}
+
+.message__markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.message__markdown h1,
+.message__markdown h2,
+.message__markdown h3,
+.message__markdown h4 {
+  margin: 0.6em 0 0.3em;
+  line-height: 1.25;
+}
+
+.message__markdown h1 { font-size: 1.25em; }
+.message__markdown h2 { font-size: 1.12em; }
+.message__markdown h3 { font-size: 1em; }
+
+/* Segments (html runs, code blocks, perch-ui blocks) sit one beat apart. */
+.message__markdown > * + * { margin-top: 0.5em; }
+
+/* Tables, in chat and in perch-ui: a quiet card that scrolls sideways instead of squashing. */
+.message__markdown table,
+.md-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.5em 0;
+  font-size: 0.92em;
+  background: var(--surface-0);
+  border-radius: var(--radius);
+}
+
+.md-table { display: table; width: 100%; margin: 0; }
+
+.message__markdown th,
+.message__markdown td,
+.md-table th,
+.md-table td {
+  padding: 0.35em 0.75em;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--surface-1);
+}
+
+.message__markdown th,
+.md-table th {
+  font-weight: 600;
+  color: var(--subtext-0);
+  white-space: nowrap;
+  background: var(--surface-1);
+}
+
+.message__markdown tbody tr:last-child td,
+.md-table tbody tr:last-child td { border-bottom: 0; }
+.message__markdown tbody tr:hover td,
+.md-table tbody tr:hover td { background: var(--surface-1); }
+.md-table caption { padding: 0.4em 0.75em; text-align: left; color: var(--subtext-0); }
+
+/* Code blocks: label + copy bar over the code (CodeBlock.tsx). */
+.md-code {
+  background: var(--surface-0);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.md-code__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.1rem 0.4rem 0.1rem 0.75rem;
+  font-size: 0.75em;
+  color: var(--subtext-0);
+  background: var(--surface-1);
+}
+
+.message__markdown .md-code pre { margin: 0; border-radius: 0; background: none; }
+
+.hl-keyword { color: var(--mauve); }
+.hl-string { color: var(--green); }
+.hl-number { color: var(--peach); }
+.hl-function { color: var(--blue); }
+.hl-type { color: var(--yellow); }
+.hl-tag { color: var(--teal); }
+.hl-comment { color: var(--overlay-1); font-style: italic; }
+
+.message__markdown ul,
+.message__markdown ol {
+  margin: 0.3em 0 0.5em 1.3em;
+  padding: 0;
+}
+
+.message__markdown li {
+  margin-bottom: 0.2em;
+}
+
+.message__markdown code {
+  background: var(--surface-0);
+  border-radius: 0.25rem;
+  padding: 0.1em 0.35em;
+  font-size: 0.88em;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Fenced code blocks (jean CodeBlock treatment, adapted to perch tokens). */
+.message__markdown pre {
+  position: relative;
+  background: var(--surface-0);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem;
+  overflow-x: auto;
+  margin: 0.4em 0;
+}
+
+.message__markdown pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.85em;
+}
+
+.message__markdown a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.message__markdown blockquote {
+  border-left: 3px solid var(--overlay-0);
+  margin: 0.4em 0;
+  padding: 0.1em 0.6em;
+  color: var(--subtext-0);
+}
+
+.message__markdown hr {
+  border: none;
+  border-top: 1px solid var(--overlay-0);
+  margin: 0.75em 0;
+}
+
+/* The file viewer's Markdown preview (WorkspaceMarkdownPreview.tsx) reuses the rules above. */
+.file-markdown {
+  overflow-wrap: anywhere;
+}
+
+.file-markdown img {
+  max-width: 100%;
+}
+
+.file-markdown table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  margin: 0.4em 0;
+}
+
+.file-markdown th,
+.file-markdown td {
+  border: 1px solid var(--overlay-0);
+  padding: 0.2em 0.5em;
+}
+
+/* A remote image/media/frame that was not loaded: its alt text and URL, as text. */
+.file-markdown .md-placeholder {
+  color: var(--subtext-0);
+  font-size: 0.9em;
+  border: 1px dashed var(--overlay-0);
+  border-radius: 0.25rem;
+  padding: 0.05em 0.35em;
+}

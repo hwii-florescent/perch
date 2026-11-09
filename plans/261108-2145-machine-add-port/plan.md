@@ -1,0 +1,67 @@
+# Port herdr's machine-add flow to Perch's SSH hosts
+
+Status: scouted, not started. Decision from the owner: "Our current SSH hosts inside perch is not working as smooth and clear as herdr's so it might be worth it to port full machine add."
+
+## Outcome
+
+Adding a remote computer takes one step in Settings > Hosts, and says plainly what is wrong when it does not work, the way `hc machine add|ls|login|update` does in herdr-core. Then `perch exec --on <host>` runs through that host's core.
+
+## What herdr does (herdr-core `docs/machines.md`, `src/machines.rs`, `src/remote.rs`)
+
+1. `machine add user@host --name box`: the target is anything ssh accepts, including a `Host` from `~/.ssh/config`. The `machine-add` mod (herdr-app) lists the config's hosts, following `Include`s.
+2. If the remote has no `herdr-core`, add asks, then copies the local build when OS and CPU match (otherwise the release build for that target). `--install` allows it without asking.
+3. The local core keeps one framed JSON-RPC pipe: `ssh target 'sh -c "p=$(command -v herdr-core) || p=$HOME/.local/bin/herdr-core; ... exec $p connect"'`. A supervisor redials a lost line. `BatchMode=yes`, `ConnectTimeout=10`, `ServerAliveInterval=15`.
+4. One shared ssh login per target (ControlMaster, `ControlPersist=600`), made by `machine login` in a real terminal, for passwords, codes and host-key prompts. The core's connections ride it.
+5. `--via '<command>'` replaces ssh with any transport that carries stdin/stdout.
+6. `machine ls` shows connection state and the last seen version; errors name the next step (`needs_login`, "not installed", "too old: run machine update").
+7. `exec --on box` is an RPC forwarded down the line; the remote core runs the program.
+
+## What Perch does today (scouted)
+
+- `hosts.json` entry: `name`, `sshHost`, `remotePort`, `mode` (`perch` federates, `direct` = ssh + tmux, no Perch there), `directUrl`, `remoteCmd`. Typed by hand in Settings.
+- `hub.rs` connects through an ssh port-forward tunnel and, if the remote core does not answer, starts it with `tmux new-session ... 'cd ~/perch && ./target/debug/perch-core --port {port}'`. The default command assumes a source checkout built on the remote; the precheck says "perch not installed on remote (~/perch/target/debug/perch-core missing)". This is the main rough edge.
+- `ssh.rs` already has ControlMaster options (`mux_opts`, `close_master`), `probe_host` (direct mode), and `copy_file`.
+- `perch exec --on` uses one-shot `ssh host cmd` (`server/mods.rs` `remote_exec`), not the host's core.
+
+## Slices (each verified, one local commit)
+
+1. **Probe + install in the core.** `ssh::probe_machine(target)`: reachable (BatchMode), `uname -sm`, whether `perch-core` is on PATH or `~/.local/bin`, its `--version`. `ssh::install_machine(target)`: copy the local `perch-core` over ssh to `~/.local/bin/perch-core` when OS/arch match, refuse with a clear message otherwise (Perch has no release service). Tested through the `PERCH_SSH` stand-in.
+2. **Start with the installed binary.** Default remote command becomes `perch-core` from PATH or `~/.local/bin` when present, falling back to the checkout command; the precheck message names `Add machine` instead of a checkout path. Check the remote core starts without a web dist dir.
+3. **Settings > Hosts "Add machine".** List `~/.ssh/config` hosts (core endpoint, follows `Include`), or type a target; then probe, show state, offer Install, and show the next step on failure. Host rows show state, version and the error hint.
+4. **Login.** `needs_login` when BatchMode ssh asks for a password or code; the button opens a Perch terminal running the ssh login with `ControlMaster=auto ControlPersist=600` on the same control path `mux_opts` uses.
+5. **`--via`.** Host field `via`: a command that replaces ssh for the tunnel and probe. Only if it fits the tunnel model; otherwise document why not.
+6. **Exec through the host's core.** `perch exec --on` for `perch`-mode hosts goes to the remote core (an agent-token route there); `direct`-mode hosts keep the ssh path.
+
+## Non-goals
+
+No release/download service. No Windows remotes. No change to how `direct` hosts run turns.
+
+## Acceptance
+
+- A new Mac or Linux host with only ssh access becomes a working `perch`-mode host from Settings without typing a command or building anything there.
+- A host that needs a password says so and the login button fixes it.
+- Failures are one sentence with the next step; none fall back to local execution.
+- `perch exec --on` output, stderr and exit code come from the remote core.
+
+## Findings from the checks (2026-11-08)
+
+- **Binaries.** The v0.0.1-beta.1 release has desktop installers (macOS arm64 dmg; Linux x86_64 deb/rpm/AppImage) and static `perchd-linux-{x86_64,aarch64}`. There is no standalone headless `perch-core` for Linux, and no `perch-core` is installed on this Mac (only `perch.app`). So "copy the local build" would reach only a Mac to a Mac of the same CPU, and the common Mac laptop to Linux VPS case has nothing to copy.
+- **`perchd connect` is already herdr's pipe, for terminals.** It splices stdin/stdout onto the PTY daemon socket and starts the daemon if needed (`ssh host perchd connect`), and the static Linux binary is what ships for it. ARCHITECTURE line 216 says it "alone is not a remote workspace service": files, Git, agents and the project model still need a remote core.
+- **Web dist is not needed remotely.** With no dist directory the core serves a placeholder page; the WS API still works (`server/mod.rs` `placeholder_response`). Not exercised by a live start yet.
+- **Start path.** The hub starts the remote core with `tmux new-session` (default `cd ~/perch && ./target/debug/perch-core --port {port}`), so tmux and a source checkout are prerequisites today. herdr starts its core from `connect` itself and ships systemd/launchd units.
+- **Real ssh can be tested headlessly.** A user-mode `/usr/sbin/sshd` on 127.0.0.1:2299 with a temp host key accepted a key login (`StrictModes no`, `UsePAM no`); it was stopped afterward. This proves BatchMode, ControlMaster reuse and real copies, which the `PERCH_SSH` stand-in cannot.
+
+## Decision (owner): route A, CI-built core
+
+## Done (local commits f8b18ac, d10f805, ac17490, 527ed22)
+
+1. `machine.rs`: probe, install (upload or checked download), `~/.ssh/config` hosts, login argv; real-OpenSSH test via `scripts/machine-over-real-ssh.sh`.
+2. Hub auto-start runs the installed `perch-core`; precheck names tmux or perch-core.
+3. `machine.*` messages and Settings > Hosts `MachineCheck`.
+4. Release `core` job (unrun).
+
+## Not done, on purpose
+
+- `--via` and the framed stdio line: the hub's transport is an ssh port-forward tunnel; replacing it with a stdio WS client is a rewrite of `hub.rs` connection handling. Ask before starting.
+- Exec through the host's core: no benefit for a one-shot command over a tunnel Perch does not use for it.
+- A no-tmux start path: tmux stays a stated prerequisite (the probe reports it).
