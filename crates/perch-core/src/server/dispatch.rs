@@ -554,7 +554,7 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
         } => config::handle_device_revoke(state, request_id, device_id),
 
         ClientMessage::SettingsGet {} => config::handle_settings_get(state),
-        ClientMessage::SettingsUpdate { patch } => config::handle_settings_update(state, patch),
+        ClientMessage::SettingsUpdate { patch } => config::handle_settings_update(state, *patch),
         ClientMessage::HostsList {} => config::handle_hosts_list(state),
         ClientMessage::HostsUpsert { host } => config::handle_hosts_upsert(state, host),
         ClientMessage::HostsDelete { id } => config::handle_hosts_delete(state, id),

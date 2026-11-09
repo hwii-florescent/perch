@@ -96,6 +96,14 @@ pub struct SettingsData {
     /// A terminal pane shows its scroll position thumb. Defaults to `true`.
     #[serde(default = "default_true")]
     pub pane_scrollbars: bool,
+    /// Space between a terminal's edge and its text, in px: `[x, y]`, each 0 to 64. A layout's own
+    /// `terminalPadding` wins. Defaults to `[0, 0]`.
+    #[serde(default)]
+    pub terminal_padding: [f64; 2],
+    /// 0.1 to 1: below 1, what is behind a terminal shows through. A layout's `terminalOpacity` wins.
+    /// Defaults to 1.
+    #[serde(default = "default_terminal_opacity")]
+    pub terminal_opacity: f64,
     /// Option acts as Alt in terminals (`"auto"` and `"on"` do; `"off"` keeps the keyboard layout's
     /// characters). Defaults to `"auto"`.
     #[serde(default = "default_option_as_alt")]
@@ -187,6 +195,10 @@ fn default_minimum_contrast() -> f64 {
     1.0
 }
 
+fn default_terminal_opacity() -> f64 {
+    1.0
+}
+
 fn default_tab_shape() -> String {
     "square".to_string()
 }
@@ -240,6 +252,10 @@ pub struct SettingsPatch {
     pub clipboard_write: Option<bool>,
     #[serde(default)]
     pub pane_scrollbars: Option<bool>,
+    #[serde(default)]
+    pub terminal_padding: Option<[f64; 2]>,
+    #[serde(default)]
+    pub terminal_opacity: Option<f64>,
     #[serde(default)]
     pub option_as_alt: Option<String>,
     #[serde(default)]
@@ -1912,7 +1928,7 @@ pub enum ClientMessage {
     SettingsGet {},
 
     #[serde(rename = "settings.update", rename_all = "camelCase")]
-    SettingsUpdate { patch: SettingsPatch },
+    SettingsUpdate { patch: Box<SettingsPatch> },
 
     #[serde(rename = "hosts.list")]
     HostsList {},

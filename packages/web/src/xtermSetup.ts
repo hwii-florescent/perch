@@ -232,10 +232,18 @@ function watchTerminalSettings() {
   let seen = "";
   const apply = () => {
     const settings = usePerchStore.getState().settings;
-    const key = `${settings?.minimumContrast}|${settings?.paneScrollbars}|${settings?.optionAsAlt}`;
+    const key = `${settings?.minimumContrast}|${settings?.paneScrollbars}|${settings?.optionAsAlt}|${settings?.terminalPadding}|${settings?.terminalOpacity}`;
     if (key === seen) return;
     seen = key;
     document.documentElement.classList.toggle("no-pane-scrollbars", settings?.paneScrollbars === false);
+    // The page-wide default; a layout's own look sets the same variables lower down and wins there.
+    const [padX, padY] = settings?.terminalPadding ?? [0, 0];
+    const style = document.documentElement.style;
+    if (padX || padY) style.setProperty("--terminal-padding", `${padY}px ${padX}px`);
+    else style.removeProperty("--terminal-padding");
+    const opacity = settings?.terminalOpacity ?? 1;
+    if (opacity < 1) style.setProperty("--terminal-opacity", String(opacity));
+    else style.removeProperty("--terminal-opacity");
     for (const term of liveTerminals.values()) {
       term.options.minimumContrastRatio = clampContrast(settings?.minimumContrast);
       term.options.macOptionIsMeta = optionIsMeta(settings?.optionAsAlt);

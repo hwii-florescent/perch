@@ -124,7 +124,9 @@ approval not mattering much.
   cannot tell the keyboard layout, `off`, and `left` or `right`: only that Option key is Alt, sent as ESC and the key's
   base character by its physical key, the other key keeps typing the layout's characters); a dead-key combination such as Option+E is caught before the composition check and its keydown is cancelled, but that is not checked in a real window and `sounds` (`soundDone`, `soundBlocked`: a file under the
   folder that holds `mods/`, served by `GET /mods/file?sound=`, 2 MiB, mp3/wav/ogg/m4a/flac, the tone if it will not
-  play), live in open terminals. Fonts and sizes stay with the server terminal profile and a layout's look, ligatures
+  play), `terminal_padding` (`terminalPadding`: `[x, y]` px, 0 to 64) and `terminal_opacity` (`terminalOpacity`, 0.1 to 1),
+  which set the `--terminal-padding` and `--terminal-opacity` defaults on the page (a layout's own look still wins
+  inside its subtree), live in open terminals. Fonts and sizes stay with the server terminal profile and a layout's look, ligatures
   need an addon Perch does not ship, and there is no telemetry to turn off.
   `perch exec --on <host> [--cwd d] [--timeout s] -- cmd args` is herdr's `hc exec --on`: a session's agent runs one
   program on a Settings > Hosts computer over that host's ssh login (nothing is installed there) and gets exactly its

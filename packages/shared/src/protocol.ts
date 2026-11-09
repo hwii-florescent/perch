@@ -497,6 +497,10 @@ export interface SettingsData {
   clipboardWrite?: boolean;
   /** A terminal pane shows its scroll position thumb. Absent = true. */
   paneScrollbars?: boolean;
+  /** Space between a terminal's edge and its text in px, `[x, y]`; a layout's own `terminalPadding` wins. */
+  terminalPadding?: [number, number];
+  /** 0.1 to 1; below 1 what is behind a terminal shows through. A layout's `terminalOpacity` wins. */
+  terminalOpacity?: number;
   /** Option acts as Alt in terminals: "auto" and "on" do, "off" keeps the layout's characters. Absent = "auto". */
   optionAsAlt?: "auto" | "on" | "off" | "left" | "right";
   /** Notification sounds: a file under the folder that holds mods/ in place of the built-in tone. Absent or "" = the tone. */
@@ -565,6 +569,10 @@ export interface SettingsPatch {
   minimumContrast?: number;
   clipboardWrite?: boolean;
   paneScrollbars?: boolean;
+  /** Space between a terminal's edge and its text in px, `[x, y]`; a layout's own `terminalPadding` wins. */
+  terminalPadding?: [number, number];
+  /** 0.1 to 1; below 1 what is behind a terminal shows through. A layout's `terminalOpacity` wins. */
+  terminalOpacity?: number;
   optionAsAlt?: "auto" | "on" | "off" | "left" | "right";
   soundDone?: string;
   soundBlocked?: string;

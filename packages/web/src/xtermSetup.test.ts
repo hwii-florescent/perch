@@ -139,6 +139,12 @@ describe("createPerchTerminal", () => {
     expect(term.options.macOptionIsMeta).toBe(false);
     settings({ optionAsAlt: "on" });
     expect(term.options.macOptionIsMeta).toBe(true);
+    const root = document.documentElement.style;
+    expect([root.getPropertyValue("--terminal-padding"), root.getPropertyValue("--terminal-opacity")]).toEqual(["", ""]);
+    settings({ terminalPadding: [8, 4], terminalOpacity: 0.8 });
+    expect([root.getPropertyValue("--terminal-padding"), root.getPropertyValue("--terminal-opacity")]).toEqual(["4px 8px", "0.8"]);
+    settings({ terminalPadding: [0, 0], terminalOpacity: 1 });
+    expect([root.getPropertyValue("--terminal-padding"), root.getPropertyValue("--terminal-opacity")]).toEqual(["", ""]);
     settings({ minimumContrast: 1, paneScrollbars: true });
     expect(term.options.minimumContrastRatio).toBe(1);
     expect(document.documentElement.classList.contains("no-pane-scrollbars")).toBe(false);

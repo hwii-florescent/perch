@@ -85,6 +85,14 @@ pub struct Settings {
     /// A terminal pane shows its scroll position thumb. Defaults to `true`.
     #[serde(default = "default_true")]
     pub pane_scrollbars: bool,
+    /// Space between a terminal's edge and its text, in px: `[x, y]`, each 0 to 64. A layout's own
+    /// `terminalPadding` wins. Defaults to `[0, 0]`.
+    #[serde(default)]
+    pub terminal_padding: [f64; 2],
+    /// 0.1 to 1: below 1, what is behind a terminal shows through. A layout's `terminalOpacity` wins.
+    /// Defaults to 1.
+    #[serde(default = "default_terminal_opacity")]
+    pub terminal_opacity: f64,
     /// Option acts as Alt in terminals (`"auto"` and `"on"` for both keys, `"left"` or `"right"` for
     /// that key only; `"off"` keeps the keyboard layout's characters). Defaults to `"auto"`.
     #[serde(default = "default_option_as_alt")]
@@ -168,6 +176,8 @@ impl Default for Settings {
             minimum_contrast: default_minimum_contrast(),
             clipboard_write: true,
             pane_scrollbars: true,
+            terminal_padding: [0.0, 0.0],
+            terminal_opacity: default_terminal_opacity(),
             option_as_alt: default_option_as_alt(),
             sound_done: String::new(),
             sound_blocked: String::new(),
@@ -246,6 +256,10 @@ fn default_minimum_contrast() -> f64 {
     1.0
 }
 
+fn default_terminal_opacity() -> f64 {
+    1.0
+}
+
 fn default_tab_shape() -> String {
     "square".to_string()
 }
@@ -290,6 +304,10 @@ pub struct SettingsPatch {
     pub clipboard_write: Option<bool>,
     #[serde(default)]
     pub pane_scrollbars: Option<bool>,
+    #[serde(default)]
+    pub terminal_padding: Option<[f64; 2]>,
+    #[serde(default)]
+    pub terminal_opacity: Option<f64>,
     #[serde(default)]
     pub option_as_alt: Option<String>,
     #[serde(default)]
@@ -425,6 +443,20 @@ impl SettingsStore {
                 "minimum contrast must be 1-21"
             );
         }
+        if let Some(padding) = patch.terminal_padding {
+            anyhow::ensure!(
+                padding
+                    .iter()
+                    .all(|px| px.is_finite() && (0.0..=64.0).contains(px)),
+                "terminal padding is [x, y], each 0-64 px"
+            );
+        }
+        if let Some(opacity) = patch.terminal_opacity {
+            anyhow::ensure!(
+                opacity.is_finite() && (0.1..=1.0).contains(&opacity),
+                "terminal opacity must be 0.1-1"
+            );
+        }
         if let Some(percent) = patch.usage_limit_alert {
             anyhow::ensure!(percent <= 100, "usage limit alert must be 0-100");
         }
@@ -509,6 +541,12 @@ impl SettingsStore {
         }
         if let Some(ratio) = patch.minimum_contrast {
             guard.minimum_contrast = ratio;
+        }
+        if let Some(padding) = patch.terminal_padding {
+            guard.terminal_padding = padding;
+        }
+        if let Some(opacity) = patch.terminal_opacity {
+            guard.terminal_opacity = opacity;
         }
         if let Some(allowed) = patch.clipboard_write {
             guard.clipboard_write = allowed;
@@ -805,6 +843,28 @@ mod keybinding_tests {
             (4.5, false, false)
         );
         assert_eq!(reloaded.option_as_alt, "auto");
+        assert_eq!(
+            (reloaded.terminal_padding, reloaded.terminal_opacity),
+            ([0.0, 0.0], 1.0)
+        );
+        for bad in [
+            serde_json::json!({"terminalPadding": [-1, 0]}),
+            serde_json::json!({"terminalPadding": [0, 65]}),
+            serde_json::json!({"terminalOpacity": 0.05}),
+            serde_json::json!({"terminalOpacity": 1.5}),
+        ] {
+            assert!(store.update(patch(bad)).is_err());
+        }
+        store
+            .update(patch(
+                serde_json::json!({"terminalPadding": [8, 4.5], "terminalOpacity": 0.9}),
+            ))
+            .unwrap();
+        let reloaded = SettingsStore::load(&path).get();
+        assert_eq!(
+            (reloaded.terminal_padding, reloaded.terminal_opacity),
+            ([8.0, 4.5], 0.9)
+        );
         assert!(store
             .update(patch(serde_json::json!({"optionAsAlt": "middle"})))
             .is_err());
