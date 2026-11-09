@@ -25,6 +25,15 @@ it("project.new checks argv before it adds the folder, and runs the program only
   made("success");
   await vi.waitFor(() => expect(started).toHaveBeenCalledWith("ws-new", "'claude' 'hi'"));
 
+  expect(usePerchStore.getState().activeProjectId).toBe("p-new");
+
+  // Without argv the project is still shown once it is added.
+  usePerchStore.setState({ activeProjectId: null, workspaceProjectCreate: null });
+  run({});
+  made("success");
+  await vi.waitFor(() => expect(usePerchStore.getState().activeProjectId).toBe("p-new"));
+  expect(started).toHaveBeenCalledTimes(1);
+
   // A failed add runs nothing and says so.
   run({ argv: ["claude"] });
   made("error", { error: "no such folder" });
@@ -43,4 +52,21 @@ it("terminal.show, peek and keep open the session they name", async () => {
   usePerchStore.setState({ switchSession: open as never });
   for (const verb of ["show", "peek", "keep"]) TYPED_COMMANDS[`terminal.${verb}`]!.run({ id: `s-${verb}` });
   expect(open.mock.calls.map(([id]) => id)).toEqual(["s-show", "s-peek", "s-keep"]);
+});
+
+it("terminal.pin pins a listed session that is not on screen", async () => {
+  const { usePerchStore } = await import("./store");
+  const { TYPED_COMMANDS } = await import("./modCommands");
+  const { isPinned } = await import("./pinnedTerminals");
+  const kept = new Map<string, string>();
+  vi.stubGlobal("localStorage", { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v) });
+  usePerchStore.setState({ sessions: [{ id: "s-off" }] as never });
+  // Nothing is on screen, so only the listed id can work.
+  expect(() => TYPED_COMMANDS["terminal.pin"]!.run({ terminal: "unknown" })).toThrow(/not on screen/);
+  expect(() => TYPED_COMMANDS["terminal.pin"]!.run({ terminal: "s-off", pinned: "yes" })).toThrow(/true or false/);
+  expect(isPinned("s-off")).toBe(false);
+  TYPED_COMMANDS["terminal.pin"]!.run({ terminal: "s-off" });
+  expect(isPinned("s-off")).toBe(true);
+  TYPED_COMMANDS["terminal.pin"]!.run({ terminal: "s-off" });
+  expect(isPinned("s-off")).toBe(false);
 });

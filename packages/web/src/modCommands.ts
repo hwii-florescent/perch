@@ -207,8 +207,9 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
     if (!id) throw new Error("That terminal is still opening.");
     usePerchStore.getState().killTerminal(id);
   } },
-  "terminal.pin": { description: "Pin or unpin a terminal on this device (agents() and terminals() report it; Perch's own views do not order by it)", args: "{terminal?, pinned?}", run: (args) => {
-    const id = terminalOnScreen(args).getAttribute("data-session-id");
+  "terminal.pin": { description: "Pin or unpin a terminal on this device: {terminal} is a session id from terminals() (or one on screen); with none, the one with the keyboard. agents() and terminals() report it; Perch's own views do not order by it", args: "{terminal?, pinned?}", run: (args) => {
+    const named = word(args, "terminal");
+    const id = named && usePerchStore.getState().sessions.some((session) => session.id === named) ? named : terminalOnScreen(args).getAttribute("data-session-id");
     if (!id) throw new Error("That terminal is still opening.");
     const pinned = (args as { pinned?: unknown } | null)?.pinned;
     if (pinned !== undefined && typeof pinned !== "boolean") throw new Error("{pinned} is true or false.");
@@ -240,8 +241,7 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
     const known = new Set(usePerchStore.getState().workspaceProjects.map((project) => project.id));
     const requestId = usePerchStore.getState().createWorkspaceProject(folder, word(args, "name"));
     if (!requestId) throw new Error(`Cannot add ${folder} as a project.`);
-    if (!start) return;
-    const fail = (why: string) => later(async () => { throw new Error(`${why}: ${folder} was not started.`); })(undefined);
+    const fail = (why: string) => later(async () => { throw new Error(`${why}: ${folder} was not ${start ? "started" : "shown"}.`); })(undefined);
     const stop = usePerchStore.subscribe((state) => {
       const made = state.workspaceProjectCreate;
       if (made?.requestId !== requestId || made.status === "pending") return;
@@ -252,6 +252,7 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
         ?? state.workspaceProjects.find((project) => project.hostId === made.hostId && project.path === made.path);
       if (made.status !== "success" || !created) return fail(made.error ?? "The project could not be added");
       state.focusWorkspaceProject(created.id);
+      if (!start) return;
       const workspaceId = usePerchStore.getState().activeWorkspaceId;
       if (workspaceId) later(() => start(workspaceId))(undefined);
       else fail("The new project has no workspace");

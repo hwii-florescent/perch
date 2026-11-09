@@ -60,7 +60,10 @@ async fn capture_window(window: tauri::WebviewWindow) -> Result<String, String> 
     {
         use base64::Engine;
         let png = glass::snapshot_png(&window).await?;
-        Ok(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png)))
+        Ok(format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(png)
+        ))
     }
     #[cfg(not(target_os = "macos"))]
     {
