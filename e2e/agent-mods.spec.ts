@@ -1,7 +1,8 @@
 /**
  * Live check of herdr's "ask the agent to change the app": a Claude lead (haiku) that a person has just
  * spoken to reads `perch guide` and `perch mod api`, writes a mod that shows a todo list, enables it and
- * puts it on screen, and the page then draws it and the list works. What is asserted is the mod's files
+ * puts it on screen, and the page then draws it and the list works; then it is asked to turn Perch into an
+ * IDE and writes a layout (files, panes, git) and selects it. What is asserted is the mod's files
  * in the core's folder and the page's own DOM, not what the model said. Isolated core and daemon, see
  * docs/TESTING.md.
  *
@@ -33,13 +34,13 @@ async function untilReady(ui: ReturnType<Page["getByTestId"]>, timeout: number) 
   while (Date.now() < deadline) {
     if ((await ui.getByRole("status").innerText().catch(() => "")) === "Ready") return;
     const card = ui.getByTestId("native-cli-request");
-    if (await card.isVisible().catch(() => false)) await card.getByTestId("native-cli-request-option-1").click().catch(() => {});
+    if (await card.isVisible().catch(() => false)) await card.getByTestId("native-cli-request-option-1").click();
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   throw new Error("the lead did not become ready");
 }
 
-test("an agent asked for a todo list in Perch writes a mod that the page draws and that works", async ({ page }, testInfo) => {
+test("an agent asked to change Perch writes a todo-list mod and an IDE layout that the page draws", async ({ page }, testInfo) => {
   test.setTimeout(600_000);
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "perch-agentmods-"));
   const heading = `Todos${Date.now().toString(36)}`;
@@ -110,6 +111,25 @@ test("an agent asked for a todo list in Perch writes a mod that the page draws a
     await list.getByRole("button", { name: /add/i }).first().click();
     await expect(list).toContainText("Buy milk");
     await page.screenshot({ path: testInfo.outputPath("agent-mods.png") });
+
+    // Then the whole window: "make Perch an IDE" is a layout, chosen with `perch mod layout`.
+    await box.fill(
+      "Use the shell and no other tools, and only the perch command to reach Perch. " +
+      "Now change Perch into an IDE: write a layout named ide with the project's files on the left, the open session's panes in the middle and git on the right, " +
+      "select it with `perch mod layout ide`, and check it with `perch mod status`. Reply with the one word done and nothing else.",
+    );
+    await ui.getByRole("button", { name: "Send", exact: true }).click();
+    await expect(box).toHaveValue("", { timeout: 15_000 });
+    const layouts = path.join(fixture, "layouts");
+    await expect.poll(() => fs.existsSync(layouts) && fs.readdirSync(layouts).some((name) => name.endsWith(".json")), { timeout: 240_000, intervals: [2_000] }).toBe(true);
+    await untilReady(ui, 360_000);
+    const written = fs.readdirSync(layouts).filter((name) => name.endsWith(".json"));
+    const contents = written.flatMap((name) => JSON.stringify(JSON.parse(fs.readFileSync(path.join(layouts, name), "utf8"))).match(/"content":"(\w+)/g) ?? []);
+    expect(contents.join(" "), "the layout holds the files, panes and git blocks").toMatch(/files[\s\S]*canvas|canvas[\s\S]*files/);
+    expect(contents.join(" ")).toContain("git");
+    // The page now draws that layout instead of stock Perch.
+    for (const block of ["files", "canvas", "git"]) await expect(page.getByTestId(`layout-${block}`)).toBeVisible({ timeout: 30_000 });
+    await page.screenshot({ path: testInfo.outputPath("agent-ide-layout.png") });
   } catch (error) {
     await testInfo.attach("core-log", { body: fs.readFileSync(path.join(fixture, "core.log"), "utf8").slice(-6000), contentType: "text/plain" });
     await testInfo.attach("visible-state", { body: await page.locator("body").innerText().catch(() => "unavailable"), contentType: "text/plain" });
