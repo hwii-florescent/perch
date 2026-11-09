@@ -44,6 +44,9 @@
  * is set (xtermSetup.ts); perch has no decorations, only a bright edge line. */
 .terminal__surface .xterm-decoration-overview-ruler { display: none; }
 
+/* settings.paneScrollbars = false */
+.no-pane-scrollbars .terminal__surface .xterm-scrollable-element > .xterm-scrollbar { display: none; }
+
 .terminal--persistent { flex-direction: column; }
 .terminal__toolbar {
   display: flex;

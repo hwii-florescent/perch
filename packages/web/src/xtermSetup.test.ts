@@ -118,6 +118,36 @@ describe("createPerchTerminal", () => {
     expect(terminalText(host)).toBeNull();
   });
 
+  it("minimumContrast reaches open terminals, paneScrollbars marks the page, and clipboardWrite gates OSC 52", async () => {
+    HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }) })) as never;
+    window.matchMedia ??= (() => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} })) as never;
+    globalThis.ResizeObserver ??= class { observe() {} disconnect() {} } as never;
+    globalThis.IntersectionObserver ??= class { observe() {} disconnect() {} } as never;
+    const { usePerchStore } = await import("./store");
+    const settings = (patch: object) => usePerchStore.setState((s) => ({ settings: { ...s.settings, ...patch } as never }));
+    const written = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: written }, configurable: true });
+    const { createPerchTerminal } = await import("./xtermSetup");
+    settings({ minimumContrast: 4.5 });
+    const { term, dispose } = createPerchTerminal(document.createElement("div"), () => {});
+    expect(term.options.minimumContrastRatio).toBe(4.5);
+    settings({ minimumContrast: 99, paneScrollbars: false });
+    expect(term.options.minimumContrastRatio).toBe(21);
+    expect(document.documentElement.classList.contains("no-pane-scrollbars")).toBe(true);
+    settings({ minimumContrast: 1, paneScrollbars: true });
+    expect(term.options.minimumContrastRatio).toBe(1);
+    expect(document.documentElement.classList.contains("no-pane-scrollbars")).toBe(false);
+    term.resize(20, 5);
+    term.write("\u001b]52;c;aGk=\u0007");
+    term.resize(21, 5);
+    expect(written).toHaveBeenCalledWith("hi");
+    settings({ clipboardWrite: false });
+    term.write("\u001b]52;c;aGk=\u0007");
+    term.resize(22, 5);
+    expect(written).toHaveBeenCalledTimes(1);
+    dispose();
+  });
+
   it("keeps an empty write's callback, and later writes, across a resize", async () => {
     // jsdom has no canvas, matchMedia, ResizeObserver or IntersectionObserver; xterm only uses them to measure and pause.
     HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }) })) as never;

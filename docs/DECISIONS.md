@@ -114,7 +114,10 @@ approval not mattering much.
   `pane.close`, `pane.focus {pane|terminal}`, `terminal.kill {terminal?}`, `terminal.scroll {lines|pages|to, terminal?}`,
   `agent.next|prev|focus {terminal}`, `session|workspace|project.rename {id, name}`, `app.settings|help|palette`, and
   `tab.new {argv, task?}` (a terminal running the program in the shown workspace through the core's `workspace.run`,
-  `task` as its last argument). Not ported because Perch has no such thing: `terminal.keep|park|peek|show` (perchd keeps
+  `task` as its last argument). `settings.json` also takes herdr's `minimum_contrast` (as `minimumContrast`, 1 to 21), `clipboard_write` (`clipboardWrite`,
+  OSC 52) and `pane_scrollbars` (`paneScrollbars`), live in open terminals. Fonts and sizes stay with the server terminal
+  profile and a layout's look, ligatures need an addon Perch does not ship, and there is no telemetry to turn off.
+  Not ported because Perch has no such thing: `terminal.keep|park|peek|show` (perchd keeps
   every terminal), `terminal.pin`, `space.*` creation by argv, `layout.set` (a layout is a file a mod writes and hot reload
   applies), and the updater, feedback and `app.reset` family.
 - **More of herdr's surface.** `home()`/`appHome()`, `placement()` (a floating mod's edge/align/dragging),

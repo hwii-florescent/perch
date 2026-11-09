@@ -491,6 +491,12 @@ export interface SettingsData {
   previewTabs?: boolean;
   /** Tab corner style. Absent = "square" for older peers. */
   tabShape?: "square" | "round";
+  /** Terminal text below this contrast ratio (1 to 21) is pushed toward black or white. Absent = 1 (off). */
+  minimumContrast?: number;
+  /** A terminal program may write the clipboard (OSC 52). Absent = true. */
+  clipboardWrite?: boolean;
+  /** A terminal pane shows its scroll position thumb. Absent = true. */
+  paneScrollbars?: boolean;
   /** The desktop app also listens on the LAN for paired phones. Absent = off. */
   phoneAccess?: boolean;
   /** Relay address for phones on any network; empty or absent = off. */
@@ -551,6 +557,9 @@ export interface SettingsPatch {
   warnCloseAgent?: boolean;
   previewTabs?: boolean;
   tabShape?: "square" | "round";
+  minimumContrast?: number;
+  clipboardWrite?: boolean;
+  paneScrollbars?: boolean;
   phoneAccess?: boolean;
   relayUrl?: string;
   permissionsSetupDismissed?: boolean;

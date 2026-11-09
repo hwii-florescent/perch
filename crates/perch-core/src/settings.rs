@@ -75,6 +75,16 @@ pub struct Settings {
     /// Tab corner style: "square" or "round". Defaults to square.
     #[serde(default = "default_tab_shape")]
     pub tab_shape: String,
+    /// Terminal text below this contrast ratio (1 to 21) is pushed toward black or white. `1` leaves
+    /// program colors alone. Defaults to `1`.
+    #[serde(default = "default_minimum_contrast")]
+    pub minimum_contrast: f64,
+    /// A terminal program may write the clipboard (OSC 52). Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub clipboard_write: bool,
+    /// A terminal pane shows its scroll position thumb. Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub pane_scrollbars: bool,
     /// The desktop app also listens on the LAN so a paired phone can reach it
     /// (`server/phone_access.rs`). Off by default: nothing but loopback listens
     /// until the user turns it on.
@@ -145,6 +155,9 @@ impl Default for Settings {
             warn_close_agent: true,
             preview_tabs: true,
             tab_shape: default_tab_shape(),
+            minimum_contrast: default_minimum_contrast(),
+            clipboard_write: true,
+            pane_scrollbars: true,
             phone_access: false,
             relay_url: String::new(),
             permissions_setup_dismissed: false,
@@ -212,6 +225,10 @@ fn normalize_chat_mode(mode: &str) -> String {
     }
 }
 
+fn default_minimum_contrast() -> f64 {
+    1.0
+}
+
 fn default_tab_shape() -> String {
     "square".to_string()
 }
@@ -250,6 +267,12 @@ pub struct SettingsPatch {
     pub warn_close_agent: Option<bool>,
     pub preview_tabs: Option<bool>,
     pub tab_shape: Option<String>,
+    #[serde(default)]
+    pub minimum_contrast: Option<f64>,
+    #[serde(default)]
+    pub clipboard_write: Option<bool>,
+    #[serde(default)]
+    pub pane_scrollbars: Option<bool>,
     pub phone_access: Option<bool>,
     pub relay_url: Option<String>,
     pub permissions_setup_dismissed: Option<bool>,
@@ -355,6 +378,12 @@ impl SettingsStore {
                 "unknown browser search engine"
             );
         }
+        if let Some(ratio) = patch.minimum_contrast {
+            anyhow::ensure!(
+                ratio.is_finite() && (1.0..=21.0).contains(&ratio),
+                "minimum contrast must be 1-21"
+            );
+        }
         if let Some(percent) = patch.usage_limit_alert {
             anyhow::ensure!(percent <= 100, "usage limit alert must be 0-100");
         }
@@ -436,6 +465,15 @@ impl SettingsStore {
         }
         if let Some(tab_shape) = patch.tab_shape {
             guard.tab_shape = tab_shape;
+        }
+        if let Some(ratio) = patch.minimum_contrast {
+            guard.minimum_contrast = ratio;
+        }
+        if let Some(allowed) = patch.clipboard_write {
+            guard.clipboard_write = allowed;
+        }
+        if let Some(shown) = patch.pane_scrollbars {
+            guard.pane_scrollbars = shown;
         }
         if let Some(phone_access) = patch.phone_access {
             guard.phone_access = phone_access;
@@ -675,6 +713,46 @@ mod keybinding_tests {
         assert_eq!(
             SettingsStore::load(&path).get().run_limits,
             crate::sub_sessions::RunLimits::default()
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn terminal_look_settings_default_round_trip_and_reject_out_of_range() {
+        let dir =
+            std::env::temp_dir().join(format!("perch-terminal-settings-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"theme":"light"}"#).unwrap();
+        let store = SettingsStore::load(&path);
+        let (settings, patch) = (store.get(), |value: serde_json::Value| -> SettingsPatch {
+            serde_json::from_value(value).unwrap()
+        });
+        assert_eq!(
+            (
+                settings.minimum_contrast,
+                settings.clipboard_write,
+                settings.pane_scrollbars
+            ),
+            (1.0, true, true)
+        );
+        assert!(store
+            .update(patch(serde_json::json!({"minimumContrast": 0.5})))
+            .is_err());
+        assert!(store
+            .update(patch(serde_json::json!({"minimumContrast": 22})))
+            .is_err());
+        store
+            .update(patch(serde_json::json!({"minimumContrast": 4.5, "clipboardWrite": false, "paneScrollbars": false})))
+            .unwrap();
+        let reloaded = SettingsStore::load(&path).get();
+        assert_eq!(
+            (
+                reloaded.minimum_contrast,
+                reloaded.clipboard_write,
+                reloaded.pane_scrollbars
+            ),
+            (4.5, false, false)
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }

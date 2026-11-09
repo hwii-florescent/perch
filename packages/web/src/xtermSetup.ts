@@ -197,6 +197,27 @@ export interface PerchTerminal {
 /** The live terminals by the element they draw in, so a mod can read one's text (`api.readTerminal`). */
 const liveTerminals = new Map<HTMLElement, Terminal>();
 
+/** settings.minimumContrast (1 to 21; 1 leaves the program's colors alone). */
+const clampContrast = (ratio: number | undefined) => (Number.isFinite(ratio) ? Math.min(21, Math.max(1, ratio!)) : 1);
+
+/** The terminal settings that apply to terminals already open (contrast, the scroll thumb), kept in step with the store once any terminal exists. */
+let watchingSettings = false;
+function watchTerminalSettings() {
+  if (watchingSettings) return;
+  watchingSettings = true;
+  let seen = "";
+  const apply = () => {
+    const settings = usePerchStore.getState().settings;
+    const key = `${settings?.minimumContrast}|${settings?.paneScrollbars}`;
+    if (key === seen) return;
+    seen = key;
+    document.documentElement.classList.toggle("no-pane-scrollbars", settings?.paneScrollbars === false);
+    for (const term of liveTerminals.values()) term.options.minimumContrastRatio = clampContrast(settings?.minimumContrast);
+  };
+  usePerchStore.subscribe(apply);
+  apply();
+}
+
 const liveTerminalIn = (root: Element) => {
   const host = [...liveTerminals.keys()].find((container) => root === container || root.contains(container));
   return host && liveTerminals.get(host);
@@ -271,6 +292,7 @@ export function createPerchTerminal(
     // store directly here (rather than threading it through every caller)
     // keeps `createPerchTerminal` the single place a Terminal is built.
     scrollback: clampScrollback(usePerchStore.getState().settings?.terminalScrollback),
+    minimumContrastRatio: clampContrast(usePerchStore.getState().settings?.minimumContrast),
     // iTerm2's "Esc+" behaviour — what makes Alt+B / Alt+F / Alt+Backspace
     // word motion work in the CLIs' composers.
     macOptionIsMeta: true,
@@ -425,7 +447,7 @@ export function createPerchTerminal(
   // consumed instead of falling through and rendering as garbage text.
   term.parser.registerOscHandler(52, (data) => {
     const result = parseOsc52(data);
-    if (result.kind === "write") {
+    if (result.kind === "write" && usePerchStore.getState().settings?.clipboardWrite !== false) {
       navigator.clipboard?.writeText(result.text).catch(() => {
         // Swallow: a rejected clipboard write (no secure context, no recent
         // gesture, permission denied) is not something the pane can recover
@@ -728,6 +750,7 @@ export function createPerchTerminal(
   });
 
   liveTerminals.set(container, term);
+  watchTerminalSettings();
   const stopContext = attachTerminalContext(container, term, contextSessionId);
   // Observes OSC 133 output marks only (jump between commands, failed-command ticks); no input is touched.
   const commandMarks = attachCommandMarks(term);

@@ -86,6 +86,16 @@ pub struct SettingsData {
     /// Tab corner style: "square" or "round". Defaults to square.
     #[serde(default = "default_tab_shape")]
     pub tab_shape: String,
+    /// Terminal text below this contrast ratio (1 to 21) is pushed toward black or white. `1` leaves
+    /// program colors alone. Defaults to `1`.
+    #[serde(default = "default_minimum_contrast")]
+    pub minimum_contrast: f64,
+    /// A terminal program may write the clipboard (OSC 52). Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub clipboard_write: bool,
+    /// A terminal pane shows its scroll position thumb. Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub pane_scrollbars: bool,
     /// Also listen on the LAN for paired phones (desktop app; see `phone_access.rs`).
     #[serde(default)]
     pub phone_access: bool,
@@ -159,6 +169,10 @@ fn default_chat_mode() -> String {
     "cli".to_string()
 }
 
+fn default_minimum_contrast() -> f64 {
+    1.0
+}
+
 fn default_tab_shape() -> String {
     "square".to_string()
 }
@@ -206,6 +220,12 @@ pub struct SettingsPatch {
     pub preview_tabs: Option<bool>,
     #[serde(default)]
     pub tab_shape: Option<String>,
+    #[serde(default)]
+    pub minimum_contrast: Option<f64>,
+    #[serde(default)]
+    pub clipboard_write: Option<bool>,
+    #[serde(default)]
+    pub pane_scrollbars: Option<bool>,
     #[serde(default)]
     pub phone_access: Option<bool>,
     #[serde(default)]
