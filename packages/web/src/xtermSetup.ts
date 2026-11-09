@@ -197,6 +197,30 @@ export interface PerchTerminal {
 /** The live terminals by the element they draw in, so a mod can read one's text (`api.readTerminal`). */
 const liveTerminals = new Map<HTMLElement, Terminal>();
 
+/** Both Option keys act as Alt for auto and on. For left and right only that one does, through `optionAsAltInput`; xterm's own switch stays off so the other key still types the layout's characters. */
+const optionIsMeta = (mode: string | undefined) => mode !== "off" && mode !== "left" && mode !== "right";
+
+const SHIFTED_DIGITS = ")!@#$%^&*(";
+const PUNCTUATION: Record<string, [string, string]> = {
+  Minus: ["-", "_"], Equal: ["=", "+"], BracketLeft: ["[", "{"], BracketRight: ["]", "}"], Backslash: ["\\", "|"],
+  Semicolon: [";", ":"], Quote: ["'", '"'], Comma: [",", "<"], Period: [".", ">"], Slash: ["/", "?"], Backquote: ["`", "~"],
+};
+const heldAlt = { AltLeft: false, AltRight: false };
+
+/** With optionAsAlt "left" or "right": the bytes (ESC, then the key's base character) for a key typed while that Option key is held, else undefined and xterm handles the key. Feed it every key event the terminal sees, so it knows which Option is down. */
+export function optionAsAltInput(e: KeyboardEvent): string | undefined {
+  if (e.code === "AltLeft" || e.code === "AltRight") heldAlt[e.code] = e.type === "keydown";
+  if (!e.altKey) heldAlt.AltLeft = heldAlt.AltRight = false;
+  const mode = usePerchStore.getState().settings?.optionAsAlt;
+  if ((mode !== "left" && mode !== "right") || e.type !== "keydown" || !e.altKey || e.ctrlKey || e.metaKey) return undefined;
+  if (!heldAlt[mode === "left" ? "AltLeft" : "AltRight"]) return undefined;
+  // The layout's own character for this key is the very thing Option rewrote, so go by the physical key.
+  const letter = /^Key([A-Z])$/.exec(e.code)?.[1];
+  const digit = /^Digit([0-9])$/.exec(e.code)?.[1];
+  const base = letter ? (e.shiftKey ? letter : letter.toLowerCase()) : digit ? (e.shiftKey ? SHIFTED_DIGITS[+digit] : digit) : PUNCTUATION[e.code]?.[e.shiftKey ? 1 : 0];
+  return base === undefined ? undefined : `\x1b${base}`;
+}
+
 /** settings.minimumContrast (1 to 21; 1 leaves the program's colors alone). */
 const clampContrast = (ratio: number | undefined) => (Number.isFinite(ratio) ? Math.min(21, Math.max(1, ratio!)) : 1);
 
@@ -214,7 +238,7 @@ function watchTerminalSettings() {
     document.documentElement.classList.toggle("no-pane-scrollbars", settings?.paneScrollbars === false);
     for (const term of liveTerminals.values()) {
       term.options.minimumContrastRatio = clampContrast(settings?.minimumContrast);
-      term.options.macOptionIsMeta = settings?.optionAsAlt !== "off";
+      term.options.macOptionIsMeta = optionIsMeta(settings?.optionAsAlt);
     }
   };
   usePerchStore.subscribe(apply);
@@ -308,7 +332,7 @@ export function createPerchTerminal(
     minimumContrastRatio: clampContrast(usePerchStore.getState().settings?.minimumContrast),
     // iTerm2's "Esc+" behaviour — what makes Alt+B / Alt+F / Alt+Backspace
     // word motion work in the CLIs' composers.
-    macOptionIsMeta: usePerchStore.getState().settings?.optionAsAlt !== "off",
+    macOptionIsMeta: optionIsMeta(usePerchStore.getState().settings?.optionAsAlt),
     macOptionClickForcesSelection: true,
     drawBoldTextInBrightColors: true,
     allowProposedApi: true, // required by the Unicode 11 addon

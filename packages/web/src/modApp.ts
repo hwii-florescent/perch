@@ -14,6 +14,7 @@ import { isRelayMode, relayBlobUrl } from "./relay/transport";
 import { usePerchStore } from "./store";
 import { workspaceRecord } from "./terminalScope";
 import { sessionDotState } from "./statusDot";
+import { isPinned } from "./pinnedTerminals";
 import { socket } from "./ws";
 
 /** Colors by name plus which appearance is on. */
@@ -78,9 +79,9 @@ export interface ModApi {
   hosts(): { id: string; name: string; enabled: boolean }[];
   focused(): { sessionId: string | null; projectId: string | null; workspaceId: string | null };
   /** The sessions that run an agent (not a plain terminal), with their status. */
-  agents(): { id: string; title: string; provider: string; status: "working" | "idle" | "blocked" | "done"; workspaceId?: string; hostId: string; focused: boolean }[];
+  agents(): { id: string; title: string; provider: string; status: "working" | "idle" | "blocked" | "done"; workspaceId?: string; hostId: string; focused: boolean; pinned: boolean }[];
   /** The sessions that are plain terminals. */
-  terminals(): { id: string; title: string; cwd: string; workspaceId?: string; hostId: string; focused: boolean }[];
+  terminals(): { id: string; title: string; cwd: string; workspaceId?: string; hostId: string; focused: boolean; pinned: boolean }[];
   /** What the tab on screen shows: its tiles when split, else the one tab. `kind` is session, file, review, browser or mod. */
   panes(): { id: string; kind: string; title: string; mod?: string; focused: boolean }[];
   /** The last `lines` lines (default 50) of a terminal's text, screen and scrollback: `id` is a session id or a terminal id, and it must be on screen (herdr's `hc read`). */
@@ -325,8 +326,8 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
       if (!hosts.length) fetchHosts(); // the list is only loaded once Settings has been opened
       return hosts.map(({ id, name, enabled }) => ({ id, name, enabled }));
     },
-    agents: () => usePerchStore.getState().sessions.filter((s) => s.cliProviderId !== "terminal").map((s) => ({ id: s.id, title: s.title, provider: s.cliProviderId ?? "", status: sessionDotState(s) as "working" | "idle" | "blocked" | "done", workspaceId: s.workspaceId, hostId: s.hostId ?? "local", focused: s.id === usePerchStore.getState().sessionId })),
-    terminals: () => usePerchStore.getState().sessions.filter((s) => s.cliProviderId === "terminal").map((s) => ({ id: s.id, title: s.title, cwd: s.cwd, workspaceId: s.workspaceId, hostId: s.hostId ?? "local", focused: s.id === usePerchStore.getState().sessionId })),
+    agents: () => usePerchStore.getState().sessions.filter((s) => s.cliProviderId !== "terminal").map((s) => ({ id: s.id, title: s.title, provider: s.cliProviderId ?? "", status: sessionDotState(s) as "working" | "idle" | "blocked" | "done", workspaceId: s.workspaceId, hostId: s.hostId ?? "local", focused: s.id === usePerchStore.getState().sessionId, pinned: isPinned(s.id) })),
+    terminals: () => usePerchStore.getState().sessions.filter((s) => s.cliProviderId === "terminal").map((s) => ({ id: s.id, title: s.title, cwd: s.cwd, workspaceId: s.workspaceId, hostId: s.hostId ?? "local", focused: s.id === usePerchStore.getState().sessionId , pinned: isPinned(s.id) })),
     panes: () => panesOnScreen(),
     readTerminal: (id, lines) => {
       const text = terminalText(terminalElement(id), lines);

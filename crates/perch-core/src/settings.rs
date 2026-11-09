@@ -85,8 +85,8 @@ pub struct Settings {
     /// A terminal pane shows its scroll position thumb. Defaults to `true`.
     #[serde(default = "default_true")]
     pub pane_scrollbars: bool,
-    /// Option acts as Alt in terminals (`"auto"` and `"on"` do; `"off"` keeps the keyboard layout's
-    /// characters). Defaults to `"auto"`.
+    /// Option acts as Alt in terminals (`"auto"` and `"on"` for both keys, `"left"` or `"right"` for
+    /// that key only; `"off"` keeps the keyboard layout's characters). Defaults to `"auto"`.
     #[serde(default = "default_option_as_alt")]
     pub option_as_alt: String,
     /// Notification sounds: a file under the folder that holds `mods/` (mp3, wav, ogg, m4a, flac;
@@ -403,8 +403,8 @@ impl SettingsStore {
         }
         if let Some(mode) = &patch.option_as_alt {
             anyhow::ensure!(
-                matches!(mode.as_str(), "auto" | "on" | "off"),
-                "option as alt is auto, on or off"
+                matches!(mode.as_str(), "auto" | "on" | "off" | "left" | "right"),
+                "option as alt is auto, on, off, left or right"
             );
         }
         for file in [&patch.sound_done, &patch.sound_blocked]
@@ -806,8 +806,12 @@ mod keybinding_tests {
         );
         assert_eq!(reloaded.option_as_alt, "auto");
         assert!(store
-            .update(patch(serde_json::json!({"optionAsAlt": "left"})))
+            .update(patch(serde_json::json!({"optionAsAlt": "middle"})))
             .is_err());
+        assert!(store
+            .update(patch(serde_json::json!({"optionAsAlt": "left"})))
+            .is_ok());
+        assert_eq!(store.get().option_as_alt, "left");
         assert!(store
             .update(patch(serde_json::json!({"soundDone": "../x.mp3"})))
             .is_err());

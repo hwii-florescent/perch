@@ -21,6 +21,7 @@ import type { Terminal } from "@xterm/xterm";
 import { SearchAddon } from "@xterm/addon-search";
 import { shortcutFor, terminalKeyHandler } from "./keybinds";
 import { jumpToCommand } from "./commandMarks";
+import { optionAsAltInput } from "./xtermSetup";
 
 export interface TerminalSearchController {
   open: boolean;
@@ -73,7 +74,12 @@ export function useTerminalSearch(term: Terminal | null): TerminalSearchControll
         searchAddonRef.current?.clearActiveDecoration();
         return false;
       }
-      return terminalKeyHandler(e);
+      if (!terminalKeyHandler(e)) return false;
+      const alt = optionAsAltInput(e);
+      if (alt === undefined) return true;
+      e.preventDefault();
+      term.input(alt, true);
+      return false;
     });
   }, [term]);
 

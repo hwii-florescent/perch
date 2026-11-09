@@ -153,6 +153,41 @@ describe("createPerchTerminal", () => {
     dispose();
   });
 
+  it("optionAsAlt left or right turns only that Option key into Alt, by the physical key", async () => {
+    const { usePerchStore } = await import("./store");
+    const { createPerchTerminal, optionAsAltInput } = await import("./xtermSetup");
+    const settings = (optionAsAlt: string) => usePerchStore.setState((s) => ({ settings: { ...s.settings, optionAsAlt } as never }));
+    const key = (type: string, code: string, init: KeyboardEventInit = {}) => new KeyboardEvent(type, { code, ...init });
+    const typed = (code: string, init: KeyboardEventInit = {}) => optionAsAltInput(key("keydown", code, { altKey: true, ...init }));
+    settings("left");
+    optionAsAltInput(key("keydown", "AltRight", { altKey: true }));
+    expect(typed("KeyB")).toBeUndefined(); // the right Option keeps composing
+    optionAsAltInput(key("keyup", "AltRight"));
+    optionAsAltInput(key("keydown", "AltLeft", { altKey: true }));
+    expect(typed("KeyB")).toBe("\x1bb");
+    expect(typed("KeyB", { shiftKey: true })).toBe("\x1bB");
+    expect(typed("Digit1", { shiftKey: true })).toBe("\x1b!");
+    expect(typed("Slash")).toBe("\x1b/");
+    expect(typed("ArrowLeft")).toBeUndefined(); // xterm encodes special keys itself
+    expect(typed("KeyB", { ctrlKey: true })).toBeUndefined();
+    optionAsAltInput(key("keyup", "AltLeft"));
+    expect(typed("KeyB")).toBeUndefined(); // released: nothing held
+    settings("on");
+    optionAsAltInput(key("keydown", "AltLeft", { altKey: true }));
+    expect(typed("KeyB")).toBeUndefined(); // on, not left: xterm's own meta switch does it
+    optionAsAltInput(key("keyup", "AltLeft"));
+    HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }) })) as never;
+    window.matchMedia ??= (() => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} })) as never;
+    globalThis.ResizeObserver ??= class { observe() {} disconnect() {} } as never;
+    globalThis.IntersectionObserver ??= class { observe() {} disconnect() {} } as never;
+    const { term, dispose } = createPerchTerminal(document.createElement("div"), () => {});
+    settings("left");
+    expect(term.options.macOptionIsMeta).toBe(false);
+    settings("auto");
+    expect(term.options.macOptionIsMeta).toBe(true);
+    dispose();
+  });
+
   it("terminalSelection and pasteIntoTerminal act on the terminal in or under an element", async () => {
     HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }) })) as never;
     window.matchMedia ??= (() => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} })) as never;

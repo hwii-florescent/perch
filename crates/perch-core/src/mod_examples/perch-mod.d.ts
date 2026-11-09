@@ -25,9 +25,9 @@ interface ModApi {
   workspaces(): { id: string; projectId: string; state: string }[];
   focused(): { sessionId: string | null; projectId: string | null; workspaceId: string | null };
   /** The sessions that run an agent (not a plain terminal), with their status. */
-  agents(): { id: string; title: string; provider: string; status: "working" | "idle" | "blocked" | "done"; workspaceId?: string; hostId: string; focused: boolean }[];
+  agents(): { id: string; title: string; provider: string; status: "working" | "idle" | "blocked" | "done"; workspaceId?: string; hostId: string; focused: boolean; pinned: boolean }[];
   /** The sessions that are plain terminals. */
-  terminals(): { id: string; title: string; cwd: string; workspaceId?: string; hostId: string; focused: boolean }[];
+  terminals(): { id: string; title: string; cwd: string; workspaceId?: string; hostId: string; focused: boolean; pinned: boolean }[];
   /** What the tab on screen shows: its tiles when split, else the one tab. `kind` is session, file, review, browser or mod. */
   panes(): { id: string; kind: string; title: string; mod?: string; focused: boolean }[];
   /** The last `lines` lines (default 50) of a terminal's text, screen and scrollback: `id` is a session id or a terminal id, and it must be on screen (herdr's `hc read`). */

@@ -115,18 +115,23 @@ approval not mattering much.
   `agent.next|prev|focus {terminal}`, `session|workspace|project.rename {id, name}`, `app.settings|help|palette`, and
   `tab.new {argv, task?}` (a terminal running the program in the shown workspace through the core's `workspace.run`,
   `task` as its last argument), `terminal.copy|paste {terminal?}`, `overlay.close` (the top dialog or popup), `project.new
-  {folder, name?}` and `layout.set {layout}` (rewrites the shown layout's file; it hot reloads). `settings.json` also takes
+  {folder, name?, argv?, task?}` (with `argv`, runs the program in the new project once it is added: herdr's `space.new`
+  with `argv`), `terminal.pin {terminal?, pinned?}` (kept on this device; `agents()` and `terminals()` report `pinned`, a
+  mod's own sidebar can order by it, Perch's views do not), `terminal.show|peek|keep {terminal|id}` (all three show the
+  session: perchd keeps every terminal running, so none is hidden or parked) and `layout.set {layout}` (rewrites the shown layout's file; it hot reloads). `settings.json` also takes
   herdr's `minimum_contrast` (as `minimumContrast`, 1 to 21), `clipboard_write` (`clipboardWrite`, OSC 52),
   `pane_scrollbars` (`paneScrollbars`), `option_as_alt` (`optionAsAlt`: `auto` and `on` are alike because a web view
-  cannot tell the keyboard layout, `off`; not `left`/`right`) and `sounds` (`soundDone`, `soundBlocked`: a file under the
+  cannot tell the keyboard layout, `off`, and `left` or `right`: only that Option key is Alt, sent as ESC and the key's
+  base character by its physical key, the other key keeps typing the layout's characters); not checked in a real window, and a dead-key combination such as Option+E may still start the layout's accent instead of sending ESC+e and `sounds` (`soundDone`, `soundBlocked`: a file under the
   folder that holds `mods/`, served by `GET /mods/file?sound=`, 2 MiB, mp3/wav/ogg/m4a/flac, the tone if it will not
   play), live in open terminals. Fonts and sizes stay with the server terminal profile and a layout's look, ligatures
   need an addon Perch does not ship, and there is no telemetry to turn off.
-  Not ported because Perch has no such thing: `terminal.keep|park|peek|show` (perchd keeps every terminal), `terminal.pin`
-  (no pinned agents), the updater, feedback and `app.reset` family, `space.new` with `argv` (start the program with
-  `tab.new {argv}` after `project.new`), label adoption of daemon terminals (the core keeps the bookkeeping of what it
-  started; a terminal `perch daemon run` makes stays out of the UI, as herdr's unlabeled ones do) and `hc exec --on`
-  (a mod's `exec({host})` runs on a Settings > Hosts computer).
+  Not ported: `terminal.park` (nothing is ever hidden), the updater, feedback and `app.reset` family (Perch has no
+  updater service or feedback form; a reset is deleting the folder), label adoption of daemon terminals (the core keeps
+  the bookkeeping of what it started; a terminal `perch daemon run` makes stays out of the UI, as herdr's unlabeled ones
+  do) and `hc exec --on` as a command line. The core opens `/mods/exec` only to its own page or a paired device, and a
+  desktop core publishes no local token; a command line would need a new credential, so a mod's `exec({host})` runs on a
+  Settings > Hosts computer instead.
 - **More of herdr's surface.** `home()`/`appHome()`, `placement()` (a floating mod's edge/align/dragging),
   `playSound("done"|"blocked")`, a block `agent:focused` (the focused session's terminal), `key.bind {command, keys}`
   (so an agent can set a key through `perch mod do`) and `perch mod status` (layout, focus, theme, dialogs, each mod's

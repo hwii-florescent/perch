@@ -9,6 +9,7 @@ import { activateTab, currentTabs, entryLabel, moveChat } from "./workspaceTabs"
 import { zoomIn, zoomOut, zoomReset } from "./zoom";
 import { tauriInvoke } from "./links";
 import { useFileTabs } from "./fileTabs";
+import { isPinned, setPinned } from "./pinnedTerminals";
 import { runInWorkspace } from "./runs";
 import { usePerchStore } from "./store";
 
@@ -131,6 +132,15 @@ const showWhenListed = (id: string) => {
   const timer = setTimeout(stop, 10_000);
 };
 
+/** Validate `{argv, task?}` now; the returned start runs that program in a workspace and shows its terminal. */
+const programIn = (args: unknown) => {
+  const argv = (args as { argv?: unknown } | null)?.argv;
+  if (!Array.isArray(argv) || !argv.length || argv.some((part) => typeof part !== "string" || !part)) throw new Error("argv is a list of strings: [program, ...arguments].");
+  const quote = (part: string) => `'${part.replace(/'/g, "'\\''")}'`;
+  const command = [...argv as string[], ...(word(args, "task") ? [word(args, "task")!] : [])].map(quote).join(" ");
+  return async (workspaceId: string) => showWhenListed(await runInWorkspace(workspaceId, command));
+};
+
 export const TYPED_COMMANDS: Record<string, { description: string; args: string; run: (args: unknown) => void }> = {
   "session.open": { description: "Go to a session", args: "{id}", run: (args) => usePerchStore.getState().switchSession(needsId(args)) },
   "session.close": { description: "Delete a session", args: "{id}", run: (args) => usePerchStore.getState().deleteSession(needsId(args)) },
@@ -153,15 +163,11 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
   "app.zoom_reset": { description: "Zoom back to 100%", args: "{}", run: () => zoomReset() },
   "tab.new": { description: "A new tab; with `mod`, a tab that shows that mod (props reach it as props()); with `argv`, a terminal running that program (an agent from knownAgents().run) in the shown workspace, `task` as its last argument (most agents take it as the first message)", args: "{mod?, props?, argv?: string[], task?}", run: (args) => {
     const mod = word(args, "mod");
-    const argv = (args as { argv?: unknown } | null)?.argv;
     if (mod) return openModOrThrow(mod, args);
-    if (argv === undefined) return void runCommand("tabs.new");
-    if (!Array.isArray(argv) || !argv.length || argv.some((part) => typeof part !== "string" || !part)) throw new Error("argv is a list of strings: [program, ...arguments].");
-    const state = usePerchStore.getState();
-    if (!state.activeWorkspaceId) throw new Error("Open a project first.");
-    const quote = (part: string) => `'${part.replace(/'/g, "'\\''")}'`;
-    const command = [...argv as string[], ...(word(args, "task") ? [word(args, "task")!] : [])].map(quote).join(" ");
-    later(async () => showWhenListed(await runInWorkspace(state.activeWorkspaceId!, command)))(undefined);
+    if ((args as { argv?: unknown } | null)?.argv === undefined) return void runCommand("tabs.new");
+    if (!usePerchStore.getState().activeWorkspaceId) throw new Error("Open a project first.");
+    const start = programIn(args);
+    later(async () => start(usePerchStore.getState().activeWorkspaceId!))(undefined);
   } },
   "tab.next": { description: "The next tab", args: "{}", run: () => void runCommand("tabs.next") },
   "tab.prev": { description: "The previous tab", args: "{}", run: () => void runCommand("tabs.prev") },
@@ -201,6 +207,14 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
     if (!id) throw new Error("That terminal is still opening.");
     usePerchStore.getState().killTerminal(id);
   } },
+  "terminal.pin": { description: "Pin or unpin a terminal on this device (agents() and terminals() report it; Perch's own views do not order by it)", args: "{terminal?, pinned?}", run: (args) => {
+    const id = terminalOnScreen(args).getAttribute("data-session-id");
+    if (!id) throw new Error("That terminal is still opening.");
+    const pinned = (args as { pinned?: unknown } | null)?.pinned;
+    if (pinned !== undefined && typeof pinned !== "boolean") throw new Error("{pinned} is true or false.");
+    setPinned(id, pinned ?? !isPinned(id));
+  } },
+  ...Object.fromEntries(["show", "peek", "keep"].map((verb) => [`terminal.${verb}`, { description: "Show a terminal's session (Perch keeps every terminal running, so there is nothing to un-hide or park; peek, keep and show are the same command)", args: "{terminal | id}", run: (args: unknown) => usePerchStore.getState().switchSession(word(args, "terminal") ?? needsId(args)) }])),
   "terminal.scroll": { description: "Move the view of a terminal's history, not the program: lines or pages (negative: toward history), or to top | bottom", args: "{lines | pages | to, terminal?}", run: (args) => {
     const to = word(args, "to");
     if (to !== undefined && to !== "top" && to !== "bottom") throw new Error('{to} is "top" or "bottom".');
@@ -219,10 +233,30 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
     pasteIntoTerminal(terminalOnScreen(args), text);
   }) },
   "overlay.close": { description: "Close the top dialog or popup a mod opened (windows stay until their own close)", args: "{}", run: () => void closeTopOverlay() },
-  "project.new": { description: "Add a folder as a project and show it", args: "{folder, name?}", run: (args) => {
+  "project.new": { description: "Add a folder as a project and show it; with `argv` (and `task`), run that program in the new project once it is added", args: "{folder, name?, argv?: string[], task?}", run: (args) => {
     const folder = word(args, "folder");
     if (!folder) throw new Error('This command needs {folder: "/path"}.');
-    if (!usePerchStore.getState().createWorkspaceProject(folder, word(args, "name"))) throw new Error(`Cannot add ${folder} as a project.`);
+    const start = (args as { argv?: unknown }).argv === undefined ? undefined : programIn(args);
+    const known = new Set(usePerchStore.getState().workspaceProjects.map((project) => project.id));
+    const requestId = usePerchStore.getState().createWorkspaceProject(folder, word(args, "name"));
+    if (!requestId) throw new Error(`Cannot add ${folder} as a project.`);
+    if (!start) return;
+    const fail = (why: string) => later(async () => { throw new Error(`${why}: ${folder} was not started.`); })(undefined);
+    const stop = usePerchStore.subscribe((state) => {
+      const made = state.workspaceProjectCreate;
+      if (made?.requestId !== requestId || made.status === "pending") return;
+      stop();
+      clearTimeout(timer);
+      // A successful add does not move focus; the new project is the one that was not listed before (or has the path), as the folder picker finds it.
+      const created = state.workspaceProjects.find((project) => project.hostId === made.hostId && !known.has(project.id))
+        ?? state.workspaceProjects.find((project) => project.hostId === made.hostId && project.path === made.path);
+      if (made.status !== "success" || !created) return fail(made.error ?? "The project could not be added");
+      state.focusWorkspaceProject(created.id);
+      const workspaceId = usePerchStore.getState().activeWorkspaceId;
+      if (workspaceId) later(() => start(workspaceId))(undefined);
+      else fail("The new project has no workspace");
+    });
+    const timer = setTimeout(() => { stop(); fail("The project was not added in time"); }, 30_000);
   } },
   "layout.set": { description: "Replace the shown layout's tree (the file layouts/<name>.json; it reloads at once). A layout must be shown: layout.switch first", args: "{layout: {type, children, ...}}", run: (args) => {
     const tree = (args as { layout?: unknown } | null)?.layout;

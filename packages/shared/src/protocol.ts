@@ -498,7 +498,7 @@ export interface SettingsData {
   /** A terminal pane shows its scroll position thumb. Absent = true. */
   paneScrollbars?: boolean;
   /** Option acts as Alt in terminals: "auto" and "on" do, "off" keeps the layout's characters. Absent = "auto". */
-  optionAsAlt?: "auto" | "on" | "off";
+  optionAsAlt?: "auto" | "on" | "off" | "left" | "right";
   /** Notification sounds: a file under the folder that holds mods/ in place of the built-in tone. Absent or "" = the tone. */
   soundDone?: string;
   soundBlocked?: string;
@@ -565,7 +565,7 @@ export interface SettingsPatch {
   minimumContrast?: number;
   clipboardWrite?: boolean;
   paneScrollbars?: boolean;
-  optionAsAlt?: "auto" | "on" | "off";
+  optionAsAlt?: "auto" | "on" | "off" | "left" | "right";
   soundDone?: string;
   soundBlocked?: string;
   phoneAccess?: boolean;
