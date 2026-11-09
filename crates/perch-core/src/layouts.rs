@@ -37,6 +37,30 @@ const COLORS: [&str; 17] = [
     "backdrop",
 ];
 
+/// herdr's color names, which a theme file's `colors` may use as well. `themes.ts` maps the ones Perch has a
+/// token for (`HERDR_COLORS`) and ignores the rest.
+const HERDR_COLOR_NAMES: [&str; 19] = [
+    "background",
+    "surface",
+    "raised",
+    "popover",
+    "hover",
+    "border",
+    "input",
+    "foreground",
+    "terminal_foreground",
+    "muted",
+    "dim",
+    "selection",
+    "accent_foreground",
+    "ring",
+    "working",
+    "blocked",
+    "done",
+    "idle",
+    "unknown",
+];
+
 /// `{"px": 240}` (fixed) or `{"weight": 2}` (a share of what fixed siblings leave; the default is 1).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Size {
@@ -699,7 +723,7 @@ pub fn scan(root: &Path, policy: &Policy) -> Vec<LayoutInfo> {
 /// A theme file in `<root>/themes/<id>.json`. Two shapes: Perch's own, `{"name", "base"?, "colors":
 /// {palette token: "#rrggbb"}}` (tokens are `COLORS` without `backdrop`; `base` is the theme the rest
 /// comes from), or herdr's terminal one, `{"name", "background", "foreground", "selection"?,
-/// "cursor"?, "ansi": [16 colors]}`, from which the page derives the palette.
+/// "cursor"?, "ansi": [16 colors], "colors"?: {herdr's color names}}`, from which the page derives the palette.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ThemeFile {
@@ -723,19 +747,19 @@ pub struct ThemeInfo {
 
 fn theme_ok(theme: &ThemeFile) -> Result<(), String> {
     let bad = |c: &String| !hex_color(c);
-    if theme
-        .colors
-        .iter()
-        .any(|(name, value)| !COLORS.contains(&name.as_str()) || name == "backdrop" || bad(value))
-        || [
-            &theme.background,
-            &theme.foreground,
-            &theme.selection,
-            &theme.cursor,
-        ]
-        .into_iter()
-        .flatten()
-        .any(bad)
+    if theme.colors.iter().any(|(name, value)| {
+        !(COLORS.contains(&name.as_str()) || HERDR_COLOR_NAMES.contains(&name.as_str()))
+            || name == "backdrop"
+            || bad(value)
+    }) || [
+        &theme.background,
+        &theme.foreground,
+        &theme.selection,
+        &theme.cursor,
+    ]
+    .into_iter()
+    .flatten()
+    .any(bad)
         || theme.ansi.iter().any(bad)
         || !(theme.ansi.is_empty() || theme.ansi.len() == 16)
     {
@@ -1198,6 +1222,14 @@ mod tests {
                 serde_json::json!(ansi)
             ),
         );
+        // herdr's own win98.json shape: terminal colors plus its named `colors`.
+        put(
+            "win98.json",
+            &format!(
+                r##"{{"background":"#ffffff","foreground":"#c0c0c0","selection":"#000080","cursor":"#c0c0c0","ansi":{},"colors":{{"background":"#000000","surface":"#c0c0c0","popover":"#c0c0c0","raised":"#dfdfdf","hover":"#dfdfdf","border":"#808080","input":"#ffffff","muted":"#404040","dim":"#808080","accent":"#000080","accent_foreground":"#ffffff","ring":"#000000","working":"#808000","blocked":"#ff0000","done":"#0000ff","idle":"#808080","unknown":"#808080"}}}}"##,
+                serde_json::json!(ansi)
+            ),
+        );
         put("bad-hex.json", r#"{"colors":{"accent":"orange"}}"#);
         put("bad-token.json", r##"{"colors":{"nope":"#000000"}}"##);
         put(
@@ -1210,10 +1242,11 @@ mod tests {
         let by = |id: &str| found.iter().find(|t| t.id == id).unwrap();
         assert_eq!(by("mine").name, "Mine");
         assert!(by("mine").error.is_none() && by("term").error.is_none());
+        assert!(by("win98").error.is_none(), "{:?}", by("win98").error);
         for bad in ["bad-hex", "bad-token", "bad-ansi", "empty"] {
             assert!(by(bad).error.is_some(), "{bad}");
         }
-        assert_eq!(found.len(), 6); // "not json" has a space: not a plain id
+        assert_eq!(found.len(), 7); // "not json" has a space: not a plain id
         let _ = std::fs::remove_dir_all(&root);
     }
 

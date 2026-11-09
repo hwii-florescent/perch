@@ -189,26 +189,39 @@ const SHIPPED = new Set(THEME_NAMES);
 
 const hexMix = (a: string, b: string, pct: number) => `#${[1, 3, 5].map((i) => Math.round(parseInt(a.slice(i, i + 2), 16) * (1 - pct / 100) + parseInt(b.slice(i, i + 2), 16) * pct / 100).toString(16).padStart(2, "0")).join("")}`;
 
-/** A palette from a `themes/<id>.json` file: Perch's shape (`colors` over a `base` theme) or herdr's
- * terminal one, whose surfaces are mixed from its background and foreground and whose accents are its
- * ANSI colors. Returns null for one that has neither. */
+/** herdr's color names in a theme file's `colors`, as the Perch token each fills; the others herdr names (`input`, `ring`, `selection`, ...) have no Perch token and are ignored. */
+const HERDR_COLORS: Record<string, keyof Palette> = {
+  surface: "panelBg", raised: "surface0", popover: "surface1", border: "overlay0", foreground: "text",
+  muted: "subtext0", dim: "overlay1", working: "yellow", blocked: "red", done: "blue",
+};
+
+/** A palette from a `themes/<id>.json` file: herdr's terminal shape (surfaces mixed from its background
+ * and foreground, accents from its ANSI colors) or a `base` theme, with its `colors` on top (Perch's
+ * tokens, or herdr's names). Returns null for one that has neither. */
 export function paletteFromFile(file: ThemeFile): Palette | null {
-  if (file.colors && Object.keys(file.colors).length) {
-    const base = (file.base && Object.hasOwn(THEMES, file.base) ? THEMES[file.base] : undefined) ?? PERCH_DEFAULT;
-    return { ...base, ...(file.colors as Partial<Palette>) };
-  }
   const { background: bg, foreground: fg, ansi = [] } = file;
-  if (!bg || !fg) return null;
-  const light = luminance(bg) > 0.179;
-  const accent = file.cursor ?? ansi[4] ?? fg;
-  return {
-    accent, panelBg: bg, text: fg,
-    surface0: hexMix(bg, fg, 8), surface1: hexMix(bg, fg, 16),
-    surfaceDim: hexMix(bg, light ? "#ffffff" : "#000000", 40),
-    overlay0: hexMix(bg, fg, 28), overlay1: hexMix(bg, fg, 55), subtext0: hexMix(bg, fg, 72),
-    mauve: ansi[5] ?? accent, green: ansi[2] ?? accent, yellow: ansi[3] ?? accent, red: ansi[1] ?? accent,
-    blue: ansi[4] ?? accent, teal: ansi[6] ?? accent, peach: ansi[11] ?? ansi[3] ?? accent,
-  };
+  const colors = Object.entries(file.colors ?? {});
+  if (!colors.length && !(bg && fg)) return null;
+  let palette: Palette;
+  if (bg && fg) {
+    const light = luminance(bg) > 0.179;
+    const accent = file.cursor ?? ansi[4] ?? fg;
+    palette = {
+      accent, panelBg: bg, text: fg,
+      surface0: hexMix(bg, fg, 8), surface1: hexMix(bg, fg, 16),
+      surfaceDim: hexMix(bg, light ? "#ffffff" : "#000000", 40),
+      overlay0: hexMix(bg, fg, 28), overlay1: hexMix(bg, fg, 55), subtext0: hexMix(bg, fg, 72),
+      mauve: ansi[5] ?? accent, green: ansi[2] ?? accent, yellow: ansi[3] ?? accent, red: ansi[1] ?? accent,
+      blue: ansi[4] ?? accent, teal: ansi[6] ?? accent, peach: ansi[11] ?? ansi[3] ?? accent,
+    };
+  } else {
+    palette = { ...((file.base && Object.hasOwn(THEMES, file.base) ? THEMES[file.base] : undefined) ?? PERCH_DEFAULT) };
+  }
+  for (const [name, value] of colors) {
+    const token = Object.hasOwn(PERCH_DEFAULT, name) ? (name as keyof Palette) : Object.hasOwn(HERDR_COLORS, name) ? HERDR_COLORS[name] : undefined;
+    if (token) palette[token] = value;
+  }
+  return palette;
 }
 
 /** Offers the files in `themes/` as themes by file name (to a layout's `theme` and the Settings

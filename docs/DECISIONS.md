@@ -192,7 +192,7 @@ approval not mattering much.
   run on the same state), `windowDrag` (`data-tauri-drag-region`), root `preview` (a data URI in the layout
   info, shown in Settings), root `titlebar: "none"` (macOS keeps its window buttons over the layout, so
   it only sets `--titlebar-inset`), and `theme` may be `{light, dark}`. `themes/<name>.json` (Perch's
-  `colors` over a `base`, or herdr's `background`/`foreground`/`ansi`) are offered by file name; a
+  `colors` over a `base`, or herdr's `background`/`foreground`/`ansi`, whose `colors` may use herdr's names: `surface`, `raised`, `popover`, `border`, `foreground`, `muted`, `dim`, `accent`, `working`, `blocked`, `done` fill the matching Perch token and the rest are ignored, so herdr's shipped `win98.json` loads as it is) are offered by file name; a
   mod's `fonts/` files load as fonts named by file stem (`GET /mods/file?id=&font=`). New slots
   `pane-header` and `terminal-menu`; `api.loop(frame, {fps})` for animation.
 - **Driving the window.** `perch mod commands` lists the app commands (the ones keys, `api.commands` and

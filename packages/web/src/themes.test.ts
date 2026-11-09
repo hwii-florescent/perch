@@ -168,6 +168,19 @@ describe("theme files", () => {
     expect(Object.hasOwn(THEMES, "dusk")).toBe(false);
   });
 
+  it("take herdr's win98 theme as shipped: its terminal colors, then its named colors on top", () => {
+    const win98 = {
+      background: "#ffffff", foreground: "#c0c0c0", selection: "#000080", cursor: "#c0c0c0",
+      ansi: ["#555555", "#aa0000", "#00aa00", "#aa5500", "#0000bb", "#aa00aa", "#00aaaa", "#aaaaaa", "#555555", "#ff5555", "#55ff55", "#ffff55", "#5555ff", "#ff55ff", "#55ffff", "#ffffff"],
+      colors: { background: "#000000", foreground: "#000000", surface: "#c0c0c0", raised: "#dfdfdf", border: "#808080", muted: "#404040", accent: "#000080", ring: "#000000", working: "#808000", blocked: "#ff0000", __proto__x: "#123456" },
+    };
+    const palette = paletteFromFile(win98)!;
+    expect([palette.panelBg, palette.surface0, palette.overlay0, palette.subtext0, palette.text, palette.accent, palette.yellow, palette.red])
+      .toEqual(["#c0c0c0", "#dfdfdf", "#808080", "#404040", "#000000", "#000080", "#808000", "#ff0000"]);
+    expect(palette.green).toBe("#00aa00"); // from the ANSI colors
+    expect(Object.keys(palette).sort()).toEqual(Object.keys(PERCH_DEFAULT).sort()); // nothing foreign leaks in
+  });
+
   it("picks a half of a light/dark pair", () => {
     expect(themeName("nord", true)).toBe("nord");
     expect(themeName({ light: "paper", dark: "nord" }, true)).toBe("nord");
