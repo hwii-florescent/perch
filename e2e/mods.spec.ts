@@ -275,13 +275,20 @@ test("herdr's tab, pane, terminal and agent commands run against Perch's tabs an
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     (async () => {
       const seen = {};
-      await sleep(800);
+      // The page restores the viewer's saved selection once after load (and treats the first session change as the connection resuming); act after both, as a person would.
+      for (let i = 0; i < 40 && !api.focused().sessionId; i++) await sleep(250);
+      await sleep(2000);
+      const before = new Set(api.terminals().map((t) => t.id));
       api.run('tab.new', { argv: ['sh', '-c', 'echo ARGV_$((6*7)); sleep 60'] });
       let id;
       for (let i = 0; i < 40 && !id; i++) {
         await sleep(500);
-        const focused = api.focused().sessionId;
-        try { if ((await api.readTerminal(focused, 10)).includes('ARGV_42')) id = focused; } catch {}
+        // The new terminal is listed at once; the page may move focus elsewhere meanwhile (a resumed session), so show it by name.
+        const made = api.terminals().find((t) => !before.has(t.id) && t.title.startsWith("Run: 'sh'"));
+        if (!made) continue;
+        api.run('session.open', { id: made.id });
+        await sleep(300);
+        try { if ((await api.readTerminal(made.id, 10)).includes('ARGV_42')) id = made.id; } catch {}
       }
       seen.started = !!id;
       if (id) {

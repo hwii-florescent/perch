@@ -148,7 +148,7 @@ export function PersistentTerminal({ active, sessionId, paneId, layoutPanelId, o
     : current?.state === "exited" ? `Shell exited (code ${current.exitCode ?? "unknown"}).`
     : !current ? "Opening shell…" : null);
 
-  return <div className="terminal terminal--persistent" data-terminal-id={current?.id} data-pane-id={selected ?? undefined}>
+  return <div className="terminal terminal--persistent" data-session-id={sessionId} data-terminal-id={current?.id} data-pane-id={selected ?? undefined}>
     <div className="terminal__toolbar">
       {terminals.length > 0 && <Select className="min-w-0 max-w-[140px]" ariaLabel="Shell pane" disabled={closing || !connected} value={selected ?? ""} onChange={(value) => { explicitlyClosed.current = false; setSelected(value); onPaneChange?.(value); }}
         options={[...(selected ? [] : [{ value: "", label: "Choose a shell", disabled: true }]), ...terminals.map((row, index) => ({ value: row.paneId, label: `Shell ${index + 1}${row.state === "lost" ? " · unavailable" : ""}` }))]} />

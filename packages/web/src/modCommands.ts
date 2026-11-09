@@ -6,6 +6,7 @@ import { focusedSplit, getPaneController, openModTab, splitActiveTab } from "./t
 import { activateTab, currentTabs, entryLabel, moveChat } from "./workspaceTabs";
 import { zoomIn, zoomOut, zoomReset } from "./zoom";
 import { tauriInvoke } from "./links";
+import { useFileTabs } from "./fileTabs";
 import { runInWorkspace } from "./runs";
 import { usePerchStore } from "./store";
 
@@ -112,6 +113,22 @@ const stepAgent = (step: 1 | -1) => () => {
 };
 const sessionsByTab = (id: string) => usePerchStore.getState().sessions.find((session) => session.id === id)?.id;
 
+/** The core answers a run before it pushes the new session; show the session once the store lists it (a session the core never lists is dropped after 10 s). */
+const showWhenListed = (id: string) => {
+  // As the Navigator's Run does: mark the terminal started, show the session strip, then the session.
+  usePerchStore.getState().startCli(id, "terminal");
+  const show = () => { useFileTabs.getState().showSession(); usePerchStore.getState().switchSession(id); };
+  const listed = () => usePerchStore.getState().sessions.some((session) => session.id === id);
+  if (listed()) return show();
+  const stop = usePerchStore.subscribe(() => {
+    if (!listed()) return;
+    stop();
+    clearTimeout(timer);
+    show();
+  });
+  const timer = setTimeout(stop, 10_000);
+};
+
 export const TYPED_COMMANDS: Record<string, { description: string; args: string; run: (args: unknown) => void }> = {
   "session.open": { description: "Go to a session", args: "{id}", run: (args) => usePerchStore.getState().switchSession(needsId(args)) },
   "session.close": { description: "Delete a session", args: "{id}", run: (args) => usePerchStore.getState().deleteSession(needsId(args)) },
@@ -142,7 +159,7 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
     if (!state.activeWorkspaceId) throw new Error("Open a project first.");
     const quote = (part: string) => `'${part.replace(/'/g, "'\\''")}'`;
     const command = [...argv as string[], ...(word(args, "task") ? [word(args, "task")!] : [])].map(quote).join(" ");
-    later(async () => usePerchStore.getState().switchSession(await runInWorkspace(state.activeWorkspaceId!, command)))(undefined);
+    later(async () => showWhenListed(await runInWorkspace(state.activeWorkspaceId!, command)))(undefined);
   } },
   "tab.next": { description: "The next tab", args: "{}", run: () => void runCommand("tabs.next") },
   "tab.prev": { description: "The previous tab", args: "{}", run: () => void runCommand("tabs.prev") },
