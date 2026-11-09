@@ -831,7 +831,9 @@ fn files_from_begin_patch(envelope: &str) -> Vec<EditFile> {
 
 /// `NotebookEdit` has only new cell text, so a diff card would mark unchanged cells added:
 /// it keeps the generic row.
-const CLAUDE_EDIT_TOOLS: [&str; 4] = ["Edit", "MultiEdit", "Write", "str_replace"];
+/// Pi and OMP name theirs `edit` and `write` (`path`, `oldText`/`newText`, `content`); an input of
+/// another shape finds no file here and keeps its plain row.
+const CLAUDE_EDIT_TOOLS: [&str; 6] = ["Edit", "MultiEdit", "Write", "str_replace", "edit", "write"];
 /// Command tools can quote patches without applying them.
 const COMMAND_PATCH_TOOLS: [&str; 3] = ["exec", "shell", "local_shell"];
 
@@ -937,8 +939,10 @@ fn claude_edit_files(
     if name == "MultiEdit" {
         return multi_edit_files(input, path);
     }
-    let old = snippet(input, "old_string", "oldString");
-    let new = snippet(input, "new_string", "newString");
+    let old =
+        snippet(input, "old_string", "oldString").or_else(|| snippet(input, "oldText", "old_text"));
+    let new =
+        snippet(input, "new_string", "newString").or_else(|| snippet(input, "newText", "new_text"));
     let content = text(input, "content").or_else(|| text(input, "file_text"));
     if let (None, Some(content)) = (&old, content) {
         let (lines, truncated) = lines_from_whole_file(content, EditLineKind::Add);
@@ -1596,6 +1600,23 @@ mod tests {
             ]
         );
         assert_eq!((files[0].added, files[0].removed), (2, 2));
+    }
+
+    #[test]
+    fn pi_style_lowercase_edit_and_write_make_cards() {
+        let edit = settled(
+            "edit",
+            json!({"path": "src/a.ts", "oldText": "was", "newText": "now"}),
+        )
+        .unwrap();
+        assert_eq!(
+            (edit[0].path.as_str(), edit[0].added, edit[0].removed),
+            ("src/a.ts", 1, 1)
+        );
+        let write = settled("write", json!({"path": "b.txt", "content": "x\ny"})).unwrap();
+        assert_eq!((write[0].added, write[0].removed), (2, 0));
+        // A shape it does not know keeps the plain row.
+        assert!(settled("edit", json!({"path": "a", "edits": [{"op": "x"}]})).is_none());
     }
 
     #[test]

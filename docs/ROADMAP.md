@@ -252,7 +252,7 @@ Context ring (toolbar, amber from 70%, red from 90%, tooltip with tokens) for
 Claude, Codex, Pi and OMP via `NativeUiSnapshot.context`: Codex reports it
 (`thread/tokenUsage/updated`, `last.totalTokens` over `modelContextWindow`), Pi and
 OMP report it through `ctx.getContextUsage()`, Claude gives only per-response usage
-in its transcript, so its window is a guess (200k, 1M for `[1m]` or past 200k) and
+in its transcript, so its window is judged from the model id (200k for the older families, else 1M) and
 the tooltip says "about". OpenCode has no source yet. Live-checked on Claude; the
 Pi/OMP/Codex paths are unit-tested and wait on a run when their accounts are
 under the usage limit.

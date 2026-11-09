@@ -1,7 +1,7 @@
 /** What the native chat composer's one round button offers, after Orca's
  * `native-chat-composer-send-state.ts`: Stop takes Send's place while the agent
  * works and the draft is empty; a typed draft still sends (the provider queues it). */
-export type ComposerAction = "send" | "queue" | "stop" | "sending" | "stopping";
+export type ComposerAction = "send" | "queue" | "steer" | "stop" | "sending" | "stopping";
 
 export interface SendStateInput {
   draft: string;
@@ -20,6 +20,8 @@ export interface SendStateInput {
   sending: boolean;
   /** This view's stop request is in flight. */
   stopping: boolean;
+  /** What a send while working does: into the running turn (default) or behind it. */
+  whileWorking?: "steer" | "queue";
 }
 
 export interface SendState {
@@ -34,6 +36,7 @@ export interface SendState {
 const LABEL: Record<ComposerAction, string> = {
   send: "Send",
   queue: "Queue message",
+  steer: "Steer turn",
   stop: "Cancel turn",
   sending: "Sending…",
   stopping: "Stopping…",
@@ -49,7 +52,7 @@ export function sendState(input: SendStateInput): SendState {
   const hasDraft = input.draft.trim() !== "" || input.attachments > 0;
   const action: ComposerAction = input.sending ? "sending"
     : input.working && !hasDraft ? (input.stopping ? "stopping" : "stop")
-    : input.working ? "queue" : "send";
+    : input.working ? (input.whileWorking === "queue" ? "queue" : "steer") : "send";
   const disabled = action === "sending" || action === "stopping" || reason !== null || (action !== "stop" && !hasDraft);
   return { action, label: LABEL[action], disabled, reason: action === "sending" || action === "stopping" ? null : reason };
 }

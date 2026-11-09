@@ -653,21 +653,41 @@ fn used_tokens(row: &Value) -> u64 {
     .sum()
 }
 
-/// Claude does not report its window. Only `[1m]` names it, and a session past 200k must have it.
-/// ponytail: a 1M model run without the suffix reads as 200k until it passes 200k; use the
-/// statusLine `context_window` feed if that proves common.
+/// Claude does not report its window and the transcript's model id never carries `[1m]`, so the
+/// window is judged from the model: current Claude models have 1M, only the older families below
+/// have 200k, and a session past 200k has the large one whatever it is called.
+/// ponytail: a model newer than this list is assumed 1M; use the statusLine `context_window`
+/// feed if exactness matters (it means wrapping the person's own statusLine).
+fn context_window(model: Option<&str>, used: u64) -> u64 {
+    const SMALL: &[&str] = &[
+        "claude-3",
+        "haiku-4",
+        "haiku-3",
+        "sonnet-4-5",
+        "opus-4-1",
+        "opus-4-5",
+    ];
+    let model = model.unwrap_or_default().to_lowercase();
+    // "sonnet-4" and "opus-4", bare or dated, are the first 4s.
+    let first_four = ["sonnet-4", "opus-4"].iter().any(|family| {
+        model
+            .split_once(family)
+            .is_some_and(|(_, rest)| rest.is_empty() || rest.starts_with("-20"))
+    });
+    if used <= 200_000 && (first_four || SMALL.iter().any(|name| model.contains(name))) {
+        200_000
+    } else {
+        1_000_000
+    }
+}
+
 fn context(row: &Value) -> Option<NativeUiContext> {
     let used = used_tokens(row);
     let model = row["message"]["model"].as_str();
     if used == 0 {
         return None;
     }
-    let window =
-        if used > 200_000 || model.is_some_and(|model| model.to_lowercase().ends_with("[1m]")) {
-            1_000_000
-        } else {
-            200_000
-        };
+    let window = context_window(model, used);
     Some(NativeUiContext {
         used_tokens: used,
         window_tokens: window,
@@ -1340,26 +1360,36 @@ mod tests {
 
     use super::*;
     #[test]
-    fn context_sums_the_last_response_and_guesses_the_window_from_the_model() {
+    fn context_sums_the_last_response_and_judges_the_window_from_the_model() {
         let row = |model: &str, input: u64, cache: u64| serde_json::json!({"type":"assistant","message":{"model":model,"usage":{"input_tokens":input,"cache_read_input_tokens":cache,"output_tokens":10}}});
         let small = context(&row("claude-haiku-4-5", 100, 900)).unwrap();
         assert_eq!(
             (small.used_tokens, small.window_tokens, small.estimated),
             (1010, 200_000, true)
         );
-        assert_eq!(
-            context(&row("claude-opus-4-7[1m]", 100, 900))
-                .unwrap()
-                .window_tokens,
-            1_000_000
-        );
+        let window =
+            |model: &str, cache: u64| context(&row(model, 100, cache)).unwrap().window_tokens;
+        for old in [
+            "claude-sonnet-4-5-20250929",
+            "claude-opus-4-1",
+            "claude-opus-4-5",
+            "claude-sonnet-4",
+            "claude-opus-4-20250514",
+            "claude-3-7-sonnet",
+        ] {
+            assert_eq!(window(old, 900), 200_000, "{old}");
+        }
+        for current in [
+            "claude-sonnet-5-5",
+            "claude-opus-5-5",
+            "claude-opus-4-7",
+            "claude-sonnet-4-6",
+            "claude-opus-4-8[1m]",
+        ] {
+            assert_eq!(window(current, 900), 1_000_000, "{current}");
+        }
         // Past 200k the window can only be the large one.
-        assert_eq!(
-            context(&row("claude-opus-4-7", 100, 250_000))
-                .unwrap()
-                .window_tokens,
-            1_000_000
-        );
+        assert_eq!(window("claude-haiku-4-5", 250_000), 1_000_000);
         // Synthetic responses report zero usage.
         assert!(context(&serde_json::json!({"type":"assistant","message":{"model":"<synthetic>","usage":{"input_tokens":0}}})).is_none());
     }

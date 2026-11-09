@@ -23,6 +23,30 @@ export function renderMarkdown(text: string, streaming: boolean): string {
   return DOMPurify.sanitize(html);
 }
 
+export type Segment = { kind: "html"; html: string } | { kind: "code"; lang: string; text: string };
+
+/** A chat message as html runs with its fenced code blocks lifted out, so React can draw them
+ * (copy button, highlighting, `perch-ui` blocks). Same repair and sanitizing as `renderMarkdown`. */
+export function splitMarkdown(text: string, streaming: boolean): Segment[] {
+  if (typeof window === "undefined") return [{ kind: "html", html: text }];
+  const tokens = marked.lexer(streaming ? repairMarkdown(text) : text);
+  const out: Segment[] = [];
+  const fresh = (): typeof tokens => Object.assign([], { links: tokens.links });
+  let run = fresh();
+  const flush = () => {
+    if (run.length) out.push({ kind: "html", html: DOMPurify.sanitize(marked.parser(run)) });
+    run = fresh();
+  };
+  for (const token of tokens) {
+    if (token.type === "code") {
+      flush();
+      out.push({ kind: "code", lang: (token.lang ?? "").trim().split(/\s+/)[0], text: token.text });
+    } else run.push(token);
+  }
+  flush();
+  return out;
+}
+
 /** The rendered preview of a file stays bounded: past this many characters only the head is rendered. */
 export const FILE_PREVIEW_MAX_CHARS = 200_000;
 

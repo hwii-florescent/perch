@@ -4,6 +4,7 @@ import { registerSW } from "virtual:pwa-register";
 import { claimViewer } from "./viewer";
 import { installRelayTransport } from "./relay/transport";
 import { trackVisibleViewport } from "./visibleViewport";
+import { installContextMenuGuard } from "./contextMenuGuard";
 
 // Opened from a relay link: send the app's data routes through the sealed tunnel.
 // Before anything can make a request; a no-op on the LAN and the desktop app.
@@ -33,6 +34,7 @@ if (!container) {
 // perch is an app, not a web page: no browser context menu. Surfaces with a menu of their own
 // preventDefault it before this runs; text fields (outside terminals) keep the OS one for cut/copy/paste.
 // This also swallows the menu macOS opens for Ctrl+Enter in a terminal's hidden textarea.
+installContextMenuGuard();
 document.addEventListener("contextmenu", (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (target?.closest("input, textarea, [contenteditable='true']") && !target.closest(".xterm")) return;

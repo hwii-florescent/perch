@@ -132,6 +132,56 @@ it("lists agents only: a plain terminal stays a tab, one running an agent is lis
   expect(storage.get("perch.sidebar.showTerminals")).toBe("1");
 });
 
+it.each(["project", "status", "list"])("%s always lists Quickchat terminals, regardless of Show terminals", (mode) => {
+  storage.set("perch.sidebar.organize", mode);
+  storage.set("perch.sidebar.showTerminals", "0");
+  const scratch = { ...project, id: "s", name: "Chats", path: "/tmp/.perch/scratch" };
+  const sw = { ...workspace, id: "sw", projectId: "s", path: scratch.path };
+  usePerchStore.setState({ workspaceProjects: [project, scratch], workspaces: [workspace, sw], sessions: [
+    chat("project-shell", { cliProviderId: "terminal", createdAt: 1 }),
+    chat("project-agent", { createdAt: 2 }),
+    chat("quick-shell", { workspaceId: "sw", projectId: "s", cwd: "/tmp", cliProviderId: "terminal", createdAt: 3 }),
+    chat("quick-agent", { workspaceId: "sw", projectId: "s", cwd: "/home", createdAt: 4, status: "running" }),
+  ] });
+  act(() => root.render(<WorkspaceOverview />));
+  expect(get("workspace-session-project-shell")).toBeNull();
+  expect(get("workspace-session-project-agent")).not.toBeNull();
+  expect(get("workspace-session-quick-shell")).not.toBeNull();
+  expect(get("workspace-session-quick-agent")).not.toBeNull();
+  if (mode === "project") expect(rowsIn("workspace-chats")).toEqual(["quick-agent", "quick-shell"]);
+  if (mode === "status") {
+    expect(rowsIn("status-project-idle-s")).toEqual(["quick-shell"]);
+    expect(rowsIn("status-project-working-s")).toEqual(["quick-agent"]);
+    expect(get("workspace-chats")).toBeNull();
+  }
+  if (mode === "list") {
+    expect(rowsIn("workspace-session-list")).toEqual(["quick-agent", "quick-shell", "project-agent"]);
+    expect(get("workspace-session-quick-shell")!.textContent).toContain("Quickchat");
+    expect(get("workspace-chats")).toBeNull();
+  }
+  for (const enabled of [true, false]) {
+    act(() => get("workspace-organize")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    act(() => (document.querySelector('[data-testid="workspace-show-terminals"]') as HTMLElement).click());
+    expect(!!get("workspace-session-project-shell")).toBe(enabled);
+    expect(get("workspace-session-quick-shell")).not.toBeNull();
+  }
+});
+
+it("In one list uses plain harness marks and the tree's state badges, with no state claims offline", () => {
+  storage.set("perch.sidebar.organize", "list");
+  act(() => root.render(<WorkspaceOverview />));
+  expect(host.querySelectorAll(".agent-mark")).toHaveLength(4);
+  expect(host.querySelector(".agent-status-dot")).toBeNull();
+  expect(get("session-state-ask")!.textContent).toBe("Needs you");
+  expect(get("session-state-fin")!.textContent).toBe("Done");
+  expect(get("session-state-work")!.textContent).toBe("Working");
+  expect(get("session-state-idle")).toBeNull();
+  expect(get("workspace-session-idle")!.textContent).toContain("Project");
+  act(() => usePerchStore.setState({ connected: false }));
+  expect(host.querySelector('[data-testid^="session-state-"]')).toBeNull();
+  expect(rowsIn("workspace-session-list")).toHaveLength(4);
+});
+
 it("opens a chat on click and keeps the chat in view in Done while it is read", () => {
   const switchSession = vi.fn();
   usePerchStore.setState({ switchSession });

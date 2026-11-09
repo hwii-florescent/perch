@@ -347,11 +347,14 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const activeHostId = usePerchStore((state) => state.activeHostId);
   const projects = usePerchStore((state) => state.workspaceProjects);
   const workspaces = usePerchStore((state) => state.workspaces);
-  // Agents only unless asked: a plain terminal stays a tab and gets no sidebar row.
+  // Project terminals stay tabs unless asked; Quickchat always lists every session.
   const [showTerminals, setShowTerminals] = useState(() => readFlag(SHOW_TERMINALS_KEY, "1"));
   const allKnownSessions = usePerchStore((state) => state.sessions);
   const agentBySession = usePerchStore((state) => state.cliAgentBySession);
-  const sessions = useMemo(() => allKnownSessions.filter((session) => showTerminals || listedInSidebar(session, agentBySession[session.id])), [allKnownSessions, agentBySession, showTerminals]);
+  const sessions = useMemo(() => {
+    const quickchatIds = new Set(projects.filter(isChatsProject).map((project) => project.id));
+    return allKnownSessions.filter((session) => showTerminals || quickchatIds.has(session.projectId ?? "") || listedInSidebar(session, agentBySession[session.id]));
+  }, [allKnownSessions, projects, agentBySession, showTerminals]);
   const agentIds = useMemo(() => new Set(sessions.map((session) => session.id)), [sessions]);
   const worktreeJobs = usePerchStore((state) => state.worktreeJobs);
   const activeWorkspaceId = usePerchStore((state) => state.activeWorkspaceId);
@@ -661,9 +664,20 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     () => sessions.filter((session) => (session.hostId ?? "local") === activeHostId).sort((a, b) => b.createdAt - a.createdAt),
     [sessions, activeHostId],
   );
+  // Shared state across modes: a chat you are reading stays in Done until you leave it
+  // (`holdFinished`), so its By status row does not jump.
+  const attentionEvents = useAttention((state) => state.events);
+  const hostReachable = activeHostId === "local" ? connected : hostStates[activeHostId]?.state === "connected";
+  const viewedSession = sessions.find((session) => session.id === sessionId);
+  const viewedDot = viewedSession && sessionDotState(viewedSession);
+  const reading = useRef<{ id: string | null; held: string | null; dot?: AgentDotState }>({ id: null, held: null });
+  const held = holdFinished(reading.current.id === sessionId ? reading.current.held : null, sessionId, reading.current.id === sessionId ? reading.current.dot : undefined, viewedDot);
+  reading.current = { id: sessionId, held, dot: viewedDot };
+  const needsEvents = useMemo(() => new Map(needsYou(attentionEvents).map((event) => [event.sessionId, event])), [attentionEvents]);
+  const needsIds = useMemo(() => new Set(needsEvents.keys()), [needsEvents]);
   const listView = (
     <div className="flex flex-col gap-[2px] py-[0.2rem]" data-testid="workspace-session-list">
-      {allSessions.length === 0 && <div className="px-[0.3rem] py-2 text-[0.7rem] text-subtext-0">Nothing in Quickchat yet.</div>}
+      {allSessions.length === 0 && <div className="px-[0.3rem] py-2 text-[0.7rem] text-subtext-0">No sessions yet.</div>}
       {allSessions.map((session) => {
         const owner = projects.find((project) => project.id === session.projectId);
         return (
@@ -679,9 +693,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 onNavigate?.();
               }}
             >
-              <StatusDot session={session} className="h-[18px] w-[18px]" />
+              <StatusDot plain session={session} className="h-[18px] w-[18px]" />
               <span className={SESSION_TITLE}>{session.title || "New chat"}</span>
-              {owner && !isChatsProject(owner) && <span className="min-w-0 max-w-[35%] truncate text-[0.62rem] text-subtext-0" title={owner.name || basename(owner.path)}>{owner.name || basename(owner.path)}</span>}
+              {owner && <span className="min-w-0 max-w-[35%] truncate text-[0.62rem] text-subtext-0" title={isChatsProject(owner) ? "Quickchat" : owner.name || basename(owner.path)}>{isChatsProject(owner) ? "Quickchat" : owner.name || basename(owner.path)}</span>}
+              {hostReachable && <StateBadge section={sectionOf(session, needsIds, held)} testId={`session-state-${session.id}`} />}
             </button>
             <button
               type="button"
@@ -699,17 +714,6 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     </div>
   );
 
-  // "By status": the same chats in sections by what they need from you. A chat you are
-  // reading stays in Done until you leave it (`holdFinished`), so its row does not jump.
-  const attentionEvents = useAttention((state) => state.events);
-  const hostReachable = activeHostId === "local" ? connected : hostStates[activeHostId]?.state === "connected";
-  const viewedSession = sessions.find((session) => session.id === sessionId);
-  const viewedDot = viewedSession && sessionDotState(viewedSession);
-  const reading = useRef<{ id: string | null; held: string | null; dot?: AgentDotState }>({ id: null, held: null });
-  const held = holdFinished(reading.current.id === sessionId ? reading.current.held : null, sessionId, reading.current.id === sessionId ? reading.current.dot : undefined, viewedDot);
-  reading.current = { id: sessionId, held, dot: viewedDot };
-  const needsEvents = useMemo(() => new Map(needsYou(attentionEvents).map((event) => [event.sessionId, event])), [attentionEvents]);
-  const needsIds = useMemo(() => new Set(needsEvents.keys()), [needsEvents]);
   // Within a section: newest first on screen, the mirror of the strips' order (each workspace in its
   // strip's order, then the core's chat order), so a move is mirrored back before it is written and
   // a first move changes nothing else. Built from reversed inputs so chats the core has not listed

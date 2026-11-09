@@ -50,9 +50,79 @@
   line-height: 1.25;
 }
 
-.message__markdown h1 { font-size: 1.2em; }
-.message__markdown h2 { font-size: 1.1em; }
+.message__markdown h1 { font-size: 1.25em; }
+.message__markdown h2 { font-size: 1.12em; }
 .message__markdown h3 { font-size: 1em; }
+
+/* Segments (html runs, code blocks, perch-ui blocks) sit one beat apart. */
+.message__markdown > * + * { margin-top: 0.5em; }
+
+/* Tables, in chat and in perch-ui: a quiet card that scrolls sideways instead of squashing. */
+.message__markdown table,
+.md-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.5em 0;
+  font-size: 0.92em;
+  background: var(--surface-0);
+  border-radius: var(--radius);
+}
+
+.md-table { display: table; width: 100%; margin: 0; }
+
+.message__markdown th,
+.message__markdown td,
+.md-table th,
+.md-table td {
+  padding: 0.35em 0.75em;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--surface-1);
+}
+
+.message__markdown th,
+.md-table th {
+  font-weight: 600;
+  color: var(--subtext-0);
+  white-space: nowrap;
+  background: var(--surface-1);
+}
+
+.message__markdown tbody tr:last-child td,
+.md-table tbody tr:last-child td { border-bottom: 0; }
+.message__markdown tbody tr:hover td,
+.md-table tbody tr:hover td { background: var(--surface-1); }
+.md-table caption { padding: 0.4em 0.75em; text-align: left; color: var(--subtext-0); }
+
+/* Code blocks: label + copy bar over the code (CodeBlock.tsx). */
+.md-code {
+  background: var(--surface-0);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.md-code__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.1rem 0.4rem 0.1rem 0.75rem;
+  font-size: 0.75em;
+  color: var(--subtext-0);
+  background: var(--surface-1);
+}
+
+.message__markdown .md-code pre { margin: 0; border-radius: 0; background: none; }
+
+.hl-keyword { color: var(--mauve); }
+.hl-string { color: var(--green); }
+.hl-number { color: var(--peach); }
+.hl-function { color: var(--blue); }
+.hl-type { color: var(--yellow); }
+.hl-tag { color: var(--teal); }
+.hl-comment { color: var(--overlay-1); font-style: italic; }
 
 .message__markdown ul,
 .message__markdown ol {

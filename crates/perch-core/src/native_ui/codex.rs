@@ -111,6 +111,35 @@ fn content(value: &Value) -> String {
     }
     text
 }
+/// The rows a turn's end adds: a stopped turn's quiet status row, and its error.
+/// `TurnStatus` is completed | interrupted | failed | inProgress (`codex app-server
+/// generate-json-schema`, 0.166).
+fn error_rows(turn: &Value) -> Vec<NativeUiMessage> {
+    let id = turn["id"].as_str().unwrap_or_default();
+    let mut rows = vec![];
+    if turn["status"] == "interrupted" {
+        rows.push(super::interrupted_row(format!("{id}:interrupted")));
+    }
+    if let Some(error) = turn["error"]["message"].as_str() {
+        let mut row = message(&format!("{id}:error"), "assistant");
+        row.error = Some(clip(error, 4096));
+        rows.push(row);
+    }
+    rows
+}
+
+/// Every row of some turns, oldest turn first (Codex lists them newest first).
+fn turn_rows(turns: &Value) -> Vec<NativeUiMessage> {
+    let mut rows = vec![];
+    for turn in turns.as_array().into_iter().flatten().rev() {
+        for item in turn["items"].as_array().into_iter().flatten() {
+            rows.extend(normalize(item));
+        }
+        rows.extend(error_rows(turn));
+    }
+    rows
+}
+
 fn normalize(item: &Value) -> Vec<NativeUiMessage> {
     let Some(id) = item["id"].as_str() else {
         return vec![];
@@ -208,20 +237,7 @@ struct View {
 }
 impl View {
     fn turn_error(&mut self, turn: &Value) {
-        // `TurnStatus` is completed | interrupted | failed | inProgress (`codex app-server
-        // generate-json-schema`, 0.166): a stopped turn leaves Orca's quiet status row.
-        if turn["status"] == "interrupted" {
-            self.put(super::interrupted_row(format!(
-                "{}:interrupted",
-                turn["id"].as_str().unwrap_or_default()
-            )));
-        }
-        if let Some(error) = turn["error"]["message"].as_str() {
-            let mut row = message(
-                &format!("{}:error", turn["id"].as_str().unwrap_or_default()),
-                "assistant",
-            );
-            row.error = Some(clip(error, 4096));
+        for row in error_rows(turn) {
             self.put(row);
         }
     }
@@ -425,6 +441,7 @@ async fn connection(
     on_snapshot: &Arc<dyn Fn(NativeUiSnapshot) + Send + Sync>,
     snapshots: &watch::Sender<Option<NativeUiSnapshot>>,
     commands: &mut mpsc::Receiver<super::Command>,
+    pager: &mut mpsc::Receiver<oneshot::Sender<OlderPageOutcome>>,
 ) -> anyhow::Result<()> {
     let paths = paths(key)?;
     let pid_path = paths.extension.with_extension("pid");
@@ -476,6 +493,10 @@ async fn connection(
         next_thread: None,
         dirty: false,
     };
+    // The conversation as far back as it has been asked for (`history.rs`), and Codex's cursor to the
+    // turns before the oldest one held. Seeded afresh each time a thread is joined.
+    let mut record = super::history::History::default();
+    let mut older_cursor: Option<String>;
     let mut id = 1;
     request(&mut peer, &mut view, id, "initialize", json!({"clientInfo":{"name":"perch_native_ui","title":"Perch","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true,"requestAttestation":false}})).await?;
     peer.send(Message::Text(json!({"method":"initialized"}).to_string()))
@@ -587,12 +608,14 @@ async fn connection(
             if turn["status"] == "inProgress" {
                 view.turn = turn["id"].as_str().map(str::to_string);
             }
-            for item in turn["items"].as_array().into_iter().flatten() {
-                for row in normalize(item) {
-                    view.put(row);
-                }
-            }
-            view.turn_error(turn);
+        }
+        // The view keeps only the newest 128 messages; the whole page goes to the history first, so
+        // what that limit cuts is still there to page back to, and older turns follow by cursor.
+        let initial = turn_rows(&history["data"]);
+        older_cursor = history["nextCursor"].as_str().map(str::to_string);
+        record.seed(&native, initial.clone(), older_cursor.is_some());
+        for row in initial {
+            view.put(row);
         }
         for row in arriving {
             view.put(row);
@@ -610,16 +633,49 @@ async fn connection(
                     if view.dirty {
                         view.dirty = false;
                         view.snapshot.revision += 1;
-                        snapshots.send_replace(Some(view.snapshot.clone()));
-                        on_snapshot(view.snapshot.clone());
+                        let shown = record.apply(view.snapshot.clone());
+                        snapshots.send_replace(Some(shown.clone()));
+                        on_snapshot(shown);
                     }
+                }
+                reply = pager.recv(), if !view.snapshot.provider_session_id.is_empty() => {
+                    let Some(reply) = reply else { return Ok(()); };
+                    // Messages already held are shown first; only past them does Codex get asked.
+                    let outcome = if record.held_older() == 0 && !record.at_start() {
+                        id += 1;
+                        let page = request(&mut peer, &mut view, id, "thread/turns/list",
+                            json!({"threadId":native,"cursor":older_cursor,"limit":8,"itemsView":"full","sortDirection":"desc"})).await;
+                        match page {
+                            Ok(page) => {
+                                older_cursor = page["nextCursor"].as_str().map(str::to_string);
+                                record.page_in(turn_rows(&page["data"]), older_cursor.is_some());
+                                None
+                            }
+                            // Codex refusing is an answer; anything else is a connection to rebuild.
+                            Err(error) if error.is::<Rejected>() => Some(OlderPageOutcome::Failed),
+                            Err(error) => { let _ = reply.send(OlderPageOutcome::Failed); return Err(error); }
+                        }
+                    } else { None };
+                    let outcome = outcome.unwrap_or_else(|| {
+                        let added = record.widen();
+                        if added > 0 { OlderPageOutcome::Applied } else if record.at_start() { OlderPageOutcome::Exhausted } else { OlderPageOutcome::Unchanged }
+                    });
+                    if outcome != OlderPageOutcome::Failed {
+                        let shown = record.apply(view.snapshot.clone());
+                        snapshots.send_replace(Some(shown.clone()));
+                        on_snapshot(shown);
+                    }
+                    let _ = reply.send(outcome);
                 }
                 command = commands.recv() => {
                     let Some(command) = command else { return Ok(()); };
                     let payload: Value = serde_json::from_str(&command.payload)?;
-                    let action = if payload["type"] == "prompt" {
+                    // A prompt asked to steer joins the running turn if there is one, and starts a new turn
+                    // if the last one has just ended; Codex's turn is known here, so this is not a race.
+                    let steer_prompt = payload["type"] == "prompt" && payload["steer"] == true && view.turn.is_some() && view.snapshot.running;
+                    let action = if payload["type"] == "prompt" && !steer_prompt {
                         Some(("turn/start", json!({"threadId":native,"clientUserMessageId":command.id,"input":[{"type":"text","text":payload["text"],"text_elements":[]}]})))
-                    } else if payload["type"] == "steer" {
+                    } else if payload["type"] == "steer" || steer_prompt {
                         // Into the running turn, which must still be the one the bridge saw: Codex refuses
                         // a steer whose `expectedTurnId` is not the active turn (schema 0.166).
                         view.turn.as_ref().map(|turn| ("turn/steer", json!({"threadId":native,"expectedTurnId":turn,"clientUserMessageId":command.id,"input":[{"type":"text","text":payload["text"],"text_elements":[]}]})))
@@ -664,6 +720,7 @@ pub(super) async fn observe(
     on_snapshot: Arc<dyn Fn(NativeUiSnapshot) + Send + Sync>,
     snapshots: watch::Sender<Option<NativeUiSnapshot>>,
     mut commands: mpsc::Receiver<super::Command>,
+    mut pager: mpsc::Receiver<oneshot::Sender<OlderPageOutcome>>,
 ) {
     let mut last_error = String::new();
     while alive() {
@@ -674,6 +731,7 @@ pub(super) async fn observe(
             &on_snapshot,
             &snapshots,
             &mut commands,
+            &mut pager,
         )
         .await
         {
@@ -850,6 +908,18 @@ mod tests {
             exited && stopped,
             "closing tmux must stop the native TUI and server"
         );
+    }
+
+    /// Codex lists turns newest first; the chat reads them oldest first, each turn's rows then its end.
+    #[test]
+    fn turns_become_rows_oldest_first_with_their_endings() {
+        let turns = json!([
+            {"id":"t2","status":"failed","error":{"message":"boom"},"items":[{"id":"u2","type":"userMessage","content":[{"type":"text","text":"again"}]}]},
+            {"id":"t1","status":"interrupted","items":[{"id":"u1","type":"userMessage","content":[{"type":"text","text":"first"}]}]},
+        ]);
+        let rows: Vec<_> = turn_rows(&turns).into_iter().map(|row| row.id).collect();
+        assert_eq!(rows, ["u1", "t1:interrupted", "u2", "t2:error"]);
+        assert!(turn_rows(&json!(null)).is_empty());
     }
 
     #[test]

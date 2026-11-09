@@ -41,3 +41,9 @@ export async function loadLanguage(path: string, large: boolean): Promise<Langua
   const description = LanguageDescription.matchFilename(starter, path.split("/").pop() ?? path);
   return description ? description.load().catch(() => null) : null;
 }
+
+/** The language a Markdown fence names (`ts`, `bash`, `rust`…), loaded, or null. */
+export async function loadLanguageByName(name: string): Promise<LanguageSupport | null> {
+  const description = name ? LanguageDescription.matchLanguageName(starter, name, true) : null;
+  return description ? description.load().catch(() => null) : null;
+}

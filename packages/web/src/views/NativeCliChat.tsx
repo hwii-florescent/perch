@@ -4,7 +4,12 @@ import { usePerchStore } from "../store";
 import { openAgentTerminal, agentInputGeneration } from "../agentTerminals";
 import { NativeUiError, requestNativeUi, subscribeNativeUi } from "../nativeUi";
 import { socket } from "../ws";
-import { renderMarkdown } from "../markdown";
+import { splitMarkdown } from "../markdown";
+import { CodeBlock } from "./nativeChat/CodeBlock";
+import { SafeHtml } from "./nativeChat/SafeHtml";
+import { PerchUi } from "./nativeChat/UiBlocksView";
+import { parseUi } from "./nativeChat/uiBlocks";
+import { deliveryFor, useSendWhileWorking } from "../chatSend";
 import { newId } from "../ids";
 import { loadDraftText, saveDraftText, sentPrompts, stepRecall, withTerminalDraft, type RecallPosition } from "./nativeChat/composerDraft";
 import { CHAT_COLUMN, CHAT_INPUT, CHAT_LIST, CHAT_LIST_CONTAINER, MESSAGE_COPY_ASSISTANT, MESSAGE_COPY_USER, MESSAGE_ERROR, MESSAGE_FILE_LINK, MESSAGE_MARKDOWN, NATIVE_TEXTAREA, SCROLL_PILL, SEND_BUTTON_GO, SEND_BUTTON_STOP, messageClass } from "../components/ui/chat";
@@ -61,7 +66,8 @@ type Outbox = { operationId: string; text: string; draft: Pick<Draft, "text" | "
 const receiptsBySession = new Map<string, Receipt[]>();
 const sentCount = (snapshot: NativeUiSnapshot | null, text: string) => snapshot?.messages.filter((message) => message.role === "user" && message.text.trim() === text.trim()).length ?? 0;
 export const NativeMessage = memo(function NativeMessage({ message, streaming, turn, find, fileLinkScope }: { message: NativeUiMessage; streaming: boolean; turn: string; find?: FindMark; fileLinkScope?: { workspaceId: string; hostId: string } }) {
-  const html = useMemo(() => message.role === "assistant" ? renderMarkdown(message.text, streaming) : "", [message.role, message.text, streaming]);
+  const segments = useMemo(() => message.role === "assistant" ? splitMarkdown(message.text, streaming) : [], [message.role, message.text, streaming]);
+  const html = useMemo(() => segments.map((segment) => segment.kind === "html" ? segment.html : "").join(""), [segments]);
   const body = useRef<HTMLDivElement>(null);
   const { workspaceId: linkWorkspaceId, hostId: linkHostId } = fileLinkScope ?? {};
   // Links that name a file in the workspace become pills that open it; the core decides which do.
@@ -108,7 +114,13 @@ export const NativeMessage = memo(function NativeMessage({ message, streaming, t
   // A stopped turn: a quiet line between the turns, not a bubble (the core words it; `system` rows carry no prompt or answer).
   if (message.role === "system") return <div className={cn(HINT, "text-center py-1")} data-native-role="system" data-testid="native-cli-status-row" data-native-turn={turn} data-block-id={message.id}>{message.text}</div>;
   return <article className={messageClass(message.role === "user" ? "user" : "assistant", FIND_MARK[find ?? "none"])} data-native-role={message.role} data-native-turn={turn} data-block-id={message.id}>
-    {message.role === "assistant" ? <div ref={body} onClick={openFileLink} className={cn("message__markdown", MESSAGE_MARKDOWN)} dangerouslySetInnerHTML={{ __html: html }} />
+    {message.role === "assistant" ? <div ref={body} onClick={openFileLink} className={cn("message__markdown", MESSAGE_MARKDOWN)}>
+      {segments.map((segment, index) => {
+        if (segment.kind === "html") return <SafeHtml key={index} html={segment.html} />;
+        const ui = segment.lang === "perch-ui" ? parseUi(segment.text) : null;
+        return ui ? <PerchUi key={index} blocks={ui} /> : <CodeBlock key={index} lang={segment.lang} text={segment.text} />;
+      })}
+    </div>
       : <div className="message__text">{message.text}</div>}
     {linkError && <div className={cn("message__error", MESSAGE_ERROR)} role="alert">{linkError}</div>}
     {message.error && <div className={cn("message__error", MESSAGE_ERROR)} role="alert">{message.error}</div>}
@@ -120,6 +132,7 @@ export const NativeMessage = memo(function NativeMessage({ message, streaming, t
  * that differs: an agent typed into a Terminal tab runs under the tab's own `terminal` runtime. */
 export function NativeCliChat({ sessionId, providerId, terminalProviderId = providerId }: { sessionId: string; providerId: string; terminalProviderId?: string }) {
   const connected = usePerchStore((state) => state.connected);
+  const whileWorking = useSendWhileWorking();
   const draftKey = JSON.stringify([sessionId, providerId]);
   const [text, setText] = useState(() => drafts.get(draftKey)?.text ?? loadDraftText(draftKey));
   const [images, setImages] = useState<ComposerImage[]>(() => drafts.get(draftKey)?.images ?? []);
@@ -273,7 +286,8 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     catch (reason) { setError((reason as Error).message); }
     finally { setPending(false); }
   }
-  async function send() {
+  // Alt/Option+Enter does the other of steer and queue while a turn runs.
+  async function send(alt = false) {
     const generation = terminalId.current ? agentInputGeneration(terminalId.current) : undefined;
     if (generation === undefined || pending || outbox?.phase === "sending" || !connected || uploading || (!text.trim() && !images.length)) return;
     const draft: Draft = drafts.get(draftKey) ?? { text, operationId: newId(), images };
@@ -284,7 +298,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     setOutbox(sent);
     const settled = () => { if (drafts.get(draftKey)?.operationId === draft.operationId) { drafts.delete(draftKey); saveDraftText(draftKey, ""); setText(""); setImages([]); } };
     try {
-      const reply = await requestNativeUi({ type: "agent.ui.prompt", requestId: newId(), sessionId, providerId, generation, operationId: draft.operationId, text: prompt, ...(pickedUp.current ? { replaces: pickedUp.current } : {}) });
+      const reply = await requestNativeUi({ type: "agent.ui.prompt", requestId: newId(), sessionId, providerId, generation, operationId: draft.operationId, text: prompt, ...(latest.current?.running ? { delivery: deliveryFor(whileWorking, alt) } : {}), ...(pickedUp.current ? { replaces: pickedUp.current } : {}) });
       if (reply.type !== "agent.ui.result" || !reply.accepted) throw new Error("The CLI did not accept this action.");
       settled(); pickedUp.current = null;
       if (reply.command) { setOutbox(null); setRanCommand(draft.text.trim()); }
@@ -350,7 +364,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     setOutbox(null); setError(null);
     field.current?.focus();
   }
-  const sendable = sendState({ draft: text, attachments: images.length, uploading: uploading > 0, connected, ready: !!snapshot, controlling, exited, working: !!snapshot?.running, sending: outbox?.phase === "sending", stopping });
+  const sendable = sendState({ draft: text, attachments: images.length, uploading: uploading > 0, connected, ready: !!snapshot, controlling, exited, working: !!snapshot?.running, sending: outbox?.phase === "sending", stopping, whileWorking });
   // The snapshot is what this view renders; the lifecycle's blocked state (from title evidence) can lag it.
   const waiting = snapshot?.blocked === true;
   const lastTurn = useLastTurnChanges(workspaceId, sessionId, hostId, !!snapshot && !snapshot.running && snapshot.messages.length > 0);
@@ -483,7 +497,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
             const step = (!text || onEdge) && stepRecall({ direction: back ? "back" : "forward", prompts: sentPrompts(snapshot?.messages ?? []), position: recall.current, draft: text });
             if (step) { event.preventDefault(); recall.current = step.position; nextCaret.current = step.draft.length; updateDraft(step.draft); setCaret(step.draft.length); return; }
           }
-          if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); if (!sendable.disabled && sendable.action !== "stop") void send(); }
+          if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); if (!sendable.disabled && sendable.action !== "stop") void send(event.altKey); }
           else if (event.key === "Escape" && snapshot?.running && controlling) { event.preventDefault(); void stop(); }
         }} />
       <div className="flex items-center gap-2 px-2 pt-1 pb-2">

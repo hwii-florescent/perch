@@ -667,6 +667,23 @@ impl AgentRuntimeAdapter {
         })
     }
 
+    /// Runtimes whose own CLI is the foreground agent right now, so its native bridge should be
+    /// connected. `observe` runs once at attach; if the first process snapshot caught the launch
+    /// wrapper's shell, the bridge gave up for good and the tab never showed Working.
+    pub(crate) fn native_owners(&self) -> Vec<AgentKey> {
+        self.active
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, runtime)| {
+                runtime.shell_agent.is_none()
+                    && runtime.observed_provider == runtime.handle.provider_id
+                    && crate::native_ui::supported(&runtime.handle.provider_id)
+            })
+            .map(|(key, _)| key.clone())
+            .collect()
+    }
+
     pub(crate) fn shell_agents(&self) -> Vec<(AgentKey, crate::shell_integration::ShellAgent)> {
         self.active
             .lock()
@@ -1033,9 +1050,14 @@ impl AgentRuntimeAdapter {
             // The Perch pointer joins what the session pinned, for this launch only; the
             // stored pin is unchanged. It is given only with an identity to go with it.
             let identity = self.launch_identity(&key, &provider_id, existing_only)?;
-            let pinned = match identity {
-                Some(_) => Some(crate::agent_identity::with_pointer(pinned.as_ref())),
-                None => pinned,
+            // A reattach mints no identity (the process keeps its token) but the shims are
+            // rewritten, so they get the pointer whenever a `perch` binary can run.
+            let pinned = if identity.is_some()
+                || (existing_only && crate::agent_identity::cli_binary().is_some())
+            {
+                Some(crate::agent_identity::with_pointer(pinned.as_ref()))
+            } else {
+                pinned
             };
             let (command, server_args) =
                 with_instructions(&key, &provider_id, command, pinned.as_ref())?;
@@ -2117,6 +2139,7 @@ mod tests {
             );
             let output = std::process::Command::new(&argv[0])
                 .args(&argv[1..])
+                .env_remove("PERCH_SHELL") // set when the suite runs inside a Perch terminal
                 .env("SHELL", "/bin/echo")
                 .output()
                 .unwrap();
@@ -2134,7 +2157,6 @@ mod tests {
         std::fs::write(cores.join("2147483646"), b"").unwrap();
         run(&cores);
         assert!(dir.join("agent-exit/k").exists());
-                .env_remove("PERCH_SHELL") // set when the suite runs inside a Perch terminal
         std::fs::remove_file(dir.join("agent-exit/k")).unwrap();
         run(&dir.join("missing"));
         assert!(dir.join("agent-exit/k").exists());

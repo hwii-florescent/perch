@@ -9,6 +9,8 @@ import { usePerchStore } from "../store";
 import type { BrowserSearchEngine, HostConnectionState, HostMode, DeviceSummary } from "@perch/shared";
 import { THEME_NAMES, applyTheme } from "../themes";
 import { getPaneLabelsEnabled, setPaneLabelsEnabled } from "../paneLabels";
+import { CHAT_FONT_SIZES, setChatFontScale, useChatFontScale } from "../chatFont";
+import { setSendWhileWorking, useSendWhileWorking, type SendWhileWorking } from "../chatSend";
 import { ModeSwitch } from "./ModeSwitch";
 import { MacPermissions, macPermissionsAvailable } from "./MacPermissions";
 import { socket } from "../ws";
@@ -23,9 +25,9 @@ import { useAgentChoices } from "./AgentPicker";
 import { MIN_SCROLLBACK, MAX_SCROLLBACK } from "../xtermSetup";
 import { newId } from "../ids";
 import { HostStateDot } from "./HostStateDot";
+import { MachineCheck, SSH_CONFIG_HOSTS } from "./MachineCheck";
 import { cn } from "../lib/cn";
 import { SettingsGroup, SettingRow, SettingsQuery } from "./ui/setting-row";
-import { MachineCheck, SSH_CONFIG_HOSTS } from "./MachineCheck";
 import { Switch } from "./ui/switch";
 import { Select, type SelectOption } from "./ui/select";
 import { KeybindingsSection } from "./KeybindingsSection";
@@ -37,7 +39,7 @@ import { Chevron } from "./ui/chevron";
 import { MOBILE_WIDTH_BREAKPOINT, useIsMobileWidth } from "../responsive";
 import {
   ADD_ROW, ADDR, BTN_DANGER, BTN_PRIMARY, EMPTY, HOST_ROW, INPUT, INPUT_PORT, INPUT_WIDE,
-  LIST, MODEL_ROW, MUTED, NAME, SELECT, SELECT_HOST,
+  LIST, MUTED, NAME, SELECT, SELECT_HOST,
 } from "./ui/settings";
 
 // A full-height column of the shell, as in App.tsx (kept in step by hand: App imports this file).
@@ -89,6 +91,21 @@ function ThemeSection() {
         ))}
       </ul>
       </div>
+    </SettingsGroup>
+  );
+}
+
+function ChatTextSection() {
+  const scale = useChatFontScale();
+  const whileWorking = useSendWhileWorking();
+  return (
+    <SettingsGroup title="Chat">
+      <SettingRow title="Text size" description="The size of messages in chat. Kept on this device only.">
+        <Select className={SELECT} testId="settings-chat-text-size" ariaLabel="Chat text size" value={scale} onChange={setChatFontScale} options={CHAT_FONT_SIZES.map(({ value, label }) => ({ value, label }))} />
+      </SettingRow>
+      <SettingRow title="Enter while the agent is working" description="Steer puts your message into the running turn; Queue runs it after the turn. Alt/Option+Enter does the other one. Claude and OpenCode have no separate steer, so they always take it their own way. Kept on this device only.">
+        <Select className={SELECT} testId="settings-chat-send-while-working" ariaLabel="Enter while the agent is working" value={whileWorking} onChange={(value) => setSendWhileWorking(value as SendWhileWorking)} options={[{ value: "steer", label: "Steer" }, { value: "queue", label: "Queue" }]} />
+      </SettingRow>
     </SettingsGroup>
   );
 }
@@ -311,6 +328,7 @@ function SshHostsSection() {
           type="text"
           className={INPUT}
           placeholder="SSH host"
+          list={SSH_CONFIG_HOSTS}
           value={newSshHost}
           data-testid="host-ssh-input"
           onChange={(e) => setNewSshHost(e.target.value)}
@@ -328,7 +346,6 @@ function SshHostsSection() {
           ariaLabel="New host mode"
           title="direct = remote only needs claude/codex + tmux; perch = remote runs its own perch"
           value={newMode}
-          list={SSH_CONFIG_HOSTS}
           onChange={(value) => setNewMode(value as HostMode)}
           options={[{ value: "direct", label: "direct" }, { value: "perch", label: "perch" }]}
         />
@@ -341,6 +358,7 @@ function SshHostsSection() {
           Add
         </button>
       </div>
+      <MachineCheck sshHost={newSshHost} onCore={() => setNewMode("perch")} />
 
       {/* Advanced optional fields */}
       <div className={`${ADD_ROW} mt-[0.35rem] opacity-75`}>
@@ -358,7 +376,6 @@ function SshHostsSection() {
           placeholder="Remote start cmd (optional, {port} placeholder)"
           value={newRemoteCmd}
           data-testid="host-remote-cmd-input"
-      <MachineCheck sshHost={newSshHost} onCore={() => setNewMode("perch")} />
           onChange={(e) => setNewRemoteCmd(e.target.value)}
         />
       </div>
@@ -895,7 +912,7 @@ const TABS: { id: SettingsTab; label: string }[] = [
 function TabContent({ tab }: { tab: SettingsTab }) {
   switch (tab) {
     case "general": return <><ChatModeSection /><InterfaceSection /><BrowserSection /><DefaultCwdSection /></>;
-    case "appearance": return <><ThemeSection /><TabShapeSection /></>;
+    case "appearance": return <><ThemeSection /><ChatTextSection /><TabShapeSection /></>;
     case "agents": return <AgentCatalog />;
     case "mods": return <ModsSection />;
     case "keyboard": return <KeybindingsSection />;

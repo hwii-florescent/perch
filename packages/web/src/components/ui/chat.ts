@@ -1,4 +1,5 @@
 import { cn } from "../../lib/cn";
+import "../../chatFont"; // applies the saved --chat-font-scale as soon as the chat is loaded
 
 /** Chat chrome for `NativeCliChat.tsx`: the list, the scroll pill, the message shell, the
  * worked-for summary, the error line and the composer shell. What stays in chat.css is `.chat` and the markdown
@@ -9,7 +10,8 @@ export const CHAT_LIST = "min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-2";
 export const CHAT_COLUMN = "mx-auto flex w-full max-w-[46rem] flex-col";
 export const SCROLL_PILL = "absolute right-4 bottom-3 z-5 flex cursor-pointer items-center gap-[0.4rem] rounded-ui [border:none] bg-accent px-3 py-[0.35rem] text-[0.8rem] font-semibold text-panel-bg [font-family:inherit] [box-shadow:0_4px_14px_rgba(0,0,0,0.35)] hover:[filter:brightness(1.08)]";
 
-const MESSAGE = "group relative max-w-[85%] text-[0.95rem] leading-[1.55] [word-break:break-word]";
+// `--chat-font-scale` is the person's chat text size (chatFont.ts).
+const MESSAGE = "group relative max-w-[85%] text-[calc(0.95rem*var(--chat-font-scale,1))] leading-[1.6] [word-break:break-word]";
 const MESSAGE_USER = "self-end whitespace-pre-wrap rounded-soft bg-surface-1 px-3.5 py-2 text-fg";
 // Assistant text is full width, unboxed and at full contrast: it is what you came to read.
 const MESSAGE_ASSISTANT = "max-w-full self-stretch p-0 text-fg [background:none] [border:none]";
