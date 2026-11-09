@@ -65,6 +65,30 @@ fn row_from(row: &rusqlite::Row<'_>) -> rusqlite::Result<SubSessionRow> {
 }
 
 impl HistoryDb {
+    /// Record the lead's own quiet threshold for a child it just started.
+    pub fn set_quiet_after(&self, child_session_id: &str, minutes: u32) -> anyhow::Result<()> {
+        self.conn.lock().unwrap().execute(
+            "UPDATE sub_sessions SET quiet_after_minutes = ?2 WHERE child_session_id = ?1",
+            params![child_session_id, minutes],
+        )?;
+        Ok(())
+    }
+
+    /// A child's quiet threshold in minutes, when its lead chose one.
+    pub fn quiet_after(&self, child_session_id: &str) -> anyhow::Result<Option<u32>> {
+        Ok(self
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT quiet_after_minutes FROM sub_sessions WHERE child_session_id = ?1",
+                params![child_session_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
     /// Admit and record a spawn: the key's earlier child if there is one, else the run's limits, then the child's session row and its record, atomically.
     pub fn reserve_sub_session(&self, spec: &SubSessionSpec<'_>) -> anyhow::Result<Reserved> {
         let mut conn = self.conn.lock().unwrap();
@@ -317,6 +341,18 @@ mod tests {
         let (child, key) = (format!("child-{n}"), format!("key-{n}"));
         db.reserve_sub_session(&spec(workspace, &child, &key))
             .unwrap()
+    }
+
+    #[test]
+    fn a_leads_quiet_threshold_is_kept_per_child() {
+        let (db, workspace) = db_with_lead();
+        reserve(&db, &workspace, 1);
+        reserve(&db, &workspace, 2);
+        assert_eq!(db.quiet_after("child-1").unwrap(), None);
+        db.set_quiet_after("child-1", 45).unwrap();
+        assert_eq!(db.quiet_after("child-1").unwrap(), Some(45));
+        assert_eq!(db.quiet_after("child-2").unwrap(), None);
+        assert_eq!(db.quiet_after("nobody").unwrap(), None);
     }
 
     #[test]

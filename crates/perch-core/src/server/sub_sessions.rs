@@ -95,6 +95,8 @@ pub(super) struct SpawnRequest {
     pub task: String,
     pub key: String,
     pub worktree: bool,
+    /// Minutes of silence before `perch list` marks the child quiet; `None` = the default.
+    pub quiet_after: Option<u32>,
 }
 
 impl SpawnRequest {
@@ -117,12 +119,19 @@ impl SpawnRequest {
         let key = sub_sessions::check_key(body["key"].as_str().unwrap_or_default())
             .map_err(bad)?
             .to_string();
+        let quiet_after = match body.get("quietAfter").filter(|value| !value.is_null()) {
+            Some(value) => {
+                Some(sub_sessions::check_quiet_after(value.as_u64().unwrap_or(0)).map_err(bad)?)
+            }
+            None => None,
+        };
         Ok(Self {
             agent: agent.to_string(),
             model,
             task,
             key,
             worktree: body["worktree"].as_bool().unwrap_or(false),
+            quiet_after,
         })
     }
 }
@@ -218,6 +227,11 @@ pub(super) async fn start(
         }
         Reserved::New(row) => row,
     };
+    if let Some(minutes) = request.quiet_after {
+        if let Err(error) = app.db.set_quiet_after(&row.child_session_id, minutes) {
+            tracing::warn!(%error, "could not keep a sub-session's quiet threshold");
+        }
+    }
 
     let mut cwd = lead.cwd.clone();
     if request.worktree {
@@ -500,6 +514,11 @@ fn member_json(
             child.is_some() && snapshot.state == AgentState::Working,
             snapshot.last_activity_ms.max(snapshot.last_transition_ms),
             now_millis(),
+            app.db
+                .quiet_after(session_id)
+                .ok()
+                .flatten()
+                .unwrap_or(sub_sessions::DEFAULT_QUIET_AFTER_MINUTES),
         )
     });
     let report = member_report(app, session_id, child.is_some());
@@ -752,6 +771,36 @@ pub(super) fn stop_children_of(app: &AppState, lead_session_id: &str) -> Result<
 
 #[cfg(test)]
 pub(super) mod tests {
+    #[test]
+    fn a_spawn_request_checks_the_leads_quiet_threshold() {
+        let body = |extra: Value| {
+            let mut body = json!({"agent": "claude", "task": "do it", "key": "k1"});
+            body.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            body
+        };
+        assert_eq!(
+            SpawnRequest::parse(&body(json!({}))).unwrap().quiet_after,
+            None
+        );
+        assert_eq!(
+            SpawnRequest::parse(&body(json!({"quietAfter": 45})))
+                .unwrap()
+                .quiet_after,
+            Some(45)
+        );
+        assert_eq!(
+            SpawnRequest::parse(&body(json!({"quietAfter": null})))
+                .unwrap()
+                .quiet_after,
+            None
+        );
+        for bad in [json!(0), json!(241), json!("soon")] {
+            assert!(SpawnRequest::parse(&body(json!({"quietAfter": bad}))).is_err());
+        }
+    }
+
     use super::super::agent::tests::request;
     use super::*;
     use crate::agent_identity::IdentityStore;

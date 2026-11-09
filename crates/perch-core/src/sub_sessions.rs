@@ -277,16 +277,31 @@ pub fn check_key(key: &str) -> Result<&str, String> {
     }
 }
 
-/// A working child with no output and no state change for this long is shown as quiet in
-/// `perch list`. ponytail: one fixed threshold for every child; a setting is the upgrade path.
-pub const QUIET_AFTER_MS: u64 = 10 * 60 * 1000;
+/// How long a working child may be silent before `perch list` shows it as quiet, unless its lead
+/// chose another time with `perch spawn --quiet-after`.
+pub const DEFAULT_QUIET_AFTER_MINUTES: u32 = 10;
+const QUIET_AFTER_RANGE: std::ops::RangeInclusive<u64> = 1..=240;
 
-/// Whole minutes a working child has been silent, once that reaches [`QUIET_AFTER_MS`]. A child
-/// that is blocked on a person is flagged as that instead, and an idle or finished one is not
-/// quiet, it is done.
-pub fn quiet_minutes(working: bool, last_evidence_ms: u64, now_ms: u64) -> Option<u64> {
+/// The lead's `--quiet-after`, in whole minutes.
+pub fn check_quiet_after(minutes: u64) -> Result<u32, String> {
+    if QUIET_AFTER_RANGE.contains(&minutes) {
+        Ok(minutes as u32)
+    } else {
+        Err(format!("--quiet-after is 1 to 240 minutes, not {minutes}"))
+    }
+}
+
+/// Whole minutes a working child has been silent, once that reaches `quiet_after` minutes. A
+/// child that is blocked on a person is flagged as that instead, and an idle or finished one is
+/// not quiet, it is done.
+pub fn quiet_minutes(
+    working: bool,
+    last_evidence_ms: u64,
+    now_ms: u64,
+    quiet_after: u32,
+) -> Option<u64> {
     let silent = now_ms.saturating_sub(last_evidence_ms);
-    (working && silent >= QUIET_AFTER_MS).then_some(silent / 60_000)
+    (working && silent >= u64::from(quiet_after) * 60_000).then_some(silent / 60_000)
 }
 
 /// The first message of a child: Perch's note, then the task. Plain text, never starting with
@@ -718,20 +733,30 @@ mod tests {
     }
 
     #[test]
-    fn only_a_working_child_silent_for_ten_minutes_is_quiet() {
+    fn only_a_working_child_silent_past_its_threshold_is_quiet() {
         let now = 100 * 60_000;
-        assert_eq!(quiet_minutes(true, now - 9 * 60_000, now), None);
-        assert_eq!(quiet_minutes(true, now - 10 * 60_000, now), Some(10));
+        assert_eq!(quiet_minutes(true, now - 9 * 60_000, now, 10), None);
+        assert_eq!(quiet_minutes(true, now - 10 * 60_000, now, 10), Some(10));
         assert_eq!(
-            quiet_minutes(true, now - 25 * 60_000 - 5_000, now),
+            quiet_minutes(true, now - 25 * 60_000 - 5_000, now, 10),
             Some(25)
         );
-        assert_eq!(quiet_minutes(false, 0, now), None);
+        // The lead's own threshold decides.
+        assert_eq!(quiet_minutes(true, now - 20 * 60_000, now, 30), None);
+        assert_eq!(quiet_minutes(true, now - 3 * 60_000, now, 2), Some(3));
+        assert_eq!(quiet_minutes(false, 0, now, 10), None);
         assert_eq!(
-            quiet_minutes(true, now + 5, now),
+            quiet_minutes(true, now + 5, now, 10),
             None,
             "a clock step back is not quiet"
         );
+    }
+
+    #[test]
+    fn quiet_after_is_one_to_240_minutes() {
+        assert_eq!(check_quiet_after(1), Ok(1));
+        assert_eq!(check_quiet_after(240), Ok(240));
+        assert!(check_quiet_after(0).is_err() && check_quiet_after(241).is_err());
     }
 
     #[test]

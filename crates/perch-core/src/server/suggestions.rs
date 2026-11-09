@@ -502,6 +502,7 @@ async fn start_one(
         task: picked.task.clone(),
         key: key.clone(),
         worktree: picked.worktree,
+        quiet_after: None,
     };
     let settle = |state: SuggestionState, child: Option<&str>, reason: &str| {
         if let Err(error) =

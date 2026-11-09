@@ -496,6 +496,21 @@ impl HistoryDb {
                 cost_usd REAL
             );",
         )?;
+        // A lead's own quiet threshold for a child (`perch spawn --quiet-after`); NULL = default.
+        {
+            let mut stmt = conn.prepare("PRAGMA table_info(sub_sessions)")?;
+            let has_column = stmt
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<Result<Vec<_>, _>>()?
+                .iter()
+                .any(|name| name == "quiet_after_minutes");
+            if !has_column {
+                conn.execute(
+                    "ALTER TABLE sub_sessions ADD COLUMN quiet_after_minutes INTEGER",
+                    [],
+                )?;
+            }
+        }
         // The table above needs `sessions`, which an old database already has; the column
         // below is added after the table list so that a fresh one has both.
         conn.execute_batch(

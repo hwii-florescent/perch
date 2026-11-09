@@ -267,10 +267,10 @@ struct SpawnArgs {
     task: String,
     key: Option<String>,
     worktree: bool,
+    quiet_after: Option<u64>,
 }
 
-const SPAWN_USAGE: &str =
-    "usage: perch spawn --agent <claude|codex|pi|omp> [--model <name>] [--worktree] --task <text>";
+const SPAWN_USAGE: &str = "usage: perch spawn --agent <claude|codex|pi|omp> [--model <name>] [--worktree] [--quiet-after <minutes>] --task <text>";
 
 fn parse_spawn(args: &[String]) -> Result<SpawnArgs, String> {
     let mut parsed = SpawnArgs {
@@ -279,6 +279,7 @@ fn parse_spawn(args: &[String]) -> Result<SpawnArgs, String> {
         task: String::new(),
         key: None,
         worktree: false,
+        quiet_after: None,
     };
     let mut words = args.iter();
     while let Some(word) = words.next() {
@@ -293,6 +294,12 @@ fn parse_spawn(args: &[String]) -> Result<SpawnArgs, String> {
             "--model" => parsed.model = Some(value("--model")?),
             "--key" => parsed.key = Some(value("--key")?),
             "--worktree" => parsed.worktree = true,
+            "--quiet-after" => {
+                let text = value("--quiet-after")?;
+                parsed.quiet_after = Some(text.parse().map_err(|_| {
+                    format!("--quiet-after is a whole number of minutes. {SPAWN_USAGE}")
+                })?);
+            }
             // The task is the rest of the line, so it needs no quoting.
             "--task" => {
                 let rest: Vec<&str> = words.by_ref().map(String::as_str).collect();
@@ -324,6 +331,7 @@ fn spawn(args: &[String]) -> Result<(), String> {
             "task": parsed.task,
             "key": key,
             "worktree": parsed.worktree,
+            "quietAfter": parsed.quiet_after,
         }),
     )?;
     if answer["suggested"].as_bool().unwrap_or(false) {
@@ -1407,11 +1415,13 @@ Commands
                           turn for `perch list`, and wakes no one with it. Up to 4000
                           characters; for more, write a file and report its path. Reading
                           from standard input also works.
-  perch spawn --agent <claude|codex|pi|omp> [--model <name>] [--worktree] --task <text>
+  perch spawn --agent <claude|codex|pi|omp> [--model <name>] [--worktree] [--quiet-after <minutes>] --task <text>
                           Start a sub-session in this Workspace: an ordinary Perch session of its
                           own, with its own agent. The task is its first message, so make it
                           complete (up to 3000 characters; for more, write a file and name
-                          its path). --worktree gives it its own git checkout. The rest of
+                          its path). --worktree gives it its own git checkout. --quiet-after sets
+                          how many minutes of silence mark it QUIET in `perch list` (1 to 240,
+                          default 10): a long refactor deserves more than a lint fix. The rest of
                           the line after --task is the task; it needs no quoting. Unless
                           the person has allowed leads to start without asking, this only
                           puts the task in front of them as a card (see `perch suggest`)
@@ -1434,8 +1444,8 @@ Commands
   perch list [--json]     Your run: the session that leads it and every sub-session, with
                           what Perch knows of each (state, whether it needs a person, its
                           report). QUIET n min marks a sub-session that is working but has
-                          had no output for 10 minutes or more: look with `perch read`, then
-                          steer or stop it. Read-only.
+                          had no output for longer than its --quiet-after (default 10 minutes):
+                          look with `perch read`, then steer or stop it. Read-only.
   perch read <session> [--turns N]
                           Read the tail of one of your own sub-sessions' conversation: its
                           last N turns (1 to 5, default 2) as what opened each, a sentence
@@ -1996,7 +2006,15 @@ mod tests {
                 task: "fix the parser, then run tests".into(),
                 key: None,
                 worktree: true,
+                quiet_after: None,
             }
+        );
+        let long = parse_spawn(&words("--agent pi --quiet-after 45 --task refactor")).unwrap();
+        assert_eq!(long.quiet_after, Some(45));
+        assert!(
+            parse_spawn(&words("--agent pi --quiet-after soon --task x"))
+                .unwrap_err()
+                .contains("whole number")
         );
         // An option after --task belongs to the task, not to spawn.
         let late = parse_spawn(&words("--agent pi --task rename --worktree everywhere")).unwrap();
