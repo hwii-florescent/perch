@@ -342,7 +342,7 @@ pub struct SshHostEntry {
     pub direct_url: Option<String>,
     /// Command used to auto-start the remote perch binary when it's not already
     /// running.  The literal `{port}` is replaced with the remote port.
-    /// Default: `~/perch/target/debug/perch-core --port {port}`.
+    /// Default: the `perch-core` that Add machine installs (else `~/perch/target/debug/perch-core`), `--port {port}`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_cmd: Option<String>,
 }

@@ -977,13 +977,15 @@ impl HubManager {
             }
 
             let remote_cmd_template = host.remote_cmd.clone().unwrap_or_else(|| {
-                "cd ~/perch && ./target/debug/perch-core --port {port}".to_string()
+                "if command -v perch-core >/dev/null 2>&1; then perch-core --port {port}; else cd ~/perch && ./target/debug/perch-core --port {port}; fi".to_string()
             });
             let remote_cmd = remote_cmd_template.replace("{port}", &remote_port.to_string());
 
             // Prefix with stable-socket export so tmux child inherits a live agent.
-            let tmux_inner =
-                format!(r#"export SSH_AUTH_SOCK=$HOME/.ssh/perch_auth_sock; {remote_cmd}"#);
+            let tmux_inner = format!(
+                r#"{} export SSH_AUTH_SOCK=$HOME/.ssh/perch_auth_sock; {remote_cmd}"#,
+                crate::ssh::REMOTE_PATH_PREFIX
+            );
 
             tracing::info!(
                 "[hub] {}: auto-starting remote perch via tmux (with agent socket)",
@@ -1812,31 +1814,45 @@ use crate::ssh::run_ssh_bounded;
 /// checkout, which used to time out silently and loop back to "connecting"
 /// forever.
 ///
-/// For the default auto-start command we check the binary the default
-/// command actually runs (`~/perch/target/debug/perch-core`). For a custom
-/// `remote_cmd` we can't know its prerequisites, so we only verify `tmux`
-/// itself is present (auto-start always goes through `tmux new-session`).
-async fn precheck_remote_prereqs(ssh_host: &str, has_custom_cmd: bool) -> Result<(), String> {
-    let check_cmd = if has_custom_cmd {
-        "command -v tmux >/dev/null 2>&1"
+/// The default auto-start command runs the `perch-core` that "Add machine" installs
+/// (`~/.local/bin/perch-core`), or an older source checkout's `target/debug/perch-core`. For a custom
+/// `remote_cmd` we can't know its prerequisites, so we only verify `tmux` itself is present
+/// (auto-start always goes through `tmux new-session`). The exit code says which one is missing.
+fn precheck_script(has_custom_cmd: bool) -> String {
+    let core = if has_custom_cmd {
+        ""
     } else {
-        "test -d ~/perch && test -x ~/perch/target/debug/perch-core"
+        " command -v perch-core >/dev/null 2>&1 || test -x ~/perch/target/debug/perch-core || exit 4;"
     };
+    format!(
+        "{} command -v tmux >/dev/null 2>&1 || exit 3;{core}",
+        crate::ssh::REMOTE_PATH_PREFIX
+    )
+}
+
+fn precheck_failure(exit_code: Option<i32>) -> String {
+    match exit_code {
+        Some(3) => "tmux is not installed on the remote (Perch starts its core there with tmux)".to_string(),
+        Some(4) => "perch-core is not installed on the remote: add it again in Settings > Hosts to install it".to_string(),
+        other => format!("the remote precheck failed (exit {})", other.map_or("?".into(), |c| c.to_string())),
+    }
+}
+
+async fn precheck_remote_prereqs(ssh_host: &str, has_custom_cmd: bool) -> Result<(), String> {
+    let check_cmd = precheck_script(has_custom_cmd);
     let args = [
         "-o",
         "BatchMode=yes",
         "-o",
         "ConnectTimeout=5",
         ssh_host,
-        check_cmd,
+        check_cmd.as_str(),
     ];
     let out = run_ssh_bounded(&args, 20, "precheck").await?;
     if out.status.success() {
         Ok(())
-    } else if has_custom_cmd {
-        Err("tmux not available on remote".to_string())
     } else {
-        Err("perch not installed on remote (~/perch/target/debug/perch-core missing)".to_string())
+        Err(precheck_failure(out.status.code()))
     }
 }
 
@@ -2030,6 +2046,38 @@ mod tests {
     };
 
     const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn the_precheck_names_the_missing_piece_by_exit_code() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = std::env::temp_dir().join(format!("perch-precheck-{}", uuid::Uuid::new_v4()));
+        let bin = home.join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let exit_code = |custom: bool| {
+            std::process::Command::new("/bin/sh")
+                .args(["-c", &super::precheck_script(custom)])
+                .env_clear()
+                .env("HOME", &home)
+                .env("PATH", &bin) // only what the script itself puts first: no real tmux or perch-core
+                .status()
+                .unwrap()
+                .code()
+        };
+        let put = |name: &str| {
+            std::fs::write(bin.join(name), "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(bin.join(name), std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+        };
+        assert_eq!(exit_code(false), Some(3)); // no tmux
+        put("tmux");
+        assert_eq!(exit_code(true), Some(0)); // a custom command only needs tmux
+        assert_eq!(exit_code(false), Some(4)); // no perch-core
+        put("perch-core");
+        assert_eq!(exit_code(false), Some(0));
+        assert!(super::precheck_failure(Some(3)).contains("tmux"));
+        assert!(super::precheck_failure(Some(4)).contains("Settings > Hosts"));
+        std::fs::remove_dir_all(&home).unwrap();
+    }
 
     #[test]
     fn the_remote_token_is_read_only_from_a_file_naming_the_forwarded_port() {
