@@ -122,7 +122,7 @@ approval not mattering much.
   herdr's `minimum_contrast` (as `minimumContrast`, 1 to 21), `clipboard_write` (`clipboardWrite`, OSC 52),
   `pane_scrollbars` (`paneScrollbars`), `option_as_alt` (`optionAsAlt`: `auto` and `on` are alike because a web view
   cannot tell the keyboard layout, `off`, and `left` or `right`: only that Option key is Alt, sent as ESC and the key's
-  base character by its physical key, the other key keeps typing the layout's characters); not checked in a real window, and a dead-key combination such as Option+E may still start the layout's accent instead of sending ESC+e and `sounds` (`soundDone`, `soundBlocked`: a file under the
+  base character by its physical key, the other key keeps typing the layout's characters); a dead-key combination such as Option+E is caught before the composition check and its keydown is cancelled, but that is not checked in a real window and `sounds` (`soundDone`, `soundBlocked`: a file under the
   folder that holds `mods/`, served by `GET /mods/file?sound=`, 2 MiB, mp3/wav/ogg/m4a/flac, the tone if it will not
   play), live in open terminals. Fonts and sizes stay with the server terminal profile and a layout's look, ligatures
   need an addon Perch does not ship, and there is no telemetry to turn off.

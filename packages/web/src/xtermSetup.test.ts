@@ -169,6 +169,7 @@ describe("createPerchTerminal", () => {
     expect(typed("Digit1", { shiftKey: true })).toBe("\x1b!");
     expect(typed("Slash")).toBe("\x1b/");
     expect(typed("ArrowLeft")).toBeUndefined(); // xterm encodes special keys itself
+    expect(typed("KeyE", { keyCode: 229, key: "Dead" })).toBe("\x1be"); // a dead key still sends Alt+e
     expect(typed("KeyB", { ctrlKey: true })).toBeUndefined();
     optionAsAltInput(key("keyup", "AltLeft"));
     expect(typed("KeyB")).toBeUndefined(); // released: nothing held

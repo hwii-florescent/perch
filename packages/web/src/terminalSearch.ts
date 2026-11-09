@@ -56,6 +56,13 @@ export function useTerminalSearch(term: Terminal | null): TerminalSearchControll
   useEffect(() => {
     if (!term) return;
     term.attachCustomKeyEventHandler((e) => {
+      // Sees every key event (it tracks which Option is down). A dead key (Option+E) arrives as keyCode 229, so this runs before the composition check and cancels the accent.
+      const alt = optionAsAltInput(e);
+      if (alt !== undefined && !e.isComposing && !shortcutFor(e, true)) {
+        e.preventDefault();
+        term.input(alt, true);
+        return false;
+      }
       if (e.isComposing || e.keyCode === 229) return true;
       const direct = e.type === "keydown" ? shortcutFor(e, true) : undefined;
       if (direct?.scope === "terminal") {
@@ -74,12 +81,7 @@ export function useTerminalSearch(term: Terminal | null): TerminalSearchControll
         searchAddonRef.current?.clearActiveDecoration();
         return false;
       }
-      if (!terminalKeyHandler(e)) return false;
-      const alt = optionAsAltInput(e);
-      if (alt === undefined) return true;
-      e.preventDefault();
-      term.input(alt, true);
-      return false;
+      return terminalKeyHandler(e);
     });
   }, [term]);
 
