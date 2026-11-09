@@ -1,0 +1,6 @@
+{
+  "name": "Tab drag",
+  "description": "what a tab drag shows: the tab under the pointer and the half of a pane a split would take",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

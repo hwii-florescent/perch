@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "check:stock-ui": "node --test scripts/export-stock-ui.test.mjs && node scripts/export-stock-ui.mjs --check",
     "preview": "vite preview",
     "test": "vitest run"
   },
@@ -17,6 +18,7 @@
     "@codemirror/search": "^6.7.2",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.14",
+    "@csstools/css-tokenizer": "^4.0.2",
     "@lezer/highlight": "^1.2.5",
     "@perch/shared": "*",
     "@tailwindcss/vite": "^4.3.3",
@@ -31,6 +33,7 @@
     "diff": "^9.0.0",
     "dockview-react": "^7.0.2",
     "dompurify": "^3.4.12",
+    "es-module-shims": "2.8.4",
     "marked": "^18.0.7",
     "pdfjs-dist": "^6.4.299",
     "qrcode-generator": "^2.0.4",

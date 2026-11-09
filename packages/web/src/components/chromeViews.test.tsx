@@ -4,12 +4,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("../ws", () => ({ socket: { send: vi.fn(), connect: vi.fn(), onMessage: vi.fn(() => () => {}), onConnectionChange: vi.fn(() => () => {}) } }));
-vi.mock("../Sidebar", () => ({ NewSessionPopover: () => null }));
+vi.mock("./NewSessionPopover", () => ({ NewSessionPopover: () => null }));
 vi.mock("../keybinds", () => ({ useNestShortcutHints: () => [] }));
 vi.mock("../closeGuard", () => ({ requestCloseSession: vi.fn() }));
 const { requestCloseSession } = await import("../closeGuard");
 const { usePerchStore } = await import("../store");
-const { WorkspaceOverview } = await import("./WorkspaceOverview");
+const { WorkspaceOverview } = await import("../stock-ui/sidebar/overview");
 const { WorkspaceBrowser } = await import("./WorkspaceBrowser");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

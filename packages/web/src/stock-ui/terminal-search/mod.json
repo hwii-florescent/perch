@@ -1,0 +1,6 @@
+{
+  "name": "Terminal find",
+  "description": "the terminal's find bar: a query, next and previous, and close, over Perch's terminal search",
+  "version": "1.0.0",
+  "api": "^1.9"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Review",
+  "description": "a workspace's Git review: changed files, the diff against the working tree, staged, HEAD or a compare, line comments, stage/unstage, discard and commit with their previews, Ask agent, and one review packet to an agent",
+  "version": "1.0.0",
+  "api": "^1.4"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Settings: Keyboard",
+  "description": "every shortcut, and the commands packages add, with the keys to record or reset",
+  "version": "1.0.0",
+  "api": "^1.8"
+}

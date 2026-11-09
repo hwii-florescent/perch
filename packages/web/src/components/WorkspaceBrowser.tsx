@@ -1,5 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { cn } from "../lib/cn";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent } from "react";
+import type { BrowserToolbarProps } from "@perch/sdk";
+import { StockRoute } from "./mod-root";
+// The toolbar is the stock screen `stock:browser-toolbar` (or the person's copy); the page, its address draft and the
+// suggestions stay this file's.
+import BrowserToolbar from "../stock-ui/browser-toolbar/main";
 import { BROWSER_COVERS, browserAddressDrafts, browserCall, browserHasFocus, browserId, nativeBrowser, noteBrowserFocus, onPassthrough, passthroughActive } from "../browserNative";
 import { browserAddress, fileUrl, openExternal, parseUrl, webUrl } from "../links";
 
@@ -10,10 +14,6 @@ import { recordPage, removePage, searchHistory, searchSuggestions, type HistoryE
 import { addressRows, type AddressRow } from "../addressSuggestions";
 import { usePerchStore } from "../store";
 import { useZoom } from "../zoom";
-import { GHOST_BUTTON } from "./ui/icon-button";
-import { PageIcon } from "./PageIcon";
-
-const BTN = cn(GHOST_BUTTON, "grid h-7 w-7 shrink-0 place-items-center focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-fg max-[700px]:size-11");
 
 /** perch's lightweight browser. In the desktop app the page is a native child webview laid
  * over `.host` (`browser.rs`): a real browser, so GitHub and every other site works. Without
@@ -44,7 +44,9 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl, active }: {
   const lastVisit = useRef("");
   const lastSent = useRef("");
   const host = useRef<HTMLDivElement>(null);
-  const address = useRef<HTMLInputElement>(null);
+  const address = useRef<HTMLInputElement | null>(null);
+  // The address box is the toolbar screen's; it hands its element here (a swapped copy hands its own).
+  const setAddress = useCallback((element: HTMLInputElement | null) => { address.current = element; }, []);
   const selected = useRef(active);
   selected.current = active;
   const focusPending = useRef(active === true);
@@ -204,90 +206,46 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl, active }: {
 
   return (
     <div className="@container flex min-w-0 flex-1 flex-col [--radius:var(--radius-pane)]" data-testid="workspace-browser" data-browser-id={id}>
-      <div className="browser-toolbar flex h-[43px] shrink-0 items-center gap-1 bg-surface-0 px-[10px] text-subtext-0 max-[700px]:h-12" data-testid="browser-toolbar">
-        <button type="button" className={BTN} title={nativeBrowser ? "Back" : "Back is available in the desktop app"} aria-label="Back" disabled={!nativeBrowser || !started} onClick={() => act("back")}>
-          <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 5-5 5 5 5" /></svg>
-        </button>
-        <button type="button" className={BTN} title={nativeBrowser ? "Forward" : "Forward is available in the desktop app"} aria-label="Forward" disabled={!nativeBrowser || !started} onClick={() => act("forward")}>
-          <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m8 5 5 5-5 5" /></svg>
-        </button>
-        <button type="button" className={BTN} title="Reload" aria-label="Reload" disabled={!started} onClick={() => act("reload")}>
-          <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M16 7a6 6 0 1 0 0 6M16 3v4h-4" /></svg>
-        </button>
-        <div className="relative mx-[11px] flex h-7 min-w-0 flex-1 items-center gap-[7px] rounded-ui bg-[var(--bg)] px-[10px] focus-within:outline focus-within:outline-1 focus-within:outline-fg @max-[460px]:mx-1 max-[700px]:h-9">
-          <PageIcon icon={icon} fallback={<svg width="12" height="12" className="shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><circle cx="10" cy="10" r="7" /><ellipse cx="10" cy="10" rx="3" ry="7" /><path d="M3 10h14" /></svg>} />
-          <input
-            ref={address}
-            role="combobox"
-            aria-expanded={rows.length > 0}
-            aria-controls="browser-suggestions"
-            aria-autocomplete="list"
-            aria-activedescendant={picked >= 0 ? `browser-suggestion-${picked}` : undefined}
-            className="h-full min-w-0 flex-1 bg-transparent p-0 text-[11px] text-fg [border:0] [font-family:inherit] outline-none placeholder:text-subtext-0"
-            aria-label="Address"
-            data-testid="browser-address"
-            placeholder="Search or enter an address"
-            value={draft}
-            spellCheck={false}
-            autoCapitalize="none"
-            autoCorrect="off"
-            onChange={(e) => { setDraft(e.target.value); setDirty(true); setOpen(true); setPicked(-1); }}
-            // Like other browsers, focusing selects the whole address. The list opens on typing or ↓, not on focus:
-            // it hides the native page, which a plain click into the bar should not do.
-            onFocus={(e) => { editing.current = true; justFocused.current = true; e.currentTarget.select(); }}
-            onMouseUp={(e) => { if (justFocused.current) e.preventDefault(); justFocused.current = false; }}
-            onBlur={() => { editing.current = false; setOpen(false); setDirty(false); setPicked(-1); }}
-            onKeyDown={(e) => {
-              justFocused.current = false;
-              if (e.nativeEvent.isComposing) return;
-              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                e.preventDefault();
-                if (!open) { setOpen(true); return; }
-                if (rows.length === 0) return;
-                setPicked((i) => (e.key === "ArrowDown" ? (i + 1) % rows.length : (i <= 0 ? rows.length : i) - 1));
-              } else if (e.key === "Escape") {
-                if (open && rows.length > 0) { e.preventDefault(); setOpen(false); setPicked(-1); }
-                else { setDraft(url); setDirty(false); }
-              } else if (e.key === "Enter") {
-                e.preventDefault();
-                const row = rows[picked];
-                if (row) choose(row); else go();
-              }
-            }}
-          />
-          {rows.length > 0 && (
-            <ul id="browser-suggestions" role="listbox" aria-label="Suggestions" data-testid="browser-suggestions" className="absolute top-full right-0 left-0 z-50 mt-1 list-none overflow-hidden rounded-ui bg-surface-0 p-1 text-[11px] text-fg shadow-lg">
-              {rows.map((row, i) => (
-                <li
-                  key={`${row.kind}:${row.url}`}
-                  id={`browser-suggestion-${i}`}
-                  role="option"
-                  aria-selected={i === picked}
-                  className={cn("group flex cursor-default items-center gap-2 rounded-ui px-2 py-1", i === picked ? "bg-surface-1" : "hover:bg-surface-1")}
-                  // mousedown, not click: the input must not blur (closing the list) before the choice lands.
-                  onMouseDown={(e) => { e.preventDefault(); choose(row); }}
-                >
-                  <span className="min-w-0 flex-1 truncate">{row.kind === "search" ? `Search for “${row.title}”` : row.kind === "suggest" ? row.title : row.kind === "go" ? `Go to ${row.title}` : row.title}</span>
-                  {row.kind === "page" && <span className="min-w-0 max-w-[55%] shrink truncate text-subtext-0">{row.url.replace(/^https?:\/\/(www\.)?/, "")}</span>}
-                  {row.kind === "page" && (
-                    <span
-                      role="button"
-                      aria-label={`Remove ${row.title} from history`}
-                      title="Remove from history"
-                      className="shrink-0 px-1 text-subtext-0 opacity-0 group-hover:opacity-100 hover:text-fg"
-                      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); removePage(row.url); setHistory((found) => found.filter((page) => page.url !== row.url)); }}
-                    >×</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <button type="button" className={cn(BTN, "w-auto gap-2 px-1 text-[10px] @min-[461px]:flex")} data-testid="browser-open-external" aria-label="Open externally" disabled={!started} onClick={() => openExternal(url)}>
-          <span className="@max-[460px]:hidden">Open externally</span>
-          <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 3h6v6m0-6-8 8m-1-7H4v12h12v-4" /></svg>
-        </button>
-      </div>
+      <StockRoute name="browser-toolbar" stock={BrowserToolbar} props={{
+        native: nativeBrowser,
+        started,
+        icon,
+        address: {
+          ref: setAddress,
+          value: draft,
+          rows,
+          picked,
+          onChange: (value: string) => { setDraft(value); setDirty(true); setOpen(true); setPicked(-1); },
+          // Like other browsers, focusing selects the whole address. The list opens on typing or ↓, not on focus:
+          // it hides the native page, which a plain click into the bar should not do.
+          onFocus: (e: FocusEvent<HTMLInputElement>) => { editing.current = true; justFocused.current = true; e.currentTarget.select(); },
+          onMouseUp: (e: MouseEvent<HTMLInputElement>) => { if (justFocused.current) e.preventDefault(); justFocused.current = false; },
+          onBlur: () => { editing.current = false; setOpen(false); setDirty(false); setPicked(-1); },
+          onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => {
+            justFocused.current = false;
+            if (e.nativeEvent.isComposing) return;
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              if (!open) { setOpen(true); return; }
+              if (rows.length === 0) return;
+              setPicked((i) => (e.key === "ArrowDown" ? (i + 1) % rows.length : (i <= 0 ? rows.length : i) - 1));
+            } else if (e.key === "Escape") {
+              if (open && rows.length > 0) { e.preventDefault(); setOpen(false); setPicked(-1); }
+              else { setDraft(url); setDirty(false); }
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              const row = rows[picked];
+              if (row) choose(row); else go();
+            }
+          },
+        },
+        onChoose: choose,
+        onRemove: (row: AddressRow) => { removePage(row.url); setHistory((found) => found.filter((page) => page.url !== row.url)); },
+        onBack: () => act("back"),
+        onForward: () => act("forward"),
+        onReload: () => act("reload"),
+        onOpenExternal: () => openExternal(url),
+      } satisfies BrowserToolbarProps} />
       <div ref={host} className="host relative min-h-0 flex-1">
         {!started ? (
           <div className="flex h-full items-center justify-center p-6 text-[12px] text-subtext-0">Search or enter an address above to browse.</div>

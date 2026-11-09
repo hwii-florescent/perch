@@ -309,29 +309,30 @@ pub fn parse_dialog(screen: &str) -> Option<Dialog> {
     above.reverse();
     // `title` indexed the reversed list; map it back.
     let title = title.map(|from_bottom| above.len() - 1 - from_bottom);
-    let (title, detail) = match title {
-        // Claude: the command sits above its question; Codex: below it.
-        Some(at) => {
-            let detail: Vec<&str> = above
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| *i != at)
-                .map(|(_, line)| *line)
-                .collect();
-            (above[at].trim().to_string(), detail)
-        }
-        None => (
-            above
-                .last()
-                .map(|line| line.trim().to_string())
-                .unwrap_or_default(),
-            above
-                .iter()
-                .take(above.len().saturating_sub(1))
-                .copied()
-                .collect(),
-        ),
+    // Claude: the command sits above its question; Codex: below it. With no line ending in `?`,
+    // the line next to the options is the title.
+    let Some(at) = title.or(above.len().checked_sub(1)) else {
+        return finish(String::new(), String::new(), options, keys);
     };
+    // A question wrapped by a narrow terminal is one title, not its last line.
+    let mut first = at;
+    while first > 0 && wraps_into(above[first - 1], above[first]) {
+        first -= 1;
+    }
+    let mut title = String::new();
+    for line in &above[first..=at] {
+        // A hyphenated break (`inline-` / `visual`) rejoins without a space.
+        if !title.is_empty() && !title.ends_with('-') {
+            title.push(' ');
+        }
+        title.push_str(line.trim());
+    }
+    let detail: Vec<&str> = above
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !(first..=at).contains(i))
+        .map(|(_, line)| *line)
+        .collect();
     let indent = detail
         .iter()
         .map(|line| line.len() - line.trim_start().len())
@@ -343,6 +344,14 @@ pub fn parse_dialog(screen: &str) -> Option<Dialog> {
         .collect::<Vec<_>>()
         .join("\n");
     finish(title, clip_detail(detail, MAX_DETAIL), options, keys)
+}
+
+/// Whether `next` continues the sentence `prev` left open: no closing punctuation and either a
+/// hyphenated break or a lowercase start.
+fn wraps_into(prev: &str, next: &str) -> bool {
+    let prev = prev.trim();
+    let open = !prev.is_empty() && !prev.ends_with(['.', '?', '!', ':', ';', ')', ']', '`']);
+    open && (prev.ends_with('-') || next.trim().starts_with(char::is_lowercase))
 }
 
 fn finish(
@@ -608,6 +617,19 @@ Enter to select · ↑/↓ to navigate · Esc to cancel
         );
         assert!(dialog.request.detail.starts_with("Create hello.txt"));
         assert_eq!(dialog.request.options.len(), 2);
+    }
+
+    // A long question wrapped over three lines, with no `?` ending a line (Pi's ask dialog).
+    #[test]
+    fn a_wrapped_question_is_one_title_in_a_numbered_dialog() {
+        let screen = "\n Rich output\n How should agents produce 'pretty UI' in chat? (Orca has no inline-\n visual feature to copy, so this is our\n own design.)\n\n ❯ 1. Markdown first\n      Step 1\n   2. Markdown only\n Enter to select · Esc to cancel\n";
+        let request = parse(screen).unwrap();
+        assert_eq!(
+            request.title,
+            "How should agents produce 'pretty UI' in chat? (Orca has no inline-visual feature to copy, so this is our own design.)"
+        );
+        assert_eq!(request.detail, "Rich output");
+        assert_eq!(request.options.len(), 2);
     }
 
     #[test]

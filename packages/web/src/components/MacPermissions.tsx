@@ -4,8 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { tauriInvoke } from "../links";
 import { usePerchStore } from "../store";
 import { Dialog } from "./ui/dialog";
-import { SettingRow, SettingsGroup } from "./ui/setting-row";
 import { CATALOG_TOGGLE, MUTED } from "./ui/settings";
+import { useIsMobileWidth } from "../responsive";
+import PermissionsSettings from "../stock-ui/settings-permissions/main";
+import { StockRoute } from "./mod-root";
 
 export const macPermissionsAvailable = Boolean(tauriInvoke) && /Mac/.test(navigator.platform);
 
@@ -25,42 +27,34 @@ export interface PermissionReport {
   note: string | null;
 }
 
-function PermissionMark({ state, label, name }: { state: PermissionState; label: string; name?: string }) {
-  const text = state === "granted" ? "Granted" : state === "notGranted" ? "Not granted" : "Unable to verify";
-  return (
-    <span className="inline-flex items-center gap-1 text-[0.75rem] text-fg" aria-label={`${name ? `${name} · ` : ""}${label}: ${text}`} title={text}>
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        {state === "granted" ? <path d="m3 8 3 3 7-7" /> : state === "notGranted" ? <path d="m4 4 8 8M12 4l-8 8" /> : <><path d="M6 5a2 2 0 0 1 4 0c0 2-2 2-2 4" /><path d="M8 12h.01" /></>}
-      </svg>
-      <span>{label}</span>
-    </span>
-  );
-}
-
-/** Shared by onboarding and Settings. No consent requests until Allow is clicked. */
+/** Shared by onboarding and Settings. No consent requests until Allow is clicked. The page is
+ * `stock:settings-permissions` (`stock-ui/settings-permissions/main.tsx`) or the person's package chosen for it; the
+ * native bridge, its one-request-at-a-time guard and the refresh on returning to the app are bound here. */
 export function MacPermissions() {
   const [report, setReport] = useState<PermissionReport | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirmRestart, setConfirmRestart] = useState(false);
+  const isMobile = useIsMobileWidth();
   const active = useRef(false);
   const mounted = useRef(false);
   const shown = useRef<PermissionReport | null>(null);
   shown.current = report;
 
-  const run = useCallback(async (command: "permissions_status" | "permissions_verify" | "permissions_allow" | "permissions_restart_host", id?: string) => {
-    if (!tauriInvoke || active.current) return;
+  /** Resolves true when a terminal host restart went through (it is the only command the caller waits on). */
+  const run = useCallback(async (command: "permissions_status" | "permissions_verify" | "permissions_allow" | "permissions_restart_host", id?: string): Promise<boolean> => {
+    if (!tauriInvoke || active.current) return false;
     active.current = true;
     setPending(id ?? command);
     setError(null);
+    let restarted = false;
     try {
       if (command === "permissions_allow") await tauriInvoke(command, { id });
       if (command === "permissions_restart_host") {
         // Exactly the daemon and session count the user was shown; the core re-verifies both.
         const host = shown.current?.host;
-        if (!host) return;
+        if (!host) return false;
         await tauriInvoke(command, { pid: host.pid, liveSessions: host.liveSessions });
-        setConfirmRestart(false);
+        restarted = true;
       }
       const next = await tauriInvoke(command === "permissions_allow" || command === "permissions_restart_host" ? "permissions_status" : command) as PermissionReport;
       if (mounted.current) setReport(next);
@@ -74,6 +68,7 @@ export function MacPermissions() {
       active.current = false;
       if (mounted.current) setPending(null);
     }
+    return restarted;
   }, []);
 
   useEffect(() => {
@@ -86,59 +81,16 @@ export function MacPermissions() {
   }, [run]);
 
   if (!macPermissionsAvailable) return null;
-  return (
-    <div data-testid="mac-permissions">
-      <p className="m-0 mb-4 text-[0.85rem] text-fg">
-        Choose what perch and the tools you run may access. Allow opens macOS System Settings; you still decide there. All permissions are optional.
-      </p>
-      {report?.host?.attribution === "severed" && (
-        <div className="mb-4 text-[0.8rem] text-fg" role="status" data-testid="host-severed">
-          <p className="m-0">Terminals run from an older perch build that was replaced, so macOS no longer applies perch's permissions to them. Restarting the terminal host fixes that.</p>
-          {confirmRestart ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span>{report.host.liveSessions === 0 ? "No terminals are running." : `This ends ${report.host.liveSessions} running terminal${report.host.liveSessions === 1 ? "" : "s"}, including agents and anything they started.`}</span>
-              <button type="button" className={CATALOG_TOGGLE} disabled={pending !== null} onClick={() => { void run("permissions_restart_host"); }}>{pending === "permissions_restart_host" ? "Restarting…" : "Restart terminal host"}</button>
-              <button type="button" className={CATALOG_TOGGLE} disabled={pending !== null} onClick={() => setConfirmRestart(false)}>Cancel</button>
-            </div>
-          ) : (
-            <button type="button" className={`${CATALOG_TOGGLE} mt-2`} disabled={pending !== null} onClick={() => setConfirmRestart(true)}>Restart terminal host…</button>
-          )}
-        </div>
-      )}
-      <SettingsGroup>
-        {!report && <p className="m-0 py-4 text-[0.8rem] text-subtext-0" role="status">{pending ? "Checking macOS access…" : "Permission status unavailable. Try Refresh."}</p>}
-        {report?.app.checks.map((check) => (
-          <SettingRow key={check.id} title={check.title} description={check.description}>
-            <div className="flex flex-col items-end gap-1">
-              <PermissionMark state={check.state} name={check.title} label="App" />
-              {report.terminal && <PermissionMark state={report.terminal.checks.find((c) => c.id === check.id)?.state ?? "unknown"} name={check.title} label="Terminal" />}
-            </div>
-            <button type="button" className={CATALOG_TOGGLE} aria-label={`Allow ${check.title}`} disabled={pending !== null} onClick={() => { void run("permissions_allow", check.id); }}>
-              {pending === check.id ? "Opening…" : "Allow"}
-            </button>
-          </SettingRow>
-        ))}
-      </SettingsGroup>
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className={CATALOG_TOGGLE} disabled={pending !== null} onClick={() => { void run("permissions_status"); }}>Refresh</button>
-        <button type="button" className={CATALOG_TOGGLE} disabled={pending !== null} onClick={() => { void run("permissions_verify"); }}>{pending === "permissions_verify" ? "Verifying…" : "Verify terminals"}</button>
-      </div>
-      {error && <p className="mt-2 text-[0.8rem] text-red" role="alert">Could not check or request permission: {error}</p>}
-      {report?.terminal && <p className={MUTED} role="status" data-testid="permission-comparison">
-        {report.comparison === "match" ? "App and terminal checks match. Matching checks can include permissions that are not granted." : report.comparison === "different" ? "App and terminal access differ. Review the individual marks before relying on a grant." : "Some checks could not be verified. Compare the app and terminal marks above."}
-      </p>}
-      <p className={MUTED}>Ad-hoc builds may need permissions enabled again after an update.</p>
-      {report && <details className="mt-3 text-[0.75rem] text-subtext-0">
-        <summary className="cursor-pointer">About permissions and process checks</summary>
-        <p>Verify terminals runs a short read-only shell through the real terminal host. It does not touch existing sessions. A matching result is not a guarantee for every external tool or sandbox.</p>
-        <p>App PID {report.app.pid}{report.daemon && ` · Terminal host PID ${report.daemon.pid}`}{report.terminal && ` · Probe PID ${report.terminal.pid}`}</p>
-        {report.daemon && <ul className="pl-4">{report.daemon.checks.map((check) => <li key={check.id}><PermissionMark state={check.state} label={`Host · ${check.title}`} /></li>)}</ul>}
-        {report.note && <p>{report.note}</p>}
-      <p className={MUTED}>Local builds are ad-hoc signed. After a rebuild, macOS may show perch enabled while access no longer matches. Toggle the entry off and on, or remove and add the current perch app again. Restarting an old terminal host ends its sessions; perch never does that automatically.</p>
-      <p className={MUTED}>Automation is per target app; other apps may ask later. Normal browser tabs need none of these grants. External computer-use tools may have their own permission identities.</p>
-      </details>}
-    </div>
-  );
+  const props = {
+    report, pending, error,
+    actions: {
+      refresh: () => { void run("permissions_status"); },
+      verify: () => { void run("permissions_verify"); },
+      allow: (checkId: string) => { void run("permissions_allow", checkId); },
+      restartHost: () => run("permissions_restart_host"),
+    },
+  };
+  return <StockRoute name="settings-permissions" props={props} stock={PermissionsSettings} exact={isMobile} />;
 }
 
 /** Host-persisted dismissal, independent of the browser/profile's welcome screen. */

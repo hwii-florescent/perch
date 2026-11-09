@@ -21,7 +21,7 @@ vi.mock("../relay/transport", () => ({
   relayDownload: vi.fn(),
 }));
 const openWindow = vi.spyOn(window, "open").mockImplementation(() => null);
-const { WorkspaceFilesView } = await import("./WorkspaceFiles");
+const { WorkspaceFilesView } = await import("../stock-ui/files/files");
 const { WorkspaceFileAsset } = await import("./WorkspaceFileAsset");
 const { MAX_IMAGE_BYTES } = await import("./WorkspaceImage");
 const { usePerchStore } = await import("../store");

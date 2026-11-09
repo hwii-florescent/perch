@@ -1,0 +1,6 @@
+{
+  "name": "Notifications",
+  "description": "the in-app notifications: a session finished or needs you, a usage alert, a mod's notify",
+  "version": "1.0.0",
+  "api": "^1.6"
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { AgentLifecycleStatus } from "@perch/shared";
 import { usePerchStore } from "../store";
 import { socket } from "../ws";
@@ -8,14 +8,16 @@ import { useTerminalSearch } from "../terminalSearch";
 import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
 import { attachAgentFileDrop, type FileDropNotice } from "../agentFileDrop";
-import { KeptTerminal, forgetTerminal, showTerminal } from "../terminalKeeper";
+import { BorrowTerminals, KeptTerminal, forgetTerminal, showTerminal } from "../terminalKeeper";
 import { MobileKeyBar } from "../components/MobileKeyBar";
 import { useIsMobileWidth } from "../responsive";
-import { button } from "../components/ui/button";
-import { glass } from "../components/ui/glass";
+import { StockRoute } from "../components/mod-root";
+import type { AgentControlProps } from "@perch/sdk";
+// The chip, the error line and the exited/sleeping banner are the stock screen `stock:agent-control` (or the person's
+// copy); the lease, starting and closing stay this file's.
+import AgentControl from "../stock-ui/agent-control/main";
 import { PhoneSizeNotice } from "../components/PhoneSizeNotice";
 import { TerminalSuggestions } from "./nativeChat/TerminalSuggestions";
-import { cn } from "../lib/cn";
 
 /** The PTY's size, in-band in its output (`terminal::pty_size_marker`). */
 const SIZE_MARKER = /\x1b\[8;(\d+);(\d+)t/g;
@@ -185,6 +187,8 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
   sessionId: string; agent: string; cliError?: string | null; onClose?: () => void;
 }) {
   const connected = usePerchStore((state) => state.connected);
+  // Under a borrowing surface (an overlay, a peek) the kept terminal moves here and back, never a second copy.
+  const borrow = useContext(BorrowTerminals);
   const container = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<AgentView | null>(null);
   const [restart, setRestart] = useState(0);
@@ -205,7 +209,7 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
   useEffect(() => {
     if (!connected || !container.current) return;
     const surface = container.current;
-    const shown = showTerminal(keyOf(sessionId, agent), sessionId, surface, () => new AgentView(sessionId, agent, surface));
+    const shown = showTerminal(keyOf(sessionId, agent), sessionId, surface, () => new AgentView(sessionId, agent, surface), { borrow });
     setView(shown.view);
     const stopPaste = attachClipboardImagePaste(surface, () => shown.view.inputId);
     setFileDrop(null);
@@ -214,7 +218,7 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
       (text) => { shown.view.created.term.paste(text); shown.view.created.term.focus(); }, setFileDrop,
     );
     return () => { stopDrop(); stopPaste(); shown.hide(); };
-  }, [connected, sessionId, agent, restart]);
+  }, [connected, sessionId, agent, restart, borrow]);
 
   function startOver() {
     forgetTerminal(keyOf(sessionId, agent));
@@ -238,14 +242,21 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
   // A phone holds the size of this computer's terminal: the notice offers it back, in place of "Fit here".
   const phoneSized = !isMobile && shared && !resizing && !!terminalId && sizedByOtherDevice(status);
   const label = !connected ? "Reconnecting…" : phoneSized ? null : sleeping || exitCode !== null ? null : error && !terminalId ? "Agent unavailable" : !status ? "Opening agent…" : controlling ? null : shared ? (isMobile ? "Shared terminal" : null) : status.inputOwner ? "Another view is typing in this agent" : "Viewing agent";
+  const controls: Omit<AgentControlProps, "part"> = {
+    agent,
+    label,
+    connected,
+    pending,
+    onRetry: !terminalId && error && connected ? startOver : null,
+    control: terminalId && status && !controlling && (isMobile || !shared)
+      ? { label: pending ? (shared ? "Fitting…" : "Taking control…") : shared ? "Fit here" : "Take control", disabled: pending || !connected, onClick: () => void view?.takeControl() }
+      : null,
+    error: error || cliError || null,
+    ended: exitCode !== null || sleeping ? { sleeping, exitCode, onRestart: startOver, onClose: onClose ?? null } : null,
+    state: { controlling, shared, writable, phone: isMobile },
+  };
   return <div className="terminal terminal--persistent" data-testid="persistent-agent-terminal" data-session-id={sessionId} data-terminal-id={terminalId ?? undefined} data-controlling={controlling || undefined} data-writable={writable || undefined}>
-    {label && <div className={cn(glass, "absolute top-2 right-3 z-[2] flex items-center gap-1 py-0.5 pr-0.5 pl-3 text-[0.8rem] text-subtext-0")}>
-      <span role="status">{label}</span>
-      {!terminalId && error && connected && <button type="button" className={button({ variant: "soft", size: "md", className: "[.app--mobile_&]:min-h-11" })} disabled={pending} onClick={startOver}>Retry CLI</button>}
-      {terminalId && status && !controlling && (isMobile || !shared) && <button type="button" className={button({ variant: "soft", size: "md", className: "[.app--mobile_&]:min-h-11" })} disabled={pending || !connected} onClick={() => void view?.takeControl()}>
-        {pending ? (shared ? "Fitting…" : "Taking control…") : shared ? "Fit here" : "Take control"}
-      </button>}
-    </div>}
+    <StockRoute name="agent-control" stock={AgentControl} props={{ ...controls, part: "top" }} />
     {phoneSized && status?.resizeOwner && <PhoneSizeNotice generation={status.resizeOwner.generation} pending={pending} onThisTab={() => void view?.takeBack(false)} onAllTabs={() => void view?.takeBack(true)} />}
     <div className="terminal__surface" ref={container} />
     <TerminalSearchBar controller={search} />
@@ -259,14 +270,7 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
       </div>
     )}
     {isMobile && writable && exitCode === null && !sleeping && view && <MobileKeyBar term={view.created.term} send={(data) => view.sendKey(data)} />}
-    {(error || cliError) && <div className="terminal__cli-error" role="alert">{error || cliError}</div>}
-    {(exitCode !== null || sleeping) && <div className="terminal__exited terminal__exited--cli" data-testid={sleeping ? "cli-sleeping" : "cli-exited"}>
-      <span className="terminal__exited-text">{sleeping ? `${agent} is sleeping to save memory — its conversation is kept` : `${agent} exited (code ${exitCode})`}</span>
-      <span className="terminal__exited-actions">
-        <button type="button" className={button({ variant: "primary", size: "md", className: "[.app--mobile_&]:min-h-11" })} data-testid={sleeping ? "cli-resume" : "cli-restart"} onClick={startOver}>{sleeping ? "Resume agent" : "Restart CLI"}</button>
-        {onClose && <button type="button" className={button({ variant: "soft", size: "md", className: "[.app--mobile_&]:min-h-11" })} data-testid="cli-close-session" onClick={onClose}>Close session</button>}
-      </span>
-    </div>}
+    <StockRoute name="agent-control" stock={AgentControl} props={{ ...controls, part: "bottom" }} />
   </div>;
 }
 

@@ -5,15 +5,17 @@ import { lookVars, prefersDark, setRootLook } from "../themes";
 import { activeOverride, floatOverride, hiddenOverride, layoutStateVersion, pointAtLayout, publishFloat, publishStack, setActive, setFloat, setShownLayout, setSizes, sizeOverride, snapSpot, subscribeLayoutState } from "../layoutState";
 import type { LayoutNode, ModInfo } from "@perch/shared";
 import { currentMods, subscribeMods } from "../mods";
+import { retainInstances } from "../mod-runtime";
 import { cn } from "../lib/cn";
-import { StatusBar } from "../StatusBar";
-import { Sidebar } from "../Sidebar";
 import { ModView } from "./ModView";
+import { StockView } from "./mod-root";
 import { SplitCanvas } from "./SplitCanvas";
-import { TabBar } from "./TabBar";
 import { usePerchStore } from "../store";
 import { PersistentTerminal } from "../views/PersistentTerminal";
+import { AgentPane } from "../views/AgentPane";
+import { BorrowTerminals } from "../terminalKeeper";
 import { WorkspaceTools } from "./WorkspaceTools";
+import { STOCK_WINDOW_PARTS, WindowPart } from "./StockWindow";
 
 // The same card the stock window draws its three panes on.
 const CARD = "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--card-radius,12px)] bg-[var(--card-bg)]";
@@ -24,24 +26,46 @@ function FocusedAgent() {
   return sessionId ? <PersistentTerminal active sessionId={sessionId} /> : <div className="inactive-session-pane">No session is focused.</div>;
 }
 
+/** The instance a layout's mod block is (`mod-runtime.ts`): in the window's layout (`scope` `layout:<name>`) a node
+ * with an id keeps its copy, state and tasks while hidden and until it leaves the layout; a node without one has only
+ * its position, which an edit can give to another node, so its copy lives only while shown. Under any other scope (a
+ * mod's overlay, a package's `Layout`) every copy lives only while shown: the window's layout never releases it. */
+const blockInstance = (scope: string, node: LayoutNode, path: string) => ({
+  instance: `${scope}:${node.id ?? path}`,
+  owner: node.id && scope.startsWith("layout:") ? ("layout" as const) : ("view" as const),
+});
+
+/** The instances of every enabled mod block in `node`, shown or not: what the layout still owns. */
+function ownedInstances(layout: string, node: LayoutNode, mods: ModInfo[], path = "r", into = new Set<string>()): Set<string> {
+  if (node.type === "block" && node.id && mods.some((m) => `mod:${m.id}` === node.content && m.enabled && !m.error)) into.add(blockInstance(layout, node, path).instance);
+  if ("children" in node) node.children.forEach((child, i) => ownedInstances(layout, child, mods, `${path}/${i}`, into));
+  return into;
+}
+
 /** One of Perch's own panes, or a mod's view, by the name a layout gives it. */
-function Block({ content, mods, props }: { content: string; mods: ModInfo[]; props?: Record<string, unknown> }) {
+function Block({ content, mods, props, at }: { content: string; mods: ModInfo[]; props?: Record<string, unknown>; at?: { instance: string; owner: "layout" | "view" } }) {
   switch (content) {
-    case "sidebar": return <Sidebar />;
-    case "tabs": return <div className="flex h-11 shrink-0 items-center"><TabBar /></div>;
+    case "sidebar": return <StockView name="sidebar" instance={at?.instance} placeholder={<div className="min-h-0 flex-1" />} />;
+    case "tabs": return <div className="flex h-11 shrink-0 items-center"><StockView name="tabs" instance={at?.instance} /></div>;
     case "canvas": return <main className="dock-area relative flex min-h-0 min-w-0 flex-1"><SplitCanvas /></main>;
     case "files": return <WorkspaceTools tab="files" />;
     case "git": return <WorkspaceTools tab="gitReview" />;
-    case "status": return <StatusBar />;
+    // Perch's own screens run as their stock package, or the package the person chose for it (`perch mod use`).
+    case "status": return <StockView name="status" instance={at?.instance} placeholder={<div className="h-6 shrink-0" />} />;
+    // The stock window's own parts (`stock:main`), each with its card, head row and resize handle.
+    case "window:sidebar": case "window:main": case "window:drawer": return <WindowPart name={content} />;
   }
   // The focused session's terminal, whichever it is now (herdr's `{agent: "focused"}`).
   if (content === "agent:focused") return <FocusedAgent />;
   // A live terminal of a session. A terminal shows in one place at a time: if the session is also in
   // the canvas, put it in this block or the canvas, not both.
   if (content.startsWith("terminal:")) return <PersistentTerminal active sessionId={content.slice("terminal:".length)} />;
+  // A session's own view, as its tab shows it (its agent's terminal or its chat). Under a borrowing surface the
+  // tab's terminal moves here and back; nothing new is started for it.
+  if (content.startsWith("session:")) return <AgentPane sessionId={content.slice("session:".length)} />;
   const mod = mods.find((candidate) => `mod:${candidate.id}` === content);
   if (!mod?.enabled || mod.error) return <div className="inactive-session-pane">{`${content} is off or gone.`}</div>;
-  return <ModView mod={mod} props={props} />;
+  return <ModView mod={mod} props={props} instance={at?.instance} owner={at?.owner} />;
 }
 
 const EDGE_GAP = 12;
@@ -158,7 +182,7 @@ function StackHeader({ node, active, mods }: { node: Extract<LayoutNode, { type:
   );
 }
 
-function Node({ node, mods, root, inRow, path, parentPath, index }: { node: LayoutNode; mods: ModInfo[]; root?: boolean; inRow?: boolean; path: string; parentPath: string; index: number }) {
+function Node({ node, mods, root, inRow, path, parentPath, index, layout }: { node: LayoutNode; mods: ModInfo[]; root?: boolean; inRow?: boolean; path: string; parentPath: string; index: number; layout: string }) {
   if (!shownNode(node)) return null;
   const float = root ? undefined : floatNow(node, path);
   const grip = float && <FloatGrip id={node.id ?? path} spot={{ edge: float.edge ?? "", align: float.align ?? "" }} />;
@@ -177,7 +201,11 @@ function Node({ node, mods, root, inRow, path, parentPath, index }: { node: Layo
     ...(float ? floatStyle(float) : {}),
   };
   const common = { "data-node-id": node.id, "data-tauri-drag-region": node.windowDrag ? true : undefined };
-  if (node.type === "block") return <div className={cn(CARD, "relative", float?.peek != null && "layout-drawer")} style={{ ...style, ...OUTLINE }} data-testid={`layout-${node.content}`} {...common}>{grip}<Block content={node.content} mods={mods} props={node.props} /></div>;
+  // A stock window part draws its own card and sizes itself (its dragged width); the node only places it.
+  if (node.type === "block" && (STOCK_WINDOW_PARTS as readonly string[]).includes(node.content)) {
+    return <div className="contents" data-testid={`layout-${node.content}`} {...common}><Block content={node.content} mods={mods} /></div>;
+  }
+  if (node.type === "block") return <div className={cn(CARD, "relative", float?.peek != null && "layout-drawer")} style={{ ...style, ...OUTLINE }} data-testid={`layout-${node.content}`} {...common}>{grip}<Block content={node.content} mods={mods} props={node.props} at={blockInstance(layout, node, path)} /></div>;
   if (node.type === "stack") {
     const ids = node.children.map((child, i) => child.id ?? String(i));
     const current = Math.max(0, ids.indexOf(activeOverride(node.id) ?? node.active ?? ids[0]!));
@@ -185,7 +213,8 @@ function Node({ node, mods, root, inRow, path, parentPath, index }: { node: Layo
       <div className="flex min-h-0 min-w-0 flex-col" style={style} data-testid={`layout-stack-${node.id ?? path}`} {...common}>
         {grip}
         <StackHeader node={node} active={ids[current]!} mods={mods} />
-        <Node node={node.children[current]!} mods={mods} path={`${path}/${current}`} parentPath={path} index={current} inRow={false} />
+        {/* Keyed by the child, so another tab never takes over this one's views. */}
+        <Node key={ids[current]} node={node.children[current]!} mods={mods} path={`${path}/${current}`} parentPath={path} index={current} inRow={false} layout={layout} />
       </div>
     );
   }
@@ -202,7 +231,7 @@ function Node({ node, mods, root, inRow, path, parentPath, index }: { node: Layo
             {line && (node.resizable !== false
               ? <Boundary row={row} divider={node.divider} path={path} prev={before} next={i} siblings={node.children} />
               : <div className="shrink-0" style={{ [row ? "width" : "height"]: node.divider?.width, background: node.divider?.color ?? "var(--overlay-0)" }} />)}
-            <Node node={child} mods={mods} path={`${path}/${i}`} parentPath={path} index={i} inRow={row} />
+            <Node node={child} mods={mods} path={`${path}/${i}`} parentPath={path} index={i} inRow={row} layout={layout} />
           </Fragment>
         );
       })}
@@ -230,7 +259,16 @@ const watchDark = (watch: () => void) => {
 /** The whole window as a layout file describes it, in the place the stock three cards would be. The
  * core has already checked the shape; a layout that stops parsing is never passed here. */
 export function LayoutRoot({ root }: { root: LayoutNode }) {
-  const mods = useSyncExternalStore(subscribeMods, currentMods)?.mods ?? [];
+  const state = useSyncExternalStore(subscribeMods, currentMods);
+  const mods = state?.mods ?? [];
+  const layout = state?.layout || "layout";
+  // Copies the layout no longer holds (a node removed, a mod turned off, another layout chosen) end; hidden ones stay.
+  const owned = [...ownedInstances(`layout:${layout}`, root, mods)].sort().join("\n");
+  useEffect(() => {
+    const keep = new Set(owned ? owned.split("\n") : []);
+    retainInstances("layout:", keep);
+  }, [owned]);
+  useEffect(() => () => retainInstances("layout:", new Set()), []);
   pointAtLayout(root);
   useSyncExternalStore(subscribeLayoutState, layoutStateVersion);
   const dark = useSyncExternalStore(watchDark, prefersDark);
@@ -259,5 +297,21 @@ export function LayoutRoot({ root }: { root: LayoutNode }) {
       if (mac && lightsX !== undefined) void tauriInvoke?.("set_traffic_lights", { at: null });
     };
   }, [lightsX, lightsY]);
-  return <div className="flex min-h-0 flex-1 px-2 pt-2" style={{ background: root.background }} data-testid="layout-root"><Node node={{ ...root, background: undefined }} mods={mods} root path="r" parentPath="" index={0} /></div>;
+  return <div className="flex min-h-0 flex-1 px-2 pt-2" style={{ background: root.background }} data-testid="layout-root"><Node node={{ ...root, background: undefined }} mods={mods} root path="r" parentPath="" index={0} layout={`layout:${layout}`} /></div>;
+}
+
+/**
+ * A layout tree drawn inside something else (a mod's overlay, popup or window; a package's `Layout`), with the same
+ * node semantics as the window's layout. Terminals here borrow (`BorrowTerminals`): one already on screen moves in
+ * and goes back when this unmounts, so it never gains a second input or resize owner, and nothing here stops a
+ * process. `scope` names its mod copies, which live only while shown. The window's look and stacks are not touched.
+ */
+export function LayoutContent({ node, scope }: { node: LayoutNode; scope: string }) {
+  const state = useSyncExternalStore(subscribeMods, currentMods);
+  useSyncExternalStore(subscribeLayoutState, layoutStateVersion);
+  return <BorrowTerminals.Provider value>
+    <div className="flex h-full min-h-0 w-full min-w-0" data-testid="layout-content">
+      <Node node={node} mods={state?.mods ?? []} root path="r" parentPath="" index={0} layout={scope} />
+    </div>
+  </BorrowTerminals.Provider>;
 }

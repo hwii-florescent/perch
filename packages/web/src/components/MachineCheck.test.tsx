@@ -14,9 +14,20 @@ vi.mock("../ws", () => ({
   },
 }));
 const runCommand = vi.fn();
+// The view draws with the SDK's class strings only; the rest of the SDK is the whole app.
+vi.mock("@perch/sdk", () => ({ settingsClass: { primary: "primary", muted: "muted" } }));
 vi.mock("../modApp", () => ({ runCommand: (...args: unknown[]) => runCommand(...args) }));
 
-import { MachineCheck, describe } from "./MachineCheck";
+import { useMachineCheck } from "./MachineCheck";
+import { MachineCheck as MachineCheckView, describe } from "../stock-ui/settings-hosts/machine-check";
+
+/** The host's engine (`useMachineCheck`) behind the screen's view, as the SSH hosts page wires them. */
+function MachineCheck({ sshHost, onCore }: { sshHost: string; onCore?: () => void }) {
+  const machine = useMachineCheck();
+  return <MachineCheckView sshHost={sshHost} machine={machine.state} onCore={onCore} actions={{
+    checkMachine: machine.check, installCore: machine.install, logIn: (argv) => { runCommand("tab.new", { argv }); },
+  }} />;
+}
 
 const reply = (message: unknown) => act(() => handlers.forEach((handler) => handler(message as ServerMessage)));
 afterEach(() => { handlers.clear(); sent.length = 0; runCommand.mockReset(); document.body.innerHTML = ""; });

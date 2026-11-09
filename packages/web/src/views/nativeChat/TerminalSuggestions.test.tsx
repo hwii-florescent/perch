@@ -11,13 +11,13 @@ vi.mock("../../suggestions", async (original) => ({
   actOnSuggestion: mocks.act,
 }));
 vi.mock("../../agentTerminals", () => ({ agentInputGeneration: mocks.generation }));
-vi.mock("../../store", () => ({ usePerchStore: Object.assign((select: (state: object) => unknown) => select({ connected: true }), { getState: () => ({ switchSession: () => {} }) }) }));
 import { waitingCount } from "../../suggestions";
+import { usePerchStore } from "../../store";
 import { TerminalSuggestions } from "./TerminalSuggestions";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let host: HTMLDivElement, root: Root;
-beforeEach(() => { host = document.createElement("div"); document.body.append(host); root = createRoot(host); mocks.act.mockReset(); mocks.generation.mockReset(); });
+beforeEach(() => { host = document.createElement("div"); document.body.append(host); root = createRoot(host); mocks.act.mockReset(); mocks.generation.mockReset(); usePerchStore.setState({ connected: true }); });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
 const card = (states: string[]): SuggestionCard => ({

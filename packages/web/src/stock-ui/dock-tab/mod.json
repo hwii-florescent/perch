@@ -1,0 +1,6 @@
+{
+  "name": "Dock tab",
+  "description": "one tab of a docked pane group: dockview's title and close, the agent badge, and the pane menu on right-click",
+  "version": "1.0.0",
+  "api": "^1.10"
+}

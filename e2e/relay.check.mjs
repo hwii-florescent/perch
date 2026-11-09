@@ -92,6 +92,24 @@ try {
   const seen = [];
   phone.on("request", (request) => seen.push(request.url()));
   phone.on("websocket", (socket) => seen.push(socket.url()));
+  phone.on("pageerror", (error) => { logs.core += `\nPHONE PAGEERROR ${error.stack}`; });
+  phone.on("console", (message) => { if (message.type() === "error") logs.core += `\nPHONE CONSOLE ${message.text()}`; });
+  // The phone's relay socket, passed through as it is (sealed frames, both ways, closes included), so the check can
+  // cut it at a chosen frame: `relayCut.at` frames after it is armed, the socket drops as a lost network would.
+  const relayCut = { at: 0, sent: 0, cut: 0 };
+  await phone.routeWebSocket(/\/r\/[^/?]+\?role=guest/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((message) => {
+      server.send(message);
+      if (relayCut.at && ++relayCut.sent === relayCut.at) {
+        relayCut.at = 0;
+        relayCut.cut++;
+        server.close();
+        ws.close();
+      }
+    });
+    server.onMessage((message) => ws.send(message));
+  });
   await phone.goto(`${link}&pair=${code}`);
   const dismiss = phone.getByTestId("onboarding-dismiss");
   await dismiss.click({ timeout: 20_000 }).catch(() => {});
@@ -162,8 +180,149 @@ try {
   assert.equal(huge.contentBytes, hugeText.length);
   assert(huge.frameBytes > 1 << 20, `fixture must exceed the relay frame limit, got ${huge.frameBytes}`);
   assert.equal(await inPage(() => window.usePerchStore.getState().connected), true, "a large message dropped the phone's main session");
+  const modsState = (requestId, body) => { send({ type: "mods.set", requestId, ...body }); return wait((m) => m.type === "mods.state" && m.requestId === requestId, `mods.set ${body.op}`).then(() => messages.findLast((m) => m.requestId === requestId)); };
+  const statusOf = (screen) => inPage((screen) => document.querySelector(`[data-testid="screen-${screen}-status"]`)?.textContent ?? "", screen);
+  // A phone runs a person's package only on one of its own screens (`stock:mobile-*`), and only once that was turned
+  // on for this phone: its device token is in this page's storage, readable by any code on the page. Then the
+  // package loads: every file of one revision (its modules, its CSS and the asset that CSS and assetUrl name) crosses
+  // the sealed tunnel and runs on the app's own React. More files than the host takes pending requests (16) at once:
+  // the loader sends at most MAX_RELAY_FETCHES (8) and the session survives.
+  {
+    const pkg = path.join(dir, "mods", "relay-esm");
+    const HELPERS = 20;
+    fs.mkdirSync(path.join(pkg, "lib"), { recursive: true });
+    fs.mkdirSync(path.join(pkg, "art"), { recursive: true });
+    fs.writeFileSync(path.join(pkg, "mod.json"), JSON.stringify({ name: "Relay ESM", format: "esm", api: "^1.6", place: "none" }));
+    for (let i = 0; i < HELPERS; i++) fs.writeFileSync(path.join(pkg, "lib", `h${i}.js`), `export const n = ${i};\n`);
+    fs.writeFileSync(path.join(pkg, "main.js"), [
+      'import { useEffect } from "react";',
+      'import { assetUrl, useModData } from "@perch/sdk";',
+      'import "./look.css";',
+      'import { label } from "./lib/dep.js";',
+      ...Array.from({ length: HELPERS }, (_, i) => `import { n as n${i} } from "./lib/h${i}.js";`),
+      `const sum = ${Array.from({ length: HELPERS }, (_, i) => `n${i}`).join(" + ")};`,
+      // Its durable data (`mods/data`) makes a round trip through the tunnel: a write, then a read of what was written.
+      "export default function Probe() { const data = useModData(); useEffect(() => { const root = document.documentElement.dataset; root.esmProof = label + ':' + sum; root.esmAsset = assetUrl('art/dot.svg');",
+      "  data.write('trip', { sum }).then(() => data.read('trip')).then((got) => { root.modData = JSON.stringify(got && got.value); }, (error) => { root.modData = 'error: ' + error.message; }); }, [data]); return null; }",
+    ].join("\n"));
+    fs.writeFileSync(path.join(pkg, "lib", "dep.js"), 'export const label = "relay-esm-ok";');
+    fs.writeFileSync(path.join(pkg, "look.css"), ".relay-esm-dot { background-image: url(art/dot.svg); }\n");
+    fs.writeFileSync(path.join(pkg, "art", "dot.svg"), '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>');
+    const expected = `relay-esm-ok:${(HELPERS * (HELPERS - 1)) / 2}`;
+    // Chosen for the phone's header: still Perch's own until this phone turns on phone screens from packages.
+    await until(async () => ((await modsState(`use-header-${Date.now()}`, { id: "stock:mobile-header", op: "use", target: "relay-esm" })).error ?? null) === null, "the package to be chosen for the phone's header");
+    await inPage(() => window.usePerchStore.getState().setSettingsOpen(true));
+    await phone.getByTestId("settings-nav-mods").click({ timeout: 15_000 });
+    await until(async () => (await statusOf("stock:mobile-header")).includes("until phone screens from your packages are on"), "the header row to say the phone has not turned it on");
+    assert.equal(await inPage(() => document.documentElement.dataset.esmProof ?? null), null, "a package ran on a phone that never turned phone screens on");
+    assert.equal(await phone.getByTestId("mobile-header").count(), 1, "the phone must keep Perch's own header");
+    const toggle = phone.getByTestId("settings-phone-mods");
+    await toggle.click();
+    await until(async () => toggle.isChecked(), "the phone's switch to turn on");
+    assert.equal(await inPage(() => localStorage.getItem("perch.phoneMods")), "on");
+    await inPage(() => window.usePerchStore.getState().setSettingsOpen(false));
+    await phone.waitForFunction((expected) => document.documentElement.dataset.esmProof === expected, expected, { timeout: 30_000 }).catch(() => { throw new Error("the ES-module package never ran on the phone"); });
+    const loaded = await inPage(async () => {
+      const asset = document.documentElement.dataset.esmAsset ?? "";
+      const style = document.querySelector('style[data-mod-package="relay-esm"]')?.textContent ?? "";
+      const svg = asset.startsWith("blob:") ? await (await fetch(asset)).text() : "";
+      return { asset, style, svg };
+    });
+    assert.match(loaded.asset, /^blob:/, "assetUrl must name the tunnel's copy of the file");
+    assert(loaded.style.includes(`url("${loaded.asset}")`), `the package CSS must point at the same object URL: ${loaded.style}`);
+    assert(loaded.svg.includes("<svg"), "the asset must arrive whole");
+    assert.equal(await inPage(() => window.usePerchStore.getState().connected), true, "more package files than the tunnel's request limit ended the phone's session");
+    const stored = await phone.waitForFunction(() => document.documentElement.dataset.modData, undefined, { timeout: 30_000 })
+      .then((handle) => handle.jsonValue()).catch(() => { throw new Error("the package's data never came back on the phone"); });
+    assert.equal(stored, JSON.stringify({ sum: (HELPERS * (HELPERS - 1)) / 2 }), "the package's data must cross the tunnel both ways");
+    // The relay drops while the phone fetches a new revision's files: the copy keeps what it shows and says why, and
+    // once the phone is back through the relay the same revision loads. The new revision also asks for a capability
+    // the relay does not carry (running a program): a readable refusal, never a request to the relay's own origin.
+    {
+      const BIG = 60;
+      for (let i = 0; i < BIG; i++) fs.writeFileSync(path.join(pkg, "lib", `big${i}.js`), `export const b = ${i}; // ${"x".repeat(16_000)}\n`);
+      // Let the phone take the revision with the new files (main.js unchanged) before the one that imports them.
+      await setTimeout(2500);
+      const proof = `relay-esm-2:${(BIG * (BIG - 1)) / 2}`;
+      fs.writeFileSync(path.join(pkg, "main.js"), [
+        'import { useEffect } from "react";',
+        ...Array.from({ length: BIG }, (_, i) => `import { b as b${i} } from "./lib/big${i}.js";`),
+        `const sum = ${Array.from({ length: BIG }, (_, i) => `b${i}`).join(" + ")};`,
+        "export default function Probe({ api }) { useEffect(() => { const root = document.documentElement.dataset; root.esmProof = 'relay-esm-2:' + sum;",
+        "  api.exec('echo', ['hi']).then(() => { root.execResult = 'ran'; }, (error) => { root.execResult = error.message; }); }, [api]); return null; }",
+      ].join("\n"));
+      relayCut.sent = 0;
+      relayCut.at = 12;
+      await phone.waitForFunction(() => [...document.querySelectorAll('[data-testid="mod-error"]')].some((el) => el.textContent.includes("Perch could not be reached")), undefined, { timeout: 30_000 })
+        .catch(() => { throw new Error(`no readable error after the relay dropped mid-fetch (cut ${relayCut.cut} time(s))`); });
+      assert.equal(relayCut.cut, 1, "the relay must have been cut once, mid-fetch");
+      assert.equal(await phone.evaluate(() => document.documentElement.dataset.esmProof), expected, "the last good revision must stay while the new one cannot load");
+      await inApp();
+      await phone.waitForFunction((proof) => document.documentElement.dataset.esmProof === proof, proof, { timeout: 60_000 })
+        .catch(() => { throw new Error("the new revision never loaded once the phone was back through the relay"); });
+      await phone.waitForFunction(() => !document.querySelector('[data-testid="mod-error"]'), undefined, { timeout: 15_000 });
+      await phone.waitForFunction(() => document.documentElement.dataset.execResult, undefined, { timeout: 15_000 });
+      assert.equal(await phone.evaluate(() => document.documentElement.dataset.execResult), "This is not available over the relay: open Perch on the computer that runs the core.");
+      assert.equal(await inPage(() => window.usePerchStore.getState().connected), true, "the phone must be connected again");
+    }
+    // Perch's own header again, for the rest of the check.
+    assert.equal((await modsState("use-header-off", { id: "stock:mobile-header", op: "use", target: "" })).error ?? null, null);
+    await phone.getByTestId("mobile-header").waitFor({ timeout: 15_000 });
+  }
+  // A stock screen comes from the Worker's own copy of this web build (no tunnel), on the same React and @perch/sdk.
+  {
+    await phone.evaluate(() => document.activeElement?.blur());
+    await phone.keyboard.press("Shift+Slash");
+    await phone.getByTestId("keybind-help").getByRole("heading", { name: "Keybindings", exact: true }).waitFor({ timeout: 30_000 })
+      .catch(() => { throw new Error("the stock keybind help never showed on the phone"); });
+    assert(seen.some((url) => url.startsWith(`${relayOrigin}/stock-ui/keybind-help/main.js`)), "stock files must come from the relay's own assets");
+    await phone.keyboard.press("Escape");
+    await phone.getByTestId("keybind-help").waitFor({ state: "detached", timeout: 10_000 });
+  }
+  // Settings > Mods is the phone's way back from a person's copy, through the tunnel: with a copy of the dropdown
+  // chosen for every dropdown (a computer's screen, so it never runs on the phone, even turned on), the page is
+  // Perch's own, the row says so, and choosing "Perch's own" there reaches the core.
+  {
+    assert.equal((await modsState("clone-select", { id: "stock:select", op: "clone", as: "relay-my-select" })).error ?? null, null);
+    const main = path.join(dir, "mods", "relay-my-select", "main.js");
+    const source = fs.readFileSync(main, "utf8");
+    assert(source.includes('"data-testid": testId'), "the dropdown's root must carry its test id");
+    fs.writeFileSync(main, source.replace('"data-testid": testId', '"data-testid": testId, "data-relay-copy": "edited"'));
+    await until(async () => ((await modsState(`use-select-${Date.now()}`, { id: "stock:select", op: "use", target: "relay-my-select" })).error ?? null) === null, "the copy to be chosen");
+    await phone.reload();
+    await inApp();
+    await inPage(() => window.usePerchStore.getState().setSettingsOpen(true));
+    await phone.getByTestId("settings-nav-mods").click({ timeout: 15_000 });
+    const use = phone.getByTestId("screen-stock:select-use");
+    const status = phone.getByTestId("screen-stock:select-status");
+    await use.waitFor({ timeout: 30_000 });
+    assert.equal(await use.getAttribute("data-relay-copy"), null, "Settings > Mods must never run the person's copy");
+    await until(async () => (await statusOf("stock:select")).includes("chosen for the computer; this phone shows Perch's own"), "the dropdown row to say the copy is the computer's");
+    assert.equal(await phone.locator('[data-relay-copy="edited"]').count(), 0, "a computer's copy ran on the phone");
+    // Chosen by keys, as on the desktop recovery check: each try opens the list, goes to "Perch's own" and takes it
+    // only once the trigger names that row active (a list a late scroll closed is opened again).
+    const option = phone.getByRole("option", { name: "Perch's own", exact: true });
+    await until(async () => {
+      await use.focus();
+      if (!(await option.count())) await use.press("ArrowDown");
+      if (!(await option.count())) return false;
+      await use.press("Home");
+      const id = await option.getAttribute("id").catch(() => null);
+      if (!id || (await use.getAttribute("aria-activedescendant")) !== id) return false;
+      await use.press("Enter");
+      await setTimeout(300);
+      return !(await statusOf("stock:select")).includes("Your");
+    }, "the phone to put Perch's own dropdown back");
+    await phone.waitForFunction(() => { const text = document.querySelector('[data-testid="screen-stock:select-status"]')?.textContent ?? ""; return text.includes("Perch's own") && !text.includes("Your"); }, undefined, { timeout: 15_000 })
+      .catch(async (error) => { await phone.screenshot({ path: "/tmp/perch-relay-mods-failed.png" }); throw new Error(`the phone could not put Perch's own dropdown back (/tmp/perch-relay-mods-failed.png): ${error.message} (status: ${await status.textContent()})`); });
+    send({ type: "mods.list", requestId: "mods-after-list" });
+    await wait((m) => m.type === "mods.state" && m.requestId === "mods-after-list", "the mods list");
+    assert.equal(messages.findLast((m) => m.requestId === "mods-after-list").uses?.["stock:select"], undefined, "the core still uses the copy");
+    await phone.screenshot({ path: "/tmp/perch-relay-mods.png" });
+    await inPage(() => window.usePerchStore.getState().setSettingsOpen(false));
+  }
   // Its data routes went through the sealed tunnel, not the relay's HTTP.
-  const direct = seen.filter((url) => /\/(pair|ws|workspace-file|upload|clipboard-image)(\?|$)/.test(new URL(url).pathname));
+  const direct = seen.filter((url) => /\/(pair|ws|workspace-file|upload|clipboard-image|mods\/package|mods\/data|mods\/exec|mods\/fs|terminal\/read)(\?|$)/.test(new URL(url).pathname));
   assert.deepEqual(direct, [], "data routes must not be fetched from the relay directly");
   assert(seen.some((url) => url.includes("/r/")), "the phone never opened the relay socket");
   // The address bar no longer holds the key or the code.

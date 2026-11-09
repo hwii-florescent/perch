@@ -7,9 +7,32 @@
 //! What stays safe is stock Perch: a mod that fails to load never replaces a working one, a mod can
 //! be turned off from Settings or `perch mod disable`, and `PERCH_MODS=off` (or the Settings
 //! switch) loads none, so Perch starts even when a mod breaks the page. State is `mod-state.json`
-//! beside `mods/`. Only [`source`] reads a mod's code, from inside its own folder.
+//! beside `mods/`. Only [`source`] and [`package_file`] serve a mod's code.
+//!
+//! A package (`"format": "esm"` in `mod.json`, with an optional `"api"` range) is a folder of ES
+//! modules, CSS and assets the page loads as one graph. Its revision is the SHA-256 of every
+//! supported file (sorted relative path, length, bytes); [`scan`] keeps the last
+//! [`RETAINED_SNAPSHOTS`] revisions' bytes in memory, so every read of one revision is that
+//! revision's bytes (never the disk now), and rehashes only when a file's metadata stamp moves.
+//! A legacy client that does not accept `esm` is never shown a package (`server::mods`).
+//!
+//! Stock screens ship as packages too, in the web app's own build (`stock-ui/` beside
+//! `index.html`, written by `packages/web/scripts/export-stock-ui.mjs`). [`stock`] lists them as
+//! `stock:<id>`, a namespace no mod can take ([`plain_id`] refuses `:`), even while mods are off:
+//! they are Perch as shipped, and the page loads them from its own origin, never through
+//! `mods/package` or the mods folder. The core reads them only to list and to clone
+//! ([`clone_stock`]); a core with no web build (headless, remote) has none.
+//!
+//! Installing is one step whatever the source ([`install_from`]): a folder, or a git URL cloned to
+//! a temporary folder first, is copied and each copied mod's `mod.json` gets `installedFrom` (kind,
+//! location, git commit and the SHA-256 of the files as installed). A manifest may name its own
+//! stable `id` and `publisher`; nothing assumes the package came from a local folder, so a registry
+//! is one more source kind in front of the same step.
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex};
 
 const MAX_BYTES: u64 = 2 * 1024 * 1024;
 const STATE: &str = "mod-state.json";
@@ -18,13 +41,19 @@ const STATE: &str = "mod-state.json";
 pub enum Error {
     Invalid(String),
     NotFound(String),
+    /// Mods are off, or this mod is.
+    Off(String),
+    /// A package revision that is no longer kept: list the mods again.
+    Gone(String),
     Io(std::io::Error),
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Invalid(text) | Self::NotFound(text) => f.write_str(text),
+            Self::Invalid(text) | Self::NotFound(text) | Self::Off(text) | Self::Gone(text) => {
+                f.write_str(text)
+            }
             Self::Io(error) => write!(f, "Perch could not use the mods folder: {error}"),
         }
     }
@@ -62,15 +91,59 @@ pub enum Place {
     Dock,
     Overlay,
     None,
+    /// Only where a layout block or Perch itself puts it: never docked, overlaid or run hidden on
+    /// its own (stock screens and their clones).
+    Layout,
 }
 
 #[derive(Default, Deserialize)]
-#[serde(default)]
+#[serde(default, rename_all = "camelCase")]
 struct Manifest {
     name: String,
     description: String,
     place: Place,
     entry: Option<String>,
+    format: Option<String>,
+    api: Option<String>,
+    origin: Option<String>,
+    version: Option<String>,
+    cloned_from: Option<ClonedFrom>,
+    /// The package's own stable id as published; `install` names the folder after it.
+    id: Option<String>,
+    publisher: Option<String>,
+    installed_from: Option<InstalledFrom>,
+}
+
+/// Where `perch mod install` took a mod from, written into its `mod.json` as `installedFrom`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledFrom {
+    /// `folder` or `git` (a registry would be another kind).
+    pub kind: String,
+    /// The folder or the git URL as given (git URLs are public https, so they hold no credentials).
+    pub location: String,
+    /// The git commit installed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    /// `sha256:<hex>` of the mod's files as installed, before this record was written: every file
+    /// by sorted relative path, each path and its bytes preceded by their length (u64, little
+    /// endian), the same scheme as a package revision.
+    #[serde(default)]
+    pub digest: String,
+}
+
+/// The one package format: ES modules the page imports through `mods/package`.
+pub const PACKAGE_FORMAT: &str = "esm";
+
+/// The mod a clone was copied from, and that mod's revision at the time.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClonedFrom {
+    pub id: String,
+    pub revision: String,
+    /// The source's `mod.json` `version`, when it had one (a stock screen always does).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,6 +162,33 @@ pub struct ModInfo {
     /// under its file name without the extension, so a layout can name it in `font`.
     #[serde(default)]
     pub fonts: Vec<String>,
+    /// `esm` for a package; absent for a single-file mod.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    /// The host API range a package was written for (`mod.json` `api`), as written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api: Option<String>,
+    /// A package's entry module (default `main.js`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<String>,
+    /// Every file of a package's current revision, sorted: the only paths `mods/package` serves.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
+    /// Where this copy came from (`clone` for `perch mod clone`, `stock` for a shipped screen), as
+    /// recorded in `mod.json`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    /// The package's own version (`mod.json` `version`), as written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloned_from: Option<ClonedFrom>,
+    /// Who published the package (`mod.json` `publisher`), as written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+    /// Where `perch mod install` took it from, and the digest of what it copied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed_from: Option<InstalledFrom>,
 }
 
 fn mods_dir(root: &Path) -> PathBuf {
@@ -121,23 +221,280 @@ fn entry_of(manifest: &Manifest) -> Result<&str, Error> {
     let entry = manifest.entry.as_deref().unwrap_or("main.js");
     let path = Path::new(entry);
     if path.components().all(|c| matches!(c, Component::Normal(_)))
-        && path.extension().is_some_and(|e| e == "js")
+        && path.extension().is_some_and(|e| e == "js" || e == "mjs")
     {
         Ok(entry)
     } else {
         Err(Error::Invalid(
-            "entry must be a relative .js path inside the mod".into(),
+            "entry must be a relative .js or .mjs path inside the mod".into(),
         ))
     }
 }
 
 fn read_manifest(dir: &Path) -> Result<Manifest, Error> {
-    match std::fs::read_to_string(dir.join("mod.json")) {
+    let manifest: Manifest = match std::fs::read_to_string(dir.join("mod.json")) {
         Ok(text) => serde_json::from_str(&text)
-            .map_err(|error| Error::Invalid(format!("mod.json is not valid: {error}"))),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Manifest::default()),
-        Err(error) => Err(error.into()),
+            .map_err(|error| Error::Invalid(format!("mod.json is not valid: {error}")))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Manifest::default(),
+        Err(error) => return Err(error.into()),
+    };
+    if manifest
+        .format
+        .as_deref()
+        .is_some_and(|f| f != PACKAGE_FORMAT)
+    {
+        return Err(Error::Invalid(format!(
+            "mod.json format is \"{PACKAGE_FORMAT}\" or absent"
+        )));
     }
+    let short = |text: &Option<String>, max: usize| {
+        text.as_ref()
+            .is_none_or(|t| t.len() <= max && !t.chars().any(char::is_control))
+    };
+    if !short(&manifest.api, 64)
+        || !short(&manifest.origin, 300)
+        || !short(&manifest.version, 64)
+        || !short(&manifest.publisher, 120)
+    {
+        return Err(Error::Invalid(
+            "mod.json api, origin, version or publisher is too long or holds control characters"
+                .into(),
+        ));
+    }
+    if manifest.id.as_deref().is_some_and(|id| !plain_id(id)) {
+        return Err(Error::Invalid(
+            "mod.json id is a plain id: letters, digits, - and _".into(),
+        ));
+    }
+    Ok(manifest)
+}
+
+/// Files a package may hold and serve, by extension (case-sensitive), with their content type.
+/// Nothing that a browser would open as a document: no HTML.
+const PACKAGE_KINDS: [(&str, &str); 10] = [
+    ("js", "text/javascript; charset=utf-8"),
+    ("mjs", "text/javascript; charset=utf-8"),
+    ("css", "text/css; charset=utf-8"),
+    ("json", "application/json"),
+    ("svg", "image/svg+xml"),
+    ("png", "image/png"),
+    ("jpg", "image/jpeg"),
+    ("webp", "image/webp"),
+    ("woff2", "font/woff2"),
+    ("woff", "font/woff"),
+];
+const MAX_PACKAGE_FILES: usize = 2000;
+const MAX_PACKAGE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_PACKAGE_DEPTH: usize = 16;
+/// Revisions of one package kept in memory, so a page still loading one finishes on its bytes.
+pub const RETAINED_SNAPSHOTS: usize = 4;
+
+/// One revision of a package: its files' bytes, by relative path.
+pub struct Snapshot {
+    pub revision: String,
+    files: BTreeMap<String, Arc<[u8]>>,
+}
+
+/// The retained revisions of one package (newest last) and the metadata stamp of the newest.
+#[derive(Default)]
+struct Retained {
+    stamp: String,
+    snapshots: VecDeque<Arc<Snapshot>>,
+}
+
+// ponytail: one process-wide table keyed by the mod's folder, cleared whole past 256 packages (a
+// page then sees 410 and lists again); the upgrade path is an LRU owned by `AppState`.
+static PACKAGES: LazyLock<Mutex<HashMap<PathBuf, Retained>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// A path inside a package as the page names it: `/`-separated segments of letters, digits, `.`,
+/// `-` and `_`, none empty or starting with `.` (so no `..`, no hidden files, no `\`, `%` or NUL).
+fn package_path_ok(rel: &str) -> bool {
+    rel.len() <= 512
+        && rel.split('/').all(|segment| {
+            !segment.is_empty()
+                && !segment.starts_with('.')
+                && segment
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        })
+}
+
+fn package_kind(rel: &str) -> Option<&'static str> {
+    let ext = rel.rsplit_once('.')?.1;
+    PACKAGE_KINDS
+        .iter()
+        .find(|(e, _)| *e == ext)
+        .map(|(_, kind)| *kind)
+}
+
+/// What changes when a file is written: size, modified and (on unix) changed time and inode. The
+/// changed time moves on every write even when the modified time is put back.
+fn file_stamp(meta: &std::fs::Metadata) -> String {
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok());
+    #[cfg(unix)]
+    let changed = {
+        use std::os::unix::fs::MetadataExt;
+        (meta.ctime(), meta.ctime_nsec(), meta.ino())
+    };
+    // ponytail: without a changed time, a same-size edit that restores the modified time is missed
+    // until another change; unix (macOS, Linux) is where cores run.
+    #[cfg(not(unix))]
+    let changed = ();
+    format!("{}:{modified:?}:{changed:?}", meta.len())
+}
+
+/// Every supported file of a package, sorted by relative path, with its metadata stamp. A link, an
+/// unsafe name or a package past the limits is refused rather than partly served.
+fn inventory(dir: &Path) -> Result<Vec<(String, PathBuf, String)>, Error> {
+    let mut found = Vec::new();
+    let mut bytes = 0u64;
+    let mut stack = vec![(dir.to_path_buf(), String::new(), 0usize)];
+    while let Some((folder, prefix, depth)) = stack.pop() {
+        for entry in std::fs::read_dir(&folder)? {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || name == "node_modules" {
+                continue;
+            }
+            let rel = format!("{prefix}{name}");
+            let kind = entry.file_type()?;
+            if kind.is_symlink() {
+                return Err(Error::Invalid(format!(
+                    "a package cannot hold links ({rel})"
+                )));
+            }
+            if kind.is_dir() {
+                if depth + 1 >= MAX_PACKAGE_DEPTH {
+                    return Err(Error::Invalid(format!(
+                        "a package is at most {MAX_PACKAGE_DEPTH} folders deep ({rel})"
+                    )));
+                }
+                stack.push((entry.path(), format!("{rel}/"), depth + 1));
+                continue;
+            }
+            if !kind.is_file() || package_kind(&rel).is_none() {
+                continue;
+            }
+            if !package_path_ok(&rel) {
+                return Err(Error::Invalid(format!(
+                    "package file names are letters, digits, '.', '-' and '_' ({rel})"
+                )));
+            }
+            let meta = entry.metadata()?;
+            bytes += meta.len();
+            if found.len() >= MAX_PACKAGE_FILES || bytes > MAX_PACKAGE_BYTES {
+                return Err(Error::Invalid(format!(
+                    "a package is at most {MAX_PACKAGE_FILES} files and 64 MiB"
+                )));
+            }
+            found.push((rel, entry.path(), file_stamp(&meta)));
+        }
+    }
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(found)
+}
+
+/// The current snapshot of the package in `dir`: the retained one when no file's stamp moved,
+/// else every file read, hashed and kept (unchanged files share the previous revision's bytes).
+fn package(dir: &Path) -> Result<Arc<Snapshot>, Error> {
+    let files = inventory(dir)?;
+    let stamp: String = files
+        .iter()
+        .map(|(rel, _, stamp)| format!("{rel}={stamp};"))
+        .collect();
+    let previous = {
+        let store = PACKAGES.lock().unwrap();
+        let retained = store.get(dir);
+        match retained.and_then(|r| r.snapshots.back().cloned()) {
+            Some(newest) if retained.is_some_and(|r| r.stamp == stamp) => return Ok(newest),
+            newest => newest,
+        }
+    };
+    let mut hasher = Sha256::new();
+    let mut read = BTreeMap::new();
+    let mut total = 0u64;
+    for (rel, path, _) in files {
+        let bytes = std::fs::read(&path)?;
+        total += bytes.len() as u64;
+        if total > MAX_PACKAGE_BYTES {
+            return Err(Error::Invalid(
+                "a package is at most 64 MiB (it grew while being read)".into(),
+            ));
+        }
+        for part in [rel.as_bytes(), &bytes] {
+            hasher.update((part.len() as u64).to_le_bytes());
+            hasher.update(part);
+        }
+        let shared = previous
+            .as_ref()
+            .and_then(|p| p.files.get(&rel))
+            .filter(|old| ***old == *bytes)
+            .cloned()
+            .unwrap_or_else(|| Arc::from(bytes));
+        read.insert(rel, shared);
+    }
+    let snapshot = Arc::new(Snapshot {
+        revision: format!("{:x}", hasher.finalize()),
+        files: read,
+    });
+    let mut store = PACKAGES.lock().unwrap();
+    if store.len() >= 256 && !store.contains_key(dir) {
+        store.clear();
+    }
+    let retained = store.entry(dir.to_path_buf()).or_default();
+    retained.stamp = stamp;
+    retained
+        .snapshots
+        .retain(|s| s.revision != snapshot.revision);
+    retained.snapshots.push_back(snapshot.clone());
+    while retained.snapshots.len() > RETAINED_SNAPSHOTS {
+        retained.snapshots.pop_front();
+    }
+    Ok(snapshot)
+}
+
+/// One file of a retained package revision, with its content type, by exact path in that
+/// revision's file list. Never reads the disk: an unknown or dropped revision is [`Error::Gone`].
+pub fn package_file(
+    root: &Path,
+    policy: &Policy,
+    id: &str,
+    revision: &str,
+    rel: &str,
+) -> Result<(Arc<[u8]>, &'static str), Error> {
+    if policy.is_off() {
+        return Err(Error::Off("mods are off".into()));
+    }
+    let dir = mods_dir(root).join(id);
+    if !plain_id(id) || !dir.is_dir() {
+        return Err(Error::NotFound(format!("no mod \"{id}\"")));
+    }
+    if disabled(root).iter().any(|other| other == id) {
+        return Err(Error::Off(format!("mod \"{id}\" is off")));
+    }
+    let kind = package_kind(rel)
+        .filter(|_| package_path_ok(rel))
+        .ok_or_else(|| Error::NotFound(format!("mod \"{id}\" has no file \"{rel}\"")))?;
+    let snapshot = PACKAGES
+        .lock()
+        .unwrap()
+        .get(&dir)
+        .and_then(|r| r.snapshots.iter().find(|s| s.revision == revision).cloned())
+        .ok_or_else(|| {
+            Error::Gone(format!(
+                "revision {revision} of mod \"{id}\" is no longer kept; list the mods again"
+            ))
+        })?;
+    let bytes = snapshot
+        .files
+        .get(rel)
+        .cloned()
+        .ok_or_else(|| Error::NotFound(format!("mod \"{id}\" has no file \"{rel}\"")))?;
+    Ok((bytes, kind))
 }
 
 fn stamp(path: &Path) -> String {
@@ -173,53 +530,86 @@ pub fn scan(root: &Path, policy: &Policy) -> Vec<ModInfo> {
     names
         .into_iter()
         .map(|id| {
-            let dir = mods_dir(root).join(&id);
-            let loaded = read_manifest(&dir).and_then(|m| {
-                let entry = entry_of(&m)?.to_string();
-                if dir.join(&entry).is_file() {
-                    Ok((m, entry))
-                } else {
-                    Err(Error::Invalid(format!("{entry} is missing")))
-                }
-            });
-            let revision = |entry: &str| {
-                let sum = format!(
-                    "{}{}",
-                    stamp(&dir.join("mod.json")),
-                    stamp(&dir.join(entry))
-                );
-                sum.bytes().fold(0xcbf29ce484222325u64, |h, b| {
-                    (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
-                })
-            };
-            match loaded {
-                Ok((m, entry)) => ModInfo {
-                    enabled: !off.contains(&id),
-                    name: if m.name.is_empty() {
-                        id.clone()
-                    } else {
-                        m.name
-                    },
-                    description: m.description,
-                    place: m.place,
-                    revision: format!("{:x}", revision(&entry)),
-                    error: None,
-                    fonts: fonts_of(&dir),
-                    id,
-                },
-                Err(error) => ModInfo {
-                    enabled: false,
-                    name: id.clone(),
-                    description: String::new(),
-                    place: Place::None,
-                    revision: String::new(),
-                    error: Some(error.to_string()),
-                    fonts: Vec::new(),
-                    id,
-                },
-            }
+            let enabled = !off.contains(&id);
+            mod_info(&mods_dir(root).join(&id), id, enabled)
         })
         .collect()
+}
+
+/// The mod in `dir` as [`scan`] lists it, named `id`; `enabled` unless it is turned off.
+fn mod_info(dir: &Path, id: String, enabled: bool) -> ModInfo {
+    let dir = dir.to_path_buf();
+    let manifest = read_manifest(&dir);
+    let package_format = manifest.as_ref().ok().and_then(|m| m.format.clone());
+    let loaded = manifest.and_then(|m| {
+        let entry = entry_of(&m)?.to_string();
+        if m.format.is_some() {
+            let snapshot = package(&dir)?;
+            if !snapshot.files.contains_key(&entry) {
+                return Err(Error::Invalid(format!("{entry} is missing")));
+            }
+            return Ok((m, entry, snapshot.revision.clone(), Some(snapshot)));
+        }
+        if !dir.join(&entry).is_file() {
+            return Err(Error::Invalid(format!("{entry} is missing")));
+        }
+        let sum = format!(
+            "{}{}",
+            stamp(&dir.join("mod.json")),
+            stamp(&dir.join(&entry))
+        );
+        let revision = sum.bytes().fold(0xcbf29ce484222325u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
+        });
+        Ok((m, entry, format!("{revision:x}"), None))
+    });
+    match loaded {
+        Ok((m, entry, revision, snapshot)) => ModInfo {
+            enabled,
+            name: if m.name.is_empty() {
+                id.clone()
+            } else {
+                m.name
+            },
+            description: m.description,
+            place: m.place,
+            revision,
+            error: None,
+            fonts: fonts_of(&dir),
+            entry: snapshot.as_ref().map(|_| entry),
+            files: snapshot
+                .map(|s| s.files.keys().cloned().collect())
+                .unwrap_or_default(),
+            format: m.format,
+            api: m.api,
+            origin: m.origin,
+            version: m.version,
+            cloned_from: m.cloned_from,
+            publisher: m.publisher,
+            installed_from: m.installed_from,
+            id,
+        },
+        Err(error) => ModInfo {
+            enabled: false,
+            name: id.clone(),
+            description: String::new(),
+            place: Place::None,
+            revision: String::new(),
+            error: Some(error.to_string()),
+            fonts: Vec::new(),
+            // Still marked, so a client that cannot load packages is not shown a broken one.
+            format: package_format,
+            api: None,
+            entry: None,
+            files: Vec::new(),
+            origin: None,
+            version: None,
+            cloned_from: None,
+            publisher: None,
+            installed_from: None,
+            id,
+        },
+    }
 }
 
 const MAX_FONT_BYTES: u64 = 4 * 1024 * 1024;
@@ -404,6 +794,11 @@ pub fn source(root: &Path, policy: &Policy, id: &str) -> Result<String, Error> {
     if !found.enabled {
         return Err(Error::Invalid(format!("mod \"{id}\" is off")));
     }
+    if found.format.is_some() {
+        return Err(Error::Invalid(format!(
+            "mod \"{id}\" is a package; its files load from mods/package"
+        )));
+    }
     let dir = mods_dir(root).join(id);
     let entry = entry_of(&read_manifest(&dir)?)?.to_string();
     let (base, file) = (dir.canonicalize()?, dir.join(entry).canonicalize()?);
@@ -542,7 +937,19 @@ fn public_git_url(url: &str) -> Result<(), Error> {
     }
 }
 
-fn copy_tree(from: &Path, to: &Path, files: &mut usize, bytes: &mut u64) -> Result<(), Error> {
+/// The most `copy_tree` copies: files and bytes.
+type CopyLimit = (usize, u64);
+const INSTALL_LIMIT: CopyLimit = (MAX_INSTALL_FILES, MAX_INSTALL_BYTES);
+/// A whole package (a stock-sized screen is hundreds of files); a sanity bound, not a quota.
+const PACKAGE_COPY_LIMIT: CopyLimit = (MAX_PACKAGE_FILES, MAX_PACKAGE_BYTES);
+
+fn copy_tree(
+    from: &Path,
+    to: &Path,
+    files: &mut usize,
+    bytes: &mut u64,
+    limit: CopyLimit,
+) -> Result<(), Error> {
     std::fs::create_dir_all(to)?;
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
@@ -553,13 +960,15 @@ fn copy_tree(from: &Path, to: &Path, files: &mut usize, bytes: &mut u64) -> Resu
             continue;
         }
         if kind.is_dir() {
-            copy_tree(&entry.path(), &to.join(&name), files, bytes)?;
+            copy_tree(&entry.path(), &to.join(&name), files, bytes, limit)?;
         } else {
             *files += 1;
             *bytes += entry.metadata()?.len();
-            if *files > MAX_INSTALL_FILES || *bytes > MAX_INSTALL_BYTES {
+            if *files > limit.0 || *bytes > limit.1 {
                 return Err(Error::Invalid(format!(
-                    "too big to install: at most {MAX_INSTALL_FILES} files and 8 MiB"
+                    "too big to copy: at most {} files and {} MiB",
+                    limit.0,
+                    limit.1 / (1024 * 1024)
                 )));
             }
             std::fs::copy(entry.path(), to.join(&name))?;
@@ -613,7 +1022,16 @@ pub fn install(root: &Path, source: &str) -> Result<Installed, Error> {
             .join(rest),
             None => PathBuf::from(source),
         };
-        return install_from(root, &path, source);
+        return install_from(
+            root,
+            &path,
+            &InstalledFrom {
+                kind: "folder".into(),
+                location: path.display().to_string(),
+                commit: None,
+                digest: String::new(),
+            },
+        );
     }
     // Any other git host over https: `https://host/path[.git][#branch]`.
     if source.starts_with("https://") && !source.starts_with("https://github.com/") {
@@ -630,7 +1048,7 @@ pub fn install(root: &Path, source: &str) -> Result<Installed, Error> {
         }) {
             return Err(Error::Invalid("a branch is plain text".into()));
         }
-        return install_from_url(root, url, branch, &[], url.trim_start_matches("https://"));
+        return install_from_url(root, url, branch, &[]);
     }
     let (repo, branch, sub) = github_source(source)?;
     install_from_url(
@@ -638,18 +1056,18 @@ pub fn install(root: &Path, source: &str) -> Result<Installed, Error> {
         &format!("https://github.com/{repo}.git"),
         branch.as_deref(),
         &sub,
-        &repo,
     )
 }
 
-/// `install` for any git URL or path; the source has already been checked.
+/// `install` for any git URL or path; the source has already been checked. The clone is a
+/// temporary folder handed to [`install_from`], recorded as the URL and the commit it holds.
 fn install_from_url(
     root: &Path,
     url: &str,
     branch: Option<&str>,
     sub: &[String],
-    repo: &str,
 ) -> Result<Installed, Error> {
+    let repo = url.trim_start_matches("https://");
     let work = std::env::temp_dir().join(format!("perch-install-{}", uuid::Uuid::new_v4()));
     let result = (|| {
         let mut clone = std::process::Command::new("git");
@@ -667,18 +1085,105 @@ fn install_from_url(
                 String::from_utf8_lossy(&output.stderr).trim()
             )));
         }
+        let commit = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&work)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+            .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+            .filter(|commit| !commit.is_empty());
         install_from(
             root,
             &sub.iter().fold(work.clone(), |dir, s| dir.join(s)),
-            repo,
+            &InstalledFrom {
+                kind: "git".into(),
+                location: url.to_string(),
+                commit,
+                digest: String::new(),
+            },
         )
     })();
     let _ = std::fs::remove_dir_all(&work);
     result
 }
 
-/// The copy half of `install`, from a folder already on disk.
-pub fn install_from(root: &Path, top: &Path, name_hint: &str) -> Result<Installed, Error> {
+/// `sha256:<hex>` of every file under `dir` that [`copy_tree`] copies, as [`InstalledFrom::digest`]
+/// describes.
+fn tree_digest(dir: &Path) -> Result<String, Error> {
+    let mut files = Vec::new();
+    let mut stack = vec![(dir.to_path_buf(), String::new())];
+    while let Some((folder, prefix)) = stack.pop() {
+        for entry in std::fs::read_dir(&folder)? {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let kind = entry.file_type()?;
+            if name.starts_with('.') || name == "node_modules" || kind.is_symlink() {
+                continue;
+            }
+            if kind.is_dir() {
+                stack.push((entry.path(), format!("{prefix}{name}/")));
+            } else {
+                files.push((format!("{prefix}{name}"), entry.path()));
+            }
+        }
+    }
+    files.sort();
+    let mut hasher = Sha256::new();
+    for (rel, path) in files {
+        let bytes = std::fs::read(path)?;
+        for part in [rel.as_bytes(), &bytes] {
+            hasher.update((part.len() as u64).to_le_bytes());
+            hasher.update(part);
+        }
+    }
+    Ok(format!("sha256:{:x}", hasher.finalize()))
+}
+
+/// Writes where an installed mod came from into its `mod.json` (made if absent), with the digest
+/// of its files as copied. A manifest that is not a JSON object is left as it is.
+fn record_install(dir: &Path, from: &InstalledFrom) -> Result<(), Error> {
+    let from = InstalledFrom {
+        digest: tree_digest(dir)?,
+        ..from.clone()
+    };
+    let path = dir.join("mod.json");
+    let mut manifest = match std::fs::read_to_string(&path) {
+        Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(serde_json::Value::Object(map)) => map,
+            _ => return Ok(()),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
+        Err(error) => return Err(error.into()),
+    };
+    manifest.insert(
+        "installedFrom".into(),
+        serde_json::to_value(&from)
+            .map_err(|e| Error::Invalid(format!("could not write mod.json: {e}")))?,
+    );
+    let text = serde_json::to_string_pretty(&manifest)
+        .map_err(|e| Error::Invalid(format!("could not write mod.json: {e}")))?;
+    std::fs::write(path, text)?;
+    Ok(())
+}
+
+/// The id a mod folder installs as: its `mod.json` `id` when it names one, else the folder's name.
+fn install_id(dir: &Path, folder: String) -> String {
+    std::fs::read_to_string(dir.join("mod.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|manifest| manifest["id"].as_str().map(str::to_string))
+        .filter(|id| plain_id(id))
+        .unwrap_or(folder)
+}
+
+/// The one install step, whatever the source: `top` is a folder on disk (the source itself, or a
+/// git clone of it) and `from` says where it came from. Copies every mod and layout it holds and
+/// records `from` and the copied files' digest in each mod's `mod.json`.
+pub fn install_from(root: &Path, top: &Path, from: &InstalledFrom) -> Result<Installed, Error> {
+    let name_hint = from.location.trim_end_matches('/');
+    let name_hint = name_hint.strip_suffix(".git").unwrap_or(name_hint);
     if !top.is_dir() {
         return Err(Error::NotFound(
             "that folder is not in the repository".into(),
@@ -692,7 +1197,7 @@ pub fn install_from(root: &Path, top: &Path, name_hint: &str) -> Result<Installe
     {
         let id = entry.file_name().to_string_lossy().into_owned();
         if entry.path().join("main.js").is_file() && plain_id(&id) {
-            found.push((id, entry.path(), false));
+            found.push((install_id(&entry.path(), id), entry.path(), false));
         }
     }
     for entry in std::fs::read_dir(top.join("layouts"))
@@ -713,7 +1218,7 @@ pub fn install_from(root: &Path, top: &Path, name_hint: &str) -> Result<Installe
             .filter(|n| plain_id(n) && !n.starts_with("perch-install-"))
             .unwrap_or(last)
             .to_string();
-        found.push((id, top.to_path_buf(), false));
+        found.push((install_id(top, id), top.to_path_buf(), false));
     }
     if found.is_empty() {
         return Err(Error::Invalid(
@@ -734,14 +1239,15 @@ pub fn install_from(root: &Path, top: &Path, name_hint: &str) -> Result<Installe
     }
     let mut done = Installed::default();
     let (mut files, mut bytes) = (0, 0);
-    for (id, from, is_layout) in found {
+    for (id, source, is_layout) in found {
         if is_layout {
             std::fs::create_dir_all(root.join("layouts"))?;
-            std::fs::copy(&from, root.join("layouts").join(format!("{id}.json")))?;
+            std::fs::copy(&source, root.join("layouts").join(format!("{id}.json")))?;
             done.layouts.push(id);
         } else {
             let to = mods_dir(root).join(&id);
-            copy_tree(&from, &to, &mut files, &mut bytes)?;
+            copy_tree(&source, &to, &mut files, &mut bytes, INSTALL_LIMIT)?;
+            record_install(&to, from)?;
             done.warnings.extend(warnings_for(&id, &to));
             done.mods.push(id);
         }
@@ -801,7 +1307,10 @@ pub const EXAMPLES: &[Example] = &[
 ];
 
 /// Duplicates a mod or layout already in the folders, as herdr's "Duplicate mod/layout": the copy is
-/// `new_id` (default `<id>-copy`), yours to edit, and nothing is overwritten.
+/// `new_id` (default `<id>-copy`), yours to edit, and nothing is overwritten. A mod is copied whole
+/// (a package up to [`PACKAGE_COPY_LIMIT`]) into a hidden folder first, so the copy appears complete
+/// or not at all, and its `mod.json` records `origin: "clone"` and `clonedFrom`. A copy never takes
+/// the id of a shipped example.
 fn clone_installed(root: &Path, id: &str, new_id: Option<&str>) -> Result<Option<String>, Error> {
     let (mod_dir, layout) = (
         mods_dir(root).join(id),
@@ -821,12 +1330,207 @@ fn clone_installed(root: &Path, id: &str, new_id: Option<&str>) -> Result<Option
             "\"{copy}\" is taken or not a plain id; pass another: perch mod clone {id} <id>"
         )));
     }
-    if mod_dir.is_dir() {
-        copy_tree(&mod_dir, &to, &mut 0, &mut 0)?;
-    } else {
-        std::fs::copy(&layout, &to)?;
+    if !mod_dir.is_dir() {
+        // A layout copy records what it was copied from, as a package copy does; a file that is not a
+        // JSON object (it cannot load either) is copied as it is.
+        let text = std::fs::read_to_string(&layout)?;
+        match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(serde_json::Value::Object(mut object)) => {
+                object.insert("clonedFrom".into(), serde_json::json!({ "id": id }));
+                crate::layouts::write_new(root, &copy, &serde_json::Value::Object(object))?;
+            }
+            _ => {
+                std::fs::copy(&layout, &to)?;
+            }
+        }
+        return Ok(Some(copy));
     }
+    let source = mod_info(&mod_dir, id.to_string(), true);
+    let from = ClonedFrom {
+        id: id.to_string(),
+        revision: source.revision,
+        version: source.version,
+    };
+    let limit = if source.format.is_some() {
+        PACKAGE_COPY_LIMIT
+    } else {
+        INSTALL_LIMIT
+    };
+    copy_mod(root, &mod_dir, &copy, &from, limit)?;
     Ok(Some(copy))
+}
+
+/// Copies the mod folder `from` to `mods/<copy>` through a hidden staging folder, so the copy
+/// appears complete or not at all, and records `from` as its provenance. Refuses an id that is not
+/// plain, is taken or is a shipped example's.
+fn copy_mod(
+    root: &Path,
+    from: &Path,
+    copy: &str,
+    source: &ClonedFrom,
+    limit: CopyLimit,
+) -> Result<(), Error> {
+    let to = mods_dir(root).join(copy);
+    if !plain_id(copy) || to.exists() {
+        return Err(Error::Invalid(format!(
+            "\"{copy}\" is taken or not a plain id; pass another: perch mod clone {} <id>",
+            source.id
+        )));
+    }
+    if EXAMPLES.iter().any(|e| e.id == copy) {
+        return Err(Error::Invalid(format!(
+            "\"{copy}\" is a shipped example's id; pass another: perch mod clone {} <id>",
+            source.id
+        )));
+    }
+    let staging = mods_dir(root).join(format!(".clone-{}", uuid::Uuid::new_v4()));
+    let made = copy_tree(from, &staging, &mut 0, &mut 0, limit)
+        .and_then(|()| record_clone(&staging, source))
+        .and_then(|()| {
+            if to.exists() {
+                return Err(Error::Invalid(format!("\"{copy}\" was taken meanwhile")));
+            }
+            Ok(std::fs::rename(&staging, &to)?)
+        });
+    if made.is_err() {
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+    made
+}
+
+/// The prefix of a stock screen's id. No mod, layout or clone id can start with it.
+pub const STOCK_PREFIX: &str = "stock:";
+const MAX_CATALOG_BYTES: u64 = 1024 * 1024;
+
+/// One package of `stock-ui/catalog.json`; the rest of what it says is in its `mod.json`.
+#[derive(Deserialize)]
+struct CatalogEntry {
+    id: String,
+    revision: String,
+}
+
+#[derive(Deserialize)]
+struct Catalog {
+    packages: Vec<CatalogEntry>,
+}
+
+/// The stock screens in `stock_dir` (the web build's `stock-ui/`), as `stock:<id>`: placed only by
+/// Perch or a layout, and listed whether mods are on or off. A package whose files no longer hash to
+/// the catalog's revision is listed with that error (a half-rebuilt web app), not served or copied.
+/// No `catalog.json` (a core without a web build) is no stock screens.
+pub fn stock(stock_dir: &Path) -> Vec<ModInfo> {
+    let path = stock_dir.join("catalog.json");
+    let read = std::fs::metadata(&path)
+        .ok()
+        .filter(|m| m.is_file() && m.len() <= MAX_CATALOG_BYTES)
+        .and_then(|_| std::fs::read_to_string(&path).ok())
+        .and_then(|text| serde_json::from_str::<Catalog>(&text).ok());
+    let Some(catalog) = read else {
+        return Vec::new();
+    };
+    catalog
+        .packages
+        .into_iter()
+        .filter(|entry| plain_id(&entry.id))
+        .map(|entry| {
+            let mut info = mod_info(
+                &stock_dir.join(&entry.id),
+                format!("{STOCK_PREFIX}{}", entry.id),
+                true,
+            );
+            let problem = if info.error.is_some() {
+                None
+            } else if info.format.as_deref() != Some(PACKAGE_FORMAT) {
+                Some("a stock screen is a package (format \"esm\")".to_string())
+            } else if info.revision != entry.revision {
+                Some(
+                    "its files do not match the web build's catalog.json; rebuild Perch's web app"
+                        .into(),
+                )
+            } else {
+                None
+            };
+            if let Some(problem) = problem {
+                info.error = Some(problem);
+                info.enabled = false;
+            }
+            info.place = Place::Layout;
+            info.origin = Some("stock".into());
+            info
+        })
+        .collect()
+}
+
+/// `perch mod clone stock:<id> [new id]`: copies a stock screen's whole package out of the web build
+/// into `mods/<new id>` (default `<id>-copy`), yours to edit; the copy records the screen, its
+/// revision and version as `clonedFrom`. The stock screen itself is never changed, and the copy can
+/// never take a `stock:` id, so it never stands in for stock (or runs while mods are off).
+pub fn clone_stock(
+    root: &Path,
+    stock_dir: &Path,
+    id: &str,
+    new_id: Option<&str>,
+) -> Result<String, Error> {
+    let name = id.strip_prefix(STOCK_PREFIX).unwrap_or(id);
+    let shipped = stock(stock_dir);
+    let Some(source) = shipped.into_iter().find(|m| m.id == id) else {
+        let names: Vec<String> = stock(stock_dir).into_iter().map(|m| m.id).collect();
+        return Err(Error::NotFound(format!(
+            "no stock screen \"{id}\" (this Perch ships: {})",
+            if names.is_empty() {
+                "none; a core without its web app has none".into()
+            } else {
+                names.join(", ")
+            }
+        )));
+    };
+    if let Some(error) = source.error {
+        return Err(Error::Invalid(format!("{id} cannot be copied: {error}")));
+    }
+    let copy = new_id.map_or_else(|| format!("{name}-copy"), String::from);
+    let from = ClonedFrom {
+        id: source.id,
+        revision: source.revision,
+        version: source.version,
+    };
+    // ponytail: the files are checked against the catalog just before copying, not after; a web
+    // rebuild during the copy could mix two builds (the clone is still a complete, editable package).
+    copy_mod(
+        root,
+        &stock_dir.join(name),
+        &copy,
+        &from,
+        PACKAGE_COPY_LIMIT,
+    )?;
+    Ok(copy)
+}
+
+/// Writes a clone's provenance into its `mod.json` (made if absent). A `mod.json` that is not a
+/// JSON object is left as copied: the clone is as broken as its source and says so in its error.
+fn record_clone(dir: &Path, from: &ClonedFrom) -> Result<(), Error> {
+    let path = dir.join("mod.json");
+    let mut manifest = match std::fs::read_to_string(&path) {
+        Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(serde_json::Value::Object(map)) => map,
+            _ => return Ok(()),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
+        Err(error) => return Err(error.into()),
+    };
+    // A copy is the person's own package, not the published one it came from.
+    for key in ["id", "publisher", "installedFrom"] {
+        manifest.remove(key);
+    }
+    manifest.insert("origin".into(), "clone".into());
+    manifest.insert(
+        "clonedFrom".into(),
+        serde_json::to_value(from)
+            .map_err(|e| Error::Invalid(format!("could not write mod.json: {e}")))?,
+    );
+    let text = serde_json::to_string_pretty(&manifest)
+        .map_err(|e| Error::Invalid(format!("could not write mod.json: {e}")))?;
+    std::fs::write(path, text)?;
+    Ok(())
 }
 
 /// `perch mod clone <example|id> [as <id>]`: copies a shipped example (or one of your own mods or
@@ -1058,7 +1762,13 @@ mod tests {
         )
         .unwrap();
 
-        let done = install_from(&root.0, &src, "o/r").unwrap();
+        let here = |location: &Path| InstalledFrom {
+            kind: "folder".into(),
+            location: location.display().to_string(),
+            commit: None,
+            digest: String::new(),
+        };
+        let done = install_from(&root.0, &src, &here(&src)).unwrap();
         assert_eq!(
             (done.mods.as_slice(), done.layouts.as_slice()),
             (&["spy".to_string()][..], &["wide".to_string()][..])
@@ -1070,7 +1780,7 @@ mod tests {
         );
         assert!(!mods_dir(&root.0).join("spy/.hidden").exists());
         // A second install stops on the taken name and changes nothing.
-        assert!(install_from(&root.0, &src, "o/r").is_err());
+        assert!(install_from(&root.0, &src, &here(&src)).is_err());
 
         assert_eq!(remove(&root.0, "spy", None).unwrap(), "mod");
         assert!(!mods_dir(&root.0).join("spy").exists());
@@ -1090,10 +1800,68 @@ mod tests {
         std::fs::create_dir_all(&solo).unwrap();
         std::fs::write(solo.join("main.js"), "export default () => {}").unwrap();
         assert_eq!(
-            install_from(&root.0, &solo, "o/r").unwrap().mods,
+            install_from(&root.0, &solo, &here(&solo)).unwrap().mods,
             vec!["solo-mod"]
         );
-        assert!(install_from(&root.0, &src.join("none"), "o/r").is_err());
+        assert!(install_from(&root.0, &src.join("none"), &here(&src)).is_err());
+        let _ = std::fs::remove_dir_all(&src);
+    }
+
+    /// Registry-ready provenance: what `install` copied is recorded in the copy's `mod.json` (source
+    /// kind, location and the SHA-256 of the files as copied), a manifest's own `id` names the
+    /// folder, and a clone of an installed package is the person's own, not the published one.
+    #[test]
+    fn install_records_its_source_and_digest_and_a_clone_drops_them() {
+        let root = Root::new();
+        let src = std::env::temp_dir().join(format!("perch-provenance-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(src.join("art")).unwrap();
+        std::fs::write(
+            src.join("mod.json"),
+            r#"{"id":"pretty-clock","publisher":"acme","version":"2.1.0","api":"^1","format":"esm"}"#,
+        )
+        .unwrap();
+        std::fs::write(src.join("main.js"), "export default () => null;").unwrap();
+        std::fs::write(src.join("art/dot.svg"), "<svg/>").unwrap();
+        let before = tree_digest(&src).unwrap();
+        let done = install(&root.0, src.to_str().unwrap()).unwrap();
+        assert_eq!(
+            done.mods,
+            vec!["pretty-clock"],
+            "the manifest's id, not the folder's name"
+        );
+        let info = scan(&root.0, &Policy::default()).remove(0);
+        assert_eq!(
+            (
+                info.publisher.as_deref(),
+                info.version.as_deref(),
+                info.api.as_deref()
+            ),
+            (Some("acme"), Some("2.1.0"), Some("^1"))
+        );
+        let from = info.installed_from.unwrap();
+        assert_eq!(
+            (from.kind.as_str(), from.location.as_str(), from.commit),
+            ("folder", src.to_str().unwrap(), None)
+        );
+        assert_eq!(from.digest, before, "the digest of the files as published");
+        assert!(from.digest.starts_with("sha256:") && from.digest.len() == 7 + 64);
+        // A same-length edit is a different digest.
+        std::fs::write(src.join("art/dot.svg"), "<svG/>").unwrap();
+        assert_ne!(tree_digest(&src).unwrap(), before);
+
+        clone_example(&root.0, "pretty-clock", Some("mine")).unwrap();
+        let copy = scan(&root.0, &Policy::default())
+            .into_iter()
+            .find(|m| m.id == "mine")
+            .unwrap();
+        assert_eq!(
+            (copy.publisher, copy.installed_from, copy.origin.as_deref()),
+            (None, None, Some("clone"))
+        );
+        assert_eq!(copy.cloned_from.unwrap().id, "pretty-clock");
+        // A manifest id that is not a plain id is an error, not a folder name.
+        std::fs::write(src.join("mod.json"), r#"{"id":"../x"}"#).unwrap();
+        assert!(read_manifest(&src).is_err());
         let _ = std::fs::remove_dir_all(&src);
     }
 
@@ -1131,20 +1899,32 @@ mod tests {
         let url = repo.to_str().unwrap();
 
         let all = Root::new();
-        let done = install_from_url(&all.0, url, None, &[], "o/r").unwrap();
+        let done = install_from_url(&all.0, url, None, &[]).unwrap();
         assert_eq!(done.mods, vec!["clock"]);
+        // The git source is recorded with the commit it held.
+        let head = std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let installed = scan(&all.0, &Policy::default())
+            .remove(0)
+            .installed_from
+            .unwrap();
+        assert_eq!(
+            (installed.kind.as_str(), installed.location.as_str()),
+            ("git", url)
+        );
+        assert_eq!(
+            installed.commit.as_deref(),
+            Some(String::from_utf8_lossy(&head.stdout).trim())
+        );
         assert!(mods_dir(&all.0).join("clock/main.js").is_file());
         assert!(!mods_dir(&all.0).join("clock/.git").exists());
 
         let one = Root::new();
-        let done = install_from_url(
-            &one.0,
-            url,
-            Some("main"),
-            &["extras".into(), "solo".into()],
-            "o/r",
-        )
-        .unwrap();
+        let done =
+            install_from_url(&one.0, url, Some("main"), &["extras".into(), "solo".into()]).unwrap();
         assert_eq!(done.mods, vec!["solo"]);
         assert!(
             done.warnings
@@ -1153,8 +1933,8 @@ mod tests {
             "{:?}",
             done.warnings
         );
-        assert!(install_from_url(&one.0, url, Some("nope"), &[], "o/r").is_err());
-        assert!(install_from_url(&one.0, "/no/such/repo", None, &[], "o/r").is_err());
+        assert!(install_from_url(&one.0, url, Some("nope"), &[]).is_err());
+        assert!(install_from_url(&one.0, "/no/such/repo", None, &[]).is_err());
         let _ = std::fs::remove_dir_all(&repo);
     }
 
@@ -1364,6 +2144,351 @@ mod tests {
         root.put("m", "main.js", "export default () => 22222");
         assert_ne!(scan(&root.0, &policy)[0].revision, before);
         assert!(set_enabled(&root.0, &policy, "nope", false).is_err());
+    }
+
+    const PACKAGE: &str = r#"{"name":"Pkg","format":"esm","api":"^1"}"#;
+
+    #[test]
+    fn a_package_revision_is_its_content_and_its_reads_stay_on_that_revision() {
+        let root = Root::new();
+        let policy = Policy::default();
+        root.put("pkg", "mod.json", PACKAGE);
+        root.put("pkg", "main.js", "import './ui/a.js'");
+        root.put("pkg", "ui/a.js", "export const a = 1");
+        root.put("pkg", "ui/look.css", "a{}");
+        root.put("pkg", "README.md", "not served");
+        let first = scan(&root.0, &policy).remove(0);
+        assert_eq!(first.error, None);
+        assert_eq!(
+            (first.format.as_deref(), first.api.as_deref()),
+            (Some("esm"), Some("^1"))
+        );
+        assert_eq!(first.entry.as_deref(), Some("main.js"));
+        assert_eq!(
+            first.files,
+            ["main.js", "mod.json", "ui/a.js", "ui/look.css"]
+        );
+        assert_eq!(first.revision.len(), 64, "a full SHA-256");
+        // A scan with nothing changed reuses the digest.
+        assert_eq!(scan(&root.0, &policy)[0].revision, first.revision);
+        let read = |rev: &str, path: &str| package_file(&root.0, &policy, "pkg", rev, path);
+        let (bytes, kind) = read(&first.revision, "ui/a.js").unwrap();
+        assert_eq!(
+            (&*bytes, kind),
+            (&b"export const a = 1"[..], "text/javascript; charset=utf-8")
+        );
+
+        // The same length, with the modified time put back: still a new revision.
+        let file = mods_dir(&root.0).join("pkg/ui/a.js");
+        let modified = std::fs::metadata(&file).unwrap().modified().unwrap();
+        std::fs::write(&file, "export const a = 2").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().modified().unwrap(),
+            modified
+        );
+        let second = scan(&root.0, &policy).remove(0);
+        assert_ne!(second.revision, first.revision);
+        // Each revision reads its own bytes: no fallback to the disk now.
+        assert_eq!(
+            &*read(&first.revision, "ui/a.js").unwrap().0,
+            b"export const a = 1"
+        );
+        assert_eq!(
+            &*read(&second.revision, "ui/a.js").unwrap().0,
+            b"export const a = 2"
+        );
+
+        // Only listed, well-formed paths; nothing beside or above the package.
+        std::fs::write(root.0.join("secret.js"), "stolen").unwrap();
+        for bad in [
+            "../secret.js",
+            "ui/../main.js",
+            "./main.js",
+            "ui//a.js",
+            "/main.js",
+            "ui\\a.js",
+            "%2e%2e/secret.js",
+            "Main.js",
+            "README.md",
+            "main.js\0",
+            "",
+        ] {
+            assert!(
+                matches!(read(&second.revision, bad), Err(Error::NotFound(_))),
+                "{bad:?}"
+            );
+        }
+        // An unknown revision, and one pushed out by newer ones, are gone.
+        assert!(matches!(read("feed", "main.js"), Err(Error::Gone(_))));
+        for n in 0..RETAINED_SNAPSHOTS {
+            root.put("pkg", "ui/a.js", &format!("export const a = {}", n + 10));
+            scan(&root.0, &policy);
+        }
+        assert!(matches!(
+            read(&first.revision, "main.js"),
+            Err(Error::Gone(_))
+        ));
+        let now = scan(&root.0, &policy).remove(0).revision;
+        assert!(read(&now, "main.js").is_ok());
+
+        // Off is refused: one mod, or all of them.
+        set_enabled(&root.0, &policy, "pkg", false).unwrap();
+        assert!(matches!(read(&now, "main.js"), Err(Error::Off(_))));
+        set_enabled(&root.0, &policy, "pkg", true).unwrap();
+        assert!(matches!(
+            package_file(&root.0, &Policy { off: true }, "pkg", &now, "main.js"),
+            Err(Error::Off(_))
+        ));
+        // A package is never served as a single legacy file.
+        assert!(source(&root.0, &policy, "pkg").is_err());
+    }
+
+    #[test]
+    fn a_package_with_a_link_or_a_bad_format_is_refused_whole() {
+        let root = Root::new();
+        let policy = Policy::default();
+        root.put("weird", "mod.json", r#"{"format":"cjs"}"#);
+        root.put("weird", "main.js", "x");
+        #[cfg(unix)]
+        {
+            root.put("linked", "mod.json", PACKAGE);
+            root.put("linked", "main.js", "x");
+            std::fs::write(root.0.join("secret.js"), "stolen").unwrap();
+            std::os::unix::fs::symlink(
+                root.0.join("secret.js"),
+                mods_dir(&root.0).join("linked/leak.js"),
+            )
+            .unwrap();
+        }
+        for info in scan(&root.0, &policy) {
+            assert!(info.error.is_some() && !info.enabled, "{info:?}");
+            assert!(info.files.is_empty(), "{info:?}");
+        }
+    }
+
+    #[test]
+    fn a_legacy_mod_keeps_the_old_wire_shape_and_a_package_carries_its_fields() {
+        let root = Root::new();
+        root.put("old", "main.js", "export default () => {}");
+        root.put("pkg", "mod.json", PACKAGE);
+        root.put("pkg", "main.js", "x");
+        let found = scan(&root.0, &Policy::default());
+        let old = serde_json::to_value(&found[0]).unwrap();
+        let keys: Vec<&str> = old
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "description",
+                "enabled",
+                "error",
+                "fonts",
+                "id",
+                "name",
+                "place",
+                "revision"
+            ]
+        );
+        let pkg = serde_json::to_value(&found[1]).unwrap();
+        for key in ["format", "api", "entry", "files"] {
+            assert!(pkg.get(key).is_some(), "{key}: {pkg}");
+        }
+        // An old peer's ModInfo still parses.
+        let back: ModInfo = serde_json::from_value(old).unwrap();
+        assert_eq!(back, found[0]);
+    }
+
+    #[test]
+    fn a_cloned_package_is_whole_new_and_says_where_it_came_from() {
+        let root = Root::new();
+        let policy = Policy::default();
+        root.put("pkg", "mod.json", PACKAGE);
+        root.put("pkg", "main.js", "x");
+        // Past the 300-file install cap: a package copies whole.
+        for n in 0..320 {
+            root.put("pkg", &format!("parts/p{n}.js"), "export default 1");
+        }
+        let source = scan(&root.0, &policy).remove(0);
+        assert_eq!(clone_example(&root.0, "pkg", Some("mine")).unwrap(), "mine");
+        let copy = scan(&root.0, &policy)
+            .into_iter()
+            .find(|m| m.id == "mine")
+            .unwrap();
+        assert_eq!(copy.error, None);
+        assert_eq!(copy.files.len(), source.files.len());
+        assert_eq!(copy.origin.as_deref(), Some("clone"));
+        assert_eq!(
+            copy.cloned_from,
+            Some(ClonedFrom {
+                id: "pkg".into(),
+                revision: source.revision.clone(),
+                version: None,
+            })
+        );
+        assert_eq!(copy.format.as_deref(), Some("esm"));
+        // Never over an existing mod, never as a shipped example, and nothing half-made is left.
+        assert!(clone_example(&root.0, "pkg", Some("mine")).is_err());
+        assert!(clone_example(&root.0, "pkg", Some("command-list")).is_err());
+        assert!(clone_example(&root.0, "pkg", Some("pkg")).is_err());
+        let names: Vec<_> = std::fs::read_dir(mods_dir(&root.0))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert!(names.iter().all(|n| !n.starts_with('.')), "{names:?}");
+    }
+
+    /// The revision `export-stock-ui.mjs` computes for the same files (its test pins the same value),
+    /// so a stock package the web build wrote is the revision this core lists.
+    const SHARED_DIGEST_FILES: [(&str, &str); 2] =
+        [("main.js", "export default 1;\n"), ("mod.json", "{}\n")];
+    const SHARED_DIGEST: &str = "5b7477fe52e6579f4473624a6d7a7c385e63f84b8273af9986dd2fceec6db433";
+
+    /// A web build's stock folder with one screen, `demo`, and its catalog.
+    fn stock_build(root: &Root, revision: Option<&str>) -> PathBuf {
+        let dir = root.0.join("web").join("stock-ui");
+        let package = dir.join("demo");
+        std::fs::create_dir_all(package.join("parts")).unwrap();
+        std::fs::write(
+            package.join("mod.json"),
+            r#"{"name":"Demo","format":"esm","api":"^1","version":"1.0.0","place":"layout","origin":"stock"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            package.join("main.js"),
+            "export { default } from \"./parts/view.js\";",
+        )
+        .unwrap();
+        std::fs::write(package.join("parts/view.js"), "export default () => null;").unwrap();
+        std::fs::write(
+            package.join("perch-sdk.d.ts"),
+            "declare module \"@perch/sdk\" {}",
+        )
+        .unwrap();
+        let revision = revision.map_or_else(|| package_digest(&package), String::from);
+        std::fs::write(
+            dir.join("catalog.json"),
+            format!(r#"{{"packages":[{{"id":"demo","revision":"{revision}"}},{{"id":"../up","revision":"x"}}]}}"#),
+        )
+        .unwrap();
+        dir
+    }
+
+    fn package_digest(dir: &Path) -> String {
+        package(dir).unwrap().revision.clone()
+    }
+
+    #[test]
+    fn a_package_digest_is_the_one_the_web_exporter_computes() {
+        let root = Root::new();
+        let dir = root.0.join("digest");
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, text) in SHARED_DIGEST_FILES {
+            std::fs::write(dir.join(name), text).unwrap();
+        }
+        assert_eq!(package_digest(&dir), SHARED_DIGEST);
+    }
+
+    #[test]
+    fn stock_screens_list_as_their_own_namespace_and_clone_into_a_new_id() {
+        let root = Root::new();
+        let stock_dir = stock_build(&root, None);
+        let listed = stock(&stock_dir);
+        assert_eq!(listed.len(), 1, "a catalog id that is not plain is skipped");
+        let demo = &listed[0];
+        assert_eq!(demo.id, "stock:demo");
+        assert_eq!((demo.error.as_deref(), demo.enabled), (None, true));
+        assert_eq!(demo.place, Place::Layout);
+        assert_eq!(demo.origin.as_deref(), Some("stock"));
+        assert_eq!(demo.version.as_deref(), Some("1.0.0"));
+        assert_eq!(demo.files, ["main.js", "mod.json", "parts/view.js"]);
+        // Stock is Perch as shipped: listed with mods off, and never served from the mods folder.
+        root.put("demo", "main.js", "export default 'user';");
+        assert!(scan(&root.0, &Policy { off: true }).is_empty());
+        assert!(package_file(
+            &root.0,
+            &Policy::default(),
+            "stock:demo",
+            &demo.revision,
+            "main.js"
+        )
+        .is_err());
+
+        let made = clone_stock(&root.0, &stock_dir, "stock:demo", None).unwrap();
+        assert_eq!(made, "demo-copy");
+        let copy = scan(&root.0, &Policy::default())
+            .into_iter()
+            .find(|m| m.id == "demo-copy")
+            .unwrap();
+        assert_eq!(copy.error, None);
+        assert_eq!(
+            copy.place,
+            Place::Layout,
+            "a clone is never docked or run hidden either"
+        );
+        assert_eq!(copy.origin.as_deref(), Some("clone"));
+        assert_eq!(copy.api.as_deref(), Some("^1"));
+        assert_eq!(
+            copy.cloned_from,
+            Some(ClonedFrom {
+                id: "stock:demo".into(),
+                revision: demo.revision.clone(),
+                version: Some("1.0.0".into()),
+            })
+        );
+        let copied = mods_dir(&root.0).join("demo-copy");
+        assert!(
+            copied.join("perch-sdk.d.ts").is_file(),
+            "the SDK types travel with the copy"
+        );
+        assert_eq!(
+            std::fs::read_to_string(copied.join("parts/view.js")).unwrap(),
+            "export default () => null;"
+        );
+        // Never over a taken id, never as a stock or example id, and stock is left as it was.
+        for taken in ["demo-copy", "stock:mine", "command-list", "a/b"] {
+            assert!(
+                clone_stock(&root.0, &stock_dir, "stock:demo", Some(taken)).is_err(),
+                "{taken}"
+            );
+        }
+        assert!(clone_stock(&root.0, &stock_dir, "stock:nope", Some("x")).is_err());
+        assert_eq!(stock(&stock_dir)[0].revision, demo.revision);
+        // A copy edited in place changes, stock does not.
+        std::fs::write(copied.join("parts/view.js"), "export default () => 'mine';").unwrap();
+        let edited = scan(&root.0, &Policy::default())
+            .into_iter()
+            .find(|m| m.id == "demo-copy")
+            .unwrap();
+        assert_ne!(edited.revision, copy.revision);
+        assert_eq!(stock(&stock_dir)[0].revision, demo.revision);
+    }
+
+    #[test]
+    fn a_stock_build_that_drifted_from_its_catalog_is_listed_broken_and_not_copied() {
+        let root = Root::new();
+        let stock_dir = stock_build(&root, Some("0000"));
+        let demo = stock(&stock_dir).remove(0);
+        assert!(
+            demo.error
+                .as_deref()
+                .is_some_and(|e| e.contains("catalog.json")),
+            "{demo:?}"
+        );
+        assert!(!demo.enabled);
+        assert!(clone_stock(&root.0, &stock_dir, "stock:demo", Some("x")).is_err());
+        assert!(!mods_dir(&root.0).join("x").exists());
+        // No web build is no stock screens.
+        assert!(stock(&root.0.join("nowhere")).is_empty());
     }
 
     #[test]

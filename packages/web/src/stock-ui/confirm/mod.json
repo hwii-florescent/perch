@@ -1,0 +1,6 @@
+{
+  "name": "Confirmation",
+  "description": "the question Perch asks before a destructive or disruptive action (close, delete, discard)",
+  "version": "1.0.0",
+  "api": "^1.6"
+}

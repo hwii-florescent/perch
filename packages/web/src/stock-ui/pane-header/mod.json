@@ -1,0 +1,6 @@
+{
+  "name": "Pane header",
+  "description": "the header row of a tiled pane (agent, name, state, leave split, close) and a split file's corner controls",
+  "version": "1.0.0",
+  "api": "^1.2"
+}

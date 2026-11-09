@@ -242,6 +242,52 @@ fn sentence(categories: &[ToolCategory], live: bool) -> String {
 
 // ---- Tool input ------------------------------------------------------------------------------
 
+/// An input as plain lines for a row's body: `name: value`, a multi-line string on indented lines
+/// under its name, a list as `- item`s. Reads as the call, not as the JSON it arrived in.
+fn readable(value: &Value) -> String {
+    fn put(out: &mut String, indent: usize, name: Option<&str>, value: &Value) {
+        let pad = "  ".repeat(indent);
+        let head = name.map_or_else(|| format!("{pad}-"), |name| format!("{pad}{name}:"));
+        match value {
+            Value::String(text) if !text.contains('\n') => {
+                out.push_str(&format!("{head} {text}\n"));
+            }
+            Value::String(text) => {
+                out.push_str(&format!("{head}\n"));
+                for line in text.lines() {
+                    out.push_str(&format!("{pad}  {line}\n"));
+                }
+            }
+            Value::Object(map) if !map.is_empty() => {
+                out.push_str(&format!("{head}\n"));
+                for (key, inner) in map {
+                    put(out, indent + 1, Some(key), inner);
+                }
+            }
+            Value::Array(items) if !items.is_empty() => {
+                out.push_str(&format!("{head}\n"));
+                for inner in items {
+                    put(out, indent + 1, None, inner);
+                }
+            }
+            Value::Null | Value::Object(_) | Value::Array(_) => {
+                out.push_str(&format!("{head} -\n"))
+            }
+            other => out.push_str(&format!("{head} {other}\n")),
+        }
+    }
+    let mut out = String::new();
+    match value {
+        Value::Object(map) => {
+            for (key, inner) in map {
+                put(&mut out, 0, Some(key), inner);
+            }
+        }
+        other => put(&mut out, 0, None, other),
+    }
+    out.trim_end().to_string()
+}
+
 /// A provider's input text as a value: JSON objects and arrays are parsed, anything else (a Codex
 /// shell command, input clipped mid-JSON) stays a string. A clipped object keeps the few fields a
 /// row is named by, so a long edit still says which file it touched.
@@ -527,7 +573,7 @@ fn line(tool: &NativeUiTool, state: LineState) -> Line {
     };
     let mut body = match &input {
         Value::String(text) => text.clone(),
-        other => serde_json::to_string_pretty(other).unwrap_or_default(),
+        other => readable(other),
     };
     let name = if category == ToolCategory::Mcp {
         mcp_name(&tool.name)
@@ -1535,6 +1581,16 @@ mod tests {
     }
 
     #[test]
+    fn an_input_reads_as_lines_not_json() {
+        let value = serde_json::json!({"file_path":"a.rs","old":"x\ny","n":3,"edits":[{"find":"p"}],"none":null});
+        assert_eq!(
+            readable(&value),
+            // Keys come sorted: the map is not order-preserving.
+            "edits:\n  -\n    find: p\nfile_path: a.rs\nn: 3\nnone: -\nold:\n  x\n  y"
+        );
+    }
+
+    #[test]
     fn plan_calls_read_as_their_changes_and_the_latest_list_is_docked() {
         let todos = |content: &str, status: &str| {
             format!(r#"{{"todos":[{{"content":"{content}","status":"{status}"}}]}}"#)
@@ -1564,7 +1620,7 @@ mod tests {
         let (_, steps) = run(&transcript, 0);
         assert_eq!(steps[0].body, "Added Test");
         assert_eq!(steps[1].body, "Completed Test");
-        assert!(steps[2].body.contains("Other") && steps[2].body.starts_with('{'));
+        assert!(steps[2].body.contains("content: Other") && !steps[2].body.contains('{'));
         let docked = transcript.tasks.unwrap();
         assert_eq!(docked.tasks.len(), 1);
         assert_eq!(docked.tasks[0].content, "Test");

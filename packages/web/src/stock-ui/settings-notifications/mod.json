@@ -1,0 +1,6 @@
+{
+  "name": "Settings: Notifications",
+  "description": "sound, alerts, the system permission, usage alerts and sub-session limits and summaries",
+  "version": "1.0.0",
+  "api": "^1.8"
+}

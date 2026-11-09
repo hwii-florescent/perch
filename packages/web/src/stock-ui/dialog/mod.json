@@ -1,0 +1,6 @@
+{
+  "name": "Dialog",
+  "description": "the modal shell of Perch's forms and pickers (Instructions, Memory, a new file's name, Ask agent)",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

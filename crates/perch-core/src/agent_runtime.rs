@@ -667,6 +667,23 @@ impl AgentRuntimeAdapter {
         })
     }
 
+    /// Runtimes whose own CLI is the foreground agent right now, so its native bridge should be
+    /// connected. `observe` runs once at attach; if the first process snapshot caught the launch
+    /// wrapper's shell, the bridge gave up for good and the tab never showed Working.
+    pub(crate) fn native_owners(&self) -> Vec<AgentKey> {
+        self.active
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, runtime)| {
+                runtime.shell_agent.is_none()
+                    && runtime.observed_provider == runtime.handle.provider_id
+                    && crate::native_ui::supported(&runtime.handle.provider_id)
+            })
+            .map(|(key, _)| key.clone())
+            .collect()
+    }
+
     pub(crate) fn shell_agents(&self) -> Vec<(AgentKey, crate::shell_integration::ShellAgent)> {
         self.active
             .lock()
@@ -2117,6 +2134,7 @@ mod tests {
             );
             let output = std::process::Command::new(&argv[0])
                 .args(&argv[1..])
+                .env_remove("PERCH_SHELL") // set when the suite runs inside a Perch terminal
                 .env("SHELL", "/bin/echo")
                 .output()
                 .unwrap();
@@ -2134,7 +2152,6 @@ mod tests {
         std::fs::write(cores.join("2147483646"), b"").unwrap();
         run(&cores);
         assert!(dir.join("agent-exit/k").exists());
-                .env_remove("PERCH_SHELL") // set when the suite runs inside a Perch terminal
         std::fs::remove_file(dir.join("agent-exit/k")).unwrap();
         run(&dir.join("missing"));
         assert!(dir.join("agent-exit/k").exists());

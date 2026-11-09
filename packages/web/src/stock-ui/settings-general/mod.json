@@ -1,0 +1,6 @@
+{
+  "name": "Settings: General",
+  "description": "the chat mode, interface and browser settings and the default working directory",
+  "version": "1.0.0",
+  "api": "^1.8"
+}

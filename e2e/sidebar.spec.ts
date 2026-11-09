@@ -241,19 +241,55 @@ test.describe("Perch sidebar", () => {
     }
   });
 
-  test("2g. Plain terminals stay out of the sidebar unless Show terminals is on", async ({ page }) => {
+  test("2g. Project terminals stay out of the sidebar unless Show terminals is on", async ({ page }) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-terminals-"));
+    try {
+      await open(page);
+      const id = await startChat(page, "terminal", dir);
+      await expect(page.getByTestId(`workspace-session-${id}`)).toBeVisible();
+      await page.getByTestId("workspace-organize").click();
+      await page.getByTestId("workspace-show-terminals").click();
+      await expect(page.getByTestId(`workspace-session-${id}`)).toHaveCount(0);
+      await expect(page.getByTestId(`tab-${id}`)).toBeVisible(); // still a tab
+      await page.reload({ waitUntil: "networkidle" });
+      await expect(page.getByTestId(`workspace-session-${id}`)).toHaveCount(0);
+      await page.getByTestId("workspace-organize").click();
+      await page.getByTestId("workspace-show-terminals").click();
+      await expect(page.getByTestId(`workspace-session-${id}`)).toBeVisible();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("2i. Quickchat terminals stay visible in every mode, with plain marks on desktop and phone", async ({ page }, testInfo) => {
     await open(page);
     const id = await startChat(page, "terminal");
-    await expect(page.getByTestId(`workspace-session-${id}`)).toBeVisible();
     await page.getByTestId("workspace-organize").click();
     await page.getByTestId("workspace-show-terminals").click();
-    await expect(page.getByTestId(`workspace-session-${id}`)).toHaveCount(0);
-    await expect(page.getByTestId(`tab-${id}`)).toBeVisible(); // still a tab
     await page.reload({ waitUntil: "networkidle" });
-    await expect(page.getByTestId(`workspace-session-${id}`)).toHaveCount(0);
-    await page.getByTestId("workspace-organize").click();
-    await page.getByTestId("workspace-show-terminals").click();
-    await expect(page.getByTestId(`workspace-session-${id}`)).toBeVisible();
+    const row = page.getByTestId(`workspace-session-${id}`);
+    for (const phone of [false, true]) {
+      await page.setViewportSize(phone ? { width: 390, height: 844 } : { width: 1280, height: 900 });
+      if (phone) await page.getByTestId("mobile-switch").click();
+      for (const mode of ["project", "status", "list"]) {
+        await page.getByTestId("workspace-organize").click();
+        await page.getByTestId(`workspace-organize-${mode}`).click();
+        await expect(row).toBeVisible();
+        await expect(row.locator(".agent-mark")).toHaveAttribute("data-provider", "terminal");
+        await expect(row.locator(".agent-status-dot")).toHaveCount(0);
+        if (mode === "project") await expect(page.getByTestId("workspace-chats").getByTestId(`workspace-session-${id}`)).toBeVisible();
+        if (mode === "status") {
+          await expect(page.getByTestId("status-section-idle").getByTestId(`workspace-session-${id}`)).toBeVisible();
+          await expect(page.getByTestId("status-section-idle").getByTestId("status-project-title").filter({ hasText: /^Quickchat$/ })).toBeVisible();
+          await expect(page.getByTestId("workspace-chats")).toHaveCount(0);
+        }
+        if (mode === "list") {
+          await expect(page.getByTestId("workspace-session-list").getByTestId(`workspace-session-${id}`)).toContainText("Quickchat");
+          await expect(page.getByTestId("workspace-chats")).toHaveCount(0);
+          await page.screenshot({ path: testInfo.outputPath(`quickchat-list-${phone ? "phone" : "desktop"}.png`) });
+        }
+      }
+    }
   });
 
   test("2b. Organize sidebar: in one list shows every session flat", async ({ page }) => {

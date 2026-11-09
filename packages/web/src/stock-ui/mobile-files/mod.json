@@ -1,0 +1,6 @@
+{
+  "name": "Phone files",
+  "description": "the phone's Files pane: the explorer, or the open file with a way back to it",
+  "version": "1.0.0",
+  "api": "^1.10"
+}

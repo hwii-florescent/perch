@@ -1,0 +1,6 @@
+{
+  "name": "Settings: Agents",
+  "description": "the agents a host can run, and which are enabled or the default",
+  "version": "1.0.0",
+  "api": "^1.8"
+}

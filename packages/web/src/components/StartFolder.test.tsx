@@ -4,10 +4,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("../ws", () => ({ socket: { send: vi.fn(), connect: vi.fn(), onMessage: vi.fn(() => () => {}), onConnectionChange: vi.fn(() => () => {}) } }));
-vi.mock("../Sidebar", () => ({ NewSessionPopover: () => null }));
+vi.mock("./NewSessionPopover", () => ({ NewSessionPopover: () => null }));
 const { usePerchStore } = await import("../store");
-const { NoSessionPanel } = await import("./NoSessionPanel");
-const { CliStartPanel } = await import("./CliStartPanel");
+const { NoSessionPanel, CliStartPanel } = await import("./StartScreen");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root;
@@ -21,6 +20,8 @@ const worktree = { id: "wt", projectId: "app", hostId: "local", path: "/work/app
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // A desktop window: the start screen follows the person's choice there (a phone keeps Perch's own).
+  window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);

@@ -1,0 +1,6 @@
+{
+  "name": "Status bar",
+  "description": "the bottom bar: host, folder, branch, zoom, context and cost, plan usage with refresh and banked resets",
+  "version": "1.0.0",
+  "api": "^1.2"
+}

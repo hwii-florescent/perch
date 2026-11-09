@@ -1,0 +1,6 @@
+{
+  "name": "Welcome",
+  "description": "the first-run orientation: what Perch is, how to start, the main keys",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

@@ -4,6 +4,7 @@ import { registerSW } from "virtual:pwa-register";
 import { claimViewer } from "./viewer";
 import { installRelayTransport } from "./relay/transport";
 import { trackVisibleViewport } from "./visibleViewport";
+import { installContextMenuGuard } from "./contextMenuGuard";
 
 // Opened from a relay link: send the app's data routes through the sealed tunnel.
 // Before anything can make a request; a no-op on the LAN and the desktop app.
@@ -33,6 +34,7 @@ if (!container) {
 // perch is an app, not a web page: no browser context menu. Surfaces with a menu of their own
 // preventDefault it before this runs; text fields (outside terminals) keep the OS one for cut/copy/paste.
 // This also swallows the menu macOS opens for Ctrl+Enter in a terminal's hidden textarea.
+installContextMenuGuard();
 document.addEventListener("contextmenu", (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (target?.closest("input, textarea, [contenteditable='true']") && !target.closest(".xterm")) return;
@@ -44,6 +46,8 @@ await claimViewer();
 // App first, and its whole module graph with it (the store connects as it loads): a store
 // loaded ahead of the modules that watch it would deliver its first messages unheard.
 const [{ default: App }] = await Promise.all([import("./App"), import("./styles/index.css")]);
+// `@perch/sdk` loads with App (App.tsx imports it), so it shares App's chunk: a separate dynamic import here split
+// it from the components it re-exports, which import it back through the stock sources (a circular chunk).
 const { usePerchStore } = await import("./store");
 
 // Expose the Zustand store on window so e2e tests can drive/assert state

@@ -1,8 +1,9 @@
 //! Layouts, as in herdr's desktop app: `<root>/layouts/<id>.json` is a whole window as a tree of
 //! rows, columns and blocks, and a block is one of Perch's own panes (`sidebar`, `tabs`, `canvas`,
-//! `files`, `git`, `status`) or a mod (`mod:<id>`). Stock Perch is the default; one layout can be
-//! chosen (`layout-state.json` beside `layouts/`), and mods being off, or a layout that stops
-//! parsing, falls back to stock. The core only checks the shape (depth, size, known content); the
+//! `files`, `git`, `status`), a mod (`mod:<id>`) or a stock screen (`mod:stock:<id>`). Stock Perch
+//! is the default; one layout can be chosen (`layout-state.json` beside `layouts/`), and mods being
+//! off, or a layout that stops parsing, falls back to stock. The same file's `use` names the
+//! person's mod to show in place of a stock screen (`stock:sidebar` → `my-nav`), in every layout. The core only checks the shape (depth, size, known content); the
 //! page draws it. A node has `size`, `hidden`, `gap` and `padding`, and the cascading [`Look`]
 //! (`theme`, `colors`, `font`, `radius`, `border`).
 //! ponytail: no pane frames; terminals keep the server's font and colors (a layout sets only their
@@ -15,7 +16,19 @@ use std::path::Path;
 const MAX_DEPTH: usize = 8;
 const MAX_NODES: usize = 64;
 const MAX_BYTES: u64 = 256 * 1024;
-const BUILTIN: [&str; 6] = ["sidebar", "tabs", "canvas", "files", "git", "status"];
+const BUILTIN: [&str; 9] = [
+    "sidebar",
+    "tabs",
+    "canvas",
+    "files",
+    "git",
+    "status",
+    // The stock window's own parts (`stock:main`): each draws its card, head row and resize handle as
+    // Perch as shipped does, so a copy of the stock layout looks and works the same until edited.
+    "window:sidebar",
+    "window:main",
+    "window:drawer",
+];
 /// The palette tokens of `themes.ts` (`Palette`) a layout may override, and the window `backdrop`.
 const COLORS: [&str; 17] = [
     "accent",
@@ -300,6 +313,28 @@ pub struct LayoutInfo {
     pub preview: Option<String>,
     /// Why the file cannot be used, if it cannot.
     pub error: Option<String>,
+    /// What this layout is a copy of (`perch mod clone`): written into the copy, shown in Settings.
+    #[serde(
+        rename = "clonedFrom",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cloned_from: Option<LayoutSource>,
+}
+
+/// A layout copy's source: a stock layout (`stock:main`) and its version, or another layout's id.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LayoutSource {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+}
+
+/// `clonedFrom` as a copy records it; anything else (a hand edit) is not provenance.
+fn source_of(value: &serde_json::Value) -> Option<LayoutSource> {
+    let source: LayoutSource = serde_json::from_value(value.get("clonedFrom")?.clone()).ok()?;
+    let short = |text: &str| text.len() <= 120 && !text.chars().any(char::is_control);
+    (short(&source.id) && source.version.as_deref().is_none_or(short)).then_some(source)
 }
 
 fn size_ok(size: &Option<Size>) -> bool {
@@ -493,7 +528,7 @@ fn check(node: &Node, depth: usize, walk: &mut Walk) -> Result<(), String> {
             let header_ok = s
                 .header
                 .as_deref()
-                .is_none_or(|h| h == "tabs" || h.strip_prefix("mod:").is_some_and(plain_id));
+                .is_none_or(|h| h == "tabs" || mod_content(h));
             let active_ok = s.active.as_ref().is_none_or(|a| {
                 s.children
                     .iter()
@@ -513,12 +548,13 @@ fn check(node: &Node, depth: usize, walk: &mut Walk) -> Result<(), String> {
         }
         Node::Block(b) => {
             let known = BUILTIN.contains(&b.content.as_str())
-                || b.content.strip_prefix("mod:").is_some_and(plain_id)
+                || mod_content(&b.content)
                 || b.content.strip_prefix("terminal:").is_some_and(plain_id)
+                || b.content.strip_prefix("session:").is_some_and(plain_id)
                 || b.content == "agent:focused";
             if !known || b.padding > 200 || !size_ok(&b.size) {
                 return Err(format!(
-                    "block content \"{}\" must be one of {}, mod:<id>, terminal:<session id> or agent:focused",
+                    "block content \"{}\" must be one of {}, mod:<id>, mod:stock:<id>, terminal:<session id>, session:<session id> or agent:focused",
                     b.content,
                     BUILTIN.join(", ")
                 ));
@@ -667,6 +703,7 @@ fn read(path: &Path, id: &str) -> LayoutInfo {
         })
         .and_then(|value| {
             let name = value["name"].as_str().unwrap_or(id).to_string();
+            let source = source_of(&value);
             let mut node: Node = serde_json::from_value(value).map_err(|e| e.to_string())?;
             check(
                 &node,
@@ -680,15 +717,16 @@ fn read(path: &Path, id: &str) -> LayoutInfo {
             if let Some(root) = path.parent().and_then(Path::parent) {
                 resolve_backgrounds(&mut node, root);
             }
-            Ok((name, node, preview))
+            Ok((name, node, preview, source))
         });
     match loaded {
-        Ok((name, node, preview)) => LayoutInfo {
+        Ok((name, node, preview, cloned_from)) => LayoutInfo {
             id: id.into(),
             name,
             root: Some(node),
             preview,
             error: None,
+            cloned_from,
         },
         Err(error) => LayoutInfo {
             id: id.into(),
@@ -696,6 +734,7 @@ fn read(path: &Path, id: &str) -> LayoutInfo {
             root: None,
             preview: None,
             error: Some(error),
+            cloned_from: None,
         },
     }
 }
@@ -718,6 +757,84 @@ pub fn scan(root: &Path, policy: &Policy) -> Vec<LayoutInfo> {
         .collect();
     found.sort_by(|a, b| a.id.cmp(&b.id));
     found
+}
+
+/// The stock layouts of this core's web build (`stock-ui/layouts/<name>.json`, exported from
+/// `packages/web/src/stock-ui/layouts/`), as `stock:<name>`: `stock:main` is Perch's own window as a
+/// layout file. They are never chosen as such (Perch as shipped is the stock window); they are copied
+/// with `perch mod clone stock:main <id>` into `layouts/`, where the copy is the person's to edit. No
+/// web build is no stock layouts. Read whatever the mods setting is: stock is Perch itself.
+pub fn stock(stock_dir: &Path) -> Vec<LayoutInfo> {
+    let Ok(entries) = std::fs::read_dir(stock_dir.join("layouts")) else {
+        return Vec::new();
+    };
+    let mut found: Vec<LayoutInfo> = entries
+        .filter_map(Result::ok)
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            let id = name.strip_suffix(".json")?;
+            plain_id(id).then(|| read(&e.path(), &format!("{}{id}", crate::mods::STOCK_PREFIX)))
+        })
+        .collect();
+    found.sort_by(|a, b| a.id.cmp(&b.id));
+    found
+}
+
+/// Copies the stock layout `id` (`stock:main`) to `layouts/<new_id>.json` (default `my-<name>`), with
+/// `clonedFrom: {id, version}` in place of the stock file's `version`. Never overwrites, never takes a
+/// shipped example's id, and refuses a stock layout that does not load.
+pub fn clone_stock(
+    root: &Path,
+    stock_dir: &Path,
+    id: &str,
+    new_id: Option<&str>,
+) -> Result<String, Error> {
+    let name = id.strip_prefix(crate::mods::STOCK_PREFIX).unwrap_or(id);
+    let path = stock_dir.join("layouts").join(format!("{name}.json"));
+    if !plain_id(name) || !path.is_file() {
+        return Err(Error::NotFound(format!("no stock layout \"{id}\"")));
+    }
+    if let Some(error) = read(&path, id).error {
+        return Err(Error::Invalid(format!("{id} cannot be copied: {error}")));
+    }
+    let copy = new_id.map_or_else(|| format!("my-{name}"), String::from);
+    if !plain_id(&copy) || crate::mods::EXAMPLES.iter().any(|e| e.id == copy) {
+        return Err(Error::Invalid(format!(
+            "\"{copy}\" is not a plain id or is a shipped example's; pass another: perch mod clone {id} <id>"
+        )));
+    }
+    let mut value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path)?)
+        .map_err(|e| Error::Invalid(e.to_string()))?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| Error::Invalid(format!("{id} is not a layout object")))?;
+    let version = object.remove("version");
+    object.insert(
+        "clonedFrom".into(),
+        serde_json::json!({ "id": id, "version": version }),
+    );
+    write_new(root, &copy, &value)?;
+    Ok(copy)
+}
+
+/// Writes `layouts/<id>.json` only if it does not exist yet, whole or not at all: a hidden temporary
+/// file hard-linked into place (which fails rather than replace a file that appeared meanwhile).
+pub(crate) fn write_new(root: &Path, id: &str, value: &serde_json::Value) -> Result<(), Error> {
+    let dir = root.join("layouts");
+    std::fs::create_dir_all(&dir)?;
+    let to = dir.join(format!("{id}.json"));
+    let staging = dir.join(format!(".clone-{}.json", uuid::Uuid::new_v4()));
+    let text = serde_json::to_string_pretty(value).map_err(|e| Error::Invalid(e.to_string()))?;
+    std::fs::write(&staging, text + "\n")?;
+    let linked = std::fs::hard_link(&staging, &to);
+    let _ = std::fs::remove_file(&staging);
+    match linked {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(Error::Invalid(format!(
+            "\"{id}\" is taken; pass another id"
+        ))),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// A theme file in `<root>/themes/<id>.json`. Two shapes: Perch's own, `{"name", "base"?, "colors":
@@ -831,12 +948,78 @@ pub fn scan_themes(root: &Path, policy: &Policy) -> Vec<ThemeInfo> {
         .collect()
 }
 
+/// `mod:<id>` (a person's mod) or `mod:stock:<id>` (a stock screen of the web build).
+fn mod_content(content: &str) -> bool {
+    content.strip_prefix("mod:").is_some_and(|id| {
+        plain_id(id)
+            || id
+                .strip_prefix(crate::mods::STOCK_PREFIX)
+                .is_some_and(plain_id)
+    })
+}
+
+/// `layout-state.json`: the chosen layout and the stock screens replaced by a person's mod (`use`).
+fn read_state(root: &Path) -> serde_json::Map<String, serde_json::Value> {
+    std::fs::read_to_string(root.join("layout-state.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default()
+}
+
+fn write_state(
+    root: &Path,
+    state: serde_json::Map<String, serde_json::Value>,
+) -> std::io::Result<()> {
+    std::fs::write(
+        root.join("layout-state.json"),
+        serde_json::Value::Object(state).to_string(),
+    )
+}
+
 /// The layout the person chose, if any.
 pub fn current(root: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(root.join("layout-state.json")).ok()?;
-    serde_json::from_str::<serde_json::Value>(&text).ok()?["layout"]
-        .as_str()
-        .map(String::from)
+    read_state(root).get("layout")?.as_str().map(String::from)
+}
+
+/// Which of the person's mods Perch shows in place of a stock screen: `stock:<id>` → mod id. It
+/// applies wherever Perch shows that screen (the stock window, a layout's `sidebar`/`tabs`/`status`
+/// block, Perch's own openers), whichever layout is chosen. Entries that are not a stock id and a
+/// plain mod id are ignored, so a hand-edited file cannot point anywhere else.
+pub fn uses(root: &Path) -> BTreeMap<String, String> {
+    let Some(serde_json::Value::Object(map)) = read_state(root).remove("use") else {
+        return BTreeMap::new();
+    };
+    map.into_iter()
+        .filter_map(|(stock, id)| Some((stock, id.as_str()?.to_string())))
+        .filter(|(stock, id)| {
+            stock
+                .strip_prefix(crate::mods::STOCK_PREFIX)
+                .is_some_and(plain_id)
+                && plain_id(id)
+        })
+        .take(64)
+        .collect()
+}
+
+/// Show the person's package `id` wherever Perch shows the stock screen `stock` (`None`: the stock
+/// screen again). The caller has checked both ids exist; this only records the choice.
+pub fn set_use(root: &Path, stock: &str, id: Option<&str>) -> std::io::Result<()> {
+    let mut state = read_state(root);
+    let mut chosen: serde_json::Map<String, serde_json::Value> = uses(root)
+        .into_iter()
+        .map(|(k, v)| (k, serde_json::Value::String(v)))
+        .collect();
+    match id {
+        Some(id) => chosen.insert(stock.to_string(), id.into()),
+        None => chosen.remove(stock),
+    };
+    if chosen.is_empty() {
+        state.remove("use");
+    } else {
+        state.insert("use".into(), serde_json::Value::Object(chosen));
+    }
+    write_state(root, state)
 }
 
 /// Choose a layout, or `None` for stock Perch. Only a layout that parses can be chosen.
@@ -854,16 +1037,55 @@ pub fn set_current(root: &Path, policy: &Policy, id: Option<&str>) -> Result<(),
             Some(_) => {}
         }
     }
-    std::fs::write(
-        root.join("layout-state.json"),
-        serde_json::json!({ "layout": id }).to_string(),
-    )?;
+    // The stock screens a person replaced stay replaced across layouts.
+    let mut state = read_state(root);
+    state.insert("layout".into(), id.into());
+    write_state(root, state)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_layout_names_a_stock_screen_and_the_use_map_keeps_only_plain_ids() {
+        let root = root_with(&[
+            (
+                "stock.json",
+                r#"{"type":"block","content":"mod:stock:keybind-help"}"#,
+            ),
+            ("odd.json", r#"{"type":"block","content":"mod:stock:../x"}"#),
+        ]);
+        let found = scan(&root, &Policy::default());
+        let get = |id: &str| found.iter().find(|l| l.id == id).unwrap();
+        assert!(get("stock").error.is_none());
+        assert!(get("odd").error.is_some());
+        std::fs::write(
+            root.join("layout-state.json"),
+            r#"{"layout":"stock","use":{"stock:sidebar":"my-nav","stock:../x":"a","sidebar":"b","stock:tabs":"../c"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            uses(&root),
+            BTreeMap::from([("stock:sidebar".to_string(), "my-nav".to_string())])
+        );
+        set_use(&root, "stock:status", Some("my-status")).unwrap();
+        set_use(&root, "stock:sidebar", None).unwrap();
+        assert_eq!(
+            uses(&root),
+            BTreeMap::from([("stock:status".to_string(), "my-status".to_string())])
+        );
+        assert_eq!(current(&root).as_deref(), Some("stock"));
+        set_current(&root, &Policy::default(), None).unwrap();
+        assert_eq!(current(&root), None);
+        assert_eq!(
+            uses(&root).len(),
+            1,
+            "going back to stock Perch keeps the replacement"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     fn root_with(files: &[(&str, &str)]) -> std::path::PathBuf {
         let root = std::env::temp_dir().join(format!("perch-layouts-{}", uuid::Uuid::new_v4()));
@@ -945,6 +1167,14 @@ mod tests {
                 r#"{"type":"block","content":"tabs","float":{"x":0,"y":0,"width":0,"height":10}}"#,
             ),
             ("term.json", r#"{"type":"block","content":"terminal:../x"}"#),
+            (
+                "session.json",
+                r#"{"type":"block","content":"session:abc-123"}"#,
+            ),
+            (
+                "session-bad.json",
+                r#"{"type":"block","content":"session:../x"}"#,
+            ),
             (
                 "term-look.json",
                 r#"{"type":"row","shadow":"md","terminalPadding":10,"terminalOpacity":0.5,"children":[
@@ -1048,6 +1278,7 @@ mod tests {
         assert_eq!(group.look.colors["accent"], "#ff8800");
         assert_eq!((group.look.radius, group.look.border), (Some(4), Some(1)));
         assert!(by("fancy").error.is_none(), "{:?}", by("fancy").error);
+        assert!(by("session").error.is_none(), "{:?}", by("session").error);
         assert!(by("chrome").error.is_none(), "{:?}", by("chrome").error);
         assert!(by("chrome")
             .preview
@@ -1109,6 +1340,7 @@ mod tests {
             "url",
             "flat",
             "term",
+            "session-bad",
             "shadow",
             "opaque",
             "pad",
@@ -1248,6 +1480,122 @@ mod tests {
         }
         assert_eq!(found.len(), 7); // "not json" has a space: not a plain id
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The web build's stock layouts, as `stock-ui/layouts/` in a scratch folder.
+    fn stock_dir_with(files: &[(&str, &str)]) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("perch-stock-layouts-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join("layouts")).unwrap();
+        for (name, text) in files {
+            std::fs::write(dir.join("layouts").join(name), text).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn the_stock_window_is_a_layout_a_person_copies_and_edits_and_old_layouts_still_load() {
+        // The file the web build ships (`packages/web/src/stock-ui/layouts/main.json`), as the core reads it.
+        let shipped = include_str!("../../../packages/web/src/stock-ui/layouts/main.json");
+        let stock_dir = stock_dir_with(&[("main.json", shipped), ("Bad id.json", "{}")]);
+        let listed = stock(&stock_dir);
+        assert_eq!(listed.len(), 1, "an id that is not plain is skipped");
+        let main = &listed[0];
+        assert_eq!(main.id, "stock:main");
+        assert!(main.error.is_none(), "{:?}", main.error);
+        // Its blocks are the stock window's parts, in the order Perch as shipped draws them.
+        let text = serde_json::to_string(main.root.as_ref().unwrap()).unwrap();
+        let at = |part: &str| text.find(&format!("\"content\":\"{part}\"")).unwrap();
+        assert!(
+            at("window:sidebar") < at("window:main") && at("window:main") < at("window:drawer")
+        );
+        assert!(text.contains("\"content\":\"status\""));
+
+        // A pre-existing layout file (no provenance, old aliases) loads exactly as before.
+        let root = root_with(&[(
+            "old.json",
+            r#"{"name":"Old","type":"row","children":[{"type":"block","content":"sidebar"},{"type":"block","content":"canvas"}]}"#,
+        )]);
+        let policy = Policy::default();
+        let old = scan(&root, &policy)
+            .into_iter()
+            .find(|l| l.id == "old")
+            .unwrap();
+        assert!(old.error.is_none() && old.cloned_from.is_none());
+
+        // The copy is the person's file: provenance in place of the stock version, never overwritten.
+        assert_eq!(
+            clone_stock(&root, &stock_dir, "stock:main", None).unwrap(),
+            "my-main"
+        );
+        let copy: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join("layouts/my-main.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            copy["clonedFrom"],
+            serde_json::json!({"id": "stock:main", "version": "1.0.0"})
+        );
+        assert!(copy.get("version").is_none());
+        let before = std::fs::read(root.join("layouts/my-main.json")).unwrap();
+        assert!(
+            clone_stock(&root, &stock_dir, "stock:main", Some("my-main")).is_err(),
+            "no overwrite"
+        );
+        assert_eq!(
+            std::fs::read(root.join("layouts/my-main.json")).unwrap(),
+            before
+        );
+        assert!(
+            clone_stock(&root, &stock_dir, "stock:main", Some("ide")).is_err(),
+            "not an example's id"
+        );
+        assert!(clone_stock(&root, &stock_dir, "stock:main", Some("../x")).is_err());
+        assert!(clone_stock(&root, &stock_dir, "stock:nope", Some("x")).is_err());
+        let mine = scan(&root, &policy)
+            .into_iter()
+            .find(|l| l.id == "my-main")
+            .unwrap();
+        assert!(mine.error.is_none(), "{:?}", mine.error);
+        assert_eq!(
+            mine.cloned_from,
+            Some(LayoutSource {
+                id: "stock:main".into(),
+                version: Some("1.0.0".into())
+            })
+        );
+        set_current(&root, &policy, Some("my-main")).unwrap();
+
+        // An edit that breaks it makes it unusable; the page then draws Perch as shipped.
+        std::fs::write(
+            root.join("layouts/my-main.json"),
+            r#"{"type":"block","content":"window:nope"}"#,
+        )
+        .unwrap();
+        let broken = scan(&root, &policy)
+            .into_iter()
+            .find(|l| l.id == "my-main")
+            .unwrap();
+        assert!(broken.root.is_none() && broken.error.is_some());
+        // Copying any layout records where it came from too.
+        assert_eq!(
+            crate::mods::clone_example(&root, "old", Some("old-2")).unwrap(),
+            "old-2"
+        );
+        let copied = scan(&root, &policy)
+            .into_iter()
+            .find(|l| l.id == "old-2")
+            .unwrap();
+        assert_eq!(
+            copied.cloned_from,
+            Some(LayoutSource {
+                id: "old".into(),
+                version: None
+            })
+        );
+        assert_eq!(copied.root, old.root);
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&stock_dir);
     }
 
     #[test]

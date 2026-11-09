@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { Slot } from "./Slot";
 import { cn } from "../lib/cn";
 import { DockviewShell } from "../dockview/DockviewShell";
 import { AgentPane } from "../views/AgentPane";
@@ -8,20 +7,14 @@ import { fileTabKey, isBlankBrowser, restoreSelection, useFileTabs, type FileTab
 import { gapped, layout, MIN_PANE_PX, useSplitSets, visibleSplit, type Strip } from "../splitSets";
 import { acquirePassthrough, focusMainResponder } from "../browserNative";
 import { activateTab, entryLabel, workspaceTabs, type TabEntry } from "../workspaceTabs";
-import { closeTab, exitSplit } from "../tiledPanes";
 import { beginTabDrag } from "../tabDrag";
 import { usePaneLook } from "../paneLook";
-import { GHOST_BUTTON } from "./ui/icon-button";
-import { AgentIcon } from "./AgentIcon";
-import { DOT_GLYPH, sessionDotState, type AgentDotState } from "../statusDot";
 import { useTabOrderVersion } from "../tabOrder";
 import { ModPane } from "./ModView";
+import { StockView } from "./mod-root";
 import { WorkspaceBrowser } from "./WorkspaceBrowser";
-import { WorkspaceFilesView } from "./WorkspaceFiles";
-import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
 
 const STEP = 0.02;
-const STATE_WORD: Record<AgentDotState, string> = { blocked: "Waiting for you", working: "Working", done: "Done", idle: "Idle", unknown: "" };
 
 /**
  * The canvas under the one tab strip. Normally the session's Dockview fills it
@@ -76,7 +69,6 @@ export function SplitCanvas() {
   const resize = useSplitSets((s) => s.resize);
   const zoomedId = useSplitSets((s) => s.zoomedId);
   const settingsOpen = usePerchStore((s) => s.settingsOpen);
-  const cliAgentBySession = usePerchStore((s) => s.cliAgentBySession);
   const shownWorkspaceId = usePerchStore((s) => effectiveWorkspace(s)?.id ?? null);
   const hostRef = useRef<HTMLDivElement>(null);
   // A saved drag order changes the panes' order: re-render for it.
@@ -249,17 +241,6 @@ export function SplitCanvas() {
     ? <div className="pointer-events-none absolute top-0 right-0 left-0 z-20 h-[2px] bg-overlay-1" data-testid="split-focus-bar" />
     : null;
 
-  const tileControls = (entry: TabEntry) => (
-    <span className="flex shrink-0 items-center" data-testid={`tile-controls-${entry.id}`}>
-      <button type="button" className={cn(GHOST_BUTTON, "flex size-6 items-center justify-center p-0 text-subtext-0 hover:text-fg")} title="Show this tab full size — leave the split" aria-label={`Exit split for ${entryLabel(entry)}`} data-testid={`tile-expand-${entry.id}`} onClick={() => exitSplit(entry.id)}>
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>
-      </button>
-      <button type="button" className={cn(GHOST_BUTTON, "flex size-6 items-center justify-center p-0 text-subtext-0 hover:text-fg")} title="Close this tab" aria-label={`Close ${entryLabel(entry)}`} data-testid={`tile-close-${entry.id}`} onClick={() => closeTab(entry.id)}>
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8" /></svg>
-      </button>
-    </span>
-  );
-
   return (
     <div ref={hostRef} className="absolute inset-0" data-testid="split-canvas" data-split={split ? split.ids.length : 0}>
       <div
@@ -286,32 +267,9 @@ export function SplitCanvas() {
           onFocusCapture={() => { if (activeId !== entry.id) activateTab(entry); }}
         >
           {split && !zoomed && <PaneGrip id={entry.id} label={entryLabel(entry)} />}
-          {/* One compact row owns the name, status and actions; no floating controls over the header. */}
-          <div
-            className={cn(
-              "flex shrink-0 items-center gap-1.5 bg-panel-bg px-1.5 text-xs text-subtext-0",
-              // `hover`: drawn over the terminal while the pointer is on the pane, so the terminal never resizes.
-              paneLook.headerReveal === "hover" && cn("absolute inset-x-0 z-20 opacity-0 transition-opacity group-hover:opacity-100", paneLook.headerAt === "bottom" ? "bottom-0" : "top-0"),
-              paneLook.headerReveal !== "hover" && paneLook.headerAt === "bottom" && "order-last",
-            )}
-            style={{ height: paneLook.headerHeight }}
-            data-testid={`pane-header-${entry.id}`}
-            onContextMenu={(event) => { event.preventDefault(); useSplitSets.getState().openMenu(entry.id, event.clientX, event.clientY); }}>
-            <Slot
-              name="pane-header"
-              className="flex min-w-0 flex-1 items-center gap-1.5"
-              data={{ id: entry.id, title: entry.session.title, label: entryLabel(entry), state: sessionDotState(entry.session), provider: entry.session.currentProviderId ?? cliAgentBySession[entry.id] ?? entry.session.cliProviderId, focused: entry.id === activeId }}
-              actions={{ open: () => activateTab(entry), menu: (x, y) => useSplitSets.getState().openMenu(entry.id, Number(x), Number(y)) }}
-            >
-              <span className="shrink-0"><AgentIcon provider={entry.session.currentProviderId ?? cliAgentBySession[entry.id] ?? entry.session.cliProviderId} size={12} /></span>
-              <span className="min-w-0 flex-1 truncate" title={entry.session.title}>{entryLabel(entry)}</span>
-              <span className="flex min-w-0 items-center gap-1" title={STATE_WORD[sessionDotState(entry.session)]}>
-                <span className="size-[5px] shrink-0 rounded-full" style={{ background: DOT_GLYPH[sessionDotState(entry.session)].color }} aria-hidden="true" />
-                <span className="truncate">{STATE_WORD[sessionDotState(entry.session)]}</span>
-              </span>
-            </Slot>
-            {tileControls(entry)}
-          </div>
+          {/* The header row is the stock screen `stock:pane-header` (or the person's copy of it): one copy per pane,
+              acting on it by id. The pane, its terminal and its grip stay here. */}
+          <StockView name="pane-header" props={{ id: entry.id }} instance={`pane-header:${entry.id}`} placeholder={<div className="shrink-0" style={{ height: paneLook.headerHeight }} />} />
           <AgentPane sessionId={entry.id} />
           {focusBar(entry.id === activeId)}
         </div>
@@ -330,13 +288,13 @@ export function SplitCanvas() {
           onFocusCapture={split ? () => focusResource(tab) : undefined}
         >
           {tab.kind === "review" ? (
-            <WorkspaceGitReviewPane workspaceId={tab.scope ?? tab.workspaceId} />
+            <StockView name="review" props={{ workspaceId: tab.scope ?? tab.workspaceId }} instance={`review-pane:${id}`} placeholder={<div className="terminal__notice" role="status">Loading review…</div>} />
           ) : tab.kind === "mod" ? (
-            <ModPane modId={tab.mod ?? ""} props={tab.props} />
+            <ModPane modId={tab.mod ?? ""} props={tab.props} instance={`pane:${id}`} />
           ) : tab.kind === "browser" ? (
             <WorkspaceBrowser tabId={id} initialUrl={isBlankBrowser(tab) ? "" : tab.path} active={id === activeId} />
           ) : (
-            <WorkspaceFilesView layout="editor" workspaceId={tab.scope ?? tab.workspaceId} initialPath={tab.path} />
+            <StockView name="files" props={{ layout: "editor", workspaceId: tab.scope ?? tab.workspaceId, initialPath: tab.path }} instance={`files-pane:${id}`} placeholder={<div className="terminal__notice" role="status">Loading file…</div>} />
           )}
           {split && !zoomed && <PaneGrip id={id} label={tab.path || id} />}
           {focusBar(id === activeKey)}
@@ -344,7 +302,7 @@ export function SplitCanvas() {
       ))}
       {split && entries.filter((entry) => entry.kind === "resource" && split.ids.includes(entry.id) && tileVisible(entry.id)).map((entry) => (
         <div key={`controls-${entry.id}`} className="pointer-events-none absolute z-40" style={slot(entry.id)}>
-          <div className="pointer-events-auto absolute top-1 right-1 rounded-ui bg-panel-bg">{tileControls(entry)}</div>
+          <StockView name="pane-header" props={{ id: entry.id, corner: true }} instance={`pane-corner:${entry.id}`} />
         </div>
       ))}
       {split && !zoomed && dividers.map(({ strip, i, edge }, n) => {

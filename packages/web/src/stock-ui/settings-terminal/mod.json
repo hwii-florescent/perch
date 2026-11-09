@@ -1,0 +1,6 @@
+{
+  "name": "Settings: Terminal",
+  "description": "scrollback, the login shell and how dropped paths are quoted",
+  "version": "1.0.0",
+  "api": "^1.8"
+}

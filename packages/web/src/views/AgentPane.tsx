@@ -1,20 +1,24 @@
-import { useEffect } from "react";
+import { useEffect, useId } from "react";
 import { usePerchStore } from "../store";
-import { NativeCliChat } from "./NativeCliChat";
+import { StockView } from "../components/mod-root";
+// The phone keeps its own screens until they follow `perch mod use`: the stock chat source, compiled in.
+import { NativeCliChat } from "../stock-ui/chat/chat";
 import { AgentCliTerminal } from "./AgentCliTerminal";
-import { CliStartPanel } from "../components/CliStartPanel";
-import { NoSessionPanel } from "../components/NoSessionPanel";
+import { CliStartPanel, NoSessionPanel } from "../components/StartScreen";
 
 /**
  * One pane showing one agent session. It is always the same real CLI process;
  * the global `chatMode` setting (Terminal by default) only decides the view:
- * `cli` is the terminal, `ui` is the native chat (`NativeCliChat`) over that
+ * `cli` is the terminal, `ui` is the native chat (the stock screen `stock:chat`, or
+ * the package the person chose for it: the chat's state stays Perch's) over that
  * same process. Agents or hosts with no native bridge always get the terminal.
  *
  * `sessionId`: omitted means "the globally active session"; a split pane
- * passes its own id.
+ * passes its own id. `phone`: the phone's pane, which draws the stock chat compiled in.
  */
-export function AgentPane({ sessionId: sessionIdProp }: { sessionId?: string } = {}) {
+export function AgentPane({ sessionId: sessionIdProp, phone = false }: { sessionId?: string; phone?: boolean } = {}) {
+  // Each pane is its own copy of the chat screen (the chat it shows is shared through `useNativeChat`).
+  const view = useId();
   const activeSessionId = usePerchStore((s) => s.sessionId);
   const sessionId = sessionIdProp ?? activeSessionId;
   const connected = usePerchStore((s) => s.connected);
@@ -52,7 +56,9 @@ export function AgentPane({ sessionId: sessionIdProp }: { sessionId?: string } =
       ) : !ready ? (
         <CliStartPanel />
       ) : chatMode === "ui" && nativeUiAvailable ? (
-        <NativeCliChat key={`${sessionId}-${chatAgent}-${session?.chatProviderId ?? ""}`} sessionId={sessionId} providerId={chatAgent!} terminalProviderId={cliAgent} />
+        phone ? <NativeCliChat key={`${sessionId}-${chatAgent}-${session?.chatProviderId ?? ""}`} sessionId={sessionId} providerId={chatAgent!} terminalProviderId={cliAgent} />
+          : <StockView key={`${sessionId}-${chatAgent}-${session?.chatProviderId ?? ""}`} name="chat" instance={`chat:${sessionId}:${view}`}
+            props={{ sessionId, providerId: chatAgent!, terminalProviderId: cliAgent }} placeholder={<div className="p-4 text-[12px] text-subtext-0" role="status">Loading chat…</div>} />
       ) : chatMode === "ui" && nativeUiPending ? (
         <div className="p-4 text-[12px] text-subtext-0" role="status">Checking agent…</div>
       ) : (

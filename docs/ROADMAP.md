@@ -252,7 +252,7 @@ Context ring (toolbar, amber from 70%, red from 90%, tooltip with tokens) for
 Claude, Codex, Pi and OMP via `NativeUiSnapshot.context`: Codex reports it
 (`thread/tokenUsage/updated`, `last.totalTokens` over `modelContextWindow`), Pi and
 OMP report it through `ctx.getContextUsage()`, Claude gives only per-response usage
-in its transcript, so its window is a guess (200k, 1M for `[1m]` or past 200k) and
+in its transcript, so its window is judged from the model id (200k for the older families, else 1M) and
 the tooltip says "about". OpenCode has no source yet. Live-checked on Claude; the
 Pi/OMP/Codex paths are unit-tested and wait on a run when their accounts are
 under the usage limit.
@@ -609,6 +609,20 @@ Public README/demo, security/privacy/retention/support guidance and release
 notes remain work. GPL-3.0-only and THIRD_PARTY_NOTICES already exist; review
 distribution obligations rather than reopening license selection. Resolve the
 npm/pnpm contributor workflow deliberately; do not delete a lockfile here.
+
+**Cloneable stock UI (SDK 1.10):** the local device's screens, terminal and dock
+chrome, browser toolbar and phone screens are clonable `stock:` packages with
+regressions (`e2e/stock-ui-clones.spec.ts`, `e2e/relay.check.mjs`). Still owed:
+owner acceptance of the host-owned boundary listed in [DECISIONS](DECISIONS.md)
+(2026-11-09), a registry (future; manifests already record id, publisher,
+version, API range, SHA-256 and install source). Fault injection (bad assets,
+blocked storage, bad mod data, a revision dropped or expired mid-load, a core
+restart mid-swap, a relay drop mid-fetch, throwing cleanups) and 100 edits of a
+package holding a terminal, a draft, timers and tracked work are regressions;
+one of each stays live. The page's module cache grows by one copy of a package's
+modules per edited revision (4 per edit in that test) until the page reloads;
+reloading is the accepted response ([MOD-SDK](MOD-SDK.md)). Not covered: a
+throwing class `componentWillUnmount`, and a retry of the stock catalog fetch.
 
 ## Not the goal
 

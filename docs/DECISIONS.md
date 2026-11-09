@@ -7,6 +7,305 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-09 — Terminal and dock chrome, the browser toolbar and the phone's screens are stock screens; phone screens are opt-in per phone (SDK 1.10)
+
+Plan: `plans/261108-2212-cloneable-stock-ui/` phase 5. Owner direction: convert the terminal toolbar, the agent
+control chip and banners, the dock's tab and group buttons and the browser toolbar unless an engine boundary makes it
+impossible; phones get their own screens and mods, opt-in per phone, never the desktop's by default. Supersedes the
+"Terminal authority" and "Engines" items of the 1.9 entry below for the parts named here.
+- **Screens.** `stock:terminal-toolbar` (`PersistentTerminal`), `stock:agent-control` (`PersistentAgentTerminal`,
+  drawn in two places, `part: "top"` for the chip and `"bottom"` for the error line and the exited/sleeping banner,
+  so the banner stays over the terminal surface), `stock:dock-tab` and `stock:dock-actions` (`DockviewShell`'s
+  `PaneTab` and `PaneGroupHeaderActions`), `stock:browser-toolbar` (`WorkspaceBrowser`), and the phone's own
+  `stock:mobile-header`, `-switcher`, `-panes`, `-files` and `-keys`. Data and Perch's actions are props, as since 1.7.
+- **The authority stays Perch's.** The screens ask; Perch acts: Take control / Fit here move the input or resize
+  lease (`view.takeControl()`), Restart/Resume and Close session start or close the agent, New/Close shell open and
+  end shells, the dock tab's close and menu and the group's + and Split go to dockview and Perch's dock controller, the
+  browser's address, suggestions, keys and page are `WorkspaceBrowser`'s (a typed address survives a swap), a phone
+  key types only through the terminal view's own input. Dockview still draws the tab strip, drag and drop; the tab's
+  title and close button come in as `defaultTab` (dockview's own element), which a copy may keep, wrap or replace.
+- **Phones.** A phone is a page at phone width or any page reached through a relay. It never runs the computer's
+  packages: no desktop screen's copy, no layout, no docked, hidden or overlay package, no single-file mod. It runs a
+  person's copy only for one of its own screens (`stock:mobile-*`), and only after "Phone screens from my packages"
+  was turned on in that phone's Settings > Mods (this device's storage, `perch.phoneMods`; another phone starts off).
+  Reason: a relay phone keeps its device token in the page's storage, where any code on the page can read it. Off
+  puts Perch's own back at once; a phone that loses its pairing forgets the choice before it shows the pairing gate.
+  Settings > Mods says on each device where a choice applies ("chosen for the computer; this phone shows Perch's
+  own", "chosen for phones that turned on phone screens", "until phone screens from your packages are on").
+- **Older peers and versions.** An older page is never handed a package (`mods.list` without `accepts: ["esm"]`,
+  `server/mods.rs` tests). A page on a core without `mods.v1` says in Settings > Mods that the computer's Perch is
+  older and Perch's own screens are shown. A copy whose `api` range excludes the page's SDK (a relay phone's page
+  can be another build than the computer's core) does not run: Perch's own shows, with the range and the version, in
+  the screen and in Settings > Mods. A core started with `PERCH_MODS=off` says so in Settings > Mods.
+- **A reload mid-start is not a freeze.** The boot guard drops the marks of packages still starting when the page is
+  left normally (`pagehide`); a frozen or crashed page fires nothing, so those are still turned off.
+- **SDK 1.10** adds `glassClass`, `tapButtonClass`, `GearIcon`, `PlusIcon`, `EllipsisIcon` and the ten screens'
+  props types.
+- **Host-owned, needs owner acceptance** (each stays Perch-drawn; the reason is the evidence):
+  - *Recovery and trust* (unchanged from 1.9): the recovery shell and its toggles, the pairing gate, Connection
+    details, the Settings frame, Settings > Mods, the mod-root/ModView/LayoutRoot notices, ModOverlay. They must draw
+    without a person's code.
+  - *Terminal text and the suggestions pill:* `PersistentTerminal`'s one-line status ("Opening shell…", a lost
+    shell's message) and file-drop notice, and `TerminalSuggestions` (acting on a suggestion needs the input lease;
+    its cards are `stock:chat`'s source).
+  - *Remote and legacy terminal views* (`Terminal.tsx`, `AgentCliTerminal.tsx` with its own exited banner): they
+    show another host's sessions, and stock cloning is for the local device only.
+  - *Engines:* dockview's strip, drag and drop and its default tab element; the browser page (native webview or
+    sandboxed frame); the file viewers; xterm and CodeMirror.
+  - *Phones and the computer's screens they share:* on a phone, the chat, review, files, sidebar body, Settings pages
+    and dialogs are Perch's own even after opting in, because they are desktop screens; a phone's copies are limited
+    to the five `stock:mobile-*` screens.
+  - *Placeholders:* loading lines and the layout-only "No session is focused" and stack strip.
+
+Plan: `plans/261108-2212-cloneable-stock-ui/` phase 4 (closing slice). Owner direction: convert the remaining desktop
+screens and list every other hard-coded desktop surface here as a host-owned boundary with its reason.
+- **Screens.** `stock:start` (the empty main area: connecting, home, a workspace's start picker, the CLI start panel;
+  host route `components/StartScreen.tsx`, which replaces `NoSessionPanel`, `CliStartPanel`, `StartCard` and
+  `FolderPicker`), `stock:editor-menu` (`EditorContextMenu.tsx`), `stock:terminal-search` (`TerminalSearchBar.tsx`),
+  `stock:slash-popover` (the native chat's autocomplete list; the SDK's `SlashPopover` is its route, so the stock
+  chat and copies of it use the chosen one; the old `components/SlashPopover.tsx` had had no caller since the Hosted
+  chat was removed), `stock:session-split` (a docked group's Split with session picker, `SessionSplitPopover.tsx`)
+  and `stock:phone-size` (`PhoneSizeNotice.tsx`). Same pattern as 1.7: data and Perch's actions as props. A phone
+  keeps Perch's own.
+- **What stays Perch's.** Session start and the chosen place (kept by the host route, so it survives a swap);
+  CodeMirror transactions and the editor's focus; the terminal's search, its focus on close and its keys (the bar
+  never writes to the terminal); the composer's focus and keys (a slash pick rewrites the draft only); the dock's
+  split and drag payload; the terminal's resize lease.
+- **Host-owned on purpose (not screens), with the reason:**
+  - *Recovery and trust:* the recovery shell `StockWindow.tsx` and the parts it draws (sidebar and drawer toggles, the
+    drawer's Files/Git/Browser tabs, `WorkspaceToolsTabs`), the pairing gate, Connection details, the Settings frame,
+    Settings > Mods, the notices of `mod-root.tsx`, `ModView.tsx` and `LayoutRoot.tsx` (a copy that failed, "off or
+    gone", a missing pane id) and the package overlay frame (`ModOverlay`). They must draw without running a
+    person's code, because they are the way back from a broken copy. The window itself is changed through a copy of
+    `stock:main` (move the parts, add blocks beside them).
+  - *Terminal authority:* the terminal panes' own chrome: `PersistentTerminal`'s toolbar and status, the agent
+    terminal's control chip (Take control, Fit here, Retry CLI) and exited/sleeping banners (Restart, Resume, Close
+    session), the legacy terminal views, and the terminal's suggested-tasks pill (its cards are `stock:chat`'s source;
+    acting needs the terminal's input lease). Each button moves the input or resize lease or starts, resumes or stops
+    a process, and AGENTS.md keeps one owner for that. Notices over a terminal that move no authority are screens
+    (the find bar, the phone-size notice).
+  - *Engines:* dockview draws its own tabs and group header buttons (`PaneTab`, `PaneGroupHeaderActions`), with its
+    drag, drop and group focus; the menus they open are screens (`pane-menu`, `session-split`). The browser page's
+    toolbar (`WorkspaceBrowser`: back, forward, reload, the address and its suggestions) drives the native webview;
+    the file viewers (`WorkspaceFileAsset`, `WorkspaceImage`, `WorkspacePdf`, the Markdown preview's size notice) are
+    engines like CodeMirror. The screens that place them (`stock:browser`, `stock:files`) are packages.
+  - *Composed of screens:* the macOS first-run permissions dialog (`MacPermissionSetup`) is `stock:dialog` around
+    `stock:settings-permissions`; only its Not now / Continue buttons, which record the dismissal, are Perch's.
+  - *Placeholders:* one-line loading text while a screen's package or a terminal attaches ("Loading chat…",
+    "Checking agent…", "Connecting to terminal…"), and the layout-only "No session is focused" and stack tab strip of
+    `LayoutRoot` (a person's own layout, not Perch's window).
+  - The phone's own screens (`Mobile*`) are phase 5.
+- **SDK 1.9** adds only `SlashPopover` and the six screens' props types.
+
+## 2026-11-09 — Settings pages, Perch's window as a layout, kept windows and package keys (SDK 1.8)
+
+Plan: `plans/261108-2212-cloneable-stock-ui/` phase 4 (third slice). Closes the "Open" line of the entry below.
+- **Settings pages are stock screens; the frame and Mods are not.** `stock:settings-general`, `-appearance`,
+  `-agents`, `-keyboard`, `-terminal`, `-notifications`, `-hosts`, `-devices` and `-permissions` each get the saved
+  settings and Perch's actions as props (`components/settingsRoutes.tsx`, `SettingsPage.tsx`). The engines behind
+  them (machine check and install, pairing, relay, notification permission, key recording) stay in host files, and
+  what a page is typing lives in `useResourceState`, so drafts survive a swap. The Settings frame (nav, search,
+  close, the phone's section list) and Settings > Mods stay host-owned on purpose: they are the way back from any
+  copy, on a phone too. A phone shows Perch's own pages until phase 5.
+- **Perch's window is the layout `stock:main`.** It ships in the web build (`stock-ui/layouts/main.json`, as the
+  stock screens do) and names the window's parts, `window:sidebar`, `window:main`, `window:drawer`, over `status`.
+  Perch as shipped is drawn by a recovery shell (`StockWindow.tsx`) from the same parts, and a test keeps the shell
+  and the file in the same order. "Make my copy" in Settings > Mods > Window layout (or `perch mod clone
+  stock:main`) writes an ordinary layout file with `clonedFrom` and uses it; a copy that stops parsing falls back to
+  the shell. Old block names and per-layout click state are unchanged; drafts are Perch's, not a layout's.
+- **Keyed windows remember their place; kept windows belong to a layout.** A keyed `api.window` keeps position and
+  size on this device across restarts (one localStorage value written whole, at most 64 keys, least recently used
+  dropped). A value this build cannot read is left untouched and named in Settings > Mods with a Reset. `keep: true`
+  windows hold only checked layout content and a title, belong to the layout shown when they opened (its id, or
+  Perch as shipped), close while another layout is shown, survive their package being replaced or removed, and are
+  forgotten only by their × or the package's close. They are in-app windows, never OS windows.
+- **Package keys never take a key from anyone.** A package command whose key is taken, reserved or has no modifier
+  registers unbound with the reason; Settings > Keyboard lists package commands under "Package commands" with that
+  reason until the person gives one a key (theirs, in their settings). Commands leave with their package.
+- **SDK 1.8** adds only the Settings pages' props types and parts (`SettingsGroup`, `SettingRow`, `Switch`,
+  `ModeSwitch`, `QrCode`, `settingsClass`, `useSettingsQuery`). Windows and commands stay on a package's `api`.
+
+## 2026-11-09 — Every dialog and menu is a stock screen; data and actions travel as props (SDK 1.7)
+
+Plan: `plans/261108-2212-cloneable-stock-ui/` phase 4 (second slice). Extends "On-demand screens are compiled stock"
+and "Nested owners" below.
+- **Screens.** `stock:dialog`, `select`, `tab-menu` (also the SDK's `SessionMenu`), `pane-menu`, `file-menu` (also
+  `NewFilePrompt`), `new-session`, `launcher`, `navigator`, `folder-browser`, `worktree`, `instructions`, `memory`,
+  `close-guard`, `tab-drag`, `onboarding` and `context-bridge`. Each opener in Perch is a thin host file
+  (`components/<Name>.tsx`) that gathers the data, binds Perch's actions and renders `StockRoute`; the screen's
+  source (`stock-ui/<name>/`) gets both as props and imports only React and `@perch/sdk`.
+- **Why props, not more SDK.** One host binding per screen keeps the SDK small (three helpers added:
+  `useAgentChoices`, `shortcutFor`, `menuDividerClass`) and means a copy cannot do anything Perch's own screen
+  could not: what a save, a stop or a send does is the host's.
+- **Nested owners, by the SDK.** The SDK's `Dialog`, `Select`, `ConfirmDialog`, `TabMenu`, `FolderBrowser`, … are the
+  routes themselves, so a stock or copied screen that uses them gets the person's chosen inner screen. A screen never
+  chooses for the screens it contains.
+- **Kept with the host.** Context Bridge's send state (one operation id per capture, at most one send, never retried)
+  lives in the host file, keyed by the capture; a copy swapped in mid-send sees "sent" and cannot send again.
+  Settings > Mods imports Perch's own dropdown source directly, so recovery never runs a person's copy.
+- **Import cycle.** Compiled stock sources import `@perch/sdk`, which imports the host routes. A stock source makes no
+  SDK call at module top level (docs/MOD-SDK.md, "Stock screen sources").
+- **Open.** Settings pages, the stock layout as an editable layout package, kept windows and command/keys authoring:
+  done in the entry above.
+
+## 2026-11-09 — Mod data, terminal reads, confirmation and notifications as stock screens, safe start
+
+Plan: `plans/261108-2212-cloneable-stock-ui/` phases 3 (rest) and 4 (first slice). SDK 1.6. Supersedes the "Open"
+line of the entry below.
+- **Durable mod data is the person's, per package id, outside the package** (`mod_data.rs`): `mod-data/<id>/<key>.json`
+  in Perch's folder, a stock screen under `@stock-<name>`. Keys are 1-120 of `A-Za-z0-9._-`, not starting with a dot;
+  values are JSON up to 1 MiB, 1000 keys. Each value's revision is the SHA-256 of its bytes; a write or delete may
+  name the revision it expects (`null`: absent) and gets 409 with the current one otherwise. Writes are atomic
+  (temporary file, rename) and serialised in the core; symlinks are refused; bytes that are not JSON are reported
+  as corrupt and copied to `.corrupt/` before anything replaces them. A clone copies files only, so it starts
+  empty; removing a package leaves its data. `POST /mods/data` takes a person's or a paired device's token, never an
+  agent's; a user package needs mods on and an installed folder, a stock screen only that it is in this build. It is
+  the relay's seventh allowlisted route (exact match, both `relay/host.rs` and `relay/transport.ts`).
+- **A terminal this page never opened is read through the core** (`POST /terminal/read`, `server/terminal_read.rs`):
+  target `<host>/<session>` (a bare id means this computer), 1-2000 lines (default 50) of the daemon's screen. A
+  person's token reads any local session; `POST /agent/terminal/read` reads only the caller's own session (any other
+  target 403). Not answered from a guess: a remote host's session is 501 (not read through another host), a
+  daemon that does not answer is 503 "unknown", never "exited". Not on the relay; over a phone only open
+  terminals can be read.
+- **A peek of a remote session moves the tab's terminal, never attaches a second viewer.** The legacy view (a remote
+  session's terminal, which ends with its view) lends its element (`lendTerminal`); a borrowing surface moves it in
+  and back, or shows a placeholder when no tab has it open.
+- **On-demand screens are compiled stock unless a copy is chosen** (`StockRoute`). `stock:confirm` (every
+  `ConfirmDialog`, Perch's and the SDK's) and `stock:toast` (the notifications) are packages like the others, but
+  Perch renders their source compiled into the page so a confirmation never waits for a load; `perch mod use`
+  routes every opener, global and nested, to the person's copy, with the same live props and callbacks. Screens drawn
+  for the whole session (status, tabs, sidebar…) still run their exported package (`StockView`).
+- **Nested owners.** A screen that opens another stock screen (the sidebar's or chat's confirmation, a package's
+  `ConfirmDialog`) opens it through the same route, so the chosen copy of the inner screen applies inside a copy of
+  the outer one; a copy never chooses for the screens it contains. A layout block `mod:stock:<id>` is always stock.
+- **Safe start.** A chosen copy that fails to load or render gives way to stock with a notice; its files and the
+  choice are kept and its next revision is tried. A person's package that stops the page while starting is marked in
+  this device's storage (`bootGuard.ts`) and turned off on the next load (`mods.set disable`), with a notification;
+  stock screens are never turned off. Recovery is Settings > Mods (Turn on/off, and Screens: per stock screen,
+  Perch's own or a copy, and "Make my copy"), the same on a paired phone.
+- **Agents change screens with the CLI only.** `perch mod guide` walks clone, use, edit, check, dom and do; `perch mod
+  clone` prints the copy's folder. No repository, no build.
+- **Chat Markdown keeps `style` and `class`** (the file preview drops them): a deliberate existing behavior, held by
+  its test; this plan does not change it.
+
+## 2026-11-09 — The SDK object is made on first use
+
+`@perch/sdk` resolves to `sdk.ts` inside the page, and stock sources compiled into the page (`confirm`, `toast`)
+import it, so it is evaluated inside an import cycle. Its exports are live re-exports, and the object packages get is
+built when the first package loads (`registerHostModule` takes a function), never at evaluation.
+
+## 2026-11-09 — Files, chat and the drawer browser are stock screens; terminals compose by moving, not copying
+
+Plan: `plans/261108-2212-cloneable-stock-ui/phase-03-resource-surfaces.md` (second slice). SDK 1.5.
+- **`stock:files`, `stock:chat`, `stock:browser`.** The Files explorer and file editor, the native chat and the
+  drawer's browser strip are packages on `@perch/sdk` alone, shown through `StockView` wherever Perch drew them;
+  `perch mod use` puts a clone there. Their state stays the host's: drafts and saves in `filesystemStore`
+  (`useWorkspaceFiles`), the chat's transcript, draft, operation id, outbox and requests in `chatComposer.ts` and
+  `chatSession.ts` (`useNativeChat`), the browser's pages in `drawerBrowsers.ts`. CodeMirror, the media/PDF
+  viewers and the native webview are engines a screen places (`CodeEditor`, `FileAsset`, `BrowserPage`). The phone
+  renders the stock sources compiled in.
+- **Sanitizers are fixed.** Agent and file Markdown reach a screen only as `Markdown` and `MarkdownPreview`, never
+  as a sanitizer a package holds; `perch-ui` blocks stay data drawn as text. The chat sanitizer now also drops
+  forms and form controls (a submit would navigate Perch away); it still keeps `style` and `class`, which the file
+  preview drops (open question below).
+- **Terminals in composed surfaces are borrowed.** A layout block, a mod's overlay/popup/window with layout content
+  (`api.overlay({layout})`) and a package's `Layout` draw a terminal already on screen by moving its one xterm
+  there and back (`terminalKeeper` `borrow`): one input and size owner, nothing replayed, and closing never stops
+  it. A split showing one session twice keeps its separate observer, as before. A new block, `session:<id>`,
+  draws a session's own view (its agent's terminal or chat) and is also valid in layout files.
+- **Peek, keep and park are distinct** (supersedes "`terminal.peek|keep` show the session" and "`terminal.park`
+  not ported" in the 2026-11-08 mods entry). `terminal.peek` shows the session's own view over the app without
+  going there (a click outside, `terminal.park` or `terminal.peek` again closes it; Esc is the program's while the
+  terminal has the keyboard); `terminal.keep` closes the peek and goes to the session's tab; `terminal.park`
+  (`terminal.unkeep`) puts the peek away and refuses when there is none, because a session's tab stays until it is
+  closed. None starts, stops or restarts anything.
+- **Pins and order are this device's.** `terminal.order {ids}` (and `api.setAgentOrder`) now persist on the device
+  beside `terminal.pin`, and `agents()`, `terminals()` and the SDK records report `order`. They are named as the
+  device's, not shared terminal metadata; Perch's own views do not order by them.
+- Open: durable core-backed mod data (per mod, outside package folders, not copied by a clone, relay-allowlisted)
+  and reading a terminal this page never opened through a core/daemon route are not built yet. A remote
+  session's terminal is not kept (`LegacyAgentCliTerminal`), so a peek of one is a second observer, not a move.
+
+## 2026-11-09 — Unsent work belongs to the host, not to a screen's code; the review is a stock screen
+
+Plan: `plans/261108-2212-cloneable-stock-ui/phase-03-resource-surfaces.md`. A screen whose code can be edited,
+reloaded, swapped for a clone or released while hidden cannot own what a person would lose with it.
+- **Native chat composer (`chatComposer.ts`).** The draft (text, staged files and the operation id a send of
+  exactly that draft carries), the message in flight and the answered-prompt receipts are kept per chat
+  (session + agent) by the host, and the send itself runs there: its outcome lands even if the view that started
+  it is gone, and a send in flight blocks a second one from any copy. A retry of an unchanged draft reuses its
+  operation id, in memory and, with the text, across a page reload (`composerDraft.ts` now saves the id); the
+  core dispatches one id at most once (`reserve_prompt_operation`). An edit is a new message with a new id. An
+  unconfirmed send is still never replayed, only restored as a new message. Staged files are not saved across a
+  page reload (a path on the host may be gone), as before.
+- **`useResourceState` (SDK 1.4).** One small host store keyed by the screen's own name for a resource, shared by
+  every copy and view of it, in memory. The review keeps its unsent comment and commit text, the line being
+  commented, the comparison it shows, the prepared packet (and so its send operation id) and the send in flight
+  there, per workspace. Two copies of one workspace's review therefore show one comparison: `gitReviewStore`
+  already holds one diff per workspace, so independent comparisons per copy would fight over it. Transient UI (an
+  open confirmation, a busy flag of a request the copy awaits) stays the copy's own. The editor's word wrap moved
+  from a module variable into `filesystemStore`.
+- **`stock:review`.** The Git review is a package on `@perch/sdk` alone (`stock-ui/review/`), shown through
+  `StockView` in the Files/Git drawer, a review tab and a docked panel; `perch mod use stock:review <id>` puts a
+  clone there. `useGitReview` is `gitReviewStore`'s one state and action set per workspace, with Context Bridge's
+  Ask agent where the host offers it; previews before discard and commit, versioned comments and server
+  revisions are unchanged. The phone's Git pane renders the stock source compiled in (phones keep their own
+  screens until phone-form packages).
+- **Queries without a screen.** `terminals()`/`api.terminalRecords()` list every session's terminal on every
+  known computer, agents, sub-sessions and hidden ones included, with a `<host>/<session>` target and what is
+  known (`unknown` is not exited; `host-unavailable` is never a reason to run anything locally).
+  `readTerminal`/`sendToTerminal` (and `api.readTerminal`/`api.sendText`) take such a target and work on a
+  terminal this page keeps off screen; a bare id two computers share is refused. `layoutTree()` and `focus()`
+  report the shown layout and host-qualified focus. A terminal this page never opened cannot be read from the
+  page; `perch daemon read` remains the way for that.
+
+## 2026-11-09 — A clone takes a stock screen's place through `use`, beside the chosen layout
+
+Settles "use my clone for this screen", left open by the entry below. Plan: `plans/261108-2212-cloneable-stock-ui/phase-02-navigation.md`.
+- **Shape: one map in `layout-state.json`, not a layout field and not a setting.** `use` maps `stock:<name>` to
+  one of the person's packages (`perch mod use stock:tabs my-tabs`, `mods.set` op `use` with `target`; `stock`
+  or an empty target puts Perch's own back). Evidence: the stock window has no layout file to carry a field
+  (`App.tsx` draws stock cards when no layout is chosen); a layout can already name any package directly
+  (`mod:<id>`, now also `mod:stock:<id>` for the stock screen itself); and `layout-state.json` is already the
+  core-owned, per-core choice of what the window shows (`layouts::current`), which mods-off and safe mode already
+  ignore. Settings (`settings.rs`) hold app preferences, not mod wiring, and a per-device `localStorage` choice
+  would split desktop and browser windows of one core.
+- **Where it applies.** Wherever Perch shows that screen: the stock window, a layout's `sidebar`/`tabs`/`status`
+  block, every pane header, and Perch's own openers (the keybind help). The copy runs at that place's instance
+  (`stock:<name>`, `layout:<layout>:<node>`, `pane-header:<tab>`) with the stock screen's props. Choosing a layout
+  keeps the map, and the map keeps the chosen layout.
+- **Guards.** Only a stock screen of the web build can be replaced and only by a package (`format: "esm"`) of the
+  person's that loads; a `stock:` id is never a target. While mods are off the core reports no map (stock shows),
+  and the choice returns when they are on. A page that cannot load packages is never told of it. A chosen package
+  that is off or broken is not shown: the stock screen is.
+- **Phones.** The phone draws its own shell (`MobilePaneShell`), not these screens, so the map does not reach it;
+  phone screens get their own stock ids when they move (Phase 5), so one map serves both without the phone
+  inheriting the desktop's design.
+
+## 2026-11-09 — Stock screens are cloneable packages on one small SDK (owner direction)
+
+Amends "Examples, not shipped defaults" and "Slots" below; the rest of the mods entry stands. Plan:
+`plans/261108-2212-cloneable-stock-ui/` (owner answers in its `validation.md`).
+- **Perch's own screens ship as packages.** A stock screen is TSX in `packages/web/src/stock-ui/<id>/`
+  that `npm run build` exports to readable plain JS (comments kept) in the web build; Perch runs that
+  exported package, not a compiled copy. First: the keybind help (`stock:keybind-help`); then the status
+  bar (`stock:status`), the tab strip (`stock:tabs`) and the split panes' headers (`stock:pane-header`), and the sidebar (`stock:sidebar`, on the
+  SDK's navigation surface; the phone's switcher keeps its own compiled copy of the body).
+  More screens move one at a time; until then the rest stay compiled React with slots.
+- **One public API.** Stock screens, clones and community packages import only `@perch/sdk`, React and
+  their own files. The SDK is small, documented and versioned ([MOD-SDK](MOD-SDK.md)); app modules are
+  not a contract. A package names its range in `mod.json` `api`; outside it, Perch refuses to load it.
+- **Clone, then edit.** `perch mod clone stock:<id> --as <id>` (or `mods.set clone`) copies the whole
+  package into `mods/` with `clonedFrom` (id, revision, version), the API range and no size cap beyond
+  the package sanity bound. Copies are independent and never updated; stock is never changed.
+- **Local device only.** The catalog is the web build's; a headless or remote core has none. Phones
+  load stock from the build they were served.
+- **Safe by namespace.** Stock ids are `stock:<id>`, which no mod, clone or layout id can take, so a
+  copy never stands in for stock. Stock screens run with mods off; clones do not. Stock packages and
+  their clones have `place: "layout"`: shown only where Perch or a layout block puts them, never
+  docked, overlaid or run hidden on their own.
+- **Fixed built-ins.** Sanitizers (`markdown.ts`, `SafeHtml.tsx`, `uiBlocks.ts`) are not cloneable.
+
 ## 2026-11-08 — Mods: trusted JavaScript that changes Perch itself, as in herdr-app (owner direction)
 
 Copies herdr's desktop app, not its older plugins: a person prompts an agent, the agent writes a
@@ -63,14 +362,17 @@ approval not mattering much.
   mods `command-list` and `session-count` (each part of `api`), layouts `ide` and `midnight` (with
   and without a look). `perch mod examples` lists them and `perch mod clone <example> [id]` copies one
   into `mods/` or `layouts/`, never over an existing id. Tests load every example and run the two mods
-  against a fake `api`.
+  against a fake `api`. (Amended 2026-11-09: stock screens now ship as cloneable packages, above.)
 - **Checking.** The page reports each load of a mod's revision (`mods.report`, capability
   `mods.report.v1`); `perch mod check <id>` waits for the current revision and exits nonzero with the
   error. It sees a throw (including a slot function that throws later), not a mod that mounts but
   draws wrongly; for that, `perch mod dom <id|app>` asks the person's screen (`mods.snapshot.request`
   / `mods.snapshot`, capability `mods.snapshot.v1`) for what a mod's view, or the whole page, drew, as
   text and HTML. That replaces herdr's `shot` (a DOM page has no frame to dump); an agent reads the
-  structure, not pixels.
+  structure, not pixels. (Amended 2026-11-09: with `mods.report.v2` a report names its copy and
+  phase, `load`, `render`, `callback`, `disposal` or a `swap` warning. `check` lists every copy on
+  every viewer. `check`/`dom` take `--viewer`/`--instance` and `do` takes `--viewer`; a targeted
+  request is answered only by that viewer. See [MOD-SDK](MOD-SDK.md).)
 - **Getting out.** `perch mod disable <id>` or Settings > Mods turns one off (off is kept in
   `mod-state.json` beside `mods/`); deleting the folder removes it; **mods off** (a Settings switch,
   `PERCH_MODS=off`, or ctrl+alt+shift+Escape, herdr's reset key) loads none, even when the page is
@@ -118,7 +420,8 @@ approval not mattering much.
   {folder, name?, argv?, task?}` (with `argv`, runs the program in the new project once it is added: herdr's `space.new`
   with `argv`), `terminal.pin {terminal?, pinned?}` (kept on this device; `agents()` and `terminals()` report `pinned`, a
   mod's own sidebar can order by it, Perch's views do not), `project.select {index|id}`, `project.next|prev`, `project.close {id, confirmed: true}` (herdr's `space.*`), `terminal.open {place}`, `api.themes()` and `api.setAgentOrder(ids)`, `terminal.show|peek|keep {terminal|id}` (all three show the
-  session: perchd keeps every terminal running, so none is hidden or parked) and `layout.set {layout}` (rewrites the shown layout's file; it hot reloads). `settings.json` also takes
+  session: perchd keeps every terminal running, so none is hidden or parked; amended 2026-11-09: peek, keep and park
+  are now distinct presentations, see the entry above) and `layout.set {layout}` (rewrites the shown layout's file; it hot reloads). `settings.json` also takes
   herdr's `minimum_contrast` (as `minimumContrast`, 1 to 21), `clipboard_write` (`clipboardWrite`, OSC 52),
   `pane_scrollbars` (`paneScrollbars`), `option_as_alt` (`optionAsAlt`: `auto` and `on` are alike because a web view
   cannot tell the keyboard layout, `off`, and `left` or `right`: only that Option key is Alt, sent as ESC and the key's
@@ -151,7 +454,7 @@ approval not mattering much.
   a one-shot command. The release workflow's `core` job builds the assets; it has not been run (no tag has been pushed),
   so the install-by-download path is proven only against `file://` assets through a stand-in `ssh` and, for the
   upload path, a real OpenSSH to a throwaway loopback sshd (`scripts/machine-over-real-ssh.sh`).
-  Not ported: `terminal.park` (nothing is ever hidden), the updater, feedback and `app.reset` family (Perch has no
+  Not ported: `terminal.park` (nothing is ever hidden; amended 2026-11-09: it now puts a peek away), the updater, feedback and `app.reset` family (Perch has no
   updater service or feedback form; a reset is deleting the folder), label adoption of daemon terminals (the core keeps
   the bookkeeping of what it started; a terminal `perch daemon run` makes stays out of the UI, as herdr's unlabeled ones
   do), ligatures and telemetry (out of scope: the goal is agents reshaping the UI and layout).

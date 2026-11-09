@@ -11,7 +11,7 @@ vi.mock("./browserNative", async (original) => ({ ...await original<typeof impor
 vi.mock("./keyCombo", async (original) => ({ ...await original<typeof import("./keyCombo")>(), get IS_MAC() { return mocks.mac; } }));
 vi.mock("./tiledPanes", () => ({ getPaneController: () => ({ closeActiveTerminalPanel: mocks.paneClose }), splitActiveTab: vi.fn() }));
 vi.mock("./agentTerminals", () => ({ isWatchingAgent: mocks.watching }));
-vi.mock("./terminalKeeper", () => ({ forgetSessionTerminals: mocks.forget }));
+vi.mock("./terminalKeeper", async (original) => ({ ...await original<typeof import("./terminalKeeper")>(), forgetSessionTerminals: mocks.forget }));
 
 const { CLOSE_TAB_EVENT, NATIVE_COMMAND_EVENT, SHORTCUTS, nativeShortcutBindings, nativeShortcutModes, useLeaderKey } = await import("./keybinds");
 const { usePerchStore } = await import("./store");

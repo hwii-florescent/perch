@@ -1,0 +1,6 @@
+{
+  "name": "Shell toolbar",
+  "description": "the row over a shell pane: which shell is shown, whether it runs, New shell and Close shell",
+  "version": "1.0.0",
+  "api": "^1.10"
+}

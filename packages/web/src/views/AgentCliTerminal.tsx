@@ -1,5 +1,5 @@
 import { PersistentAgentTerminal } from "./PersistentAgentTerminal";
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import type { AgentKind } from "@perch/shared";
@@ -11,6 +11,7 @@ import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
 import { attachAgentFileDrop, type FileDropNotice } from "../agentFileDrop";
 import { button } from "../components/ui/button";
+import { BorrowTerminals, borrowLentTerminal, lendTerminal } from "../terminalKeeper";
 
 function LegacyAgentCliTerminal({
   sessionId,
@@ -64,8 +65,13 @@ function LegacyAgentCliTerminal({
   // unaffected: the server resumes the same claude session id either way.
   useEffect(() => {
     if (!containerRef.current) return;
+    // The terminal draws in an element of its own (not React's), so a borrowing surface (a peek) can move this one
+    // view in and back instead of attaching a second viewer, which would also stop the CLI when it closed.
+    const surface = document.createElement("div");
+    surface.className = "terminal__host";
+    containerRef.current.appendChild(surface);
     const perchTerm = createPerchTerminal(
-      containerRef.current,
+      surface,
       (cols, rows) => {
         const id = terminalIdRef.current;
         if (id) usePerchStore.getState().resizeTerminal(id, cols, rows);
@@ -107,13 +113,12 @@ function LegacyAgentCliTerminal({
 
     // Wave 2 item 9: paste a clipboard image -> upload -> type its staged
     // path into the PTY (see clipboardImagePaste.ts).
-    const detachClipboardPaste = containerRef.current
-      ? attachClipboardImagePaste(containerRef.current, () => terminalIdRef.current)
-      : () => {};
+    const detachClipboardPaste = attachClipboardImagePaste(surface, () => terminalIdRef.current);
+    const withdraw = lendTerminal(sessionId, containerRef.current, surface, () => perchTerm.fit());
 
     setFileDrop(null);
     const detachFileDrop = attachAgentFileDrop(
-      containerRef.current, sessionId,
+      surface, sessionId,
       () => {
         const state = usePerchStore.getState();
         const id = terminalIdRef.current;
@@ -129,7 +134,9 @@ function LegacyAgentCliTerminal({
       detachFileDrop();
       detachClipboardPaste();
       dataSub.dispose();
+      withdraw();
       perchTerm.dispose();
+      surface.remove();
       if (currentId) killTerminal(currentId);
     };
     // Deliberately re-run only on mount and on an explicit "Restart CLI"
@@ -213,12 +220,35 @@ function LegacyAgentCliTerminal({
   );
 }
 
+/** A borrowing surface's view of a session whose terminal is not kept (a remote one): the view already showing it
+ * moves in and goes back on close; with none, a placeholder, never a second attach. */
+function BorrowedLegacyTerminal({ sessionId, hostName }: { sessionId: string; hostName: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [lent, setLent] = useState(true);
+  useLayoutEffect(() => {
+    const release = ref.current ? borrowLentTerminal(sessionId, ref.current) : null;
+    setLent(release !== null);
+    return release ?? undefined;
+  }, [sessionId]);
+  return (
+    <div className="terminal" data-testid="borrowed-legacy-terminal" data-session-id={sessionId}>
+      <div className="terminal__surface" ref={ref} />
+      {!lent && (
+        <div className="terminal__exited" role="status">
+          This terminal runs on {hostName} and is shown only in its own tab; open the tab to see it.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AgentCliTerminal(props: { sessionId: string; agent: string; cliError?: string | null; onClose?: () => void }) {
-  const persistent = usePerchStore((state) => {
-    const hostId = state.sessions.find((session) => session.id === props.sessionId)?.hostId ?? state.activeHostId;
-    return hostId === "local" && state.serverInfo?.capabilities?.includes("agent.terminal.open") === true;
-  });
+  const hostId = usePerchStore((state) => state.sessions.find((session) => session.id === props.sessionId)?.hostId ?? state.activeHostId);
+  const hostName = usePerchStore((state) => state.hosts.find((host) => host.id === hostId)?.name ?? hostId);
+  const persistent = usePerchStore((state) => hostId === "local" && state.serverInfo?.capabilities?.includes("agent.terminal.open") === true);
+  const borrow = useContext(BorrowTerminals);
   if (persistent) return <PersistentAgentTerminal {...props} />;
+  if (borrow) return <BorrowedLegacyTerminal sessionId={props.sessionId} hostName={hostName} />;
   if (props.agent === "claude" || props.agent === "codex") return <LegacyAgentCliTerminal {...props} agent={props.agent} />;
   return <div className="terminal__cli-error" role="alert">This host does not support configured CLI providers.</div>;
 }

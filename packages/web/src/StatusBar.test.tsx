@@ -7,7 +7,8 @@ import type { AccountUsage, SpendSummary } from "@perch/shared";
 vi.mock("./ws", () => ({ socket: { send: vi.fn(), connect: vi.fn(), onMessage: vi.fn(() => () => {}), onConnectionChange: vi.fn(() => () => {}) } }));
 const { socket } = await import("./ws");
 const { usePerchStore } = await import("./store");
-const { StatusBar } = await import("./StatusBar");
+// The stock screen `stock:status` from its source, as the package the app loads is exported from it.
+const { default: StatusBar } = await import("./stock-ui/status/main");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root;

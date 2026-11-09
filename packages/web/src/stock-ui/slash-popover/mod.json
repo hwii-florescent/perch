@@ -1,0 +1,6 @@
+{
+  "name": "Slash popover",
+  "description": "the composer's autocomplete list (slash commands, skills, file mentions) above the native chat's composer",
+  "version": "1.0.0",
+  "api": "^1.9"
+}

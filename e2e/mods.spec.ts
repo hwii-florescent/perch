@@ -238,12 +238,14 @@ test("a mod drives the app's own terminals through api.perch, like herdr's hc ls
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     (async () => {
       await sleep(800);
+      // The shell this split opens: in a shared core, earlier specs' sessions (not all shells) are alive too.
+      const before = new Set(JSON.parse((await api.perch(['daemon', 'ls', '--json'])).stdout || '[]').map((s) => s.id));
       api.run('pane.split', { direction: 'right' });
       let session;
       for (let i = 0; i < 40 && !session; i++) {
         await sleep(500);
         const ls = JSON.parse((await api.perch(['daemon', 'ls', '--json'])).stdout || '[]');
-        session = ls.find((s) => s.alive);
+        session = ls.find((s) => s.alive && !before.has(s.id));
       }
       if (!session) { el.dataset.read = 'NO SESSION'; return; }
       await api.perch(['daemon', 'send', session.id, 'echo PERCH_MOD_$((6*7))', '--enter']);
@@ -289,7 +291,9 @@ test("herdr's tab, pane, terminal and agent commands run against Perch's tabs an
         if (!made) continue;
         api.run('session.open', { id: made.id });
         await sleep(300);
-        try { if ((await api.readTerminal(made.id, 10)).includes('ARGV_42')) id = made.id; } catch {}
+        // readTerminal also reads a terminal kept off screen, so wait until it is shown too: the commands below act on screen.
+        const shown = api.terminalRecords().find((r) => r.sessionId === made.id)?.shown;
+        try { if (shown && (await api.readTerminal(made.id, 10)).includes('ARGV_42')) id = made.id; } catch {}
       }
       seen.started = !!id;
       if (id) {

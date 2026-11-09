@@ -1,39 +1,7 @@
 import { viewerKey } from "../../viewer";
 
-/** Prompt recall and draft persistence for the native chat composer (Orca: `native-chat-sent-prompt-history.ts`,
- * `native-chat-composer-draft-*.ts`). Recall reads the transcript at keypress, so a reload, a remount or a prompt
- * typed in the terminal needs no history of its own. */
-
-export type SentPrompt = { id: string; prompt: string };
-export type RecallPosition = { id: string; recalled: string };
-
-/** Oldest first. A prompt repeated back to back is one stop, as in a shell's history. */
-export function sentPrompts(messages: readonly { id: string; role: string; text: string }[]): SentPrompt[] {
-  const prompts: SentPrompt[] = [];
-  for (const message of messages) {
-    const prompt = message.role === "user" ? message.text.trim() : "";
-    if (!prompt) continue;
-    if (prompts.at(-1)?.prompt === prompt) prompts.pop();
-    prompts.push({ id: message.id, prompt });
-  }
-  return prompts;
-}
-
-/** Back starts only from an empty draft; it stops at the oldest prompt, and Forward past the newest clears.
- * Null leaves the key to the caret. Recall ends as soon as the text differs from what was recalled. */
-export function stepRecall(input: { direction: "back" | "forward"; prompts: readonly SentPrompt[]; position: RecallPosition | null; draft: string }): { position: RecallPosition | null; draft: string } | null {
-  const { prompts, position, draft, direction } = input;
-  let active = -1;
-  if (position && position.recalled === draft) {
-    active = prompts.findIndex((prompt) => prompt.id === position.id);
-    // The echo of a prompt just sent is replaced by its transcript message: same text, new id.
-    if (active < 0) active = prompts.findLastIndex((prompt) => prompt.prompt === position.recalled);
-  }
-  if (active < 0 && (direction === "forward" || draft !== "")) return null;
-  const next = direction === "forward" ? prompts[active + 1] : prompts[active < 0 ? prompts.length - 1 : active - 1];
-  if (next) return { position: { id: next.id, recalled: next.prompt }, draft: next.prompt };
-  return direction === "forward" ? { position: null, draft: "" } : null;
-}
+/** Draft persistence for the native chat composer (Orca: `native-chat-composer-draft-*.ts`) and the pick-up of a
+ * line typed in the CLI. Prompt recall is the screen's own (`stock-ui/chat/recall.ts`). */
 
 /** The composer text with what was typed on the CLI's own line added, once: a composer that already holds the
  * line (whole lines, so a short draft that is only a word of it still gets it) is left as it is. */
@@ -45,7 +13,9 @@ export function withTerminalDraft(draft: string, seed: string): string {
 const KEY = "perch.nativeDrafts";
 const MAX = 50;
 const TTL_MS = 7 * 24 * 3_600_000;
-type Stored = Record<string, { text: string; at: number }>;
+// `operationId` is the id a send of exactly this text carries, so a send cut off by a page reload is retried as the
+// same operation (the core dispatches one id at most once). Absent in drafts saved before it was kept.
+type Stored = Record<string, { text: string; at: number; operationId?: string }>;
 
 function read(now: number): Stored {
   try {
@@ -60,10 +30,16 @@ export function loadDraftText(key: string, now = Date.now()): string {
   return read(now)[key]?.text ?? "";
 }
 
+/** The saved draft and its operation id (when it was saved with one). */
+export function loadDraft(key: string, now = Date.now()): { text: string; operationId?: string } {
+  const entry = read(now)[key];
+  return { text: entry?.text ?? "", ...(typeof entry?.operationId === "string" && entry.operationId ? { operationId: entry.operationId } : {}) };
+}
+
 /** An empty text forgets the entry. Best effort, bounded to the newest `MAX` drafts for a week. */
-export function saveDraftText(key: string, text: string, now = Date.now()): void {
+export function saveDraftText(key: string, text: string, now = Date.now(), operationId?: string): void {
   const stored = read(now);
-  if (text.trim()) stored[key] = { text, at: now }; else delete stored[key];
+  if (text.trim()) stored[key] = { text, at: now, ...(operationId ? { operationId } : {}) }; else delete stored[key];
   const newest = Object.entries(stored).sort((a, b) => b[1].at - a[1].at).slice(0, MAX);
   try { localStorage.setItem(viewerKey(KEY), JSON.stringify(Object.fromEntries(newest))); } catch { /* convenience only */ }
 }

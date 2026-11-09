@@ -4,9 +4,7 @@ import { fileTabKey, useFileTabs } from "../fileTabs";
 import { openFilePreview } from "../workspaceTabs";
 import { segment } from "./ui/segment";
 import { GHOST_BUTTON } from "./ui/icon-button";
-import { DrawerBrowser } from "./DrawerBrowser";
-import { WorkspaceFilesView } from "./WorkspaceFiles";
-import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
+import { StockView } from "./mod-root";
 import { terminalScopeId, workspaceRecord } from "../terminalScope";
 
 const BTN = "h-7 self-center rounded-ui px-[0.8rem] text-[0.75rem] [font-weight:inherit] [line-height:inherit]";
@@ -99,21 +97,26 @@ export function WorkspaceTools({ requestedWorkspaceId, tab }: {
       </div>
       <div className="flex min-h-0 flex-1 overflow-hidden [&>*]:min-h-0 [&>*]:min-w-0 [&>*]:flex-1">
         {tab === "files" && (workspaceId ? (
-          <WorkspaceFilesView
+          <StockView
             key={scopeId ?? workspaceId}
-            layout="explorer"
-            workspaceId={scopeId ?? workspaceId}
-            onOpenFile={(path, pinned) => {
-              const scope = scopeId ?? undefined;
-              if (!pinned) return openFilePreview(workspaceId, path, scope);
-              const files = useFileTabs.getState();
-              files.open(workspaceId, path, undefined, scope);
-              files.pin(fileTabKey({ workspaceId, path, scope }));
+            name="files"
+            instance={`files-drawer:${scopeId ?? workspaceId}`}
+            placeholder={<div className="terminal__notice" role="status">Loading files…</div>}
+            props={{
+              layout: "explorer",
+              workspaceId: scopeId ?? workspaceId,
+              onOpenFile: (path: string, pinned?: boolean) => {
+                const scope = scopeId ?? undefined;
+                if (!pinned) return openFilePreview(workspaceId, path, scope);
+                const files = useFileTabs.getState();
+                files.open(workspaceId, path, undefined, scope);
+                files.pin(fileTabKey({ workspaceId, path, scope }));
+              },
             }}
           />
         ) : missing)}
-        {tab === "gitReview" && (workspaceId ? <WorkspaceGitReviewPane key={scopeId ?? workspaceId} workspaceId={scopeId ?? workspaceId} /> : missing)}
-        {tab === "browser" && (workspaceId ? <DrawerBrowser key={workspaceId} workspaceId={workspaceId} /> : missing)}
+        {tab === "gitReview" && (workspaceId ? <StockView key={scopeId ?? workspaceId} name="review" props={{ workspaceId: scopeId ?? workspaceId }} instance={`review-drawer:${scopeId ?? workspaceId}`} placeholder={<div className="terminal__notice" role="status">Loading review…</div>} /> : missing)}
+        {tab === "browser" && (workspaceId ? <StockView key={workspaceId} name="browser" props={{ workspaceId }} instance={`browser-drawer:${workspaceId}`} placeholder={<div className="terminal__notice" role="status">Loading browser…</div>} /> : missing)}
       </div>
       {row?.branch && (
         // The quiet footer of the drawer column. Change counts (+added/-removed) are not tracked client-side yet.

@@ -1,20 +1,21 @@
-import { getWorkspaceFileUrl } from "./base";
+import { getBasePath, getWorkspaceFileUrl } from "./base";
+import { modData, type ModData } from "./modData";
 import { newId } from "./ids";
-import type { SessionSummary } from "@perch/shared";
+import type { LayoutNode, SessionSummary } from "@perch/shared";
 import { claimSlot, type SlotRender } from "./slots";
 import { prefersDark, resolveTheme, THEME_NAMES } from "./themes";
 import { zoomFactor } from "./zoom";
-import { nodeIds, shownLayout } from "./layoutState";
+import { activeOverride, hiddenOverride, nodeIds, shownLayout } from "./layoutState";
 import { playBlockedTone, playDoneTone } from "./sound";
 import { currentPrograms, programFor, programTable } from "./programs";
 import { exec, getShared, listDir, onShared, readTextFile, setShared, statFile, watchPath, writeTextFile, type ExecResult, type FileStat, type OnHost } from "./modHost";
-import { modUi } from "./modUi";
+import { modUi, type SurfaceLayout, type WindowOptions } from "./modUi";
 import type { WorkspaceProject, WorkspaceRecord } from "./store";
 import { isRelayMode, relayBlobUrl } from "./relay/transport";
 import { usePerchStore } from "./store";
 import { workspaceRecord } from "./terminalScope";
 import { sessionDotState } from "./statusDot";
-import { isPinned } from "./pinnedTerminals";
+import { isPinned, orderOf, setTerminalOrder, terminalOrder } from "./pinnedTerminals";
 import { socket } from "./ws";
 
 /** Colors by name plus which appearance is on. */
@@ -32,7 +33,7 @@ export interface ModApi {
   readFile(path: string): Promise<string>;
   /** Every app command: its id (as in Settings > Keyboard), what it does and, for those that take
    * arguments, what they are. */
-  commands(): { id: string; description: string; args?: string }[];
+  commands(): { id: string; description: string; args?: string; keys?: string; conflict?: string }[];
   /** Runs an app command by id (`tabs.new`, `global.settings`, `session.open` with `{id}`, ...);
    * false for an unknown id. */
   run(command: string, args?: unknown): boolean;
@@ -79,18 +80,38 @@ export interface ModApi {
   hosts(): { id: string; name: string; enabled: boolean }[];
   focused(): { sessionId: string | null; projectId: string | null; workspaceId: string | null };
   /** The sessions that run an agent (not a plain terminal), with their status. */
-  agents(): { id: string; title: string; provider: string; status: "working" | "idle" | "blocked" | "done"; workspaceId?: string; hostId: string; focused: boolean; pinned: boolean }[];
-  /** Make `agent.next` and `agent.prev` walk the agents in this order (session ids), as a mod's own list shows them. In memory only: agents left out follow in the app's order, unknown ids are ignored; an empty list goes back to the app's order. */
+  agents(): { id: string; title: string; provider: string; status: "working" | "idle" | "blocked" | "done"; workspaceId?: string; hostId: string; focused: boolean; pinned: boolean; order: number | null }[];
+  /** Make `agent.next` and `agent.prev` walk the agents in this order (session ids), as a mod's own list shows them. Kept on this device (the same order as `terminal.order`, reported as `order` in the SDK's terminal records): agents left out follow in the app's order, unknown ids are ignored; an empty list goes back to the app's order. */
   setAgentOrder(ids: string[]): void;
   /** Every theme `app.theme` can use (the shipped ones, then your themes/*.json): its name, whether it is light, and its colors. */
   themes(): { name: string; light: boolean; colors: Record<string, string> }[];
   /** The sessions that are plain terminals. */
-  terminals(): { id: string; title: string; cwd: string; workspaceId?: string; hostId: string; focused: boolean; pinned: boolean }[];
+  terminals(): { id: string; title: string; cwd: string; workspaceId?: string; hostId: string; focused: boolean; pinned: boolean; order: number | null }[];
+  /** Every session's terminal, agents and sub-sessions included, shown or not, on every computer this page knows:
+   * `target` (`<host>/<session>`) names it for `readTerminal`/`sendText`, and `state` says what is known of it
+   * (`unknown` is not exited). */
+  terminalRecords(): TerminalRecord[];
+  /** The shown layout as a tree (each node's `path`, `id`, type, content, whether it is hidden and a stack's shown
+   * child, with the person's clicks applied); `root` is null for Perch as shipped. */
+  layoutTree(): LayoutTree;
+  /** What has focus, host-qualified: the host, workspace and session, the panes on screen and the focused
+   * session's terminal on this page. */
+  focus(): FocusInfo;
   /** What the tab on screen shows: its tiles when split, else the one tab. `kind` is session, file, review, browser or mod. */
   panes(): { id: string; kind: string; title: string; mod?: string; focused: boolean }[];
-  /** The last `lines` lines (default 50) of a terminal's text, screen and scrollback: `id` is a session id or a terminal id, and it must be on screen (herdr's `hc read`). */
+  /** The last `lines` lines (default 50) of a terminal's text, screen and scrollback (herdr's `hc read`): `id` is a
+   * `<host>/<session>` target, a session id or a terminal id. It need not be on screen: a terminal this page keeps
+   * off screen reads too. Throws, saying why, for one this page has not opened or an id two hosts share. */
   readTerminal(id: string, lines?: number): string;
-  /** Types `text` into a terminal like the person would (add "\r" for Enter): herdr's `hc send`. Throws if there is no such terminal. */
+  /** `readTerminal`, also for a terminal this page never opened: then the core reads the terminal daemon's own screen
+   * (`terminal/read`), opening, starting and resizing nothing. A session on another computer that this page has not
+   * opened is refused (read it there), as is reading over the relay. */
+  fetchTerminal(id: string, lines?: number): Promise<string>;
+  /** This mod's durable data (`modData.ts`): JSON values by key, kept by the core outside the mod's folder, so they
+   * survive reloads, restarts and edits, and a clone of the mod starts without them. */
+  data: ModData;
+  /** Types `text` into a terminal like the person would (add "\r" for Enter): herdr's `hc send`. Same targets as
+   * `readTerminal`, on screen or not. Throws if there is no such terminal open on this page. */
   sendText(id: string, text: string): void;
   /** This computer (id "local") and the computers in Settings > Hosts, with whether they can be reached now. */
   machines(): { id: string; name: string; state: "ready" | "loading" | "unavailable" }[];
@@ -126,13 +147,15 @@ export interface ModApi {
   playSound(name: "done" | "blocked"): void;
   /** A modal over the app: `draw(el, close)` fills it (and may return a cleanup). Esc or clicking
    * outside closes it, as does the mod being replaced. Returns `close`. */
-  overlay(draw: Draw): () => void;
+  overlay(draw: Draw | SurfaceLayout): () => void;
   /** A small panel next to an element (or a `{x, y}` point), kept on screen; Esc or a click
    * elsewhere closes it. Returns `close`. */
-  popup(anchor: HTMLElement | { x: number; y: number }, draw: Draw): () => void;
-  /** A window that stays until closed, under modals and over the app: drag it by its title bar. A
-   * `key` remembers where it was put and replaces an open window with the same key. */
-  window(options: { key?: string; title?: string; width?: number; height?: number; at?: { x: number; y: number }; frame?: "none" }, draw: Draw): () => void;
+  popup(anchor: HTMLElement | { x: number; y: number }, draw: Draw | SurfaceLayout): () => void;
+  /** A window that stays until closed, under modals and over the app: drag it by its title bar, size it
+   * by its corner. A `key` remembers where it was put and how big (on this device, across restarts) and
+   * replaces an open window with the same key. `keep` (with a key, layout content and a frame) keeps the
+   * window: it belongs to the layout shown, reopens with it, and only its x or `close` forgets it. */
+  window(options: WindowOptions, draw: Draw | SurfaceLayout): () => void;
   /** A picture of the app as a PNG data URL: the OS's own capture of the window in the desktop app, else drawn from the page (terminal canvases are copied, web fonts fall back). */
   screenshot(): Promise<string>;
   /** Calls `frame(ms)` (milliseconds since the loop began) before each repaint, at most `fps` times a
@@ -146,7 +169,8 @@ type Draw = (el: HTMLElement, close: () => void) => void | (() => void);
 
 /** What the app hands mods for `commands`/`run`: App.tsx owns the handlers a command needs. */
 export interface CommandBridge {
-  list(): { id: string; description: string; args?: string }[];
+  /** `keys`: the command's key now; `conflict`: why a package's command did not get the key it asked for. */
+  list(): { id: string; description: string; args?: string; keys?: string; conflict?: string }[];
   run(command: string, args?: unknown): boolean;
   register(id: string, description: string, keys: string | undefined, run: (args?: unknown) => void): () => void;
   bind(command: string, keys: string | null): void;
@@ -171,7 +195,7 @@ export const setLayoutInfo = (next: typeof layoutInfo) => { layoutInfo = next; }
 export type ModMount = (el: HTMLElement, api: ModApi) => void | (() => void) | Promise<void | (() => void)>;
 
 /** Text from the core, through the relay when that is how this page is connected. */
-async function fetchText(url: string): Promise<string> {
+export async function fetchText(url: string): Promise<string> {
   const target = isRelayMode() ? await relayBlobUrl(url) : url;
   try {
     const response = await fetch(target, { credentials: "same-origin" });
@@ -198,21 +222,69 @@ function theme(): ModTheme {
   return { ...out, dark: css.getPropertyValue("color-scheme").includes("dark") || (!css.getPropertyValue("color-scheme") && prefersDark()) };
 }
 
-/** The API for one load of a mod, and `dispose` for what it left open (overlays). */
 // Read when used, not at import: links.ts (the usual home of this) pulls in the whole store.
 const tauriInternals = () => (window as { __TAURI_INTERNALS__?: { invoke: (cmd: string, args?: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__;
 
-export function modApi(modId: string, given: Record<string, unknown> = {}): ModApi & { dispose(): void } {
+/** Every copy's handler of one mod command id. The key runs the newest copy that is on screen (a copy parked in a
+ * hidden tab or column gets none); the command is registered while any copy holds it. */
+const routes = new Map<string, { copies: { run: (args?: unknown) => void; shown: () => boolean }[]; remove: () => void }>();
+function routeCommand(id: string, description: string, keys: string | undefined, run: (args?: unknown) => void, shown: () => boolean): () => void {
+  const route = routes.get(id) ?? { copies: [], remove: () => {} };
+  routes.set(id, route);
+  const copy = { run, shown };
+  route.copies.push(copy);
+  // The newest registration's description and key win.
+  route.remove();
+  route.remove = bridge.register(id, description, keys, (args) => [...route.copies].reverse().find((c) => c.shown())?.run(args));
+  return () => {
+    route.copies = route.copies.filter((c) => c !== copy);
+    if (route.copies.length || routes.get(id) !== route) return;
+    route.remove();
+    routes.delete(id);
+  };
+}
+
+/** How one copy's API is tied to the host: whether it is on screen (keys go only to copies that are), and where a
+ * callback that throws is reported. */
+export interface ModApiOptions {
+  shown?: () => boolean;
+  onError?: (phase: "callback", error: unknown) => void;
+}
+
+/** The API for one load of a mod, and `dispose` for what it left open (commands, subscriptions, watchers, timers,
+ * overlays). `dispose` runs once, runs every cleanup even when one throws, and returns what they threw. Afterwards
+ * nothing new opens and a result that arrives late is dropped: that promise never settles, so the replaced code
+ * never runs on it. */
+export function modApi(modId: string, given: Record<string, unknown> = {}, options: ModApiOptions = {}): ModApi & { dispose(): unknown[] } {
   const open = new Set<() => void>();
+  let disposed = false;
   const ui = modUi(modId, open);
+  const shown = options.shown ?? (() => true);
   let waiting: ((value: { name: string; args?: unknown }) => void)[] = [];
   const queued: { name: string; args?: unknown }[] = [];
-  /** Things the mod started that its replacement must stop (watchers, subscriptions). */
+  /** Things the mod started that its replacement must stop (watchers, subscriptions); one started after that is
+   * stopped at once. */
   const track = (stop: () => void) => {
+    if (disposed) { stop(); return () => {}; }
     const gone = () => { open.delete(gone); stop(); };
     open.add(gone);
     return gone;
   };
+  /** A callback the mod gave: what it throws is reported, not lost. */
+  const guarded = <A extends unknown[]>(fn: (...args: A) => void) => (...args: A) => {
+    if (disposed) return;
+    try { fn(...args); } catch (error) { if (options.onError) options.onError("callback", error); else throw error; }
+  };
+  /** A result for this copy only while it is live. */
+  const live = <A extends unknown[], R>(fn: (...args: A) => Promise<R>) => (...args: A): Promise<R> => {
+    if (disposed) return new Promise<R>(() => {});
+    return fn(...args).then(
+      (value) => (disposed ? new Promise<R>(() => {}) : value),
+      (error: unknown) => (disposed ? new Promise<R>(() => {}) : Promise.reject(error)),
+    );
+  };
+  /** A surface (overlay, popup, window) opens only while the copy is live. */
+  const surface = <A extends unknown[]>(fn: (...args: A) => () => void) => (...args: A) => (disposed ? () => {} : fn(...args));
   const loop: ModApi["loop"] = (frame, { fps = 60 } = {}) => {
       let id = 0, last = -Infinity, begin = -1, stopped = false;
       const step = (now: number) => {
@@ -221,25 +293,38 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
         if (begin < 0) begin = now;
         if (now - last < 1000 / Math.max(1, Math.min(fps, 120)) - 1) return;
         last = now;
-        try { frame(now - begin); } catch (error) { console.error("a mod's loop threw", error); stopped = true; cancelAnimationFrame(id); }
+        try { frame(now - begin); } catch (error) {
+          stopped = true;
+          cancelAnimationFrame(id);
+          if (options.onError) options.onError("callback", error); else console.error("a mod's loop threw", error);
+        }
       };
       id = requestAnimationFrame(step);
       return track(() => { stopped = true; cancelAnimationFrame(id); });
     };
   return {
-    dispose: () => [...open].forEach((close) => close()),
+    dispose: () => {
+      if (disposed) return [];
+      disposed = true;
+      const errors: unknown[] = [];
+      for (const close of [...open]) {
+        try { close(); } catch (error) { errors.push(error); }
+      }
+      open.clear();
+      return errors;
+    },
     commands: () => bridge.list(),
     run: (command, args) => bridge.run(command, args),
-    exec,
-    perch: (args, options) => exec("perch", args, options),
-    readTextFile,
-    writeTextFile,
-    statFile,
-    listDir,
+    exec: live(exec),
+    perch: live((args?: string[], options?: { cwd?: string; timeout?: number }) => exec("perch", args, options)),
+    readTextFile: live(readTextFile),
+    writeTextFile: live(writeTextFile),
+    statFile: live(statFile),
+    listDir: live(listDir),
     // The desktop app asks the OS's own web view for the picture; the browser draws the page itself.
-    screenshot: () => tauriInternals()
+    screenshot: live(() => tauriInternals()
       ? (tauriInternals()!.invoke("capture_window") as Promise<string>).catch(() => import("./shot").then(({ screenshot }) => screenshot()))
-      : import("./shot").then(({ screenshot }) => screenshot()),
+      : import("./shot").then(({ screenshot }) => screenshot())),
     loop,
     frames: (list, every, show) => {
       let shown = -1;
@@ -248,8 +333,9 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
         if (at !== shown) { shown = at; show(list[at]!, at); }
       }, { fps: Math.min(60, 1000 / Math.max(16, every)) });
     },
-    watch: (path, changed, on) => track(watchPath(path, changed, 2000, on)),
+    watch: (path, changed, on) => track(watchPath(path, guarded(changed), 2000, on)),
     watchFolder: (dir, on) => new Promise<string[]>((resolve, reject) => {
+      if (disposed) return reject(new Error("the mod was replaced"));
       const base = dir.replace(/\/$/, "");
       let seen: Map<string, number> | undefined;
       const entry = { stop: () => { clearInterval(timer); open.delete(entry.stop); reject(new Error("the mod was replaced")); } };
@@ -266,7 +352,7 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
       void scan().catch(() => {});
       open.add(entry.stop);
     }),
-    pickFolder: ({ prompt = "Choose a folder", start, host } = {}) => !host && tauriInternals()
+    pickFolder: live(({ prompt = "Choose a folder", start, host }: { prompt?: string; start?: string; host?: string } = {}) => !host && tauriInternals()
       // The desktop app is on this computer: use the system's own picker (the same one Add project uses).
       ? tauriInternals()!.invoke("plugin:dialog|open", { options: { directory: true, title: prompt, ...(start ? { defaultPath: start } : {}) } }).then((picked: unknown) => (typeof picked === "string" ? picked : null))
       : new Promise<string | null>((resolve) => {
@@ -301,10 +387,10 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
         void show(here);
         return () => resolve(null);
       });
-    }),
+    })),
     programs: () => programTable(currentPrograms()),
     program: (command) => programFor(command, currentPrograms()),
-    knownAgents: async (on) => {
+    knownAgents: live(async (on?: OnHost) => {
       const host = on?.host ?? "local";
       const read = () => usePerchStore.getState().agentManifestsByHost[host]?.manifests;
       if (!read()) {
@@ -318,10 +404,10 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
         found.push({ id: entry.id, name: entry.name, installed: probe?.code === 0, isDefault: false, run: entry.run });
       }
       return found;
-    },
+    }),
     shared: getShared,
     setShared,
-    onShared: (watch) => track(onShared(watch)),
+    onShared: (watch) => track(onShared(guarded(watch))),
     sessions: () => usePerchStore.getState().sessions,
     projects: () => usePerchStore.getState().workspaceProjects,
     workspaces: () => usePerchStore.getState().workspaces,
@@ -330,27 +416,27 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
       if (!hosts.length) fetchHosts(); // the list is only loaded once Settings has been opened
       return hosts.map(({ id, name, enabled }) => ({ id, name, enabled }));
     },
-    agents: () => usePerchStore.getState().sessions.filter((s) => s.cliProviderId !== "terminal").map((s) => ({ id: s.id, title: s.title, provider: s.cliProviderId ?? "", status: sessionDotState(s) as "working" | "idle" | "blocked" | "done", workspaceId: s.workspaceId, hostId: s.hostId ?? "local", focused: s.id === usePerchStore.getState().sessionId, pinned: isPinned(s.id) })),
+    agents: () => usePerchStore.getState().sessions.filter((s) => s.cliProviderId !== "terminal").map((s) => ({ id: s.id, title: s.title, provider: s.cliProviderId ?? "", status: sessionDotState(s) as "working" | "idle" | "blocked" | "done", workspaceId: s.workspaceId, hostId: s.hostId ?? "local", focused: s.id === usePerchStore.getState().sessionId, pinned: isPinned(s.id), order: orderOf(s.id) })),
     setAgentOrder: (ids) => {
       if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) throw new Error("setAgentOrder takes a list of session ids.");
-      agentOrder = ids;
+      setTerminalOrder(ids);
     },
     themes: () => THEME_NAMES.map((name) => {
       const { colorScheme, ...colors } = resolveTheme(name);
       return { name, light: colorScheme === "light", colors: colors as Record<string, string> };
     }),
-    terminals: () => usePerchStore.getState().sessions.filter((s) => s.cliProviderId === "terminal").map((s) => ({ id: s.id, title: s.title, cwd: s.cwd, workspaceId: s.workspaceId, hostId: s.hostId ?? "local", focused: s.id === usePerchStore.getState().sessionId , pinned: isPinned(s.id) })),
+    terminals: () => usePerchStore.getState().sessions.filter((s) => s.cliProviderId === "terminal").map((s) => ({ id: s.id, title: s.title, cwd: s.cwd, workspaceId: s.workspaceId, hostId: s.hostId ?? "local", focused: s.id === usePerchStore.getState().sessionId , pinned: isPinned(s.id), order: orderOf(s.id) })),
     panes: () => panesOnScreen(),
-    readTerminal: (id, lines) => {
-      const text = terminalText(terminalElement(id), lines);
-      if (text === null) throw new Error(`Terminal ${id} is not on screen.`);
-      return text;
-    },
-    sendText: (id, text) => {
-      const terminalId = terminalElement(id).getAttribute("data-terminal-id");
-      if (!terminalId) throw new Error(`No terminal ${id}.`);
-      usePerchStore.getState().sendTerminalInput(terminalId, text);
-    },
+    terminalRecords,
+    layoutTree,
+    focus: focusInfo,
+    readTerminal: (id, lines) => readTerminalAt(id, lines),
+    fetchTerminal: live((id: string, lines?: number) => fetchTerminalAt(id, lines)),
+    data: (() => {
+      const data = modData(modId);
+      return { ...data, watch: (changed, every) => track(data.watch(guarded(changed), every)) } satisfies ModData;
+    })(),
+    sendText: (id, text) => sendTerminalAt(id, text),
     machines: () => {
       const s = usePerchStore.getState();
       return [
@@ -362,16 +448,14 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
       const s = usePerchStore.getState();
       return { sessionId: s.sessionId, projectId: s.activeProjectId, workspaceId: s.activeWorkspaceId };
     },
-    subscribe: (changed) => track(usePerchStore.subscribe(changed)),
-    ...ui,
+    subscribe: (changed) => track(usePerchStore.subscribe(guarded(changed))),
+    overlay: surface(ui.overlay),
+    popup: surface(ui.popup),
+    window: surface(ui.window),
     bind: (command, keys) => bridge.bind(command, keys),
-    slot: (name, render) => {
-      const release = claimSlot(name, modId, render);
-      const gone = () => { open.delete(gone); release(); };
-      open.add(gone);
-      return gone;
-    },
+    slot: (name, render) => track(claimSlot(name, modId, render)),
     nextCommand: () => new Promise((resolve, reject) => {
+      if (disposed) return reject(new Error("the mod was replaced"));
       if (queued.length) return resolve(queued.shift()!);
       const waiter = (value: { name: string; args?: unknown }) => { open.delete(stop); resolve(value); };
       const stop = () => { open.delete(stop); waiting = waiting.filter((w) => w !== waiter); reject(new Error("the mod was replaced")); };
@@ -381,11 +465,9 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
     command: ({ name, description, keys, run }) => {
       if (!/^[A-Za-z0-9_-]{1,40}$/.test(name)) throw new Error("A command name is letters, digits, - and _.");
       // Without `run` the command is queued for nextCommand().
-      const handler = run ?? ((args?: unknown) => { const next = { name, args }; const w = waiting.shift(); if (w) w(next); else queued.push(next); });
-      const remove = bridge.register(`mod.${modId}.${name}`, description, keys, handler);
-      const gone = () => { open.delete(gone); remove(); };
-      open.add(gone);
-      return gone;
+      const handler = run ? guarded(run) : (args?: unknown) => { const next = { name, args }; const w = waiting.shift(); if (w) w(next); else queued.push(next); };
+      if (disposed) return () => {};
+      return track(routeCommand(`mod.${modId}.${name}`, description, keys, handler, shown));
     },
     notify: ({ title, body, level, action, icon, timeout }) =>
       usePerchStore.setState((s) => ({ toasts: [...s.toasts, { id: newId(), sessionId: `mod:${modId}`, title, body, level, action, icon, timeout: timeout === undefined ? undefined : Math.min(60_000, Math.max(1000, timeout)), kind: "usage" as const }] })),
@@ -407,12 +489,12 @@ export function modApi(modId: string, given: Record<string, unknown> = {}): ModA
     store: usePerchStore,
     socket,
     focusSession: (sessionId) => usePerchStore.getState().switchSession(sessionId),
-    readFile: (path) => {
+    readFile: live((path: string) => {
       const state = usePerchStore.getState();
       const workspaceId = state.activeWorkspaceId;
       if (!workspaceId || workspaceRecord(state, workspaceId)?.hostId !== "local") return Promise.reject(new Error("No local project is open."));
       return fetchText(getWorkspaceFileUrl(workspaceId, path));
-    },
+    }),
   };
 }
 
@@ -436,16 +518,185 @@ let panesOnScreen: () => ReturnType<ModApi["panes"]> = () => [];
 // xtermSetup pulls in the file store too, so the canvas code hands the reader over (modCommands).
 let terminalText: (root: Element, lines?: number) => string | null = () => null;
 export const setTerminalReader = (reader: typeof terminalText) => { terminalText = reader; };
-/** The element of a terminal on screen, by its terminal id or its session's (a persistent terminal names both). */
-const terminalElement = (id: string): Element => {
-  const terminalId = usePerchStore.getState().cliTerminalIds[id] ?? id;
-  const quoted = CSS.escape(terminalId);
-  return document.querySelector(`[data-terminal-id="${quoted}"], [data-session-id="${quoted}"][data-terminal-id]`) ?? document.createElement("div");
-};
-/** The order `agent.next` and `agent.prev` follow once a mod called `setAgentOrder`. */
-let agentOrder: string[] = [];
-/** `agents` in that order: the named ones first, the rest after in their own order. */
+// The terminal keeper listens to the socket when it loads, so the canvas code hands its list over too (modCommands).
+let keptTerminals: (sessionId: string) => { host: HTMLElement; inputId: string | null; shown: boolean }[] = () => [];
+export const setKeptTerminalsSource = (source: typeof keptTerminals) => { keptTerminals = source; };
+
+// ---------------------------------------------------------------------------------------------------------------
+// Queries over Perch's own state, answered once here for `api.*` and `@perch/sdk` alike. Each reads the owning
+// service (the store's sessions, terminals and host states; the terminal keeper; the layout state), never the
+// screen's DOM alone, and says "unknown" where no service knows.
+
+/** One session's terminal (agent, sub-session or shell) as this page knows it. */
+export interface TerminalRecord {
+  /** `<host>/<session>`: names it to `readTerminal`/`sendText` without ambiguity across computers. */
+  target: string;
+  hostId: string;
+  sessionId: string;
+  kind: "agent" | "terminal";
+  /** The agent running (`claude`, `codex`, …), `terminal` for a shell. */
+  provider: string;
+  title: string;
+  cwd: string;
+  workspaceId?: string;
+  /** The lead this is a sub-session of. */
+  parentSessionId?: string;
+  /** The terminal this page types into for it; null while this page has none open. */
+  terminalId: string | null;
+  /** Drawn on this screen now. */
+  shown: boolean;
+  /** Open on this page (shown, or kept off screen): its text reads and it takes input without being shown. */
+  open: boolean;
+  /** Pinned on this device (`terminal.pin`). */
+  pinned: boolean;
+  /** Its place in the order set on this device (`terminal.order`, `setAgentOrder`), 0 first; null when not in it. */
+  order: number | null;
+  focused: boolean;
+  /** `running` and `exited` are what this page saw; `unknown` is no evidence (never read it as exited);
+   * `host-unavailable` is a computer this page cannot reach now. */
+  state: "running" | "exited" | "unknown" | "host-unavailable";
+}
+export interface LayoutTreeNode {
+  /** Child indexes from the root (`""` is the root, `"0.1"` its first child's second child). */
+  path: string;
+  id?: string;
+  type: "row" | "column" | "block" | "stack";
+  /** A block's content: `sidebar`, `tabs`, `canvas`, `mod:<id>`, `terminal:<session>`, … */
+  content?: string;
+  title?: string;
+  /** Hidden by the layout or by the person (`layout.toggle`). */
+  hidden: boolean;
+  /** A stack's shown child (its id). */
+  active?: string;
+  children?: LayoutTreeNode[];
+}
+export interface LayoutTree { name: string | null; root: LayoutTreeNode | null }
+export interface FocusInfo {
+  hostId: string;
+  workspaceId: string | null;
+  sessionId: string | null;
+  /** The focused session's terminal on this page, when it has one open. */
+  terminalId: string | null;
+  panes: ReturnType<ModApi["panes"]>;
+}
+
+function treeNode(node: LayoutNode, path: string): LayoutTreeNode {
+  const hidden = hiddenOverride(node.id) ?? node.hidden === true;
+  const base: LayoutTreeNode = { path, type: node.type, hidden, ...(node.id ? { id: node.id } : {}), ...(node.title ? { title: node.title } : {}) };
+  if (node.type === "block") return { ...base, content: node.content };
+  const children = node.children.map((child, index) => treeNode(child, path ? `${path}.${index}` : String(index)));
+  const active = node.type === "stack" ? activeOverride(node.id) ?? node.active ?? node.children[0]?.id : undefined;
+  return { ...base, children, ...(active ? { active } : {}) };
+}
+
+export function layoutTree(): LayoutTree {
+  const root = shownLayout();
+  return { name: layoutInfo.layout, root: root ? treeNode(root, "") : null };
+}
+
+/** The terminal of `session` this page has open, and its element when one is shown or kept. */
+function openTerminal(session: SessionSummary): { terminalId: string | null; host: Element | null; shown: boolean } {
+  const state = usePerchStore.getState();
+  const views = keptTerminals(session.id);
+  const quoted = CSS.escape(session.id);
+  const onScreen = document.querySelector(`[data-session-id="${quoted}"][data-terminal-id]`);
+  const view = views.find((entry) => entry.shown) ?? views[0];
+  const terminalId = state.cliTerminalIds[session.id] ?? view?.inputId ?? onScreen?.getAttribute("data-terminal-id") ?? null;
+  return { terminalId: terminalId || null, host: onScreen ?? view?.host ?? null, shown: !!onScreen || views.some((entry) => entry.shown) };
+}
+
+function record(session: SessionSummary): TerminalRecord {
+  const state = usePerchStore.getState();
+  const hostId = session.hostId ?? "local";
+  const open = openTerminal(session);
+  const reachable = hostId === "local" ? state.connected : state.hostStates[hostId]?.state === "connected";
+  const exited = open.terminalId ? state.terminals[open.terminalId]?.exitCode != null : false;
+  const provider = session.currentProviderId ?? session.cliProviderId ?? "terminal";
+  return {
+    target: `${hostId}/${session.id}`, hostId, sessionId: session.id,
+    kind: session.cliProviderId === "terminal" ? "terminal" : "agent", provider,
+    title: session.title, cwd: session.cwd, ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
+    ...(session.parentSessionId ? { parentSessionId: session.parentSessionId } : {}),
+    terminalId: open.terminalId, shown: open.shown, open: open.host !== null || open.terminalId !== null,
+    pinned: isPinned(session.id), order: orderOf(session.id), focused: session.id === state.sessionId,
+    state: !reachable ? "host-unavailable" : exited ? "exited" : open.terminalId ? "running" : "unknown",
+  };
+}
+
+export const terminalRecords = (): TerminalRecord[] => usePerchStore.getState().sessions.map(record);
+
+/** The session a target names: `<host>/<session>`, a session id, or one of this page's terminal ids. Throws for an
+ * unknown target and for a bare id two computers share (name the host then). */
+export function resolveTerminal(target: string): SessionSummary {
+  if (typeof target !== "string" || !target) throw new Error("A terminal target is `<host>/<session>`, a session id or a terminal id.");
+  const state = usePerchStore.getState();
+  const slash = target.indexOf("/");
+  if (slash > 0) {
+    const hostId = target.slice(0, slash), sessionId = target.slice(slash + 1);
+    const found = state.sessions.find((session) => session.id === sessionId && (session.hostId ?? "local") === hostId);
+    if (!found) throw new Error(`No terminal ${sessionId} on ${hostId}.`);
+    return found;
+  }
+  const byId = state.sessions.filter((session) => session.id === target);
+  if (byId.length > 1) throw new Error(`Session ${target} is on more than one computer: name it as <host>/${target}.`);
+  if (byId[0]) return byId[0];
+  const owner = Object.entries(state.cliTerminalIds).find(([, id]) => id === target)?.[0]
+    ?? state.sessions.find((session) => keptTerminals(session.id).some((view) => view.inputId === target))?.id
+    ?? document.querySelector(`[data-terminal-id="${CSS.escape(target)}"][data-session-id]`)?.getAttribute("data-session-id");
+  const session = owner ? state.sessions.find((candidate) => candidate.id === owner) : undefined;
+  if (!session) throw new Error(`No terminal ${target}.`);
+  return session;
+}
+
+export function readTerminalAt(target: string, lines?: number): string {
+  const session = resolveTerminal(target);
+  const { host } = openTerminal(session);
+  const text = host ? terminalText(host, lines) : null;
+  if (text === null) throw new Error(`Terminal ${target} is not open on this page; open it once, or use fetchTerminal (the core reads it).`);
+  return text;
+}
+
+/** `readTerminalAt`, falling back to the core's read of the daemon's screen for a terminal this page never opened. */
+export async function fetchTerminalAt(target: string, lines?: number): Promise<string> {
+  const session = resolveTerminal(target);
+  const { host } = openTerminal(session);
+  const text = host ? terminalText(host, lines) : null;
+  if (text !== null) return text;
+  const named = `${session.hostId ?? "local"}/${session.id}`;
+  if (isRelayMode()) throw new Error(`Terminal ${named} is not open on this page, and the relay does not carry terminal reads.`);
+  const response = await fetch(`${window.location.origin}${getBasePath()}terminal/read`, {
+    method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ target: named, ...(lines === undefined ? {} : { lines }) }),
+  });
+  const answer = (await response.json().catch(() => ({}))) as { text?: string; error?: string };
+  if (!response.ok || typeof answer.text !== "string") throw new Error(answer.error ?? `The core could not read ${named} (${response.status}).`);
+  return answer.text;
+}
+
+export function sendTerminalAt(target: string, text: string): void {
+  if (typeof text !== "string") throw new Error("sendText takes text.");
+  const session = resolveTerminal(target);
+  const { terminalId } = openTerminal(session);
+  if (!terminalId) throw new Error(`Terminal ${target} is not open on this page.`);
+  if (usePerchStore.getState().terminals[terminalId]?.exitCode != null) throw new Error(`Terminal ${target} has exited.`);
+  usePerchStore.getState().sendTerminalInput(terminalId, text);
+}
+
+export function focusInfo(): FocusInfo {
+  const state = usePerchStore.getState();
+  const session = state.sessions.find((candidate) => candidate.id === state.sessionId);
+  return {
+    hostId: session?.hostId ?? state.activeHostId,
+    workspaceId: state.activeWorkspaceId,
+    sessionId: state.sessionId,
+    terminalId: session ? openTerminal(session).terminalId : null,
+    panes: panesOnScreen(),
+  };
+}
+/** `agents` in the order `setAgentOrder` or `terminal.order` set on this device (`agent.next`/`agent.prev` follow it):
+ * the named ones first, the rest after in their own order. */
 export const inAgentOrder = <T extends { id: string }>(agents: T[]): T[] => {
+  const agentOrder = terminalOrder();
   const rank = (id: string) => { const at = agentOrder.indexOf(id); return at === -1 ? Infinity : at; };
   return agentOrder.length ? [...agents].sort((a, b) => rank(a.id) - rank(b.id)) : agents;
 };

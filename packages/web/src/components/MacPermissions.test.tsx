@@ -5,12 +5,16 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const { invoke, updateSettings } = vi.hoisted(() => ({ invoke: vi.fn(), updateSettings: vi.fn() }));
 vi.mock("../links", () => ({ tauriInvoke: invoke }));
+// The page is drawn from its stock source with the SDK's Settings parts; the rest of the app is not needed here.
+vi.mock("./mod-root", async () => ({ StockRoute: ({ props, stock: Stock }: { props: object; stock: (props: never) => unknown }) => (Stock as (props: object) => unknown)(props) }));
+vi.mock("@perch/sdk", async () => await import("../sdkSettings"));
 vi.mock("../store", () => ({ usePerchStore: (select: (state: unknown) => unknown) => select({ settings: { permissionsSetupDismissed: false }, updateSettings }) }));
 Object.defineProperty(navigator, "platform", { configurable: true, value: "MacIntel" });
 const { MacPermissions, MacPermissionSetup } = await import("./MacPermissions");
 import type { PermissionReport } from "./MacPermissions";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
 let root: Root;
 let host: HTMLDivElement;
 const report: PermissionReport = {

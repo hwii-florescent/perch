@@ -3,13 +3,23 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ClientMessage, ServerMessage } from "@perch/shared";
-const wire = vi.hoisted(() => ({ send: vi.fn(), message: (_: ServerMessage) => {}, connection: (_: boolean) => {} }));
+// Every subscriber hears each message: the dialog's own capability and instructions listeners and the app store's.
+const wire = vi.hoisted(() => {
+  const handlers = new Set<(message: ServerMessage) => void>();
+  const connections = new Set<(connected: boolean) => void>();
+  return {
+    send: vi.fn(), handlers, connections,
+    message: (message: ServerMessage) => { for (const handler of [...handlers]) handler(message); },
+    connection: (connected: boolean) => { for (const handler of [...connections]) handler(connected); },
+  };
+});
 vi.mock("../ws", () => ({
   socket: {
     connected: true,
+    connect: () => {},
     send: wire.send,
-    onMessage: (handler: (message: ServerMessage) => void) => { wire.message = handler; },
-    onConnectionChange: (handler: (connected: boolean) => void) => { wire.connection = handler; },
+    onMessage: (handler: (message: ServerMessage) => void) => { wire.handlers.add(handler); return () => { wire.handlers.delete(handler); }; },
+    onConnectionChange: (handler: (connected: boolean) => void) => { wire.connections.add(handler); return () => { wire.connections.delete(handler); }; },
   },
 }));
 import { InstructionsDialog } from "./InstructionsDialog";

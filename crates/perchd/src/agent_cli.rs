@@ -970,10 +970,57 @@ fn cancel(args: &[String]) -> Result<(), String> {
 /// The mod API as TypeScript types, shipped with the core so the CLI and a mod author read one file.
 const MOD_API: &str = include_str!("../../perch-core/src/mod_examples/perch-mod.d.ts");
 
-const MOD_USAGE: &str ="usage: perch mod [list] [--json] | perch mod enable <id> | \
-     perch mod disable <id> | perch mod open <id> | perch mod check <id> | \
-     perch mod dom <id|app> | perch mod shot [file.png] | perch mod status | perch mod api | perch mod examples | perch mod clone <example> [id] | perch mod install <owner/repo[/folder]> | \
-     perch mod commands | perch mod do <command> [json] | perch mod remove <id> [mod|layout] | perch mod layout <id|stock>";
+/// `perch mod guide`: changing one of Perch's own screens, start to finish, with this CLI alone.
+pub const MOD_GUIDE: &str = "\
+Change one of Perch's own screens (no build, no repository: the CLI and a text editor)
+
+1. See what there is.
+     perch mod examples          stock:<id> lines are Perch's own screens (status, tabs,
+                                 sidebar, pane-header, review, files, browser, keybind-help,
+                                 chat, confirm, toast...).
+2. Copy one. Perch's own never changes; the copy is yours, under a new plain id.
+     perch mod clone stock:status --as my-status
+   The last line printed is the copy's folder. It holds plain ES modules (main.js and the
+   files beside it), mod.json (what it was copied from) and perch-sdk.d.ts: the @perch/sdk
+   types, the only import a screen has besides React. A screen has no `api` object (that is
+   a single-file mod's, `perch mod api`); it acts through @perch/sdk, e.g.
+   `import { runCommand } from \"@perch/sdk\"` and `runCommand(\"app.help\")` with a
+   command from `perch mod commands`.
+3. Put it in place of Perch's own, everywhere that screen is drawn on this computer.
+     perch mod use stock:status my-status
+   A phone keeps Perch's own screens: only a copy of one of its own (stock:mobile-header,
+   -switcher, -panes, -files, -keys) runs there, and only on a phone that turned on
+   \"Phone screens from my packages\" in its Settings > Mods.
+4. Edit main.js (or any file beside it). Each save is a new revision; the window loads it
+   at once. Use only `react`, `react/jsx-runtime`, `react-dom`, `@perch/sdk` and files
+   in the folder; JSX is written as jsx(...) calls, as the copied files do. Make anything
+   pressed a \"button\": the browser already turns Enter, Space and a tap on it into its
+   onClick, so handle onClick only (an onKeyDown of your own for Enter runs it twice).
+5. Verify, after every edit:
+     perch mod check my-status   waits until the window runs your files; nonzero exit and the
+                                 error when they threw. A broken edit keeps the last good view;
+                                 a copy that cannot run at all falls back to Perch's own with a
+                                 notice, and one that stops the page is turned off on the next
+                                 load (turn it on again with `perch mod enable my-status`).
+     perch mod dom my-status     what your copy drew, as text and HTML.
+     perch mod shot look.png     a picture of the window, when the look matters.
+     perch mod do <command>      drive the window (`perch mod commands` lists them), e.g.
+                                 `perch mod do app.help` opens the keybind help so a copy of
+                                 stock:keybind-help is drawn. Dialogs and notifications (confirm,
+                                 toast, keybind-help) are drawn only while one is open.
+6. Undo: `perch mod use stock:status stock` shows Perch's own again; your folder stays.
+   `perch mod disable my-status` turns the copy off (stock shows); `perch mod remove my-status`
+   moves its folder to mods-removed/. The person can do the same in Settings > Mods.
+
+A copy keeps what it stores with `useModData()` (or `api.data`) outside its folder: a new copy
+starts empty, and data is never copied with the files.
+";
+
+const MOD_USAGE: &str ="usage: perch mod [list] [--json] | perch mod guide | perch mod enable <id> | \
+     perch mod disable <id> | perch mod open <id> | perch mod check <id> [--viewer <v>] [--instance <i>] | \
+     perch mod dom <id|app> [--viewer <v>] [--instance <i>] | perch mod shot [file.png] | perch mod status | perch mod api | perch mod examples | perch mod clone <example|stock:id|id> [--as <id>] | perch mod install <owner/repo[/folder]> | \
+     perch mod commands | perch mod do <command> [json] [--viewer <v>] | perch mod remove <id> [mod|layout] | perch mod layout <id|stock> | \
+     perch mod use <stock:id> <id|stock>";
 
 /// The core answers 200 even when the screen said no; turn that into the CLI's error.
 fn mod_do_ok(answer: &Value) -> Result<(), String> {
@@ -986,9 +1033,38 @@ fn mod_do_ok(answer: &Value) -> Result<(), String> {
     }
 }
 
+/// `--viewer <id>` and `--instance <id>` (as `perch mod check` lists them) taken out of `words`:
+/// the one window and the one copy of a mod a `check`, `do` or `dom` is about.
+fn mod_target(words: &mut Vec<&str>) -> Result<Value, String> {
+    let mut target = json!({});
+    for flag in ["--viewer", "--instance"] {
+        if let Some(at) = words.iter().position(|w| *w == flag) {
+            let value = words
+                .get(at + 1)
+                .filter(|v| !v.starts_with("--"))
+                .ok_or(format!(
+                    "{flag} needs an id (perch mod check <id> lists them)"
+                ))?
+                .to_string();
+            words.drain(at..=at + 1);
+            target[&flag[2..]] = Value::String(value);
+        }
+    }
+    Ok(target)
+}
+
+/// `body` with the `--viewer`/`--instance` target merged in.
+fn targeted(mut body: Value, target: &Value) -> Value {
+    if let (Some(body), Some(target)) = (body.as_object_mut(), target.as_object()) {
+        body.extend(target.clone());
+    }
+    body
+}
+
 /// `perch mod`: the mods on this computer, turn one off or on, and show one.
 fn mod_cmd(args: &[String]) -> Result<(), String> {
-    let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut words: Vec<&str> = args.iter().map(String::as_str).collect();
+    let target = mod_target(&mut words)?;
     match words.as_slice() {
         [] | ["list"] | ["--json"] | ["list", "--json"] => {
             let answer = ask("mod/list", json!({}))?;
@@ -1013,7 +1089,7 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         ["dom", id] => {
-            let answer = ask("mod/dom", json!({ "id": id }))?;
+            let answer = ask("mod/dom", targeted(json!({ "id": id }), &target))?;
             match answer["status"].as_str() {
                 Some("ok") => {
                     println!("{}", answer["text"].as_str().unwrap_or(""));
@@ -1047,15 +1123,22 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
             }
             Ok(())
         }
-        ["clone", example] | ["clone", example, _] => {
+        ["clone", example] | ["clone", example, _] | ["clone", example, "--as", _] => {
             let id = ask(
                 "mod/clone",
-                json!({ "example": example, "as": words.get(2) }),
+                json!({ "example": example, "as": words.last().filter(|_| words.len() > 2) }),
             )?;
+            let new_id = id["id"].as_str().unwrap_or(example);
             println!(
-                "copied to {}; edit it and run `perch mod check {0}` (a layout: `perch mod layout {0}`)",
-                id["id"].as_str().unwrap_or(example)
+                "copied to {new_id}; edit it and run `perch mod check {new_id}` (a layout: `perch mod layout {new_id}`)"
             );
+            if let Some(path) = id["path"].as_str() {
+                println!("{path}");
+            }
+            Ok(())
+        }
+        ["guide"] => {
+            print!("{MOD_GUIDE}");
             Ok(())
         }
         ["commands"] => {
@@ -1078,7 +1161,10 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
                 )?),
                 None => None,
             };
-            mod_do_ok(&ask("mod/do", json!({ "command": command, "args": args }))?)?;
+            mod_do_ok(&ask(
+                "mod/do",
+                targeted(json!({ "command": command, "args": args }), &target),
+            )?)?;
             println!("{command} ran on the person's screen");
             Ok(())
         }
@@ -1145,7 +1231,27 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         ["check", id] => {
-            let answer = ask("mod/check", json!({ "id": id }))?;
+            let answer = ask("mod/check", targeted(json!({ "id": id }), &target))?;
+            // Every copy that reported this revision: its window (viewer), its place and how it went.
+            for copy in answer["instances"].as_array().into_iter().flatten() {
+                let detail = match (copy["phase"].as_str(), copy["error"].as_str()) {
+                    (Some(phase), Some(error)) => format!(" in {phase}: {error}"),
+                    _ => String::new(),
+                };
+                println!(
+                    "  viewer {}  instance {}  {}{detail}{}",
+                    copy["viewer"].as_str().unwrap_or(""),
+                    copy["instance"]
+                        .as_str()
+                        .filter(|i| !i.is_empty())
+                        .unwrap_or("(page)"),
+                    copy["status"].as_str().unwrap_or(""),
+                    copy["warning"]
+                        .as_str()
+                        .map(|w| format!(" (warning: {w})"))
+                        .unwrap_or_default()
+                );
+            }
             match answer["status"].as_str() {
                 Some("ok") => println!("{id} loaded without errors in the person's window"),
                 _ => {
@@ -1161,6 +1267,15 @@ fn mod_cmd(args: &[String]) -> Result<(), String> {
         ["layout", id] => {
             ask("mod/layout", json!({ "id": id }))?;
             println!("window layout is now {id}");
+            Ok(())
+        }
+        ["use", stock, id] => {
+            ask("mod/use", json!({ "id": stock, "target": id }))?;
+            if *id == "stock" || id == stock {
+                println!("{stock} is Perch's own again");
+            } else {
+                println!("Perch now shows {id} wherever it shows {stock}");
+            }
             Ok(())
         }
         _ => Err(MOD_USAGE.into()),
@@ -1204,6 +1319,11 @@ fn render_mods(answer: &Value) -> String {
         .unwrap_or_default();
     let chosen = answer["layout"].as_str().unwrap_or("stock");
     out += &format!("Window layout: {chosen}\n");
+    if let Some(uses) = answer["uses"].as_object() {
+        for (stock, id) in uses {
+            out += &format!("  {stock} shows {}\n", id.as_str().unwrap_or(""));
+        }
+    }
     for item in layouts {
         let id = item["id"].as_str().unwrap_or("");
         let note = item["error"]
@@ -1499,9 +1619,14 @@ Commands
   perch mod dom <id|app>  What a mod (or the whole window) has drawn on the person's screen, as text and
                           HTML: see the result without a screenshot. A docked mod must be open.
   perch mod api           The mod API as TypeScript types (read it before writing a mod).
-  perch mod examples      The mods and layouts shipped inside Perch to start from.
-  perch mod clone <example> [id]
-                          Copy one into the mods or layouts folder (never overwrites), then edit it.
+  perch mod guide         Change one of Perch's own screens step by step: clone, use, edit, check.
+  perch mod examples      The mods and layouts shipped inside Perch to start from, and the stock screens
+                          (stock:<id>) this computer's Perch window is built from.
+  perch mod clone <example|stock:id|id> [--as <id>]
+                          Copy one into the mods or layouts folder (never overwrites), then edit it. A
+                          stock screen copies whole as plain JS on @perch/sdk (its perch-sdk.d.ts comes
+                          too) into a new id (default <id>-copy); stock itself never changes. Prints the
+                          copy's path last.
   perch mod install <owner/repo[/folder]>
                           Also: https://<public git host>/<path>[#branch], or a folder on this computer
                           (/abs/path or ~/path). Copy mods/<name>/ and layouts/<name>.json from a public GitHub repo (or one
@@ -1521,6 +1646,10 @@ Commands
   perch mod layout <id|stock>
                           Change the whole window to a layout in the layouts folder, or back to
                           Perch as shipped.
+  perch mod use <stock:id> <id|stock>
+                          Show your copy of a stock screen wherever Perch shows that screen (the
+                          sidebar, tabs, status bar, keybind help...), in every layout; `stock`
+                          puts Perch's own back.
   perch guide             This text.
 
 How it works
@@ -1666,7 +1795,12 @@ Mods
     be chosen, and one that breaks later falls back to Perch as shipped); edits show as you save.
   - Start from an example, not an empty folder: `perch mod examples` lists what ships (mods that use
     each part of `api`, layouts with and without a look) and `perch mod clone <example|your mod or layout> [id]`
-    copies one to edit (a copy of your own is `<id>-copy` unless you name it).
+    copies one to edit (a copy of your own is `<id>-copy` unless you name it). Perch's own screens
+    are `stock:<id>` packages: `perch mod clone stock:keybind-help --as my-keys` copies the real
+    shipped source (plain JS, `import` from '@perch/sdk' and React only; types in its
+    perch-sdk.d.ts) to edit; `perch mod use stock:keybind-help my-keys` makes Perch show the copy
+    wherever it shows that screen (a layout block `mod:my-keys` also shows it; `mod:stock:<id>` is
+    the stock screen itself).
   - After every edit run `perch mod check <id>`: it says whether the person's window loaded and
     mounted the new files, or why not (a slot function that throws counts). Then `perch mod dom <id>`
     shows what it drew, as text and HTML (`perch mod dom app` is the whole window).
@@ -1762,6 +1896,62 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// The walkthrough names only commands that exist, and the main guide points to it.
+    #[test]
+    fn the_mod_guide_uses_only_real_commands() {
+        let used: Vec<&str> = MOD_GUIDE
+            .split("perch mod ")
+            .skip(1)
+            .filter_map(|rest| rest.split([' ', '`', '\n']).next())
+            .collect();
+        for verb in [
+            "examples", "api", "clone", "use", "check", "dom", "shot", "do", "enable", "disable",
+            "remove",
+        ] {
+            assert!(used.contains(&verb), "the guide shows `perch mod {verb}`");
+        }
+        for verb in used {
+            assert!(
+                MOD_USAGE.contains(&format!("perch mod {verb}")),
+                "`perch mod {verb}` is a command"
+            );
+        }
+        assert!(GUIDE.contains("perch mod guide"));
+        // `perch mod api` prints a single-file mod's `api` types; a copied screen has no `api` and acts
+        // through @perch/sdk, whose types ship in the copy's folder.
+        assert!(
+            MOD_API.contains("interface ModApi") && !MOD_API.contains("export function runCommand")
+        );
+        assert!(MOD_GUIDE.contains("perch-sdk.d.ts") && MOD_GUIDE.contains("runCommand"));
+        assert!(!MOD_GUIDE.contains("perch mod api               the @perch/sdk"));
+        // A real agent's copy toggled a group on onClick and on its own Enter handler: Enter did nothing.
+        assert!(MOD_GUIDE.contains("handle onClick only"));
+    }
+
+    /// `--viewer`/`--instance` come out of the words wherever they are and go into the body; a flag
+    /// without an id is an error, not a silently untargeted request.
+    #[test]
+    fn a_mod_command_takes_its_viewer_and_instance_target() {
+        let mut words = vec![
+            "check",
+            "--viewer",
+            "c1",
+            "board",
+            "--instance",
+            "layout:main/side",
+        ];
+        let target = mod_target(&mut words).unwrap();
+        assert_eq!(words, ["check", "board"]);
+        assert_eq!(
+            targeted(json!({ "id": "board" }), &target),
+            json!({ "id": "board", "viewer": "c1", "instance": "layout:main/side" })
+        );
+        let mut plain = vec!["do", "tab.new"];
+        assert_eq!(mod_target(&mut plain).unwrap(), json!({}));
+        assert!(mod_target(&mut vec!["dom", "app", "--viewer"]).is_err());
+        assert!(mod_target(&mut vec!["dom", "app", "--viewer", "--instance", "x"]).is_err());
     }
 
     #[test]
@@ -2185,7 +2375,7 @@ mod tests {
             "perch memory delete <name> --base <revision>",
             "perch mod open <id>",
             "perch mod check <id>",
-            "perch mod clone <example> [id]",
+            "perch mod clone <example|stock:id|id> [--as <id>]",
             "perch mod install <owner/repo[/folder]>",
             "perch mod remove <id> [mod|layout]",
             "perch mod do <command> [json]",
@@ -2195,6 +2385,7 @@ mod tests {
             "perch mod shot [file.png]",
             "perch mod status",
             "perch mod layout <id|stock>",
+            "perch mod use <stock:id> <id|stock>",
             "(el, api) => cleanup?",
             "PERCH_MODS=off",
             "Project memory",

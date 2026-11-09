@@ -1,12 +1,14 @@
-import type { ModsStateMessage } from "@perch/shared";
+import type { ModReportPhase, ModsStateMessage } from "@perch/shared";
 import { getBasePath } from "./base";
 import { newId } from "./ids";
 import { commandList, runCommand, setLayoutInfo } from "./modApp";
+import { findInstance } from "./mod-runtime";
 import { setSlotErrorReporter } from "./slots";
 import { setProgramsFile } from "./programs";
 import { registerThemes } from "./themes";
 import { usePerchStore } from "./store";
 import { socket } from "./ws";
+import { takeStalledStarts } from "./bootGuard";
 
 /** Mods: folders with a `main.js` that this page imports and runs with the person's full access, as
  * in herdr's desktop app. The core owns the files (`crates/perch-core/src/mods.rs`); this keeps the
@@ -45,6 +47,23 @@ socket.onMessage((message) => {
     refreshMods();
   } else if (message.type === "mods.state") {
     const { type: _type, requestId, ...state } = message;
+    // A package the last page never finished starting (it froze or died) is turned off before anything here starts
+    // it again (`bootGuard.ts`); stock shows in its place.
+    const stalled = takeStalledStarts().filter(({ id }) => state.mods.some((mod) => mod.id === id && mod.enabled));
+    if (stalled.length) {
+      const off = new Set(stalled.map(({ id }) => id));
+      state.mods = state.mods.map((mod) => (off.has(mod.id) ? { ...mod, enabled: false } : mod));
+      for (const { id, revision } of stalled) {
+        void enableMod(id, false);
+        const name = state.mods.find((mod) => mod.id === id)?.name ?? id;
+        usePerchStore.setState((s) => ({ toasts: [...s.toasts, {
+          id: newId(), sessionId: `mod:${id}`, kind: "usage" as const, level: "error" as const, timeout: 60_000,
+          title: `Perch turned off ${name}`,
+          body: `The page stopped while starting it (revision ${revision.slice(0, 12)}). Its files and choices are kept; turn it on again in Settings > Mods.`,
+          action: { command: "app.settings" },
+        }] }));
+      }
+    }
     latest = state;
     registerThemes(state.themes ?? []);
     setLayoutInfo({ layout: state.layout || null, layouts: (state.layouts ?? []).filter((l) => l.root).map((l) => l.id), home: state.home ?? "", folder: state.folder });
@@ -53,8 +72,10 @@ socket.onMessage((message) => {
     watchers.forEach((watch) => watch());
     settle(requestId, state);
   } else if (message.type === "mods.snapshot.request") {
-    if (message.command) answerCommand(message.requestId, message.command, message.args);
-    else answerSnapshot(message.requestId, message.modId);
+    // A request about one copy is this screen's to answer only if it holds that copy.
+    if (message.instance && !findInstance(message.instance)) return;
+    if (message.command) answerCommand(message.requestId, message.command, message.args, message.instance);
+    else answerSnapshot(message.requestId, message.modId, message.instance);
   }
   else if (message.type === "mods.changed") refreshMods();
   else if (message.type === "mods.open") openers.forEach((open) => open(message.modId));
@@ -66,17 +87,20 @@ socket.onConnectionChange((connected) => {
 
 /** `perch mod dom`: tells the core what a mod (or `app`, the whole page) has drawn, as HTML and text,
  * so an agent can see the result without a screenshot. A screen that does not show the mod stays
- * silent, so the answer comes from one that does. */
-export function answerSnapshot(requestId: string, modId: string) {
-  const el = modId === "app" ? document.body : document.querySelector<HTMLElement>(`[data-testid="mod-view-${modId}"]`);
+ * silent, so the answer comes from one that does. With `instance`, only that copy is looked at and
+ * the answer names it (the core takes no other copy's answer). */
+export function answerSnapshot(requestId: string, modId: string, instance?: string) {
+  const el = instance
+    ? document.querySelector<HTMLElement>(`[data-mod-instance="${CSS.escape(instance)}"]`)
+    : modId === "app" ? document.body : document.querySelector<HTMLElement>(`[data-testid="mod-view-${CSS.escape(modId)}"]`);
   if (!el) return;
-  socket.send({ type: "mods.snapshot", requestId, html: el.outerHTML.slice(0, 200_000), text: (el.innerText ?? el.textContent ?? "").slice(0, 20_000) });
+  socket.send({ type: "mods.snapshot", requestId, html: el.outerHTML.slice(0, 200_000), text: (el.innerText ?? el.textContent ?? "").slice(0, 20_000), ...(instance ? { instance } : {}) });
 }
 
 /** `perch mod do`: runs an app command as a key would, or lists them (`list`); the answer is JSON in
  * `text`, or `error` for a command that is not there. */
-export function answerCommand(requestId: string, command: string, args?: unknown) {
-  const reply = (text: string, error?: string) => socket.send({ type: "mods.snapshot", requestId, html: "", text, error: error ?? null });
+export function answerCommand(requestId: string, command: string, args?: unknown, instance?: string) {
+  const reply = (text: string, error?: string) => socket.send({ type: "mods.snapshot", requestId, html: "", text, error: error ?? null, ...(instance ? { instance } : {}) });
   if (command === "list") return reply(JSON.stringify(commandList()));
   if (command === "status") {
     const state = usePerchStore.getState();
@@ -118,7 +142,7 @@ function ask(build: (requestId: string) => Parameters<typeof socket.send>[0]): P
 }
 
 /** Every mod, the setting and the mods folder; `null` when the core did not answer. */
-export const listMods = () => ask((requestId) => ({ type: "mods.list", requestId }));
+export const listMods = () => ask((requestId) => ({ type: "mods.list", requestId, accepts: ["esm"] }));
 
 export const enableMod = (id: string, enabled: boolean) =>
   ask((requestId) => ({ type: "mods.set", requestId, id, op: enabled ? "enable" : "disable" }));
@@ -143,6 +167,11 @@ export const removeMod = (id: string, kind: "mod" | "layout") =>
 export const setLayout = (id: string | null) =>
   ask((requestId) => ({ type: "mods.set", requestId, id: id ?? "", op: "layout" }));
 
+/** Show the person's package `id` wherever Perch shows the stock screen `stock` (`stock:<name>`); `null` shows the
+ * stock screen again (`perch mod use`). */
+export const useForStock = (stock: string, id: string | null) =>
+  ask((requestId) => ({ type: "mods.set", requestId, id: stock, op: "use", target: id ?? "" }));
+
 /** The layout to draw, if one is chosen and still parses; otherwise stock Perch. Mods being off
  * leaves no layouts at all, so the reset key also restores the stock window. */
 export function activeLayout(state: ModsState | null) {
@@ -150,9 +179,12 @@ export function activeLayout(state: ModsState | null) {
   return layout?.root && !layout.error ? layout : null;
 }
 
-/** Tells the core how loading `revision` of a mod went (`perch mod check` reads it); `null` is no error. */
-export function reportMod(id: string, revision: string, error: string | null) {
-  if (capabilities.includes("mods.report.v1") && socket.connected) socket.send({ type: "mods.report", id, revision, error });
+/** Tells the core how loading `revision` of a mod went (`perch mod check` reads it); `null` is no error. A core with
+ * `mods.report.v2` also hears which copy (`instance`) and which `phase` (load, render, callback, disposal, swap); it
+ * files the report under this connection itself. */
+export function reportMod(id: string, revision: string, error: string | null, scope?: { instance?: string; phase?: ModReportPhase }) {
+  if (!capabilities.includes("mods.report.v1") || !socket.connected) return;
+  socket.send({ type: "mods.report", id, revision, error, ...(scope && capabilities.includes("mods.report.v2") ? scope : {}) });
 }
 
 // A slot function that throws after the mod mounted is reported against the mod's current revision.

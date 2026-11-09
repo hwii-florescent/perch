@@ -7,6 +7,7 @@ cargo test -p perch-core                 # add a substring for focused tests
 cargo test -p perchd
 npm ci && npm run build                  # shared + web; axum serves web/dist
 npm test                                # Vitest
+npm run check:stock-ui -w @perch/web    # stock-screen exporter tests, then dist/stock-ui vs sources
 cargo fmt --check
 cargo clippy --workspace --all-targets   # add no warnings
 cargo run -p perch-core -- --port 7788
@@ -15,6 +16,10 @@ cargo run -p perch-desktop
 
 These are the existing npm scripts/CI commands, not a decision to delete the
 pnpm lockfile. Both lockfiles exist; package-manager consolidation remains open.
+After a dependency change, refresh the pnpm one too with `npx --yes pnpm@10
+install --lockfile-only --ignore-scripts`. `pnpm-workspace.yaml` sets
+`linkWorkspacePackages`, so `@perch/shared` links to the workspace instead of
+being fetched from the registry.
 Do not maintain volatile test counts or an exact clippy-warning count here.
 
 Run checks relevant to the changed behavior, with one focused regression for
@@ -69,7 +74,38 @@ PERCH_E2E_WEBKIT=1 npx playwright test --project=webkit <spec>
   `settings.spec.ts` D3, `sidebar.spec.ts` 2d, `wave2.spec.ts` X1, `remote-git.spec.ts` RG2 and
   `remote-workspace.spec.ts` RW4, `workspace-recovery.spec.ts` (its core's sidebar opens By status,
   so the project tree it looks for is absent) and `device-pairing.spec.ts` (the resize check; its
-  earlier "working" check also races the process snapshot).
+  earlier "working" check also races the process snapshot). Also, on a clean `8a02934` with the
+  2026-11-08 working-tree snapshot (Chromium, 2026-11-09): `workspace-tabs.spec.ts` W2 (leader `_`
+  splits nothing: W1's sessions are Quickchat chats with no workspace) and `responsive.spec.ts` R9
+  (the held row's `row-menu` never opens) fail alone and in the suite; `pane-splitting.spec.ts` P1
+  (and P2, the same leader split) fails only after other specs (sidebar, nav, workspace-tabs,
+  mixed-tabs, …) and passes alone. R9 is fixed on the cloneable-stock-UI branch: Chromium's touch
+  sends a compatibility mousedown and click on release, which closed the menu and then clicked the
+  item under the finger; the hold now swallows that one release click and the menu closes on a
+  `pointerdown` outside it (`stock-ui/sidebar/parts.test.tsx`).
+  On the same clean baseline, each run alone (Chromium, 2026-11-09): `workspace-git.spec.ts` GB1
+  (no `.workspace-entry` holds the new terminal's row) and `workspace-terminals.spec.ts` "perchd
+  shell recovers … after a core crash" (the alert reads "provider terminal failed: persisted
+  terminal process is no longer available", not the expected no-replacement wording).
+  Same baseline (Chromium, 2026-11-09): `workspace-visual-qa.spec.ts` fails alone at its phone step
+  (the held row's `workspace-menu-git-*` never shows, the same hold-row menu as R9). On the branch it
+  passes that step and the drawer-width step (the test now sets `--tools-width` on the element that
+  defines it, not on the drawer inside), then fails at the wide-desktop focus check: `git-refresh`
+  focused by script after mouse use shows no `:focus-visible` outline; its markup and CSS are those
+  of `8a02934`, a point the baseline never reaches. And
+  `toasts.spec.ts` TN1/TN2 are flaky real-turn tests: TN1 failed in a three-spec run and passed alone
+  and in the full spec, TN2 passed alone and failed in the full spec (the toast never came in 90 s).
+  `paired-phone-flows.spec.ts` on that pristine baseline (a temporary worktree of `8a02934` with the
+  sha256-verified snapshot files, `npm ci`, build; Chromium, 2026-11-09) fails twice before any paid
+  turn: the phone page is blank with React error #300 at its pairing gate. On the branch it passes
+  alone (twice, 16 s, Haiku), after three fixes: the held-row release click (R9 above), the review's
+  session picker located as a combobox (its open list has the same accessible name), and waiting for
+  the review to select the phone's own session instead of racing it with an open list.
+  `needs-you.spec.ts` N1 (2026-11-09, stock and untouched clones alike): Claude Code 2.1.319 keeps the
+  Enter typed right after the prompt as a newline, so no question is asked and Needs you stays empty.
+  `sessions.spec.ts` S1 presses ⌘⇧T expecting "reopen closed tab", but since before `8a02934` that key is
+  New session (`sessions.new` in `keybinds.ts`), so it opens the launcher and fails; neither file differs from
+  `8a02934`.
 - Add new specs to the intended config's `testMatch`. Main config enumerates
   specs; a new filename alone is not enough.
 - Runs start with clean test state; create your own project/chat via
@@ -96,6 +132,59 @@ Useful existing coverage (not a claim of a fresh passing run):
   Strip `perch-native-*.shell/bin` from `PATH` and unset `PERCH_SHELL`, `TERM_PROGRAM` and
   `PERCH_SKIP_RELAY` first. A cold OMP or Codex bridge also fails to connect now and then; rerun
   that provider alone.
+- `stock-ui-chat.spec.ts` (same config, Claude haiku only, one real turn after the model is checked): the native
+  chat as `stock:chat` and as an untouched clone chosen with `use` (same draft, a deep edit only in the clone, a
+  send carried through a swap dispatched once, the phone's own chat). The clone lives in the fixture's `mods/`.
+  `stock-ui-clones.spec.ts` (main config, no turns; WebKit with `PERCH_E2E_WEBKIT=1 --project=webkit`) covers
+  the other stock packages, the Settings pages, the stock window layout `stock:main`, keyed and kept mod windows,
+  package commands in Settings > Keyboard, and a live terminal moving into a peek and a package `Layout`. Its
+  close-guard test starts one Claude CLI (haiku, banner checked) and never prompts it; so does its slash-popover
+  test, which switches to the UI view and types only `/` into the composer (a pick rewrites the draft; nothing is
+  sent). Its docked pane menu and Split with session tests seed a two-pane dock through `session.layout.set`
+  (`saveSessionLayout`). Its phone-size test pairs a phone context over loopback (it passes an empty
+  `storageState`: the config's cookie would make it this computer's own window, whose size never gets the notice)
+  and revokes that device at the end. Its scripted-agent test
+  builds `perch` itself (`cargo build -p perchd --bin perch`) and drives a terminal session's shell with only
+  `perch` and `sed`; no model runs. Its frozen-start test is Chromium only (WebKit's driver cannot close a page
+  whose main thread never yields) and closes that page itself. Its phone-screens test pairs a phone (as the
+  phone-size test) and drives the opt-in, off and revoke paths on the five `stock:mobile-*` copies. Its agent-chip
+  test removes `terminal.sharedInput` from each page's `serverInfo` before the terminal shows, so two views of one
+  shell trade Take control (shared typing never offers it). Its upgrade and safe-mode tests start a second fixture
+  core through `fixtureServer.ts` (private state, `fixtureRuntimeEnv`) on a copy of the person's package: one with
+  `PERCH_WEB_DIST` pointing at a temp copy of `packages/web/dist` whose `stock:status` says a newer version (the
+  catalog revision is recomputed with the exporter's `packageDigest`), one with `PERCH_MODS=off`; the real dist is
+  never edited. Its 100-edit test logs `MODULE-CACHE` with the loader's registry size before and after. Its
+  base-path test starts such a core with `PERCH_BASE_PATH=/proxy/e2e/7799/` on a temp web build: every stock file
+  and package request stays under the base, the service worker (scope = the base) precaches `stock-ui/` and never
+  `mods/package` or `mods/data`, offline the stock files still load (Chromium; WebKit reads the cache instead,
+  because Playwright's WebKit fails offline fetches the worker would answer), an edited copy is never served stale,
+  and a newer build (sidebar changed, catalog revision recomputed, the worker's entries re-revisioned) replaces the
+  open page's stock screen and catalog on the worker's update. Its phone-screens test also checks that the phone
+  gets every package `no-store`, that no cache holds one, and that a revoked phone gets 401/403 for it. Its
+  regrouping test starts one Claude CLI (haiku, banner checked) and never prompts it.
+  Its fault tests inject faults only at the network, on disk or in browser storage; the loader, core and socket are
+  the real ones. They read the page's `mods.report` frames off its socket (`watchReports`), count live object URLs
+  and intervals by period from an init script (`countLive`), and list the core's revision from a socket of the
+  test's own (`coreRevision`, which also makes the core snapshot it). The load-fault test passes the page's `/ws`
+  through `page.routeWebSocket`, keeping back only the core's `mods.changed` news while it makes the page fall behind,
+  and holds a revision's `mods/package` requests with `page.route` until the core no longer keeps it (four newer
+  revisions, `RETAINED_SNAPSHOTS`). The expired-revision test holds a swap with `trackOperation` and imports a lazy
+  file of the old revision. The restart test starts its own core (`restartableCore`: `target/debug/perch-core` on
+  `fixtureRuntimeEnv` state, stopped with SIGTERM and started again on the same port and state, then
+  `cleanupFixtureRuntime`); its shell keeps its PID across the restart, though the restarted core gives it a new
+  terminal id. The storage test blocks `Storage.prototype.setItem` from the next load on (an init script gated on a
+  flag, so the session can be made first) and writes a corrupt value straight into `mod-data/e2e-esm/`. The
+  100-cycle test logs `EDIT-CYCLES` with its counters at cycles 0, 25, 50, 75 and 100 and takes about 3.5 min in Chromium. Its package and the fault package use `place: "layout"`: a package with
+  no `place` also opens as a dock panel, and `none` runs a hidden copy, either of which doubles every counter. The load-fault and restart tests block the
+  service worker (`serviceWorkers: "block"`): in WebKit `page.route` cannot see requests the worker makes.
+  `relay.check.mjs` passes the phone's relay socket through `phone.routeWebSocket` and cuts it 12 frames after a
+  package edit (mid-fetch of a 60-file revision), then expects the readable error, the last good revision, the new
+  revision after the phone is back, and a readable refusal of `api.exec` over the relay.
+- Running existing specs on untouched copies: `PERCH_E2E_STOCK_CLONES=sidebar,tabs,status npx playwright test
+  sidebar.spec.ts nav.spec.ts` (main config). `stockClones.setup.ts` clones each `stock:<name>` as
+  `e2e-untouched-<name>` on the hub core, puts it in place with `use`, and before any spec checks the copy's files
+  are the shipped bytes and (sidebar, status, tabs) that the copy is what the page draws. Leave out
+  `stock-ui-clones.spec.ts`, which resets `use` after each test.
 - `native-options.spec.ts` (same config): Claude's model, effort and permission-mode pickers with **no model
   turn**. Claude runs under a private `CLAUDE_CONFIG_DIR` (pre-approved onboarding, trust, the dummy
   `ANTHROPIC_API_KEY`, prompt suggestions left on, so the fresh Claude's greyed `Try "…"` placeholder is in the
@@ -138,6 +227,22 @@ Useful existing coverage (not a claim of a fresh passing run):
   `layout-canvas` and `layout-git`. Two lead turns, about 50 s in the verified run. The screenshot in the run's
   artifacts shows the git block as the explorer, which is stock behavior in a folder that is not a git checkout (`WorkspaceTools`), and one of the agent's
   five commands in the second turn failed before it recovered: the test checks the result, not the path.
+  Its second test is the agent-only stock loop, in two turns of a new haiku lead with only `perch mod guide` and the
+  CLI: copy `stock:status` as `my-status` and put it in place (checked untouched: `clonedFrom`, the copy drawing
+  "Local"), then add a button with a given label that opens Settings through the SDK's command runner; the test
+  clicks the button, checks Settings opens, the stock bytes are unchanged and the copy imports only `react`,
+  `react-dom`, `@perch/sdk` and its own files. It builds `perch` itself.
+  Its third test is the deep edit in four staged turns of one haiku lead (same tools; a shell session in the same
+  project is started first so two agents are listed): (1) a `stock:sidebar` copy with a "By agent" organize choice,
+  agent then project then session (the window has that choice saved before the turn, so the agent's `perch mod dom`
+  shows its groups); (2) group headings that fold on click, Enter and a CDP touch tap, and a touch hold on a row
+  that still opens Perch's row menu; (3) a `stock:dialog` copy with a line of text, checked while a second window
+  keeps a project's Instructions (opened from the sidebar copy's menu) open, then opened again from the first
+  window; (4) a `stock:chat` copy with a line above the composer, through which the next turn ("pong") is sent.
+  After each stage the agent's saved `perch mod check`/`dom` output is asserted, Perch's own files of the three
+  screens are compared byte for byte with the start, and every copy imports only React, `@perch/sdk` and its own
+  files. When the agent's saved output lacks what it was asked to see, the test tells it so in a follow-up turn
+  (at most two per stage), logged as `FOLLOW-UP` and kept as an annotation. About 6 minutes.
   Run it outside a Perch shell: strip `PERCH_*` and the Perch wrapper directory from `PATH`.
 - `reporter.spec.ts` (same config; needs `perch` beside the core, and a signed-in `claude` on the PATH the core
   runs with): a haiku lead starts a haiku child whose task is one command and one sentence; the child does
@@ -160,7 +265,11 @@ Useful existing coverage (not a claim of a fresh passing run):
   for sender cards, and inbound control (slice 9d: unit, HTTP/socket and jsdom tests only). `agent-mail.spec.ts` now
   looks for sender cards instead of envelope text and was **not re-run** after that change.
 - `needs-you.spec.ts`: question persistence/resolution and By status navigation.
-- `context-bridge.config.ts`: isolated Chromium/WebKit real Claude probe.
+- `context-bridge.config.ts`: isolated Chromium/WebKit real Claude probe: one Haiku turn for Perch's own dialog and
+  one more for an untouched clone of `stock:context-bridge` chosen in its place (each test has its own core).
+- `federation.spec.ts` E8 (main config) creates a remote Claude session over the protocol (the store's
+  `session.create` with the host, not E2's picker path) and peeks it through a package: no prompt is sent. It runs
+  before E2, the known base failure, so the serial run reaches it.
 - `cd e2e && npx playwright test -c remote-workspace.config.ts`: isolated
   headless metadata/files/drafts/surfaces/reconnect plus `remote-git.spec.ts`
   Git/review/worktree checks, with no paid turns. Ports :7794/:7795 and all
@@ -417,7 +526,12 @@ src/relay` (shares `wire.fixture.json` with Rust). `node
 --experimental-strip-types e2e/relay.check.mjs` runs a real `wrangler dev`
 Worker, a core and a browser, all private under the temp dir; needs `npm install`
 in `relay/` and a built web app and `perch-core`. Set `PERCH_E2E_WEBKIT=1` to
-exercise WebKit instead of Chromium. The check requires the actual phone data
+exercise WebKit instead of Chromium. It chooses its 20-file package for the phone's header
+(`stock:mobile-header`), checks the phone keeps Perch's own until "Phone screens from my packages" is turned on in
+its Settings > Mods, then that the package's modules, CSS, asset and data cross the tunnel. It also chooses an
+edited copy of `stock:select` (a computer's screen) and proves the phone's Settings > Mods, through the tunnel,
+never runs it, says so, and puts Perch's own dropdown back. The
+check requires the actual phone data
 socket to connect, survive reload and recover after host replacement and a
 relay off/on cycle; rendering the phone shell alone is not a pass. Set
 `PERCH_RELAY_CHECK_URL` to an explicitly authorized deployed relay to exercise
@@ -445,7 +559,8 @@ installed; not caused by it, not diagnosed.
 
 Recorded 2026-10-02, not blanket exemptions for new failures:
 - OpenCode is deliberately absent on this dev Mac; do not install it for tests.
-- `paired-phone-flows` intermittently reports unconfirmed review delivery.
+- `paired-phone-flows` intermittently reports unconfirmed review delivery (not seen on 2026-11-09: two passes
+  alone after the fixes noted above).
 - `ssh::tests::mux_control_path_…` can fail in the full run and pass alone.
 
 Alpha evidence must name candidate commit, platform/provider versions, command,

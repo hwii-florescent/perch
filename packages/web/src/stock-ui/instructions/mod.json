@@ -1,0 +1,6 @@
+{
+  "name": "Instructions",
+  "description": "the dialog that edits a project's or workspace's Instructions (text and reference folders new sessions start with)",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

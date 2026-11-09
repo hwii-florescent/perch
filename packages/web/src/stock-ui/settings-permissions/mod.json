@@ -1,0 +1,6 @@
+{
+  "name": "Settings: Permissions",
+  "description": "what macOS lets Perch and its terminals access",
+  "version": "1.0.0",
+  "api": "^1.8"
+}

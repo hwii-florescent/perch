@@ -1,0 +1,6 @@
+{
+  "name": "Split with session",
+  "description": "the docked pane group's Split with session picker: the workspace's other sessions, each clickable or draggable onto a pane edge",
+  "version": "1.0.0",
+  "api": "^1.9"
+}

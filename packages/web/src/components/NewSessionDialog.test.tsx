@@ -11,7 +11,7 @@ vi.mock("./AgentPicker", () => ({
 }));
 vi.mock("./AgentIcon", () => ({ AgentIcon: () => null }));
 vi.mock("./FileEntryMenu", () => ({ FileEntryMenu: () => null }));
-vi.mock("./TabBar", () => ({ BrowserIcon: () => null, FileIcon: () => null }));
+vi.mock("../stock-ui/tabs/icons", () => ({ BrowserIcon: () => null, FileIcon: () => null }));
 import { ADD_PROJECT_EVENT, requestNewSession } from "../appEvents";
 import { usePerchStore } from "../store";
 import { NewSessionDialog } from "./NewSessionDialog";

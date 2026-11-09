@@ -30,10 +30,10 @@ import { IS_MAC, comboMatches, formatCombo, keyLabel, normalizeCombo, parseCombo
 export const LEADER_TIMEOUT_MS = 1500;
 
 // ---------------------------------------------------------------------------
-// Shortcut table (also consumed by KeybindHelp.tsx and Settings > Keyboard)
+// Shortcut table (also consumed by the keybind help screen, stock-ui/keybind-help, and Settings > Keyboard)
 // ---------------------------------------------------------------------------
 
-export type KeybindGroup = "global" | "tabs" | "nests" | "panes" | "terminal" | "leader" | "resize" | "editor" | "navigator" | "directory";
+export type KeybindGroup = "global" | "tabs" | "nests" | "panes" | "terminal" | "leader" | "resize" | "editor" | "navigator" | "directory" | "mods";
 export type ShortcutScope = "terminal" | "outsideTerminal" | "pane" | "outsideEditable" | "leader" | "resize" | "editor" | "navigator" | "directory";
 
 export interface KeybindEntry {
@@ -77,6 +77,10 @@ export interface Shortcut {
   nextMode?: "leader" | "resize";
   /** The help lists a range (jump to tab 1…8) as one row while none of its members is customised. */
   range?: ShortcutRange;
+  /** A package's command (`mod.<package>.<name>`): the key it asked for, and why it did not get it (taken or
+   * reserved). Settings > Keyboard shows both; the person can still give it any free key. */
+  wanted?: string;
+  conflict?: string;
 }
 
 export const SHORTCUTS: Shortcut[] = [];
@@ -321,25 +325,40 @@ export function bindableCombo(combo: string, mac = IS_MAC): boolean {
 }
 
 /** Adds a command a mod defined (id `mod.<mod>.<name>`) to the same table the app's own commands
- * live in, so Settings > Keyboard, the help and `run` all see it. `keys` is its default key, kept
- * only if it is bindable and no other command already uses it. Registering an id again replaces it;
- * the returned remover puts back what it replaced, and does nothing if a newer version took over. */
+ * live in, so Settings > Keyboard (its "Package commands"), the help and `run` all see it. `keys` is its default key,
+ * kept only if it is bindable and no other command already uses it; otherwise the command has none and says why
+ * (`conflict`), and Perch's own binding keeps the key. Registering an id again replaces it; the returned remover
+ * puts back what it replaced, and does nothing if a newer version took over. */
 export function registerCommand(id: string, description: string, keys: string | undefined, run: (args?: unknown) => void): () => void {
-  const taken = keys && (!bindableCombo(keys) || shortcutsBoundTo(keys, id).length > 0);
-  if (taken) console.warn(`${id}: "${keys}" is not a free key, so the command has none`);
-  const mine: Shortcut = { id, group: "global", description, keys: [taken ? "" : keys ?? "", taken ? "" : keys ?? ""], run: () => run(), runWith: run };
+  const others = keys && bindableCombo(keys) ? shortcutsBoundTo(keys, id) : [];
+  const conflict = !keys ? undefined
+    : !bindableCombo(keys) ? `${formatCombo(keys)} cannot be bound: it is reserved or has no modifier.`
+    : others.length ? `${formatCombo(keys)} is taken by "${others.map((other) => other.description).join('", "')}".` : undefined;
+  const given = conflict ? "" : keys ?? "";
+  const mine: Shortcut = { id, group: "mods", description, keys: [given, given], run: () => run(), runWith: run, ...(keys ? { wanted: keys } : {}), ...(conflict ? { conflict } : {}) };
   const at = SHORTCUTS.findIndex((s) => s.id === id);
   const previous = at < 0 ? undefined : SHORTCUTS[at];
   if (at < 0) SHORTCUTS.push(mine);
   else SHORTCUTS[at] = mine;
+  changedCommands();
   return () => {
     retired.add(mine);
     const now = SHORTCUTS.indexOf(mine);
     if (now < 0) return;
     if (previous && !retired.has(previous)) SHORTCUTS[now] = previous;
     else SHORTCUTS.splice(now, 1);
+    changedCommands();
   };
 }
+/** The packages' commands as they are now (a hook re-reads on a change): registered, replaced or removed. */
+let commandsVersion = 0;
+const commandWatchers = new Set<() => void>();
+function changedCommands() {
+  commandsVersion++;
+  commandWatchers.forEach((watch) => watch());
+}
+export const subscribeCommands = (watch: () => void) => (commandWatchers.add(watch), () => void commandWatchers.delete(watch));
+export const commandsSnapshot = () => commandsVersion;
 /** Mod commands whose mod has let them go; one that a newer version replaced must not come back. */
 const retired = new WeakSet<Shortcut>();
 
@@ -693,7 +712,7 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
     // mirrors that by staying out of the DOM entirely. The one concession is
     // the document title, the cheapest possible "you are in a mode" signal
     // that needs no new CSS/markup (this file may only touch keybinds.ts,
-    // dockviewController.ts, and KeybindHelp.tsx).
+    // dockviewController.ts, and stock-ui/keybind-help).
     function disarmResize() {
       if (!resizeArmedRef.current) return;
       resizeArmedRef.current = false;

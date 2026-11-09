@@ -4,6 +4,7 @@ import { getDockviewController } from "../dockview/dockviewController";
 import { currentMods, onModOpen, subscribeMods } from "../mods";
 import { usePerchStore } from "../store";
 import { ModOverlay, ModView } from "./ModView";
+import { useIsPhoneDevice } from "../phoneMods";
 
 const SEEN_KEY = "perch.mods.docked";
 const readSeen = (): string[] => {
@@ -28,16 +29,18 @@ export function dockNewMods(mods: ModInfo[], seen: string[], dock = getDockviewC
  * exist, mods with no view run hidden, `perch mod open` shows one, and ctrl+alt+shift+Escape turns
  * every mod off (herdr's escape hatch, for a mod that breaks the page). Settings only lists. */
 export function ModsHost() {
+  // A phone keeps its own screens: the desktop's docked, hidden and overlaid packages never run there (`phoneMods.ts`).
+  const phone = useIsPhoneDevice();
   const state = useSyncExternalStore(subscribeMods, currentMods);
   const updateSettings = usePerchStore((s) => s.updateSettings);
   const [overlay, setOverlay] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!state) return;
+    if (!state || phone) return;
     const seen = readSeen();
     const next = dockNewMods(state.mods, seen);
     if (next.length !== seen.length) localStorage.setItem(SEEN_KEY, JSON.stringify(next));
-  }, [state]);
+  }, [state, phone]);
 
   useEffect(() => onModOpen((modId) => {
     const mod = currentMods()?.mods.find((candidate) => candidate.id === modId);
@@ -55,11 +58,11 @@ export function ModsHost() {
     return () => window.removeEventListener("keydown", onKey);
   }, [updateSettings]);
 
-  const mods = state?.mods ?? [];
+  const mods = phone ? [] : state?.mods ?? [];
   const shown = overlay ? mods.find((mod) => mod.id === overlay && mod.enabled) : undefined;
   return (
     <>
-      {mods.filter((mod) => mod.enabled && mod.place === "none").map((mod) => <ModView key={mod.id} mod={mod} hidden />)}
+      {mods.filter((mod) => mod.enabled && mod.place === "none").map((mod) => <ModView key={mod.id} mod={mod} hidden instance={`hidden:${mod.id}`} />)}
       {shown && <ModOverlay mod={shown} onClose={() => setOverlay(null)} />}
     </>
   );

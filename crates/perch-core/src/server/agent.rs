@@ -249,6 +249,24 @@ pub(super) async fn read(
     answer(sub_sessions::read(&state, &identity, target, turns).await)
 }
 
+/// `POST {base}agent/terminal/read {session, target?, lines?}`: the caller's own terminal screen
+/// (`server/terminal_read.rs`); any other target is refused.
+pub(super) async fn terminal_read(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    let identity = match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => identity,
+        Err((status, error)) => return refuse(status, error),
+    };
+    match super::terminal_read::read_own(&identity, &body).await {
+        Ok(value) => Json(value).into_response(),
+        Err((status, error)) => refuse(status, &error),
+    }
+}
+
 /// `POST {base}agent/stop`: stop one of the caller's own sub-sessions.
 pub(super) async fn stop(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -450,6 +468,19 @@ pub(super) async fn mod_layout(
     }
 }
 
+/// `POST {base}agent/mod/use`: show a package in place of a stock screen, or the stock screen again (`server/mods.rs`).
+pub(super) async fn mod_use(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(_) => answer(mods::agent_set_use(&state, &body)),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
 /// `POST {base}agent/mod/dom`: what the person's page drew for a mod (`server/mods.rs`).
 pub(super) async fn mod_dom(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -471,12 +502,12 @@ pub(super) async fn mod_examples(
     Json(body): Json<Value>,
 ) -> Response {
     match authorize(&state, &peer, &headers, &body) {
-        Ok(_) => answer(Ok(mods::agent_examples())),
+        Ok(_) => answer(Ok(mods::agent_examples(&state))),
         Err((status, error)) => refuse(status, error),
     }
 }
 
-/// `POST {base}agent/mod/clone`: copy a shipped example into the mods or layouts folder (`server/mods.rs`).
+/// `POST {base}agent/mod/clone`: copy a shipped example, stock screen or mod into the mods or layouts folder (`server/mods.rs`).
 pub(super) async fn mod_clone(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,

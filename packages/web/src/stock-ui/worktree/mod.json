@@ -1,0 +1,6 @@
+{
+  "name": "Worktrees",
+  "description": "a git project's + (a new workspace on a new worktree) and its worktree list",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

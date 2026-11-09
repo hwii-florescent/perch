@@ -2,7 +2,7 @@
 import { act, createRef, type RefObject } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { OlderHistoryRow } from "./OlderHistoryRow";
+import { OlderHistoryRow } from "../../stock-ui/chat/OlderHistoryRow";
 import { useOlderHistory } from "./useOlderHistory";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

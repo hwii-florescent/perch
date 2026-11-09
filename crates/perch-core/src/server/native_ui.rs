@@ -493,12 +493,12 @@ pub(super) fn control(
     session_id: String,
     provider_id: String,
     generation: u64,
-    prompt: Option<(String, String, Option<String>)>,
+    prompt: Option<(String, String, Option<String>, Option<String>)>,
 ) {
     if route_to_remote_host_or_fail(state, &session_id, &request_id, raw) {
         return;
     }
-    let operation_id = prompt.as_ref().map(|(id, _, _)| id.clone());
+    let operation_id = prompt.as_ref().map(|(id, ..)| id.clone());
     let command = std::cell::Cell::new(false);
     let prepared =
         (|| -> anyhow::Result<Option<tokio::sync::oneshot::Receiver<Result<bool, String>>>> {
@@ -531,7 +531,7 @@ pub(super) fn control(
                 .get(&bridge_key)
                 .ok_or_else(|| anyhow::anyhow!("native CLI UI is unavailable"))?;
             state.app.agent_runtime.dispatch_native_control(&key, &lease, |write| {
-            if let Some((operation, text, replaces)) = &prompt {
+            if let Some((operation, text, replaces, delivery)) = &prompt {
                 anyhow::ensure!(!operation.is_empty() && operation.len() <= 128 && !text.trim().is_empty() && text.len() <= 64 * 1024, "invalid prompt");
                 let digest = format!("{:x}", Sha256::digest(format!("{provider_id}\0{text}").as_bytes()));
                 let (existing, _) = state.app.db.reserve_prompt_operation(operation, &session_id, Some(&key.workspace_id), &digest, text, Some(&provider_id), None)?;
@@ -563,8 +563,19 @@ pub(super) fn control(
                 anyhow::ensure!(claim.won_claim, "This prompt was already dispatched; delivery is still unconfirmed. It will not be sent twice.");
                 // Persist uncertainty before any bytes cross to the native CLI.
                 state.app.db.set_prompt_operation_state(operation, "unconfirmed")?;
-                state.app.agent_runtime.record_turn_boundary(&key, true)?;
-                let reply = bridge.enqueue(operation, Some(text))?;
+                // Asked to steer: the CLI puts it into the running turn through its own steering, or starts a
+                // turn if none runs by then (it decides, so a turn that just ended is not a failed steer).
+                // Claude's prompt queue already takes a typed message into the turn and OpenCode has no
+                // steering, so they send as usual. A message seen joining a running turn opens no new turn
+                // boundary, which would restart that turn's change record.
+                // ponytail: if the turn ended in the instant after the snapshot, the new turn starts without
+                // a boundary and its edits join the previous record; the next idle snapshot settles it.
+                let steer = delivery.as_deref() == Some("steer")
+                    && matches!(bridge_key.agent_id.as_str(), "codex" | "pi" | "omp");
+                if !(steer && bridge.latest().is_some_and(|snapshot| snapshot.running)) {
+                    state.app.agent_runtime.record_turn_boundary(&key, true)?;
+                }
+                let reply = bridge.enqueue_prompt(operation, text, steer)?;
                 if let Some(input) = input { crate::native_ui::claude::write_input(&input, write)?; }
                 let _ = state.app.db.set_cli_title(&session_id, text);
                 Ok(Some(reply))

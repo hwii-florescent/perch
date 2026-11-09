@@ -1,0 +1,6 @@
+{
+  "name": "Phone terminal keys",
+  "description": "the phone's key bar under an agent terminal: arrows, Enter, Esc, Shift+Tab, Ctrl chords and Paste",
+  "version": "1.0.0",
+  "api": "^1.10"
+}

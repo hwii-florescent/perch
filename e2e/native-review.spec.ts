@@ -118,8 +118,8 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     });
     await phone.goto(url, { waitUntil: "networkidle" });
     await expect(phone.getByTestId("native-cli-chat")).toHaveAttribute("data-native-pid", pid!);
-    await phone.getByTestId("mobile-switch").click();
-    await phone.getByTestId("mobile-switcher").getByTestId(`workspace-git-${workspaceId}`).click();
+    // The phone shows the chat's workspace; its Git pane is the review (`MobilePaneShell`).
+    await phone.getByTestId("mobile-pane-git").click();
     await expect(phone.getByTestId("workspace-git-review")).toBeVisible();
     await phone.locator('.workspace-git__path-button[title="notes.txt"]').click();
     await expect(phone.getByTestId("git-diff")).toContainText("review_first");

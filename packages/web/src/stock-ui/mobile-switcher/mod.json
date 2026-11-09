@@ -1,0 +1,6 @@
+{
+  "name": "Phone switcher",
+  "description": "the phone's sidebar: a slide-over with every host, project, workspace and session, and plan usage",
+  "version": "1.0.0",
+  "api": "^1.10"
+}

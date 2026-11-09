@@ -96,7 +96,7 @@ describe("an app module's versions", () => {
     await swapper.load("x", "board");
     const run = () => {};
     api.command({ name: "go", description: "Go", keys: "cmd+shift+y", run });
-    expect(register).toHaveBeenCalledWith("mod.board.go", "Go", "cmd+shift+y", run);
+    expect(register).toHaveBeenCalledWith("mod.board.go", "Go", "cmd+shift+y", expect.any(Function));
     expect(() => api.command({ name: "bad name!", description: "", run })).toThrow();
     api.bind("tabs.new", "cmd+shift+y");
     expect(bind).toHaveBeenCalledWith("tabs.new", "cmd+shift+y");
@@ -381,7 +381,8 @@ describe("an app module's versions", () => {
 
   it("finds a persistent terminal by its session id as well as its terminal id", () => {
     const sendTerminalInput = vi.fn();
-    Object.assign(store.state, { cliTerminalIds: {}, sendTerminalInput });
+    const before = store.state.sessions;
+    Object.assign(store.state, { sessions: [{ id: "sess" }, { id: "opening" }], cliTerminalIds: {}, terminals: {}, hostStates: {}, connected: true, sendTerminalInput });
     const host = document.createElement("div");
     host.innerHTML = '<div data-session-id="sess" data-terminal-id="term"></div><div data-session-id="opening"></div>';
     document.body.append(host);
@@ -390,9 +391,184 @@ describe("an app module's versions", () => {
       api.sendText("sess", "ls\r");
       api.sendText("term", "pwd\r");
       expect(sendTerminalInput.mock.calls).toEqual([["term", "ls\r"], ["term", "pwd\r"]]);
-      expect(() => api.sendText("opening", "x")).toThrow("No terminal opening");
+      expect(() => api.sendText("opening", "x")).toThrow("Terminal opening is not open on this page.");
+      expect(() => api.sendText("nowhere", "x")).toThrow("No terminal nowhere.");
     } finally {
       host.remove();
+      store.state.sessions = before;
     }
+  });
+});
+
+describe("queries over Perch's state, without a terminal on screen", () => {
+  const sessions = [
+    { id: "lead", title: "Lead", cwd: "/p", cliProviderId: "claude", workspaceId: "w" },
+    { id: "child", title: "Sub", cwd: "/p", cliProviderId: "codex", parentSessionId: "lead", workspaceId: "w" },
+    { id: "shell", title: "zsh", cwd: "/p", cliProviderId: "terminal" },
+    { id: "same", title: "Here", cwd: "/a", cliProviderId: "terminal" },
+    { id: "same", title: "There", cwd: "/b", cliProviderId: "terminal", hostId: "box" },
+    { id: "far", title: "Far", cwd: "/c", cliProviderId: "claude", hostId: "box" },
+  ];
+  const setup = () => {
+    const sendTerminalInput = vi.fn();
+    const before = { ...store.state };
+    Object.assign(store.state, {
+      sessions, sessionId: "lead", activeHostId: "local", activeWorkspaceId: "w", connected: true,
+      cliTerminalIds: { lead: "t-lead", child: "t-child" }, terminals: { "t-child": { exitCode: 0 } },
+      hostStates: { box: { state: "disconnected" } }, sendTerminalInput,
+    });
+    return { sendTerminalInput, restore: () => { for (const key of Object.keys(store.state)) delete (store.state as Record<string, unknown>)[key]; Object.assign(store.state, before); } };
+  };
+
+  it("lists every session's terminal, hidden agents and sub-sessions included, and says what is unknown", () => {
+    const { restore } = setup();
+    try {
+      const records = modApi("m").terminalRecords();
+      expect(records.map((r) => r.target)).toEqual(["local/lead", "local/child", "local/shell", "local/same", "box/same", "box/far"]);
+      expect(records[0]).toMatchObject({ kind: "agent", provider: "claude", terminalId: "t-lead", shown: false, focused: true, state: "running" });
+      expect(records[1]).toMatchObject({ parentSessionId: "lead", terminalId: "t-child", state: "exited" });
+      // Nothing on this page has opened the shell: no evidence is not "exited".
+      expect(records[2]).toMatchObject({ kind: "terminal", terminalId: null, open: false, state: "unknown" });
+      expect(records[5]).toMatchObject({ hostId: "box", state: "host-unavailable" });
+      // The old projections are unchanged.
+      expect(modApi("m").terminals().map((t) => t.id)).toEqual(["shell", "same", "same"]);
+    } finally { restore(); }
+  });
+
+  it("sends to a hidden terminal by its host-qualified target, and refuses an id two computers share", () => {
+    const { sendTerminalInput, restore } = setup();
+    try {
+      const api = modApi("m");
+      api.sendText("local/lead", "hi\r");
+      api.sendText("lead", "again\r");
+      expect(sendTerminalInput.mock.calls).toEqual([["t-lead", "hi\r"], ["t-lead", "again\r"]]);
+      expect(() => api.sendText("same", "x")).toThrow("Session same is on more than one computer: name it as <host>/same.");
+      // The remote session with the colliding id is never reached through the local one's target, or vice versa.
+      expect(() => api.sendText("box/lead", "x")).toThrow("No terminal lead on box.");
+      expect(() => api.sendText("local/same", "x")).toThrow("Terminal local/same is not open on this page.");
+      expect(() => api.sendText("local/child", "x")).toThrow("Terminal local/child has exited.");
+      expect(() => api.readTerminal("local/shell")).toThrow(/is not open on this page/);
+      expect(sendTerminalInput).toHaveBeenCalledTimes(2);
+    } finally { restore(); }
+  });
+
+  it("fetches a terminal this page never opened from the core, by its host-qualified target, and never for another computer", async () => {
+    const { restore } = setup();
+    const fetch = vi.fn(async (_url: string, init: RequestInit) => new Response(JSON.stringify({ text: `screen of ${JSON.parse(String(init.body)).target}` })));
+    vi.stubGlobal("fetch", fetch);
+    try {
+      const api = modApi("m");
+      expect(await api.fetchTerminal("local/shell", 5)).toBe("screen of local/shell");
+      expect(fetch.mock.calls[0]![0]).toMatch(/\/terminal\/read$/);
+      expect(JSON.parse(String(fetch.mock.calls[0]![1].body))).toEqual({ target: "local/shell", lines: 5 });
+      // A bare id two computers share is refused before anything is asked; a remote one goes as its own target.
+      await expect(api.fetchTerminal("same")).rejects.toThrow(/more than one computer/);
+      fetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: "that terminal runs on box; read it on that computer" }), { status: 501 }));
+      await expect(api.fetchTerminal("box/far")).rejects.toThrow("that terminal runs on box; read it on that computer");
+      expect(JSON.parse(String(fetch.mock.calls.at(-1)![1].body))).toEqual({ target: "box/far" });
+    } finally { vi.unstubAllGlobals(); restore(); }
+  });
+
+  it("reports focus host-qualified and the shown layout as a tree with the person's choices", async () => {
+    const { restore } = setup();
+    const { setShownLayout, setHidden, setActive } = await import("./layoutState");
+    try {
+      expect(modApi("m").focus()).toMatchObject({ hostId: "local", workspaceId: "w", sessionId: "lead", terminalId: "t-lead" });
+      setShownLayout({ type: "row", children: [
+        { type: "block", id: "side", content: "sidebar" },
+        { type: "stack", id: "main", children: [{ type: "block", id: "a", content: "canvas" }, { type: "block", id: "b", content: "mod:x", title: "X" }] },
+      ] });
+      setHidden("side", true);
+      setActive("main", "b");
+      expect(modApi("m").layoutTree().root).toEqual({ path: "", type: "row", hidden: false, children: [
+        { path: "0", id: "side", type: "block", content: "sidebar", hidden: true },
+        { path: "1", id: "main", type: "stack", hidden: false, active: "b", children: [
+          { path: "1.0", id: "a", type: "block", content: "canvas", hidden: false },
+          { path: "1.1", id: "b", type: "block", content: "mod:x", title: "X", hidden: false },
+        ] },
+      ] });
+    } finally {
+      setShownLayout(null);
+      restore();
+    }
+  });
+});
+
+describe("one copy's API lifetime", () => {
+  it("disposes once, runs every cleanup when one throws, and returns what they threw", () => {
+    const api = modApi("m");
+    const after = vi.fn();
+    api.subscribe(() => {});
+    api.watch("/tmp/x", () => {});
+    const broken = new Error("cleanup broke");
+    api.overlay(() => () => { throw broken; });
+    api.overlay(() => after);
+    expect(api.dispose()).toEqual([broken]);
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(store.listeners.size).toBe(0);
+    expect(api.dispose()).toEqual([]);
+  });
+
+  it("starts nothing after it is disposed: a late subscription stops at once and surfaces do not open", () => {
+    const api = modApi("m");
+    api.dispose();
+    const changed = vi.fn();
+    api.subscribe(changed);
+    store.listeners.forEach((fn) => fn());
+    expect(changed).not.toHaveBeenCalled();
+    const draw = vi.fn();
+    api.overlay(draw);
+    expect(draw).not.toHaveBeenCalled();
+    return expect(api.nextCommand()).rejects.toThrow("replaced");
+  });
+
+  it("drops a result that arrives after the copy was replaced", async () => {
+    const fetch = vi.fn(() => new Promise<Response>((resolve) => setTimeout(() => resolve(new Response(JSON.stringify({ code: 0, stdout: "late", stderr: "" }))), 10)));
+    vi.stubGlobal("fetch", fetch);
+    try {
+      const api = modApi("m");
+      const seen = vi.fn();
+      api.exec("ls").then(seen, seen);
+      api.dispose(); // replaced while the program runs
+      const live = modApi("n");
+      expect((await live.exec("ls")).stdout).toBe("late");
+      await new Promise((done) => setTimeout(done, 30));
+      expect(seen).not.toHaveBeenCalled();
+      expect(fetch).toHaveBeenCalledTimes(2); // the program still ran: only the stale result is dropped
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("sends a command's key to the newest copy on screen, never to a hidden one, and reports what it throws", () => {
+    const registered: ((args?: unknown) => void)[] = [];
+    const remove = vi.fn();
+    setCommandBridge({ list: () => [], run: () => false, register: (_id, _d, _k, run) => (registered.push(run), remove), bind: () => {} });
+    let shownA = true, shownB = false;
+    const errors: unknown[] = [];
+    const a = modApi("board", {}, { shown: () => shownA });
+    const b = modApi("board", {}, { shown: () => shownB, onError: (_phase, error) => errors.push(error) });
+    const ranA = vi.fn(), ranB = vi.fn(() => { throw new Error("b broke"); });
+    a.command({ name: "go", description: "Go", run: ranA });
+    b.command({ name: "go", description: "Go", run: ranB });
+    const key = () => registered[registered.length - 1]!({ n: 1 });
+    key();
+    expect(ranA).toHaveBeenCalledWith({ n: 1 });
+    expect(ranB).not.toHaveBeenCalled();
+    shownB = true;
+    key();
+    expect(ranB).toHaveBeenCalledTimes(1);
+    expect(errors).toEqual([new Error("b broke")]);
+    shownA = shownB = false;
+    key();
+    expect(ranA).toHaveBeenCalledTimes(1);
+    a.dispose();
+    expect(remove).toHaveBeenCalled();
+    shownB = true;
+    const removals = remove.mock.calls.length;
+    key();
+    expect(ranB).toHaveBeenCalledTimes(2);
+    b.dispose();
+    expect(remove.mock.calls.length).toBe(removals + 1);
   });
 });

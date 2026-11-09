@@ -1750,10 +1750,13 @@ export interface MemoryFile {
   text: string;
 }
 
-/** The mods on this core (capability `mods.v1`). Answered with `mods.state`. */
+/** The mods on this core (capability `mods.v1`). Answered with `mods.state`. `accepts` names the
+ * mod formats this page loads (`esm`, capability `mods.package.v1`); a page that leaves it out is
+ * never shown a package, in this reply or any later `mods.set` reply. */
 export interface ModsListMessage {
   type: "mods.list";
   requestId: string;
+  accepts?: string[];
 }
 
 /** A person's change to one mod: `enable` or `disable`; `layout` chooses the layout named `id` (an
@@ -1763,9 +1766,12 @@ export interface ModsSetMessage {
   type: "mods.set";
   requestId: string;
   id: string;
-  op: "enable" | "disable" | "layout" | "clone" | "remove-mod" | "remove-layout";
+  op: "enable" | "disable" | "layout" | "use" | "clone" | "remove-mod" | "remove-layout";
   /** For `clone`: the new id (default `<id>-copy`). */
   as?: string;
+  /** For `use`: the person's package to show wherever Perch shows the stock screen `id` (`stock:<name>`);
+   * absent or empty shows the stock screen again. */
+  target?: string;
 }
 
 /** The person's page says whether it loaded a mod's `revision` (capability `mods.report.v1`);
@@ -1775,7 +1781,14 @@ export interface ModsReportMessage {
   id: string;
   revision: string;
   error?: string | null;
+  /** Which copy of the mod (its place on screen), with capability `mods.report.v2`. The core files
+   * the report under the connection it came on; a page never names its own viewer. */
+  instance?: string;
+  /** `load`, `render`, `callback`, `disposal` or `swap` (capability `mods.report.v2`). */
+  phase?: ModReportPhase;
 }
+
+export type ModReportPhase = "load" | "render" | "callback" | "disposal" | "swap";
 
 /** The index of a Project's memory files on this core (capability `memory.v1`). Answered with
  * `memory.state`. */
@@ -2925,8 +2938,9 @@ export interface ModInfo {
   id: string;
   name: string;
   description: string;
-  /** Where it shows: docked as a pane, over the app, or nowhere (it only runs). */
-  place: "dock" | "overlay" | "none";
+  /** Where it shows: docked as a pane, over the app, nowhere (it only runs), or only where a layout
+   * block or Perch itself puts it (`layout`: stock screens and their clones; never run hidden). */
+  place: "dock" | "overlay" | "none" | "layout";
   enabled: boolean;
   /** Changes whenever the mod's files do, so an open mod reloads when it is edited. */
   revision: string;
@@ -2934,6 +2948,42 @@ export interface ModInfo {
   error: string | null;
   /** Font files in the mod's `fonts/` folder; the page loads each as the file name without its extension. */
   fonts?: string[];
+  /** `esm` for a package (ES modules, CSS and assets loaded from `mods/package`); absent for a single-file mod. */
+  format?: "esm";
+  /** The host API range a package was written for (`mod.json` `api`), as written. */
+  api?: string;
+  /** A package's entry module (default `main.js`). */
+  entry?: string;
+  /** Every file of a package's current `revision`, sorted: the only paths `mods/package` serves. */
+  files?: string[];
+  /** Where this copy came from (`clone` for `perch mod clone`, `stock` for a shipped `stock:<id>` screen), as recorded in `mod.json`. */
+  origin?: string;
+  /** The package's own version (`mod.json` `version`), as written. */
+  version?: string;
+  /** The mod a clone was copied from, and that mod's revision at the time. */
+  clonedFrom?: ModClonedFrom;
+  /** Who published the package (`mod.json` `publisher`), as written. */
+  publisher?: string;
+  /** Where `perch mod install` took it from, and the digest of what it copied. */
+  installedFrom?: ModInstalledFrom;
+}
+
+export interface ModInstalledFrom {
+  /** `folder` or `git` (a registry would be another kind). */
+  kind: string;
+  /** The folder or the public git URL as given. */
+  location: string;
+  /** The git commit installed. */
+  commit?: string;
+  /** `sha256:<hex>` of the files as installed (sorted paths, each path and its bytes length-prefixed). */
+  digest: string;
+}
+
+export interface ModClonedFrom {
+  id: string;
+  revision: string;
+  /** The source's `mod.json` `version`, when it had one (a stock screen always does). */
+  version?: string;
 }
 
 /** `{px}` (fixed) or `{weight}` (a share of what fixed siblings leave; default 1). */
@@ -3037,6 +3087,9 @@ export interface LayoutInfo {
   preview?: string;
   /** Why the file cannot be used, if it cannot. */
   error: string | null;
+  /** What this layout is a copy of (`perch mod clone`): a stock layout (`stock:main`) and its version, or another
+   * layout's id. Absent on a file nobody copied, and from older cores. */
+  clonedFrom?: { id: string; version?: string };
 }
 
 /** Broadcast when the mods folder or a mod's state changed; clients ask again with `mods.list`. */
@@ -3055,15 +3108,21 @@ export interface ModsSnapshotRequestMessage {
    * JSON in `text`). */
   command?: string;
   args?: unknown;
+  /** The one connection this request is for (capability `mods.report.v2`); the core sends it only there. */
+  viewer?: string;
+  /** One copy of the mod; a page that does not show it stays silent. */
+  instance?: string;
 }
 
-/** The page's answer to `mods.snapshot.request` (capability `mods.snapshot.v1`). */
+/** The page's answer to `mods.snapshot.request` (capability `mods.snapshot.v1`). `instance` repeats
+ * the request's, when it named one; the core takes answers only from connections the request was for. */
 export interface ModsSnapshotMessage {
   type: "mods.snapshot";
   requestId: string;
   html?: string;
   text?: string;
   error?: string | null;
+  instance?: string;
 }
 
 /** Broadcast when `perch mod open` asks this screen to show a mod. */
@@ -3081,6 +3140,8 @@ export interface ModsStateMessage {
   /** The layouts in `layouts/`, and the one chosen (absent: stock Perch). */
   layouts?: LayoutInfo[];
   layout?: string;
+  /** Stock screens the person replaced with one of their packages: `stock:<name>` → mod id. Empty while mods are off. */
+  uses?: Record<string, string>;
   /** The theme files in `themes/`, offered to layouts and Settings by file name. */
   themes?: ThemeInfo[];
   policy: ModsPolicy;

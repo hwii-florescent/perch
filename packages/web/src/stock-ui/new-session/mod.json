@@ -1,0 +1,6 @@
+{
+  "name": "New session menu",
+  "description": "the agent launcher at the tab strip's + (and Cmd+T) and the home screen: an agent, a folder, a browser, a file",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Keybind help",
+  "description": "the searchable list of every key binding (Cmd+/, ?)",
+  "version": "1.0.0",
+  "api": "^1"
+}

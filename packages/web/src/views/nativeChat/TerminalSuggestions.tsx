@@ -5,7 +5,8 @@ import { glass } from "../../components/ui/glass";
 import { cn } from "../../lib/cn";
 import { usePerchStore } from "../../store";
 import { actOnSuggestion, useSuggestions, waitingCount } from "../../suggestions";
-import { SuggestionCards } from "./SuggestionCards";
+// The suggestion cards are the chat screen's (`stock:chat`); the terminal view shows the same ones, compiled in.
+import { SuggestionCards } from "../../stock-ui/chat/SuggestionCards";
 
 /** The suggested tasks a lead left for a person, for a lead shown as its terminal: the chat's cards are
  * not on screen there. Nothing when none waits; otherwise a small count over the terminal that opens

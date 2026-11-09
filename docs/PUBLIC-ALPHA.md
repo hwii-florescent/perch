@@ -349,7 +349,8 @@ infrastructure.
 - [ ] Issue template/report instructions request version/platform/provider and redact secrets, terminal contents and hostnames by default.
 - [ ] Freeze named platform/provider versions and known limitations, including experimental paths.
 - [ ] Choose one documented contributor package-manager workflow; resolve dual-lockfile ambiguity deliberately, not by casually deleting a lockfile. Current release CI uses npm.
-- [ ] Build and smoke-test actual release artifacts from a clean checkout/environment.
+- [ ] Build and smoke-test actual release artifacts from a clean checkout/environment. Partial evidence: `cargo test -p perch-core` needs no Node build (the core reads stock screens from `PERCH_WEB_DIST` at run time, not at compile time); release artifacts themselves are still unproven.
+- [ ] Mods and stock screens: `PERCH_MODS=off` starts every screen as Perch's own, a copy that freezes at start is turned off on the next load, and a phone runs only `stock:mobile-*` copies after it opts in. Owner acceptance of the host-owned boundary in [DECISIONS](DECISIONS.md) (2026-11-09) is still owed.
 - [ ] Verify install, first launch, CLI PATH discovery, missing-provider errors, restart/update, uninstall and surviving-daemon explanation.
 - [ ] Decide macOS signing/notarization. Current workflow documents ad-hoc signing, not notarization; if alpha ships that way, disclose exact installation friction and get explicit owner approval. Do not normalize disabling security globally.
 - [ ] Record checksums, release notes, recovery/backup instructions for schema migration and compatible-daemon policy.

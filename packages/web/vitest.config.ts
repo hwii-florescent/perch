@@ -10,6 +10,8 @@ import { defineConfig } from "vitest/config";
 // "unavailable" case they're written for. DOM-heavy interaction tests opt
 // into jsdom at the file level so the rest of the suite stays lightweight.
 export default defineConfig({
+  // Tests render a stock screen's source with the app's own SDK module (as the phone does; vite.config.ts).
+  resolve: { alias: { "@perch/sdk": decodeURIComponent(new URL("./src/sdk.ts", import.meta.url).pathname) } },
   test: {
     environment: "node",
     include: ["src/**/*.test.{ts,tsx}"],

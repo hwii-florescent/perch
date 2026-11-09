@@ -7,7 +7,7 @@ const COPIED_MS = 1500;
 
 /** Copies one message's text. The clipboard can refuse when the page is unfocused; then nothing
  * changes and the person can try again. */
-export function CopyButton({ text, className, label: idle = "Copy message" }: { text: string; className?: string; label?: string }) {
+export function CopyButton({ text, className, label: idle = "Copy message", testId = "copy-message" }: { text: string; className?: string; label?: string; testId?: string }) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
@@ -15,7 +15,7 @@ export function CopyButton({ text, className, label: idle = "Copy message" }: { 
   return (
     <button
       type="button"
-      data-testid="copy-message"
+      data-testid={testId}
       aria-label={label}
       title={label}
       onClick={() => {

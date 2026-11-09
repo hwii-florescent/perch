@@ -1,0 +1,6 @@
+{
+  "name": "Memory",
+  "description": "a project's memory files: notes agents write for each other and for you",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

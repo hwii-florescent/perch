@@ -1,23 +1,25 @@
+import type { MobileFilesProps } from "@perch/sdk";
 import { fileTabKey, useFileTabs } from "../fileTabs";
 import { openFilePreview } from "../workspaceTabs";
-import { cn } from "../lib/cn";
-import { GHOST_BUTTON } from "./ui/icon-button";
-import { Chevron } from "./ui/chevron";
-import { WorkspaceFilesView } from "./WorkspaceFiles";
+// The phone's explorer and editor are Perch's own Files parts (a phone never runs the desktop's choice for them).
+import { WorkspaceFilesView } from "../stock-ui/files/files";
+import Files from "../stock-ui/mobile-files/main";
+import { StockRoute } from "./mod-root";
 
 /**
- * The phone's Files pane, built from the desktop's own pieces: the explorer is
- * the drawer's (`layout="explorer"`), and a tapped file opens exactly as a
- * click does there (`openFilePreview` / pin into the shared `fileTabs` store),
- * then shows in the tab's editor (`layout="editor"`). The phone has no tab strip, so
- * the open file replaces the explorer and "Files" goes back; `showSession` is
- * the same "no file covers the session" state the desktop's strip uses, and the
- * tab stays open for the desktop view and for the next visit.
+ * The phone's Files pane. The screen is `stock:mobile-files` (`stock-ui/mobile-files/`), or the person's copy once
+ * turned on for this phone (`phoneMods.ts`). Built from the desktop's own pieces: the explorer is the drawer's
+ * (`layout="explorer"`), and a tapped file opens exactly as a click does there (`openFilePreview` / pin into the shared
+ * `fileTabs` store), then shows in the tab's editor (`layout="editor"`). `onBack` is the same "no file covers the
+ * session" state the desktop's strip uses (`showSession`), and the tab stays open for the desktop view and the next
+ * visit.
  */
 export function MobileFiles({ workspaceId }: { workspaceId: string }) {
   const tab = useFileTabs((s) => s.tabs.find((t) => !t.kind && t.workspaceId === workspaceId && fileTabKey(t) === s.active));
-  if (!tab) {
-    return (
+  const props: MobileFilesProps = {
+    workspaceId,
+    openPath: tab?.path ?? null,
+    explorer: tab ? null : (
       <WorkspaceFilesView
         key={workspaceId}
         layout="explorer"
@@ -29,20 +31,9 @@ export function MobileFiles({ workspaceId }: { workspaceId: string }) {
           files.pin(fileTabKey({ workspaceId, path }));
         }}
       />
-    );
-  }
-  return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <button
-        type="button"
-        className={cn(GHOST_BUTTON, "flex min-h-11 shrink-0 items-center gap-1 self-start px-3 text-[0.85rem]")}
-        data-testid="mobile-files-back"
-        onClick={() => useFileTabs.getState().showSession()}
-      >
-        <Chevron open={false} className="rotate-180" />
-        Files
-      </button>
-      <WorkspaceFilesView key={fileTabKey(tab)} layout="editor" workspaceId={workspaceId} initialPath={tab.path} />
-    </div>
-  );
+    ),
+    editor: tab ? <WorkspaceFilesView key={fileTabKey(tab)} layout="editor" workspaceId={workspaceId} initialPath={tab.path} /> : null,
+    onBack: () => useFileTabs.getState().showSession(),
+  };
+  return <StockRoute name="mobile-files" props={props} stock={Files} />;
 }

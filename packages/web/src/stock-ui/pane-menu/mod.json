@@ -1,0 +1,6 @@
+{
+  "name": "Pane menu",
+  "description": "the right-click menu of a docked pane: split, zoom, rename, stop agent, close",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

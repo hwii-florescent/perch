@@ -1,0 +1,6 @@
+{
+  "name": "Start",
+  "description": "what the main area shows with nothing open: the home screen, a workspace's start picker, the CLI start panel and the connecting notice",
+  "version": "1.0.0",
+  "api": "^1.9"
+}

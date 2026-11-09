@@ -7,8 +7,10 @@
 //! them as remote: the device token (cookie) is still checked exactly as it is
 //! for a phone on Wi-Fi, and `/pair` is still how a phone gets one.
 //!
-//! Only the five data routes are reachable (`ROUTES`); the phone's page itself
-//! comes from the relay's static assets, not from here.
+//! Only the seven data routes are reachable (`ROUTES`, matched by exact path; a
+//! mod package's files and a mod's own data (`mods/data`), but not `mods/file`,
+//! `mods/exec` or `mods/fs`); the
+//! phone's page itself comes from the relay's static assets, not from here.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -42,7 +44,15 @@ pub enum Link {
     Error(String),
 }
 
-const ROUTES: [&str; 5] = ["pair", "ws", "workspace-file", "clipboard-image", "upload"];
+const ROUTES: [&str; 7] = [
+    "pair",
+    "ws",
+    "workspace-file",
+    "clipboard-image",
+    "upload",
+    "mods/package",
+    "mods/data",
+];
 /// Phones per computer. A guest costs a task and a loopback socket or two.
 const MAX_GUESTS: usize = 8;
 /// A guest that has not said hello by now is a stranger holding a room id.
@@ -390,6 +400,10 @@ async fn http(session: Arc<Session>, id: u32, pending: Pending, local: Arc<Local
             "contentType": header_of(header::CONTENT_TYPE),
             "contentDisposition": header_of(header::CONTENT_DISPOSITION),
             "setCookie": header_of(header::SET_COOKIE),
+            // What keeps a package file what its type says (`mods/package`): the phone sees
+            // the same `nosniff` and asset sandbox as a page on the LAN.
+            "contentTypeOptions": header_of(header::X_CONTENT_TYPE_OPTIONS),
+            "contentSecurityPolicy": header_of(header::CONTENT_SECURITY_POLICY),
         })
     };
     if !session
@@ -479,4 +493,30 @@ async fn socket(
     }
     let _ = sink.close().await;
     session.close_socket(id).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::allowed;
+
+    #[test]
+    fn a_phone_reaches_mod_package_files_and_no_other_mod_route() {
+        assert!(allowed("mods/package?id=a&rev=b&path=ui/main.js"));
+        assert!(allowed("mods/data"));
+        assert!(allowed("workspace-file?path=x"));
+        for refused in [
+            "mods/file?id=a",
+            "mods/exec",
+            "mods/fs",
+            "mods/package/x",
+            "mods/packagex",
+            "mods/data/x",
+            "mods/datax",
+            "mods/",
+            "agent/mod/list",
+            "mods/package?id=a\r\nX: y",
+        ] {
+            assert!(!allowed(refused), "{refused:?}");
+        }
+    }
 }

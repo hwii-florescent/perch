@@ -3,7 +3,7 @@
  *
  * `value` is the store's draft; edits leave through `onChange` and nothing else, so the
  * server-owned draft buffer, conflict handling and recovery in `filesystemStore.ts` are
- * untouched. Loaded lazily (`WorkspaceFiles.tsx`): CodeMirror stays out of the main chunk.
+ * untouched. Loaded lazily (`CodeEditor` in `sdk.ts`): CodeMirror stays out of the main chunk.
  * Remount per file (`key`): undo history, selection and scroll are per open file, parked in
  * `parked` when the editor unmounts (a tab switch) and restored when its text is unchanged.
  *

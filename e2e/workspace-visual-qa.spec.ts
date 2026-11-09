@@ -294,7 +294,8 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     await expect(review).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId("git-status")).toContainText("2 changed paths", { timeout: 20000 });
     await expect(page.getByTestId("git-diff")).toContainText("modified sentinel", { timeout: 20000 });
-    await page.getByTestId("workspace-tools").evaluate((element) => element.style.setProperty("--tools-width", "760px"));
+    // The drawer's width is the app root's `--tools-width` (its card reads it): set it there, not on the drawer inside.
+    await page.locator('[style*="--tools-width"]').first().evaluate((element: HTMLElement) => element.style.setProperty("--tools-width", "760px"));
     await expect(review.locator('nav[aria-label="Changed files"]')).toBeVisible();
     await expect(page.getByTestId("git-diff-file-select")).toBeHidden();
     await page.screenshot({ path: path.join(shots, "git-wide-pane.png"), fullPage: false });

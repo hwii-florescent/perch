@@ -1,0 +1,6 @@
+{
+  "name": "Phone header",
+  "description": "the phone's top row: the session shown (tap to switch), what needs you, and Settings",
+  "version": "1.0.0",
+  "api": "^1.10"
+}

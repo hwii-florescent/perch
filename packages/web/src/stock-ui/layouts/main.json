@@ -1,0 +1,19 @@
+{
+  "name": "Perch",
+  "version": "1.0.0",
+  "type": "column",
+  "children": [
+    {
+      "type": "row",
+      "id": "window",
+      "windowDrag": true,
+      "resizable": false,
+      "children": [
+        { "type": "block", "id": "sidebar", "content": "window:sidebar" },
+        { "type": "block", "id": "main", "content": "window:main" },
+        { "type": "block", "id": "drawer", "content": "window:drawer" }
+      ]
+    },
+    { "type": "block", "id": "status", "content": "status", "size": { "px": 24 } }
+  ]
+}

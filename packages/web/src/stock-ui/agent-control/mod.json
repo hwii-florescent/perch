@@ -1,0 +1,6 @@
+{
+  "name": "Agent terminal controls",
+  "description": "over an agent's terminal: the chip with Take control, Fit here or Retry CLI, the error line, and the exited or sleeping banner",
+  "version": "1.0.0",
+  "api": "^1.10"
+}

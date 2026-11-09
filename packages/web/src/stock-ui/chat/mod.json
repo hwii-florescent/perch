@@ -1,0 +1,6 @@
+{
+  "name": "Chat",
+  "description": "an agent's native chat: the transcript (messages, tool runs, edits, subagents, turn diffs), request cards, the pending send, held messages, suggestions, the family strip and the composer (autocomplete, attachments, recall, options), over Perch's own chat state",
+  "version": "1.0.0",
+  "api": "^1.9"
+}

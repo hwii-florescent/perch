@@ -1,102 +1,64 @@
 /**
- * KeybindingsSection.tsx — Settings > Keyboard: every application shortcut of
- * `keybinds.ts`, as a row with its key. Click the key to record a new one,
- * × for no shortcut, ↺ for the built-in default. Overrides live in the
- * server's `settings.keybindings` (action id → combo, "" = none).
+ * KeybindingsSection.tsx — Settings > Keyboard: every application shortcut of `keybinds.ts`, and the commands
+ * packages register, as rows with their key. The page is `stock:settings-keyboard`
+ * (`stock-ui/settings-keyboard/main.tsx`) or the person's package chosen for it; this file builds its rows and binds
+ * what recording does: reading the key press, moving the key off the commands that had it, and saving. Overrides live
+ * in the server's `settings.keybindings` (action id → combo, "" = none). The phone has no shortcuts to rebind: Settings never lists this section there, so the route has no `exact`.
  */
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { usePerchStore } from "../store";
-import { SHORTCUTS, effectiveSpec, plainShortcutAllowed, shortcutsBoundTo, type KeybindGroup } from "../keybinds";
+import { SHORTCUTS, commandsSnapshot, effectiveSpec, plainShortcutAllowed, shortcutsBoundTo, subscribeCommands, type KeybindGroup } from "../keybinds";
 import { IS_MAC, formatCombo, normalizeCombo, recordCombo } from "../keyCombo";
-import { SettingRow, SettingsGroup } from "./ui/setting-row";
-import { cn } from "../lib/cn";
+import KeyboardSettings from "../stock-ui/settings-keyboard/main";
+import { StockRoute } from "./mod-root";
 
 const GROUPS: [KeybindGroup, string][] = [
   ["global", "Global"], ["tabs", "Tabs"], ["nests", "Workspaces and projects"], ["panes", "Splits and panes"], ["terminal", "Terminal"], ["editor", "File editor"], ["navigator", "Navigator"], ["directory", "Folder picker"], ["leader", "Leader and follow-up keys"], ["resize", "Resize mode"],
 ];
 
-const CHIP = "min-w-24 cursor-pointer rounded-ui bg-surface-1 px-2 py-[0.2rem] text-center [font-family:ui-monospace,SFMono-Regular,Menlo,monospace] text-[0.75rem] hover:bg-overlay-0";
-const ICON = "cursor-pointer rounded-ui bg-transparent px-[0.4rem] py-[0.1rem] text-[0.85rem] leading-none text-subtext-0 [border:0] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg";
+const overrides = () => usePerchStore.getState().settings?.keybindings ?? {};
+const save = (next: Record<string, string>) => usePerchStore.getState().updateSettings({ keybindings: next });
+
+/** Gives `id` the key `spec`, taking it from the commands that had it: the note says which. */
+function commit(id: string, spec: string): { kind: "saved"; note?: string } {
+  const target = SHORTCUTS.find((s) => s.id === id);
+  if (!target) return { kind: "saved" };
+  const next = { ...overrides() };
+  const taken = shortcutsBoundTo(spec, id);
+  for (const other of taken) next[other.id] = "";
+  const builtIn = target.keys[IS_MAC ? 0 : 1];
+  // A package command with no key of its own has "" here.
+  if (builtIn && normalizeCombo(builtIn) === normalizeCombo(spec)) delete next[id];
+  else next[id] = spec;
+  save(next);
+  return { kind: "saved", note: taken.length ? `Moved from "${taken.map((other) => other.description).join('", "')}".` : undefined };
+}
 
 export function KeybindingsSection() {
   const settings = usePerchStore((s) => s.settings);
-  const updateSettings = usePerchStore((s) => s.updateSettings);
-  const [recording, setRecording] = useState<string | null>(null);
-  const [note, setNote] = useState<{ id: string; text: string } | null>(null);
+  // Package commands come and go while Settings is open.
+  useSyncExternalStore(subscribeCommands, commandsSnapshot);
   const custom = settings?.keybindings ?? {};
-
-  const save = (next: Record<string, string>) => updateSettings({ keybindings: next });
-
-  function commit(id: string, spec: string) {
-    const target = SHORTCUTS.find((s) => s.id === id);
-    if (!target) return;
-    const next = { ...custom };
-    const taken = shortcutsBoundTo(spec, id);
-    for (const other of taken) next[other.id] = "";
-    setNote(taken.length ? { id, text: `Moved from "${taken.map((other) => other.description).join('", "')}".` } : null);
-    const builtIn = target.keys[IS_MAC ? 0 : 1];
-    if (builtIn !== null && normalizeCombo(builtIn) === normalizeCombo(spec)) delete next[id];
-    else next[id] = spec;
-    save(next);
-    setRecording(null);
-  }
-
-  // While recording, every key is ours: capture before the app's own listeners run.
-  useEffect(() => {
-    if (!recording) return;
-    const id = recording;
-    const onKey = (e: KeyboardEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-        setRecording(null);
-        setNote(null);
-        return;
-      }
-      const recorded = recordCombo(e, plainShortcutAllowed(SHORTCUTS.find((s) => s.id === id)!));
-      if (!recorded) return;
-      if ("error" in recorded) setNote({ id, text: recorded.error });
-      else commit(id, recorded.spec);
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [recording, custom]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return (
-    <>
-      <div className="mb-4 flex items-center justify-between gap-4 text-[0.78rem] text-subtext-0">
-        <span>Click a key to record a new one, × for no shortcut, ↺ for the default. Leader and resize rows configure follow-up keys. Global Ctrl/Alt overrides also take precedence in terminals. Ordinary editing, arrows, Enter, Tab and Escape stay native.</span>
-        <button type="button" className={cn(ICON, "shrink-0 text-[0.78rem]")} data-testid="keybindings-reset-all" disabled={Object.keys(custom).length === 0} onClick={() => save({})}>
-          Reset all
-        </button>
-      </div>
-      {GROUPS.map(([group, title]) => (
-        <SettingsGroup key={group} title={title} testId={`keybindings-${group}`}>
-          {SHORTCUTS.filter((s) => s.group === group).map((s) => {
-            const spec = effectiveSpec(s);
-            const edited = custom[s.id] !== undefined;
-            const active = recording === s.id;
-            return (
-              <SettingRow key={s.id} title={s.description} description={note?.id === s.id ? note.text : undefined}>
-                <button
-                  type="button"
-                  className={cn(CHIP, active && "bg-surface-0 text-accent", !spec && !active && "text-subtext-0")}
-                  data-testid={`keybinding-${s.id}`}
-                  aria-label={`Shortcut for ${s.description}`}
-                  onClick={() => { setNote(null); setRecording(active ? null : s.id); }}
-                  onBlur={() => active && setRecording(null)}
-                >
-                  {active ? "Press keys…" : spec ? formatCombo(spec) : "Not set"}
-                </button>
-                <button type="button" className={cn(ICON, !spec && "invisible")} data-testid={`keybinding-clear-${s.id}`} title="Remove shortcut" aria-label={`Remove shortcut for ${s.description}`}
-                  onClick={() => { setNote(null); save({ ...custom, [s.id]: "" }); }}>×</button>
-                <button type="button" className={cn(ICON, !edited && "invisible")} data-testid={`keybinding-reset-${s.id}`} title="Back to the default" aria-label={`Reset shortcut for ${s.description}`}
-                  onClick={() => { setNote(null); const next = { ...custom }; delete next[s.id]; save(next); }}>↺</button>
-              </SettingRow>
-            );
-          })}
-        </SettingsGroup>
-      ))}
-    </>
-  );
+  const rows = (group: KeybindGroup) => SHORTCUTS.filter((s) => s.group === group).map((s) => {
+    const spec = effectiveSpec(s);
+    return { id: s.id, description: s.description, keys: spec ? formatCombo(spec) : "", edited: custom[s.id] !== undefined, ...(s.conflict ? { conflict: s.conflict } : {}) };
+  });
+  const mods = rows("mods");
+  const props = {
+    groups: [...GROUPS.map(([id, title]) => ({ id, title, rows: rows(id) })), ...(mods.length ? [{ id: "mods", title: "Package commands", rows: mods }] : [])],
+    hasOverrides: Object.keys(custom).length > 0,
+    actions: {
+      record: (id: string, event: KeyboardEvent) => {
+        const target = SHORTCUTS.find((s) => s.id === id);
+        if (!target) return null;
+        const recorded = recordCombo(event, plainShortcutAllowed(target));
+        if (!recorded) return null;
+        return "error" in recorded ? { kind: "error" as const, text: recorded.error } : commit(id, recorded.spec);
+      },
+      clear: (id: string) => save({ ...overrides(), [id]: "" }),
+      reset: (id: string) => { const next = { ...overrides() }; delete next[id]; save(next); },
+      resetAll: () => save({}),
+    },
+  };
+  return <StockRoute name="settings-keyboard" props={props} stock={KeyboardSettings} />;
 }

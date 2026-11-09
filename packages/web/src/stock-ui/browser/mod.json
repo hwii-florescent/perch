@@ -1,0 +1,6 @@
+{
+  "name": "Browser",
+  "description": "the drawer's browser: a strip of the workspace's pages (open, switch, close, close all) over the shown page, whose webview is Perch's",
+  "version": "1.0.0",
+  "api": "^1.5"
+}

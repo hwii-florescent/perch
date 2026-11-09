@@ -1,0 +1,6 @@
+{
+  "name": "Sidebar",
+  "description": "the sidebar: host switcher, New session, projects with their workspaces and sessions (or by status, or in one list), Quickchat, Add project, row menus, reorder by drag, and the settings button",
+  "version": "1.0.0",
+  "api": "^1.3"
+}

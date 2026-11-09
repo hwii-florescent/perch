@@ -24,6 +24,9 @@ export interface ResponseHead {
   contentType?: string | null;
   contentDisposition?: string | null;
   setCookie?: string | null;
+  /** `x-content-type-options` and `content-security-policy`, as the LAN page gets them (`mods/package`). */
+  contentTypeOptions?: string | null;
+  contentSecurityPolicy?: string | null;
 }
 
 export interface SocketHandlers {

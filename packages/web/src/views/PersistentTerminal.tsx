@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { WorkspaceTerminal } from "@perch/shared";
 import { usePerchStore } from "../store";
 import { socket } from "../ws";
@@ -10,8 +10,11 @@ import { attachAgentFileDrop, type FileDropNotice } from "../agentFileDrop";
 import { closeWorkspaceTerminal, listWorkspaceTerminals, openWorkspaceTerminal } from "../workspaceTerminals";
 import { getDockviewController } from "../dockview/dockviewController";
 import { newId } from "../ids";
-import { KeptTerminal, forgetTerminal, showTerminal } from "../terminalKeeper";
-import { Select } from "../components/ui/select";
+import { BorrowTerminals, KeptTerminal, forgetTerminal, showTerminal } from "../terminalKeeper";
+import { StockRoute } from "../components/mod-root";
+import type { TerminalToolbarProps } from "@perch/sdk";
+// The shell toolbar is the stock screen `stock:terminal-toolbar`, or the person's copy; the shells stay this file's.
+import TerminalToolbar from "../stock-ui/terminal-toolbar/main";
 
 interface ShellState { current: WorkspaceTerminal | null; error: string | null }
 const OPENING: ShellState = { current: null, error: null };
@@ -83,6 +86,8 @@ export function PersistentTerminal({ active, sessionId, paneId, layoutPanelId, o
   active: boolean; sessionId: string; paneId?: string; layoutPanelId?: string; onPaneChange?: (paneId: string) => void;
 }) {
   const connected = usePerchStore((state) => state.connected);
+  // Under a borrowing surface (an overlay, a peek) the kept terminal moves here and back, never a second copy.
+  const borrow = useContext(BorrowTerminals);
   const container = useRef<HTMLDivElement>(null);
   const explicitlyClosed = useRef(false);
   const [view, setView] = useState<ShellView | null>(null);
@@ -112,7 +117,7 @@ export function PersistentTerminal({ active, sessionId, paneId, layoutPanelId, o
     if (!connected || !selected || !container.current) return;
     setClosed(false);
     const surface = container.current;
-    const shown = showTerminal(shellTerminalKey(sessionId, selected), sessionId, surface, () => new ShellView(sessionId, selected, surface));
+    const shown = showTerminal(shellTerminalKey(sessionId, selected), sessionId, surface, () => new ShellView(sessionId, selected, surface), { borrow });
     setView(shown.view);
     const stopPaste = attachClipboardImagePaste(surface, () => shown.view.inputId);
     setFileDrop(null);
@@ -121,7 +126,7 @@ export function PersistentTerminal({ active, sessionId, paneId, layoutPanelId, o
       (text) => { shown.view.created.term.paste(text); shown.view.created.term.focus(); }, setFileDrop,
     );
     return () => { stopDrop(); stopPaste(); shown.hide(); };
-  }, [connected, sessionId, selected]);
+  }, [connected, sessionId, selected, borrow]);
 
   useEffect(() => {
     if (current) setTerminals((rows) => [...rows.filter((item) => item.id !== current.id), current]);
@@ -149,18 +154,21 @@ export function PersistentTerminal({ active, sessionId, paneId, layoutPanelId, o
     : !current ? "Opening shell…" : null);
 
   return <div className="terminal terminal--persistent" data-session-id={sessionId} data-terminal-id={current?.id} data-pane-id={selected ?? undefined}>
-    <div className="terminal__toolbar">
-      {terminals.length > 0 && <Select className="min-w-0 max-w-[140px]" ariaLabel="Shell pane" disabled={closing || !connected} value={selected ?? ""} onChange={(value) => { explicitlyClosed.current = false; setSelected(value); onPaneChange?.(value); }}
-        options={[...(selected ? [] : [{ value: "", label: "Choose a shell", disabled: true }]), ...terminals.map((row, index) => ({ value: row.paneId, label: `Shell ${index + 1}${row.state === "lost" ? " · unavailable" : ""}` }))]} />
-      }
-      <span className="terminal__connection">{current?.state === "running" ? "Shell running" : "Shell"}</span>
-      <button type="button" disabled={!connected || closing} onClick={() => {
+    <StockRoute name="terminal-toolbar" stock={TerminalToolbar} props={{
+      shells: terminals.map((row, index) => ({ value: row.paneId, label: `Shell ${index + 1}${row.state === "lost" ? " · unavailable" : ""}` })),
+      selected: selected ?? "",
+      connected,
+      closing,
+      running: current?.state === "running",
+      canClose: !!current,
+      onSelect: (value: string) => { explicitlyClosed.current = false; setSelected(value); onPaneChange?.(value); },
+      onNew: () => {
         explicitlyClosed.current = false;
         if (layoutPanelId) getDockviewController()?.addTerminalTabInGroup(layoutPanelId);
         else setSelected(newId());
-      }}>New shell</button>
-      <button type="button" disabled={!connected || !current || closing} onClick={() => void closeShell()}>{closing ? "Closing…" : "Close shell"}</button>
-    </div>
+      },
+      onClose: () => void closeShell(),
+    } satisfies TerminalToolbarProps} />
     <div className="terminal__surface" ref={container} />
     <TerminalSearchBar controller={search} />
     {fileDrop && <div className="terminal__notice" role={fileDrop.error ? "alert" : "status"}>{fileDrop.message}</div>}

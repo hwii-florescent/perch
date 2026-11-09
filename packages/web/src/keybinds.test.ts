@@ -28,11 +28,21 @@ it("a mod's command joins the table with a free default key, and a newer version
   old();
   // A key with no modifier, or one another command already uses, is dropped; the command stays.
   const plain = registerCommand("mod.t.plain", "Plain", "y", () => {});
-  const taken = registerCommand("mod.t.taken", "Taken", IS_MAC ? "cmd+t" : "ctrl+t", () => {});
+  const owner = SHORTCUTS.find((s) => s.group === "tabs" && effectiveSpec(s) && bindableCombo(effectiveSpec(s)!))!;
+  const taken = registerCommand("mod.t.taken", "Taken", effectiveSpec(owner)!, () => {});
   expect(effectiveSpec(SHORTCUTS.find((s) => s.id === "mod.t.plain")!)).toBeNull();
+  // Each says why, and keeps what it asked for, so Settings > Keyboard can show the row unbound with the reason.
+  expect(SHORTCUTS.find((s) => s.id === "mod.t.plain")).toMatchObject({ group: "mods", wanted: "y", conflict: expect.stringMatching(/cannot be bound/) });
+  const takenRow = SHORTCUTS.find((s) => s.id === "mod.t.taken")!;
+  expect(effectiveSpec(takenRow)).toBeNull();
+  expect(takenRow.conflict).toContain(`is taken by "${owner.description}"`);
+  expect(effectiveSpec(owner)).not.toBeNull(); // the built-in keeps its key
+  expect(SHORTCUTS.find((s) => s.id === "mod.t.go")).toBeUndefined();
   expect(bindableCombo("y")).toBe(false);
   expect(bindableCombo("cmd+shift+y")).toBe(true);
   plain(); taken();
+  // Released with its package: gone from the table, so from Settings > Keyboard and the key help too.
+  expect(SHORTCUTS.some((s) => s.id === "mod.t.plain" || s.id === "mod.t.taken")).toBe(false);
 });
 
 it("cancels the leader on keyup without swallowing ordinary Space or text input", async () => {

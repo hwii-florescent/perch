@@ -52,6 +52,3 @@ export const loadInstructions = (scope: InstructionsScope, id: string) =>
 export const saveInstructions = (scope: InstructionsScope, id: string, text: string, folders: string[]) =>
   ask((requestId) => ({ type: "instructions.set", requestId, scope, id, text, folders }));
 
-/** The folder box holds one absolute path per line. */
-export const folderLines = (folders: string[]) => folders.join("\n");
-export const parseFolderLines = (text: string) => text.split("\n").map((line) => line.trim()).filter(Boolean);

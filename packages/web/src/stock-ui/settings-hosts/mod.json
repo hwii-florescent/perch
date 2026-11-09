@@ -1,0 +1,6 @@
+{
+  "name": "Settings: SSH hosts",
+  "description": "the computers Perch reaches over ssh, and the form that adds and checks one",
+  "version": "1.0.0",
+  "api": "^1.8"
+}

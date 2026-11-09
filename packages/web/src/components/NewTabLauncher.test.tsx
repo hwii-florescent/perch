@@ -14,7 +14,7 @@ vi.mock("./AgentIcon", () => ({ AgentIcon: () => null }));
 vi.mock("./StatusDot", () => ({ StatusDot: () => null }));
 vi.mock("./WorktreeMenu", () => ({ WorktreeMenu: () => null }));
 vi.mock("./ConfirmDialog", () => ({ ConfirmDialog: () => null }));
-import { NewSessionPopover } from "../Sidebar";
+import { NewSessionPopover } from "./NewSessionPopover";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement, root: Root;

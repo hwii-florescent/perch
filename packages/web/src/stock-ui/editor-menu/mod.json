@@ -1,0 +1,6 @@
+{
+  "name": "Editor menu",
+  "description": "the file editor's right-click menu: Ask agent, undo and redo, cut, copy, paste, select all, find, replace and go to line",
+  "version": "1.0.0",
+  "api": "^1.9"
+}

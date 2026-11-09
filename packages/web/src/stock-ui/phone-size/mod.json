@@ -1,0 +1,6 @@
+{
+  "name": "Phone size",
+  "description": "the notice over a desktop terminal whose size a paired phone holds: take this tab or every tab back, or fold it to a chip",
+  "version": "1.0.0",
+  "api": "^1.9"
+}

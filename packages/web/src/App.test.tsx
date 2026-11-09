@@ -1,32 +1,40 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("./ws", () => ({ socket: { send: vi.fn(), connect: vi.fn(), onMessage: vi.fn(() => () => {}), onConnectionChange: vi.fn(() => () => {}) } }));
 // The shell's chrome is what is under test: stand in for the heavy panes and overlays.
 const stub = (testId: string) => () => <div data-testid={testId} />;
-vi.mock("./Sidebar", () => ({ Sidebar: stub("sidebar"), NewSessionPopover: () => null }));
+vi.mock("./components/NewSessionPopover", () => ({ NewSessionPopover: () => null }));
 vi.mock("./components/SplitCanvas", () => ({ SplitCanvas: stub("split-canvas") }));
 vi.mock("./components/SettingsPage", () => ({ SettingsPage: () => null }));
 vi.mock("./components/Navigator", () => ({ Navigator: () => null }));
 vi.mock("./components/ContextBridge", () => ({ ContextBridge: () => null }));
 vi.mock("./components/CloseAgentGuard", () => ({ CloseAgentGuard: () => null }));
-vi.mock("./components/KeybindHelp", () => ({ KeybindHelp: () => null }));
 vi.mock("./components/Onboarding", () => ({ Onboarding: () => null }));
 vi.mock("./components/MacPermissions", () => ({ MacPermissionSetup: () => null }));
 vi.mock("./components/Toast", () => ({ Toast: () => null }));
-vi.mock("./components/TabBar", () => ({ TabBar: stub("tab-bar") }));
 vi.mock("./components/MobilePaneShell", () => ({ MobilePaneShell: stub("mobile-pane-shell") }));
 vi.mock("./components/MobileSwitcher", () => ({ MobileSwitcher: () => null }));
+// A stock screen runs as its package in the app; here the status bar renders from that package's source (set below:
+// its source imports `@perch/sdk`, whose graph imports this mocked module, so the factory cannot wait for it).
+const stock = vi.hoisted(() => ({ StatusBar: (() => null) as () => ReactElement | null }));
+vi.mock("./components/mod-root", () => ({
+  StockView: ({ name }: { name: string }) => (name === "status" ? <stock.StatusBar /> : name === "tabs" ? <div data-testid="tab-bar" /> : null),
+  StockRoute: ({ props, stock: Stock }: { props: object; stock: (props: object) => ReactElement | null }) => <Stock {...props} />,
+}));
 vi.mock("./components/WorkspaceTools", () => ({ WorkspaceTools: stub("workspace-tools"), WorkspaceToolsTabs: stub("workspace-tools-tabs") }));
 
 const storage = new Map<string, string>([["perch.onboarding.seen", "1"], ["perch.workspaceTools", "files"]]);
 vi.stubGlobal("localStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key), clear: () => storage.clear() });
 vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+stock.StatusBar = (await import("./stock-ui/status/main")).default;
 const { usePerchStore } = await import("./store");
 const { useAttention } = await import("./attention");
 const { default: App } = await import("./App");
+// The drawer's tab is the stock window's state (`StockWindow.tsx`), read from storage once per page.
+const { useWindowChrome } = await import("./components/StockWindow");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root;
@@ -35,6 +43,7 @@ const matches = { mobile: false };
 
 beforeEach(() => {
   storage.set("perch.workspaceTools", "files");
+  useWindowChrome.getState().setTools("files");
   vi.stubGlobal("matchMedia", (query: string) => ({ matches: matches.mobile && query.includes("max-width"), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
   host = document.createElement("div");
   document.body.append(host);
@@ -102,7 +111,7 @@ it("lays out three full-height cards with the resize handles as the 8px gutters"
 
 it("moves the sidebar toggle into the main card when the sidebar is closed, and drops the drawer card", () => {
   act(() => usePerchStore.setState({ sidebarCollapsed: true }));
-  storage.delete("perch.workspaceTools");
+  useWindowChrome.getState().setTools(null);
   act(() => root.render(<App />));
   expect(host.querySelector('[data-testid="sidebar-card"]')).toBeNull();
   expect(host.querySelector('[data-testid="tools-card"]')).toBeNull();

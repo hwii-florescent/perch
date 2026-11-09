@@ -1,0 +1,6 @@
+{
+  "name": "Settings: Appearance",
+  "description": "the theme, the chat's text size and the tab shape",
+  "version": "1.0.0",
+  "api": "^1.8"
+}

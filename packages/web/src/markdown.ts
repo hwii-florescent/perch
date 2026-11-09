@@ -12,6 +12,10 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { repairMarkdown } from "./markdownRepair";
 
+/** The chat sanitizer's config, also applied again where the HTML is inserted (`SafeHtml`): DOMPurify's defaults (no
+ * scripts, handlers or unsafe URLs) plus no forms or controls, whose submit would navigate the app away. */
+export const CHAT_SANITIZE = { FORBID_TAGS: ["form", "button", "textarea", "select", "option"] };
+
 /** Render markdown text to sanitized HTML. Guard: only runs in browser.
  * While a message is still streaming, run it through `repairMarkdown` first
  * so a growing, incomplete string (open code fence, dangling `**`, etc.)
@@ -20,7 +24,31 @@ export function renderMarkdown(text: string, streaming: boolean): string {
   if (typeof window === "undefined") return text;
   const source = streaming ? repairMarkdown(text) : text;
   const html = marked.parse(source, { async: false }) as string;
-  return DOMPurify.sanitize(html);
+  return DOMPurify.sanitize(html, CHAT_SANITIZE);
+}
+
+export type Segment = { kind: "html"; html: string } | { kind: "code"; lang: string; text: string };
+
+/** A chat message as html runs with its fenced code blocks lifted out, so React can draw them
+ * (copy button, highlighting, `perch-ui` blocks). Same repair and sanitizing as `renderMarkdown`. */
+export function splitMarkdown(text: string, streaming: boolean): Segment[] {
+  if (typeof window === "undefined") return [{ kind: "html", html: text }];
+  const tokens = marked.lexer(streaming ? repairMarkdown(text) : text);
+  const out: Segment[] = [];
+  const fresh = (): typeof tokens => Object.assign([], { links: tokens.links });
+  let run = fresh();
+  const flush = () => {
+    if (run.length) out.push({ kind: "html", html: DOMPurify.sanitize(marked.parser(run), CHAT_SANITIZE) });
+    run = fresh();
+  };
+  for (const token of tokens) {
+    if (token.type === "code") {
+      flush();
+      out.push({ kind: "code", lang: (token.lang ?? "").trim().split(/\s+/)[0], text: token.text });
+    } else run.push(token);
+  }
+  flush();
+  return out;
 }
 
 /** The rendered preview of a file stays bounded: past this many characters only the head is rendered. */

@@ -1401,13 +1401,20 @@ pub enum ClientMessage {
         id: String,
     },
 
-    /// The mods on this core (capability `mods.v1`). Answered with `mods.state`.
+    /// The mods on this core (capability `mods.v1`). Answered with `mods.state`. `accepts` names
+    /// the mod formats this page loads (`esm`, capability `mods.package.v1`); a page that leaves it
+    /// out is never shown a package, in this reply or any later `mods.set` reply.
     #[serde(rename = "mods.list", rename_all = "camelCase")]
-    ModsList { request_id: String },
+    ModsList {
+        request_id: String,
+        #[serde(default)]
+        accepts: Option<Vec<String>>,
+    },
 
     /// A person's change to one mod: `op` is `enable` or `disable`; `layout` chooses the layout named
-    /// `id` (an empty `id` goes back to stock Perch); `remove-mod` / `remove-layout` move it to
-    /// `mods-removed/`. Answered with `mods.state`.
+    /// `id` (an empty `id` goes back to stock Perch); `use` shows `target` in place of the stock
+    /// screen `id`; `remove-mod` / `remove-layout` move it to `mods-removed/`. Answered with
+    /// `mods.state`.
     #[serde(rename = "mods.set", rename_all = "camelCase")]
     ModsSet {
         request_id: String,
@@ -1416,9 +1423,15 @@ pub enum ClientMessage {
         /// For `clone`: the new id (default `<id>-copy`).
         #[serde(default, rename = "as")]
         as_id: Option<String>,
+        /// For `use`: the person's package to show wherever Perch shows the stock screen `id`
+        /// (`stock:<name>`); absent or empty shows the stock screen again.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<String>,
     },
 
     /// The page's answer to `mods.snapshot.request`: what is drawn, as HTML and as text, or why not.
+    /// `instance` repeats the request's `instance` when it named one (capability `mods.report.v2`);
+    /// the core takes an answer only from a connection the request was for.
     #[serde(rename = "mods.snapshot", rename_all = "camelCase")]
     ModsSnapshot {
         request_id: String,
@@ -1428,16 +1441,25 @@ pub enum ClientMessage {
         text: String,
         #[serde(default)]
         error: Option<String>,
+        #[serde(default)]
+        instance: Option<String>,
     },
 
     /// The person's page says whether it loaded a mod's `revision` (capability `mods.report.v1`);
-    /// `error` is why not. No reply: `perch mod check` reads it.
+    /// `error` is why not. No reply: `perch mod check` reads it. With `mods.report.v2` the page adds
+    /// which copy (`instance`, its place on screen) and `phase` (`load`, `render`, `callback`,
+    /// `disposal` or `swap`); the core files it under the connection it came on, never a viewer the
+    /// page names.
     #[serde(rename = "mods.report", rename_all = "camelCase")]
     ModsReport {
         id: String,
         revision: String,
         #[serde(default)]
         error: Option<String>,
+        #[serde(default)]
+        instance: Option<String>,
+        #[serde(default)]
+        phase: Option<String>,
     },
 
     /// The index of a Project's memory files on this core (capability `memory.v1`). Answered
@@ -2608,6 +2630,10 @@ pub enum ServerMessage {
         layouts: Vec<crate::layouts::LayoutInfo>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layout: Option<String>,
+        /// Stock screens the person replaced with one of their packages: `stock:<name>` → mod id
+        /// (`layouts::uses`). Empty while mods are off.
+        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+        uses: std::collections::BTreeMap<String, String>,
         /// The theme files in `themes/`, offered to layouts and Settings by file name.
         #[serde(default)]
         themes: Vec<crate::layouts::ThemeInfo>,
@@ -2643,6 +2669,8 @@ pub enum ServerMessage {
     /// person's page answers with `mods.snapshot` (capability `mods.snapshot.v1`). With `command`
     /// (`perch mod do`) the page runs that app command with `args` instead (`list` answers with the
     /// commands, as JSON in `text`).
+    /// `viewer` (capability `mods.report.v2`) is the one connection the request is for: the core
+    /// sends it only there. `instance` names one copy of the mod; a page without it stays silent.
     #[serde(rename = "mods.snapshot.request", rename_all = "camelCase")]
     ModsSnapshotRequest {
         request_id: String,
@@ -2651,6 +2679,10 @@ pub enum ServerMessage {
         command: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         args: Option<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        viewer: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        instance: Option<String>,
     },
 
     /// Reply to `memory.list`, `memory.set` and `memory.delete`: the Project's memory index,

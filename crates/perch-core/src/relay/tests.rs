@@ -449,6 +449,47 @@ async fn a_phone_pairs_and_works_through_the_relay_and_tampering_ends_its_sessio
         .await;
     assert_eq!(status, 404);
 
+    // A package's files come through with the headers the LAN page gets: nosniff on all, and an
+    // asset opened on its own is a sandboxed document.
+    let package = root.join("mods").join("pkg");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(package.join("mod.json"), r#"{"format":"esm"}"#).unwrap();
+    std::fs::write(package.join("main.js"), "export default 1").unwrap();
+    std::fs::write(package.join("dot.svg"), "<svg/>").unwrap();
+    let revision = crate::mods::scan(&root, &crate::mods::Policy::default())
+        .into_iter()
+        .find(|m| m.id == "pkg")
+        .unwrap()
+        .revision;
+    let file = |path: &str| {
+        serde_json::json!({
+            "method": "GET",
+            "path": format!("mods/package?id=pkg&rev={revision}&path={path}"),
+            "token": token,
+        })
+    };
+    let (status, head, body) = phone.http(7, file("main.js"), &[]).await;
+    assert_eq!(
+        (status, body.as_slice()),
+        (200, &b"export default 1"[..]),
+        "{head}"
+    );
+    assert_eq!(head["contentTypeOptions"], "nosniff", "{head}");
+    assert!(head["contentType"]
+        .as_str()
+        .unwrap()
+        .starts_with("text/javascript"));
+    let (status, head, _) = phone.http(8, file("dot.svg"), &[]).await;
+    assert_eq!(status, 200);
+    assert_eq!(head["contentTypeOptions"], "nosniff", "{head}");
+    assert!(
+        head["contentSecurityPolicy"]
+            .as_str()
+            .unwrap()
+            .contains("sandbox"),
+        "{head}"
+    );
+
     // The data socket: authenticated by the token, then a normal session.
     phone
         .send(

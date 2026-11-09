@@ -1,0 +1,6 @@
+{
+  "name": "Navigator",
+  "description": "the command palette: files, sessions, agents and > commands in one search",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

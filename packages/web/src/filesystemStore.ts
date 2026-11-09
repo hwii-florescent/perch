@@ -119,6 +119,10 @@ interface PendingFilesystemRequest {
 }
 
 export interface WorkspaceFilesState {
+  /** The editor's word wrap: a preference of the page, not of one editor view, so it survives tab switches and a
+   * reload or swap of the files screen's code. */
+  wrap: boolean;
+  setWrap: (wrap: boolean) => void;
   trees: Record<string, Record<string, WorkspaceTreeState>>;
   searches: Record<string, WorkspaceSearchState>;
   extractions: Record<string, Record<string, WorkspaceExtractionState>>;
@@ -400,6 +404,8 @@ function requestBufferResync(
 }
 
 export const useWorkspaceFilesStore = create<WorkspaceFilesState>((set, get) => ({
+  wrap: false,
+  setWrap: (wrap) => set({ wrap }),
   trees: {},
   searches: {},
   extractions: {},

@@ -1,0 +1,6 @@
+{
+  "name": "File menu",
+  "description": "the explorer's right-click menu and its prompts, and the new-file prompt",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

@@ -239,3 +239,137 @@ test("editor, file, diff and terminal captures reach the same ready agent only o
     fs.rmSync(scratch, { recursive: true, force: true });
   }
 });
+
+test("the Ask agent dialog runs from its stock package; a clone in its place prepares the same context and delivers only on its Send, and an edit changes only the clone", async ({ page, context }, testInfo) => {
+  const root = path.resolve(__dirname, "..");
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "perch-context-clone-"));
+  const fixture = path.join(scratch, "workspace"); fs.mkdirSync(fixture);
+  fs.writeFileSync(path.join(fixture, "notes.txt"), "clone bridge line\n");
+  fs.writeFileSync(path.join(scratch, "hosts.json"), '{"hosts":[]}');
+  fs.writeFileSync(path.join(scratch, "providers.json"), '{"version":1,"providers":[]}');
+  fs.writeFileSync(path.join(scratch, "settings.json"), JSON.stringify({ chatMode: "cli", permissionsSetupDismissed: true }));
+  const port = await new Promise<number>((resolve) => { const server = net.createServer(); server.listen(0, "127.0.0.1", () => { const port = (server.address() as net.AddressInfo).port; server.close(() => resolve(port)); }); });
+  const url = `http://127.0.0.1:${port}`;
+  const log = fs.openSync(path.join(scratch, "core.log"), "a");
+  let core: ChildProcess | undefined;
+  const sent: any[] = [], errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("websocket", (socket) => socket.on("framesent", ({ payload }) => sent.push(JSON.parse(String(payload)))));
+  await context.addInitScript(() => { if (location.protocol === "http:") localStorage.setItem("perch.onboarding.seen", "1"); });
+  /** `mods.set` on a short-lived socket of the page's origin; the reply's error, or null. */
+  const modsSet = (body: Record<string, unknown>) => page.evaluate((body) => new Promise<string | null>((resolve, reject) => {
+    const ws = new WebSocket(`${location.origin.replace(/^http/, "ws")}/ws`);
+    const requestId = crypto.randomUUID();
+    const timer = setTimeout(() => { ws.close(); reject(new Error("mods.set timed out")); }, 10_000);
+    ws.onopen = () => ws.send(JSON.stringify({ type: "mods.set", requestId, ...body }));
+    ws.onmessage = (event) => {
+      const answer = JSON.parse(event.data);
+      if (answer.type !== "mods.state" || answer.requestId !== requestId) return;
+      clearTimeout(timer); ws.close(); resolve(answer.error ?? null);
+    };
+  }), body);
+  const dialog = page.getByTestId("context-bridge");
+  const prepared = dialog.getByLabel("Prepared context", { exact: true });
+  const copy = page.locator('[data-testid="mod-view-e2e-my-bridge"]');
+  const sends = () => sent.filter((message) => message.type === "context.send").length;
+  /** Opens the dialog on the editor's whole selection. */
+  const ask = async () => {
+    const editor = page.getByTestId("workspace-file-editor");
+    await editor.click(); await editor.press(`${MOD}+a`);
+    await editor.click({ button: "right" });
+    await page.getByTestId("editor-menu-ask-agent").click();
+    await expect(prepared).toHaveValue(/clone bridge line/, { timeout: 15000 });
+    await expect(prepared).toHaveValue(/notes.txt:1-1/);
+  };
+  try {
+    // Stock settings for the core: its mods and layouts sit beside its database.
+    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(scratch, "history.sqlite"), "--hosts-path", path.join(scratch, "hosts.json"), "--providers-path", path.join(scratch, "providers.json")], { cwd: root, env: { ...process.env, ...fixtureRuntimeEnv(scratch), PERCH_NO_LOGIN_PATH: "1", ANTHROPIC_MODEL: CHEAP_CLAUDE_MODEL, RUST_LOG: "info" }, stdio: ["ignore", log, log] });
+    await expect.poll(async () => { if (core?.exitCode !== null) throw new Error("Core exited"); try { return (await fetch(url)).ok; } catch { return false; } }, { timeout: 20_000 }).toBe(true);
+    await page.goto(url, { waitUntil: "networkidle" });
+    await addProject(page, fixture);
+    const workspaceId = await firstWorkspaceId(page.locator(".workspace-project").filter({ hasText: "workspace" }));
+    await openWorkspaceTool(page, workspaceId, "files");
+    await page.getByTestId("workspace-file-entry-notes.txt").click();
+    await expectDoc(page.getByTestId("workspace-file-editor"), "clone bridge line\n");
+
+    // Stock: the dialog prepares the selection and sends nothing on Cancel.
+    await ask();
+    await expect(copy).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+
+    // The untouched clone, chosen in its place: the same prepared context, still nothing sent without an agent or Send.
+    expect(await modsSet({ id: "stock:context-bridge", op: "clone", as: "e2e-my-bridge" })).toBeNull();
+    const shipped = fs.readFileSync(path.join(scratch, "mods", "e2e-my-bridge", "main.js"), "utf8");
+    await expect.poll(() => modsSet({ id: "stock:context-bridge", op: "use", target: "e2e-my-bridge" }), { timeout: 15000 }).toBeNull();
+    await ask();
+    await expect(copy).toHaveCount(1);
+    await expect(dialog.getByRole("button", { name: "Send to agent", exact: true })).toBeDisabled();
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    expect(sends()).toBe(0);
+
+    // An edit to the clone shows the next time it opens; Perch's own source is untouched.
+    const main = path.join(scratch, "mods", "e2e-my-bridge", "main.js");
+    expect(shipped).toContain('"Ask agent about this"');
+    fs.writeFileSync(main, shipped.replace('"Ask agent about this"', '"My ask agent"'));
+    await expect(async () => {
+      if (!(await dialog.count())) await ask();
+      await expect(dialog.getByText("My ask agent", { exact: true })).toBeVisible({ timeout: 1000 });
+    }).toPass({ timeout: 15000 });
+    expect(await (await page.request.get(`${url}/stock-ui/context-bridge/main.js`)).text()).toBe(shipped);
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+
+    // One cheap Claude CLI, started by the person and checked by its banner before the only prompt.
+    await page.getByTestId("tab-new").click();
+    await page.getByTestId("new-session-provider-claude").click();
+    const terminal = page.getByTestId("persistent-agent-terminal");
+    await expect(terminal).toHaveAttribute("data-controlling", "true", { timeout: 15000 });
+    await expect(terminal.locator(".xterm-rows")).toContainText(/bypass permissions on|Yes, I trust this folder/, { timeout: 30_000 });
+    await page.waitForTimeout(300);
+    if ((await terminal.locator(".xterm-rows").innerText()).includes("Yes, I trust this folder")) {
+      if ((await terminal.locator(".xterm-rows").innerText()).includes("❯ No, exit")) await terminal.locator(".xterm-helper-textarea").press("ArrowDown");
+      await expect(terminal.locator(".xterm-rows")).toContainText("❯ Yes, I trust this folder");
+      await terminal.locator(".xterm-helper-textarea").press("Enter");
+    }
+    await expect(terminal.locator(".xterm-rows")).toContainText("bypass permissions on", { timeout: 30_000 });
+    await expect(terminal.locator(".xterm-rows")).toContainText(/Haiku 4.5/i);
+    const targetSessionId = await terminal.getAttribute("data-session-id");
+    expect(targetSessionId).toBeTruthy();
+
+    // The clone's Send is the only send: one context.send, delivered once to the chosen agent.
+    await openWorkspaceTool(page, workspaceId, "files");
+    await page.getByTestId("workspace-file-entry-notes.txt").click();
+    await ask();
+    await expect(copy).toHaveCount(1);
+    const marker = `CLONE_BRIDGE_OK_${Date.now()}`;
+    await dialog.getByLabel("Question for agent", { exact: true }).fill(`Do not use tools, execute commands, or modify files. If the excerpt contains clone bridge line, reply exactly ${marker}.`);
+    await choose(dialog.getByLabel("Agent in this workspace", { exact: true }), targetSessionId!);
+    await expect(dialog.getByRole("button", { name: "Send to agent", exact: true })).toBeEnabled();
+    expect(sends()).toBe(0);
+    await dialog.getByRole("button", { name: "Send to agent", exact: true }).click();
+    await expect(dialog.getByRole("status")).toContainText("Context delivered", { timeout: 20_000 });
+    expect(sends()).toBe(1);
+    await dialog.getByRole("button", { name: "Open agent", exact: true }).click();
+    await expect(terminal.locator(".xterm-rows")).toContainText(marker, { timeout: 90_000 });
+    expect(execFileSync("sqlite3", [path.join(scratch, "history.sqlite"), "SELECT count(*) FROM prompt_operations WHERE state = 'delivered'"], { encoding: "utf8" }).trim()).toBe("1");
+
+    // Back to stock: Perch's own dialog, without the clone's edit.
+    expect(await modsSet({ id: "stock:context-bridge", op: "use", target: "" })).toBeNull();
+    await openWorkspaceTool(page, workspaceId, "files");
+    await page.getByTestId("workspace-file-entry-notes.txt").click();
+    await ask();
+    await expect(copy).toHaveCount(0);
+    await expect(dialog.getByText("My ask agent", { exact: true })).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    expect(sends()).toBe(1);
+    expect(fs.readFileSync(path.join(fixture, "notes.txt"), "utf8")).toBe("clone bridge line\n");
+    await terminal.locator(".xterm-helper-textarea").pressSequentially("/exit");
+    await terminal.locator(".xterm-helper-textarea").press("Enter");
+    expect(errors).toEqual([]);
+  } finally {
+    if (core && core.exitCode === null && core.signalCode === null) { const child = core; await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGKILL"); }); }
+    await cleanupFixtureRuntime(root, scratch);
+    fs.closeSync(log);
+    await testInfo.attach("core.log", { body: fs.readFileSync(path.join(scratch, "core.log")), contentType: "text/plain" });
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});

@@ -1,0 +1,6 @@
+{
+  "name": "Launcher",
+  "description": "the keyboard-first New session picker: a project, then an agent, a terminal, a browser or a file",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

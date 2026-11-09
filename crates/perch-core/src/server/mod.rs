@@ -98,6 +98,7 @@ mod reporter;
 use agents::{connection_client_identity, lifecycle_status_to_wire};
 mod surfaces;
 mod terminal;
+mod terminal_read;
 mod uploads;
 #[cfg(test)]
 use terminal::claude_conversation_exists_in;
@@ -271,6 +272,9 @@ struct AppState {
     /// The directory that holds `memory/<project id>/` (`crate::memory`): the history
     /// database's own directory, so it lives as long as the database and follows `PERCH_DB`.
     memory_root: PathBuf,
+    /// The served web build's `stock-ui/` (`crate::mods::stock`): the stock screens this core lists and
+    /// clones. Absent with no web build.
+    stock_ui_dir: PathBuf,
     default_cwd: String,
     /// Session ids that currently have an agent turn in flight.
     running_sessions: Arc<Mutex<HashSet<String>>>,
@@ -278,11 +282,9 @@ struct AppState {
     /// currently viewing it (i.e. it's their `active_session_id`). A session
     /// with no entry, or an entry with an empty set, has no viewers.
     session_viewers: Arc<Mutex<HashMap<String, HashSet<String>>>>,
-    /// What the person's page last said about loading each mod: `(revision, error)`. `perch mod
-    /// check` reads it; memory only, since a reloaded page reports again.
-    mod_reports: Arc<Mutex<HashMap<String, (String, Option<String>)>>>,
-    /// Answers to `mods.snapshot.request` by request id (`perch mod dom`): `(html, text, error)`.
-    mod_snapshots: Arc<Mutex<HashMap<String, (String, String, Option<String>)>>>,
+    /// What the person's pages said about loading mods, per viewer and copy, and their answers to
+    /// `perch mod do/dom` (`mods::ModDiagnostics`).
+    mod_diagnostics: Arc<Mutex<mods::ModDiagnostics>>,
     /// Local session ids that finished a turn while unviewed (herdr's `done`
     /// state). Cleared the moment any connection views the session again.
     unseen_sessions: Arc<Mutex<HashSet<String>>>,
@@ -598,11 +600,11 @@ pub async fn run(
     let state = AppState {
         db,
         memory_root,
+        stock_ui_dir: options.web_dist_dir.join("stock-ui"),
         default_cwd: effective_cwd,
         running_sessions,
         session_viewers: Arc::new(Mutex::new(HashMap::new())),
-        mod_reports: Arc::new(Mutex::new(HashMap::new())),
-        mod_snapshots: Arc::new(Mutex::new(HashMap::new())),
+        mod_diagnostics: Arc::new(Mutex::new(mods::ModDiagnostics::default())),
         unseen_sessions: Arc::new(Mutex::new(HashSet::new())),
         blocked_sessions: Arc::new(Mutex::new(HashSet::new())),
         stale_sessions: Arc::new(Mutex::new(HashSet::new())),
@@ -907,6 +909,10 @@ pub async fn run(
             post(agent::mod_layout).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(
+            &format!("{base_path}agent/mod/use"),
+            post(agent::mod_use).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
             &format!("{base_path}agent/mod/open"),
             post(agent::mod_open).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
@@ -943,6 +949,7 @@ pub async fn run(
             post(agent::mod_check).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(&format!("{base_path}mods/file"), get(mods::file))
+        .route(&format!("{base_path}mods/package"), get(mods::package))
         .route(
             &format!("{base_path}mods/exec"),
             post(mods::exec).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
@@ -950,6 +957,18 @@ pub async fn run(
         .route(
             &format!("{base_path}mods/fs"),
             post(mods::fs).layer(axum::extract::DefaultBodyLimit::max(6 * 1024 * 1024)),
+        )
+        .route(
+            &format!("{base_path}terminal/read"),
+            post(terminal_read::person_read).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/terminal/read"),
+            post(agent::terminal_read).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}mods/data"),
+            post(mods::data).layer(axum::extract::DefaultBodyLimit::max(2 * 1024 * 1024)),
         )
         .route(&format!("{base_path}workspace-file"), get(fs::file_content))
         .with_state(state);
@@ -2168,6 +2187,9 @@ struct ConnState {
     released_agent_views: Mutex<std::collections::VecDeque<String>>,
     agent_input_leases: Mutex<HashMap<String, crate::agent_fleet::ControlLease>>,
     agent_resize_leases: Mutex<HashMap<String, crate::agent_fleet::ControlLease>>,
+    /// Mod formats this page said it loads in its last `mods.list` (`accepts`); empty for an older
+    /// page, which is then never shown a package (`mods::state_message`).
+    mod_formats: Mutex<Vec<String>>,
 }
 
 /// RAII guard that decrements `AppState::connected_clients` on drop, so the
@@ -2338,6 +2360,7 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
         released_agent_views: Mutex::new(std::collections::VecDeque::new()),
         agent_input_leases: Mutex::new(HashMap::new()),
         agent_resize_leases: Mutex::new(HashMap::new()),
+        mod_formats: Mutex::new(Vec::new()),
     });
 
     // Send initial status.update and server.info once per connection.
@@ -2568,6 +2591,12 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
     state.terminals.dispose_all();
     state
         .app
+        .mod_diagnostics
+        .lock()
+        .unwrap()
+        .drop_viewer(&state.conn_id);
+    state
+        .app
         .workspace_terminals
         .release_connection(&state.conn_id);
     // Task 1: detach this connection as a viewer from every shared agent
@@ -2661,6 +2690,8 @@ fn foundation_capabilities() -> Vec<String> {
         "mods.v1",
         "mods.report.v1",
         "mods.snapshot.v1",
+        "mods.package.v1",
+        "mods.report.v2",
         "crew.v1",
         "crew.actions.v1",
         "suggestions.v1",

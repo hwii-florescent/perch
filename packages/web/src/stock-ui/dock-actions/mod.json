@@ -1,0 +1,6 @@
+{
+  "name": "Dock group actions",
+  "description": "the buttons at the end of a docked pane group's tab strip: add a shell, split a session in, the pane menu",
+  "version": "1.0.0",
+  "api": "^1.10"
+}

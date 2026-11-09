@@ -8,6 +8,11 @@ const SOCKET_PATH = "__PERCH_NATIVE_SOCKET__";
 const PROVIDER = "__PERCH_NATIVE_PROVIDER__";
 const MAX_FRAME = 256 * 1024;
 const MAX_TRANSCRIPT = 192 * 1024;
+// A snapshot holds only the newest WINDOW messages. Older ones are asked for with `page` and come back
+// in a frame of their own (at most PAGE messages and MAX_TRANSCRIPT bytes), so the whole conversation is
+// reachable and no frame holds more than a page. The core keeps what it was sent (native_ui/history.rs).
+const WINDOW = 128;
+const PAGE = 200;
 const RECEIPT_TYPE = "dev.perch.ui.operation";
 
 export default function (pi: any) {
@@ -73,7 +78,7 @@ export default function (pi: any) {
     let bytes = 0;
     for (let index = history.length - 1; index >= 0; index--) {
       bytes += Buffer.byteLength(JSON.stringify(history[index]));
-      if (bytes > MAX_TRANSCRIPT || history.length - index > 128) {
+      if (bytes > MAX_TRANSCRIPT || history.length - index > WINDOW) {
         history = history.slice(index + 1); historyTruncated = true; break;
       }
     }
@@ -87,10 +92,36 @@ export default function (pi: any) {
       const entry = branch[index];
       const normalized = message(entry.type === "custom_message" ? { role: "custom", content: entry.content, display: entry.display } : entry.message, entry.id);
       if (!normalized) continue;
-      if (history.length === 128) { historyTruncated = true; break; }
+      if (history.length === WINDOW) { historyTruncated = true; break; }
       history.unshift(normalized);
     }
     boundHistory(); historyDirty = false;
+  }
+  // The id `message()` gives an entry, without normalizing it.
+  function entryId(entry: any): string | undefined {
+    const raw = entry.type === "custom_message" ? { role: "custom", timestamp: undefined } : entry.message;
+    if (!raw) return undefined;
+    return raw.timestamp != null ? `${raw.role}:${raw.timestamp}:${raw.toolCallId ?? ""}` : entry.id;
+  }
+  // The messages just before the one with id `before` (the oldest the core holds), oldest first, up to a
+  // page of PAGE messages and MAX_TRANSCRIPT bytes. `more`: there are still older ones.
+  function page(requestId: string, before: unknown) {
+    const branch = ctx.sessionManager.getBranch();
+    let index = typeof before === "string" ? branch.findIndex((entry: any) => entryId(entry) === before) : branch.length;
+    if (index < 0) index = 0;
+    const normalize = (entry: any) => message(entry.type === "custom_message" ? { role: "custom", content: entry.content, display: entry.display } : entry.message, entry.id);
+    const messages: any[] = [];
+    let bytes = 0;
+    for (index--; index >= 0 && messages.length < PAGE; index--) {
+      const normalized = normalize(branch[index]);
+      if (!normalized) continue;
+      bytes += Buffer.byteLength(JSON.stringify(normalized));
+      if (messages.length && bytes > MAX_TRANSCRIPT) break;
+      messages.unshift(normalized);
+    }
+    let more = false;
+    for (; index >= 0 && !more; index--) more = normalize(branch[index]) !== null;
+    return { type: "page", requestId, messages, more };
   }
   function snapshot() {
     if (historyDirty) refreshHistory();
@@ -176,6 +207,7 @@ export default function (pi: any) {
     if (!requestId || requestId.length > 128) { client.destroy(); return; }
     try {
       if (request.type === "snapshot") { send(client, snapshot()); return; }
+      if (request.type === "page") { send(client, page(requestId, request.before)); return; }
       if (request.type === "cancel") {
         ctx.abort();
         send(client, { type: "ack", requestId, accepted: true });
@@ -207,7 +239,9 @@ export default function (pi: any) {
       receipt(requestId, "dispatching");
       // This is the CLI's native user-input API. It runs its own extensions,
       // tools, context, auth, and approvals. Perch supplies no system prompt.
-      const result = pi.sendUserMessage(request.text, ctx.isIdle() ? { expandPromptTemplates: true } : { deliverAs: "followUp", expandPromptTemplates: true });
+      // While a turn runs, `steer: true` puts the message into it; otherwise it queues behind it. Decided here,
+      // where the idle check is, so a turn that just ended starts a new one instead of failing a steer.
+      const result = pi.sendUserMessage(request.text, ctx.isIdle() ? { expandPromptTemplates: true } : { deliverAs: request.steer === true ? "steer" : "followUp", expandPromptTemplates: true });
       Promise.resolve(result).catch(() => schedule(0));
       receipt(requestId, "accepted");
       send(client, { type: "ack", requestId, accepted: true });

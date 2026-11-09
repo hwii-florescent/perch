@@ -3,11 +3,23 @@ import type { ModInfo } from "@perch/shared";
 import { createSwapper } from "../modApp";
 import { currentMods, modFileUrl, reportMod, subscribeMods } from "../mods";
 import { GHOST_BUTTON } from "./ui/icon-button";
+import { ModRoot, PhoneRefusal, usePersonCode } from "./mod-root";
 
 /** A mod's view: its own JavaScript, run inside Perch with the person's full access. A newer version
  * replaces the old only once it has mounted, so a broken edit leaves the last good one in place and
- * says why. It reloads by itself when the mod's files change. `hidden` is a mod with no view. */
-export function ModView({ mod, hidden, props }: { mod: ModInfo; hidden?: boolean; props?: Record<string, unknown> }) {
+ * says why. It reloads by itself when the mod's files change. `hidden` is a mod with no view.
+ * `instance` names where this copy is (a package's instance, `mod-runtime.ts`); a `layout` one is
+ * kept while hidden. A single-file mod has no instances and ignores both. */
+export function ModView({ instance, owner, ...args }: { mod: ModInfo; hidden?: boolean; props?: Record<string, unknown>; instance?: string; owner?: "layout" | "view" }) {
+  return args.mod.format === "esm" ? <ModRoot {...args} instance={instance} owner={owner} /> : <ScriptModView {...args} />;
+}
+
+/** A single-file mod: a desktop's, never run on a phone (`phoneMods.ts`). */
+function ScriptModView(args: { mod: ModInfo; hidden?: boolean; props?: Record<string, unknown> }) {
+  return usePersonCode(args.mod, null) ? <AllowedScriptModView {...args} /> : <PhoneRefusal mod={args.mod} hidden={args.hidden} />;
+}
+
+function AllowedScriptModView({ mod, hidden, props }: { mod: ModInfo; hidden?: boolean; props?: Record<string, unknown> }) {
   const host = useRef<HTMLDivElement>(null);
   const swapper = useRef<ReturnType<typeof createSwapper> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -36,15 +48,15 @@ export function ModOverlay({ mod, onClose }: { mod: ModInfo; onClose: () => void
           <h2 className="m-0 text-[0.9rem] font-semibold text-fg">{mod.name}</h2>
           <button type="button" className={GHOST_BUTTON} onClick={onClose} autoFocus>Close</button>
         </div>
-        <ModView mod={mod} />
+        <ModView mod={mod} instance={`overlay:${mod.id}`} />
       </div>
     </div>
   );
 }
 
 /** A mod shown as a tab or a tile of the canvas (`tab.new {mod}`, `pane.split {mod}`). */
-export function ModPane({ modId, props }: { modId: string; props?: Record<string, unknown> }) {
+export function ModPane({ modId, props, instance }: { modId: string; props?: Record<string, unknown>; instance?: string }) {
   const mod = useSyncExternalStore(subscribeMods, currentMods)?.mods.find((candidate) => candidate.id === modId);
   if (!mod?.enabled || mod.error) return <div className="inactive-session-pane">{`mod ${modId} is off or gone.`}</div>;
-  return <div tabIndex={-1} data-mod-pane className="flex h-full w-full min-h-0 flex-1 [outline:none]"><ModView mod={mod} props={props} /></div>;
+  return <div tabIndex={-1} data-mod-pane className="flex h-full w-full min-h-0 flex-1 [outline:none]"><ModView mod={mod} props={props} instance={instance} /></div>;
 }

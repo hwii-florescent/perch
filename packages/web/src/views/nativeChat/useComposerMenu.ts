@@ -3,9 +3,10 @@ import { usePerchStore } from "../../store";
 import { filterCommands } from "../../composerCommands";
 import { activeMenu, applyMenuItem, sigilLists, type ActiveMenu } from "./menuTokens";
 import { useFileSearch } from "./useFileSearch";
-import type { MenuItem } from "./MenuList";
 
 const MAX_FILES = 20;
+
+export interface MenuItem { key: string; label: string; detail?: string }
 
 /** The composer's autocomplete: which menu the caret is in, its items and the highlighted one.
  * Esc dismisses it until the token under the caret ends. */

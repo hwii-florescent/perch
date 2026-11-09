@@ -25,6 +25,103 @@ shells, real agent CLIs
   notifications and native child browser webviews.
 - **Web** renders WS-driven state and owns view-local presentation. Do not
   confuse focus/layout with runtime authority.
+- **Stock screens** (`packages/web/src/stock-ui/<id>/`) are presentation only and
+  import nothing of the app but `@perch/sdk` (`src/perch-sdk.d.ts`, implemented in
+  `src/sdk.ts`; [guide](MOD-SDK.md)). `npm run build` exports them to plain JS in
+  the web build (`dist/stock-ui/`, `scripts/export-stock-ui.mjs` run by the Vite
+  build, so the service worker precaches them with the shell); the page loads
+  them from its own origin through the package loader (`mod-runtime.ts`,
+  `components/mod-root.tsx`), mods on or off. The core only lists and clones them
+  (`mods::stock`, `mods::clone_stock`) from the web build it serves, as
+  `stock:<id>`; a core without one has none. Stores, services and sanitizers
+  (`markdown.ts`, `SafeHtml`, `uiBlocks`) stay app-owned and are not cloned.
+  The status bar, tab strip and split panes' headers are stock screens
+  (`StockView` in `App.tsx`, `LayoutRoot.tsx`, `SplitCanvas.tsx`); the canvas,
+  its terminals, sizes, drag grips, focus and the tab drag engine stay in the
+  app, and a screen acts on them only through SDK hooks and the typed command
+  registry with explicit tab ids (`modCommands.ts`). The sidebar is one too: its
+  data and rules (which sessions are listed, order, attention, the chat held in
+  Done) live in `navigation.ts` behind the SDK's navigation hooks, its actions
+  are typed commands naming their target, and the phone's switcher renders the
+  same source compiled in, so it does not follow `use`. `layout-state.json` `use`
+  (`layouts::uses`) names a person's package to show in a stock screen's place.
+  The Git review is one as well (`stock:review`, on `useGitReview` over
+  `gitReviewStore`); the phone's Git pane renders its source compiled in.
+- **Phones run only their own screens.** `phoneMods.ts` decides, for every
+  person's package (`usePersonCode` in `mod-root.tsx`, `ModView`, `ModsHost`,
+  `useStockChoice`): a phone (phone width, or any relay page) runs a copy only
+  for a `stock:mobile-*` screen, and only after "Phone screens from my packages"
+  is on in that device's storage; never a desktop screen's copy, a layout, or a
+  docked, hidden or overlay package. A page that loses its pairing clears the
+  choice (`App.tsx`). The phone's shell (`MobileHeader`, `MobileSwitcher`,
+  `MobilePaneShell`, `MobileFiles`, `MobileKeyBar`) is thin host routes over
+  those five stock screens.
+- **Terminal and dock chrome are screens; authority is not.** The shell
+  toolbar, the agent control chip and banners (`stock:agent-control`, drawn as
+  `top` and `bottom` parts so the banner stays over the surface), a docked
+  pane's tab and group buttons and the browser toolbar are stock screens whose
+  buttons call Perch's actions: lease moves (`takeControl`), process start/stop,
+  dockview and the dock controller, the browser engine and its address draft
+  stay in the host files.
+- **Unsent work is host-owned, never a screen's.** Code that can be reloaded,
+  swapped for a clone or released while hidden must not own a draft, an
+  operation id or a send in flight: the native chat composer's draft, retry id,
+  outbox and receipts live per chat in `chatComposer.ts` (which also runs the
+  send), and a screen's own drafts and pending operations go in
+  `resourceState.ts` (`useResourceState`), keyed by resource. Terminal, layout
+  and focus queries (`terminalRecords`, `layoutTree`, `focusInfo`,
+  `readTerminalAt`, `sendTerminalAt` in `modApp.ts`) read the owning services
+  and the terminal keeper, not the screen's DOM, and take host-qualified
+  `<host>/<session>` targets. The same holds for files (`useWorkspaceFiles`
+  over `filesystemStore`), the native chat (`useNativeChat` in
+  `chatSession.ts`) and the drawer's pages (`drawerBrowsers.ts`); Markdown
+  reaches a screen only through the fixed `ChatMarkdown`/
+  `WorkspaceMarkdownPreview` sanitizers.
+- **Terminal engines** (`PersistentTerminal`, `PersistentAgentTerminal`) are
+  host code a package places, never package source. Under `BorrowTerminals`
+  (`LayoutContent` in mod surfaces, the SDK's `Layout`, a peek) the keeper moves
+  the one kept view into the new place and back on release (`showTerminal`
+  `borrow`), so there is never a second input or resize owner and releasing
+  never stops a process; elsewhere a second view of an on-screen terminal is a
+  separate, unkept observer, as before.
+- **Package copies** are instances in the page's table (`mod-runtime.ts`), keyed
+  by place (`layout:<layout>:<node>`, `pane:<tab>`, …). The instance, not the
+  React view, owns the generation (component and `ModApi`), its tracked
+  operations, its held state, and its revision's CSS and asset object URLs. A
+  layout copy is parked while hidden and released when `LayoutRoot` drops its
+  node. A new revision disposes the old `ModApi` before the new tree mounts.
+  Over the relay, package files go only through the sealed tunnel, at most 8 at
+  a time. The core keeps load reports per viewer (its connection id), instance
+  and revision (`server/mods.rs`, `ModDiagnostics`, bounded, oldest out). A
+  targeted `perch mod dom/do` is answered only by that viewer.
+- **Mod data** (`mod_data.rs`, `POST /mods/data`) is the person's: JSON values
+  per package id in `mod-data/<id>/`, outside every package folder, so a clone
+  or reinstall never copies or loses it. Revisions are content hashes; writes
+  are atomic and serialised, conflicts are 409, unreadable bytes are kept aside.
+  Agent tokens are refused.
+- **Terminal reads** for a terminal the page never opened go through the core
+  (`server/terminal_read.rs`): `POST /terminal/read` (person, any local session)
+  and `POST /agent/terminal/read` (an agent, its own session only), target
+  `<host>/<session>`, from perchd's snapshot. A remote host's session is refused
+  (501) and an unreachable daemon is "unknown" (503), never "exited".
+- **Safe start**: `bootGuard.ts` marks a person's package in device storage
+  while it starts; a mark left by a page that never finished turns that package
+  off on the next load (a page left normally, `pagehide`, clears its own marks
+  first). A chosen copy that fails falls back to stock with a
+  notice (`useStockChoice` in `mod-root.tsx`). The dialogs and menus
+  (`confirm`, `toast`, `dialog`, `select`, the tab/pane/file menus, launcher,
+  Navigator, worktree, instructions, memory, …) are compiled stock unless a
+  copy is chosen (`StockRoute`); their host files keep the data and actions.
+  So are the Settings pages (`components/settingsRoutes.tsx`), whose engines
+  (machine check, pairing, relay, notification permission, key recording) stay
+  in host files; the Settings frame and Settings > Mods are host-owned, the
+  recovery path. Perch's window is the layout `stock:main` (web build
+  `stock-ui/layouts/main.json`, listed and cloned by `layouts::stock` and
+  `layouts::clone_stock`); Perch as shipped is drawn by the recovery shell
+  `StockWindow.tsx` from the same `window:*` parts, so a broken layout copy
+  always falls back to it. Keyed and kept mod windows (`modUi.ts`) are
+  device-local, bounded, and a kept window belongs to the layout shown when it
+  opened (`setWindowOwner` from `App.tsx`).
 - **perchd** is detached from core lifetime. Core starts it as
   `<exe> __perchd serve`; a standalone binary is also built for remote use.
   It does not own project/filesystem/Git/agent-product semantics.
@@ -256,8 +353,9 @@ is a third way in. The core dials out to a user-deployed Worker and serves each
 phone as an end-to-end sealed session (key in the link fragment, AES-256-GCM,
 nonces and counters bound into every frame). Tunnelled requests reach the same
 router and `/ws` marked `x-perch-relay`, so they are remote and need a paired
-token; only `pair`, `ws`, `workspace-file`, `clipboard-image` and `upload`
-are carried. The relay's address is the `relayUrl` setting, changed only from
+token; only `pair`, `ws`, `workspace-file`, `clipboard-image`, `upload`,
+`mods/package` and `mods/data` are carried (exact match, `ROUTES` in
+`relay/host.rs` and `relay/transport.ts`). The relay's address is the `relayUrl` setting, changed only from
 the computer itself. `relay.json` beside `devices.json` holds its identity.
 `wire.rs` and `wire.ts` must change together (`wire.fixture.json`).
 

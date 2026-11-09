@@ -261,7 +261,11 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
 
     // 7. One packet to the session the phone is already driving (turn 2 of 2).
     const receipt = `PHONE_REVIEW_OK_${RUN_ID}`;
-    await choose(phone.getByLabel("Send to agent session"), sessionId!);
+    // The open list carries the same name as its trigger: pick the combobox. The review selects the session this
+    // phone drives by itself once it knows it, which closes a list opened just before: wait for that, else choose.
+    const target = phone.getByRole("combobox", { name: "Send to agent session" });
+    await expect(target).toHaveAttribute("data-value", sessionId!, { timeout: 15_000 }).catch(() => choose(target, sessionId!));
+    await expect(target).toHaveAttribute("data-value", sessionId!);
     await phone.getByLabel("Request", { exact: true }).fill(`Do not modify files or use tools. If this packet includes both notes, reply with exactly ${receipt}.`);
     await phone.getByTestId("git-review-preview").click();
     const packet = phone.getByTestId("git-review-packet");

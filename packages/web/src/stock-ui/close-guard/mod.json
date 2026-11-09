@@ -1,0 +1,6 @@
+{
+  "name": "Close guard",
+  "description": "the warning before closing an agent's tab stops its agent and shells for everyone",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

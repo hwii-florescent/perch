@@ -162,7 +162,8 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
     // 2. Image: staged through the real upload endpoint, shown as a chip, handed to the agent as an attachment.
     await check("image", async () => {
       await ui.getByTestId("native-cli-file-input").setInputFiles(path.join(fixture, "red.png"));
-      await expect(ui.getByTestId("native-cli-attachments").getByText("red.png")).toBeVisible({ timeout: 15_000 });
+      // A picture is a thumbnail named only by its label (`nativeChat/Attachments.tsx`), not a text chip.
+      await expect(ui.getByTestId("native-cli-attachments").getByRole("button", { name: "Preview red.png" })).toBeVisible({ timeout: 15_000 });
       await box.fill("What single colour fills the attached image? Reply with only the colour name.");
       const reply = await sendAndWait();
       await testInfo.attach("image-reply", { body: reply, contentType: "text/plain" });

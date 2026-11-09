@@ -1,0 +1,6 @@
+{
+  "name": "Folder browser",
+  "description": "picks a folder on a host: Add project, a session's folder",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

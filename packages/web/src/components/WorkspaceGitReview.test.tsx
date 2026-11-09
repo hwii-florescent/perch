@@ -3,8 +3,9 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WorkspaceGitReview, type WorkspaceGitReviewProps } from "./WorkspaceGitReview";
+import { WorkspaceGitReview, type WorkspaceGitReviewProps } from "../stock-ui/review/review";
 import { chooseDropdown } from "./ui/selectTesting";
+import { resetResourceStateForTest } from "../resourceState";
 import type {
   GitDiffSnapshot,
   GitStatusSnapshot,
@@ -164,6 +165,55 @@ afterEach(async () => {
   host?.remove();
   host = null;
   document.body.innerHTML = "";
+  resetResourceStateForTest();
+});
+
+/** Replaces the view, as a code reload, a swap to a clone, a released hidden copy or the phone/desktop breakpoint do. */
+async function replaceView(nextProps: WorkspaceGitReviewProps): Promise<void> {
+  await act(async () => root?.unmount());
+  root = null;
+  await render(nextProps);
+}
+
+describe("review state the host keeps for the workspace", () => {
+  it("keeps the commit message, the comment draft and a prepared packet when the view is replaced", async () => {
+    const actionSet = actions();
+    await render({ ...props(actionSet), comments: [comment] });
+    const commit = document.querySelector<HTMLInputElement>('input[placeholder="Describe the change"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(commit, "Fix the anchor");
+      commit.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      (document.querySelector('[data-testid="git-review-preview"]') as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+    expect(document.querySelector('[data-testid="git-review-packet"]')).not.toBeNull();
+    await replaceView({ ...props(actionSet), comments: [comment] });
+    expect(document.querySelector<HTMLInputElement>('input[placeholder="Describe the change"]')!.value).toBe("Fix the anchor");
+    expect(document.querySelector('[data-testid="git-review-packet"]')?.textContent).toContain(packet.packetId);
+    expect(actionSet.previewBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not send a packet twice when the view is replaced while it is in flight", async () => {
+    let settle!: (value: null) => void;
+    const actionSet = actions({ sendBatch: vi.fn(() => new Promise<null>((resolve) => { settle = resolve; })) });
+    await render({ ...props(actionSet), comments: [comment] });
+    await act(async () => {
+      (document.querySelector('[data-testid="git-review-preview"]') as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+    await act(async () => (document.querySelector('[data-testid="git-review-send"]') as HTMLButtonElement).click());
+    await replaceView({ ...props(actionSet), comments: [comment] });
+    const send = document.querySelector('[data-testid="git-review-send"]') as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    await act(async () => send.click());
+    expect(actionSet.sendBatch).toHaveBeenCalledTimes(1);
+    // The answer reaches the replaced view: the shared state, not the view that sent it, settles.
+    await act(async () => { settle(null); });
+    expect((document.querySelector('[data-testid="git-review-send"]') as HTMLButtonElement).disabled).toBe(false);
+    expect(actionSet.sendBatch).toHaveBeenCalledWith(packet.packetId, packet.sendOperationId);
+  });
 });
 
 describe("WorkspaceGitReview interaction truthfulness", () => {

@@ -6,7 +6,7 @@ import type { DirectoryEntry, GitStatusEntry } from "@perch/shared";
 import { fileAppearance, gitPresentation, indexGitDecorations } from "./fileDecorations";
 
 vi.mock("../ws", () => ({ socket: { connected: true, send: vi.fn(), connect: vi.fn(), onMessage: vi.fn(() => () => {}), onConnectionChange: vi.fn(() => () => {}) } }));
-const { WorkspaceFilesView } = await import("./WorkspaceFiles");
+const { WorkspaceFilesView } = await import("../stock-ui/files/files");
 const { usePerchStore } = await import("../store");
 const { useWorkspaceFilesStore } = await import("../filesystemStore");
 const { useWorkspaceGitReviewStore, EMPTY_GIT_REVIEW_STATE } = await import("../gitReviewStore");

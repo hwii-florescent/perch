@@ -19,6 +19,7 @@
  *   E2 — "+ New session" on the remote host creates a session under it
  *   E4 — a remote claude terminal renders, takes /exit, shows the exited banner
  *   E5 — disable host in settings → disabled dot in the switcher; re-enable → connected
+ *   E8 — a remote agent made over the protocol peeks like a local one (the same xterm, nothing stopped)
  *
  * Screenshots saved to e2e/screenshots-federation/ (NOT under artifacts/ which
  * Playwright wipes on each run).
@@ -27,6 +28,8 @@
 import { test, expect, type Page } from "@playwright/test";
 import { choose } from "./select";
 import { withLocalToken } from "./localAuth";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -337,6 +340,91 @@ test.describe("Stage F3: federation e2e", () => {
     await expect(row.locator(".host-state--connected")).toBeVisible({ timeout: 15000 });
 
     await shot(page, "fed-e1-connected.png");
+  });
+
+  // -------------------------------------------------------------------------
+  // E8 — a remote agent, made over the protocol (not E2's picker path, a known
+  //      base failure; it runs before E2 so the serial run reaches it), peeks
+  //      through a package's `terminal.peek` like a local one
+  // -------------------------------------------------------------------------
+  test("E8. a remote agent made over the protocol peeks like a local one: the same xterm moves into the peek and back, and closing stops nothing", async ({ page }) => {
+    test.setTimeout(120000);
+    page.on("pageerror", (error) => console.log("PAGEERROR", error.message));
+    type Store = { getState(): { createSessionOnHost(host: string, cwd?: string, agent?: string): void; deleteSession(id: string): void } };
+    const home = path.join(process.env.PERCH_E2E_STATE ?? "", "hub");
+    const mod = path.join(home, "mods", "e2e-remote-peek");
+    const layout = path.join(home, "layouts", "e2e-remote-peek.json");
+    const modsSet = (body: Record<string, unknown>) => page.evaluate((body) => new Promise<string | null>((resolve, reject) => {
+      const ws = new WebSocket(`${location.origin.replace(/^http/, "ws")}/ws`);
+      const requestId = crypto.randomUUID();
+      const timer = setTimeout(() => { ws.close(); reject(new Error("mods.set timed out")); }, 10_000);
+      ws.onopen = () => ws.send(JSON.stringify({ type: "mods.set", requestId, ...body }));
+      ws.onmessage = (event) => {
+        const answer = JSON.parse(event.data);
+        if (answer.type !== "mods.state" || answer.requestId !== requestId) return;
+        clearTimeout(timer); ws.close(); resolve(answer.error ?? null);
+      };
+    }), body);
+    let id: string | null = null;
+    try {
+      // A package that peeks the shown session with Perch's own command, in a layout beside the canvas.
+      fs.mkdirSync(mod, { recursive: true });
+      fs.writeFileSync(path.join(mod, "mod.json"), JSON.stringify({ name: "Remote peek", format: "esm", api: "^1.5" }));
+      fs.writeFileSync(path.join(mod, "main.js"), [
+        'import { jsx } from "react/jsx-runtime";',
+        'import { runCommand } from "@perch/sdk";',
+        'export default function Peek() { return jsx("button", { "data-testid": "remote-peek", onClick: () => runCommand("terminal.peek", { id: localStorage.getItem("perch.sessionId") }), children: "peek" }); }',
+      ].join("\n"));
+      fs.mkdirSync(path.dirname(layout), { recursive: true });
+      fs.writeFileSync(layout, JSON.stringify({ name: "Remote peek", type: "row", children: [
+        { type: "block", content: "sidebar", size: { px: 240 } },
+        { type: "column", children: [{ type: "block", content: "tabs", size: { px: 36 } }, { type: "block", content: "canvas" }] },
+        { type: "block", content: "mod:e2e-remote-peek", size: { px: 120 } },
+      ] }));
+      await freshSession(page);
+      await expect.poll(() => modsSet({ id: "e2e-remote-peek", op: "layout" }), { timeout: 15000 }).toBeNull();
+      await expect(page.getByTestId("remote-peek")).toBeVisible({ timeout: 15000 });
+      await switchToHost(page, REMOTE_HOST_ID, REMOTE_HOST_NAME);
+      const before = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
+      // `session.create` with the host, then the agent's start: the store's own requests, without the picker.
+      await page.evaluate((host) => (window as unknown as { usePerchStore: Store }).usePerchStore.getState().createSessionOnHost(host, undefined, "claude"), REMOTE_HOST_ID);
+      await expect.poll(async () => {
+        const now = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
+        return now && now !== before ? now : null;
+      }, { timeout: 15000 }).not.toBeNull();
+      id = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
+      await expect(page.getByTestId(`tab-${id}`)).toBeVisible({ timeout: 15000 });
+      // The approved cheap model, by its banner; nothing is ever typed to it.
+      const xterm = page.locator(".xterm");
+      await expect(page.locator(".xterm-rows").first()).toContainText(/Haiku 4\.5/i, { timeout: 30_000 });
+      await expect(xterm).toHaveCount(1);
+      await xterm.evaluate((el) => el.setAttribute("data-e2e-same", "1"));
+      await page.getByTestId("remote-peek").click();
+
+      // The same xterm (no second copy) moves into the peek, with the agent's screen.
+      const peek = page.getByTestId("mod-api-overlay-terminal-peek");
+      const lent = peek.locator(`[data-testid="borrowed-legacy-terminal"][data-session-id="${id}"]`);
+      await expect(lent.locator('.xterm[data-e2e-same="1"]')).toHaveCount(1, { timeout: 15000 });
+      await expect(xterm).toHaveCount(1);
+      await expect(lent.locator(".xterm-rows")).toContainText(/Haiku 4\.5/i);
+      await peek.click({ position: { x: 4, y: 4 } });
+      await expect(peek).toHaveCount(0);
+
+      // Back in its tab, the same xterm, and the agent still runs on the remote.
+      await expect(xterm).toHaveCount(1);
+      await expect(page.locator('.xterm[data-e2e-same="1"]')).toBeVisible({ timeout: 15000 });
+      await expect(page.locator(".xterm-rows").first()).toContainText(/Haiku 4\.5/i);
+      await expect(page.locator(".terminal__exited")).toHaveCount(0);
+      await expect(page.getByTestId(`tab-${id}`)).toBeVisible();
+    } finally {
+      await modsSet({ id: "", op: "layout" }).catch(() => {});
+      fs.rmSync(mod, { recursive: true, force: true });
+      fs.rmSync(layout, { force: true });
+      if (id) {
+        await page.evaluate((session) => (window as unknown as { usePerchStore: Store }).usePerchStore.getState().deleteSession(session), id);
+        await expect(page.getByTestId(`tab-${id}`)).toHaveCount(0, { timeout: 15000 });
+      }
+    }
   });
 
   // -------------------------------------------------------------------------

@@ -27,9 +27,10 @@ async function check(provider, thinkingApi = "available") {
   let effort = "high";
   if (thinkingApi !== "absent") pi.getThinkingLevel = () => { if (thinkingApi === "throws") throw new Error("unavailable"); return effort; };
   let idle = true;
+  let branch = [];
   const ctx = {
     cwd: dir, model: { id: "model" }, isIdle: () => idle, hasPendingMessages: () => false, abort() {},
-    sessionManager: { getBranch: () => [], getSessionFile: () => path.join(dir, "session.jsonl"), getSessionId: () => "session" },
+    sessionManager: { getBranch: () => branch, getSessionFile: () => path.join(dir, "session.jsonl"), getSessionId: () => "session" },
   };
   (await import(pathToFileURL(module))).default(pi);
   const fire = (name, event = {}) => handlers.get(name)(event, ctx);
@@ -106,7 +107,34 @@ async function check(provider, thinkingApi = "available") {
     peer.write(JSON.stringify({ type: "prompt", requestId: "p2", text: "start now" }) + "\n");
     await until(() => received.some(event => event.requestId === "p2"));
     assert.deepEqual(sentMessages.at(-1), ["start now", { expandPromptTemplates: true }]);
+    // `steer: true` joins a running turn, and where the turn has just ended starts one: the extension
+    // decides, so a steer is never lost to that race.
     idle = false;
+    peer.write(JSON.stringify({ type: "prompt", requestId: "p3", text: "mid-turn", steer: true }) + "\n");
+    await until(() => received.some(event => event.requestId === "p3"));
+    assert.deepEqual(sentMessages.at(-1), ["mid-turn", { deliverAs: "steer", expandPromptTemplates: true }]);
+    idle = true;
+    peer.write(JSON.stringify({ type: "prompt", requestId: "p4", text: "just ended", steer: true }) + "\n");
+    await until(() => received.some(event => event.requestId === "p4"));
+    assert.deepEqual(sentMessages.at(-1), ["just ended", { expandPromptTemplates: true }]);
+    // A long conversation: a snapshot holds only the newest 128; older ones come in pages of their own,
+    // all the way back to the first message.
+    branch = Array.from({ length: 700 }, (_, n) => ({ type: "message", id: `m${n}`, message: { role: "user", content: `message ${n}`, timestamp: n } }));
+    fire("agent_end");
+    await until(() => received.at(-1).messages?.length === 128);
+    assert.equal(received.at(-1).truncated, true);
+    assert.equal(received.at(-1).messages.at(-1).text, "message 699");
+    const page = async (id, before) => { peer.write(JSON.stringify({ type: "page", requestId: id, before }) + "\n"); await until(() => received.some(event => event.requestId === id)); return received.find(event => event.requestId === id); };
+    let reply = await page("o1", received.at(-1).messages[0].id);
+    assert.equal(reply.type, "page");
+    assert.deepEqual([reply.messages.length, reply.messages[0].text, reply.messages.at(-1).text, reply.more], [200, "message 372", "message 571", true]);
+    reply = await page("o2", reply.messages[0].id);
+    assert.deepEqual([reply.messages.length, reply.messages[0].text, reply.more], [200, "message 172", true]);
+    reply = await page("o3", reply.messages[0].id);
+    assert.deepEqual([reply.messages.length, reply.messages[0].text, reply.more], [172, "message 0", false]);
+    branch = [];
+    idle = false;
+    fire("agent_start");
     // The CLI goes idle with no event after the running snapshot (a missed settle): the extension looks
     // again by itself, so the core never keeps an idle prompt as "working".
     await until(() => received.at(-1).running === true);

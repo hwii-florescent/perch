@@ -7,12 +7,21 @@ import type { DirectoryEntry } from "@perch/shared";
 const native = vi.hoisted(() => ({ available: true, invoke: vi.fn() }));
 const state = vi.hoisted(() => ({ workspaces: [{ id: "w", hostId: "local" }] }));
 vi.mock("../links", () => ({ get tauriInvoke() { return native.available ? native.invoke : undefined; } }));
-vi.mock("../store", () => ({ usePerchStore: (select: (value: typeof state) => unknown) => select(state) }));
+vi.mock("../store", () => ({ usePerchStore: Object.assign((select: (value: typeof state) => unknown) => select(state), { subscribe: () => () => {}, getState: () => state, setState: () => {} }) }));
+// The confirmation is a stock screen with its own tests; this file is about the menu.
+vi.mock("./ConfirmDialog", () => ({ ConfirmDialog: () => null }));
 vi.mock("../contextBridge", () => ({ contextBridgeAvailable: () => false, askAgentAboutFile: vi.fn() }));
 vi.mock("../fileOps", () => ({
   joinPath: (dir: string, name: string) => dir ? `${dir}/${name}` : name,
   parentPath: (path: string) => path.split("/").slice(0, -1).join("/"),
   useEntryClipboard: (select: (value: { entry: null }) => unknown) => select({ entry: null }),
+}));
+// The screen's source imports `@perch/sdk`; here it gets the SDK's own leaf primitives, not the whole app graph
+// behind `sdk.ts`, and its route renders Perch's stock source.
+vi.mock("./mod-root", () => ({ StockRoute: ({ props, stock: Stock }: { props: object; stock: (props: object) => unknown }) => Stock(props) }));
+vi.mock("@perch/sdk", async () => ({
+  buttonClass: (await import("./ui/button")).button, ConfirmDialog: () => null, Dialog: (await import("../stock-ui/dialog/main")).default,
+  menuDividerClass: (await import("./ui/menu")).menuDivider, menuItemClass: (await import("./ui/menu")).menuItem, menuPanel: (await import("./ui/menu")).menuPanel,
 }));
 import { FileEntryMenu } from "./FileEntryMenu";
 

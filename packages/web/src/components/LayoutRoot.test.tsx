@@ -10,10 +10,9 @@ vi.mock("../mods", async (original) => ({
   currentMods: () => state.snapshot,
   subscribeMods: () => () => {},
 }));
-vi.mock("../Sidebar", () => ({ Sidebar: () => <div>sidebar</div> }));
-vi.mock("../StatusBar", () => ({ StatusBar: () => <div>status</div> }));
+// A stock screen (`status`, …) runs as its package; here it stands for itself, by name and place.
+vi.mock("./mod-root", () => ({ StockView: ({ name, instance }: { name: string; instance?: string }) => <div data-instance={instance}>{name}</div> }));
 vi.mock("./SplitCanvas", () => ({ SplitCanvas: () => <div>canvas</div> }));
-vi.mock("./TabBar", () => ({ TabBar: () => <div>tabs</div> }));
 vi.mock("../views/PersistentTerminal", () => ({ PersistentTerminal: ({ sessionId }: { sessionId: string }) => <div>{`terminal ${sessionId}`}</div> }));
 vi.mock("./WorkspaceTools", () => ({ WorkspaceTools: ({ tab }: { tab: string }) => <div>{`tools:${tab}`}</div> }));
 vi.mock("./ModView", () => ({ ModView: ({ mod }: { mod: ModInfo }) => <div>{`mod view ${mod.id}`}</div> }));
@@ -42,6 +41,20 @@ describe("a layout on screen", () => {
     const style = (id: string) => (host.querySelector(`[data-testid="layout-${id}"]`) as HTMLElement).style.flex;
     expect(style("sidebar")).toBe("0 0 220px");
     expect(style("canvas")).toBe("1 1 0%");
+  });
+
+  it("draws Perch's own tabs and status as their stock screens at the block's place, and mod:stock:<id> as the stock screen itself", async () => {
+    state.snapshot = { mods: [mod({ id: "stock:keybind-help", origin: "stock", format: "esm" })] };
+    const tree: LayoutNode = { type: "column", children: [
+      { type: "block", id: "strip", content: "tabs" },
+      { type: "block", content: "status" },
+      { type: "block", id: "keys", content: "mod:stock:keybind-help" },
+    ] };
+    await act(async () => root.render(<LayoutRoot root={tree} />));
+    const place = (name: string) => [...host.querySelectorAll("[data-instance]")].find((el) => el.textContent === name)?.getAttribute("data-instance");
+    expect(place("tabs")).toBe("layout:layout:strip");
+    expect(place("status")).toBe("layout:layout:r/1");
+    expect(host.textContent).toContain("mod view stock:keybind-help");
   });
 });
 

@@ -1,0 +1,6 @@
+{
+  "name": "Settings: Devices",
+  "description": "phone access, the relay, pairing a device and the devices already paired",
+  "version": "1.0.0",
+  "api": "^1.8"
+}

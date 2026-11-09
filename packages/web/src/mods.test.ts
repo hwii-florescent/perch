@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const sent = vi.hoisted(() => [] as unknown[]);
 vi.mock("./ws", () => ({ socket: { send: (message: unknown) => sent.push(message), connected: true, onMessage: () => () => {}, onConnectionChange: () => () => {} } }));
 vi.mock("./store", () => ({ usePerchStore: { getState: () => ({}), setState: () => {}, subscribe: () => () => {} } }));
+// The navigation commands' module syncs with the real store when it loads; these tests never run them.
+vi.mock("./workspaceNav", () => ({}));
 import { setCommandBridge } from "./modApp";
 import { answerCommand } from "./mods";
 import { TYPED_COMMANDS } from "./modCommands";

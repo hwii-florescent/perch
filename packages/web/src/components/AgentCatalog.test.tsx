@@ -5,11 +5,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AgentManifestSummary } from "@perch/shared";
 
 vi.mock("../ws", () => ({ socket: { connect: vi.fn(), send: vi.fn(), onMessage: vi.fn(() => () => {}), onConnectionChange: vi.fn(() => () => {}) } }));
-vi.mock("../links", () => ({ openExternal: vi.fn() }));
+vi.mock("../links", async (importOriginal) => ({ ...(await importOriginal<object>()), openExternal: vi.fn() }));
 const { usePerchStore } = await import("../store");
 const { openExternal } = await import("../links");
 const { AgentCatalog } = await import("./AgentCatalog");
-const { AgentPicker } = await import("./AgentPicker");
+const { AgentPicker } = await import("../stock-ui/new-session/agent-picker");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const fetch = vi.fn();
@@ -33,12 +33,13 @@ function button(label: string, scope: ParentNode = document) {
 }
 function click(node: Element) { act(() => { (node as HTMLElement).click(); }); }
 function render(picker = false) {
-  act(() => root.render(<><AgentCatalog />{picker && <AgentPicker value="" onChange={() => {}} />}</>));
+  act(() => root.render(<><AgentCatalog />{picker && <AgentPicker hostId="local" testIdPrefix="new-session-agent" value="" onChange={() => {}} />}</>));
   fetch.mockClear(); // Ignore the initial discovery request.
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);

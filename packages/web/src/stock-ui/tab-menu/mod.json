@@ -1,0 +1,6 @@
+{
+  "name": "Tab menu",
+  "description": "a tab's actions: rename, split, show beside another tab, stop agent, close",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

@@ -32,9 +32,12 @@ import { PaneContextMenu } from "../components/PaneContextMenu";
 import { SessionSplitPopover } from "./SessionSplitPopover";
 import { isSessionDrag, readSessionDragId } from "./sessionDrag";
 import { usePaneLabelsEnabled } from "../paneLabels";
-import { WorkspaceFilesView } from "../components/WorkspaceFiles";
-import { EllipsisIcon, PlusIcon } from "../components/ui/icons";
-import { WorkspaceGitReviewPane } from "../components/WorkspaceGitReviewPane";
+import { StockRoute, StockView } from "../components/mod-root";
+import type { DockActionsProps, DockTabProps } from "@perch/sdk";
+// A docked group's tab and its end buttons are stock screens (`stock:dock-tab`, `stock:dock-actions`) or the person's
+// copies; the strip, drag and drop, and what each action does stay dockview's and this file's.
+import DockTab from "../stock-ui/dock-tab/main";
+import DockActions from "../stock-ui/dock-actions/main";
 import { focusMainResponder } from "../browserNative";
 
 /** Info needed to render `<PaneContextMenu>` for a right-clicked tab. Module
@@ -81,28 +84,23 @@ function PaneTab(props: IDockviewPanelHeaderProps) {
     const session = s.sessions.find((candidate) => candidate.id === sessionId);
     return session?.currentProviderId ?? s.cliAgentBySession[sessionId] ?? session?.cliProviderId ?? "claude";
   });
-  const showAgentBadge = props.api.id === "chat" && paneLabelsEnabled;
-  return (
-    <div
-      className="pane-tab"
-      data-testid={`pane-tab-${props.api.id}`}
-      onContextMenu={(e: React.MouseEvent) => {
-        e.preventDefault();
-        openPaneContextMenu?.(props.api.id, props.api.title ?? "", e.clientX, e.clientY);
-      }}
-    >
-      <DockviewDefaultTab {...props} closeActionOverride={() => getDockviewController()?.closePanel(props.api.id)} />
-      {showAgentBadge && (
-        // NOT "pane-tab-agent-badge": e2e's `nonChatTab()`/`[data-testid^="pane-tab-"]`
-        // locators (pane-splitting.spec.ts, wave2.spec.ts) match on that
-        // prefix to find the *real* terminal tab, and would otherwise also
-        // match this badge, causing a Playwright strict-mode violation.
-        <span className="pane-tab__agent-badge" data-testid="chat-tab-agent-badge">
-          · {agent}
-        </span>
-      )}
-    </div>
-  );
+  const [title, setTitle] = useState(props.api.title ?? "");
+  useEffect(() => {
+    setTitle(props.api.title ?? "");
+    const disposable = props.api.onDidTitleChange((event) => setTitle(event.title));
+    return () => disposable.dispose();
+  }, [props.api]);
+  const id = props.api.id;
+  const tab: DockTabProps = {
+    id,
+    title,
+    agent: id === "chat" && paneLabelsEnabled ? agent : null,
+    // The engine's own title and close (drag, active state and middle-click are dockview's).
+    defaultTab: <DockviewDefaultTab {...props} closeActionOverride={() => getDockviewController()?.closePanel(id)} />,
+    onClose: () => getDockviewController()?.closePanel(id),
+    onMenu: (x: number, y: number) => openPaneContextMenu?.(id, props.api.title ?? "", x, y),
+  };
+  return <StockRoute name="dock-tab" props={tab} stock={DockTab} />;
 }
 
 const PrimaryHidden = createContext(false);
@@ -165,11 +163,7 @@ function FilesPanel(props: IDockviewPanelProps) {
   }
   const initialPath = typeof props.params?.path === "string" ? props.params.path : undefined;
   return (
-    <WorkspaceFilesView
-      layout="editor"
-      workspaceId={workspaceId}
-      initialPath={initialPath}
-    />
+    <StockView name="files" props={{ layout: "editor", workspaceId, initialPath }} instance={`files-dock:${props.api.id}`} placeholder={<div className="terminal__notice" role="status">Loading file…</div>} />
   );
 }
 
@@ -184,7 +178,7 @@ function GitReviewPanel(props: IDockviewPanelProps) {
   if (!workspaceId) {
     return <div className="inactive-session-pane">Git pane is missing its workspace id.</div>;
   }
-  return <WorkspaceGitReviewPane workspaceId={workspaceId} />;
+  return <StockView name="review" props={{ workspaceId }} instance={`review-dock:${props.api.id}`} placeholder={<div className="terminal__notice" role="status">Loading review…</div>} />;
 }
 
 /** A mod's docked view. Looks the mod up on every change, so a mod that was turned off or removed
@@ -193,7 +187,7 @@ function ModPanel(props: IDockviewPanelProps) {
   const mods = useSyncExternalStore(subscribeMods, currentMods);
   const mod = mods?.mods.find((candidate) => candidate.id === (props.params as { modId?: string } | undefined)?.modId);
   if (!mod?.enabled || mod.error) return <div className="inactive-session-pane">{mods ? "This mod is off or gone." : "Loading…"}</div>;
-  return <ModView mod={mod} />;
+  return <ModView mod={mod} instance={`dock:${props.api.id}`} />;
 }
 
 const components = {
@@ -225,56 +219,16 @@ function PaneGroupHeaderActions({ panels, activePanel }: IDockviewHeaderActionsP
   // Classified by `component`, not "any panel whose id isn't chat" — a
   // session-chat panel's id is `session-chat-<sessionId>` (definitely not
   // "chat"), so the old id-based check would have wrongly treated a
-  // session-chat group as a terminal group and rendered this "+" button
+  // session-chat group as a terminal group and offered "Add terminal"
   // there too (which would then add a TERMINAL tab into someone's session
   // chat group). See dockviewController.ts's `panelKind`.
   const terminalPanel = panels.find((p) => panelKind(p) === "terminal");
-  return (
-    <>
-      {terminalPanel && (
-        <button
-          type="button"
-          className="dockview-group-action dockview-group-action--add-terminal"
-          data-testid="terminal-add-tab"
-          title="Add terminal"
-          aria-label="Add terminal"
-          onClick={() => getDockviewController()?.addTerminalTabInGroup(terminalPanel.id)}
-        >
-          <PlusIcon />
-        </button>
-      )}
-      {activePanel && (
-        <button
-          type="button"
-          className="dockview-group-action dockview-group-action--split-session"
-          data-testid="pane-split-session"
-          title="Split with another session"
-          aria-label="Split with another session"
-          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            openSessionSplitPopover?.(activePanel.id, rect.right, rect.bottom);
-          }}
-        >
-          ⛶
-        </button>
-      )}
-      {activePanel && (
-        <button
-          type="button"
-          className="dockview-group-action dockview-group-action--pane-menu"
-          data-testid="pane-group-menu"
-          title="Split / zoom / rename / close pane"
-          aria-label="Split / zoom / rename / close pane"
-          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            openPaneContextMenu?.(activePanel.id, activePanel.title ?? "", rect.right, rect.bottom);
-          }}
-        >
-          <EllipsisIcon />
-        </button>
-      )}
-    </>
-  );
+  const actions: DockActionsProps = {
+    onAddTerminal: terminalPanel ? () => getDockviewController()?.addTerminalTabInGroup(terminalPanel.id) : null,
+    onSplitSession: activePanel ? (x: number, y: number) => openSessionSplitPopover?.(activePanel.id, x, y) : null,
+    onMenu: activePanel ? (x: number, y: number) => openPaneContextMenu?.(activePanel.id, activePanel.title ?? "", x, y) : null,
+  };
+  return <StockRoute name="dock-actions" props={actions} stock={DockActions} />;
 }
 
 const LAYOUT_SAVE_DEBOUNCE_MS = 500;

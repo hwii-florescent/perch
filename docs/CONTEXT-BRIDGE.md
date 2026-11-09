@@ -47,6 +47,12 @@ returns to its tab; the original file and unsaved draft remain open.
   Double-clicks/replayed IDs
   cannot dispatch it twice. Disconnects and unconfirmed deliveries are never
   retried automatically: inspect the CLI before making another send.
+- The dialog is a stock screen (`stock:context-bridge`) a person may replace
+  with a copy, but the send is Perch's (`components/ContextBridge.tsx`): one
+  operation id per capture and at most one send, whatever calls the screen's
+  `send` action; Perch's own screen calls it only from Send. A copy swapped in
+  mid-send sees the send as made and cannot send again. A copy is trusted code
+  (docs/MOD-SDK.md, "Not a sandbox").
 - Editor excerpts, terminal selections and Git diffs are **captured view
   snapshots**. The packet labels unsaved drafts and possibly outdated diffs;
   it does not claim they match current disk/Git state. It never saves a draft.

@@ -10,8 +10,9 @@ const storage = new Map<string, string>();
 vi.stubGlobal("localStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key), clear: () => storage.clear() });
 const { usePerchStore } = await import("../store");
 const { jumpToNest, orderedNests, stepNest } = await import("../workspaceNav");
-const { TabBar } = await import("./TabBar");
-const { WorkspaceOverview } = await import("./WorkspaceOverview");
+// The tab strip is the stock screen `stock:tabs`; its source renders here with the app's own SDK module.
+const { default: TabBar } = await import("../stock-ui/tabs/main");
+const { WorkspaceOverview } = await import("../stock-ui/sidebar/overview");
 const { StatusDot } = await import("./StatusDot");
 const { AgentIcon } = await import("./AgentIcon");
 const { saveTabOrder } = await import("../tabOrder");

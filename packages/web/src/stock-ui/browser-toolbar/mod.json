@@ -1,0 +1,6 @@
+{
+  "name": "Browser toolbar",
+  "description": "the row over a browser page: back, forward, reload, the address with its suggestions, and Open externally",
+  "version": "1.0.0",
+  "api": "^1.10"
+}

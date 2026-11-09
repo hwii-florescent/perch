@@ -18,7 +18,7 @@ import { getRelayDiagnostics, reportConnection } from "./diagnostics";
 const LINK_KEY = "perch.relay.link";
 const tokenKey = (room: string) => `perch.relay.token.${room}`;
 /** The routes `host.rs` will carry; the same set, by name under the base path. */
-const ROUTES = new Set(["pair", "ws", "workspace-file", "clipboard-image", "upload"]);
+const ROUTES = new Set(["pair", "ws", "workspace-file", "clipboard-image", "upload", "mods/package", "mods/data"]);
 const ROOM = /^[A-Za-z0-9_-]{43}$/;
 
 interface Link {
@@ -119,6 +119,8 @@ async function tunnelFetch(route: string, init: RequestInit | undefined): Promis
   const out = new Headers();
   if (result.head.contentType) out.set("content-type", result.head.contentType);
   if (result.head.contentDisposition) out.set("content-disposition", result.head.contentDisposition);
+  if (result.head.contentTypeOptions) out.set("x-content-type-options", result.head.contentTypeOptions);
+  if (result.head.contentSecurityPolicy) out.set("content-security-policy", result.head.contentSecurityPolicy);
   const empty = [204, 205, 304].includes(result.head.status);
   return new Response(empty ? null : (result.body as BufferSource), { status: result.head.status, headers: out });
 }
@@ -250,6 +252,15 @@ export function installRelayTransport(): boolean {
   Object.assign(Patched, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
   window.WebSocket = Patched;
   return true;
+}
+
+/** A GET of one of the computer's routes through the sealed tunnel, and nothing else: a URL the tunnel does
+ * not carry is an error, never a fetch from the relay's own origin (the module loader uses this). */
+export function relayRequest(url: string): Promise<Response> {
+  const route = routeOf(new URL(url, window.location.href));
+  if (!route) return Promise.reject(new Error(`${url} cannot go through the relay, so it is not fetched`));
+  if (!link) return Promise.reject(new Error("not in relay mode"));
+  return tunnelFetch(route, undefined);
 }
 
 /** A file from the computer as an object URL: `<img>`, `<video>` and the like

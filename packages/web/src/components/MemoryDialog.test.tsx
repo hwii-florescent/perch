@@ -3,13 +3,18 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ClientMessage, MemoryEntry, ServerMessage } from "@perch/shared";
-const wire = vi.hoisted(() => ({ send: vi.fn(), message: (_: ServerMessage) => {}, connection: (_: boolean) => {} }));
+// Every subscriber hears each message: the dialog's own capability and memory listeners and the app store's.
+const wire = vi.hoisted(() => {
+  const handlers = new Set<(message: ServerMessage) => void>();
+  return { send: vi.fn(), handlers, message: (message: ServerMessage) => { for (const handler of [...handlers]) handler(message); } };
+});
 vi.mock("../ws", () => ({
   socket: {
     connected: true,
+    connect: () => {},
     send: wire.send,
-    onMessage: (handler: (message: ServerMessage) => void) => { wire.message = handler; },
-    onConnectionChange: (handler: (connected: boolean) => void) => { wire.connection = handler; },
+    onMessage: (handler: (message: ServerMessage) => void) => { wire.handlers.add(handler); return () => { wire.handlers.delete(handler); }; },
+    onConnectionChange: () => () => {},
   },
 }));
 import { MemoryDialog } from "./MemoryDialog";

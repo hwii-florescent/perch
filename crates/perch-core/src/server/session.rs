@@ -344,6 +344,14 @@ pub(super) fn should_forward_to_viewer(
     viewers: &HashMap<String, HashSet<String>>,
     observes: impl Fn(&str, &str) -> bool,
 ) -> bool {
+    // `perch mod do/dom --viewer` is for that one connection: no other screen runs or answers it.
+    if let ServerMessage::ModsSnapshotRequest {
+        viewer: Some(viewer),
+        ..
+    } = msg
+    {
+        return viewer == conn_id;
+    }
     if let ServerMessage::AgentUiSnapshot {
         session_id,
         provider_id,

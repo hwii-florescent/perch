@@ -4,7 +4,7 @@
 use crate::{
     agent_fleet::AgentKey,
     agent_runtime::terminal_key,
-    protocol::{CommandEntry, NativeUiSnapshot, OlderPageOutcome},
+    protocol::{CommandEntry, NativeUiMessage, NativeUiSnapshot, OlderPageOutcome},
 };
 use anyhow::{bail, ensure, Context};
 use serde::Deserialize;
@@ -27,6 +27,7 @@ pub mod command_envelope;
 pub mod dialog;
 pub mod edits;
 pub mod file_links;
+pub mod history;
 pub mod opencode;
 pub mod option_pickers;
 pub mod session_options;
@@ -318,6 +319,13 @@ enum NativeEvent {
     },
     /// What the running CLI itself offers after `/`: extensions, prompt templates and skills.
     Commands { commands: Vec<CommandEntry> },
+    /// The answer to a `page` request: messages older than the one asked about, oldest first.
+    Page {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        messages: Vec<NativeUiMessage>,
+        more: bool,
+    },
 }
 
 struct Command {
@@ -335,27 +343,44 @@ pub struct NativeBridge {
     window: Arc<std::sync::atomic::AtomicUsize>,
     /// One page request at a time: a second one waits and then reads the next page.
     paging: tokio::sync::Mutex<()>,
+    /// Pi and OMP: asks the bridge task, which keeps their conversation (`history.rs`), for a page.
+    pager: mpsc::Sender<oneshot::Sender<OlderPageOutcome>>,
 }
 impl NativeBridge {
-    /// Read one page further back (`agent.ui.older`). Only Claude's bridge can: the core reads its
-    /// transcript file itself, while the other providers' bridges send a fixed window. The longer
-    /// snapshot reaches viewers the usual way; this says what came of the request.
+    /// Read one page further back (`agent.ui.older`). Claude's bridge can: the core reads its
+    /// transcript file itself. Pi and OMP can, all the way back: their extension sends pages the core
+    /// keeps. Codex can too, through its turn cursor. OpenCode sends a fixed window. The longer snapshot
+    /// reaches viewers the usual way; this says what came of the request.
     pub async fn load_older(&self) -> OlderPageOutcome {
         use std::sync::atomic::Ordering::Relaxed;
         let _one_at_a_time = self.paging.lock().await;
         let Some(before) = self.latest() else {
             return OlderPageOutcome::Failed;
         };
+        if matches!(self.key.agent_id.as_str(), "pi" | "omp" | "codex") {
+            if !before.truncated {
+                return OlderPageOutcome::Exhausted;
+            }
+            let (reply, outcome) = oneshot::channel();
+            if self.pager.try_send(reply).is_err() {
+                return OlderPageOutcome::Failed;
+            }
+            return match tokio::time::timeout(Duration::from_secs(15), outcome).await {
+                Ok(Ok(outcome)) => outcome,
+                _ => OlderPageOutcome::Failed,
+            };
+        }
         if !before.truncated || self.key.agent_id != "claude" {
             return OlderPageOutcome::Exhausted;
         }
+        // Watch for the longer snapshot before asking, so it cannot slip past.
+        let mut receiver = self.snapshot.clone();
         let window = self.window.load(Relaxed);
         if window >= claude::MAX_WINDOW {
             return OlderPageOutcome::Exhausted;
         }
         self.window
             .store((window + claude::PAGE).min(claude::MAX_WINDOW), Relaxed);
-        let mut receiver = self.snapshot.clone();
         let wait = async {
             loop {
                 if receiver.changed().await.is_err() {
@@ -412,6 +437,22 @@ impl NativeBridge {
     }
     // Called while the runtime's input authority lock is held. Once enqueued,
     // this command has the same ordering guarantee as accepted PTY input.
+    /// A prompt that, if a turn is running, goes into it (`steer`) rather than behind it. Pi, OMP and
+    /// Codex decide at their end, where "running" is known exactly, so a turn that has just ended starts
+    /// a new one instead of failing the steer. Claude and OpenCode ignore the flag.
+    pub fn enqueue_prompt(
+        &self,
+        id: &str,
+        text: &str,
+        steer: bool,
+    ) -> anyhow::Result<oneshot::Receiver<Result<bool, String>>> {
+        let mut payload = serde_json::json!({ "type": "prompt", "requestId": id, "text": text });
+        if steer {
+            payload["steer"] = true.into();
+        }
+        self.send(id, payload)
+    }
+
     pub fn enqueue(
         &self,
         id: &str,
@@ -514,6 +555,7 @@ impl NativeUiRegistry {
         let (commands, mut commands_rx) = mpsc::channel::<Command>(16);
         let slash = Arc::new(Mutex::new(Vec::new()));
         let window = Arc::new(std::sync::atomic::AtomicUsize::new(claude::WINDOW));
+        let (pager, mut pager_rx) = mpsc::channel::<oneshot::Sender<OlderPageOutcome>>(4);
         bridges.insert(
             key.clone(),
             Arc::new(NativeBridge {
@@ -523,6 +565,7 @@ impl NativeUiRegistry {
                 slash: slash.clone(),
                 window: window.clone(),
                 paging: tokio::sync::Mutex::new(()),
+                pager,
             }),
         );
         let registry = Arc::downgrade(self);
@@ -536,6 +579,7 @@ impl NativeUiRegistry {
                         on_snapshot,
                         snapshot_tx,
                         commands_rx,
+                        pager_rx,
                     )
                     .await;
                 } else {
@@ -548,6 +592,11 @@ impl NativeUiRegistry {
                 return;
             }
             let mut pending = HashMap::<String, oneshot::Sender<Result<bool, String>>>::new();
+            // Pi and OMP: the conversation as far back as it has been asked for, and the page request
+            // in flight (its id and who is waiting). Kept across reconnects; a new session resets it.
+            let paged = matches!(key.agent_id.as_str(), "pi" | "omp");
+            let mut history = history::History::default();
+            let mut awaiting: Option<(String, oneshot::Sender<OlderPageOutcome>)> = None;
             while alive() {
                 let stream = match UnixStream::connect(&socket).await {
                     Ok(stream) => stream,
@@ -568,6 +617,12 @@ impl NativeUiRegistry {
                         break;
                     }
                     pending.retain(|_, reply| !reply.is_closed());
+                    if awaiting
+                        .as_ref()
+                        .is_some_and(|(_, reply)| reply.is_closed())
+                    {
+                        awaiting = None;
+                    }
                     tokio::select! {
                         _ = dialog_tick.tick(), if last.as_ref().is_some_and(|s| s.blocked) => {
                             if let Some(shown) = last.as_mut() {
@@ -587,7 +642,7 @@ impl NativeUiRegistry {
                                 NativeEvent::Snapshot { mut snapshot } => {
                                     if snapshot.version != 1 || (snapshot.provider_session_id.is_empty() && key.agent_id != "opencode") || snapshot.messages.len() > 129 { break; }
                                     if snapshot.blocked { snapshot.request = dialog::read(&key); }
-                                    let snapshot = *snapshot;
+                                    let snapshot = if paged { history.apply(*snapshot) } else { *snapshot };
                                     last = Some(snapshot.clone());
                                     on_snapshot(snapshot.clone());
                                     let _ = snapshot_tx.send(Some(snapshot));
@@ -599,8 +654,47 @@ impl NativeUiRegistry {
                                 NativeEvent::Ack { request_id, accepted, error } => {
                                     if let Some(reply) = pending.remove(&request_id) { let _ = reply.send(error.map_or(Ok(accepted), Err)); }
                                 }
+                                NativeEvent::Page { request_id, messages, more } => {
+                                    if !paged || messages.len() > history::PAGE { break; }
+                                    // Only the page asked for; a late or repeated one is ignored.
+                                    if let Some((_, reply)) = awaiting.take_if(|(id, _)| *id == request_id) {
+                                        history.page_in(messages, more);
+                                        let added = history.widen();
+                                        if let Some(mut view) = history.republish() {
+                                            view.request = last.as_ref().and_then(|shown| shown.request.clone());
+                                            last = Some(view.clone());
+                                            on_snapshot(view.clone());
+                                            let _ = snapshot_tx.send(Some(view));
+                                        }
+                                        let _ = reply.send(if added > 0 { OlderPageOutcome::Applied } else if history.at_start() { OlderPageOutcome::Exhausted } else { OlderPageOutcome::Unchanged });
+                                    }
+                                }
                             }
                             line.clear();
+                        }
+                        reply = pager_rx.recv(), if awaiting.is_none() => {
+                            let Some(reply) = reply else { break; };
+                            if history.held_older() > 0 {
+                                // Already held (an earlier page, or messages that slid out of the tail): show more.
+                                history.widen();
+                                if let Some(mut view) = history.republish() {
+                                    view.request = last.as_ref().and_then(|shown| shown.request.clone());
+                                    last = Some(view.clone());
+                                    on_snapshot(view.clone());
+                                    let _ = snapshot_tx.send(Some(view));
+                                }
+                                let _ = reply.send(OlderPageOutcome::Applied);
+                            } else if history.at_start() {
+                                let _ = reply.send(OlderPageOutcome::Exhausted);
+                            } else {
+                                let id = uuid::Uuid::new_v4().to_string();
+                                let payload = serde_json::json!({ "type": "page", "requestId": id, "before": history.oldest_id() }).to_string() + "\n";
+                                if !matches!(tokio::time::timeout(Duration::from_secs(2), writer.write_all(payload.as_bytes())).await, Ok(Ok(()))) {
+                                    let _ = reply.send(OlderPageOutcome::Failed);
+                                    break;
+                                }
+                                awaiting = Some((id, reply));
+                            }
                         }
                         command = commands_rx.recv(), if pending.len() < 16 => {
                             let Some(command) = command else { break; };
@@ -615,6 +709,7 @@ impl NativeUiRegistry {
                     }
                 }
                 snapshot_tx.send_replace(None);
+                awaiting = None;
                 for (_, reply) in pending.drain() {
                     let _ = reply.send(Err(
                         "native CLI disconnected before confirming delivery".into()
@@ -757,6 +852,7 @@ mod tests {
             slash: Arc::new(Mutex::new(vec![])),
             window: window.clone(),
             paging: tokio::sync::Mutex::new(()),
+            pager: mpsc::channel(1).0,
         });
         let publisher = snapshot_tx.clone();
         tokio::spawn(async move {
@@ -815,6 +911,7 @@ mod tests {
             slash: Arc::new(Mutex::new(vec![])),
             window: Arc::new(std::sync::atomic::AtomicUsize::new(claude::WINDOW)),
             paging: tokio::sync::Mutex::new(()),
+            pager: mpsc::channel(1).0,
         };
         let _reply = codex.enqueue_steer("s1", "use the other file").unwrap();
         let command = queued.recv().await.unwrap();
@@ -845,21 +942,66 @@ mod tests {
         }
         assert_eq!(bridge.latest().unwrap().messages.len(), claude::MAX_WINDOW);
         assert_eq!(bridge.load_older().await, OlderPageOutcome::Exhausted);
-        let (other, _keep) = claude_bridge(5_000);
-        let pi = NativeBridge {
-            key: AgentKey::new("workspace", "session", "pi").unwrap(),
-            snapshot: other.snapshot.clone(),
-            commands: other.commands.clone(),
-            slash: other.slash.clone(),
-            window: other.window.clone(),
+    }
+
+    /// Pi's whole conversation is reachable: the bridge asks the extension for the page before the oldest
+    /// message it holds, shows it, and says so when the start is reached. OpenCode has no page to ask for.
+    #[tokio::test]
+    async fn pi_pages_all_the_way_back_through_its_extension() {
+        use tokio::io::AsyncBufReadExt;
+        let key = AgentKey::new("native-test", uuid::Uuid::new_v4().to_string(), "pi").unwrap();
+        let listener = UnixListener::bind(paths(&key).unwrap().socket).unwrap();
+        let registry = Arc::new(NativeUiRegistry::default());
+        registry
+            .start(key.clone(), None, Arc::new(|| true), Arc::new(|_| {}))
+            .unwrap();
+        let bridge = registry.get(&key).unwrap();
+        let (peer, _) = listener.accept().await.unwrap();
+        let (reader, mut extension) = peer.into_split();
+        let frame = |value: serde_json::Value| (value.to_string() + "\n").into_bytes();
+        let tail: Vec<_> = (300..428).map(|n| serde_json::json!({"id": n.to_string(), "role": "user", "text": "", "thinking": "", "tools": []})).collect();
+        extension.write_all(&frame(serde_json::json!({"type": "snapshot", "version": 1, "revision": 1, "pid": 1, "providerSessionId": "s", "cwd": "/", "model": null, "running": false, "messages": tail, "truncated": true}))).await.unwrap();
+        let first = bridge.snapshot().await.unwrap();
+        assert!(first.truncated && first.can_load_older && first.messages.len() == 128);
+        let extension_side = tokio::spawn(async move {
+            let mut lines = BufReader::new(reader).lines();
+            // Two pages of 150 messages: the second is the start of the conversation.
+            for (from, more) in [(150, true), (0, false)] {
+                let request: serde_json::Value =
+                    serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                assert_eq!(request["type"], "page");
+                let older: Vec<_> = (from..from + 150).map(|n| serde_json::json!({"id": n.to_string(), "role": "user", "text": "", "thinking": "", "tools": []})).collect();
+                extension.write_all(&frame(serde_json::json!({"type": "page", "requestId": request["requestId"], "messages": older, "more": more}))).await.unwrap();
+            }
+            extension
+        });
+        assert_eq!(bridge.load_older().await, OlderPageOutcome::Applied);
+        assert_eq!(bridge.latest().unwrap().messages.len(), 278);
+        assert!(bridge.latest().unwrap().can_load_older);
+        assert_eq!(bridge.load_older().await, OlderPageOutcome::Applied);
+        let all = bridge.latest().unwrap();
+        assert_eq!(all.messages.len(), 428);
+        assert!(!all.truncated && !all.can_load_older);
+        assert_eq!(bridge.load_older().await, OlderPageOutcome::Exhausted);
+        let _extension = extension_side.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn opencode_has_no_page_to_ask_for() {
+        let (snapshot_tx, snapshot) = watch::channel(Some(shown(1, 128, true, true)));
+        let (commands, mut queued) = mpsc::channel(4);
+        let opencode = NativeBridge {
+            key: AgentKey::new("workspace", "session", "opencode").unwrap(),
+            snapshot,
+            commands,
+            slash: Arc::new(Mutex::new(vec![])),
+            window: Arc::new(std::sync::atomic::AtomicUsize::new(claude::WINDOW)),
             paging: tokio::sync::Mutex::new(()),
+            pager: mpsc::channel(1).0,
         };
-        assert_eq!(pi.load_older().await, OlderPageOutcome::Exhausted);
-        assert_eq!(
-            pi.window.load(Ordering::Relaxed),
-            claude::WINDOW,
-            "no window was raised"
-        );
+        assert_eq!(opencode.load_older().await, OlderPageOutcome::Exhausted);
+        assert!(queued.try_recv().is_err(), "nothing was sent to OpenCode");
+        drop(snapshot_tx);
     }
 
     #[tokio::test]
@@ -873,6 +1015,7 @@ mod tests {
             slash: Arc::new(Mutex::new(vec![])),
             window: Arc::new(std::sync::atomic::AtomicUsize::new(claude::WINDOW)),
             paging: tokio::sync::Mutex::new(()),
+            pager: mpsc::channel(1).0,
         };
         drop(snapshot_tx);
         assert_eq!(bridge.load_older().await, OlderPageOutcome::Failed);

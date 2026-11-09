@@ -1,0 +1,6 @@
+{
+  "name": "Ask agent",
+  "description": "Context Bridge: the terminal selection's menu and the dialog that prepares context and sends it to an agent only on Send",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

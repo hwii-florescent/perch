@@ -1,0 +1,6 @@
+{
+  "name": "Select",
+  "description": "Perch's dropdown: a trigger and a list of choices drawn above panes and dialogs",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

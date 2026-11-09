@@ -1,0 +1,6 @@
+{
+  "name": "Files",
+  "description": "a workspace's files: the explorer (tree, search, keyboard, the entry menu) and a file's editor pane (Markdown preview, media and PDF, wrap, preview, reload, save, conflicts), on Perch's own draft buffers",
+  "version": "1.0.0",
+  "api": "^1.5"
+}

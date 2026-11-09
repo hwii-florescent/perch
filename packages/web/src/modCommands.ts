@@ -1,18 +1,23 @@
 import { placeFloat, resetLayoutState, resizeNode, showStackChild, toggleNode } from "./layoutState";
 import { cloneMod, currentMods, openMod, setLayout } from "./mods";
-import { bindKey, inAgentOrder, runCommand, setPanesSource, setTerminalReader } from "./modApp";
+import { bindKey, inAgentOrder, runCommand, setKeptTerminalsSource, setPanesSource, setTerminalReader } from "./modApp";
+import { keptTerminals } from "./terminalKeeper";
 import { pasteIntoTerminal, scrollTerminal, terminalSelection, terminalText } from "./xtermSetup";
-import { closeTopOverlay } from "./modUi";
+import { closeTopOverlay, modUi } from "./modUi";
 import { writeTextFile } from "./modHost";
-import { focusedSplit, getPaneController, openModTab, splitActiveTab } from "./tiledPanes";
+import { closeTab, exitSplit, focusedSplit, getPaneController, openModTab, splitActiveTab } from "./tiledPanes";
+import { useSplitSets } from "./splitSets";
 import { activateTab, currentTabs, entryLabel, moveChat } from "./workspaceTabs";
 import { zoomIn, zoomOut, zoomReset } from "./zoom";
 import { tauriInvoke } from "./links";
 import { useFileTabs } from "./fileTabs";
-import { isPinned, setPinned } from "./pinnedTerminals";
+import { isPinned, setPinned, setTerminalOrder } from "./pinnedTerminals";
 import { runInWorkspace } from "./runs";
 import { usePerchStore } from "./store";
-import { orderProjects } from "./sidebarOrder";
+import { orderProjects, writeScope } from "./sidebarOrder";
+import { requestCloseSession } from "./closeGuard";
+import { moveBeside } from "./tabOrder";
+import { navigateToWorkspace, newScratchpad } from "./workspaceNav";
 
 /** App commands that take arguments, for `api.run(id, args)` (keys cannot run these, so they are not
  * in the keybinding table). Add one here and it is listed by `api.commands()` and the guide. */
@@ -21,6 +26,27 @@ const needsId = (args: unknown): string => {
   if (typeof id !== "string" || !id) throw new Error('This command needs {id: "…"}.');
   return id;
 };
+
+/** A session this page knows, named by `{terminal}` or `{id}`; the peek/keep/park commands act on no other. */
+const knownSession = (args: unknown): string => {
+  const id = word(args, "terminal") ?? needsId(args);
+  if (!usePerchStore.getState().sessions.some((session) => session.id === id)) throw new Error(`There is no session ${id} on this page.`);
+  return id;
+};
+
+// Peeks: a session's own view over the app for a moment, one per session. Its terminal is borrowed (`BorrowTerminals`):
+// it moves into the peek and back, the same process and input/size owner. Closing a peek never stops anything.
+const peekSurfaces = new Set<() => void>();
+const peekUi = modUi("terminal-peek", peekSurfaces);
+const peeks = new Map<string, () => void>();
+/** Closes `id`'s peek; false when it has none open. */
+function closePeek(id: string): boolean {
+  const close = peeks.get(id);
+  peeks.delete(id);
+  if (!close || !peekSurfaces.has(close)) return false;
+  close();
+  return true;
+}
 
 /** The desktop window's own controls, for a layout that hides the system title bar and draws its own. */
 const windowControl = (action: string) => () => {
@@ -61,6 +87,7 @@ const clone = (layout: boolean) => later(async (args) => {
 });
 
 setTerminalReader(terminalText);
+setKeptTerminalsSource(keptTerminals);
 setPanesSource(() => {
   const { tabs, activeId } = currentTabs();
   const shown = new Set(focusedSplit()?.ids ?? [activeId]);
@@ -185,7 +212,15 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
   } },
   "tab.next": { description: "The next tab", args: "{}", run: () => void runCommand("tabs.next") },
   "tab.prev": { description: "The previous tab", args: "{}", run: () => void runCommand("tabs.prev") },
-  "tab.close": { description: "Close the tab", args: "{}", run: () => void runCommand("tabs.close") },
+  // With an id these act on that tab, shown or not; a session closes through the same guard as its × (owner stop).
+  "tab.close": { description: "Close a tab: the one named by {id}, else the shown one", args: "{id?}", run: (args) => (word(args, "id") ? closeTab(tabOf(args).entry.id) : void runCommand("tabs.close")) },
+  "tab.pin": { description: "Keep a previewed file's tab (single-click previews are replaced by the next one)", args: "{id}", run: (args) => { const { entry } = tabOf(args); if (entry.kind === "resource") useFileTabs.getState().pin(entry.id); } },
+  "tab.menu": { description: "Open a tab's menu (split, zoom, rename, close) at a point of the window", args: "{id, x, y}", run: (args) => {
+    const [x, y] = [numberArg(args, "x"), numberArg(args, "y")];
+    if (x === undefined || y === undefined) throw new Error("This command needs {id, x, y}.");
+    useSplitSets.getState().openMenu(tabOf(args).entry.id, x, y);
+  } },
+  "pane.unsplit": { description: "Take a tab out of its split and show it full size (its tab stays)", args: "{id}", run: (args) => exitSplit(tabOf(args).entry.id) },
   "pane.split": { description: "Split the tab with a new terminal pane, or with `mod`, a pane that shows that mod", args: "{direction: right | down, mod?, props?}", run: (args) => { const side = word(args, "direction") === "down" ? "below" : "right"; const mod = word(args, "mod"); if (mod) openModOrThrow(mod, args, side); else splitActiveTab(side); } },
   "pane.zoom": { description: "Zoom the focused pane (again: back)", args: "{}", run: () => getPaneController()?.toggleMaximizeActive() },
   "pane.go": { description: "Focus the neighbouring pane", args: "{direction}", run: (args) => getPaneController()?.focusPaneDirection?.(direction(args)) },
@@ -209,7 +244,7 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
     if (!target) throw new Error(`This command needs {index: 1-${tabs.length}}.`);
     if (target.id !== entry.id) moveChat(entry.id, target.id, tabs.indexOf(entry) < tabs.indexOf(target), tabs.map((tab) => tab.id));
   } },
-  "pane.close": { description: "Close the focused pane (its tab)", args: "{}", run: () => void runCommand("tabs.close") },
+  "pane.close": { description: "Close a pane (its tab): the one named by {id}, else the focused one", args: "{id?}", run: (args) => (word(args, "id") ? closeTab(tabOf(args).entry.id) : void runCommand("tabs.close")) },
   "pane.focus": { description: "Focus a pane by id, or the pane of a terminal", args: "{pane | terminal}", run: (args) => {
     if (word(args, "pane")) return activateTab(tabOf(args, "pane").entry);
     const session = terminalOnScreen(args).getAttribute("data-session-id");
@@ -229,7 +264,23 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
     if (pinned !== undefined && typeof pinned !== "boolean") throw new Error("{pinned} is true or false.");
     setPinned(id, pinned ?? !isPinned(id));
   } },
-  ...Object.fromEntries(["show", "peek", "keep"].map((verb) => [`terminal.${verb}`, { description: "Show a terminal's session (Perch keeps every terminal running, so there is nothing to un-hide or park; peek, keep and show are the same command)", args: "{terminal | id}", run: (args: unknown) => usePerchStore.getState().switchSession(word(args, "terminal") ?? needsId(args)) }])),
+  // Presentation only: none of these starts, stops or restarts a process (perchd keeps every terminal running).
+  "terminal.show": { description: "Go to a terminal's session, as its tab would", args: "{terminal | id}", run: (args) => usePerchStore.getState().switchSession(word(args, "terminal") ?? needsId(args)) },
+  "terminal.peek": { description: "Show a session's own view over the app for a moment, without going to it: its terminal moves in and back, still running. A click outside, Esc (unless the terminal has the keyboard: then Esc is the program's), terminal.park or terminal.peek again closes it", args: "{terminal | id}", run: (args) => {
+    const id = knownSession(args);
+    if (closePeek(id)) return;
+    peeks.set(id, peekUi.overlay({ layout: { type: "block", content: `session:${id}` } }));
+  } },
+  "terminal.keep": { description: "Keep a session where it is meant to be: close its peek and go to its tab", args: "{terminal | id}", run: (args) => {
+    const id = knownSession(args);
+    closePeek(id);
+    usePerchStore.getState().switchSession(id);
+  } },
+  ...Object.fromEntries(["park", "unkeep"].map((verb) => [`terminal.${verb}`, { description: "Put away a session's peek: its terminal goes back where it was (or off screen) and keeps running. A session's own tab stays until it is closed", args: "{terminal | id}", run: (args: unknown) => {
+    const id = knownSession(args);
+    if (!closePeek(id)) throw new Error(`${id} has no peek to put away; its tab stays until it is closed, and parking never stops it.`);
+  } }])),
+  "terminal.order": { description: "Set the order of sessions for a mod's own list, kept on this device: {ids} (session ids); [] goes back to the app's order. agents() and terminals() report it; agent.next and agent.prev follow it", args: "{ids}", run: (args) => setTerminalOrder((args as { ids?: unknown } | null)?.ids) },
   "terminal.scroll": { description: "Move the view of a terminal's history, not the program: lines or pages (negative: toward history), or to top | bottom", args: "{lines | pages | to, terminal?}", run: (args) => {
     const to = word(args, "to");
     if (to !== undefined && to !== "top" && to !== "bottom") throw new Error('{to} is "top" or "bottom".');
@@ -317,4 +368,77 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
   "window.close": { description: "Close the desktop window", args: "{}", run: windowControl("close") },
   "layout.stack": { description: "Show one child of a layout's stack", args: "{stack, child}", run: showStackChild },
   "workspace.focus": { description: "Focus a workspace", args: "{id}", run: (args) => usePerchStore.getState().focusWorkspace(needsId(args)) },
+  // Navigation (the sidebar and its clones). Each names its target, as a row does, shown or not.
+  "session.request_close": { description: "Close a session as its × does: an agent you started asks first (Settings), one you only watch leaves this view", args: "{id}", run: (args) => requestCloseSession(sessionOf(args)) },
+  "session.move": { description: "Move a session beside another in the order the core keeps for every screen; `siblings` are the ids of their group in strip order", args: "{id, target, after, siblings}", run: (args) => {
+    const siblings = (args as { siblings?: unknown }).siblings;
+    if (!Array.isArray(siblings) || siblings.some((id) => typeof id !== "string")) throw new Error("This command needs {siblings: [ids…]}.");
+    moveChat(sessionOf(args), sessionOf(args, "target"), (args as { after?: unknown }).after === true, siblings as string[]);
+  } },
+  "project.move": { description: "Move a project beside another in the order the core keeps for every screen", args: "{id, target, after}", run: (args) => {
+    const project = projectOf(args);
+    const target = projectOf(args, "target");
+    const state = usePerchStore.getState();
+    const order = state.workspaceOrderByHost[project.hostId]?.projects;
+    const ids = orderProjects(state.workspaceProjects.filter((p) => p.hostId === project.hostId).sort((a, b) => (a.favorite !== b.favorite ? (a.favorite ? -1 : 1) : b.updatedAt - a.updatedAt)), order).map((p) => p.id);
+    state.setWorkspaceOrder(project.hostId, { projects: writeScope(order, moveBeside(ids, project.id, target.id, (args as { after?: unknown }).after === true)) });
+  } },
+  "workspace.open": { description: "Show a workspace: its last viewed session, else its start screen", args: "{id}", run: (args) => navigateToWorkspace(workspaceOf(args).id) },
+  "workspace.pin": { description: "Pin or unpin a workspace (pinned ones list first)", args: "{id, pinned}", run: (args) => usePerchStore.getState().pinWorkspace(workspaceOf(args).id, (args as { pinned?: unknown }).pinned !== false) },
+  "workspace.hide": { description: "Hide a linked worktree from the sidebar, or show it again", args: "{id, hidden}", run: (args) => usePerchStore.getState().setWorkspaceHidden(workspaceOf(args).id, (args as { hidden?: unknown }).hidden !== false) },
+  "workspace.restore": { description: "Wake a sleeping workspace", args: "{id}", run: (args) => usePerchStore.getState().restoreWorkspace(workspaceOf(args).id) },
+  // A remote host's checkout may be known only by its sessions' workspace id, so these take any id.
+  "workspace.files": { description: "Open a workspace's files in the drawer", args: "{id}", run: (args) => usePerchStore.getState().openWorkspaceFiles(needsId(args)) },
+  "workspace.git": { description: "Open a workspace's Git and review", args: "{id}", run: (args) => usePerchStore.getState().openWorkspaceGitReview(needsId(args)) },
+  "worktree.remove": { description: "Ask to delete a linked worktree (its worktree menu confirms and guards the removal)", args: "{id}", run: (args) => {
+    const workspace = workspaceOf(args);
+    const project = usePerchStore.getState().workspaceProjects.find((p) => p.id === workspace.projectId);
+    if (!workspace.parentWorkspaceId || !project?.repoPath) throw new Error("Only a linked worktree of a git project can be deleted.");
+    usePerchStore.getState().requestWorktreeMenu(`${project.hostId}:${project.repoPath}`, { path: workspace.path, branch: workspace.branch || undefined });
+  } },
+  ...Object.fromEntries((["cancel", "retry", "dismiss"] as const).map((verb) => [`worktree.${verb}`, { description: { cancel: "Stop making a worktree", retry: "Try a failed worktree again", dismiss: "Forget a failed worktree" }[verb], args: "{id}", run: (args: unknown) => {
+    const id = needsId(args);
+    const state = usePerchStore.getState();
+    if (!state.worktreeJobs.some((job) => job.jobId === id)) throw new Error(`There is no worktree job ${id}.`);
+    ({ cancel: state.cancelWorktreeJob, retry: state.retryWorktreeJob, dismiss: state.dismissWorktreeJob })[verb](id);
+  } }])),
+  "host.select": { description: "Show a host's projects and sessions (\"local\" is this computer)", args: "{id}", run: (args) => usePerchStore.getState().setActiveHost(hostOf(args)) },
+  "host.enable": { description: "Turn a configured host on or off, as its Settings switch does", args: "{id, enabled}", run: (args) => {
+    const id = hostOf(args);
+    const entry = usePerchStore.getState().hosts.find((h) => h.id === id);
+    if (!entry) throw new Error("This computer cannot be turned off.");
+    usePerchStore.getState().upsertHost({ ...entry, enabled: (args as { enabled?: unknown }).enabled !== false });
+  } },
+  "host.refresh": { description: "Ask a host for its projects and workspaces again", args: "{id}", run: (args) => usePerchStore.getState().fetchWorkspaceSnapshot(hostOf(args)) },
+  "folder.select": { description: "Show a folder's sessions, on a host without projects", args: "{cwd, host?}", run: (args) => {
+    const cwd = word(args, "cwd");
+    if (!cwd) throw new Error('This command needs {cwd: "/path"}.');
+    usePerchStore.getState().setActiveProject(word(args, "host") ?? usePerchStore.getState().activeHostId, cwd);
+  } },
+  "quickchat.new": { description: "A new chat in Quickchat: its start screen, or the agent set for empty workspaces", args: "{}", run: () => newScratchpad() },
 };
+
+/** The session, project, workspace or host named by `{key}`; a missing one throws, so a command never acts on another. */
+function sessionOf(args: unknown, key = "id"): string {
+  const id = word(args, key);
+  if (!id) throw new Error(`This command needs {${key}: "…"}.`);
+  if (!usePerchStore.getState().sessions.some((session) => session.id === id)) throw new Error(`There is no session ${id}.`);
+  return id;
+}
+function projectOf(args: unknown, key = "id") {
+  const id = word(args, key);
+  const project = usePerchStore.getState().workspaceProjects.find((p) => p.id === id);
+  if (!project) throw new Error(id ? `There is no project ${id}.` : `This command needs {${key}: "…"}.`);
+  return project;
+}
+function workspaceOf(args: unknown) {
+  const id = needsId(args);
+  const workspace = usePerchStore.getState().workspaces.find((w) => w.id === id);
+  if (!workspace) throw new Error(`There is no workspace ${id}.`);
+  return workspace;
+}
+function hostOf(args: unknown): string {
+  const id = needsId(args);
+  if (id !== "local" && !usePerchStore.getState().hosts.some((h) => h.id === id)) throw new Error(`There is no host ${id}.`);
+  return id;
+}

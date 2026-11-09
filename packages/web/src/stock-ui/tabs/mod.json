@@ -1,0 +1,6 @@
+{
+  "name": "Tabs",
+  "description": "the tab strip of the shown workspace: sessions, files, reviews, browsers and mod tabs; rename, reorder and split by drag, close, the + launcher",
+  "version": "1.0.0",
+  "api": "^1.2"
+}

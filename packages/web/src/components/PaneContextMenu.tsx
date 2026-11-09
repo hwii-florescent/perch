@@ -1,24 +1,14 @@
 /**
- * PaneContextMenu.tsx — Phase 5 right-click context menu for dockview panel
- * tabs: Split Right, Split Down, Split with Session, Zoom/Restore (toggle), Rename (inline
- * input), Close. Portal-rendered into `document.body` with `position:
- * fixed`, following the same click-outside/Escape-to-close pattern as
- * `ModelChip.tsx`'s popover and `Sidebar.tsx`'s `SessionMenu`.
- *
- * All actions are routed through the existing `DockviewController` (see
- * `dockview/dockviewController.ts`) rather than touching the dockview `api`
- * directly here, so this component never duplicates split/close/maximize
- * plumbing — it only decides *which* panel those actions apply to (via
- * `setActivePanel`) and *when* to fire them.
+ * PaneContextMenu.tsx: the right-click menu of a docked pane's tab. The screen is `stock:pane-menu`
+ * (`stock-ui/pane-menu/main.tsx`) or the person's package chosen for it; this file binds its actions to the
+ * `DockviewController` (split/close/maximize plumbing stays there), the split sets and the agent stop, for `panelId`.
  */
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import type { DockviewController } from "../dockview/dockviewController";
 import { canStopAgent, stopAgent } from "../agentTerminals";
-import { menuDivider, menuItem, menuPanel } from "./ui/menu";
-import { button } from "./ui/button";
 import { useSplitSets } from "../splitSets";
 import { splitActiveTab } from "../tiledPanes";
+import PaneMenu from "../stock-ui/pane-menu/main";
+import { StockRoute } from "./mod-root";
 
 export interface PaneContextMenuProps {
   panelId: string;
@@ -35,181 +25,20 @@ export interface PaneContextMenuProps {
 }
 
 export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, onSplitSession, onClose }: PaneContextMenuProps) {
-  const [renaming, setRenaming] = useState(false);
-  const [renameValue, setRenameValue] = useState(title);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const renameInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      onClose();
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [onClose]);
-
-  useEffect(() => {
-    if (renaming) renameInputRef.current?.focus();
-  }, [renaming]);
-
-  const canClose = controller.canClosePanel(panelId);
-  const maximized = controller.isPanelMaximized(panelId);
-
-  // Clamp so the menu never renders off-screen for a right-click near an edge.
-  const MENU_W = 180;
-  const MENU_H = renaming ? 220 : 180;
-  const left = Math.min(x, window.innerWidth - MENU_W - 8);
-  const top = Math.min(y, window.innerHeight - MENU_H - 8);
-
-  function commitRename() {
-    const trimmed = renameValue.trim();
-    if (trimmed && trimmed !== title) controller.renamePanel(panelId, trimmed);
-    onClose();
-  }
-
-  return createPortal(
-    <div
-      className={menuPanel}
-      data-testid="pane-context-menu"
-      ref={menuRef}
-      style={{ position: "fixed", top, left, zIndex: 9999, minWidth: MENU_W }}
-    >
-      {renaming ? (
-        <div className="flex items-center gap-[0.35rem] px-2 py-[0.4rem]">
-          <input
-            type="text"
-            className="min-w-0 flex-1 rounded-ui bg-surface-1 px-2 py-[0.3rem] text-[0.8rem] text-fg [font-family:inherit] focus:[outline:1px_solid_var(--accent)]"
-            data-testid="pane-menu-rename-input"
-            ref={renameInputRef}
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commitRename();
-              if (e.key === "Escape") onClose();
-            }}
-          />
-          <button
-            type="button"
-            className={button({ variant: "primary", size: "sm" })}
-            data-testid="pane-menu-rename-confirm"
-            onClick={commitRename}
-          >
-            OK
-          </button>
-        </div>
-      ) : (
-        <>
-          <button
-            type="button"
-            className={menuItem()}
-            data-testid="pane-menu-split-right"
-            onClick={() => {
-              splitActiveTab("right");
-              onClose();
-            }}
-          >
-            Split right with new terminal
-          </button>
-          <button
-            type="button"
-            className={menuItem()}
-            data-testid="pane-menu-split-down"
-            onClick={() => {
-              splitActiveTab("below");
-              onClose();
-            }}
-          >
-            Split below with new terminal
-          </button>
-          <button
-            type="button"
-            className={menuItem()}
-            data-testid="pane-menu-split-session"
-            title="Add a session pane to this tab's saved layout; other tabs stay separate"
-            onClick={() => {
-              onSplitSession();
-              onClose();
-            }}
-          >
-            Add session inside this tab…
-          </button>
-          {sessionId && (
-            <button
-              type="button"
-              className={menuItem()}
-              data-testid="pane-menu-split-tab"
-              title="Show two open tabs side by side; both stay in the tab strip"
-              onClick={() => {
-                useSplitSets.getState().openMenu(sessionId, left, top);
-                onClose();
-              }}
-            >
-              Show beside an open tab…
-            </button>
-          )}
-          <button
-            type="button"
-            className={menuItem()}
-            data-testid="pane-menu-zoom"
-            onClick={() => {
-              controller.setActivePanel(panelId);
-              controller.toggleMaximizeActive();
-              onClose();
-            }}
-          >
-            {maximized ? "Restore" : "Zoom"}
-          </button>
-          <button
-            type="button"
-            className={menuItem()}
-            data-testid="pane-menu-rename"
-            onClick={() => {
-              setRenameValue(title);
-              setRenaming(true);
-            }}
-          >
-            Rename pane
-          </button>
-          <div className={menuDivider} />
-          {sessionId && canStopAgent(sessionId) && (
-            <button
-              type="button"
-              className={menuItem({ danger: true })}
-              data-testid="pane-menu-stop-agent"
-              title="Kill the agent process. Restart resumes the conversation."
-              onClick={() => {
-                stopAgent(sessionId);
-                onClose();
-              }}
-            >
-              Stop agent
-            </button>
-          )}
-          <button
-            type="button"
-            className={menuItem({ danger: true })}
-            data-testid="pane-menu-close"
-            disabled={!canClose}
-            onClick={() => {
-              if (!canClose) return;
-              controller.setActivePanel(panelId);
-              controller.closeActiveTerminalPanel();
-              onClose();
-            }}
-          >
-            Close pane
-          </button>
-        </>
-      )}
-    </div>,
-    document.body,
-  );
+  const props = {
+    panelId, title, x, y, sessionId, onClose,
+    canClose: controller.canClosePanel(panelId),
+    maximized: controller.isPanelMaximized(panelId),
+    canStopAgent: !!sessionId && canStopAgent(sessionId),
+    actions: {
+      splitNew: (direction: "right" | "below") => splitActiveTab(direction),
+      splitSession: onSplitSession,
+      showBesideTab: (left: number, top: number) => { if (sessionId) useSplitSets.getState().openMenu(sessionId, left, top); },
+      toggleZoom: () => { controller.setActivePanel(panelId); controller.toggleMaximizeActive(); },
+      rename: (name: string) => controller.renamePanel(panelId, name),
+      stopAgent: () => { if (sessionId) stopAgent(sessionId); },
+      close: () => { if (!controller.canClosePanel(panelId)) return; controller.setActivePanel(panelId); controller.closeActiveTerminalPanel(); },
+    },
+  };
+  return <StockRoute name="pane-menu" props={props} stock={PaneMenu} />;
 }

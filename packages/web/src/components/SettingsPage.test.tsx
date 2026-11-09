@@ -6,7 +6,7 @@ import { chooseDropdown, openDropdown, optionLabels } from "./ui/selectTesting";
 
 vi.mock("../ws", () => ({ socket: { send: vi.fn(), connect: vi.fn(), onMessage: vi.fn(() => () => {}), onConnectionChange: vi.fn(() => () => {}) } }));
 vi.mock("./AgentPicker", () => ({ useAgentChoices: () => ({ choices: [] }) }));
-vi.mock("../xtermSetup", () => ({ MIN_SCROLLBACK: 100, MAX_SCROLLBACK: 100000 }));
+vi.mock("../xtermSetup", async (importOriginal) => ({ ...(await importOriginal<object>()), MIN_SCROLLBACK: 100, MAX_SCROLLBACK: 100000 }));
 const { usePerchStore } = await import("../store");
 const { SettingsPage } = await import("./SettingsPage");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
