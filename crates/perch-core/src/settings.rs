@@ -85,6 +85,16 @@ pub struct Settings {
     /// A terminal pane shows its scroll position thumb. Defaults to `true`.
     #[serde(default = "default_true")]
     pub pane_scrollbars: bool,
+    /// Option acts as Alt in terminals (`"auto"` and `"on"` do; `"off"` keeps the keyboard layout's
+    /// characters). Defaults to `"auto"`.
+    #[serde(default = "default_option_as_alt")]
+    pub option_as_alt: String,
+    /// Notification sounds: a file under the folder that holds `mods/` (mp3, wav, ogg, m4a, flac;
+    /// up to 2 MiB) in place of the built-in tone. Empty keeps the tone.
+    #[serde(default)]
+    pub sound_done: String,
+    #[serde(default)]
+    pub sound_blocked: String,
     /// The desktop app also listens on the LAN so a paired phone can reach it
     /// (`server/phone_access.rs`). Off by default: nothing but loopback listens
     /// until the user turns it on.
@@ -158,6 +168,9 @@ impl Default for Settings {
             minimum_contrast: default_minimum_contrast(),
             clipboard_write: true,
             pane_scrollbars: true,
+            option_as_alt: default_option_as_alt(),
+            sound_done: String::new(),
+            sound_blocked: String::new(),
             phone_access: false,
             relay_url: String::new(),
             permissions_setup_dismissed: false,
@@ -225,6 +238,10 @@ fn normalize_chat_mode(mode: &str) -> String {
     }
 }
 
+fn default_option_as_alt() -> String {
+    "auto".into()
+}
+
 fn default_minimum_contrast() -> f64 {
     1.0
 }
@@ -273,6 +290,12 @@ pub struct SettingsPatch {
     pub clipboard_write: Option<bool>,
     #[serde(default)]
     pub pane_scrollbars: Option<bool>,
+    #[serde(default)]
+    pub option_as_alt: Option<String>,
+    #[serde(default)]
+    pub sound_done: Option<String>,
+    #[serde(default)]
+    pub sound_blocked: Option<String>,
     pub phone_access: Option<bool>,
     pub relay_url: Option<String>,
     pub permissions_setup_dismissed: Option<bool>,
@@ -378,6 +401,24 @@ impl SettingsStore {
                 "unknown browser search engine"
             );
         }
+        if let Some(mode) = &patch.option_as_alt {
+            anyhow::ensure!(
+                matches!(mode.as_str(), "auto" | "on" | "off"),
+                "option as alt is auto, on or off"
+            );
+        }
+        for file in [&patch.sound_done, &patch.sound_blocked]
+            .into_iter()
+            .flatten()
+        {
+            anyhow::ensure!(
+                file.len() <= 256
+                    && std::path::Path::new(file)
+                        .components()
+                        .all(|c| matches!(c, std::path::Component::Normal(_))),
+                "a sound is a relative path inside the folder (or empty)"
+            );
+        }
         if let Some(ratio) = patch.minimum_contrast {
             anyhow::ensure!(
                 ratio.is_finite() && (1.0..=21.0).contains(&ratio),
@@ -474,6 +515,15 @@ impl SettingsStore {
         }
         if let Some(shown) = patch.pane_scrollbars {
             guard.pane_scrollbars = shown;
+        }
+        if let Some(mode) = patch.option_as_alt {
+            guard.option_as_alt = mode;
+        }
+        if let Some(file) = patch.sound_done {
+            guard.sound_done = file;
+        }
+        if let Some(file) = patch.sound_blocked {
+            guard.sound_blocked = file;
         }
         if let Some(phone_access) = patch.phone_access {
             guard.phone_access = phone_access;
@@ -753,6 +803,28 @@ mod keybinding_tests {
                 reloaded.pane_scrollbars
             ),
             (4.5, false, false)
+        );
+        assert_eq!(reloaded.option_as_alt, "auto");
+        assert!(store
+            .update(patch(serde_json::json!({"optionAsAlt": "left"})))
+            .is_err());
+        assert!(store
+            .update(patch(serde_json::json!({"soundDone": "../x.mp3"})))
+            .is_err());
+        assert!(store
+            .update(patch(serde_json::json!({"soundBlocked": "/etc/x.mp3"})))
+            .is_err());
+        store
+            .update(patch(serde_json::json!({"optionAsAlt": "off", "soundDone": "sounds/ding.mp3", "soundBlocked": ""})))
+            .unwrap();
+        let reloaded = SettingsStore::load(&path).get();
+        assert_eq!(
+            (
+                reloaded.option_as_alt.as_str(),
+                reloaded.sound_done.as_str(),
+                reloaded.sound_blocked.as_str()
+            ),
+            ("off", "sounds/ding.mp3", "")
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }

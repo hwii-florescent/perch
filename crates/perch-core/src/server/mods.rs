@@ -312,6 +312,24 @@ pub(super) async fn file(
             }
         };
     }
+    // A notification sound from settings.json: audio under the folder, played by the page.
+    if let Some(rel) = params.get("sound") {
+        return match mods::sound(&app.memory_root, &policy, rel) {
+            Ok((bytes, kind)) => (
+                [
+                    ("content-type", kind),
+                    ("x-content-type-options", "nosniff"),
+                    ("cache-control", "no-cache"),
+                ],
+                bytes,
+            )
+                .into_response(),
+            Err(error) => {
+                let (status, text) = failure(error);
+                (status, text).into_response()
+            }
+        };
+    }
     let Some(id) = params.get("id") else {
         return (StatusCode::BAD_REQUEST, "id is required").into_response();
     };

@@ -326,6 +326,46 @@ test("herdr's tab, pane, terminal and agent commands run against Perch's tabs an
   });
 });
 
+test("overlay.close closes the top dialog a mod opened and layout.set rewrites the shown layout's file", async ({ page }) => {
+  fs.mkdirSync(MOD, { recursive: true });
+  fs.writeFileSync(path.join(MOD, "main.js"), `export default (el, api) => {
+    el.textContent = 'ovl';
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    (async () => {
+      await sleep(1500);
+      const seen = {};
+      api.overlay((box) => { box.textContent = 'dialog one'; });
+      api.overlay((box) => { box.textContent = 'dialog two'; });
+      const count = () => document.querySelectorAll('[data-testid="mod-api-overlay-e2e-hello"]').length;
+      seen.open = count();
+      api.run('overlay.close');
+      seen.afterOne = count();
+      seen.topIsFirst = document.querySelector('[data-testid="mod-api-overlay-e2e-hello"]')?.textContent;
+      api.run('overlay.close');
+      api.run('overlay.close');
+      seen.afterAll = count();
+      try { api.run('layout.set', { layout: 'nope' }); } catch (e) { seen.bad = e.message; }
+      api.run('layout.set', { layout: { name: 'E2E set', type: 'row', children: [{ type: 'block', content: 'canvas' }, { type: 'block', content: 'mod:e2e-hello', size: { px: 222 } }] } });
+      el.dataset.seen = JSON.stringify(seen);
+    })().catch((e) => { el.dataset.seen = JSON.stringify({ error: e.message }); });
+  };`);
+  fs.mkdirSync(path.dirname(LAYOUT), { recursive: true });
+  fs.writeFileSync(LAYOUT, JSON.stringify({ name: "E2E look", type: "row", children: [
+    { type: "block", content: "canvas" },
+    { type: "block", content: "mod:e2e-hello", size: { px: 200 } },
+  ] }));
+  await openMods(page);
+  await expect(page.locator('[data-testid="layout-e2e-look"]')).toBeVisible({ timeout: 15000 });
+  await page.locator('[data-testid="layout-e2e-look"]').getByRole("button", { name: "Use" }).click();
+  await page.keyboard.press("Escape");
+  const holder = page.locator('[data-testid="layout-mod:e2e-hello"] [data-seen]');
+  await expect(holder).toHaveAttribute("data-seen", /./, { timeout: 30000 });
+  expect(JSON.parse((await holder.getAttribute("data-seen"))!)).toEqual({
+    open: 2, afterOne: 1, topIsFirst: "dialog one", afterAll: 0, bad: "This command needs {layout: {type: \"column\" | \"row\" | …, …}}.",
+  });
+  await expect.poll(() => JSON.parse(fs.readFileSync(LAYOUT, "utf8")).children[1].size, { timeout: 10000 }).toEqual({ px: 222 });
+});
+
 test("keys.json binds a key to a mod's command and programs.json reaches api.program()", async ({ page }) => {
   fs.mkdirSync(MOD, { recursive: true });
   fs.writeFileSync(path.join(MOD, "main.js"), `export default (el, api) => {

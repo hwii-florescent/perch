@@ -497,6 +497,11 @@ export interface SettingsData {
   clipboardWrite?: boolean;
   /** A terminal pane shows its scroll position thumb. Absent = true. */
   paneScrollbars?: boolean;
+  /** Option acts as Alt in terminals: "auto" and "on" do, "off" keeps the layout's characters. Absent = "auto". */
+  optionAsAlt?: "auto" | "on" | "off";
+  /** Notification sounds: a file under the folder that holds mods/ in place of the built-in tone. Absent or "" = the tone. */
+  soundDone?: string;
+  soundBlocked?: string;
   /** The desktop app also listens on the LAN for paired phones. Absent = off. */
   phoneAccess?: boolean;
   /** Relay address for phones on any network; empty or absent = off. */
@@ -560,6 +565,9 @@ export interface SettingsPatch {
   minimumContrast?: number;
   clipboardWrite?: boolean;
   paneScrollbars?: boolean;
+  optionAsAlt?: "auto" | "on" | "off";
+  soundDone?: string;
+  soundBlocked?: string;
   phoneAccess?: boolean;
   relayUrl?: string;
   permissionsSetupDismissed?: boolean;

@@ -3,6 +3,15 @@
 type Draw = (el: HTMLElement, close: () => void) => void | (() => void);
 const PANEL = "border-radius:8px;background:var(--panel-bg,#1e1e1e);color:var(--text,#ddd);box-shadow:0 8px 30px rgba(0,0,0,.45);";
 
+/** The dialogs and popups open now, oldest first: Esc, and the `overlay.close` command, close the top one. */
+const closable: (() => void)[] = [];
+/** Closes the top dialog or popup; false when none is open. */
+export const closeTopOverlay = (): boolean => {
+  const top = closable[closable.length - 1];
+  top?.();
+  return !!top;
+};
+
 /** Mounts `root` on the page and wires closing; shared by all three surfaces. */
 function surface(open: Set<() => void>, root: HTMLElement, draw: Draw, into: HTMLElement, closers: { escape: boolean; outside?: boolean }) {
   let cleanup: void | (() => void);
@@ -10,6 +19,8 @@ function surface(open: Set<() => void>, root: HTMLElement, draw: Draw, into: HTM
   const onDown = (event: MouseEvent) => { if (!root.contains(event.target as Node)) close(); };
   function close() {
     if (!open.delete(close)) return;
+    const at = closable.indexOf(close);
+    if (at >= 0) closable.splice(at, 1);
     document.removeEventListener("keydown", onKey);
     document.removeEventListener("mousedown", onDown, true);
     root.remove();
@@ -19,6 +30,7 @@ function surface(open: Set<() => void>, root: HTMLElement, draw: Draw, into: HTM
   if (closers.outside) document.addEventListener("mousedown", onDown, true);
   document.body.append(root);
   open.add(close);
+  if (closers.escape) closable.push(close);
   try { cleanup = draw(into, close); } catch (error) { close(); throw error; }
   return close;
 }

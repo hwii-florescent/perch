@@ -208,11 +208,14 @@ function watchTerminalSettings() {
   let seen = "";
   const apply = () => {
     const settings = usePerchStore.getState().settings;
-    const key = `${settings?.minimumContrast}|${settings?.paneScrollbars}`;
+    const key = `${settings?.minimumContrast}|${settings?.paneScrollbars}|${settings?.optionAsAlt}`;
     if (key === seen) return;
     seen = key;
     document.documentElement.classList.toggle("no-pane-scrollbars", settings?.paneScrollbars === false);
-    for (const term of liveTerminals.values()) term.options.minimumContrastRatio = clampContrast(settings?.minimumContrast);
+    for (const term of liveTerminals.values()) {
+      term.options.minimumContrastRatio = clampContrast(settings?.minimumContrast);
+      term.options.macOptionIsMeta = settings?.optionAsAlt !== "off";
+    }
   };
   usePerchStore.subscribe(apply);
   apply();
@@ -222,6 +225,16 @@ const liveTerminalIn = (root: Element) => {
   const host = [...liveTerminals.keys()].find((container) => root === container || root.contains(container));
   return host && liveTerminals.get(host);
 };
+
+/** What is selected in the terminal drawn in or under `root` ("" when nothing, null when none is drawn there). */
+export const terminalSelection = (root: Element): string | null => liveTerminalIn(root)?.getSelection() ?? null;
+
+/** Pastes `text` into the terminal in or under `root` as typing would (bracketed when the program asked); false when none is drawn there. */
+export function pasteIntoTerminal(root: Element, text: string): boolean {
+  const term = liveTerminalIn(root);
+  term?.paste(text);
+  return !!term;
+}
 
 /** Moves the view of the terminal in or under `root` (not the program): `lines` or `pages` (negative: toward history), or `to` the top or bottom. False when none is drawn there. */
 export function scrollTerminal(root: Element, by: { lines?: number; pages?: number; to?: "top" | "bottom" }): boolean {
@@ -295,7 +308,7 @@ export function createPerchTerminal(
     minimumContrastRatio: clampContrast(usePerchStore.getState().settings?.minimumContrast),
     // iTerm2's "Esc+" behaviour — what makes Alt+B / Alt+F / Alt+Backspace
     // word motion work in the CLIs' composers.
-    macOptionIsMeta: true,
+    macOptionIsMeta: usePerchStore.getState().settings?.optionAsAlt !== "off",
     macOptionClickForcesSelection: true,
     drawBoldTextInBrightColors: true,
     allowProposedApi: true, // required by the Unicode 11 addon

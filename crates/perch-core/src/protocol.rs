@@ -96,6 +96,16 @@ pub struct SettingsData {
     /// A terminal pane shows its scroll position thumb. Defaults to `true`.
     #[serde(default = "default_true")]
     pub pane_scrollbars: bool,
+    /// Option acts as Alt in terminals (`"auto"` and `"on"` do; `"off"` keeps the keyboard layout's
+    /// characters). Defaults to `"auto"`.
+    #[serde(default = "default_option_as_alt")]
+    pub option_as_alt: String,
+    /// Notification sounds: a file under the folder that holds `mods/` (mp3, wav, ogg, m4a, flac;
+    /// up to 2 MiB) in place of the built-in tone. Empty keeps the tone.
+    #[serde(default)]
+    pub sound_done: String,
+    #[serde(default)]
+    pub sound_blocked: String,
     /// Also listen on the LAN for paired phones (desktop app; see `phone_access.rs`).
     #[serde(default)]
     pub phone_access: bool,
@@ -169,6 +179,10 @@ fn default_chat_mode() -> String {
     "cli".to_string()
 }
 
+fn default_option_as_alt() -> String {
+    "auto".into()
+}
+
 fn default_minimum_contrast() -> f64 {
     1.0
 }
@@ -226,6 +240,12 @@ pub struct SettingsPatch {
     pub clipboard_write: Option<bool>,
     #[serde(default)]
     pub pane_scrollbars: Option<bool>,
+    #[serde(default)]
+    pub option_as_alt: Option<String>,
+    #[serde(default)]
+    pub sound_done: Option<String>,
+    #[serde(default)]
+    pub sound_blocked: Option<String>,
     #[serde(default)]
     pub phone_access: Option<bool>,
     #[serde(default)]

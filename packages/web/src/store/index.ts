@@ -9,7 +9,7 @@ import { forgetClosedTabs, recordClosedTab } from "../closedTabs";
 import { emitTerminalData } from "../terminalBus";
 import { handleWorkspaceTerminalMessage } from "../workspaceTerminals";
 import { applyTheme } from "../themes";
-import { playBlockedTone, playDoneTone } from "../sound";
+import { playBlockedTone, playDoneTone, setSoundFiles } from "../sound";
 import { hasNativeNotifications, OPEN_SESSION_EVENT, planNotification, sendSystemNotification, USAGE_NOTIFICATION_ID, windowFocused } from "../notifications";
 import { ownsAgentRuntimeRequest, ownsGitReviewRequest, ownsSurfaceRequest, registerAgentRuntimeRequest, retireAgentRuntimeRequest } from "../requestOwnership";
 import {
@@ -2457,6 +2457,7 @@ export function handleServerMessage(msg: ServerMessage): void {
     }
     case "settings.current": {
       usePerchStore.setState({ settings: msg.settings });
+      setSoundFiles(msg.settings.soundDone, msg.settings.soundBlocked);
       applyTheme(msg.settings.theme);
       break;
     }

@@ -1,7 +1,9 @@
 import { placeFloat, resetLayoutState, resizeNode, showStackChild, toggleNode } from "./layoutState";
 import { cloneMod, currentMods, openMod, setLayout } from "./mods";
 import { bindKey, runCommand, setPanesSource, setTerminalReader } from "./modApp";
-import { scrollTerminal, terminalText } from "./xtermSetup";
+import { pasteIntoTerminal, scrollTerminal, terminalSelection, terminalText } from "./xtermSetup";
+import { closeTopOverlay } from "./modUi";
+import { writeTextFile } from "./modHost";
 import { focusedSplit, getPaneController, openModTab, splitActiveTab } from "./tiledPanes";
 import { activateTab, currentTabs, entryLabel, moveChat } from "./workspaceTabs";
 import { zoomIn, zoomOut, zoomReset } from "./zoom";
@@ -205,6 +207,32 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
     const by = { lines: numberArg(args, "lines"), pages: numberArg(args, "pages"), to } as Parameters<typeof scrollTerminal>[1];
     if (by.lines === undefined && by.pages === undefined && !to) throw new Error("This command needs {lines}, {pages} or {to}.");
     scrollTerminal(terminalOnScreen(args), by);
+  } },
+  "terminal.copy": { description: "Copy the terminal's selected text to the clipboard", args: "{terminal?}", run: later(async (args) => {
+    const text = terminalSelection(terminalOnScreen(args));
+    if (!text) throw new Error("Nothing is selected in that terminal.");
+    await navigator.clipboard.writeText(text);
+  }) },
+  "terminal.paste": { description: "Paste the clipboard's text into a terminal", args: "{terminal?}", run: later(async (args) => {
+    const text = await navigator.clipboard.readText();
+    if (!text) throw new Error("The clipboard has no text.");
+    pasteIntoTerminal(terminalOnScreen(args), text);
+  }) },
+  "overlay.close": { description: "Close the top dialog or popup a mod opened (windows stay until their own close)", args: "{}", run: () => void closeTopOverlay() },
+  "project.new": { description: "Add a folder as a project and show it", args: "{folder, name?}", run: (args) => {
+    const folder = word(args, "folder");
+    if (!folder) throw new Error('This command needs {folder: "/path"}.');
+    if (!usePerchStore.getState().createWorkspaceProject(folder, word(args, "name"))) throw new Error(`Cannot add ${folder} as a project.`);
+  } },
+  "layout.set": { description: "Replace the shown layout's tree (the file layouts/<name>.json; it reloads at once). A layout must be shown: layout.switch first", args: "{layout: {type, children, ...}}", run: (args) => {
+    const tree = (args as { layout?: unknown } | null)?.layout;
+    const state = currentMods();
+    if (typeof tree !== "object" || tree === null || Array.isArray(tree) || typeof (tree as { type?: unknown }).type !== "string") throw new Error('This command needs {layout: {type: "column" | "row" | …, …}}.');
+    if (!state?.layout || !state.folder) throw new Error("No layout is shown: choose one with layout.switch first.");
+    const text = JSON.stringify(tree, null, 2);
+    if (text.length > 256 * 1024) throw new Error("A layout is at most 256 KiB.");
+    // layouts/ sits beside mods/ in the folder that holds it.
+    later(() => writeTextFile(`${state.folder.replace(/[\\/]mods[\\/]?$/, "")}/layouts/${state.layout}.json`, text))(undefined);
   } },
   "agent.focus": { description: "Show an agent's session", args: "{terminal | id}", run: (args) => usePerchStore.getState().switchSession(word(args, "terminal") ?? needsId(args)) },
   "agent.next": { description: "The next agent's session", args: "{}", run: stepAgent(1) },

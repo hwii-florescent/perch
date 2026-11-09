@@ -305,10 +305,25 @@ const ICON_KINDS: [(&str, &str); 5] = [
     ("jpeg", "image/jpeg"),
     ("webp", "image/webp"),
 ];
+const SOUND_KINDS: [(&str, &str); 5] = [
+    ("mp3", "audio/mpeg"),
+    ("wav", "audio/wav"),
+    ("ogg", "audio/ogg"),
+    ("m4a", "audio/mp4"),
+    ("flac", "audio/flac"),
+];
 
-/// A program icon from `programs.json` (`"icon": "my-icons/mytool.svg"`): an image under the folder
-/// that holds `mods/`, by relative path, up to 1 MiB. Nothing outside that folder is served.
-pub fn icon(root: &Path, policy: &Policy, rel: &str) -> Result<(Vec<u8>, &'static str), Error> {
+/// A file the person points at from `programs.json` or `settings.json` (an icon, a sound): by
+/// relative path under the folder that holds `mods/`, of one of `kinds`, up to `max` bytes. Nothing
+/// outside that folder is served, symlinks resolved.
+fn folder_asset(
+    root: &Path,
+    policy: &Policy,
+    rel: &str,
+    kinds: &[(&str, &'static str)],
+    max: u64,
+    what: &str,
+) -> Result<(Vec<u8>, &'static str), Error> {
     if policy.is_off() {
         return Err(Error::NotFound("mods are off".into()));
     }
@@ -318,29 +333,44 @@ pub fn icon(root: &Path, policy: &Policy, rel: &str) -> Result<(Vec<u8>, &'stati
             .components()
             .all(|c| matches!(c, Component::Normal(_)))
     {
-        return Err(Error::Invalid(
-            "an icon is a relative path inside the folder".into(),
-        ));
+        return Err(Error::Invalid(format!(
+            "{what} is a relative path inside the folder"
+        )));
     }
     let ext = relative
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let kind = ICON_KINDS
+    let kind = kinds
         .iter()
         .find(|(e, _)| *e == ext)
         .map(|(_, k)| *k)
-        .ok_or_else(|| Error::Invalid("an icon is an svg, png, jpg or webp".into()))?;
+        .ok_or_else(|| {
+            Error::Invalid(format!(
+                "{what} is a {}",
+                kinds.iter().map(|(e, _)| *e).collect::<Vec<_>>().join(", ")
+            ))
+        })?;
     let base = root.canonicalize()?;
     let path = base.join(relative).canonicalize()?;
     if !path.starts_with(&base) {
-        return Err(Error::Invalid("the icon points outside the folder".into()));
+        return Err(Error::Invalid(format!("{what} points outside the folder")));
     }
-    if std::fs::metadata(&path)?.len() > 1024 * 1024 {
-        return Err(Error::Invalid("larger than 1 MiB".into()));
+    if std::fs::metadata(&path)?.len() > max {
+        return Err(Error::Invalid(format!("larger than {} KiB", max / 1024)));
     }
     Ok((std::fs::read(path)?, kind))
+}
+
+/// A program icon from `programs.json` (`"icon": "my-icons/mytool.svg"`), up to 1 MiB.
+pub fn icon(root: &Path, policy: &Policy, rel: &str) -> Result<(Vec<u8>, &'static str), Error> {
+    folder_asset(root, policy, rel, &ICON_KINDS, 1024 * 1024, "an icon")
+}
+
+/// A notification sound from `settings.json` (`soundDone`, `soundBlocked`), up to 2 MiB.
+pub fn sound(root: &Path, policy: &Policy, rel: &str) -> Result<(Vec<u8>, &'static str), Error> {
+    folder_asset(root, policy, rel, &SOUND_KINDS, 2 * 1024 * 1024, "a sound")
 }
 
 /// Turn one mod off or back on.
@@ -1153,6 +1183,14 @@ mod tests {
             assert!(icon(&root, &on, "my-icons/out.png").is_err()); // a link out is refused
             let _ = std::fs::remove_file(outside);
         }
+        std::fs::write(root.join("my-icons/ding.mp3"), "ID3").unwrap();
+        assert_eq!(
+            sound(&root, &on, "my-icons/ding.mp3").unwrap().1,
+            "audio/mpeg"
+        );
+        assert!(sound(&root, &on, "my-icons/a.svg").is_err()); // an image is not a sound
+        assert!(icon(&root, &on, "my-icons/ding.mp3").is_err());
+        assert!(sound(&root, &on, "../ding.mp3").is_err());
         let _ = std::fs::remove_dir_all(&root);
     }
 

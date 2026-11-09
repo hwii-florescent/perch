@@ -9,7 +9,22 @@
  * actually blocked in practice.
  */
 
+import { getBasePath } from "./base";
+
 let ctx: AudioContext | null = null;
+
+/** settings.soundDone / soundBlocked: files under the folder that holds mods/, in place of the tones. */
+let files = { done: "", blocked: "" };
+export function setSoundFiles(done = "", blocked = ""): void {
+  files = { done, blocked };
+}
+
+/** Plays the person's own sound; the built-in tone stands in when the file is missing or will not play. */
+function playFile(rel: string, tone: () => void): void {
+  const audio = new Audio(`${window.location.origin}${getBasePath()}mods/file?${new URLSearchParams({ sound: rel })}`);
+  audio.addEventListener("error", tone, { once: true });
+  audio.play().catch(tone);
+}
 
 function getContext(): AudioContext | null {
   if (typeof window === "undefined") return null;
@@ -47,11 +62,15 @@ function playTone(freqs: number[], durationMs: number): void {
 
 /** Session finished a turn while unseen — two short ascending notes. */
 export function playDoneTone(): void {
-  playTone([660, 880], 260);
+  const tone = () => playTone([660, 880], 260);
+  if (files.done) playFile(files.done, tone);
+  else tone();
 }
 
 /** Session became blocked on an approval prompt — a single lower, more
  * insistent note (distinct timbre from "done" so they aren't confused). */
 export function playBlockedTone(): void {
-  playTone([440, 440], 320);
+  const tone = () => playTone([440, 440], 320);
+  if (files.blocked) playFile(files.blocked, tone);
+  else tone();
 }

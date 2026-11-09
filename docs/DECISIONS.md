@@ -114,12 +114,19 @@ approval not mattering much.
   `pane.close`, `pane.focus {pane|terminal}`, `terminal.kill {terminal?}`, `terminal.scroll {lines|pages|to, terminal?}`,
   `agent.next|prev|focus {terminal}`, `session|workspace|project.rename {id, name}`, `app.settings|help|palette`, and
   `tab.new {argv, task?}` (a terminal running the program in the shown workspace through the core's `workspace.run`,
-  `task` as its last argument). `settings.json` also takes herdr's `minimum_contrast` (as `minimumContrast`, 1 to 21), `clipboard_write` (`clipboardWrite`,
-  OSC 52) and `pane_scrollbars` (`paneScrollbars`), live in open terminals. Fonts and sizes stay with the server terminal
-  profile and a layout's look, ligatures need an addon Perch does not ship, and there is no telemetry to turn off.
-  Not ported because Perch has no such thing: `terminal.keep|park|peek|show` (perchd keeps
-  every terminal), `terminal.pin`, `space.*` creation by argv, `layout.set` (a layout is a file a mod writes and hot reload
-  applies), and the updater, feedback and `app.reset` family.
+  `task` as its last argument), `terminal.copy|paste {terminal?}`, `overlay.close` (the top dialog or popup), `project.new
+  {folder, name?}` and `layout.set {layout}` (rewrites the shown layout's file; it hot reloads). `settings.json` also takes
+  herdr's `minimum_contrast` (as `minimumContrast`, 1 to 21), `clipboard_write` (`clipboardWrite`, OSC 52),
+  `pane_scrollbars` (`paneScrollbars`), `option_as_alt` (`optionAsAlt`: `auto` and `on` are alike because a web view
+  cannot tell the keyboard layout, `off`; not `left`/`right`) and `sounds` (`soundDone`, `soundBlocked`: a file under the
+  folder that holds `mods/`, served by `GET /mods/file?sound=`, 2 MiB, mp3/wav/ogg/m4a/flac, the tone if it will not
+  play), live in open terminals. Fonts and sizes stay with the server terminal profile and a layout's look, ligatures
+  need an addon Perch does not ship, and there is no telemetry to turn off.
+  Not ported because Perch has no such thing: `terminal.keep|park|peek|show` (perchd keeps every terminal), `terminal.pin`
+  (no pinned agents), the updater, feedback and `app.reset` family, `space.new` with `argv` (start the program with
+  `tab.new {argv}` after `project.new`), label adoption of daemon terminals (the core keeps the bookkeeping of what it
+  started; a terminal `perch daemon run` makes stays out of the UI, as herdr's unlabeled ones do) and `hc exec --on`
+  (a mod's `exec({host})` runs on a Settings > Hosts computer).
 - **More of herdr's surface.** `home()`/`appHome()`, `placement()` (a floating mod's edge/align/dragging),
   `playSound("done"|"blocked")`, a block `agent:focused` (the focused session's terminal), `key.bind {command, keys}`
   (so an agent can set a key through `perch mod do`) and `perch mod status` (layout, focus, theme, dialogs, each mod's

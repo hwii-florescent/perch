@@ -134,6 +134,11 @@ describe("createPerchTerminal", () => {
     settings({ minimumContrast: 99, paneScrollbars: false });
     expect(term.options.minimumContrastRatio).toBe(21);
     expect(document.documentElement.classList.contains("no-pane-scrollbars")).toBe(true);
+    expect(term.options.macOptionIsMeta).toBe(true);
+    settings({ optionAsAlt: "off" });
+    expect(term.options.macOptionIsMeta).toBe(false);
+    settings({ optionAsAlt: "on" });
+    expect(term.options.macOptionIsMeta).toBe(true);
     settings({ minimumContrast: 1, paneScrollbars: true });
     expect(term.options.minimumContrastRatio).toBe(1);
     expect(document.documentElement.classList.contains("no-pane-scrollbars")).toBe(false);
@@ -145,6 +150,29 @@ describe("createPerchTerminal", () => {
     term.write("\u001b]52;c;aGk=\u0007");
     term.resize(22, 5);
     expect(written).toHaveBeenCalledTimes(1);
+    dispose();
+  });
+
+  it("terminalSelection and pasteIntoTerminal act on the terminal in or under an element", async () => {
+    HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }) })) as never;
+    window.matchMedia ??= (() => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} })) as never;
+    globalThis.ResizeObserver ??= class { observe() {} disconnect() {} } as never;
+    globalThis.IntersectionObserver ??= class { observe() {} disconnect() {} } as never;
+    const { createPerchTerminal, terminalSelection, pasteIntoTerminal } = await import("./xtermSetup");
+    const host = document.createElement("div");
+    const { term, dispose } = createPerchTerminal(host.appendChild(document.createElement("div")), () => {});
+    const typed: string[] = [];
+    term.onData((data) => typed.push(data));
+    term.resize(20, 5);
+    term.write("copy me");
+    term.resize(21, 5);
+    expect(terminalSelection(host)).toBe("");
+    term.selectAll();
+    expect(terminalSelection(host)).toContain("copy me");
+    expect(pasteIntoTerminal(host, "pasted")).toBe(true);
+    expect(typed.join("")).toContain("pasted");
+    expect(terminalSelection(document.createElement("div"))).toBeNull();
+    expect(pasteIntoTerminal(document.createElement("div"), "x")).toBe(false);
     dispose();
   });
 
