@@ -99,3 +99,56 @@ jobs:
         with:
           draft: true
           files: perchd-linux-${{ matrix.arch }}
+
+  # The headless core that Settings > Hosts > "Install perch-core" puts on a remote computer
+  # (crates/perch-core/src/machine.rs downloads `perch-core-<os>-<arch>` and its `.sha256` from the
+  # release). Linux is static musl, like the daemon; macOS is a plain release build.
+  core:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            name: linux-x86_64
+            triple: x86_64-unknown-linux-musl
+          - os: ubuntu-22.04-arm
+            name: linux-aarch64
+            triple: aarch64-unknown-linux-musl
+          - os: macos-latest
+            name: macos-aarch64
+            triple: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    env:
+      # The core tells a probe which release it came from, so an install fetches its own version.
+      PERCH_RELEASE_TAG: ${{ github.ref_name }}
+      CC_x86_64_unknown_linux_musl: musl-gcc
+      CC_aarch64_unknown_linux_musl: musl-gcc
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p perch-core --target "${{ matrix.triple }}"
+      - name: Name, smoke-test and checksum
+        run: |
+          cp "target/${{ matrix.triple }}/release/perch-core" "perch-core-${{ matrix.name }}"
+          # --version answers without booting a server; it is what a machine probe runs.
+          "./perch-core-${{ matrix.name }}" --version
+          if [ "$(uname)" = Linux ]; then
+            file "perch-core-${{ matrix.name }}"
+            sha256sum "perch-core-${{ matrix.name }}" > "perch-core-${{ matrix.name }}.sha256"
+          else
+            shasum -a 256 "perch-core-${{ matrix.name }}" > "perch-core-${{ matrix.name }}.sha256"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: perch-core-${{ matrix.name }}
+          path: perch-core-${{ matrix.name }}*
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          draft: true
+          files: perch-core-${{ matrix.name }}*
