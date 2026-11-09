@@ -118,7 +118,12 @@ fn post(
     // answer and 25 s more for a Claude steer to show in its transcript): wait past that, and if the
     // core still says nothing, say it may have taken effect rather than call it a failure.
     let acting = matches!(route, "steer" | "interrupt");
-    let _ = stream.set_read_timeout(Some(if acting { ACTION_TIMEOUT } else { TIMEOUT }));
+    // `exec` waits for the program it runs (its own `--timeout`, at most `EXEC_MAX_SECS`).
+    let _ = stream.set_read_timeout(Some(if acting || route == "exec" {
+        ACTION_TIMEOUT
+    } else {
+        TIMEOUT
+    }));
     let _ = stream.set_write_timeout(Some(TIMEOUT));
     stream
         .write_all(request.as_bytes())
@@ -875,6 +880,84 @@ fn interrupt(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+const EXEC_USAGE: &str =
+    "usage: perch exec --on <host> [--cwd <dir>] [--timeout <seconds>] -- <command> [args...]";
+/// The longest `perch exec` waits: under the 60 s the CLI waits for the core's answer.
+const EXEC_MAX_SECS: u64 = 55;
+
+/// What `perch exec` was asked: the host id, the working directory, the wait in seconds and the program with its arguments.
+#[derive(Debug, PartialEq)]
+struct ExecRequest {
+    host: String,
+    cwd: Option<String>,
+    timeout: u64,
+    command: Vec<String>,
+}
+
+fn parse_exec(args: &[String]) -> Result<ExecRequest, String> {
+    let split = args.iter().position(|arg| arg == "--");
+    let (flags, command) = match split {
+        Some(at) => (&args[..at], &args[at + 1..]),
+        None => (args, &[][..]),
+    };
+    if command.is_empty() {
+        return Err(EXEC_USAGE.into());
+    }
+    let (mut host, mut cwd, mut timeout) = (None, None, 30);
+    let mut words = flags.iter();
+    while let Some(flag) = words.next() {
+        let mut value = |name: &str| {
+            words
+                .next()
+                .cloned()
+                .ok_or_else(|| format!("{name} needs a value. {EXEC_USAGE}"))
+        };
+        match flag.as_str() {
+            "--on" => host = Some(value("--on")?),
+            "--cwd" => cwd = Some(value("--cwd")?),
+            "--timeout" => {
+                timeout = value("--timeout")?
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|secs| (1..=EXEC_MAX_SECS).contains(secs))
+                    .ok_or_else(|| format!("--timeout is 1 to {EXEC_MAX_SECS} seconds"))?
+            }
+            other => return Err(format!("unknown option {other}. {EXEC_USAGE}")),
+        }
+    }
+    let host = host.ok_or_else(|| format!("name the computer with --on. {EXEC_USAGE}"))?;
+    Ok(ExecRequest {
+        host,
+        cwd,
+        timeout,
+        command: command.to_vec(),
+    })
+}
+
+/// `perch exec --on <host> -- cmd args`: run one program on a computer from Settings > Hosts and print
+/// exactly its output; the exit code is the program's.
+fn exec(args: &[String]) -> Result<(), String> {
+    let request = parse_exec(args)?;
+    let mut body = json!({
+        "host": request.host,
+        "cmd": request.command[0],
+        "args": &request.command[1..],
+        "timeout": request.timeout * 1000,
+    });
+    if let Some(cwd) = &request.cwd {
+        body["cwd"] = json!(cwd);
+    }
+    let answer = ask("exec", body)?;
+    print!("{}", answer["stdout"].as_str().unwrap_or_default());
+    eprint!("{}", answer["stderr"].as_str().unwrap_or_default());
+    match answer["code"].as_i64() {
+        Some(0) => Ok(()),
+        // The program ran and failed: its code, not a Perch error.
+        Some(code) => std::process::exit(i32::try_from(code).unwrap_or(1)),
+        None => Err("the program was stopped by a signal".into()),
+    }
+}
+
 fn cancel(args: &[String]) -> Result<(), String> {
     let [message] = args else {
         return Err("usage: perch cancel <message>".into());
@@ -1374,6 +1457,11 @@ Commands
   perch inbox [--json]    What was sent to you and what you sent, with each receipt. Read-only;
                           it does not mark anything read.
   perch cancel <message>  Take back a message of yours while it is still queued.
+  perch exec --on <host> [--cwd <dir>] [--timeout <seconds>] -- <command> [args...]
+                          Run one program on a computer from Settings > Hosts, over that host's
+                          ssh login (nothing is installed there), and print exactly its output;
+                          the exit code is the program's. Only listed hosts, at most 55 seconds.
+                          On this computer, use your own shell.
   perch steer <session> [--key <key>] <text>
                           Put text into the running turn of one of your sub-sessions, to
                           correct it while it is going the wrong way. Only a lead can, only
@@ -1627,6 +1715,7 @@ pub fn run(command: &str, args: &[String]) -> Result<(), String> {
         "inbox" => inbox(args.iter().any(|arg| arg == "--json")),
         "cancel" => cancel(args),
         "steer" => steer(args),
+        "exec" => exec(args),
         "interrupt" => interrupt(args),
         "memory" => memory(args),
         "mod" => mod_cmd(args),
@@ -1898,6 +1987,39 @@ mod tests {
         assert_eq!(piped.text, "long text\nover lines");
         for refused in ["", "--key k text", "c", "c --key"] {
             assert!(parse_send(&words(refused), none).is_err(), "{refused:?}");
+        }
+    }
+
+    #[test]
+    fn exec_reads_its_host_directory_wait_and_the_program_after_the_dashes() {
+        let words = |text: &str| {
+            text.split_whitespace()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            parse_exec(&words("--on vps --cwd /srv --timeout 5 -- git status -s")).unwrap(),
+            ExecRequest {
+                host: "vps".into(),
+                cwd: Some("/srv".into()),
+                timeout: 5,
+                command: words("git status -s"),
+            }
+        );
+        // The program's own flags stay the program's, and the wait defaults to 30 s.
+        let plain = parse_exec(&words("--on vps -- ls --on")).unwrap();
+        assert_eq!((plain.timeout, plain.command), (30, words("ls --on")));
+        for refused in [
+            "--on vps",
+            "--on vps --",
+            "-- ls",
+            "--on",
+            "--on vps --timeout 0 -- ls",
+            "--on vps --timeout 56 -- ls",
+            "--on vps --timeout x -- ls",
+            "--on vps --bogus 1 -- ls",
+        ] {
+            assert!(parse_exec(&words(refused)).is_err(), "{refused:?}");
         }
     }
 

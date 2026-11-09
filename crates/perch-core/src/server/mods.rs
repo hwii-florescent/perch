@@ -554,6 +554,46 @@ fn program_path_with(cmd: &str, cli: Option<std::path::PathBuf>) -> std::path::P
     }
 }
 
+/// What `exec` and `agent_exec` read from a request body: the program, its arguments and how long to wait.
+type ExecParts = (String, Vec<String>, std::time::Duration);
+
+fn exec_request(body: &Value) -> Result<ExecParts, &'static str> {
+    let Some(cmd) = body["cmd"].as_str().filter(|c| !c.is_empty()) else {
+        return Err("exec needs `cmd`");
+    };
+    let args = body["args"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let wait =
+        std::time::Duration::from_millis(body["timeout"].as_u64().unwrap_or(30_000).min(600_000));
+    Ok((cmd.to_string(), args, wait))
+}
+
+/// `POST agent/exec {host, cmd, args?, cwd?, timeout?}`: an agent runs one program on a computer from
+/// Settings > Hosts over that host's ssh login (`perch exec --on`). Only hosts: an agent already has a
+/// shell here, and it never names a machine the person did not list. Nothing runs while mods are off.
+pub(super) async fn agent_exec(app: &AppState, body: &Value) -> axum::response::Response {
+    if app.settings.get().mods.is_off() {
+        return plain_error(StatusCode::FORBIDDEN, "mods are off");
+    }
+    let Some(host) = body["host"].as_str().filter(|h| !h.is_empty()) else {
+        return plain_error(
+            StatusCode::BAD_REQUEST,
+            "name a host from Settings > Hosts (on this computer, run the program in your own shell)",
+        );
+    };
+    let (cmd, args, wait) = match exec_request(body) {
+        Ok(parsed) => parsed,
+        Err(message) => return plain_error(StatusCode::BAD_REQUEST, message),
+    };
+    remote_exec(app, host, &cmd, &args, body["cwd"].as_str(), wait).await
+}
+
 /// `POST /mods/exec {cmd, args?, cwd?, timeout?, host?}`: run a program in the person's environment (or, with
 /// a `host` id from Settings > Hosts, on that computer over ssh). The
 /// timeout is milliseconds (default 30 s, at most 10 min); output past 1 MiB is cut.
@@ -566,19 +606,11 @@ pub(super) async fn exec(
     if let Err((status, text)) = mod_host_gate(&app, &peer, &headers) {
         return (status, text).into_response();
     }
-    let Some(cmd) = body["cmd"].as_str().filter(|c| !c.is_empty()) else {
-        return plain_error(StatusCode::BAD_REQUEST, "exec needs `cmd`");
+    let (cmd, args, wait) = match exec_request(&body) {
+        Ok(parsed) => parsed,
+        Err(message) => return plain_error(StatusCode::BAD_REQUEST, message),
     };
-    let args: Vec<String> = body["args"]
-        .as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
-    let wait =
-        std::time::Duration::from_millis(body["timeout"].as_u64().unwrap_or(30_000).min(600_000));
+    let cmd = cmd.as_str();
     if let Some(host) = body["host"].as_str().filter(|h| !h.is_empty()) {
         return remote_exec(&app, host, cmd, &args, body["cwd"].as_str(), wait).await;
     }
@@ -1036,6 +1068,25 @@ mod tests {
             .await
             .0,
             403
+        );
+        // An agent runs a program only on a listed host (`perch exec --on`), never on this computer,
+        // and its own token is what opens that route.
+        for body in [
+            json!({"session": "lead", "cmd": "echo"}),
+            json!({"session": "lead", "host": "nope", "cmd": "echo"}),
+            json!({"session": "lead", "host": "nope"}),
+        ] {
+            assert_eq!(host("/agent/exec", agent.clone(), body).await.0, 400);
+        }
+        assert_eq!(
+            host(
+                "/agent/exec",
+                person.clone(),
+                json!({"session": "lead", "host": "nope", "cmd": "echo"})
+            )
+            .await
+            .0,
+            401
         );
         assert_eq!(
             host("/mods/exec", agent, json!({"cmd": "echo"})).await.0,

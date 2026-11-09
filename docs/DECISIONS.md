@@ -126,12 +126,16 @@ approval not mattering much.
   folder that holds `mods/`, served by `GET /mods/file?sound=`, 2 MiB, mp3/wav/ogg/m4a/flac, the tone if it will not
   play), live in open terminals. Fonts and sizes stay with the server terminal profile and a layout's look, ligatures
   need an addon Perch does not ship, and there is no telemetry to turn off.
+  `perch exec --on <host> [--cwd d] [--timeout s] -- cmd args` is herdr's `hc exec --on`: a session's agent runs one
+  program on a Settings > Hosts computer over that host's ssh login (nothing is installed there) and gets exactly its
+  output and exit code. It uses the agent's own token on `POST /agent/exec`, so it needs no new credential. The route
+  takes a listed host only (an agent already has a shell here, and `/mods/exec` stays closed to agent tokens), refuses
+  while mods are off, waits at most 55 s, and the core's ssh path is the one `exec({host})` uses. Not run against a
+  real remote computer here: the route's refusals and the CLI parsing are tested, the ssh step is the existing one.
   Not ported: `terminal.park` (nothing is ever hidden), the updater, feedback and `app.reset` family (Perch has no
   updater service or feedback form; a reset is deleting the folder), label adoption of daemon terminals (the core keeps
   the bookkeeping of what it started; a terminal `perch daemon run` makes stays out of the UI, as herdr's unlabeled ones
-  do) and `hc exec --on` as a command line. The core opens `/mods/exec` only to its own page or a paired device, and a
-  desktop core publishes no local token; a command line would need a new credential, so a mod's `exec({host})` runs on a
-  Settings > Hosts computer instead.
+  do), ligatures and telemetry (out of scope: the goal is agents reshaping the UI and layout).
 - **More of herdr's surface.** `home()`/`appHome()`, `placement()` (a floating mod's edge/align/dragging),
   `playSound("done"|"blocked")`, a block `agent:focused` (the focused session's terminal), `key.bind {command, keys}`
   (so an agent can set a key through `perch mod do`) and `perch mod status` (layout, focus, theme, dialogs, each mod's

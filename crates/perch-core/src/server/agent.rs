@@ -528,6 +528,19 @@ pub(super) async fn mod_do(
     }
 }
 
+/// `POST {base}agent/exec`: run one program on a computer from Settings > Hosts (`server/mods.rs`).
+pub(super) async fn exec(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(_) => mods::agent_exec(&state, &body).await,
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
 /// `POST {base}agent/mod/check`: did the person's page load this mod's current files (`server/mods.rs`).
 pub(super) async fn mod_check(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,

@@ -923,6 +923,10 @@ pub async fn run(
             post(agent::mod_clone).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(
+            &format!("{base_path}agent/exec"),
+            post(agent::exec).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
             &format!("{base_path}agent/mod/do"),
             post(agent::mod_do).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
@@ -1524,6 +1528,11 @@ fn spawn_agent_lifecycle_task(state: AppState) {
                 Ok(changed) => {
                     for session_id in changed {
                         notify_session_updated(&state, &session_id);
+                    }
+                    for key in state.agent_runtime.native_owners() {
+                        if let Err(error) = native_ui::observe(&state, key) {
+                            tracing::debug!(%error, "could not observe native agent");
+                        }
                     }
                     for (key, agent) in state.agent_runtime.shell_agents() {
                         if let Err(error) = native_ui::observe_shell(&state, key, agent) {
