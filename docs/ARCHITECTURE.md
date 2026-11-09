@@ -214,6 +214,8 @@ an unconfirmed canonical close. Resource reconnect reads durable drafts before
 resubmitting; it is not proof of runtime start/stop reconciliation. Full remote
 workspace ownership remains the target; nothing remote may fall back locally.
 `perchd connect` exists, but alone is not a remote workspace service.
+`machine.rs` (Settings > Hosts "Check machine" / "Install perch-core") probes a computer over the same ssh path and installs the
+headless core at `~/.local/bin/perch-core`; the hub's auto-start runs it. See DECISIONS "Add machine".
 
 Desktop serves loopback by default. Enabling Phone access opens a second
 network listener and enables paired tokens; disabling it closes remote access

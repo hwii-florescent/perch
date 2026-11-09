@@ -135,6 +135,22 @@ approval not mattering much.
   while mods are off, waits at most 55 s, and the core's ssh path is the one `exec({host})` uses. The route is tested end to end with a
   stand-in `ssh` that runs the remote line here (output, stderr, exit code, cwd) and for its refusals; not run over a
   real ssh connection to another computer.
+  **Add machine** (herdr's `hc machine add|login`; `crates/perch-core/src/machine.rs`, Settings > Hosts, `machine.*`
+  messages): "Check machine" looks at a computer over ssh (macOS or Linux, x86_64 or aarch64; tmux; `perch-core` and its
+  version) and says what to do next (`needs_login`, `unreachable`, `failed`, each with a hint). "Install perch-core" puts it at
+  `~/.local/bin/perch-core`: uploaded from this computer when the OS and CPU match and a `perch-core` sits beside the
+  running app (or `PERCH_CORE_BIN`), else downloaded by the remote itself from the release asset
+  `perch-core-<os>-<arch>` and kept only if its `.sha256` matches; a `.part` file then `mv`, so a failed install leaves the
+  old copy. "Log in" runs `ssh` with the shared control master options in a new terminal (a password, code or host key
+  needs a person; later calls ride that login for 10 minutes idle). The SSH host field offers the names in `~/.ssh/config`,
+  following `Include`. A host started by Perch now runs the installed `perch-core` (the old `~/perch` checkout is still the
+  fallback), and its precheck names the missing piece (tmux or perch-core). A paired phone can check a machine but
+  not install on one. Unlike herdr, a host is still a port-forward tunnel to a core that Perch starts under tmux, not a
+  framed stdio pipe that supervises itself, so `--via <command>` (any transport that carries bytes) is not ported;
+  `perch exec --on` stays on the host's ssh login, which Log in primes, because a core in the middle would add nothing to
+  a one-shot command. The release workflow's `core` job builds the assets; it has not been run (no tag has been pushed),
+  so the install-by-download path is proven only against `file://` assets through a stand-in `ssh` and, for the
+  upload path, a real OpenSSH to a throwaway loopback sshd (`scripts/machine-over-real-ssh.sh`).
   Not ported: `terminal.park` (nothing is ever hidden), the updater, feedback and `app.reset` family (Perch has no
   updater service or feedback form; a reset is deleting the folder), label adoption of daemon terminals (the core keeps
   the bookkeeping of what it started; a terminal `perch daemon run` makes stays out of the UI, as herdr's unlabeled ones
