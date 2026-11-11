@@ -1668,7 +1668,7 @@ declare module "@perch/sdk" {
   /** `stock:memory`: a project's memory files. Every write names the revision it is based on; a stale one comes back
    * with `conflict` and nothing saved. Null: the core did not answer. */
   export interface MemoryEntry { name: string; size: number; revision: string; author: { kind: "person" | "agent" | "mod" | "outside"; session?: string; label: string }; updatedAt: number; summary: string }
-  export interface MemoryState { projectId: string; files: MemoryEntry[]; maxFiles: number; maxChars: number; name?: string; conflict?: boolean; error?: string }
+  export interface MemoryState { projectId: string; files: MemoryEntry[]; maxFiles: number; maxChars: number; name?: string; conflict?: boolean; /** True when the Project's agents are not to use its memory. */ off?: boolean; error?: string }
   export interface MemoryScreenProps {
     projectId: string;
     name: string;
@@ -1678,6 +1678,8 @@ declare module "@perch/sdk" {
     /** `baseRevision`: absent for a new file. */
     save(file: string, text: string, baseRevision?: string): Promise<MemoryState | null>;
     remove(file: string, revision: string): Promise<MemoryState | null>;
+    /** Let the Project's agents use its memory or not; absent when the core cannot. */
+    setEnabled?(enabled: boolean): Promise<MemoryState | null>;
   }
 
   /** `stock:close-guard`: closing an agent's tab stops it for everyone. */

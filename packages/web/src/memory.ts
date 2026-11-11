@@ -31,6 +31,9 @@ socket.onConnectionChange((connected) => {
   if (!connected) for (const id of [...pending.keys()]) settle(id, null);
 });
 
+/** Whether the connected core can also turn a Project's agents' use of memory off. */
+export const memoryOffAvailable = () => memoryAvailable() && capabilities.includes("memory.off.v1");
+
 /** Whether the connected core can keep Project memory. */
 export const memoryAvailable = () => capabilities.includes(CAPABILITY) && socket.connected;
 
@@ -57,3 +60,7 @@ export const saveMemory = (projectId: string, name: string, text: string, baseRe
 
 export const deleteMemory = (projectId: string, name: string, baseRevision: string) =>
   ask<MemoryState>((requestId) => ({ type: "memory.delete", requestId, projectId, name, baseRevision }));
+
+/** Let the Project's agents use its memory (`true`) or not. The files stay either way. */
+export const setMemoryEnabled = (projectId: string, enabled: boolean) =>
+  ask<MemoryState>((requestId) => ({ type: "memory.enable", requestId, projectId, enabled }));

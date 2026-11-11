@@ -28,6 +28,10 @@ const MAX_NAME_BYTES: usize = 64;
 /// More than any text of [`MAX_CHARS`] characters needs; a longer file was put there outside Perch.
 const MAX_BYTES: u64 = MAX_CHARS as u64 * 4;
 const PROVENANCE: &str = ".provenance.json";
+/// Present in a Project's folder when its agents are not to use memory. A file, not a column: the
+/// folder is the whole of a Project's memory, so the switch travels and is removed with it. Its
+/// leading dot keeps it out of the index (`check_name`).
+const OFF: &str = ".off";
 const REVISION_CHARS: usize = 12;
 const SUMMARY_CHARS: usize = 120;
 
@@ -451,6 +455,33 @@ pub fn delete(root: &Path, project_id: &str, name: &str, base: &str) -> Result<(
     Ok(())
 }
 
+/// Whether the Project's agents may use its memory. On unless the folder holds the off marker.
+/// An unreadable folder counts as on: this only withholds, never destroys.
+pub fn enabled(root: &Path, project_id: &str) -> Result<bool, Error> {
+    Ok(!folder(root, project_id)?.join(OFF).exists())
+}
+
+/// Turn the Project's agents' use of memory on or off. The files stay as they are and people keep
+/// reading and editing them.
+pub fn set_enabled(root: &Path, project_id: &str, on: bool) -> Result<(), Error> {
+    let dir = folder(root, project_id)?;
+    let _guard = lock();
+    let marker = dir.join(OFF);
+    if on {
+        match std::fs::remove_file(&marker) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
+            _ => {}
+        }
+    } else {
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&dir)?;
+        std::fs::write(&marker, b"")?;
+    }
+    Ok(())
+}
+
 /// Remove a whole Project's memory folder (the Project was removed). Holds the same lock as every
 /// write, removes only that one folder, and treats "no folder" as done. A symlink at the folder's
 /// place is unlinked, never followed.
@@ -505,6 +536,24 @@ mod tests {
         remove_project(&root.0, "proj-1").unwrap();
         assert!(remove_project(&root.0, "../proj-2").is_err());
         assert_eq!(list(&root.0, "proj-2").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn turning_memory_off_keeps_the_files_and_stays_out_of_the_index() {
+        let root = Root::new();
+        assert!(enabled(&root.0, "proj-1").unwrap());
+        put(&root, "a.md", "one", None).unwrap();
+        set_enabled(&root.0, "proj-1", false).unwrap();
+        assert!(!enabled(&root.0, "proj-1").unwrap());
+        assert!(enabled(&root.0, "proj-2").unwrap());
+        assert_eq!(list(&root.0, "proj-1").unwrap().len(), 1);
+        set_enabled(&root.0, "proj-1", true).unwrap();
+        set_enabled(&root.0, "proj-1", true).unwrap();
+        assert!(enabled(&root.0, "proj-1").unwrap());
+        // Off before any file exists makes the folder; removing the Project removes the switch.
+        set_enabled(&root.0, "proj-2", false).unwrap();
+        remove_project(&root.0, "proj-2").unwrap();
+        assert!(enabled(&root.0, "proj-2").unwrap());
     }
 
     #[test]

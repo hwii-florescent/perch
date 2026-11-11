@@ -129,3 +129,21 @@ it("says so when a delete was refused because the file changed", async () => {
   expect(q("memory-error").textContent).toContain("changed by someone else");
   expect(q("memory-row-notes.md")).not.toBeNull();
 });
+
+it("offers the switch only when the core has it, and sends the opposite of what is shown", async () => {
+  await state([entry("notes.md", "aaa")]);
+  expect(q("memory-enabled")).toBeNull();
+  await act(async () => root.unmount());
+  await act(async () => { wire.message({ type: "server.info", capabilities: ["memory.v1", "memory.off.v1"] } as unknown as ServerMessage); });
+  root = createRoot(host);
+  await act(async () => { root.render(<MemoryDialog projectId="p1" name="Perch" onClose={onClose} />); });
+  await state([entry("notes.md", "aaa")]);
+  expect(q<HTMLInputElement>("memory-enabled").checked).toBe(true);
+  await click("memory-enabled");
+  expect(lastRequest()).toEqual({ type: "memory.enable", requestId: expect.any(String), projectId: "p1", enabled: false });
+  await state([entry("notes.md", "aaa")], { off: true });
+  expect(q<HTMLInputElement>("memory-enabled").checked).toBe(false);
+  expect(q("memory-row-notes.md")).not.toBeNull();
+  await click("memory-enabled");
+  expect(lastRequest()).toMatchObject({ type: "memory.enable", enabled: true });
+});

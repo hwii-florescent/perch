@@ -242,7 +242,11 @@ read and a stale one is refused, never overwritten; writes are a temp file plus 
 disk is reported as edited outside Perch; only regular files count (symlinks are skipped, reads do not
 follow them). An agent reaches only its own session's Project; a person reaches any local Project through
 `memory.list/get/set/delete`. A core serves only Projects whose host is `local` and refuses the rest.
-Removing a Project leaves its memory folder on disk.
+Removing a Project removes its memory folder (`memory::remove_project`, from `project.remove`; the startup
+purge of legacy archived Projects does not). A Project's memory can be turned off for its agents
+(`memory.enable`, capability `memory.off.v1`): a `.off` marker in the folder (never an entry, since names
+cannot start with a dot) makes every `/agent/memory/*` call answer 403 and `perch whoami` name no folder,
+while a person still lists and edits the files; `memory.state` carries `off` and an older core's absence means on.
 
 Switching/quitting is different from explicit close:
 - A global session close stops and deletes it; a watcher only dismisses its

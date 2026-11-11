@@ -30,8 +30,9 @@ interface Draft { name: string; base?: string; text: string }
 
 const byWho = (entry: MemoryEntry) => (entry.author.kind === "outside" ? "edited outside Perch" : entry.author.label);
 
-export default function Memory({ projectId, name, onClose, list, get, save: store, remove: erase }: MemoryScreenProps) {
+export default function Memory({ projectId, name, onClose, list, get, save: store, remove: erase, setEnabled }: MemoryScreenProps) {
   const [index, setIndex] = useState<Pick<MemoryState, "files" | "maxFiles" | "maxChars">>({ files: [], maxFiles: 64, maxChars: 16000 });
+  const [off, setOff] = useState(false);
   const [loaded, setLoaded] = useState<"loading" | "ready" | "unavailable">("loading");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [conflict, setConflict] = useState(false);
@@ -39,7 +40,10 @@ export default function Memory({ projectId, name, onClose, list, get, save: stor
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<MemoryEntry | null>(null);
 
-  const take = (state: MemoryState) => setIndex({ files: state.files, maxFiles: state.maxFiles, maxChars: state.maxChars });
+  const take = (state: MemoryState) => {
+    setIndex({ files: state.files, maxFiles: state.maxFiles, maxChars: state.maxChars });
+    setOff(!!state.off);
+  };
 
   useEffect(() => {
     let current = true;
@@ -81,6 +85,17 @@ export default function Memory({ projectId, name, onClose, list, get, save: stor
     if (state.conflict) setConflict(true);
     else if (state.error) setError(state.error);
     else setDraft(null);
+  }
+
+  async function toggle() {
+    if (!setEnabled) return;
+    setBusy(true);
+    setError(null);
+    const state = await setEnabled(off);
+    setBusy(false);
+    if (!state) return setError(NO_ANSWER);
+    take(state);
+    if (state.error) setError(state.error);
   }
 
   /** Take the other version; the draft is replaced only when this is chosen. */
@@ -167,6 +182,12 @@ export default function Memory({ projectId, name, onClose, list, get, save: stor
                 New file
               </button>
             </div>
+            {setEnabled && loaded === "ready" && (
+              <label className="flex items-center gap-2 text-[0.75rem] text-subtext-0">
+                <input type="checkbox" checked={!off} disabled={busy} onChange={() => void toggle()} data-testid="memory-enabled" />
+                <span>Agents in this project use memory{off ? " (off: they are refused; the files stay and you can still edit them)" : ""}</span>
+              </label>
+            )}
             {loaded === "loading" && <span className="text-[0.75rem] text-subtext-0">Loading…</span>}
             {loaded === "ready" && files.length === 0 && <span className="text-[0.75rem] text-subtext-0" data-testid="memory-empty">No memory files yet.</span>}
             <ul className="m-0 grid list-none gap-[0.3rem] p-0">

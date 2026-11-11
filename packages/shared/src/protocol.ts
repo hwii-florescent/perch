@@ -1876,6 +1876,15 @@ export interface MemoryDeleteMessage {
   baseRevision: string;
 }
 
+/** Let a Project's agents use its memory (`enabled`) or not (capability `memory.off.v1`). The files
+ * stay and people keep editing them. Answered with `memory.state`. */
+export interface MemoryEnableMessage {
+  type: "memory.enable";
+  requestId: string;
+  projectId: string;
+  enabled: boolean;
+}
+
 /** Read the Instructions of a Project (`scope: "project"`) or Workspace (`"workspace"`) on this core
  * (capability `instructions.v1`). Answered with `instructions.state`. */
 export interface InstructionsGetMessage {
@@ -2731,6 +2740,7 @@ export type ClientMessage =
   | InstructionsSetMessage
   | MemorySetMessage
   | MemoryDeleteMessage
+  | MemoryEnableMessage
   | BrowserHistoryRemoveMessage
   | BrowserHistoryClearMessage
   | AttentionUpdateMessage
@@ -3219,6 +3229,8 @@ export interface MemoryStateMessage {
   maxChars: number;
   name?: string;
   conflict?: boolean;
+  /** True when the Project's agents are not to use its memory; absent means on. */
+  off?: boolean;
   error?: string;
 }
 

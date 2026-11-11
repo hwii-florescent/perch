@@ -341,6 +341,11 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             name,
             base_revision,
         } => super::memory::handle_delete(state, request_id, project_id, name, base_revision),
+        ClientMessage::MemoryEnable {
+            request_id,
+            project_id,
+            enabled,
+        } => super::memory::handle_enable(state, request_id, project_id, enabled),
         ClientMessage::BrowserHistoryRemove { ref url } => {
             super::browser_history::handle_remove(state, url)
         }

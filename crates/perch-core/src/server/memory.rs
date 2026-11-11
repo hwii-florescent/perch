@@ -33,6 +33,7 @@ fn state_message(
     outcome: Result<(), Error>,
 ) -> ServerMessage {
     let conflict = matches!(outcome, Err(Error::Conflict(_)));
+    let off = !memory::enabled(&app.memory_root, &project_id).unwrap_or(true);
     let listed = memory::list(&app.memory_root, &project_id);
     let error = outcome
         .err()
@@ -46,6 +47,7 @@ fn state_message(
         max_chars: crate::instructions::MAX_CHARS as u32,
         name,
         conflict,
+        off,
         error,
     }
 }
@@ -103,6 +105,21 @@ fn delete_message(
     let outcome = check_local(app, &project_id)
         .and_then(|()| memory::delete(&app.memory_root, &project_id, &name, base_revision));
     state_message(app, request_id, project_id, Some(name), outcome)
+}
+
+/// Switch the Project's agents' use of memory (`memory.enable`). The files stay and people keep
+/// editing them; the answer is the index, with `off` set accordingly.
+pub(super) fn handle_enable(
+    state: &Arc<ConnState>,
+    request_id: String,
+    project_id: String,
+    enabled: bool,
+) {
+    let outcome = check_local(&state.app, &project_id)
+        .and_then(|()| memory::set_enabled(&state.app.memory_root, &project_id, enabled));
+    let _ = state.out_tx.send(state_message(
+        &state.app, request_id, project_id, None, outcome,
+    ));
 }
 
 pub(super) fn handle_list(state: &Arc<ConnState>, request_id: String, project_id: String) {
@@ -187,6 +204,12 @@ fn caller_project(app: &AppState, caller: &AgentIdentity) -> Result<String, Fail
         )
     })?;
     check_local(app, &project_id).map_err(failure)?;
+    if !memory::enabled(&app.memory_root, &project_id).map_err(failure)? {
+        return Err(fail(
+            StatusCode::FORBIDDEN,
+            "project memory is turned off for this Project; the person can turn it on in the Project's Memory",
+        ));
+    }
     Ok(project_id)
 }
 
@@ -494,6 +517,50 @@ mod tests {
             panic!("a file reply")
         };
         assert!(file.is_none() && error.is_some());
+        // Off: every agent of the Project is refused and whoami names no folder, while a person
+        // still lists and edits the files and the reply says `off`. On again restores access.
+        memory::set_enabled(&app.memory_root, &alpha_id, false).unwrap();
+        for route in ["memory/list", "memory/read"] {
+            let (status, refused) = call(
+                route,
+                other_token.clone(),
+                json!({"session": other_session, "name": "plan.md"}),
+            )
+            .await;
+            assert_eq!(status, 403, "{route}: {refused}");
+        }
+        let (status, _) = write(&other_token, &other_session, Some(&revision), "x").await;
+        assert_eq!(status, 403);
+        let (_, who) = call(
+            "whoami",
+            alpha_token.clone(),
+            json!({"session": alpha_session}),
+        )
+        .await;
+        assert!(who["memory"].is_null(), "{who}");
+        let ServerMessage::MemoryState {
+            files, off, error, ..
+        } = set_message(
+            &app,
+            "r4".into(),
+            alpha_id.clone(),
+            "mine.md".into(),
+            "x",
+            None,
+        )
+        else {
+            panic!("a state reply")
+        };
+        assert!(off && error.is_none() && files.len() == 1, "{error:?}");
+        memory::set_enabled(&app.memory_root, &alpha_id, true).unwrap();
+        let (status, _) = call(
+            "memory/list",
+            other_token.clone(),
+            json!({"session": other_session}),
+        )
+        .await;
+        assert_eq!(status, 200);
+
         let remote = db
             .create_project("host-b", "/srv/remote", Some("remote"), None)
             .unwrap()

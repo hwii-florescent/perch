@@ -1644,6 +1644,15 @@ pub enum ClientMessage {
         base_revision: String,
     },
 
+    /// Let a Project's agents use its memory (`enabled`) or not (capability `memory.off.v1`). The
+    /// files stay and people keep editing them. Answered with `memory.state`.
+    #[serde(rename = "memory.enable", rename_all = "camelCase")]
+    MemoryEnable {
+        request_id: String,
+        project_id: String,
+        enabled: bool,
+    },
+
     /// Forget one page.
     #[serde(rename = "browser.history.remove")]
     BrowserHistoryRemove { url: String },
@@ -2749,6 +2758,10 @@ pub enum ServerMessage {
         name: Option<String>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         conflict: bool,
+        /// True when the Project's agents are not to use its memory (`memory.enable`). Absent
+        /// from an older core, which means on.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        off: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

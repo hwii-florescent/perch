@@ -2694,6 +2694,7 @@ fn foundation_capabilities() -> Vec<String> {
         "browser.suggest.v1",
         "instructions.v1",
         "memory.v1",
+        "memory.off.v1",
         "mods.v1",
         "mods.report.v1",
         "mods.snapshot.v1",
