@@ -222,6 +222,10 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             request_id,
             session_id,
         } => super::crew::handle_get(state, request_id, session_id),
+        ClientMessage::ProjectOverviewGet {
+            request_id,
+            project_id,
+        } => super::overview::handle_get(state, request_id, project_id),
         ClientMessage::InboundGet {
             request_id,
             session_id,

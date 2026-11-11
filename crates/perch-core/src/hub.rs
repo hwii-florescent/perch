@@ -1612,6 +1612,7 @@ impl HubManager {
             | ServerMessage::ModsSnapshotRequest { .. }
             | ServerMessage::MemoryFileState { .. }
             | ServerMessage::CrewState { .. }
+            | ServerMessage::ProjectOverview { .. }
             | ServerMessage::CrewActResult { .. }
             | ServerMessage::SuggestionsState { .. }
             | ServerMessage::SuggestionActResult { .. }

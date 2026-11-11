@@ -32,6 +32,7 @@ pub mod memory;
 pub mod mod_data;
 pub mod mods;
 pub mod native_ui;
+pub mod overview;
 pub mod permissions;
 pub mod protocol;
 pub mod provider_config;

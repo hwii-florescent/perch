@@ -29,7 +29,7 @@ fn lifecycle_word(state: Option<AgentState>) -> String {
 }
 
 /// One member as Perch's records have it. `child` carries the dispatch record of a sub-session.
-fn member_of(
+pub(super) fn member_of(
     app: &AppState,
     session_id: &str,
     provider: &str,
@@ -196,49 +196,51 @@ pub(super) fn rows_for(app: &AppState, viewer: &str) -> Vec<CrewRow> {
     let members = members(app, viewer);
     crew::build(viewer, &members, &traffic(app, viewer))
         .into_iter()
-        .map(|row| {
-            // Before the fields that move out of `row.member`.
-            let (branch, pr) = branch_and_pr(app, &row.member.session_id);
-            CrewRow {
-                actions: (row.role == crew::Role::Worker)
-                    .then(|| super::crew_actions::offered(app, &row.member.session_id))
-                    .flatten(),
-                session_id: row.member.session_id,
-                role: row.role.as_str().into(),
-                title: row.member.title,
-                provider: row.member.provider,
-                lifecycle: row.member.lifecycle,
-                dispatch: row.member.dispatch,
-                task: row.member.task,
-                needs_you: row
-                    .member
-                    .needs_you
-                    .map(|(preview, at)| CrewNeedsYou { preview, at }),
-                report: row.member.report.map(|report| CrewReport {
-                    text: report.text,
-                    source: report.source.as_str().into(),
-                    at: report.at,
-                    model: report.model,
-                }),
-                latest: row.latest.map(|latest| CrewLatest {
-                    direction: if latest.to_peer { "to" } else { "from" }.into(),
-                    preview: latest.preview,
-                    at: latest.at,
-                    receipt: latest.receipt.as_str().into(),
-                    reason: latest.reason,
-                    handoff: latest.handoff,
-                    kind: latest.kind.as_str().into(),
-                }),
-                can_message: row.member.can_message,
-                previous_run: row.member.previous_run.then_some(true),
-                branch,
-                pr,
-            }
-        })
+        .map(|row| crew_row(app, row))
         .collect()
 }
 
-/// The member's branch and its pull request, for a session whose Workspace is on this machine.
+/// One row as the wire has it, with the actions offered on a worker and the member's branch and PR.
+pub(super) fn crew_row(app: &AppState, row: crew::Row) -> CrewRow {
+    // Before the fields that move out of `row.member`.
+    let (branch, pr) = branch_and_pr(app, &row.member.session_id);
+    CrewRow {
+        actions: (row.role == crew::Role::Worker)
+            .then(|| super::crew_actions::offered(app, &row.member.session_id))
+            .flatten(),
+        session_id: row.member.session_id,
+        role: row.role.as_str().into(),
+        title: row.member.title,
+        provider: row.member.provider,
+        lifecycle: row.member.lifecycle,
+        dispatch: row.member.dispatch,
+        task: row.member.task,
+        needs_you: row
+            .member
+            .needs_you
+            .map(|(preview, at)| CrewNeedsYou { preview, at }),
+        report: row.member.report.map(|report| CrewReport {
+            text: report.text,
+            source: report.source.as_str().into(),
+            at: report.at,
+            model: report.model,
+        }),
+        latest: row.latest.map(|latest| CrewLatest {
+            direction: if latest.to_peer { "to" } else { "from" }.into(),
+            preview: latest.preview,
+            at: latest.at,
+            receipt: latest.receipt.as_str().into(),
+            reason: latest.reason,
+            handoff: latest.handoff,
+            kind: latest.kind.as_str().into(),
+        }),
+        can_message: row.member.can_message,
+        previous_run: row.member.previous_run.then_some(true),
+        branch,
+        pr,
+    }
+}
+
 fn branch_and_pr(app: &AppState, session_id: &str) -> (Option<String>, Option<CrewPr>) {
     let none = (None, None);
     let Some(row) = app.db.get_session(session_id).ok().flatten() else {
@@ -412,5 +414,20 @@ mod tests {
         assert_eq!(child_view[0].latest.as_ref().unwrap().direction, "from");
         // A session outside any run has no family.
         assert!(ask("nobody").await.is_empty());
+
+        // The Project overview groups the same child by Perch's records: the perchd-confirmed exit
+        // makes it Resolved, and it carries the same row (and branch) the strip shows. A Project that
+        // does not exist is refused, not shown empty.
+        let groups =
+            super::overview::groups_for(&booted_state(address), &workspace.project_id).unwrap();
+        assert_eq!(groups.len(), 1, "{groups:?}");
+        assert_eq!(groups[0].key, "resolved");
+        assert_eq!(groups[0].threads[0].lead_session_id, "lead");
+        assert_eq!(groups[0].threads[0].row.session_id, "child");
+        assert_eq!(
+            groups[0].threads[0].row.branch.as_deref(),
+            Some("feature-x")
+        );
+        assert!(super::overview::groups_for(&booted_state(address), "no-such-project").is_err());
     }
 }

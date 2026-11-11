@@ -561,7 +561,8 @@ across providers ([DECISIONS](DECISIONS.md) 2026-11-07, compared in the
    removed, and any live run (no agent has used `perch memory` yet).
 2. **Library.** Pickable files and folders for a project (Claude: 100 files per pick, 10
    folders). Today only up to 16 reference-folder paths in Instructions.
-3. **Project home.** One place for Instructions, memory, library and threads, and an
+3. **Project home.** (Layout decided 2026-11-10: a main-view tab per Project. **Built:** the grouped Overview data,
+   `project.overview.get` and `projectOverview.ts`. **Not built:** the tab itself.) One place for Instructions, memory, library and threads, and an
    Overview grouped by state (Claude: Ready for review, Waiting on you, Working, Landing,
    Idle, Resolved). Today: nested child rows and the family strip. "No new noun" still
    holds unless the owner renames it.

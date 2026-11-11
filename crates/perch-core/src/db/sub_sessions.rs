@@ -230,6 +230,19 @@ impl HistoryDb {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Every sub-session whose own session belongs to `project_id`, oldest first. A child moved
+    /// into a worktree of the Project is the Project's too (the join reads the session's project).
+    pub fn sub_sessions_in_project(&self, project_id: &str) -> anyhow::Result<Vec<SubSessionRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut statement = conn.prepare(&format!(
+            "SELECT {COLUMNS} FROM sub_sessions
+             WHERE child_session_id IN (SELECT id FROM sessions WHERE project_id = ?1)
+             ORDER BY created_at, child_session_id"
+        ))?;
+        let rows = statement.query_map(params![project_id], row_from)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Put a just-reserved child in a checkout made for it (`perch spawn --worktree`).
     pub fn move_child_to_workspace(
         &self,

@@ -570,6 +570,24 @@ pub struct CrewRow {
     pub pr: Option<CrewPr>,
 }
 
+/// One state-group of a Project's threads (`project.overview.v1`). `key` is `needs_you`, `working`,
+/// `ready_for_review`, `landing`, `idle`, `unknown` or `resolved`; `label` is its words.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverviewGroup {
+    pub key: String,
+    pub label: String,
+    pub threads: Vec<OverviewThread>,
+}
+
+/// A sub-session of one of the Project's leads, with the same records the family strip shows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverviewThread {
+    pub lead_session_id: String,
+    pub row: CrewRow,
+}
+
 /// A pull request for a member's branch (`crew.pr.v1`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1507,6 +1525,14 @@ pub enum ClientMessage {
     CrewGet {
         request_id: String,
         session_id: String,
+    },
+
+    /// The threads of a Project grouped by state (capability `project.overview.v1`). Answered with
+    /// `project.overview`.
+    #[serde(rename = "project.overview.get", rename_all = "camelCase")]
+    ProjectOverviewGet {
+        request_id: String,
+        project_id: String,
     },
 
     /// Act on one of a lead's sub-sessions from its family strip (capability `crew.actions.v1`):
@@ -2735,6 +2761,17 @@ pub enum ServerMessage {
         name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         file: Option<MemoryFile>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
+    /// Reply to `project.overview.get`: the non-empty groups in display order. `error` explains a
+    /// refusal (the Project is not on this core); groups are then empty.
+    #[serde(rename = "project.overview", rename_all = "camelCase")]
+    ProjectOverview {
+        request_id: String,
+        project_id: String,
+        groups: Vec<OverviewGroup>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

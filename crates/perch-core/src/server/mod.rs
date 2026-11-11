@@ -93,6 +93,7 @@ mod local_authority;
 mod memory;
 mod mods;
 mod native_ui;
+mod overview;
 mod recover;
 mod reporter;
 use agents::{connection_client_identity, lifecycle_status_to_wire};
@@ -2696,6 +2697,7 @@ fn foundation_capabilities() -> Vec<String> {
         "crew.v1",
         "crew.actions.v1",
         "crew.pr.v1",
+        "project.overview.v1",
         "suggestions.v1",
         "inbound.v1",
         "fs.tree",

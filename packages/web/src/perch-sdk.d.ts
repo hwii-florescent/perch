@@ -1455,6 +1455,18 @@ declare module "@perch/sdk" {
     /** The pull request `gh` reports for that branch. Absent means unknown or none, never "no PR". */
     pr?: CrewPr;
   }
+  /** One state-group of a Project's threads: `key` is `needs_you`, `working`, `ready_for_review`, `landing`,
+   * `idle`, `unknown` or `resolved`. */
+  export interface OverviewGroup {
+    key: string;
+    label: string;
+    threads: OverviewThread[];
+  }
+  /** A sub-session of one of the Project's leads, with the same row the family strip shows. */
+  export interface OverviewThread {
+    leadSessionId: string;
+    row: CrewRow;
+  }
   /** A pull request for a member's branch. `state` is `open`, `draft`, `merged` or `closed`. */
   export interface CrewPr {
     number: number;

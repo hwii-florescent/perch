@@ -1477,6 +1477,14 @@ export interface CrewGetMessage {
   sessionId: string;
 }
 
+/** The threads of a Project grouped by state (capability `project.overview.v1`). Answered with
+ * `project.overview`. */
+export interface ProjectOverviewGetMessage {
+  type: "project.overview.get";
+  requestId: string;
+  projectId: string;
+}
+
 /** The suggested-task cards of a lead's chat (capability `suggestions.v1`). Answered with `suggestions.state`. */
 export interface SuggestionsGetMessage {
   type: "suggestions.get";
@@ -1732,6 +1740,29 @@ export interface CrewActResultMessage {
   outcome: string;
   reason?: string;
   done: boolean;
+}
+
+/** One state-group of a Project's threads (`project.overview.v1`). `key` is `needs_you`, `working`,
+ * `ready_for_review`, `landing`, `idle`, `unknown` or `resolved`; `label` is its words. */
+export interface OverviewGroup {
+  key: string;
+  label: string;
+  threads: OverviewThread[];
+}
+
+/** A sub-session of one of the Project's leads, with the same row the family strip shows. */
+export interface OverviewThread {
+  leadSessionId: string;
+  row: CrewRow;
+}
+
+/** Reply to `project.overview.get`: the non-empty groups in display order; `error` explains a refusal. */
+export interface ProjectOverviewMessage {
+  type: "project.overview";
+  requestId: string;
+  projectId: string;
+  groups: OverviewGroup[];
+  error?: string;
 }
 
 /** Reply to `crew.get`: the session's family, newest traffic first. */
@@ -2691,6 +2722,7 @@ export type ClientMessage =
   | MemoryListMessage
   | MemoryGetMessage
   | CrewGetMessage
+  | ProjectOverviewGetMessage
   | CrewActMessage
   | SuggestionsGetMessage
   | SuggestionActMessage
@@ -3755,6 +3787,7 @@ export type ServerMessage =
   | ModsSnapshotRequestMessage
   | MemoryFileMessage
   | CrewStateMessage
+  | ProjectOverviewMessage
   | CrewActResultMessage
   | SuggestionsStateMessage
   | SuggestionActResultMessage
