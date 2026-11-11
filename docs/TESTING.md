@@ -273,6 +273,12 @@ Useful existing coverage (not a claim of a fresh passing run):
   the first card parser did not look through. Not covered live: Do it here, Options, Start all, Codex/Pi/OMP receivers
   for sender cards, and inbound control (slice 9d: unit, HTTP/socket and jsdom tests only). `agent-mail.spec.ts` now
   looks for sender cards instead of envelope text and was **not re-run** after that change.
+- `memory-live.spec.ts` (same config; needs `perch` beside the core; run outside a Perch shell, e.g. `env -u
+  PERCH_SESSION -u PERCH_SHELL -u PERCH_TOKEN -u PERCH_USER_ZDOTDIR npx playwright test -c native-composer.config.ts
+  memory-live.spec.ts`; haiku only, two short turns): a lead runs `perch memory write live-check.md`; the file is under
+  the Project's folder in the fixture, and `.provenance.json` records the lead's session as an `agent` author; a second
+  turn runs `perch memory read` and its reply holds the marker. Passed once in 18 s (2026-11-11, Claude 2.1.322). Not
+  covered live: Codex, Pi and OMP writers, a second session reading, concurrent writers.
 - `needs-you.spec.ts`: question persistence/resolution and By status navigation.
 - `context-bridge.config.ts`: isolated Chromium/WebKit real Claude probe: one Haiku turn for Perch's own dialog and
   one more for an untouched clone of `stock:context-bridge` chosen in its place (each test has its own core).
