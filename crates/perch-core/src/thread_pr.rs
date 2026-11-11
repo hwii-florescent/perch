@@ -5,9 +5,10 @@
 //! The branch is read from `.git/HEAD` (`status::get_branch`). The PR is whatever the user's own
 //! `gh` login answers for that branch (`gh pr view`), read only. A missing `gh`, no login, no
 //! remote, no PR, a timeout or unreadable output is `None`: unknown is shown as nothing, never as
-//! "no PR". Answers are cached for a short time because the strip refetches in bursts.
+//! "no PR". Answers are cached for a minute and read from the cache only on a request; a miss
+//! starts one background lookup and the answer shows on the next ask.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
@@ -53,30 +54,13 @@ pub fn parse(output: &str) -> Option<PullRequest> {
     })
 }
 
-type Cache = HashMap<(String, String), (Instant, Option<PullRequest>)>;
+type Key = (String, String);
+type Cache = HashMap<Key, (Instant, Option<PullRequest>)>;
 static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
+/// Keys being refreshed now, so a burst of asks starts one `gh` per branch.
+static REFRESHING: Mutex<Option<HashSet<Key>>> = Mutex::new(None);
 
-/// The pull request of `branch` checked out in `cwd`, cached for a minute. Blocking: call from a
-/// blocking task. A detached HEAD (`branch` is a short sha) or an empty branch asks nothing.
-pub fn for_branch(cwd: &str, branch: &str) -> Option<PullRequest> {
-    if cwd.is_empty()
-        || branch.is_empty()
-        || branch.len() == 7 && branch.bytes().all(|b| b.is_ascii_hexdigit())
-    {
-        return None;
-    }
-    let key = (cwd.to_string(), branch.to_string());
-    if let Some((at, pr)) = CACHE
-        .lock()
-        .ok()?
-        .as_ref()
-        .and_then(|cache| cache.get(&key))
-    {
-        if at.elapsed() < TTL {
-            return pr.clone();
-        }
-    }
-    let pr = ask_gh(cwd);
+fn store(key: Key, pr: Option<PullRequest>) {
     if let Ok(mut guard) = CACHE.lock() {
         let cache = guard.get_or_insert_with(HashMap::new);
         if cache.len() >= MAX_ENTRIES {
@@ -85,9 +69,58 @@ pub fn for_branch(cwd: &str, branch: &str) -> Option<PullRequest> {
         if cache.len() >= MAX_ENTRIES {
             cache.clear(); // ponytail: wholesale reset past the cap; a per-entry LRU if this ever thrashes.
         }
-        cache.insert(key, (Instant::now(), pr.clone()));
+        cache.insert(key, (Instant::now(), pr));
     }
-    pr
+}
+
+/// The pull request of `branch` checked out in `cwd`, from the cache only: `gh` talks to the
+/// network and a request must not wait for it. A missing or older-than-a-minute entry starts one
+/// background refresh (the next ask sees its answer; a stale answer is returned meanwhile). A
+/// detached HEAD (`branch` is a short sha) or an empty branch asks nothing.
+pub fn for_branch(cwd: &str, branch: &str) -> Option<PullRequest> {
+    if cwd.is_empty()
+        || branch.is_empty()
+        || branch.len() == 7 && branch.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    let key = (cwd.to_string(), branch.to_string());
+    let known = CACHE
+        .lock()
+        .ok()?
+        .as_ref()
+        .and_then(|cache| cache.get(&key).cloned());
+    if let Some((at, pr)) = &known {
+        if at.elapsed() < TTL {
+            return pr.clone();
+        }
+    }
+    {
+        let mut guard = REFRESHING.lock().ok()?;
+        if !guard.get_or_insert_with(HashSet::new).insert(key.clone()) {
+            return known.and_then(|(_, pr)| pr);
+        }
+    }
+    let refresh_key = key.clone();
+    let spawned = std::thread::Builder::new()
+        .name("perch-pr".into())
+        .spawn(move || {
+            let pr = ask_gh(&refresh_key.0);
+            store(refresh_key.clone(), pr);
+            if let Ok(mut guard) = REFRESHING.lock() {
+                if let Some(set) = guard.as_mut() {
+                    set.remove(&refresh_key);
+                }
+            }
+        });
+    if spawned.is_err() {
+        if let Ok(mut guard) = REFRESHING.lock() {
+            if let Some(set) = guard.as_mut() {
+                set.remove(&key);
+            }
+        }
+    }
+    known.and_then(|(_, pr)| pr)
 }
 
 fn ask_gh(cwd: &str) -> Option<PullRequest> {
@@ -143,6 +176,22 @@ mod tests {
         assert!(parse(&json("OPEN", false, "javascript:alert(1)")).is_none());
         assert!(parse("").is_none());
         assert!(parse("no pull requests found").is_none());
+    }
+
+    #[test]
+    fn a_fresh_answer_is_served_from_the_cache_without_asking_gh() {
+        let key = ("/cached/but/not/real".to_string(), "feature".to_string());
+        let pr = PullRequest {
+            number: 3,
+            state: "open",
+            url: "https://github.com/o/r/pull/3".into(),
+        };
+        store(key.clone(), Some(pr.clone()));
+        assert_eq!(for_branch(&key.0, &key.1), Some(pr));
+        // A fresh "none" is served too: unknown and none both show nothing.
+        let none = ("/cached/none".to_string(), "feature".to_string());
+        store(none.clone(), None);
+        assert_eq!(for_branch(&none.0, &none.1), None);
     }
 
     #[test]

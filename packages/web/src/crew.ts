@@ -12,6 +12,8 @@ const CAPABILITY = "crew.v1";
 /** Updates of the family's own sessions arrive in bursts; one ask follows the last of them. */
 const SETTLE_MS = 250;
 const TIMEOUT_MS = 5000;
+/** How long after an answer with branches but no pull request to ask once more. */
+const PR_FOLLOW_UP_MS = 5000;
 
 const pending = new Map<string, (rows: CrewRow[] | null) => void>();
 socket.onMessage((message) => {
@@ -99,10 +101,17 @@ export function useCrew(sessionId: string): { rows: CrewRow[]; refresh: () => vo
   useEffect(() => {
     if (!enabled) return;
     let current = true;
+    let later: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
-      void ask(sessionId).then((rows) => { if (current && rows) setAnswer({ sessionId, rows }); });
+      void ask(sessionId).then((rows) => {
+        if (!current || !rows) return;
+        setAnswer({ sessionId, rows });
+        // The core answers a pull request from its cache and looks it up in the background: one more ask
+        // picks up what the first started.
+        if (rows.some((row) => row.branch && !row.pr)) later = setTimeout(() => void ask(sessionId).then((again) => { if (current && again) setAnswer({ sessionId, rows: again }); }), PR_FOLLOW_UP_MS);
+      });
     }, SETTLE_MS);
-    return () => { current = false; clearTimeout(timer); };
+    return () => { current = false; clearTimeout(timer); clearTimeout(later); };
   }, [enabled, sessionId, signature]);
   // A row set of another session, or one from before the connection dropped, is not this one's.
   return { rows: enabled && answer.sessionId === sessionId ? answer.rows : [], refresh };

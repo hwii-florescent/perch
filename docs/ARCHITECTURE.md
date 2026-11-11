@@ -592,6 +592,19 @@ strip's actions are the next section.
   compact dots its dot follows its lead's and is set in; By status within one section; Quickchat); in another section it is an ordinary row, so Needs you stays
   complete. "In one list" stays purely chronological. No panel, tab or drawer.
 - *Notes folder.* One per run under the private native directory (`/tmp/perch-native-<uid>/notes/<lead
+- *Branch and pull request* (`thread_pr.rs`, capability `crew.pr.v1`; optional `CrewRow.branch` and `pr`). The
+  branch is read from the member's Workspace (`.git/HEAD`), local sessions only. The pull request is whatever
+  the person's own `gh` login answers for that branch (`gh pr view`, read only, 4 s limit, `https` links only). A
+  request reads the cache only (60 s); a miss starts one background lookup per branch and the strip and
+  overview ask once more after 5 s. Absent `pr` means unknown or none, never "no PR": no `gh`, no login, no remote, a timeout or
+  unreadable output all show nothing. The strip words it as a claim from GitHub, not as Perch verifying the work.
+- *Project overview* (`overview.rs` rules, `server/overview.rs`, `project.overview.get` / `project.overview`, capability
+  `project.overview.v1`, `packages/web/src/projectOverview.ts`). A Project's threads are the sub-sessions of its
+  leads; each comes with the same row the strip shows and sits in one group: Needs you, Working, Ready for
+  review, Landing, Idle, State unknown, Resolved. Groups come from Perch's records only: a pending approval,
+  the lifecycle, the dispatch record and the PR state `gh` reports. A report only suggests review, and a
+  thread whose start, stop or lifecycle is unknown is never Idle or Resolved. Local Projects only. The Project
+  home tab that shows this is not built.
   session id>/`, 0700), created on first use and removed when the lead is deleted. `perch whoami` and the
   end of `perch guide` give the path; the guide says what it is for. Nothing in it is ever injected into a
   prompt, and an agent reading it treats it as a peer's text. (Project memory, above, is the durable

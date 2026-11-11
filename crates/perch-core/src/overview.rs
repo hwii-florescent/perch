@@ -9,7 +9,7 @@
 //! Every group is derived from Perch's records, never from an agent's claim: a report only
 //! *suggests* review (it is the agent's word, labelled so in the UI), and a pull request is what
 //! the person's `gh` login says. Landing and Resolved read the PR state; without a PR they are
-//! never reached, except that a confirmed-gone thread is Resolved.
+//! never reached, except that a confirmed-gone thread with no PR is Resolved.
 
 /// The facts one thread is grouped by.
 #[derive(Debug, Clone, Copy, Default)]
@@ -39,11 +39,18 @@ pub const GROUPS: [(&str, &str); 7] = [
 
 /// The group key of a thread. First rule that holds wins.
 pub fn group_of(facts: &Facts) -> &'static str {
-    // Confirmed gone, or its pull request is settled: nothing left to do here.
-    if matches!(facts.dispatch, Some("stopped" | "exited" | "failed"))
-        || matches!(facts.pr, Some("merged" | "closed"))
-    {
+    // Its pull request is settled: nothing left to do here.
+    if matches!(facts.pr, Some("merged" | "closed")) {
         return "resolved";
+    }
+    // Confirmed gone. A thread that opened a pull request and then exited is the usual one waiting to
+    // land, so an open or draft PR keeps it in view; with none, nothing is left to do.
+    if matches!(facts.dispatch, Some("stopped" | "exited" | "failed")) {
+        return match facts.pr {
+            Some("open") => "landing",
+            Some("draft") => "ready_for_review",
+            _ => "resolved",
+        };
     }
     if facts.needs_you {
         return "needs_you";
@@ -112,6 +119,19 @@ mod tests {
         );
         assert_eq!(of("idle", Some("running"), false, false, None), "idle");
         assert_eq!(of("done", Some("exited"), false, true, None), "resolved");
+        // It opened a pull request and exited: still waiting to land (or to be reviewed as a draft).
+        assert_eq!(
+            of("done", Some("exited"), false, true, Some("open")),
+            "landing"
+        );
+        assert_eq!(
+            of("done", Some("exited"), false, true, Some("draft")),
+            "ready_for_review"
+        );
+        assert_eq!(
+            of("done", Some("stopped"), false, true, Some("merged")),
+            "resolved"
+        );
         assert_eq!(
             of("idle", Some("running"), false, true, Some("merged")),
             "resolved"

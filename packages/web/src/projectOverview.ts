@@ -11,6 +11,8 @@ const CAPABILITY = "project.overview.v1";
 /** Updates of the Project's sessions arrive in bursts; one ask follows the last of them. */
 const SETTLE_MS = 250;
 const TIMEOUT_MS = 5000;
+/** How long after an answer with branches but no pull request to ask once more. */
+const PR_FOLLOW_UP_MS = 5000;
 
 type Answer = { groups: OverviewGroup[]; error?: string } | null;
 const pending = new Map<string, (answer: Answer) => void>();
@@ -59,10 +61,17 @@ export function useProjectOverview(projectId: string): { groups: OverviewGroup[]
   useEffect(() => {
     if (!enabled) return;
     let current = true;
+    let later: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
-      void ask(projectId).then((value) => { if (current && value) setAnswer({ projectId, value }); });
+      void ask(projectId).then((value) => {
+        if (!current || !value) return;
+        setAnswer({ projectId, value });
+        // The core answers a pull request from its cache and looks it up in the background: one more ask
+        // picks up what the first started.
+        if (value.groups.some((group) => group.threads.some(({ row }) => row.branch && !row.pr))) later = setTimeout(() => void ask(projectId).then((again) => { if (current && again) setAnswer({ projectId, value: again }); }), PR_FOLLOW_UP_MS);
+      });
     }, SETTLE_MS);
-    return () => { current = false; clearTimeout(timer); };
+    return () => { current = false; clearTimeout(timer); clearTimeout(later); };
   }, [enabled, projectId, signature]);
   // An answer for another Project, or from before the connection dropped, is not this one's.
   const value = enabled && answer.projectId === projectId ? answer.value : { groups: [] as OverviewGroup[] };
