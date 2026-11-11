@@ -556,8 +556,7 @@ across providers ([DECISIONS](DECISIONS.md) 2026-11-07, compared in the
    writers conflict instead of overwriting; what an agent reads there is information from
    a peer, not instructions. **Slice 1 built (2026-11-08):** `memory.rs`, `memory.*` messages
    (`memory.v1`), `perch memory list|read|write|delete`, tests; storage, scope, caps and
-   conflict rules settled in [DECISIONS](DECISIONS.md) 2026-11-08. **Not built:** the Project home UI
-   (review, edit, delete from the web; the web client lives on `memory.list/get/set/delete`),
+   conflict rules settled in [DECISIONS](DECISIONS.md) 2026-11-08. **Memory dialog built** (Project menu: list, edit, create, delete). **Not built:** the Project home page,
    opt-out per session, showing the repo's own `CLAUDE.md` memory beside it, cleanup when a Project is
    removed, and any live run (no agent has used `perch memory` yet).
 2. **Library.** Pickable files and folders for a project (Claude: 100 files per pick, 10
@@ -566,7 +565,9 @@ across providers ([DECISIONS](DECISIONS.md) 2026-11-07, compared in the
    Overview grouped by state (Claude: Ready for review, Waiting on you, Working, Landing,
    Idle, Resolved). Today: nested child rows and the family strip. "No new noun" still
    holds unless the owner renames it.
-4. **Branch/PR status per thread** (Claude's Landing state). Overlaps "Thin PR workflow".
+4. **Branch/PR status per thread** (Claude's Landing state). **Built 2026-11-10 (strip only):** `thread_pr.rs`,
+   `CrewRow.branch`/`pr` (`crew.pr.v1`), shown on the family strip. Not built: the Overview groups that use it
+   (Ready for review, Landing). Overlaps "Thin PR workflow".
 5. **Limits.** Claude allows 500 new threads a day; Perch caps a lead at 4 live and 8 in
    total. Revisit when memory and the project home exist.
 

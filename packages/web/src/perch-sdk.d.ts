@@ -1450,6 +1450,16 @@ declare module "@perch/sdk" {
     /** What a person may do to this child from the strip, each with the reason it is not offered
      * (capability `crew.actions.v1`). Only a lead's `worker` rows have it. */
     actions?: CrewActions;
+    /** The branch checked out in the member's Workspace (capability `crew.pr.v1`). */
+    branch?: string;
+    /** The pull request `gh` reports for that branch. Absent means unknown or none, never "no PR". */
+    pr?: CrewPr;
+  }
+  /** A pull request for a member's branch. `state` is `open`, `draft`, `merged` or `closed`. */
+  export interface CrewPr {
+    number: number;
+    state: string;
+    url: string;
   }
   /** A message another session sent that this session's person has not answered. `text` is cut to a preview
    * when the message was long (`truncated`). */

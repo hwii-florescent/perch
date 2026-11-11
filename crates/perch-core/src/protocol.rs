@@ -561,6 +561,23 @@ pub struct CrewRow {
     /// (capability `crew.actions.v1`). Only a lead's `worker` rows have it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actions: Option<CrewActions>,
+    /// The branch checked out in the member's Workspace, read from the repository (capability
+    /// `crew.pr.v1`). Absent for a remote session, outside a repository, or on a detached HEAD.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// The pull request `gh` reports for that branch. Absent means unknown or none, never "no PR".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<CrewPr>,
+}
+
+/// A pull request for a member's branch (`crew.pr.v1`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrewPr {
+    pub number: u64,
+    /// `open`, `draft`, `merged` or `closed`.
+    pub state: String,
+    pub url: String,
 }
 
 /// The four family-strip actions on a child and whether each is available now.

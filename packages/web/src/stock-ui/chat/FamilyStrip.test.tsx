@@ -218,3 +218,16 @@ it("watches only the sessions that can change a family: the lead and its childre
   expect(familySignature([...sessions.slice(0, 2), session("elsewhere", { blocked: true })], "lead")).toBe(before);
   expect(familySignature([session("lead"), session("c1", { parentSessionId: "lead", blocked: true }), session("elsewhere")], "lead")).not.toBe(before);
 });
+
+it("shows a child's pull request in its line and its branch and link in the details", () => {
+  act(() => root.render(<FamilyStrip now={NOW} onOpen={vi.fn()} rows={[
+    row({ sessionId: "p", task: "fix the bug", branch: "fix-bug", pr: { number: 7, state: "draft", url: "https://github.com/o/r/pull/7" } }),
+    row({ sessionId: "q", task: "no pr here", branch: "main" }),
+  ]} />));
+  const [withPr, without] = [...host.querySelectorAll('[data-testid="native-cli-family-row"]')] as [Element, Element];
+  expect(withPr.querySelector('[data-testid="native-cli-family-pr"]')?.textContent).toBe("PR #7 · draft");
+  expect(without.querySelector('[data-testid="native-cli-family-pr"]')).toBeNull();
+  act(() => { (withPr.querySelector("button[aria-expanded]") as HTMLButtonElement).click(); });
+  expect(withPr.textContent).toContain("fix-bug");
+  expect(withPr.querySelector<HTMLAnchorElement>('[data-testid="native-cli-family-pr-link"]')?.href).toBe("https://github.com/o/r/pull/7");
+});

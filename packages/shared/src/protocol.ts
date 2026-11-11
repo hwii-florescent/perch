@@ -1644,6 +1644,19 @@ export interface CrewRow {
   /** What a person may do to this child from the strip, each with the reason it is not offered
    * (capability `crew.actions.v1`). Only a lead's `worker` rows have it. */
   actions?: CrewActions;
+  /** The branch checked out in the member's Workspace (capability `crew.pr.v1`). Absent for a remote
+   * session, outside a repository, or on a detached HEAD. */
+  branch?: string;
+  /** The pull request `gh` reports for that branch. Absent means unknown or none, never "no PR". */
+  pr?: CrewPr;
+}
+
+/** A pull request for a member's branch (`crew.pr.v1`). */
+export interface CrewPr {
+  number: number;
+  /** `open`, `draft`, `merged` or `closed`. */
+  state: string;
+  url: string;
 }
 
 /** The four family-strip actions on a child and whether each is available now. */

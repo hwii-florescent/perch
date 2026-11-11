@@ -50,6 +50,7 @@ pub mod suggestions;
 pub mod surfaces;
 pub mod terminal;
 pub mod terminal_profile;
+pub mod thread_pr;
 pub mod typed_lines;
 pub mod uploads;
 pub mod usage;

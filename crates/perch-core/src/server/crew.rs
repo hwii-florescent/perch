@@ -8,7 +8,7 @@ use super::*;
 use crate::agent_fleet::AgentState;
 use crate::agent_mail::MailKind;
 use crate::crew::{self, Member, MemberReport, Traffic};
-use crate::protocol::{CrewLatest, CrewNeedsYou, CrewReport, CrewRow};
+use crate::protocol::{CrewLatest, CrewNeedsYou, CrewPr, CrewReport, CrewRow};
 use crate::sub_sessions::SubState;
 
 /// Messages read for one viewer in each direction; the strip shows only the newest per peer.
@@ -196,41 +196,68 @@ pub(super) fn rows_for(app: &AppState, viewer: &str) -> Vec<CrewRow> {
     let members = members(app, viewer);
     crew::build(viewer, &members, &traffic(app, viewer))
         .into_iter()
-        .map(|row| CrewRow {
+        .map(|row| {
             // Before the fields that move out of `row.member`.
-            actions: (row.role == crew::Role::Worker)
-                .then(|| super::crew_actions::offered(app, &row.member.session_id))
-                .flatten(),
-            session_id: row.member.session_id,
-            role: row.role.as_str().into(),
-            title: row.member.title,
-            provider: row.member.provider,
-            lifecycle: row.member.lifecycle,
-            dispatch: row.member.dispatch,
-            task: row.member.task,
-            needs_you: row
-                .member
-                .needs_you
-                .map(|(preview, at)| CrewNeedsYou { preview, at }),
-            report: row.member.report.map(|report| CrewReport {
-                text: report.text,
-                source: report.source.as_str().into(),
-                at: report.at,
-                model: report.model,
-            }),
-            latest: row.latest.map(|latest| CrewLatest {
-                direction: if latest.to_peer { "to" } else { "from" }.into(),
-                preview: latest.preview,
-                at: latest.at,
-                receipt: latest.receipt.as_str().into(),
-                reason: latest.reason,
-                handoff: latest.handoff,
-                kind: latest.kind.as_str().into(),
-            }),
-            can_message: row.member.can_message,
-            previous_run: row.member.previous_run.then_some(true),
+            let (branch, pr) = branch_and_pr(app, &row.member.session_id);
+            CrewRow {
+                actions: (row.role == crew::Role::Worker)
+                    .then(|| super::crew_actions::offered(app, &row.member.session_id))
+                    .flatten(),
+                session_id: row.member.session_id,
+                role: row.role.as_str().into(),
+                title: row.member.title,
+                provider: row.member.provider,
+                lifecycle: row.member.lifecycle,
+                dispatch: row.member.dispatch,
+                task: row.member.task,
+                needs_you: row
+                    .member
+                    .needs_you
+                    .map(|(preview, at)| CrewNeedsYou { preview, at }),
+                report: row.member.report.map(|report| CrewReport {
+                    text: report.text,
+                    source: report.source.as_str().into(),
+                    at: report.at,
+                    model: report.model,
+                }),
+                latest: row.latest.map(|latest| CrewLatest {
+                    direction: if latest.to_peer { "to" } else { "from" }.into(),
+                    preview: latest.preview,
+                    at: latest.at,
+                    receipt: latest.receipt.as_str().into(),
+                    reason: latest.reason,
+                    handoff: latest.handoff,
+                    kind: latest.kind.as_str().into(),
+                }),
+                can_message: row.member.can_message,
+                previous_run: row.member.previous_run.then_some(true),
+                branch,
+                pr,
+            }
         })
         .collect()
+}
+
+/// The member's branch and its pull request, for a session whose Workspace is on this machine.
+fn branch_and_pr(app: &AppState, session_id: &str) -> (Option<String>, Option<CrewPr>) {
+    let none = (None, None);
+    let Some(row) = app.db.get_session(session_id).ok().flatten() else {
+        return none;
+    };
+    // An empty host id is a local session too (older rows).
+    if !row.host_id.is_empty() && row.host_id != "local" {
+        return none;
+    }
+    let branch = crate::status::get_branch(&row.cwd);
+    if branch.is_empty() {
+        return none;
+    }
+    let pr = crate::thread_pr::for_branch(&row.cwd, &branch).map(|pr| CrewPr {
+        number: pr.number,
+        state: pr.state.into(),
+        url: pr.url,
+    });
+    (Some(branch), pr)
 }
 
 pub(super) fn handle_get(state: &Arc<ConnState>, request_id: String, session_id: String) {
@@ -262,7 +289,8 @@ mod tests {
     async fn crew_get_answers_each_member_with_its_own_records() {
         let root = std::env::temp_dir().join(format!("perch-crew-{}", Uuid::new_v4()));
         let nest = root.join("nest");
-        std::fs::create_dir_all(&nest).unwrap();
+        std::fs::create_dir_all(nest.join(".git")).unwrap();
+        std::fs::write(nest.join(".git/HEAD"), "ref: refs/heads/feature-x\n").unwrap();
         let db_path = root.join("history.sqlite");
         let db = Arc::new(HistoryDb::open(&db_path).unwrap());
         let local_ui = crate::local_ui::LocalUi::in_process();
@@ -352,6 +380,10 @@ mod tests {
             (child.session_id.as_str(), child.role.as_str()),
             ("child", "worker")
         );
+        // The Workspace's branch is read from the repository; no pull request is claimed for it
+        // (this directory is not a real checkout, so `gh` has nothing to say).
+        assert_eq!(child.branch.as_deref(), Some("feature-x"));
+        assert!(child.pr.is_none());
         // The record said running, but perchd confirms no such process: a confirmed exit.
         assert_eq!(child.dispatch.as_deref(), Some("exited"));
         assert_eq!(child.task.as_deref(), Some("fix the parser"));

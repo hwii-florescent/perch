@@ -2695,6 +2695,7 @@ fn foundation_capabilities() -> Vec<String> {
         "mods.report.v2",
         "crew.v1",
         "crew.actions.v1",
+        "crew.pr.v1",
         "suggestions.v1",
         "inbound.v1",
         "fs.tree",
