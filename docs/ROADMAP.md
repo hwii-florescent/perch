@@ -354,10 +354,10 @@ version; the slices below replace their implied order.
   splits, assigns, retries or summarises work and hosts no model (no coordinator chat,
   scheduler, kanban or planner).
 - **Built on ordinary Perch sessions** and the attached TUI, not structured/RPC chat.
-- **Shared context, first cut:** Instructions (16,000-character cap, Anthropic's
-  limit) plus reference folders, a snapshot pinned per launch with its provenance; a
-  per-run notes folder of plain files that agents read on demand and that is never
-  injected. No agent-written memory.
+- **Shared context, first cut (since extended: reference files, Project memory, see Projects parity below):**
+  Instructions (16,000-character cap, Anthropic's limit) plus reference folders, a snapshot pinned per launch
+  with its provenance; a per-run notes folder of plain files that agents read on demand and that is never
+  injected.
 - **Agent entry: an appended pointer, not a skill.** Each Perch-launched session gets
   at most 300 characters through the same append flags as Instructions ("You are in
   Perch session X; run `perch guide` for coordination"); `perch guide` serves the full,
@@ -541,7 +541,7 @@ UI rows from step 0 continue between slices.
    jsdom tests only; **no live run**. 9a-9c ran live once (`e2e/suggestions.spec.ts`, haiku lead and child): suggest,
    Start by click, sender card, `perch read`. Not run live: Do it here, Options, Start all, non-Claude receivers.
 
-#### Projects parity (owner direction 2026-11-07; item 1 slice 1 built, rest not started)
+#### Projects parity (owner direction 2026-11-07; items 1-4 and 6 built as noted, 7 not planned)
 
 Goal: the same feature set as Claude Code Projects (beta), built on Perch sessions and
 across providers ([DECISIONS](DECISIONS.md) 2026-11-07, compared in the

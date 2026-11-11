@@ -1,5 +1,5 @@
 //! Instructions, the stock screen `stock:instructions`: the dialog that edits a Project's or Workspace's
-//! Instructions, the shared text and reference folders every new session there starts with. Opened from the sidebar
+//! Instructions, the shared text and reference files and folders every new session there starts with. Opened from the sidebar
 //! (a project's or workspace's menu) and by a package's `InstructionsDialog` from `@perch/sdk`; or the person's
 //! package chosen for it (`perch mod use stock:instructions <id>`), with the same props.
 //!
