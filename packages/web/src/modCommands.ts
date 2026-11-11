@@ -10,7 +10,8 @@ import { useSplitSets } from "./splitSets";
 import { activateTab, currentTabs, entryLabel, moveChat } from "./workspaceTabs";
 import { zoomIn, zoomOut, zoomReset } from "./zoom";
 import { tauriInvoke } from "./links";
-import { useFileTabs } from "./fileTabs";
+import { fileTabKey, useFileTabs } from "./fileTabs";
+import { PROJECT_HOME } from "./projectHome";
 import { isPinned, setPinned, setTerminalOrder } from "./pinnedTerminals";
 import { runInWorkspace } from "./runs";
 import { usePerchStore } from "./store";
@@ -99,6 +100,17 @@ setPanesSource(() => {
     focused: entry.id === activeId,
   }));
 });
+
+/** Show a Project's home as a tab of the shown workspace: the one already open for that Project, else a new one.
+ * False without a workspace. */
+export function openProjectHome(projectId: string, name: string): boolean {
+  const open = useFileTabs.getState().tabs.find((tab) => tab.kind === "mod" && tab.mod === PROJECT_HOME && tab.props?.projectId === projectId);
+  if (open) {
+    useFileTabs.setState({ active: fileTabKey(open) });
+    return true;
+  }
+  return openModTab(PROJECT_HOME, { projectId, name });
+}
 
 function openModOrThrow(mod: string, args: unknown, side?: "right" | "below") {
   if (!currentMods()?.mods.some((candidate) => candidate.id === mod && candidate.enabled && !candidate.error)) throw new Error(`No working mod named ${mod}.`);
@@ -209,6 +221,11 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
     if (!usePerchStore.getState().activeWorkspaceId) throw new Error("Open a project first.");
     const start = programIn(args);
     later(async () => start(usePerchStore.getState().activeWorkspaceId!))(undefined);
+  } },
+  "project.home": { description: "Show a project's home (its threads grouped by what needs you, Instructions, memory) as a tab", args: "{projectId, name}", run: (args) => {
+    const projectId = word(args, "projectId");
+    if (!projectId) throw new Error("project.home needs {projectId, name}.");
+    if (!openProjectHome(projectId, word(args, "name") ?? projectId)) throw new Error("Open a project first.");
   } },
   "tab.next": { description: "The next tab", args: "{}", run: () => void runCommand("tabs.next") },
   "tab.prev": { description: "The previous tab", args: "{}", run: () => void runCommand("tabs.prev") },

@@ -1,0 +1,6 @@
+{
+  "name": "Project home",
+  "description": "one place for a project: its threads grouped by what needs you, plus its Instructions and memory",
+  "version": "1.0.0",
+  "api": "^1.7"
+}

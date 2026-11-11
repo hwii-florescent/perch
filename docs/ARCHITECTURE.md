@@ -606,7 +606,8 @@ strip's actions are the next section.
   review, Landing, Idle, State unknown, Resolved. Groups come from Perch's records only: a pending approval,
   the lifecycle, the dispatch record and the PR state `gh` reports. A report only suggests review, and a
   thread whose start, stop or lifecycle is unknown is never Idle or Resolved. Local Projects only. The Project
-  home tab that shows this is not built.
+  home tab shows it (`stock:project-home`, bound by `components/ProjectHomeTab.tsx`; opened by the command
+  `project.home`, one tab per Project): the screen only draws the core's groups.
   session id>/`, 0700), created on first use and removed when the lead is deleted. `perch whoami` and the
   end of `perch guide` give the path; the guide says what it is for. Nothing in it is ever injected into a
   prompt, and an agent reading it treats it as a peer's text. (Project memory, above, is the durable

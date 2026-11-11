@@ -7,6 +7,7 @@ import { useSplitSets } from "./splitSets";
 import { parseUrl } from "./links";
 import { useBrowserPages } from "./browserPages";
 import { scopeSessionId } from "./terminalScope";
+import { PROJECT_HOME } from "./projectHome";
 
 /** One entry of the strip: a session (a terminal or agent) or an open resource.
  * `id` is the session id or `fileTabKey`, so one stored order covers both. */
@@ -139,6 +140,7 @@ export function sessionLabel(session: SessionSummary): string {
 /** A resource tab's name: a file's basename, "Changes", or a page's title (else its host). */
 export function tabName(tab: FileTab): string {
   if (tab.kind === "review") return "Changes";
+  if (tab.kind === "mod" && tab.mod === PROJECT_HOME) return `${String(tab.props?.name ?? "Project")} home`;
   if (tab.kind === "mod") return tab.mod ?? tab.path;
   if (tab.kind === "browser") {
     const page = useBrowserPages.getState().pages[fileTabKey(tab)];

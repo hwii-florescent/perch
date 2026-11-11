@@ -250,6 +250,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       { label: "Rename", testId: `workspace-project-rename-${project.id}`, onSelect: () => setRenamingProjectId(project.id) },
       { label: "Copy path", testId: `workspace-project-copy-${project.id}`, onSelect: () => copyText(project.path) },
       ...instructionsItem(project, "project", project.id, project.name, `workspace-project-instructions-${project.id}`),
+      ...(project.memory ? [{ label: "Project home", testId: `workspace-project-home-${project.id}`, onSelect: () => runCommand("project.home", { projectId: project.id, name: project.name }) }] : []),
       ...(project.memory ? [{ label: "Memory…", testId: `workspace-project-memory-${project.id}`, onSelect: () => setMemoryFor({ projectId: project.id, name: project.name }) }] : []),
       ...moveItems("project", project.id, nav.projects.filter((other) => other.favorite === project.favorite).map((other) => other.id)),
       ...(project.sessions.length > 0

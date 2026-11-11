@@ -1467,6 +1467,19 @@ declare module "@perch/sdk" {
     leadSessionId: string;
     row: CrewRow;
   }
+  /** `stock:project-home`: a Project's threads grouped by state. The groups are the core's (non-empty ones, in
+   * display order); `error` is the core's refusal (a remote or missing Project). */
+  export interface ProjectHomeProps {
+    projectId: string;
+    name: string;
+    groups: OverviewGroup[];
+    error?: string;
+    /** Show a thread's session. */
+    onOpen(sessionId: string): void;
+    /** Open the Project's Instructions or memory dialog. */
+    onInstructions(): void;
+    onMemory(): void;
+  }
   /** A pull request for a member's branch. `state` is `open`, `draft`, `merged` or `closed`. */
   export interface CrewPr {
     number: number;

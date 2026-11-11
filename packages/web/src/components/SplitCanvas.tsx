@@ -11,6 +11,8 @@ import { beginTabDrag } from "../tabDrag";
 import { usePaneLook } from "../paneLook";
 import { useTabOrderVersion } from "../tabOrder";
 import { ModPane } from "./ModView";
+import { ProjectHomeTab } from "./ProjectHomeTab";
+import { PROJECT_HOME } from "../projectHome";
 import { StockView } from "./mod-root";
 import { WorkspaceBrowser } from "./WorkspaceBrowser";
 
@@ -289,6 +291,8 @@ export function SplitCanvas() {
         >
           {tab.kind === "review" ? (
             <StockView name="review" props={{ workspaceId: tab.scope ?? tab.workspaceId }} instance={`review-pane:${id}`} placeholder={<div className="terminal__notice" role="status">Loading review…</div>} />
+          ) : tab.kind === "mod" && tab.mod === PROJECT_HOME ? (
+            <ProjectHomeTab projectId={String(tab.props?.projectId ?? "")} name={String(tab.props?.name ?? "")} />
           ) : tab.kind === "mod" ? (
             <ModPane modId={tab.mod ?? ""} props={tab.props} instance={`pane:${id}`} />
           ) : tab.kind === "browser" ? (
