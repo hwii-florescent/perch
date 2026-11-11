@@ -1481,3 +1481,7 @@ an exhaustive description of every component or a fresh acceptance result.
 - **Pull requests are read from the person's `gh` login and shown as GitHub's claim**, from a cache; a
   missing answer is unknown, not "no PR".
 
+- **The library is the Instructions reference list, grown to files and folders** (100 entries, 16 of them
+  directories), with no picker. Files are named in the text for every provider; only folders are granted.
+- **Memory opt-out is per Project only**, not per session: one switch in the Memory dialog. Off refuses the
+  Project's agents; people keep reading and editing the files.
