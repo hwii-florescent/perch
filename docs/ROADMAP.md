@@ -565,16 +565,14 @@ across providers ([DECISIONS](DECISIONS.md) 2026-11-07, compared in the
    folders, up to 100 entries (16 directories); files are listed in the text for every provider, folders also
    granted with `--add-dir` where the provider can. **Not built:** a file picker and showing the list on Project home.
 3. **Project home.** (Layout decided 2026-11-10: a main-view tab per Project. **Built 2026-11-11:** the tab (`stock:project-home`, sidebar Project menu "Project home", command
-   `project.home`) with the grouped Overview, Instructions and Memory buttons. **Not built:** the library, a search box, a per-thread PR
-   refresh button.) One place for Instructions, memory, library and threads, and an
-   Overview grouped by state (Claude: Ready for review, Waiting on you, Working, Landing,
-   Idle, Resolved). Today: nested child rows and the family strip. "No new noun" still
-   holds unless the owner renames it.
-4. **Branch/PR status per thread** (Claude's Landing state). **Built 2026-11-10 (strip only):** `thread_pr.rs`,
-   `CrewRow.branch`/`pr` (`crew.pr.v1`), shown on the family strip. Not built: the Overview groups that use it
-   (Ready for review, Landing). Overlaps "Thin PR workflow".
+   `project.home`) with the Overview grouped by state (Ready for review, Waiting on you, Working, Landing, Idle,
+   Resolved), plus Instructions and Memory buttons. **Not built:** the reference list shown on the tab, a search
+   box, a per-thread PR refresh button.) "No new noun" still holds unless the owner renames it.
+4. **Branch/PR status per thread** (Claude's Landing state). **Built 2026-11-10/11:** `thread_pr.rs`,
+   `CrewRow.branch`/`pr` (`crew.pr.v1`), shown on the family strip; the Overview's Ready for review and Landing groups
+   use it (an exit with an open PR lands, merged or closed resolves). Lookups are cached; no refresh button. Overlaps "Thin PR workflow".
 5. **Limits.** Claude allows 500 new threads a day; Perch caps a lead at 4 live and 8 in
-   total. Revisit when memory and the project home exist.
+   total. Memory and the Project home now exist, so the limits are due for a look; unchanged.
 
 6. **Cross-session search. Built 2026-11-10:** `perch search` (any agent of a Project, user and assistant words only;
    [DECISIONS](DECISIONS.md) 2026-11-10). Not built: a person's search box on the Project home.
