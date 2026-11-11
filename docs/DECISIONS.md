@@ -11,6 +11,10 @@ conventions, not automatic approval. AGENTS is only a brief contributor entry po
 
 Owner direction: redesign the phone like Claude or ChatGPT's apps. Supersedes the "one header, active pane and
 Session/Files/Git bottom bar" phone item below and the single global `chatMode` for phones.
+- **Looks like the desktop.** The phone is one main card (12px, `--card-bg`) on the `--backdrop`, 8px in from the window
+  edge and the safe areas, with a 44px head row and no divider lines. The sidebar is a card from the left and the drawer a
+  card from the right, each with the desktop's own panel glyph (sidebar, drawer) and the desktop's Files/Git switch and
+  needs-you count; theme tokens only, so a theme change reaches it. The file sheet is a card with 12px top corners.
 - **Shell.** One header: the sidebar button on the left (every session, project and host, with Settings, the phone's
   UI/CLI switch and plan usage at its foot), the session in the middle, the tools button on the right. No bottom bar:
   the session has the full height and stays mounted. The tools button opens Files and Git (Git only for a git

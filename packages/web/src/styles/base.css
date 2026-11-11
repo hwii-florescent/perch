@@ -129,7 +129,7 @@ html[data-glass] {
   --backdrop-bg: color-mix(in srgb, var(--backdrop) 86%, transparent);
   --card-bg: color-mix(in srgb, var(--panel-bg) 86%, transparent);
 }
-body:has(.app--cards) {
+body:has(.app--cards, .app--mobile) {
   background: var(--backdrop-bg);
 }
 /* Split panes are separate rounded panes: the gap between them shows the backdrop, as the

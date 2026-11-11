@@ -193,21 +193,24 @@ export default function App() {
       className={"app" + (isMobile ? " app--mobile" : " app--cards") + (MAC_DESKTOP ? " app--mac-desktop" : "")}
       style={{ "--sidebar-width": `${sidebarWidth}px`, "--tools-width": `${toolsWidth}px` } as CSSProperties}
     >
-      {isMobile && <MobileHeader onOpenSwitcher={() => setMobileSwitcherOpen(true)} onOpenTools={openTools} />}
-
       {!connected && !MAC_DESKTOP && <div className="shrink-0 px-4"><ConnectionDetails /></div>}
       {isMobile ? (
-        <div className="flex min-h-0 flex-1">
-          <main className="dock-area relative flex min-h-0 min-w-0 flex-1">
-            <MobilePaneShell
-              activePane={mobilePane}
-              workspaceFilesWorkspaceId={workspaceFilesWorkspaceId}
-              workspaceGitReviewWorkspaceId={workspaceGitReviewWorkspaceId}
-              onPaneChange={setMobilePane}
-              onCloseFiles={closeWorkspaceFiles}
-              onCloseGitReview={closeWorkspaceGitReview}
-            />
-          </main>
+        // The phone is one main card on the backdrop, as the desktop's three are: 12px, the card color, 8px in from the
+        // window edge, a 44px head row (`stock:mobile-header`) over the session (`stock:mobile-panes`).
+        <div className="flex min-h-0 flex-1 pt-[max(0.5rem,env(safe-area-inset-top))] pr-[max(0.5rem,env(safe-area-inset-right))] pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(0.5rem,env(safe-area-inset-left))] [--radius:var(--radius-pane)]">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[12px] bg-[var(--card-bg)]" data-testid="mobile-card">
+            <MobileHeader onOpenSwitcher={() => setMobileSwitcherOpen(true)} onOpenTools={openTools} />
+            <main className="dock-area relative flex min-h-0 min-w-0 flex-1">
+              <MobilePaneShell
+                activePane={mobilePane}
+                workspaceFilesWorkspaceId={workspaceFilesWorkspaceId}
+                workspaceGitReviewWorkspaceId={workspaceGitReviewWorkspaceId}
+                onPaneChange={setMobilePane}
+                onCloseFiles={closeWorkspaceFiles}
+                onCloseGitReview={closeWorkspaceGitReview}
+              />
+            </main>
+          </div>
         </div>
       ) : layout?.root ? (
         <LayoutRoot root={layout.root} />

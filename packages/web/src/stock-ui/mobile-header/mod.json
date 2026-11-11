@@ -1,6 +1,6 @@
 {
   "name": "Phone header",
-  "description": "the phone's top row: the session shown (tap to switch), what needs you, and Settings",
+  "description": "the phone's head row: the sidebar button, the session shown, and the Files/Git button, with what needs you",
   "version": "1.0.0",
   "api": "^1.10"
 }

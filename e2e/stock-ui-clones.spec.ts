@@ -811,6 +811,7 @@ test("the files surface runs from its stock package; a clone in its place opens 
     // It opens on the tree, which is the stock one; the file opens as a sheet with the same draft.
     await expect(page.getByLabel("Workspace file tree", { exact: true })).toHaveCount(1, { timeout: 15000 });
     await expect(page.getByTestId("mobile-file-sheet")).toHaveCount(0);
+    if (!(await page.getByTestId("workspace-file-entry-src/main.txt").count())) await page.getByTestId("workspace-file-entry-src").click();
     await page.getByTestId("workspace-file-entry-src/main.txt").click();
     await expectDoc(page.getByTestId("workspace-file-editor"), "UNSAVED_DRAFT\n", { timeout: 15000 });
     await page.getByTestId("mobile-files-back").click();

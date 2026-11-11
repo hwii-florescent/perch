@@ -1,6 +1,6 @@
 {
   "name": "Phone files",
-  "description": "the phone's Files pane: the explorer, or the open file with a way back to it",
+  "description": "the phone's Files tool: the explorer, and a tapped file as a sheet put away by its × or a pull down",
   "version": "1.0.0",
   "api": "^1.10"
 }

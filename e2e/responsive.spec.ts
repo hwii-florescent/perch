@@ -112,6 +112,8 @@ test.describe("Responsive narrow-width collapse (Phase 5)", () => {
     await expect(page.locator('[data-testid^="mobile-active-pane-"]')).toHaveCount(2);
     await expect(page.locator(".chat")).toHaveCount(1);
     await expect(page.locator(".dockview-theme-perch")).toHaveCount(0);
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: "artifacts/r2b-mobile-tools-drawer.png" });
 
     await page.getByTestId("mobile-tools-close").click();
     await expect(page.getByTestId("mobile-tools-drawer")).toHaveCount(0);
@@ -346,6 +348,8 @@ test.describe("Responsive narrow-width collapse (Phase 5)", () => {
     const sheet = page.getByTestId("mobile-file-sheet");
     await expect(sheet).toBeVisible({ timeout: 10000 });
     await expect(sheet.getByTestId("workspace-file-editor")).toBeVisible({ timeout: 15000 });
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: "artifacts/r13-mobile-file-sheet.png" });
 
     await page.getByTestId("mobile-files-back").click();
     await expect(sheet).toHaveCount(0);

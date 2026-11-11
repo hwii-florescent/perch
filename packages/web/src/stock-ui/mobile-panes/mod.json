@@ -1,6 +1,6 @@
 {
   "name": "Phone panes",
-  "description": "the phone's canvas: one pane (session, Files or Git) over a bottom bar that switches between them",
+  "description": "the phone's canvas: the session full height, and a Files/Git drawer card over it from the right",
   "version": "1.0.0",
   "api": "^1.10"
 }
