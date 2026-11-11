@@ -16,7 +16,10 @@ use std::path::Path;
 
 /// Anthropic's Projects limit; applied to the text a session receives, Project and Workspace together.
 pub const MAX_CHARS: usize = 16_000;
+/// Reference folders (entries that are directories).
 pub const MAX_FOLDERS: usize = 16;
+/// Reference entries in all, files and folders together (Claude Projects' library takes 100 files).
+pub const MAX_ENTRIES: usize = 100;
 const MAX_FOLDER_BYTES: usize = 1024;
 
 /// The providers that take Instructions at launch.
@@ -38,7 +41,7 @@ impl Instructions {
 }
 
 /// Check and normalise what a person typed: the text is trimmed and at most [`MAX_CHARS`]
-/// characters; each folder is an absolute path on this computer, without repeats.
+/// characters; each entry is an absolute path of a file or folder on this computer, without repeats.
 pub fn validate(text: &str, folders: &[String]) -> Result<Instructions, String> {
     let text = text.replace("\r\n", "\n").trim().to_string();
     if text.contains('\0') {
@@ -59,7 +62,7 @@ pub fn validate(text: &str, folders: &[String]) -> Result<Instructions, String> 
             || folder.len() > MAX_FOLDER_BYTES
             || folder.chars().any(char::is_control)
         {
-            return Err(format!("\"{folder}\" is not an absolute folder path."));
+            return Err(format!("\"{folder}\" is not an absolute path."));
         }
         let folder = folder.trim_end_matches('/');
         let folder = if folder.is_empty() { "/" } else { folder };
@@ -67,9 +70,21 @@ pub fn validate(text: &str, folders: &[String]) -> Result<Instructions, String> 
             kept.push(folder.to_string());
         }
     }
-    if kept.len() > MAX_FOLDERS {
+    if kept.len() > MAX_ENTRIES {
         return Err(format!(
-            "At most {MAX_FOLDERS} reference folders are allowed."
+            "At most {MAX_ENTRIES} reference files and folders are allowed."
+        ));
+    }
+    // Folders are read with the agent's own permission to add a directory; keep that list short.
+    // An entry that is not there yet counts as a file.
+    if kept
+        .iter()
+        .filter(|entry| Path::new(entry).is_dir())
+        .count()
+        > MAX_FOLDERS
+    {
+        return Err(format!(
+            "At most {MAX_FOLDERS} reference folders are allowed (files can be listed up to {MAX_ENTRIES})."
         ));
     }
     Ok(Instructions {
@@ -162,28 +177,52 @@ impl Pinned {
         self.folders
             .iter()
             .map(String::as_str)
-            .filter(|folder| Path::new(folder).is_dir())
+            .filter(|entry| Path::new(entry).is_dir())
+            .collect()
+    }
+
+    /// The reference files that exist now. A file is only listed in the text: no provider takes a
+    /// single file as an extra directory, and listing one grants nothing the agent's own permission
+    /// does not.
+    fn present_files(&self) -> Vec<&str> {
+        self.folders
+            .iter()
+            .map(String::as_str)
+            .filter(|entry| {
+                let path = Path::new(entry);
+                path.exists() && !path.is_dir()
+            })
             .collect()
     }
 
     /// What `provider` reads as its instructions. Pi has no flag for extra folders and Codex
     /// refuses `--add-dir` when its TUI connects to the shared app-server (checked live,
-    /// 0.166), so for both the folders are listed in the text.
+    /// 0.166), so for both the folders are listed in the text; the files are listed for every
+    /// provider.
     pub fn file_text(&self, provider: &str) -> String {
-        let folders = self.present_folders();
-        if !matches!(provider, "pi" | "codex") || folders.is_empty() {
-            return self.text.clone();
-        }
-        let list = folders
-            .iter()
-            .map(|folder| format!("- {folder}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        if self.text.is_empty() {
-            format!("Reference folders you may read:\n{list}")
+        let folders = if matches!(provider, "pi" | "codex") {
+            self.present_folders()
         } else {
-            format!("{}\n\nReference folders you may read:\n{list}", self.text)
+            Vec::new()
+        };
+        let files = self.present_files();
+        let list = |label: &str, entries: &[&str]| {
+            (!entries.is_empty()).then(|| {
+                let lines = entries
+                    .iter()
+                    .map(|entry| format!("- {entry}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                format!("{label}\n{lines}")
+            })
+        };
+        let mut parts: Vec<String> = Vec::new();
+        if !self.text.is_empty() {
+            parts.push(self.text.clone());
         }
+        parts.extend(list("Reference folders you may read:", &folders));
+        parts.extend(list("Reference files you may read:", &files));
+        parts.join("\n\n")
     }
 }
 
@@ -223,10 +262,11 @@ pub struct LaunchArgs {
 pub fn launch_args(provider: &str, pinned: &Pinned, file: &Path) -> LaunchArgs {
     let file = file.to_string_lossy().into_owned();
     let folders = pinned.present_folders();
+    let has_files = !pinned.present_files().is_empty();
     let mut args = LaunchArgs::default();
     match provider {
         "claude" => {
-            if !pinned.text.is_empty() {
+            if !pinned.text.is_empty() || has_files {
                 args.cli
                     .extend(["--append-system-prompt-file".into(), file]);
             }
@@ -235,14 +275,14 @@ pub fn launch_args(provider: &str, pinned: &Pinned, file: &Path) -> LaunchArgs {
                 .extend(folders.iter().map(|folder| format!("--add-dir={folder}")));
         }
         "omp" => {
-            if !pinned.text.is_empty() {
+            if !pinned.text.is_empty() || has_files {
                 args.cli.push(format!("--append-system-prompt={file}"));
             }
             args.cli
                 .extend(folders.iter().map(|folder| format!("--add-dir={folder}")));
         }
         "pi" => {
-            if !pinned.text.is_empty() || !folders.is_empty() {
+            if !pinned.text.is_empty() || !folders.is_empty() || has_files {
                 args.cli.extend(["--append-system-prompt".into(), file]);
             }
         }
@@ -293,8 +333,63 @@ mod tests {
         assert!(validate("a\0b", &[]).is_err());
         assert!(validate("", &["relative/path".into()]).is_err());
         assert!(validate("", &["/bad\npath".into()]).is_err());
-        let many: Vec<String> = (0..=MAX_FOLDERS).map(|n| format!("/f{n}")).collect();
+        // Files and folders share one cap of MAX_ENTRIES; entries that are not there count as files.
+        let many: Vec<String> = (0..=MAX_ENTRIES).map(|n| format!("/f{n}")).collect();
         assert!(validate("", &many).is_err());
+        assert!(validate("", &many[..MAX_ENTRIES]).is_ok());
+    }
+
+    #[test]
+    fn reference_files_are_listed_for_every_provider_but_only_folders_are_added_as_directories() {
+        let root = std::env::temp_dir().join(format!("perch-instr-{}", uuid::Uuid::new_v4()));
+        let dir = root.join("docs");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = root.join("spec.md");
+        std::fs::write(&file, "x").unwrap();
+        let gone = root.join("gone.md");
+        let pinned = compose(&[(
+            source("project", 1),
+            text(
+                "rule",
+                &[
+                    &dir.to_string_lossy(),
+                    &file.to_string_lossy(),
+                    &gone.to_string_lossy(),
+                ],
+            ),
+        )])
+        .unwrap();
+        let listed = format!("Reference files you may read:\n- {}", file.display());
+        // Claude: the file is in the text, the folder is a directory flag, the vanished file is nowhere.
+        assert!(pinned.file_text("claude").contains(&listed));
+        assert!(!pinned.file_text("claude").contains("Reference folders"));
+        assert!(!pinned.file_text("claude").contains("gone.md"));
+        let args = launch_args("claude", &pinned, Path::new("/tmp/pin"));
+        assert!(args.cli.contains(&format!("--add-dir={}", dir.display())));
+        assert!(!args.cli.iter().any(|arg| arg.contains("spec.md")));
+        // Codex has no directory flag: both are listed.
+        let codex = pinned.file_text("codex");
+        assert!(
+            codex.contains("Reference folders you may read:") && codex.contains(&listed),
+            "{codex}"
+        );
+        // Only files, no text: Claude still gets the prompt file.
+        let only_files =
+            compose(&[(source("project", 1), text("", &[&file.to_string_lossy()]))]).unwrap();
+        assert!(launch_args("claude", &only_files, Path::new("/tmp/pin"))
+            .cli
+            .contains(&"--append-system-prompt-file".to_string()));
+        // More than MAX_FOLDERS real directories is refused; the same number of files is not.
+        let dirs: Vec<String> = (0..=MAX_FOLDERS)
+            .map(|n| {
+                let d = root.join(format!("d{n}"));
+                std::fs::create_dir_all(&d).unwrap();
+                d.to_string_lossy().into_owned()
+            })
+            .collect();
+        assert!(validate("", &dirs).is_err());
+        assert!(validate("", &dirs[..MAX_FOLDERS]).is_ok());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

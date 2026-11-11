@@ -222,7 +222,10 @@ Context Bridge's bounded copy/explicit delivery rules live in
 [CONTEXT-BRIDGE](CONTEXT-BRIDGE.md); direct send is currently Claude-only.
 
 Instructions (`instructions.rs`, `db/instructions.rs`) are private text and reference
-folders on a Project or Nest, capped at 16,000 characters combined. A session pins
+files and folders on a Project or Nest (the stored list is still `folders`; an entry may be a file),
+capped at 16,000 characters combined, 100 entries, at most 16 of them directories. A folder is added to
+a provider as a directory where it can be (`--add-dir`) and listed in the text otherwise; a file is
+listed in the text for every provider and grants nothing beyond the agent's own permission. A session pins
 its composed snapshot (with source revisions and a hash) at first launch; wake and
 resume reuse the pin, never the current text. Launch paths reach providers only
 through append flags (`agent_runtime::with_instructions`, the shell shim, the Codex

@@ -561,7 +561,9 @@ across providers ([DECISIONS](DECISIONS.md) 2026-11-07, compared in the
    lead wrote and read a file (`e2e/memory-live.spec.ts`); other providers and a second session reading are not run. **Cleanup built 2026-11-10:** removing a Project removes its memory folder
    (`memory::remove_project`, from `project.remove`; the startup purge of legacy archived Projects does not).
 2. **Library.** Pickable files and folders for a project (Claude: 100 files per pick, 10
-   folders). Today only up to 16 reference-folder paths in Instructions.
+   folders). **Built 2026-11-11 (as a list, not a picker):** Instructions' reference list takes files and
+   folders, up to 100 entries (16 directories); files are listed in the text for every provider, folders also
+   granted with `--add-dir` where the provider can. **Not built:** a file picker and showing the list on Project home.
 3. **Project home.** (Layout decided 2026-11-10: a main-view tab per Project. **Built 2026-11-11:** the tab (`stock:project-home`, sidebar Project menu "Project home", command
    `project.home`) with the grouped Overview, Instructions and Memory buttons. **Not built:** the library, a search box, a per-thread PR
    refresh button.) One place for Instructions, memory, library and threads, and an

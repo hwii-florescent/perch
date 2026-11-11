@@ -71,10 +71,10 @@ export default function Instructions({ scope, id, name, onClose, load, save: sto
         />
       </label>
       <label className="grid gap-[0.16rem] text-[0.7rem] text-subtext-0">
-        <span>Reference folders <em className="text-overlay-1 not-italic">one absolute path per line</em></span>
+        <span>Reference files and folders <em className="text-overlay-1 not-italic">one absolute path per line</em></span>
         <textarea
           className={`${FIELD} font-mono`}
-          rows={3}
+          rows={4}
           value={folders}
           disabled={loaded !== "ready"}
           onChange={(event) => setFolders(event.target.value)}
