@@ -148,6 +148,21 @@ async function expectWholeDiffScrollable(diff: Locator): Promise<void> {
   expect(metrics.overflowX, "the diff is not the horizontal scroll surface").toBe("auto");
   expect(metrics.scrollWidth, "long diff lines do not overflow the file viewport").toBeGreaterThan(metrics.clientWidth);
   expect(metrics.codeOverflowX.every((value) => value === "visible"), "individual lines scroll horizontally").toBe(true);
+  // Scrolling right must end at the longest line: the scrollable width may not grow as the view is scrolled.
+  const widths = await diff.evaluate(async (element) => {
+    const seen: number[] = [];
+    for (let step = 0; step < 6; step += 1) {
+      element.scrollLeft = element.scrollWidth;
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+      seen.push(element.scrollWidth);
+    }
+    element.scrollLeft = 0;
+    return seen;
+  });
+  expect(new Set(widths).size, `the diff keeps growing while scrolled right: ${widths.join(", ")}`).toBe(1);
+  // Every file's block is as wide as the widest line of any file, so no file's rows end short of the scroll end.
+  const articleWidths = await diff.locator(":scope > div > article").evaluateAll((articles) => articles.map((article) => Math.round(article.getBoundingClientRect().width)));
+  expect(new Set(articleWidths).size, `file blocks differ in width: ${articleWidths.join(", ")}`).toBe(1);
 }
 
 test("populated surfaces stay usable at narrow panes, wide desktop and phone width", async ({ page, context }, testInfo) => {

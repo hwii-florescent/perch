@@ -819,10 +819,12 @@ export function WorkspaceGitReview({
             {diffState === "loading" || diffFiles.length === 0 ? <EmptyDiffState state={diffState} error={diffError} /> : (
               <>
                 {diff?.truncated && <div className={BANNER_WARNING} role="status">This diff is truncated. Narrow the path or comparison before commenting.</div>}
+                {/* One shared width: the widest line of any file. Per-file widths let scrolling run on past a short file's rows. */}
+                <div className="min-w-max">
                 {displayedFiles.map((file) => {
                   const displayPath = filePath(file);
                   return (
-                    <article className="min-w-max" key={displayPath}>
+                    <article key={displayPath}>
                       <header className="sticky top-0 left-0 z-[2] flex w-[100cqi] items-center justify-between gap-3 bg-[color-mix(in_srgb,var(--surface-1)_70%,var(--panel-bg))] px-[0.7rem] py-[0.3rem]">
                         <span className="min-w-0 flex-1 [font-family:var(--font-mono)] text-[0.75rem]" title={displayPath}><PathLabel path={displayPath} /></span>
                         <span className="shrink-0 text-[0.68rem] text-subtext-0 capitalize">{file.status}{file.isBinary ? " · binary" : ""}</span>
@@ -864,6 +866,7 @@ export function WorkspaceGitReview({
                     </article>
                   );
                 })}
+                </div>
                 {selection && (
                   <div className="workspace-git__comment-composer m-[0.7rem] min-w-0 rounded-ui bg-surface-0 p-[0.65rem]" data-testid="git-comment-composer">
                     <div className="mb-[0.4rem] flex justify-between gap-2"><strong>Comment on {selection.path}</strong><span className="text-[0.68rem] text-subtext-0">{selection.side} lines {selection.start}–{selection.end}</span></div>
