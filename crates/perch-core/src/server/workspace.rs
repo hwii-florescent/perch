@@ -1119,6 +1119,11 @@ pub(super) fn handle_project_remove(
     let _foundation_guard = state.app.foundation_lock.lock().unwrap();
     match removed.and_then(|()| state.app.db.delete_project(&project.id)) {
         Ok(()) => {
+            // The Project is gone, so are the notes kept for it. A failure leaves an orphan folder
+            // nothing refers to; it does not undo the removal.
+            if let Err(error) = crate::memory::remove_project(&state.app.memory_root, &project.id) {
+                tracing::warn!(project = %project.id, "could not remove the Project's memory: {error}");
+            }
             let revision = next_snapshot_revision_locked(&state.app);
             broadcast_foundation(
                 &state.app,

@@ -451,6 +451,21 @@ pub fn delete(root: &Path, project_id: &str, name: &str, base: &str) -> Result<(
     Ok(())
 }
 
+/// Remove a whole Project's memory folder (the Project was removed). Holds the same lock as every
+/// write, removes only that one folder, and treats "no folder" as done. A symlink at the folder's
+/// place is unlinked, never followed.
+pub fn remove_project(root: &Path, project_id: &str) -> Result<(), Error> {
+    let dir = folder(root, project_id)?;
+    let _guard = lock();
+    match std::fs::symlink_metadata(&dir) {
+        Ok(meta) if meta.is_dir() => std::fs::remove_dir_all(&dir)?,
+        Ok(_) => std::fs::remove_file(&dir)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -477,6 +492,19 @@ mod tests {
 
     fn put(root: &Root, name: &str, text: &str, base: Option<&str>) -> Result<Entry, Error> {
         write(&root.0, "proj-1", name, text, base, &Author::person())
+    }
+
+    #[test]
+    fn removing_a_project_removes_only_its_own_memory_and_a_missing_folder_is_fine() {
+        let root = Root::new();
+        put(&root, "a.md", "one", None).unwrap();
+        write(&root.0, "proj-2", "b.md", "two", None, &Author::person()).unwrap();
+        remove_project(&root.0, "proj-1").unwrap();
+        assert!(!root.dir().exists());
+        assert_eq!(list(&root.0, "proj-2").unwrap().len(), 1);
+        remove_project(&root.0, "proj-1").unwrap();
+        assert!(remove_project(&root.0, "../proj-2").is_err());
+        assert_eq!(list(&root.0, "proj-2").unwrap().len(), 1);
     }
 
     #[test]

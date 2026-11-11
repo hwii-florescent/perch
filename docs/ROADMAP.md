@@ -557,8 +557,9 @@ across providers ([DECISIONS](DECISIONS.md) 2026-11-07, compared in the
    a peer, not instructions. **Slice 1 built (2026-11-08):** `memory.rs`, `memory.*` messages
    (`memory.v1`), `perch memory list|read|write|delete`, tests; storage, scope, caps and
    conflict rules settled in [DECISIONS](DECISIONS.md) 2026-11-08. **Memory dialog built** (Project menu: list, edit, create, delete). **Not built:** the Project home page,
-   opt-out per session, showing the repo's own `CLAUDE.md` memory beside it, cleanup when a Project is
-   removed, and any live run (no agent has used `perch memory` yet).
+   opt-out per session, showing the repo's own `CLAUDE.md` memory beside it, and any live run (no agent
+   has used `perch memory` yet). **Cleanup built 2026-11-10:** removing a Project removes its memory folder
+   (`memory::remove_project`, from `project.remove`; the startup purge of legacy archived Projects does not).
 2. **Library.** Pickable files and folders for a project (Claude: 100 files per pick, 10
    folders). Today only up to 16 reference-folder paths in Instructions.
 3. **Project home.** (Layout decided 2026-11-10: a main-view tab per Project. **Built:** the grouped Overview data,
