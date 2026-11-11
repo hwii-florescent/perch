@@ -296,8 +296,12 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     await expect(page.getByTestId("git-diff")).toContainText("modified sentinel", { timeout: 20000 });
     // The drawer's width is the app root's `--tools-width` (its card reads it): set it there, not on the drawer inside.
     await page.locator('[style*="--tools-width"]').first().evaluate((element: HTMLElement) => element.style.setProperty("--tools-width", "760px"));
-    await expect(review.locator('nav[aria-label="Changed files"]')).toBeVisible();
-    await expect(page.getByTestId("git-diff-file-select")).toBeHidden();
+    // Wide: the changes list is a rail beside the diff (never folded), and the diff gets most of the pane.
+    await expect(page.getByTestId("git-status").getByRole("list", { name: "Changed paths" })).toBeVisible();
+    await expect(page.getByTestId("git-diff-file-select")).toBeVisible();
+    const wideDiff = await page.getByTestId("git-diff").boundingBox();
+    const wideReview = await review.boundingBox();
+    expect((wideDiff?.width ?? 0) / (wideReview?.width ?? 1)).toBeGreaterThan(0.6);
     await page.screenshot({ path: path.join(shots, "git-wide-pane.png"), fullPage: false });
     expect(await clippedControls(review), "Git review controls clipped at a wide viewport").toEqual([]);
     await expectFocusVisible(review, '[data-testid="git-refresh"]');

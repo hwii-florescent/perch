@@ -34,7 +34,9 @@ const CONNECTION = "rounded-[999px] bg-surface-1 px-[0.42rem] py-[0.18rem] text-
 const CONNECTION_READY = "text-green";
 const CONNECTION_ERROR = "text-red";
 const CONNECTION_IDLE = "text-subtext-0";
-const DIFF_LINE = `relative grid min-w-max grid-cols-[3.2rem_3.2rem_1.1rem_minmax(0,1fr)_auto] items-baseline text-fg [font-family:var(--font-mono)] text-[0.72rem] leading-[1.45] whitespace-pre [@container(max-width:700px)]:grid-cols-[2.6rem_2.6rem_1rem_minmax(0,1fr)_auto]`;
+// The gutter (two line numbers and the +/- marker) is the only fixed width; the line's "+" floats over it on hover, so
+// the code gets everything else. `ml-*` of a comment thread below must equal this gutter's width.
+const DIFF_LINE = `group/line relative grid min-w-max grid-cols-[2.5rem_2.5rem_0.9rem_minmax(0,1fr)] items-baseline text-fg [font-family:var(--font-mono)] text-[0.75rem] leading-[1.5] whitespace-pre [@container(max-width:700px)]:grid-cols-[2.1rem_2.1rem_0.8rem_minmax(0,1fr)]`;
 // A selected addition/deletion keeps its green/red tint (the legacy rule order); hover tints accent.
 const DIFF_LINE_KIND: Record<string, string> = {
   addition: "bg-[color-mix(in_srgb,var(--green)_9%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_15%,transparent)]",
@@ -47,10 +49,10 @@ const BRANCH_DETAIL = "block overflow-hidden text-[0.7rem] text-ellipsis whitesp
 const PATH_BUTTON = "workspace-git__path-button flex min-w-0 flex-1 items-center justify-between gap-[0.4rem] rounded-ui px-3 py-[3px] text-left text-fg [background:none] hover:bg-surface-1";
 const PATH_BUTTON_IDLE = "";
 const PATH_BUTTON_ACTIVE = "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]";
-const TB_FIELD = "flex min-w-0 max-w-full flex-col items-start gap-[0.35rem] text-[0.68rem] text-subtext-0";
+const TB_FIELD = "flex min-w-0 max-w-full items-center gap-[0.35rem] text-[0.68rem] text-subtext-0";
 const TB_INPUT = "min-w-0 max-w-full rounded-ui bg-surface-1 px-[0.4rem] py-[0.3rem] text-fg";
 const TB_CHECK = "inline-flex items-center gap-[0.3rem] text-[0.68rem] whitespace-nowrap text-subtext-0";
-const TB_GROUP = "flex max-w-full min-w-0 flex-wrap items-center gap-[0.45rem] [@container(max-width:700px)]:items-stretch [@container(max-width:700px)]:justify-start";
+const TB_GROUP = "flex max-w-full min-w-0 flex-wrap items-center gap-[0.45rem]";
 const DIFF_FILE = "flex min-w-0 flex-col items-start gap-[0.1rem] rounded-ui px-[0.45rem] py-[0.42rem] text-left text-fg [background:none] hover:bg-surface-1";
 const COMMENT = "workspace-git__comment mt-[0.3rem] rounded-ui bg-surface-0 px-[0.55rem] py-[0.45rem] whitespace-normal [font-family:inherit]";
 const COMMENT_TONE: Record<string, string> = { resolved: "opacity-[0.72]", unresolved: "", stale: "", orphaned: "" };
@@ -80,7 +82,7 @@ const BANNER_INFO = `${BOXED_NOTE} text-accent`;
 const BANNER_WARNING = `${BOXED_NOTE} text-yellow`;
 const TURN_SUMMARY = "m-0 px-[0.7rem] py-[0.4rem] text-[0.72rem] text-[color:var(--git-muted)]";
 const STATUS_NOTE = "px-[0.7rem] py-[0.55rem] text-[0.7rem] text-subtext-0";
-const LINE_COMMENT_BUTTON = "min-h-[1.8rem] min-w-[1.8rem] self-center rounded-[999px] bg-transparent text-accent opacity-70 hover:bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] hover:opacity-100";
+const LINE_COMMENT_BUTTON = "absolute top-[0.1rem] left-[0.1rem] grid size-[1.2rem] place-items-center rounded-[999px] bg-panel-bg text-[0.8rem] leading-none text-accent opacity-0 group-hover/line:opacity-90 hover:opacity-100! focus-visible:opacity-100 [@media(hover:none)]:opacity-60";
 
 export interface WorkspaceGitReviewProps {
   workspaceId: string;
@@ -133,6 +135,22 @@ function filePath(file: GitDiffFile): string {
 function filePathForSide(file: GitDiffFile, side: ReviewSide): string {
   if (side === "old") return file.oldPath ?? file.newPath ?? "(unknown file)";
   return file.newPath ?? file.oldPath ?? "(unknown file)";
+}
+
+function splitPath(path: string): [string, string] {
+  const cut = path.lastIndexOf("/") + 1;
+  return [path.slice(0, cut), path.slice(cut)];
+}
+
+/** A path with its directory dimmed and its name plain; the directory gives way first when the row is narrow. */
+function PathLabel({ path, className }: { path: string; className?: string }) {
+  const [dir, name] = splitPath(path);
+  return (
+    <span className={cn("flex min-w-0 overflow-hidden whitespace-nowrap", className)}>
+      {dir && <span className="min-w-0 overflow-hidden text-ellipsis text-subtext-0">{dir}</span>}
+      <span className="min-w-0 shrink-[0.001] overflow-hidden text-ellipsis">{name}</span>
+    </span>
+  );
 }
 
 function shortHash(value: string | undefined): string {
@@ -293,6 +311,8 @@ export function WorkspaceGitReview({
   const [editingCommentId, setEditingCommentId] = useResourceState<string | null>(`review:${workspaceId}:editingCommentId`, null);
   const [editingBody, setEditingBody] = useResourceState(`review:${workspaceId}:editingBody`, "");
   const [commitMessage, setCommitMessage] = useResourceState(`review:${workspaceId}:commitMessage`, "");
+  const [changesOpen, setChangesOpen] = useResourceState(`review:${workspaceId}:changesOpen`, true);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [localActionError, setLocalActionError] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useResourceState<string | undefined>(`review:${workspaceId}:selectedSessionId`, sessions[0]?.id);
@@ -630,35 +650,41 @@ export function WorkspaceGitReview({
     const lineComments = comments.filter((comment) => isCommentOnLine(comment, path, side, line, diff));
     if (lineComments.length === 0) return null;
     return (
-      <div className="workspace-git__line-comment-thread col-[1/-1] mt-[0.2rem] mr-[0.7rem] mb-[0.35rem] ml-[7.5rem] [@container(max-width:700px)]:ml-[5.8rem]" data-testid="git-line-comments">
+      <div className="workspace-git__line-comment-thread col-[1/-1] mt-[0.2rem] mr-[0.7rem] mb-[0.35rem] ml-[6.1rem] [@container(max-width:700px)]:ml-[5.2rem]" data-testid="git-line-comments">
         {lineComments.map((comment) => renderCommentCard(comment, true))}
       </div>
     );
   }
 
+  const optionsChanged = !includeUntracked || ignoreWhitespace || contextLines !== 3;
   return (
     <section className="workspace-git" data-testid="workspace-git-review" aria-label="Git and review">
-      <header className="flex shrink-0 items-center justify-between gap-4 px-[0.85rem] py-[0.65rem] [@container(max-width:700px)]:items-start [@container(max-width:700px)]:p-[0.55rem]">
-        <div className="flex min-w-0 flex-col items-start gap-[0.08rem]">
-          <span className={EYEBROW}>Source control</span>
-          <h2 className="m-0 max-w-full overflow-hidden text-[1rem] font-[650] text-ellipsis whitespace-nowrap">{workspaceName || "Workspace changes"}</h2>
-          <span className="text-[0.7rem] text-subtext-0" title={workspaceId}>Workspace {workspaceId.slice(0, 8)}</span>
+      <header className="flex shrink-0 items-center gap-2 px-[0.7rem] py-[0.4rem]" title={`${workspaceName || "Workspace"} · ${workspaceId}`}>
+        <div className="flex min-w-0 flex-1 items-center gap-2" title={status?.upstream ? `tracks ${status.upstream}` : status ? "No upstream configured" : undefined}>
+          <strong className="min-w-0 overflow-hidden text-[0.8rem] text-ellipsis whitespace-nowrap">{status ? status.branch || "Detached HEAD" : workspaceName || "Changes"}</strong>
+          {status && <span className="shrink-0 text-yellow [font-family:var(--font-mono)] text-[0.66rem]">{shortHash(status.head)}</span>}
+          {(status?.ahead ?? 0) > 0 && <span className="shrink-0 text-[0.68rem] text-green" title={`${status?.ahead} ahead`}>↑{status?.ahead}</span>}
+          {(status?.behind ?? 0) > 0 && <span className="shrink-0 text-[0.68rem] text-yellow" title={`${status?.behind} behind`}>↓{status?.behind}</span>}
         </div>
-        <div className="flex shrink-0 items-center gap-[0.55rem] [@container(max-width:700px)]:flex-col [@container(max-width:700px)]:items-end [@container(max-width:700px)]:gap-[0.3rem]">
-          <button type="button" className={BTN_DEFAULT} data-testid="git-refresh" onClick={() => { actions.refreshStatus(); actions.listComments(); }}>Refresh</button>
-          <span className={cn(CONNECTION, statusState === "ready" ? CONNECTION_READY : statusState === "error" ? CONNECTION_ERROR : CONNECTION_IDLE)} role="status">
-            {statusState === "loading" ? "Updating…" : statusState === "error" ? "Status unavailable" : status?.dirty ? "Dirty" : "Clean"}
-          </span>
-        </div>
+        <span className={cn(CONNECTION, statusState === "ready" ? CONNECTION_READY : statusState === "error" ? CONNECTION_ERROR : CONNECTION_IDLE)} role="status">
+          {statusState === "loading" ? "Updating…" : statusState === "error" ? "Status unavailable" : status?.dirty ? "Dirty" : "Clean"}
+        </span>
+        <button type="button" className={BTN_DEFAULT} data-testid="git-refresh" onClick={() => { actions.refreshStatus(); actions.listComments(); }}>Refresh</button>
       </header>
 
-      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden [@container(max-width:700px)]:flex-col [@container(max-width:700px)]:overflow-auto">
-        <aside className="flex min-h-0 w-[17rem] min-w-[14rem] flex-col overflow-y-auto [@container(max-width:700px)]:w-full [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:flex-[0_0_auto] [@container(max-width:700px)]:max-h-[12rem]" data-testid="git-status">
-          <div className="flex items-center justify-between gap-[0.6rem] pt-[0.65rem] pr-[0.7rem] pb-[0.45rem] pl-[0.7rem]">
-            <div className="flex min-w-0 flex-col gap-[0.1rem]">
-              <span className={EYEBROW}>Workspace status</span>
+      <div className={`flex min-h-0 min-w-0 flex-1 overflow-hidden [@container(max-width:700px)]:flex-col [@container(max-width:700px)]:overflow-auto`}>
+        {/* Wide: a rail beside the diff. Narrow: a list above it that folds away, so the code keeps the height. */}
+        <aside className={`flex min-h-0 w-[15rem] min-w-[12rem] shrink-0 flex-col [border-right:1px_solid_var(--git-border)] [@container(max-width:700px)]:w-full [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:flex-[0_0_auto] [@container(max-width:700px)]:border-r-0 [@container(max-width:700px)]:[border-bottom:1px_solid_var(--git-border)]`} data-testid="git-status">
+          <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.35rem]">
+            <button
+              type="button"
+              className="flex min-w-0 items-center gap-[0.35rem] text-left text-fg [background:none] [@container(min-width:701px)]:pointer-events-none"
+              aria-expanded={changesOpen}
+              onClick={() => setChangesOpen(!changesOpen)}
+            >
+              <span className="text-[0.6rem] text-subtext-0 [@container(min-width:701px)]:hidden" aria-hidden="true">{changesOpen ? "▾" : "▸"}</span>
               <strong>{changedFiles.length ? `${changedFiles.length} changed path${changedFiles.length === 1 ? "" : "s"}` : "No changes"}</strong>
-            </div>
+            </button>
             <label className="inline-flex items-center gap-[0.3rem] text-[0.68rem] whitespace-nowrap text-subtext-0">
               <input
                 type="checkbox"
@@ -670,102 +696,101 @@ export function WorkspaceGitReview({
             </label>
           </div>
 
-          {statusState === "loading" && <div className={STATUS_NOTE} role="status">Reading Git status…</div>}
-          {statusState === "error" && <div className={cn(STATUS_NOTE, "text-red")} role="alert">{statusError || "Git status is unavailable."}</div>}
-          {status && (
-            <div className="mx-[0.7rem] mb-[0.55rem] rounded-ui bg-[color-mix(in_srgb,var(--surface-1)_75%,transparent)] px-[0.55rem] py-2">
-              <div className="flex items-center justify-between gap-2"><strong className="overflow-hidden text-ellipsis whitespace-nowrap">{status.branch || "Detached HEAD"}</strong><span className="text-yellow [font-family:var(--font-mono)] text-[0.66rem]">{shortHash(status.head)}</span></div>
-              <div className={BRANCH_DETAIL}>{status.upstream ? `tracks ${status.upstream}` : "No upstream configured"}</div>
-              {(status.ahead ?? 0) > 0 || (status.behind ?? 0) > 0 ? (
-                <div className="mt-[0.35rem] flex items-center gap-[0.65rem] text-[0.68rem]">
-                  {(status.ahead ?? 0) > 0 && <span className="text-green">↑ {status.ahead} ahead</span>}
-                  {(status.behind ?? 0) > 0 && <span className="text-yellow">↓ {status.behind} behind</span>}
+          <div className={`flex min-h-0 flex-1 flex-col [@container(max-width:700px)]:data-[open=false]:hidden`} data-open={changesOpen}>
+            {statusState === "loading" && <div className={STATUS_NOTE} role="status">Reading Git status…</div>}
+            {statusState === "error" && <div className={cn(STATUS_NOTE, "text-red")} role="alert">{statusError || "Git status is unavailable."}</div>}
+
+            <div className={`flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem] [@container(max-width:700px)]:max-h-[8.5rem] [@container(max-width:700px)]:flex-none`} role="list" aria-label="Changed paths">
+              {changedFiles.map((entry) => (
+                <div className="flex min-w-0 items-center gap-[0.3rem]" key={entry.path} role="listitem">
+                  <input
+                    className="shrink-0"
+                    type="checkbox"
+                    checked={selectedPaths.has(entry.path)}
+                    onChange={() => selectPath(entry.path)}
+                    aria-label={`Select ${entry.path}`}
+                  />
+                  <button
+                    type="button"
+                    className={`${PATH_BUTTON} ${activeFile === entry.path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`}
+                    onClick={() => { setActiveFile(activeFile === entry.path ? undefined : entry.path); setSelection(null); }}
+                    title={entry.originalPath ? `${entry.originalPath} → ${entry.path}` : entry.path}
+                  >
+                    <FileIcon name={entry.path.split("/").at(-1) ?? entry.path} />
+                    <PathLabel path={entry.path} className="flex-1" />
+                    <GitMarker decoration={{ entry }} />
+                  </button>
                 </div>
-              ) : <span className={BRANCH_DETAIL}>Up to date</span>}
+              ))}
+              {statusState !== "loading" && changedFiles.length === 0 && <div className={STATUS_NOTE}>Working tree is clean.</div>}
             </div>
-          )}
 
-          <div className="flex flex-col gap-[2px] px-[3px] pt-0 pb-[0.55rem]" role="list" aria-label="Changed paths">
-            {changedFiles.map((entry) => (
-              <div className="flex min-w-0 items-center gap-[0.3rem]" key={entry.path} role="listitem">
-                <input
-                  className="shrink-0"
-                  type="checkbox"
-                  checked={selectedPaths.has(entry.path)}
-                  onChange={() => selectPath(entry.path)}
-                  aria-label={`Select ${entry.path}`}
-                />
-                <button
-                  type="button"
-                  className={`${PATH_BUTTON} ${activeFile === entry.path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`}
-                  onClick={() => { setActiveFile(entry.path); setSelection(null); }}
-                  title={entry.originalPath ? `${entry.originalPath} → ${entry.path}` : entry.path}
-                >
-                  <FileIcon name={entry.path.split("/").at(-1) ?? entry.path} />
-                  <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{entry.path}</span>
-                  <GitMarker decoration={{ entry }} />
-                </button>
+            <div className="flex flex-col gap-[0.35rem] p-[0.5rem] [border-top:1px_solid_var(--git-border)]">
+              <div className="flex flex-wrap items-center gap-[0.3rem]">
+                <button type="button" className={`${BTN_DEFAULT} min-w-fit flex-1`} disabled={selectedCount === 0} onClick={() => actions.stage([...selectedPaths])}>Stage selected</button>
+                <button type="button" className={`${BTN_DEFAULT} min-w-fit flex-1`} disabled={selectedCount === 0} onClick={() => actions.unstage([...selectedPaths])}>Unstage</button>
+                <button type="button" className={`${BTN_DANGER} min-w-fit flex-1`} data-testid="git-discard-preview" disabled={selectedCount === 0} onClick={() => requestDiscard("worktree")}>Discard selected</button>
               </div>
-            ))}
-            {statusState !== "loading" && changedFiles.length === 0 && <div className={STATUS_NOTE}>Working tree is clean.</div>}
-          </div>
-
-          <div className="mt-auto flex flex-col gap-[0.42rem] p-[0.65rem] [@container(max-width:700px)]:mt-0">
-            <div className="flex items-center gap-[0.3rem]">
-              <button type="button" className={`${BTN_DEFAULT} flex-1`} disabled={selectedCount === 0} onClick={() => actions.stage([...selectedPaths])}>Stage selected</button>
-              <button type="button" className={`${BTN_DEFAULT} flex-1`} disabled={selectedCount === 0} onClick={() => actions.unstage([...selectedPaths])}>Unstage</button>
+              <div className={`flex flex-col gap-[0.3rem] [@container(max-width:700px)]:flex-row`}>
+                <input className={`${TB_INPUT} min-w-0 flex-1`} aria-label="Commit staged changes" value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} placeholder="Describe the change" />
+                <button type="button" className={BTN_PRIMARY} disabled={stagedCount === 0 || !commitMessage.trim()} onClick={requestCommitPreview}>Preview commit</button>
+              </div>
             </div>
-            <div className="flex items-center gap-[0.3rem]">
-              <button type="button" className={`${BTN_DANGER} flex-1`} data-testid="git-discard-preview" disabled={selectedCount === 0} onClick={() => requestDiscard("worktree")}>Discard selected</button>
-            </div>
-            <label className="flex min-w-0 flex-col items-stretch gap-[0.35rem] text-[0.68rem] text-subtext-0">
-              <span>Commit staged changes</span>
-              <input className={TB_INPUT} value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} placeholder="Describe the change" />
-            </label>
-            <button type="button" className={BTN_PRIMARY} disabled={stagedCount === 0 || !commitMessage.trim()} onClick={requestCommitPreview}>Preview commit</button>
           </div>
         </aside>
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden [@container(max-width:700px)]:min-h-[27rem] [@container(max-width:700px)]:flex-auto">
-          <div className="flex flex-wrap items-end justify-between gap-[0.65rem] px-[0.7rem] py-[0.55rem] [@container(max-width:700px)]:flex-col [@container(max-width:700px)]:items-stretch [@container(max-width:700px)]:justify-start [@container(max-width:700px)]:gap-[0.35rem]">
-            <div className={`${TB_GROUP} [@container(max-width:700px)]:grid [@container(max-width:700px)]:w-full [@container(max-width:700px)]:grid-cols-2`}>
-              <label className={TB_FIELD}>
-                <span>Compare</span>
-                <Select className={`${TB_INPUT} [@container(max-width:700px)]:w-full`} testId="git-diff-target" ariaLabel="Compare" value={compareOpen ? "compare" : target.kind === "compare" ? (preset ?? "compare") : target.kind} onChange={chooseTarget}
-                  options={[
-                    { value: "workingTree", label: "Working tree" },
-                    { value: "staged", label: "Staged" },
-                    { value: "head", label: "HEAD" },
-                    { value: "workspaceStart", label: startSnapshot ? "Workspace start" : "Workspace start (not recorded)", disabled: !startSnapshot },
-                    { value: "lastAgentTurn", label: turnLabel, disabled: !turnBase },
-                    { value: "compare", label: "Another ref…" },
-                  ]} />
-              </label>
-              <label className={TB_FIELD}>
-                <span>Turn session</span>
-                <Select className={`${TB_INPUT} [@container(max-width:700px)]:w-full`} testId="git-turn-session" ariaLabel="Turn session" value={agentSessionId ?? ""} onChange={(value) => {
-                  chooseTarget("workingTree");
-                  actions.selectAgentSession(value || undefined);
-                }}
-                  options={[{ value: "", label: "Latest in workspace" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title} · ${session.agent ?? "agent"}` }))]} />
-              </label>
-              {compareOpen && (
-                <>
-                  <label className={TB_FIELD}><span>Base ref</span>
-                    <Select freeText className={TB_INPUT} testId="git-base-selector" ariaLabel="Base ref" value={compareBase} onChange={setCompareBase} placeholder="main"
-                      options={[...new Map(refs.map((ref) => [ref.name, { value: ref.name, label: <>{ref.name} <span className="text-subtext-0">{ref.target.slice(0, 8)}</span></>, text: ref.name }])).values()]} />
-                  </label>
-                  <label className={TB_FIELD}><span>Head <em className="font-normal">optional</em></span><input className={TB_INPUT} value={compareHead} onChange={(event) => setCompareHead(event.target.value)} placeholder="HEAD" /></label>
-                  <button type="button" className={BTN_QUIET} onClick={() => { setCompareBase(""); setCompareHead(""); setCompareOpen(false); setTarget({ kind: "workingTree" }); }}>Clear base</button>
-                </>
-              )}
-            </div>
-            <div className={`${TB_GROUP} justify-end [@container(max-width:700px)]:w-full [@container(max-width:700px)]:flex-row`}>
+        <div className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden [@container(max-width:700px)]:min-h-[18rem] [@container(max-width:700px)]:flex-auto`}>
+          <div className="flex shrink-0 flex-wrap items-center gap-x-[0.7rem] gap-y-[0.3rem] px-[0.7rem] py-[0.4rem]">
+            <label className={TB_FIELD}>
+              <span>Compare</span>
+              <Select className={TB_INPUT} testId="git-diff-target" ariaLabel="Compare" value={compareOpen ? "compare" : target.kind === "compare" ? (preset ?? "compare") : target.kind} onChange={chooseTarget}
+                options={[
+                  { value: "workingTree", label: "Working tree" },
+                  { value: "staged", label: "Staged" },
+                  { value: "head", label: "HEAD" },
+                  { value: "workspaceStart", label: startSnapshot ? "Workspace start" : "Workspace start (not recorded)", disabled: !startSnapshot },
+                  { value: "lastAgentTurn", label: turnLabel, disabled: !turnBase },
+                  { value: "compare", label: "Another ref…" },
+                ]} />
+            </label>
+            <label className={TB_FIELD}>
+              <span>Session</span>
+              <Select className={TB_INPUT} testId="git-turn-session" ariaLabel="Turn session" value={agentSessionId ?? ""} onChange={(value) => {
+                chooseTarget("workingTree");
+                actions.selectAgentSession(value || undefined);
+              }}
+                options={[{ value: "", label: "Latest in workspace" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title} · ${session.agent ?? "agent"}` }))]} />
+            </label>
+            <label className={`${TB_FIELD} min-w-[12rem] flex-1`}>
+              <span>File</span>
+              <Select
+                className={`${TB_INPUT} min-w-0 flex-1`}
+                ariaLabel="Diff file"
+                testId="git-diff-file-select"
+                value={selectedFile ?? ""}
+                onChange={(value) => { setActiveFile(value || undefined); setSelection(null); }}
+                options={[{ value: "", label: `All files · ${diffFiles.length}` }, ...diffFiles.map((file) => { const path = filePath(file); return { value: path, label: `${file.status} · ${path}` }; })]}
+              />
+            </label>
+            {compareOpen && (
+              <>
+                <label className={TB_FIELD}><span>Base</span>
+                  <Select freeText className={TB_INPUT} testId="git-base-selector" ariaLabel="Base ref" value={compareBase} onChange={setCompareBase} placeholder="main"
+                    options={[...new Map(refs.map((ref) => [ref.name, { value: ref.name, label: <>{ref.name} <span className="text-subtext-0">{ref.target.slice(0, 8)}</span></>, text: ref.name }])).values()]} />
+                </label>
+                <label className={TB_FIELD}><span>Head</span><input className={`${TB_INPUT} w-[7rem]`} aria-label="Head (optional)" value={compareHead} onChange={(event) => setCompareHead(event.target.value)} placeholder="HEAD" /></label>
+                <button type="button" className={BTN_QUIET} onClick={() => { setCompareBase(""); setCompareHead(""); setCompareOpen(false); setTarget({ kind: "workingTree" }); }}>Clear base</button>
+              </>
+            )}
+            <button type="button" className={`${BTN_QUIET} ml-auto`} aria-expanded={optionsOpen} onClick={() => setOptionsOpen(!optionsOpen)}>Options{optionsChanged ? " •" : ""}</button>
+          </div>
+          {optionsOpen && (
+            <div className="flex shrink-0 flex-wrap items-center gap-x-[0.9rem] gap-y-[0.3rem] px-[0.7rem] pb-[0.4rem]">
               <label className={TB_CHECK}><input type="checkbox" checked={includeUntracked} onChange={(event) => setIncludeUntracked(event.target.checked)} /> Untracked</label>
               <label className={TB_CHECK}><input type="checkbox" checked={ignoreWhitespace} onChange={(event) => setIgnoreWhitespace(event.target.checked)} /> Ignore whitespace</label>
               <label className={TB_FIELD}><span>Context</span><Select className={`${TB_INPUT} w-[6rem]`} ariaLabel="Context" value={String(contextLines)} onChange={(value) => setContextLines(Number(value))} options={[{ value: "0", label: "0 lines" }, { value: "3", label: "3 lines" }, { value: "8", label: "8 lines" }]} /></label>
             </div>
-          </div>
+          )}
 
           {preset === "lastAgentTurn" && lastAgentTurn && (
             /* The gate asks for the *agent's* changes, so say whose turn this
@@ -790,88 +815,68 @@ export function WorkspaceGitReview({
             </p>
           )}
 
-          <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden [@container(max-width:700px)]:min-h-[20rem] [@container(max-width:700px)]:flex-col">
-            <nav className="flex w-auto min-w-[7rem] flex-[0_1_clamp(7rem,28%,13rem)] flex-col gap-[0.15rem] overflow-y-auto p-[0.35rem] [@container(max-width:700px)]:w-[clamp(7rem,28%,10rem)] [@container(max-width:700px)]:flex-[0_1_clamp(7rem,28%,10rem)] [@container(max-width:700px)]:hidden" aria-label="Changed files">
-              <div className="flex items-center justify-between gap-[0.6rem] pt-1 pr-[0.3rem] pb-[0.4rem] pl-[0.3rem]"><span className={EYEBROW}>Diff files</span><strong>{diffFiles.length}</strong></div>
-              {diffFiles.map((file) => {
-                const path = filePath(file);
-                return <button type="button" className={`${DIFF_FILE} ${activeFile === path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`} data-testid="git-diff-file" key={path} onClick={() => { setActiveFile(path); setSelection(null); }}><span className="flex items-center gap-1.5 text-[0.64rem] text-subtext-0 capitalize"><FileIcon name={path.split("/").at(-1) ?? path} />{file.status}</span><strong className="w-full overflow-hidden text-ellipsis whitespace-nowrap">{path}</strong><small className="text-[0.64rem] text-subtext-0">{file.hunks.length} hunk{file.hunks.length === 1 ? "" : "s"}</small></button>;
-              })}
-              {diffState !== "loading" && diffFiles.length === 0 && <div className={STATUS_NOTE}>No files in this diff.</div>}
-            </nav>
-
-            <label className="hidden shrink-0 items-center gap-2 px-[0.65rem] py-[0.4rem] text-[0.68rem] text-subtext-0 [@container(max-width:700px)]:flex">
-              <span className="shrink-0">File</span>
-              <Select
-                className={`${TB_INPUT} min-w-0 flex-1`}
-                ariaLabel="Diff file"
-                testId="git-diff-file-select"
-                value={selectedFile ?? ""}
-                onChange={(value) => { setActiveFile(value || undefined); setSelection(null); }}
-                options={[{ value: "", label: `All files · ${diffFiles.length}` }, ...diffFiles.map((file) => { const path = filePath(file); return { value: path, label: `${file.status} · ${path}` }; })]}
-              />
-            </label>
-
-            <div className={`workspace-git__diff min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain [@container(max-width:700px)]:min-h-[12rem]`} data-testid="git-diff">
-              {diffState === "loading" || diffFiles.length === 0 ? <EmptyDiffState state={diffState} error={diffError} /> : (
-                <>
-                  {diff?.truncated && <div className={BANNER_WARNING} role="status">This diff is truncated. Narrow the path or comparison before commenting.</div>}
-                  {displayedFiles.map((file) => {
-                    const displayPath = filePath(file);
-                    return (
-                      <article className="min-w-max" key={displayPath}>
-                        <header className={`flex justify-between gap-4 bg-[color-mix(in_srgb,var(--surface-1)_70%,var(--panel-bg))] px-[0.7rem] py-2 [@container(max-width:700px)]:min-w-0`}><strong className={`[font-family:var(--font-mono)] text-[0.75rem] [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`} title={displayPath}>{displayPath}</strong><span className={`text-[0.68rem] text-subtext-0 [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`}>{file.status}{file.isBinary ? " · binary" : ""}</span>{onAskAgent && <button type="button" className={BTN_QUIET} disabled={file.isBinary || diffState !== "ready"} onClick={() => askAboutDiff(file)}>Ask agent about diff…</button>}</header>
-                        {file.isBinary ? <div className={EMPTY}>Binary content is not rendered. Status and path remain available for review.</div> : file.hunks.map((hunk, hunkIndex) => (
-                          <section key={`${displayPath}:${hunkIndex}`}>
-                            <div className={`bg-[color-mix(in_srgb,var(--accent)_8%,var(--panel-bg))] px-[0.7rem] py-1 text-accent [font-family:var(--font-mono)] text-[0.68rem]`}>{hunk.header || `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`}</div>
-                            {hunk.lines.map((line, lineIndex) => {
-                              const side = lineSide(line);
-                              const path = filePathForSide(file, side);
-                              const number = lineNumber(line, side);
-                              const selected = number !== undefined && selection?.path === path && selection.side === side && number >= selection.start && number <= selection.end;
-                              return (
-                                <div
-                                  className={`${DIFF_LINE} ${DIFF_LINE_KIND[line.kind] ?? `${DIFF_LINE_CONTEXT}${selected ? ` ${DIFF_LINE_SELECTED}` : ""}`}`}
-                                  data-testid="git-diff-line"
-                                  data-path={path}
-                                  data-side={side}
-                                  data-old-line={line.oldLine ?? ""}
-                                  data-new-line={line.newLine ?? ""}
-                                  key={`${path}:${hunkIndex}:${lineIndex}`}
-                                  role="button"
-                                  tabIndex={number === undefined ? -1 : 0}
-                                  onClick={(event) => selectLine(path, line, event.shiftKey)}
-                                  onKeyDown={(event) => onLineKeyDown(event, path, line)}
-                                >
-                                  <span className="min-h-[1.45em] pr-[0.45rem] text-right text-overlay-0 select-none" aria-label={`Old line ${line.oldLine ?? "none"}`}>{line.oldLine ?? ""}</span>
-                                  <span className="min-h-[1.45em] pr-[0.45rem] text-right text-overlay-0 select-none" aria-label={`New line ${line.newLine ?? "none"}`}>{line.newLine ?? ""}</span>
-                                  <span className={`text-center select-none ${LINE_MARKER_TONE[line.kind] ?? "text-subtext-0"}`} aria-hidden="true">{statusSymbol(line.kind)}</span>
-                                  <code className="min-w-0 overflow-visible text-inherit [font:inherit]">{line.content || " "}</code>
-                                  {number !== undefined && <button type="button" className={LINE_COMMENT_BUTTON} data-testid="git-comment-add" aria-label={`Comment on ${path} line ${number}`} onClick={(event) => { event.stopPropagation(); selectLine(path, line, false); startComment(); }}>＋</button>}
-                                  {number !== undefined && renderCommentThread(path, side, number)}
-                                </div>
-                              );
-                            })}
-                          </section>
-                        ))}
-                      </article>
-                    );
-                  })}
-                  {selection && (
-                    <div className="workspace-git__comment-composer m-[0.7rem] min-w-0 rounded-ui bg-surface-0 p-[0.65rem]" data-testid="git-comment-composer">
-                      <div className="mb-[0.4rem] flex justify-between gap-2"><strong>Comment on {selection.path}</strong><span className="text-[0.68rem] text-subtext-0">{selection.side} lines {selection.start}–{selection.end}</span></div>
-                      <textarea className={COMMENT_FIELD} data-testid="git-comment-body" value={commentBody} onChange={(event) => setCommentBody(event.target.value)} placeholder="Leave a focused note for the agent…" aria-label="New review comment" />
-                      <div className={`${COMMENT_ACTIONS} mt-[0.4rem]`}>{onAskAgent && <button type="button" className={CA_BTN} onClick={() => { const file = diffFiles.find((candidate) => filePathForSide(candidate, selection.side) === selection.path); if (file) askAboutDiff(file, selection); }}>Ask agent about lines…</button>}<button type="button" className={CA_BTN} disabled={!commentBody.trim()} onClick={submitComment}>Add comment</button><button type="button" className={CA_BTN} onClick={() => { setSelection(null); setAnchor(null); }}>Cancel</button></div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
+          <div className={`workspace-git__diff min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain`} data-testid="git-diff">
+            {diffState === "loading" || diffFiles.length === 0 ? <EmptyDiffState state={diffState} error={diffError} /> : (
+              <>
+                {diff?.truncated && <div className={BANNER_WARNING} role="status">This diff is truncated. Narrow the path or comparison before commenting.</div>}
+                {displayedFiles.map((file) => {
+                  const displayPath = filePath(file);
+                  return (
+                    <article className="min-w-max" key={displayPath}>
+                      <header className="sticky top-0 left-0 z-[2] flex w-[100cqi] items-center justify-between gap-3 bg-[color-mix(in_srgb,var(--surface-1)_70%,var(--panel-bg))] px-[0.7rem] py-[0.3rem]">
+                        <span className="min-w-0 flex-1 [font-family:var(--font-mono)] text-[0.75rem]" title={displayPath}><PathLabel path={displayPath} /></span>
+                        <span className="shrink-0 text-[0.68rem] text-subtext-0 capitalize">{file.status}{file.isBinary ? " · binary" : ""}</span>
+                        {onAskAgent && <button type="button" className={`${BTN_QUIET} shrink-0`} disabled={file.isBinary || diffState !== "ready"} aria-label="Ask agent about diff…" title="Ask agent about this diff" onClick={() => askAboutDiff(file)}>Ask agent</button>}
+                      </header>
+                      {file.isBinary ? <div className={EMPTY}>Binary content is not rendered. Status and path remain available for review.</div> : file.hunks.map((hunk, hunkIndex) => (
+                        <section key={`${displayPath}:${hunkIndex}`}>
+                          <div className="sticky left-0 w-[100cqi] bg-[color-mix(in_srgb,var(--accent)_8%,var(--panel-bg))] px-[0.7rem] py-[2px] text-accent [font-family:var(--font-mono)] text-[0.68rem]">{hunk.header || `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`}</div>
+                          {hunk.lines.map((line, lineIndex) => {
+                            const side = lineSide(line);
+                            const path = filePathForSide(file, side);
+                            const number = lineNumber(line, side);
+                            const selected = number !== undefined && selection?.path === path && selection.side === side && number >= selection.start && number <= selection.end;
+                            return (
+                              <div
+                                className={`${DIFF_LINE} ${DIFF_LINE_KIND[line.kind] ?? `${DIFF_LINE_CONTEXT}${selected ? ` ${DIFF_LINE_SELECTED}` : ""}`}`}
+                                data-testid="git-diff-line"
+                                data-path={path}
+                                data-side={side}
+                                data-old-line={line.oldLine ?? ""}
+                                data-new-line={line.newLine ?? ""}
+                                key={`${path}:${hunkIndex}:${lineIndex}`}
+                                role="button"
+                                tabIndex={number === undefined ? -1 : 0}
+                                onClick={(event) => selectLine(path, line, event.shiftKey)}
+                                onKeyDown={(event) => onLineKeyDown(event, path, line)}
+                              >
+                                <span className="min-h-[1.5em] pr-[0.35rem] text-right text-overlay-0 select-none" aria-label={`Old line ${line.oldLine ?? "none"}`}>{line.oldLine ?? ""}</span>
+                                <span className="min-h-[1.5em] pr-[0.35rem] text-right text-overlay-0 select-none" aria-label={`New line ${line.newLine ?? "none"}`}>{line.newLine ?? ""}</span>
+                                <span className={`text-center select-none ${LINE_MARKER_TONE[line.kind] ?? "text-subtext-0"}`} aria-hidden="true">{statusSymbol(line.kind)}</span>
+                                <code className="min-w-0 overflow-visible text-inherit [font:inherit]">{line.content || " "}</code>
+                                {number !== undefined && <button type="button" className={LINE_COMMENT_BUTTON} data-testid="git-comment-add" aria-label={`Comment on ${path} line ${number}`} onClick={(event) => { event.stopPropagation(); selectLine(path, line, false); startComment(); }}>＋</button>}
+                                {number !== undefined && renderCommentThread(path, side, number)}
+                              </div>
+                            );
+                          })}
+                        </section>
+                      ))}
+                    </article>
+                  );
+                })}
+                {selection && (
+                  <div className="workspace-git__comment-composer m-[0.7rem] min-w-0 rounded-ui bg-surface-0 p-[0.65rem]" data-testid="git-comment-composer">
+                    <div className="mb-[0.4rem] flex justify-between gap-2"><strong>Comment on {selection.path}</strong><span className="text-[0.68rem] text-subtext-0">{selection.side} lines {selection.start}–{selection.end}</span></div>
+                    <textarea className={COMMENT_FIELD} data-testid="git-comment-body" value={commentBody} onChange={(event) => setCommentBody(event.target.value)} placeholder="Leave a focused note for the agent…" aria-label="New review comment" />
+                    <div className={`${COMMENT_ACTIONS} mt-[0.4rem]`}>{onAskAgent && <button type="button" className={CA_BTN} onClick={() => { const file = diffFiles.find((candidate) => filePathForSide(candidate, selection.side) === selection.path); if (file) askAboutDiff(file, selection); }}>Ask agent about lines…</button>}<button type="button" className={CA_BTN} disabled={!commentBody.trim()} onClick={submitComment}>Add comment</button><button type="button" className={CA_BTN} onClick={() => { setSelection(null); setAnchor(null); }}>Cancel</button></div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
-          <section className="shrink-0 max-h-[17rem] overflow-y-auto [@container(max-width:700px)]:max-h-[10rem]" data-testid="git-review-panel">
-            <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.55rem]"><div className="flex min-w-0 flex-col gap-[0.1rem]"><span className={EYEBROW}>Inline review</span><strong>{unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"}</strong></div><button type="button" className={BTN_DEFAULT} disabled={!unresolvedCount || batchBusy} onClick={requestBatchPreview} data-testid="git-review-preview">{batchBusy ? "Preparing…" : "Preview packet"}</button></div>
-            {comments.length > 0 && <div className={`${SUMMARY} px-[0.7rem] pb-[0.45rem]`}>Comments stay attached to their path and core-derived anchor. Stale or orphaned anchors require an explicit correction before sending.</div>}
+          <section className="max-h-[40%] shrink-0 overflow-y-auto [border-top:1px_solid_var(--git-border)]" data-testid="git-review-panel">
+            <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.35rem]"><strong title="Comments stay attached to their path and core-derived anchor. Stale or orphaned anchors require an explicit correction before sending.">{unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"}</strong><button type="button" className={BTN_DEFAULT} disabled={!unresolvedCount || batchBusy} onClick={requestBatchPreview} data-testid="git-review-preview">{batchBusy ? "Preparing…" : "Preview packet"}</button></div>
             {unplacedComments.length > 0 && (
               <div className="mx-[0.7rem] mb-[0.55rem] rounded-ui bg-[color-mix(in_srgb,var(--surface-1)_42%,transparent)] p-2" data-testid="git-review-list">
                 <div className="flex items-center justify-between gap-2"><span className={EYEBROW}>Other review notes</span><strong>{unplacedComments.length}</strong></div>
@@ -880,9 +885,9 @@ export function WorkspaceGitReview({
               </div>
             )}
             {unresolvedCount > 0 && (
-              <div className="flex items-end gap-[0.55rem] px-[0.7rem] pb-[0.55rem] [@container(max-width:700px)]:flex-col [@container(max-width:700px)]:items-stretch">
-                <label className={`${TB_FIELD} flex-1`}><span>Send to agent session</span><Select ariaLabel="Send to agent session" className={TB_INPUT} value={selectedSessionId ?? ""} onChange={(value) => setSelectedSessionId(value || undefined)} options={[{ value: "", label: "Choose a session" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title}${session.agent ? ` · ${session.agent}` : ""}` }))]} /></label>
-                <label className={`${TB_FIELD} flex-[2]`}><span>Request</span><input className={TB_INPUT} value={reviewInstruction} onChange={(event) => setReviewInstruction(event.target.value)} /></label>
+              <div className={`flex items-end gap-[0.55rem] px-[0.7rem] pb-[0.55rem] [@container(max-width:700px)]:flex-col [@container(max-width:700px)]:items-stretch`}>
+                <label className={`${TB_FIELD} flex-1`}><span>Send to agent session</span><Select ariaLabel="Send to agent session" className={`${TB_INPUT} min-w-0 flex-1`} value={selectedSessionId ?? ""} onChange={(value) => setSelectedSessionId(value || undefined)} options={[{ value: "", label: "Choose a session" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title}${session.agent ? ` · ${session.agent}` : ""}` }))]} /></label>
+                <label className={`${TB_FIELD} flex-[2]`}><span>Request</span><input className={`${TB_INPUT} min-w-0 flex-1`} value={reviewInstruction} onChange={(event) => setReviewInstruction(event.target.value)} /></label>
               </div>
             )}
             {batchPreview && (

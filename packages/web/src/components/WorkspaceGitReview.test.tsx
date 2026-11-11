@@ -244,6 +244,24 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
     expect(line?.querySelector("code")?.className).not.toContain("overflow-x-auto");
   });
 
+  it("folds the changes list away and clicking the open file again shows every file", async () => {
+    const actionSet = actions();
+    await render(props(actionSet));
+
+    const list = document.querySelector('[data-testid="git-status"] [data-open]');
+    const fold = document.querySelector<HTMLButtonElement>('[data-testid="git-status"] button[aria-expanded]');
+    expect(list?.getAttribute("data-open")).toBe("true");
+    await act(async () => fold?.click());
+    expect(list?.getAttribute("data-open")).toBe("false");
+    expect(fold?.getAttribute("aria-expanded")).toBe("false");
+
+    const file = document.querySelector<HTMLButtonElement>('[data-testid="git-status"] [role="listitem"] button:not([aria-expanded])');
+    await act(async () => file?.click());
+    expect(actionSet.loadDiff).toHaveBeenLastCalledWith(expect.anything(), "src/main.ts", expect.anything());
+    await act(async () => file?.click());
+    expect(actionSet.loadDiff).toHaveBeenLastCalledWith(expect.anything(), undefined, expect.anything());
+  });
+
   it("focuses the destructive confirmation and closes it with Escape", async () => {
     const actionSet = actions();
     await render(props(actionSet));

@@ -47,7 +47,7 @@
 .workspace-git__line-comment-thread {
   position: sticky;
   left: 0;
-  max-width: max(0px, min(42rem, calc(100cqi - 8.2rem)));
+  max-width: max(0px, min(42rem, calc(100cqi - 6.9rem)));
 }
 
 .workspace-git__comment-composer {
@@ -58,6 +58,6 @@
 
 @container (max-width: 700px) {
   .workspace-git__line-comment-thread {
-    max-width: max(0px, calc(100cqi - 6.5rem));
+    max-width: max(0px, calc(100cqi - 5.6rem));
   }
 }

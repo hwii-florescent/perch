@@ -670,7 +670,7 @@ async function reviewProject(page: Page): Promise<{ workspaceId: string; root: s
 }
 
 /** The review, whoever's copy is showing: one review in `owner`'s view, the changed file and its worktree line, and a
- * line comment that the core keeps (created through the rendered composer). Returns the diff's file list. */
+ * line comment that the core keeps (created through the rendered composer). Returns the changed files' list. */
 async function reviewWorks(page: Page, owner: string, body: string): Promise<string[]> {
   const view = page.locator(`[data-testid="mod-view-${owner}"]`);
   await expect(view.getByTestId("workspace-git-review")).toHaveCount(1, { timeout: 20000 });
@@ -682,7 +682,7 @@ async function reviewWorks(page: Page, owner: string, body: string): Promise<str
   await view.getByTestId("git-comment-body").fill(body);
   await view.getByRole("button", { name: "Add comment", exact: true }).click();
   await expect(view.locator(".workspace-git__comment").filter({ hasText: body }).first()).toBeVisible({ timeout: 15000 });
-  return view.getByTestId("git-diff-file").locator("strong").allTextContents();
+  return view.locator(".workspace-git__path-button").evaluateAll((buttons) => buttons.map((button) => button.getAttribute("title") ?? ""));
 }
 
 test("the review runs from its stock package; a clone in its place shows the same review, keeps the unsent commit message, a deep edit changes only the clone, and the phone keeps its own", async ({ page }) => {
