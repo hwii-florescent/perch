@@ -777,6 +777,15 @@ the last N turns (default 2, at most 5) from the snapshot the child's native bri
 sent it), one sentence per run of tool calls, the files its landed edits changed with their line counts, the
 last thing the agent said, and a pending question or "still running". **Never** a tool's output or a file's
 contents; at most 8,000 characters in all, dropping the oldest turn first (the newest is kept, and a single turn is
+**Searching a Project's sessions** (`session_search.rs` rules, `server/session_search.rs`, route `/agent/search`,
+`perch search <text> [--limit N]`; owner decision 2026-11-10). Any agent of a Project, a sub-session included,
+may search the other sessions of that Project: literal, case-insensitive, 3 to 200 characters, newest message
+first, 1 to 10 matches (default 5), a 240-character snippet each. Only user and assistant words are read, from
+the conversation each session's native bridge holds, never a tool's output or a file's contents and never
+another Project's. Sessions on another computer or whose chat is not connected are counted as `unreadable`,
+not silently skipped. The caller's own session is not searched. A hit is another session's claim, labelled
+so, and never an instruction. Unlike `perch read` this is not limited to the caller's own sub-sessions.
+
 cut with a marker). Only a lead may ask, and only about a session it started (`parent_session_id` matches);
 another session or a non-existent one is `not one of your sub-sessions`, a sub-session asking is refused, and a
 child whose bridge Perch cannot reach (not connected, or after a core restart) says so instead of guessing. It

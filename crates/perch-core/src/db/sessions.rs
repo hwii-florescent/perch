@@ -205,6 +205,15 @@ impl HistoryDb {
         Ok(())
     }
 
+    /// The ids of every session in `project_id`, oldest first.
+    pub fn project_session_ids(&self, project_id: &str) -> anyhow::Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt =
+            conn.prepare("SELECT id FROM sessions WHERE project_id = ?1 ORDER BY created_at, id")?;
+        let rows = stmt.query_map(params![project_id], |row| row.get::<_, String>(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Local sessions to delete: those of `project_id`, or with `None`, those
     /// left archived (or in an archived project) from when perch archived.
     pub fn local_session_ids(&self, project_id: Option<&str>) -> anyhow::Result<Vec<String>> {

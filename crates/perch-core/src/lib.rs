@@ -41,6 +41,7 @@ pub mod relay;
 pub mod reporter;
 pub mod review;
 pub mod server;
+pub mod session_search;
 pub mod settings;
 mod shell_integration;
 pub mod source_control;

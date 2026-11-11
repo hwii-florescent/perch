@@ -572,6 +572,10 @@ across providers ([DECISIONS](DECISIONS.md) 2026-11-07, compared in the
 5. **Limits.** Claude allows 500 new threads a day; Perch caps a lead at 4 live and 8 in
    total. Revisit when memory and the project home exist.
 
+6. **Cross-session search. Built 2026-11-10:** `perch search` (any agent of a Project, user and assistant words only;
+   [DECISIONS](DECISIONS.md) 2026-11-10). Not built: a person's search box on the Project home.
+7. **Archive.** Not planned: Close deletes, and Perch has no recycle bin ([DECISIONS](DECISIONS.md) 2026-11-10).
+
 Out of reach: cloud threads and the claude.ai `/project` bridge (needs a claude.ai
 login Perch cannot drive); remote runs wait for owned remote runtimes (alpha item 1).
 

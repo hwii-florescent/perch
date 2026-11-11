@@ -105,6 +105,7 @@ mod uploads;
 use terminal::claude_conversation_exists_in;
 mod inbound;
 mod session;
+mod session_search;
 mod sub_sessions;
 mod suggestions;
 /// The state of every core a test booted, by address: a test that talks to a core over HTTP can also
@@ -864,6 +865,10 @@ pub async fn run(
         .route(
             &format!("{base_path}agent/read"),
             post(agent::read).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/search"),
+            post(agent::search).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(
             &format!("{base_path}agent/stop"),

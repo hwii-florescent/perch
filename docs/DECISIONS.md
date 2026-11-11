@@ -1460,3 +1460,20 @@ an exhaustive description of every component or a fresh acceptance result.
 - **Identity and attention:** observed foreground harness changes only display
   identity, never saved launch/resume choice. Viewing a question does not
   resolve it; uncertainty is labelled and never upgraded by silence.
+
+## 2026-11-10 — Projects parity: Project home tab, search and no archive (owner)
+
+- **Project home is a main-view tab per Project**, opened from the Project row menu beside "Memory…". This
+  supersedes the first-cut "no tab" note in 2026-11-06 for the home only; a lead's chat still shows just
+  its family strip.
+- **Cross-session search: any agent of a Project may search that Project** (`perch search`), a sub-session
+  included. It reads only user and assistant words from chats Perch can reach, never tool output, never
+  another Project, and says how many sessions it could not read. This widens the earlier rule that an agent
+  reaches only its own run, for this one read-only verb; the results are other sessions' claims, not
+  instructions.
+- **No archive verb.** Perch dropped archiving; Close deletes. Claude's archive is a reversible hide, which
+  Perch would have to build (a recycle bin) rather than reuse; not requested. Resolved threads are closed
+  with the existing action.
+- **Pull requests are read from the person's `gh` login and shown as GitHub's claim**, from a cache; a
+  missing answer is unknown, not "no PR".
+

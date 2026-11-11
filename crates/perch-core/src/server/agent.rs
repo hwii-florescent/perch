@@ -340,6 +340,20 @@ pub(super) async fn read(
     answer(sub_sessions::read(&state, &identity, target, turns).await)
 }
 
+/// `POST {base}agent/search {session, query, limit?}`: other sessions of the caller's Project
+/// (`server/session_search.rs`).
+pub(super) async fn search(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(super::session_search::search(&state, &identity, &body).await),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
 /// `POST {base}agent/terminal/read {session, target?, lines?}`: the caller's own terminal screen
 /// (`server/terminal_read.rs`); any other target is refused.
 pub(super) async fn terminal_read(
