@@ -262,6 +262,19 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
     expect(actionSet.loadDiff).toHaveBeenLastCalledWith(expect.anything(), undefined, expect.anything());
   });
 
+  it("wraps long diff lines at the pane instead of scrolling sideways when asked", async () => {
+    await render(props(actions()));
+    const line = () => document.querySelector<HTMLElement>('[data-testid="git-diff-line"]');
+    expect(line()?.className).toContain("min-w-max");
+
+    const options = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.startsWith("Options"));
+    await act(async () => options?.click());
+    const wrap = [...document.querySelectorAll<HTMLLabelElement>("label")].find((label) => label.textContent?.includes("Wrap lines"))?.querySelector("input");
+    await act(async () => wrap?.click());
+    expect(line()?.className).toContain("whitespace-pre-wrap");
+    expect(line()?.className).not.toContain("min-w-max");
+  });
+
   it("focuses the destructive confirmation and closes it with Escape", async () => {
     const actionSet = actions();
     await render(props(actionSet));

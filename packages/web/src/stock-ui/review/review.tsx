@@ -36,7 +36,10 @@ const CONNECTION_ERROR = "text-red";
 const CONNECTION_IDLE = "text-subtext-0";
 // The gutter (two line numbers and the +/- marker) is the only fixed width; the line's "+" floats over it on hover, so
 // the code gets everything else. `ml-*` of a comment thread below must equal this gutter's width.
-const DIFF_LINE = `group/line relative grid min-w-max grid-cols-[2.5rem_2.5rem_0.9rem_minmax(0,1fr)] items-baseline text-fg [font-family:var(--font-mono)] text-[0.75rem] leading-[1.5] whitespace-pre [@container(max-width:700px)]:grid-cols-[2.1rem_2.1rem_0.8rem_minmax(0,1fr)]`;
+const DIFF_LINE_BASE = `group/line relative grid grid-cols-[2.5rem_2.5rem_0.9rem_minmax(0,1fr)] items-baseline text-fg [font-family:var(--font-mono)] text-[0.75rem] leading-[1.5] [@container(max-width:700px)]:grid-cols-[2.1rem_2.1rem_0.8rem_minmax(0,1fr)]`;
+// Unwrapped, a line is as wide as its text and the diff scrolls sideways; wrapped, it breaks at the pane's width.
+const DIFF_LINE = `${DIFF_LINE_BASE} min-w-max whitespace-pre`;
+const DIFF_LINE_WRAPPED = `${DIFF_LINE_BASE} whitespace-pre-wrap [overflow-wrap:anywhere]`;
 // A selected addition/deletion keeps its green/red tint (the legacy rule order); hover tints accent.
 const DIFF_LINE_KIND: Record<string, string> = {
   addition: "bg-[color-mix(in_srgb,var(--green)_9%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_15%,transparent)]",
@@ -301,6 +304,7 @@ export function WorkspaceGitReview({
   const [compareBase, setCompareBase] = useResourceState(`review:${workspaceId}:compareBase`, "");
   const [compareHead, setCompareHead] = useResourceState(`review:${workspaceId}:compareHead`, "");
   const [includeUntracked, setIncludeUntracked] = useResourceState(`review:${workspaceId}:includeUntracked`, true);
+  const [wrapLines, setWrapLines] = useResourceState(`review:${workspaceId}:wrapLines`, false);
   const [ignoreWhitespace, setIgnoreWhitespace] = useResourceState(`review:${workspaceId}:ignoreWhitespace`, false);
   const [contextLines, setContextLines] = useResourceState(`review:${workspaceId}:contextLines`, 3);
   const [activeFile, setActiveFile] = useResourceState<string | undefined>(`review:${workspaceId}:activeFile`, undefined);
@@ -656,7 +660,7 @@ export function WorkspaceGitReview({
     );
   }
 
-  const optionsChanged = !includeUntracked || ignoreWhitespace || contextLines !== 3;
+  const optionsChanged = !includeUntracked || ignoreWhitespace || wrapLines || contextLines !== 3;
   return (
     <section className="workspace-git" data-testid="workspace-git-review" aria-label="Git and review">
       <header className="flex shrink-0 items-center gap-2 px-[0.7rem] py-[0.4rem]" title={`${workspaceName || "Workspace"} · ${workspaceId}`}>
@@ -787,6 +791,7 @@ export function WorkspaceGitReview({
           {optionsOpen && (
             <div className="flex shrink-0 flex-wrap items-center gap-x-[0.9rem] gap-y-[0.3rem] px-[0.7rem] pb-[0.4rem]">
               <label className={TB_CHECK}><input type="checkbox" checked={includeUntracked} onChange={(event) => setIncludeUntracked(event.target.checked)} /> Untracked</label>
+              <label className={TB_CHECK}><input type="checkbox" checked={wrapLines} onChange={(event) => setWrapLines(event.target.checked)} /> Wrap lines</label>
               <label className={TB_CHECK}><input type="checkbox" checked={ignoreWhitespace} onChange={(event) => setIgnoreWhitespace(event.target.checked)} /> Ignore whitespace</label>
               <label className={TB_FIELD}><span>Context</span><Select className={`${TB_INPUT} w-[6rem]`} ariaLabel="Context" value={String(contextLines)} onChange={(value) => setContextLines(Number(value))} options={[{ value: "0", label: "0 lines" }, { value: "3", label: "3 lines" }, { value: "8", label: "8 lines" }]} /></label>
             </div>
@@ -820,7 +825,7 @@ export function WorkspaceGitReview({
               <>
                 {diff?.truncated && <div className={BANNER_WARNING} role="status">This diff is truncated. Narrow the path or comparison before commenting.</div>}
                 {/* One shared width: the widest line of any file. Per-file widths let scrolling run on past a short file's rows. */}
-                <div className="min-w-max">
+                <div className={wrapLines ? "" : "min-w-max"}>
                 {displayedFiles.map((file) => {
                   const displayPath = filePath(file);
                   return (
@@ -840,7 +845,7 @@ export function WorkspaceGitReview({
                             const selected = number !== undefined && selection?.path === path && selection.side === side && number >= selection.start && number <= selection.end;
                             return (
                               <div
-                                className={`${DIFF_LINE} ${DIFF_LINE_KIND[line.kind] ?? `${DIFF_LINE_CONTEXT}${selected ? ` ${DIFF_LINE_SELECTED}` : ""}`}`}
+                                className={`${wrapLines ? DIFF_LINE_WRAPPED : DIFF_LINE} ${DIFF_LINE_KIND[line.kind] ?? `${DIFF_LINE_CONTEXT}${selected ? ` ${DIFF_LINE_SELECTED}` : ""}`}`}
                                 data-testid="git-diff-line"
                                 data-path={path}
                                 data-side={side}

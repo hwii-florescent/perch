@@ -234,6 +234,15 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     await choose(filePicker, "");
     await expect(diff).toContainText("modified sentinel");
     await expectWholeDiffScrollable(diff);
+    // Wrap lines: the long line breaks at the pane and nothing scrolls sideways; turned off, it scrolls again.
+    await page.getByRole("button", { name: /^Options/ }).click();
+    await page.getByLabel("Wrap lines").check();
+    await expect(diff).toContainText("modified sentinel");
+    const wrapped = await diff.evaluate((element) => ({ scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }));
+    expect(wrapped.scrollWidth, "wrapped lines still scroll sideways").toBeLessThanOrEqual(wrapped.clientWidth + 1);
+    await page.getByLabel("Wrap lines").uncheck();
+    await page.getByRole("button", { name: /^Options/ }).click();
+    await expectWholeDiffScrollable(diff);
     await page.screenshot({ path: path.join(shots, "git-narrow-desktop.png"), fullPage: false });
     expect(await clippedControls(review), "Git review controls clipped at a narrow pane width").toEqual([]);
     await expectNoPageOverflow(page);
