@@ -7,6 +7,31 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-10 — The phone is a chat app's shell: sidebar on the left, Files and Git on the right, its own view mode (SDK 1.10.2)
+
+Owner direction: redesign the phone like Claude or ChatGPT's apps. Supersedes the "one header, active pane and
+Session/Files/Git bottom bar" phone item below and the single global `chatMode` for phones.
+- **Shell.** One header: the sidebar button on the left (every session, project and host, with Settings, the phone's
+  UI/CLI switch and plan usage at its foot), the session in the middle, the tools button on the right. No bottom bar:
+  the session has the full height and stays mounted. The tools button opens Files and Git (Git only for a git
+  checkout) as a drawer from the right, with tabs, a × and a tap outside to close. Settings is no longer in the header.
+- **Files are a sheet.** A tapped file rises as a full-screen sheet over the drawer, with its name and two ways to put
+  it away that the desktop has not: the × and pulling the sheet's top down. Putting it away only uncovers the
+  explorer (the tab stays open; its draft is the core's). The tools button always opens on the tree, never on a file
+  left open earlier.
+- **A phone stays a phone.** Phone is a narrow window (≤700px), a touch-only short screen (a phone on its side:
+  coarse pointer, no hover, ≤500px high) or any page reached through a relay. Rotating cannot unlock the desktop
+  layout; tablets and mouse-driven windows keep it. One query (`responsive.ts`), shared by the layout and by phone
+  mods.
+- **UI/CLI is per device.** The computer keeps the core's `settings.chatMode`. A phone (touch-only input, or a relay
+  page; a narrow mouse-driven window has the phone's layout but is the computer) keeps its own in this device's
+  storage (`perch.phoneChatMode`, `chatMode.ts`), starting from the computer's value until it chooses; the switch in the
+  sidebar and Settings > General write the phone's own on a phone, and the core's setting on the computer. Changing either never changes the other.
+- **Screens.** Still the five `stock:mobile-*` screens, with reshaped props (`onOpenTools`; `chatMode`, `onChatMode`,
+  `onOpenSettings`; `session`, with `content` now the drawer's tool; an always-given `explorer`); SDK 1.10.2, no export
+  added. A copy of the old shape on a phone that turned its packages on needs the new props.
+- Not verified: WebKit, a real phone, the desktop app window.
+
 ## 2026-11-09 — Terminal and dock chrome, the browser toolbar and the phone's screens are stock screens; phone screens are opt-in per phone (SDK 1.10)
 
 Plan: `plans/261108-2212-cloneable-stock-ui/` phase 5. Owner direction: convert the terminal toolbar, the agent

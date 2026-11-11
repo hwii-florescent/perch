@@ -28,6 +28,8 @@ import { MIN_SCROLLBACK, MAX_SCROLLBACK } from "../xtermSetup";
 import { newId } from "../ids";
 import { runCommand } from "../modApp";
 import { useIsMobileWidth } from "../responsive";
+import { setPhoneChatMode, useChatMode } from "../chatMode";
+import { useIsTouchPhone } from "../responsive";
 import { useMachineCheck } from "./MachineCheck";
 import { pairLink, usePhoneAccess } from "./PhoneAccess";
 import GeneralPage from "../stock-ui/settings-general/main";
@@ -51,11 +53,23 @@ export function GeneralSettings() {
   const { choices } = useAgentChoices(usePerchStore((s) => s.activeHostId));
   const isMobile = useIsMobileWidth();
   const paneLabels = usePaneLabelsEnabled();
+  // A phone's UI/CLI view is its own (`chatMode.ts`): it reads and writes this device, never the computer's setting.
+  // A narrow mouse-driven window has the phone's layout but is the computer.
+  const touchPhone = useIsTouchPhone();
+  const chatMode = useChatMode();
   const props: GeneralSettingsProps = {
-    settings, isMobile, paneLabels,
+    settings: touchPhone && settings ? { ...settings, chatMode } : settings, isMobile, paneLabels,
     agentChoices: choices.map((choice) => ({ id: choice.id, label: choice.label })),
     searchEngines: BROWSER_SEARCH_ENGINES.map(({ id, label }) => ({ id, label })),
-    actions: { updateSettings, setPaneLabels: setPaneLabelsEnabled, clearBrowsingHistory: clearHistory },
+    actions: {
+      updateSettings: (change) => {
+        if (!touchPhone || !change.chatMode) return updateSettings(change);
+        const { chatMode: mode, ...rest } = change;
+        setPhoneChatMode(mode);
+        if (Object.keys(rest).length) updateSettings(rest);
+      },
+      setPaneLabels: setPaneLabelsEnabled, clearBrowsingHistory: clearHistory,
+    },
   };
   return <StockRoute name="settings-general" props={props} stock={GeneralPage} exact={isMobile} />;
 }

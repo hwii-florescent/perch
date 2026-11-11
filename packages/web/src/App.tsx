@@ -21,6 +21,7 @@ import { setWindowOwner } from "./modUi";
 import { TYPED_COMMANDS } from "./modCommands";
 import { installKeysFile } from "./keysFile";
 import { usePerchStore } from "./store";
+import { useFileTabs } from "./fileTabs";
 import { MobilePaneShell, type MobilePaneKind } from "./components/MobilePaneShell";
 import { LaptopUnreachable, PairingGate } from "./components/PairingGate";
 import { ConnectionDetails } from "./components/ConnectionDetails";
@@ -40,13 +41,16 @@ export default function App() {
   // localStorage (same rationale as the other overlay booleans here — keep
   // store.ts's diff minimal) so it renders at most once per browser/profile.
   const [onboardingOpen, setOnboardingOpen] = useState(() => !hasSeenOnboarding());
-  // Phase 5 (narrow-width collapse): below MOBILE_WIDTH_BREAKPOINT, swap the
-  // desktop Sidebar+TabBar/Dockview canvas and StatusBar for MobileHeader,
-  // MobileSwitcher and one mounted pane over a bottom bar. Overlay open
-  // state lives here, same rationale as navigatorOpen/keybindHelpOpen above.
+  // On a phone (`responsive.ts`: narrow, sideways, or through a relay), swap the desktop Sidebar+TabBar/Dockview canvas
+  // and StatusBar for MobileHeader (sidebar button, session, tools button), the sidebar drawer (MobileSwitcher) and
+  // the session with the Files/Git drawer over it (`mobilePane`: "chat" is the drawer closed). Overlay open state
+  // lives here, same rationale as navigatorOpen/keybindHelpOpen above.
   const isMobile = useIsMobileWidth();
   const [mobileSwitcherOpen, setMobileSwitcherOpen] = useState(false);
   const [mobilePane, setMobilePane] = useState<MobilePaneKind>("chat");
+  // The header's tools button: the drawer opens on the explorer, never on a file left open earlier (a file is put away
+  // with its own sheet's × or pull; opening the tools starts from the tree).
+  const openTools = useCallback(() => { useFileTabs.getState().showSession(); setMobilePane("files"); }, []);
   const workspaceFilesWorkspaceId = usePerchStore((state) => state.workspaceFilesWorkspaceId);
   const closeWorkspaceFiles = usePerchStore((state) => state.closeWorkspaceFiles);
   const workspaceGitReviewWorkspaceId = usePerchStore((state) => state.workspaceGitReviewWorkspaceId);
@@ -62,7 +66,7 @@ export default function App() {
   // row, so focusing it leaves `activeWorkspaceId` alone; the drawer keeps
   // this id until focus moves.
   useEffect(() => useWindowChrome.getState().setToolsWorkspaceId(null), [activeWorkspaceId]);
-  // The phone has no drawer: its bottom bar switches panes. The toggle reopens the drawer on whichever tab was last shown.
+  // The phone's drawer is its own (`mobilePane`); the toggle is the desktop's.
   const toggleTerminal = useCallback(() => {
     if (!isMobile) useWindowChrome.getState().toggleDrawer();
   }, [isMobile]);
@@ -189,7 +193,7 @@ export default function App() {
       className={"app" + (isMobile ? " app--mobile" : " app--cards") + (MAC_DESKTOP ? " app--mac-desktop" : "")}
       style={{ "--sidebar-width": `${sidebarWidth}px`, "--tools-width": `${toolsWidth}px` } as CSSProperties}
     >
-      {isMobile && <MobileHeader onOpenSwitcher={() => setMobileSwitcherOpen(true)} />}
+      {isMobile && <MobileHeader onOpenSwitcher={() => setMobileSwitcherOpen(true)} onOpenTools={openTools} />}
 
       {!connected && !MAC_DESKTOP && <div className="shrink-0 px-4"><ConnectionDetails /></div>}
       {isMobile ? (

@@ -204,7 +204,7 @@ export is for.
 
 ### `version: string`
 
-This page's SDK version, as semver (`"1.10.1"`). 1.1 added `assetUrl`,
+This page's SDK version, as semver (`"1.10.2"`). 1.1 added `assetUrl`,
 `useInstance` and `useInstanceState`; 1.2 the status bar, tab strip and pane
 header surface; 1.3 navigation (the sidebar); 1.4 resources (the Git review,
 `useResourceState`, and the terminal, layout and focus queries); 1.5 files, the
@@ -218,7 +218,9 @@ types) and their parts (`SettingsGroup`, `SettingRow`, `Switch`, `ModeSwitch`,
 (their props types) and `SlashPopover`; 1.10 the terminal and dock chrome, the
 browser toolbar and the phone's own screens (their props types), `glassClass`,
 `tapButtonClass`, `GearIcon`, `PlusIcon` and `EllipsisIcon`; 1.10.1 makes `useTerminals` draw again when a
-pin or this device's order changes (`terminal.pin`, `terminal.order`), so a copy can group and order by them.
+pin or this device's order changes (`terminal.pin`, `terminal.order`), so a copy can group and order by them; 1.10.2 reshapes the phone's
+screens' props, with no export added: the header gets `onOpenTools`, the switcher `chatMode`, `onChatMode` and `onOpenSettings`, the
+panes `session` (`content` is now the drawer's tool), and the files screen is always given its `explorer`.
 
 ### `useKeybindings(): KeybindEntry[]`
 

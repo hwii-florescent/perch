@@ -1,5 +1,5 @@
 /**
- * MobileHeader.tsx — the phone's one top row (≤700px), replacing the desktop sidebar, tab strip and brand row. The
+ * MobileHeader.tsx — the phone's one top row, replacing the desktop sidebar, tab strip and brand row: sidebar button, session, tools button. The
  * screen is `stock:mobile-header` (`stock-ui/mobile-header/main.tsx`), or the person's copy once turned on for this
  * phone (`phoneMods.ts`); this file gathers what it shows and binds the taps.
  *
@@ -22,9 +22,10 @@ function basename(cwd: string): string {
 
 export interface MobileHeaderProps {
   onOpenSwitcher: () => void;
+  onOpenTools: () => void;
 }
 
-export function MobileHeader({ onOpenSwitcher }: MobileHeaderProps) {
+export function MobileHeader({ onOpenSwitcher, onOpenTools }: MobileHeaderProps) {
   const sessionId = usePerchStore((s) => s.sessionId);
   const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
   const knownSession = usePerchStore((s) => s.sessions.find((sess) => sess.id === sessionId));
@@ -54,6 +55,7 @@ export function MobileHeader({ onOpenSwitcher }: MobileHeaderProps) {
     connected,
     needsYou,
     onOpenSwitcher,
+    onOpenTools,
     onOpenSettings: () => setSettingsOpen(true),
   };
   return <StockRoute name="mobile-header" props={props} stock={Header} />;

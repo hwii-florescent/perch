@@ -7,7 +7,7 @@ describe("@perch/sdk", () => {
   // The public surface is versioned: adding or removing an export means changing this list and SDK_VERSION together
   // (a removal or an incompatible change is a new major), and docs/MOD-SDK.md with them.
   it("exports exactly the 1.10 surface", async () => {
-    expect(SDK_VERSION).toBe("1.10.1");
+    expect(SDK_VERSION).toBe("1.10.2");
     expect(Object.keys(sdkSurface()).sort()).toEqual([
       "AgentIcon", "BrowserPage", "Chevron", "CloseIcon", "CodeEditor", "ConfirmDialog", "CopyButton", "Dialog",
       "EllipsisIcon", "FileAsset", "FileEntryMenu", "FileIcon", "FolderBrowser", "GearIcon", "GitMarker", "HostStateDot", "InstructionsDialog",

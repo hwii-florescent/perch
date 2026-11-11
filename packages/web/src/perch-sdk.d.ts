@@ -2380,8 +2380,8 @@ declare module "@perch/sdk" {
   /** Three dots, a menu's mark, in the current text color (default 14 px). */
   export function EllipsisIcon(props: { size?: number; className?: string }): ReactElement;
 
-  /** `stock:mobile-header`, the phone's top row (1.10). A phone screen: a person's copy runs only on a phone that
-   * turned that on. */
+  /** `stock:mobile-header`, the phone's top row (1.10): sidebar button, the session, tools button (1.10.2). A phone
+   * screen: a person's copy runs only on a phone that turned that on. */
   export interface MobileHeaderProps {
     /** The shown session's status dot, as Perch draws it (null with no session). */
     dot: ReactNode;
@@ -2400,8 +2400,12 @@ declare module "@perch/sdk" {
     onOpenSwitcher(): void;
     onOpenSettings(): void;
   }
+    /** Opens the sidebar (the switcher). */
 
-  /** `stock:mobile-switcher`, the phone's sidebar while open (1.10). */
+    /** Opens the Files/Git drawer (1.10.2). */
+    onOpenTools(): void;
+    /** Opens Settings. The stock header no longer shows it: Settings is in the switcher. */
+  /** `stock:mobile-switcher`, the phone's sidebar while open, a slide-over from the left (1.10). */
   export interface MobileSwitcherProps {
     /** The sidebar's own list as Perch draws it on a phone; choosing in it closes the switcher. A copy may draw its
      * own from `useNavigation` and `runCommand`, then call `onPicked`. */
@@ -2414,29 +2418,40 @@ declare module "@perch/sdk" {
   }
 
   /** The phone's panes. */
+    /** This phone's UI/CLI view (1.10.2): its own, the computer's is not changed. */
+    chatMode: "ui" | "cli";
+    onChatMode(mode: "ui" | "cli"): void;
+    /** Closes the switcher and opens Settings (1.10.2). */
+    onOpenSettings(): void;
   export type MobilePaneKind = "chat" | "files" | "gitReview";
-  /** `stock:mobile-panes`, the phone's canvas (1.10): one pane over a bottom bar. */
+  /** `stock:mobile-panes`, the phone's canvas (1.10): the session full-height, and a Files/Git drawer over it
+   * (1.10.2; before, one pane over a bottom bar). */
   export interface MobilePanesProps {
-    /** The panes this workspace has (Git only for a git checkout), in order. */
+    /** The panes this workspace has (Git only for a git checkout), in order. "chat" is the session, with no drawer. */
     panes: { kind: MobilePaneKind; label: string }[];
     shown: MobilePaneKind;
-    /** The shown pane, mounted by Perch (the only one mounted); null when it needs a workspace and none is picked. */
+    /** The session (terminal or chat), mounted by Perch and kept mounted while the drawer is open (1.10.2). */
+    session: ReactNode;
+    /** The drawer's tool, mounted by Perch only while it is open; null when `shown` is "chat" or the tool needs a
+     * workspace and none is picked. */
     content: ReactNode;
+    /** "chat": the drawer is closed; "files" or "gitReview": it is open on that tool. */
     workspaceId: string | null;
-    /** Shows a pane: drops a stale Files/Git request and uncovers the session, as the stock bar does. */
+    /** Shows a tool in the drawer, or closes it with "chat": drops a stale Files/Git request and uncovers the session. */
     onSelect(kind: MobilePaneKind): void;
   }
 
-  /** `stock:mobile-files`, the phone's Files pane (1.10). */
+  /** `stock:mobile-files`, the phone's Files tool in the drawer (1.10). A tapped file opens as a sheet over the
+   * explorer (1.10.2). */
   export interface MobileFilesProps {
     workspaceId: string;
-    /** The open file's path, or null for the explorer. */
+    /** The open file's path, or null with none open. */
     openPath: string | null;
-    /** The explorer as Perch draws it (a tap opens a file as a click does on the desktop); null while a file is open. */
+    /** The explorer as Perch draws it (a tap opens a file as a click does on the desktop); always given (1.10.2). */
     explorer: ReactNode;
     /** The open file's editor (its draft, save and conflicts are Perch's); null with no file open. */
     editor: ReactNode;
-    /** Back to the explorer; the file's tab stays open. */
+    /** Puts the file away, back to the explorer; the file's tab stays open. */
     onBack(): void;
   }
 

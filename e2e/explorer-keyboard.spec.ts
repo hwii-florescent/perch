@@ -110,7 +110,7 @@ test("file icons and Git snapshots stay honest across themes, with centered usag
     await expect(page.getByText("Reading Git status…", { exact: true })).toHaveCount(0);
     await page.screenshot({ animations: "disabled", path: testInfo.outputPath("git-rows.png") });
     await page.getByTestId("workspace-tools-files").click();
-    await page.setViewportSize({ width: 390, height: 844 }); await page.getByTestId("mobile-pane-files").click();
+    await page.setViewportSize({ width: 390, height: 844 }); await page.getByTestId("mobile-tools").click();
     await row("src").click();
     expect((await row("src/App.tsx").boundingBox())!.height).toBeGreaterThanOrEqual(44);
     expect((await page.getByTestId("mobile-switch").boundingBox())!.height).toBeGreaterThanOrEqual(44);

@@ -734,6 +734,7 @@ test("the review runs from its stock package; a clone in its place shows the sam
     // The phone keeps its own review: the stock source, not the clone.
     const desktop = page.viewportSize()!;
     await page.setViewportSize({ width: 375, height: 700 });
+    await page.getByTestId("mobile-tools").click();
     await page.getByTestId("mobile-pane-git").click();
     const phone = page.getByTestId("mobile-pane-shell");
     await expect(phone.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
@@ -805,11 +806,15 @@ test("the files surface runs from its stock package; a clone in its place opens 
     // The phone keeps its own files pane: the stock source, not the clone.
     const desktop = page.viewportSize()!;
     await page.setViewportSize({ width: 375, height: 700 });
-    await page.getByTestId("mobile-pane-files").click();
+    await page.getByTestId("mobile-tools").click();
     await expect(page.getByTestId("mobile-active-pane-files")).toBeVisible({ timeout: 10000 });
-    // It opens on the file shown on the desktop, with the same draft, and its tree is the stock one.
+    // It opens on the tree, which is the stock one; the file opens as a sheet with the same draft.
+    await expect(page.getByLabel("Workspace file tree", { exact: true })).toHaveCount(1, { timeout: 15000 });
+    await expect(page.getByTestId("mobile-file-sheet")).toHaveCount(0);
+    await page.getByTestId("workspace-file-entry-src/main.txt").click();
     await expectDoc(page.getByTestId("workspace-file-editor"), "UNSAVED_DRAFT\n", { timeout: 15000 });
     await page.getByTestId("mobile-files-back").click();
+    await expect(page.getByTestId("mobile-file-sheet")).toHaveCount(0);
     await expect(page.getByLabel("Workspace file tree", { exact: true })).toHaveCount(1, { timeout: 15000 });
     await expect(page.getByLabel("My file tree", { exact: true })).toHaveCount(0);
     await page.setViewportSize(desktop);
@@ -2123,7 +2128,6 @@ test("a phone runs the person's copy only on its own screens and only once turne
         else await expect(shown).not.toHaveAttribute("data-e2e-copy");
         await expect(phone.locator(`[data-testid="mod-view-e2e-my-${name}"]`)).toHaveCount(copies ? 1 : 0);
       };
-      await phone.getByTestId("mobile-pane-chat").click();
       await check("mobile-header", "mobile-header");
       await check("mobile-pane-shell", "mobile-panes");
       await check("mobile-key-bar", "mobile-keys");
@@ -2131,13 +2135,13 @@ test("a phone runs the person's copy only on its own screens and only once turne
       await check("mobile-switcher", "mobile-switcher");
       await phone.getByTestId("mobile-switcher-close").click();
       await expect(phone.getByTestId("mobile-switcher")).toHaveCount(0);
-      await phone.getByTestId("mobile-pane-files").click();
+      await phone.getByTestId("mobile-tools").click();
       const entry = phone.getByTestId("workspace-file-entry-src/main.txt").first();
       if (!(await entry.count())) await phone.getByTestId("workspace-file-entry-src").first().click();
       await entry.click({ timeout: 15000 });
       await check("mobile-files-back", "mobile-files");
       await phone.getByTestId("mobile-files-back").click();
-      await phone.getByTestId("mobile-pane-chat").click();
+      await phone.getByTestId("mobile-tools-close").click();
       await expect(phone.locator('[data-testid="mod-view-e2e-my-status"]')).toHaveCount(0);
       if (!copies) await expect(marked).toHaveCount(0);
     };

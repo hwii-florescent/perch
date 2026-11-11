@@ -118,8 +118,7 @@ test("Files and Git share the drawer shell across every theme without making can
     // The surface slot belongs to the desktop drawer, not the shared phone panes.
     await page.evaluate(() => document.documentElement.removeAttribute("data-glass"));
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByTestId("mobile-pane-files").click();
-    if (await page.getByTestId("mobile-files-back").count()) await page.getByTestId("mobile-files-back").click();
+    await page.getByTestId("mobile-tools").click();
     await expect(page.getByTestId("workspace-files-view")).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await page.getByTestId("mobile-pane-git").click();
     await expect(page.getByTestId("workspace-git-review")).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");

@@ -1,6 +1,6 @@
 //! Which of the person's code may run on this device, when it is a phone.
 //!
-//! A phone (a phone-width window, or any page reached through a relay) keeps its own screens: the phone's stock
+//! A phone (a phone-sized or sideways window, or any page reached through a relay) keeps its own screens: the phone's stock
 //! screens are `stock:mobile-*` (header, switcher, panes, files, terminal keys), and the desktop's screens, layouts
 //! and packages never run there. A relay phone keeps its device token in this page's storage, where any code on the
 //! page can read it, so even the phone's own screens run a person's copy only after the person turned that on for
@@ -11,8 +11,6 @@
 //! (revoked in Settings > Devices on the computer) forgets the choice before it shows the pairing screen, so a new
 //! pairing starts with Perch's own screens; the revoked token itself is refused by the core from then on.
 import { useSyncExternalStore } from "react";
-import { isRelayMode } from "./relay/transport";
-import { MOBILE_WIDTH_BREAKPOINT } from "./responsive";
 
 const KEY = "perch.phoneMods";
 /** Stock screens drawn only on a phone: `stock:mobile-header`, … */
@@ -46,20 +44,9 @@ const subscribe = (watch: () => void) => {
 };
 export const usePhoneModsOn = () => useSyncExternalStore(subscribe, read, () => false);
 
-/** Phone width, as `responsive.ts` draws the phone's shell (false where the page cannot tell: no `matchMedia`). */
-const narrowQuery = () => (typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia(`(max-width: ${MOBILE_WIDTH_BREAKPOINT}px)`) : null);
-const narrow = () => narrowQuery()?.matches ?? false;
-const subscribeNarrow = (watch: () => void) => {
-  const query = narrowQuery();
-  query?.addEventListener?.("change", watch);
-  return () => query?.removeEventListener?.("change", watch);
-};
-
-/** This page is a phone: phone-width, or reached through a relay (a paired device whose token is in storage). */
-export const isPhoneDevice = () => isRelayMode() || narrow();
-export function useIsPhoneDevice() {
-  return useSyncExternalStore(subscribeNarrow, narrow, () => false) || isRelayMode();
-}
+/** This page is a phone (`responsive.ts`): phone-sized or sideways, or reached through a relay (a paired device whose
+ * token is in storage). */
+export { isPhoneDevice, useIsMobileWidth as useIsPhoneDevice } from "./responsive";
 
 /** Whether a person's package may run here for stock screen `name` (`null`: not for a stock screen: a layout block,
  * a docked or hidden package, an overlay). A desktop runs every person's package except on phone screens; a phone runs

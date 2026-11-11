@@ -1,5 +1,6 @@
 import { useEffect, useId } from "react";
 import { usePerchStore } from "../store";
+import { useChatMode } from "../chatMode";
 import { StockView } from "../components/mod-root";
 // The phone keeps its own screens until they follow `perch mod use`: the stock chat source, compiled in.
 import { NativeCliChat } from "../stock-ui/chat/chat";
@@ -8,7 +9,7 @@ import { CliStartPanel, NoSessionPanel } from "../components/StartScreen";
 
 /**
  * One pane showing one agent session. It is always the same real CLI process;
- * the global `chatMode` setting (Terminal by default) only decides the view:
+ * the `chatMode` (Terminal by default; the computer's setting, or the phone's own: `chatMode.ts`) only decides the view:
  * `cli` is the terminal, `ui` is the native chat (the stock screen `stock:chat`, or
  * the package the person chose for it: the chat's state stays Perch's) over that
  * same process. Agents or hosts with no native bridge always get the terminal.
@@ -22,7 +23,7 @@ export function AgentPane({ sessionId: sessionIdProp, phone = false }: { session
   const activeSessionId = usePerchStore((s) => s.sessionId);
   const sessionId = sessionIdProp ?? activeSessionId;
   const connected = usePerchStore((s) => s.connected);
-  const chatMode = usePerchStore((s) => s.settings?.chatMode ?? "cli");
+  const chatMode = useChatMode();
   const cliError = usePerchStore((s) => s.cliError);
   const deleteSession = usePerchStore((s) => s.deleteSession);
   const activeHostId = usePerchStore((s) => s.activeHostId);

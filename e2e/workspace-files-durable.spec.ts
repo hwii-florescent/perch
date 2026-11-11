@@ -288,7 +288,7 @@ test.describe("V-05/V-06 durable file workflow", () => {
       // opens on Chat, so the editor is genuinely unmounted until the Files pane
       // is selected. Drive the real switcher rather than assuming the desktop
       // pane survived the resize.
-      await page.getByTestId("mobile-pane-files").click();
+      await page.getByTestId("mobile-tools").click();
       await expect(page.getByTestId("mobile-active-pane-files")).toBeVisible({ timeout: 10000 });
       // The mobile file surface opens on the Explorer half with no selection, so
       // walk the nested tree the way a phone user would before the editor exists.

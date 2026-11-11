@@ -49,7 +49,7 @@ shells, real agent CLIs
   `gitReviewStore`); the phone's Git pane renders its source compiled in.
 - **Phones run only their own screens.** `phoneMods.ts` decides, for every
   person's package (`usePersonCode` in `mod-root.tsx`, `ModView`, `ModsHost`,
-  `useStockChoice`): a phone (phone width, or any relay page) runs a copy only
+  `useStockChoice`): a phone (`responsive.ts`: narrow, a touch phone on its side, or any relay page) runs a copy only
   for a `stock:mobile-*` screen, and only after "Phone screens from my packages"
   is on in that device's storage; never a desktop screen's copy, a layout, or a
   docked, hidden or overlay package. A page that loses its pairing clears the
@@ -282,8 +282,10 @@ opens the session on click; the focused, viewed session stays quiet. Usage/test
 alerts only raise Perch. Unbundled developer runs cannot impersonate Terminal.
 Focus and notification summaries can still hide an OS-accepted banner.
 
-There is one global view setting, `chatMode`: `ui` or `cli` (default `cli`;
-a legacy `hosted` value reads as `ui`). `AgentPane` routes every session by it:
+The view is `chatMode`: `ui` or `cli` (default `cli`; a legacy `hosted` value
+reads as `ui`). The computer has one global setting; a touch phone (or relay
+page) keeps its own in its device storage (`chatMode.ts`, `useChatMode`), so neither changes the other.
+`AgentPane` routes every session by it:
 Terminal (`AgentCliTerminal`) by default, or the native chat view
 (`NativeCliChat`) when the agent has a native UI. The Hosted chat runners,
 `chat.*`/`session.history`/`session.mode*` messages, model catalogues and

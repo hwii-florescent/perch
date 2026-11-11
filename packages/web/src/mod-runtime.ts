@@ -72,7 +72,7 @@ const hostModules = new Map<string, Record<string, unknown> | (() => object)>([
   ["react-dom/client", ReactDOMClient as unknown as Record<string, unknown>],
 ]);
 /** The version of `@perch/sdk` this page runs (`sdk.ts`, contract `perch-sdk.d.ts`). */
-export const SDK_VERSION = "1.10.1";
+export const SDK_VERSION = "1.10.2";
 
 const RANGE = /^(\^|~)?(\d+)(?:\.(\d+|x))?(?:\.(\d+|x))?$/;
 

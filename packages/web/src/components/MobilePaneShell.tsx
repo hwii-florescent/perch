@@ -28,9 +28,9 @@ export interface MobilePaneShellProps {
 
 /**
  * Narrow-width canvas. The screen is `stock:mobile-panes` (`stock-ui/mobile-panes/`), or the person's copy once turned
- * on for this phone (`phoneMods.ts`): it draws the bar and places the one pane this file mounts. Exactly one content
- * component is mounted at a time; inactive desktop Dockview panels are not merely hidden, which keeps mobile memory,
- * keyboard focus, and terminal lifecycle bounded to the pane the user is actually viewing.
+ * on for this phone (`phoneMods.ts`): it places the session full-height and, over it, the Files/Git drawer that the
+ * header's tools button opens. Desktop Dockview panels are not mounted at all; the drawer's pane is mounted only
+ * while it is open, which keeps mobile memory bounded.
  *
  * Files and Git are the drawer's own: the workspace a Switcher request named, else the active session's
  * (`useToolsContext`), and Git only for a git checkout. Leaving either pane drops its request, so it never goes stale.
@@ -56,10 +56,10 @@ export function MobilePaneShell({
     onPaneChange(pane);
   }
 
-  const content = shown === "chat" ? <AgentPane phone />
-    : !workspaceId ? null
+  // The session stays mounted behind the drawer, so Files and Git never cost it its terminal or its chat.
+  const content = shown === "chat" || !workspaceId ? null
     : shown === "files" ? <MobileFiles workspaceId={workspaceId} />
     : <Review key={workspaceId} workspaceId={workspaceId} />;
-  const props: MobilePanesProps = { panes, shown, content, workspaceId: workspaceId ?? null, onSelect: selectPane };
+  const props: MobilePanesProps = { panes, shown, session: <AgentPane phone />, content, workspaceId: workspaceId ?? null, onSelect: selectPane };
   return <StockRoute name="mobile-panes" props={props} stock={Panes} />;
 }

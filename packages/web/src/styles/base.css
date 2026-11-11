@@ -160,9 +160,18 @@ body {
   inset: var(--visible-top, 0px) 0 auto 0;
   height: var(--visible-height, 100dvh);
 }
-/* With the keyboard up the terminal's own key bar is the bottom row; the pane tabs wait. */
-:root[data-keyboard] .mobile-pane-nav {
-  display: none;
+/* The phone's drawers and file sheet. Animation only, with no fill: a transform left on the panel would make it the
+ * containing block of the file sheet's `position: fixed` inside it. */
+.mobile-drawer-backdrop { animation: mobile-fade 0.15s ease-out; }
+.mobile-drawer--left { animation: mobile-slide-left 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.mobile-drawer--right { animation: mobile-slide-right 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.mobile-sheet { animation: mobile-rise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes mobile-fade { from { opacity: 0; } }
+@keyframes mobile-slide-left { from { transform: translateX(-100%); } }
+@keyframes mobile-slide-right { from { transform: translateX(100%); } }
+@keyframes mobile-rise { from { transform: translateY(100%); } }
+@media (prefers-reduced-motion: reduce) {
+  .mobile-drawer-backdrop, .mobile-drawer, .mobile-sheet { animation: none; }
 }
 
 /* A layout's floating block docked to a side with `peek`: only the peek width shows until hovered. */

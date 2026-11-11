@@ -12,7 +12,15 @@ export async function openWorkspaceTool(page: Page, workspaceId: string, tab: "f
 /** The phone's right-click: a touch held on `target` for longer than the row's 450ms threshold.
  * Chromium gets a real touch through CDP; WebKit has no CDP, so it gets the pointer events the row listens to. */
 export async function holdRow(page: Page, target: Locator): Promise<void> {
-  const box = (await target.boundingBox())!;
+  // A phone's drawer slides in: press where the row comes to rest, not where it was when it appeared.
+  let box = (await target.boundingBox())!;
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(60);
+    const next = (await target.boundingBox())!;
+    const still = next.x === box.x && next.y === box.y;
+    box = next;
+    if (still) break;
+  }
   const x = box.x + 6;
   const y = box.y + box.height / 2;
   if (page.context().browser()?.browserType().name() !== "chromium") {

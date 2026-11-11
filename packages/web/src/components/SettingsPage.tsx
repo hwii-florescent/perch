@@ -20,7 +20,7 @@ import { GHOST_BUTTON } from "./ui/icon-button";
 import { TAP_BUTTON } from "./ui/glass";
 import { disconnectNativeApp, inNativeApp } from "../nativeApp";
 import { Chevron } from "./ui/chevron";
-import { MOBILE_WIDTH_BREAKPOINT, useIsMobileWidth } from "../responsive";
+import { isPhoneDevice, useIsMobileWidth } from "../responsive";
 
 // A full-height column of the shell, as in App.tsx (kept in step by hand: App imports this file).
 const CARD = "flex min-h-0 shrink-0 flex-col overflow-hidden rounded-[12px] bg-[var(--card-bg)]";
@@ -178,7 +178,7 @@ export function SettingsPage() {
   useEffect(() => {
     if (settingsOpen) {
       setQuery("");
-      setTab(settingsPage === "agents" ? "agents" : window.matchMedia(`(max-width: ${MOBILE_WIDTH_BREAKPOINT}px)`).matches ? null : "general");
+      setTab(settingsPage === "agents" ? "agents" : isPhoneDevice() ? null : "general");
       fetchSettings();
       fetchHosts();
     }

@@ -74,9 +74,10 @@ test("agent runtime survives view changes and control transfers between desktop 
     await expect(mobile).toHaveAttribute("data-terminal-id", id);
     await expect(mobile.locator(".xterm-rows")).toContainText(`${marker}_phone`);
 
-    await phone.getByTestId("mobile-pane-files").click();
-    await expect(phone.locator(".xterm")).toHaveCount(0);
-    await phone.getByTestId("mobile-pane-chat").click();
+    // The Files/Git drawer opens over the terminal, which stays attached to its process.
+    await phone.getByTestId("mobile-tools").click();
+    await expect(phone.getByTestId("mobile-tools-drawer")).toBeVisible();
+    await phone.getByTestId("mobile-tools-close").click();
     await expect(mobile).toHaveAttribute("data-terminal-id", id);
     await expect(mobile.locator(".xterm-rows")).toContainText(`${marker}_phone`);
     await phone.reload({ waitUntil: "networkidle" });
