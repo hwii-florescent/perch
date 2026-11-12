@@ -34,7 +34,8 @@ use crate::zoom::Zoom;
 use futures::channel::mpsc::UnboundedSender;
 use gpui::{
     canvas, div, prelude::*, px, relative, rgb, size, AnyElement, App, Context, Entity, Focusable,
-    KeyDownEvent, Keystroke, MouseButton, Pixels, SharedString, Size, Subscription, Task, Window,
+    KeyDownEvent, Keystroke, MouseButton, Pixels, Point, SharedString, Size, Subscription, Task,
+    Window,
 };
 use serde_json::Value;
 use std::cell::Cell;
@@ -132,6 +133,13 @@ struct SettingsPanel {
     editing: Option<String>,
 }
 
+/// The menu a right-click in a pane opens: its entries are commands, run on that pane.
+struct PaneMenu {
+    at: Point<Pixels>,
+    /// The label and the command each runs.
+    items: Vec<(&'static str, &'static str)>,
+}
+
 pub struct Workspace {
     sidebar: Entity<Sidebar>,
     locate: Option<Locate>,
@@ -145,6 +153,10 @@ pub struct Workspace {
     zoom: Zoom,
     /// Counts the changes of what is on screen, for [`Pane::seen`].
     tick: u64,
+    menu: Option<PaneMenu>,
+    /// The session whose terminal is over the window for a moment (`terminal.peek`), with no tab
+    /// of its own unless it is kept.
+    peek: Option<String>,
     /// The leader chord was pressed; dropped when its time is up.
     leader: Option<Task<()>>,
     /// What the last command could not do, or did instead.
@@ -183,6 +195,8 @@ impl Workspace {
             settings: None,
             zoom: Zoom::default(),
             tick: 0,
+            menu: None,
+            peek: None,
             leader: None,
             notice: None,
             room: Rc::new(Cell::new(None)),
@@ -237,6 +251,23 @@ impl Workspace {
     /// The session of the tab with the keyboard.
     pub fn open(&self) -> Option<&OpenSession> {
         Some(&self.panes.get(self.tabs.active()?)?.open)
+    }
+
+    /// The labels of the pane menu, when it is open.
+    pub fn menu_labels(&self) -> Option<Vec<&'static str>> {
+        Some(
+            self.menu
+                .as_ref()?
+                .items
+                .iter()
+                .map(|(label, _)| *label)
+                .collect(),
+        )
+    }
+
+    /// The session peeked at, when there is one.
+    pub fn peeked(&self) -> Option<&str> {
+        self.peek.as_deref()
     }
 
     pub fn palette_open(&self) -> bool {
@@ -328,6 +359,7 @@ impl Workspace {
         match event {
             // A click on a link is a person's: the window runs the system's handler for it.
             TerminalEvent::OpenLink(target) => crate::terminal::links::open_in_system(target),
+            TerminalEvent::MenuAsked(at) => self.open_menu(id, *at, cx),
             TerminalEvent::Status(Status::Live) => {
                 if let Some(pane) = self.panes.get_mut(id) {
                     pane.attempts = 0;
@@ -439,6 +471,26 @@ impl Workspace {
         if self.palette.is_some() {
             self.palette_key(keystroke, &keymap, window, cx);
             return true;
+        }
+        // A menu closes on any key; Escape is only that.
+        if self.menu.take().is_some() {
+            cx.notify();
+            if keystroke.key == "escape" {
+                return true;
+            }
+        }
+        // Escape puts a peek away, unless its terminal has the keyboard: then it is the program's.
+        if keystroke.key == "escape" && self.peek.is_some() {
+            let typing = self
+                .peek
+                .as_ref()
+                .and_then(|id| self.panes.get(id))
+                .and_then(|pane| pane.view.as_ref())
+                .is_some_and(|view| view.focus_handle(cx).is_focused(window));
+            if !typing {
+                self.park_peek(cx);
+                return true;
+            }
         }
         if let Some(text) = self.settings.as_mut().and_then(|p| p.editing.as_mut()) {
             match palette::edit(text, keystroke) {
@@ -706,6 +758,29 @@ impl Workspace {
                     None => Some(SettingsPanel::default()),
                 };
                 cx.notify();
+            }
+            "terminal.show" => {
+                let id = text("id").ok_or("This command needs {id}.")?.to_string();
+                self.show_session(&id, cx)?;
+            }
+            "terminal.peek" => {
+                let id = text("id").ok_or("This command needs {id}.")?.to_string();
+                self.toggle_peek(&id, cx)?;
+            }
+            "terminal.keep" => {
+                let id = text("id")
+                    .map(str::to_string)
+                    .or_else(|| self.peek.clone())
+                    .ok_or("This command needs {id}.")?;
+                self.show_session(&id, cx)?;
+            }
+            "terminal.park" => {
+                if !self.park_peek(cx) {
+                    return Err(
+                        "There is no peek to put away; a session's tab stays until it is closed."
+                            .into(),
+                    );
+                }
             }
             "view.zoomIn" | "view.zoomInShift" | "app.zoom_in" => self.zoom_to(self.zoom.in_(), cx),
             "view.zoomOut" | "app.zoom_out" => self.zoom_to(self.zoom.out(), cx),
@@ -982,7 +1057,10 @@ impl Workspace {
             .panes
             .iter()
             .filter(|(id, pane)| {
-                pane.view.is_some() && pane.closing.is_none() && !shown.contains(id)
+                pane.view.is_some()
+                    && pane.closing.is_none()
+                    && !shown.contains(id)
+                    && self.peek.as_ref() != Some(id)
             })
             .map(|(id, pane)| (pane.seen, id.clone()))
             .collect();
@@ -996,6 +1074,244 @@ impl Workspace {
                 }
             }
         }
+    }
+
+    /// Open the pane menu at `at` for the pane `id`. A pane in a split takes the keyboard first,
+    /// so the commands run on the pane that was clicked.
+    fn open_menu(&mut self, id: &str, at: Point<Pixels>, cx: &mut Context<Self>) {
+        self.focus_pane(id, cx);
+        let Some(view) = self.panes.get(id).and_then(|p| p.view.clone()) else {
+            return;
+        };
+        let can_stop = view.read(cx).can_stop();
+        let mut items = vec![
+            ("Copy", "terminal.copy"),
+            ("Paste", "terminal.paste"),
+            ("Select all", "terminal.selectAll"),
+            ("Find\u{2026}", "terminal.find"),
+            ("Clear", "terminal.clear"),
+            ("Split right", "panes.splitRight"),
+            ("Split down", "panes.splitDown"),
+        ];
+        if self.tabs.zoomed() {
+            items.push(("Restore pane", "panes.zoom"));
+        } else if self.tabs.shown().len() > 1 {
+            items.push(("Zoom pane", "panes.zoom"));
+        }
+        if can_stop {
+            items.push(("Stop the terminal", "terminal.kill"));
+        }
+        items.push(("Close", "tabs.close"));
+        self.menu = Some(PaneMenu { at, items });
+        cx.notify();
+    }
+
+    fn menu_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let menu = self.menu.as_ref()?;
+        let mut list = div()
+            .absolute()
+            .left(menu.at.x)
+            .top(menu.at.y)
+            .min_w(px(180.))
+            .py_1()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(OVERLAY_BORDER))
+            .bg(rgb(SIDEBAR_BG))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation());
+        for (at, (label, command)) in menu.items.iter().copied().enumerate() {
+            list = list.child(
+                div()
+                    .id(SharedString::from(format!("menu-{at}")))
+                    .cursor_pointer()
+                    .px_3()
+                    .py_1()
+                    .text_sm()
+                    .text_color(rgb(TITLE_COLOR))
+                    .hover(|row| row.bg(rgb(SELECTED_BG)))
+                    .child(label)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.menu = None;
+                        if let Err(error) = this.run_command(command, None, window, cx) {
+                            this.notice = Some(error);
+                        }
+                        cx.notify();
+                    })),
+            );
+        }
+        // A click anywhere else closes it.
+        Some(
+            div()
+                .id("pane-menu")
+                .absolute()
+                .inset_0()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| {
+                        this.menu = None;
+                        cx.notify();
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(|this, _, _, cx| {
+                        this.menu = None;
+                        cx.notify();
+                    }),
+                )
+                .child(list)
+                .into_any_element(),
+        )
+    }
+
+    /// Go to a session's tab, opening one if it has none: a peek of it becomes that tab.
+    fn show_session(&mut self, id: &str, cx: &mut Context<Self>) -> Result<(), String> {
+        let open = match self.panes.get(id) {
+            Some(pane) => pane.open.clone(),
+            None => self
+                .sidebar
+                .read(cx)
+                .session_to_open(id)
+                .ok_or("That session is gone.")?,
+        };
+        if self.peek.as_deref() == Some(id) {
+            self.peek = None;
+        }
+        self.sidebar.update(cx, |sidebar, cx| {
+            sidebar.open(open.host_id, open.session_id, open.provider_id, cx)
+        });
+        Ok(())
+    }
+
+    /// Show a session's terminal over the window without going to it. The shell keeps running; a
+    /// second peek of the same session, or `terminal.park`, puts it away. A session with a tab
+    /// already has its terminal there.
+    fn toggle_peek(&mut self, id: &str, cx: &mut Context<Self>) -> Result<(), String> {
+        if self.peek.as_deref() == Some(id) {
+            self.park_peek(cx);
+            return Ok(());
+        }
+        if self.tabs.contains(id) {
+            return Err("That session is open in a tab; terminal.show goes to it.".into());
+        }
+        let open = self
+            .sidebar
+            .read(cx)
+            .session_to_open(id)
+            .ok_or("That session is gone.")?;
+        self.park_peek(cx);
+        let view = self.attach(&open, cx);
+        self.panes.insert(
+            id.to_string(),
+            Pane {
+                open,
+                view,
+                settle: Settle::default(),
+                retry: None,
+                attempts: 0,
+                closing: None,
+                seen: 0,
+                parked: false,
+            },
+        );
+        self.peek = Some(id.to_string());
+        cx.notify();
+        Ok(())
+    }
+
+    /// Put the peek away: its terminal lets go of the shell, which keeps running. False when
+    /// there was none.
+    fn park_peek(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(id) = self.peek.take() else {
+            return false;
+        };
+        if !self.tabs.contains(&id) {
+            self.panes.remove(&id);
+        }
+        cx.notify();
+        true
+    }
+
+    /// The peek, over the window.
+    fn peek_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let id = self.peek.as_ref()?;
+        let view = self.panes.get(id)?.view.clone();
+        let title = self.title_of(id, cx);
+        let keep = id.clone();
+        let link = |id: &'static str, text: &'static str| {
+            div()
+                .id(id)
+                .cursor_pointer()
+                .text_xs()
+                .text_color(rgb(DIM_COLOR))
+                .child(text)
+        };
+        let body = match view {
+            Some(view) => div().flex_1().min_h_0().child(view),
+            None => div()
+                .flex_1()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_sm()
+                .text_color(rgb(TITLE_COLOR))
+                .child("No core to show this session"),
+        };
+        Some(
+            div()
+                .id("peek")
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| {
+                        this.park_peek(cx);
+                    }),
+                )
+                .child(
+                    div()
+                        .w(relative(0.8))
+                        .h(relative(0.7))
+                        .flex()
+                        .flex_col()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(rgb(OVERLAY_BORDER))
+                        .bg(rgb(SIDEBAR_BG))
+                        .overflow_hidden()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(
+                            div()
+                                .flex()
+                                .justify_between()
+                                .px_3()
+                                .py_1()
+                                .child(div().text_sm().text_color(rgb(TITLE_COLOR)).child(title))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_3()
+                                        .child(link("peek-keep", "Keep as tab").on_click(
+                                            cx.listener(move |this, _, _, cx| {
+                                                let result = this.show_session(&keep, cx);
+                                                this.finish(result, cx);
+                                            }),
+                                        ))
+                                        .child(link("peek-close", "Close").on_click(cx.listener(
+                                            |this, _, _, cx| {
+                                                this.park_peek(cx);
+                                            },
+                                        ))),
+                                ),
+                        )
+                        .child(body),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Zoom every terminal, shown or kept, and say the level.
@@ -1763,7 +2079,12 @@ impl gpui::Render for Workspace {
         // A terminal that attaches takes the keyboard when it first draws; the tab that has it in
         // the layout keeps it.
         if self.palette.is_none() && self.settings.is_none() {
-            if let Some(view) = self.terminal() {
+            let peeked = self
+                .peek
+                .as_ref()
+                .and_then(|id| self.panes.get(id))
+                .and_then(|pane| pane.view.as_ref());
+            if let Some(view) = peeked.or_else(|| self.terminal()) {
                 let handle = view.focus_handle(cx);
                 if !handle.is_focused(window) {
                     window.defer(cx, move |window, cx| handle.focus(window, cx));
@@ -1777,7 +2098,7 @@ impl gpui::Render for Workspace {
         let room = self.room.get();
         for (id, pane) in &mut self.panes {
             let Some(view) = &pane.view else { continue };
-            let on_screen = shown.contains(id);
+            let on_screen = shown.contains(id) || self.peek.as_ref() == Some(id);
             view.update(cx, |view, cx| view.set_visible(on_screen, cx));
             if on_screen {
                 pane.settle.reset();
@@ -1875,8 +2196,13 @@ impl gpui::Render for Workspace {
                     .child(notice.clone()),
             );
         }
-        let overlays = self.palette_view(cx).or_else(|| self.settings_view(cx));
+        let overlays = self
+            .palette_view(cx)
+            .or_else(|| self.settings_view(cx))
+            .into_iter()
+            .chain(self.peek_view(cx));
         div()
+            .relative()
             .flex()
             .size_full()
             .bg(rgb(MAIN_BG))
@@ -1888,6 +2214,8 @@ impl gpui::Render for Workspace {
             }))
             .child(sidebar)
             .child(area.children(overlays))
+            // Over the whole window: it opens where the pointer was, in window coordinates.
+            .children(self.menu_view(cx))
     }
 }
 

@@ -368,6 +368,10 @@ pub const TYPED: &[(&str, Option<&str>)] = &[
     ("terminal.scroll", None),
     ("terminal.takeControl", None),
     ("terminal.kill", None),
+    ("terminal.show", Some("id")),
+    ("terminal.peek", Some("id")),
+    ("terminal.keep", Some("id")),
+    ("terminal.park", None),
 ];
 
 /// A key as a combination of modifiers and one key. `key` is the base key: `]` for both `]` and

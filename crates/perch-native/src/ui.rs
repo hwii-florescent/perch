@@ -176,6 +176,19 @@ impl Sidebar {
         cx.notify();
     }
 
+    /// What opening `session_id` would show, without opening it: the session as the model lists
+    /// it, or `None` when it is not listed.
+    pub fn session_to_open(&self, session_id: &str) -> Option<OpenSession> {
+        let row = self.find_session(session_id)?;
+        Some(OpenSession {
+            host_id: row.host_id.clone(),
+            session_id: session_id.to_string(),
+            title: row.title.clone(),
+            provider_id: row.provider_id.clone(),
+            core_url: self.model.core_url.clone(),
+        })
+    }
+
     /// The session of the model with this id.
     pub fn find_session(&self, id: &str) -> Option<&SessionView> {
         self.model

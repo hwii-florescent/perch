@@ -99,6 +99,9 @@ pub enum TerminalEvent {
     /// A person right-clicked a selection where the Context Bridge is available: the window may
     /// offer "Ask agent about selection…" at this point. Nothing is captured or sent.
     AskAgentOffered(Point<Pixels>),
+    /// A person right-clicked where the pane's program did not take the click (Shift always gets
+    /// here): the window may open its pane menu at this point.
+    MenuAsked(Point<Pixels>),
 }
 
 impl EventEmitter<TerminalEvent> for TerminalView {}
@@ -904,8 +907,11 @@ impl TerminalView {
             }
             // The program has not taken the click (a mouse-reporting program is given the
             // Shift gesture instead): offer the bridge for what is selected.
-            GpuiButton::Right if self.can_ask_agent() => {
-                cx.emit(TerminalEvent::AskAgentOffered(event.position));
+            GpuiButton::Right => {
+                if self.can_ask_agent() {
+                    cx.emit(TerminalEvent::AskAgentOffered(event.position));
+                }
+                cx.emit(TerminalEvent::MenuAsked(event.position));
             }
             _ => {}
         }

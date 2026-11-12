@@ -2185,10 +2185,23 @@ fn context_bridge_offer() {
         h.press(MouseButton::Right, x, y, modifiers);
         h.release(MouseButton::Right, x, y, modifiers);
     };
-    // A selection, but the core has said nothing about the bridge: nothing is offered.
+    let menus = |events: &std::rc::Rc<std::cell::RefCell<Vec<TerminalEvent>>>| {
+        events
+            .borrow()
+            .iter()
+            .filter(|e| matches!(e, TerminalEvent::MenuAsked(_)))
+            .count()
+    };
+    // A selection, but the core has said nothing about the bridge: nothing is offered, and the
+    // window is still asked for its pane menu.
     h.view(|v, cx| v.select_all(cx));
     right_click(&mut h, Modifiers::default());
     assert_eq!(offers(&events), 0, "no capability, no offer");
+    assert_eq!(
+        menus(&events),
+        1,
+        "a right-click the program did not take asks for the menu"
+    );
     assert!(h.view(|v, _| v.context_capture()).is_err());
 
     h.say(FromCore::Capabilities(vec![CAPABILITY.into()]));
@@ -2234,6 +2247,7 @@ fn context_bridge_offer() {
     h.sent();
     right_click(&mut h, Modifiers::default());
     assert_eq!(offers(&events), 1, "the program took the right click");
+    assert_eq!(menus(&events), 4, "and no menu is asked for");
     assert!(!h.sent().is_empty());
     // The click the program took ended the selection, as it does for any click it takes.
     assert!(h.view(|v, _| v.context_capture()).is_err());
@@ -2247,6 +2261,11 @@ fn context_bridge_offer() {
         offers(&events),
         2,
         "Shift-right-click reaches the terminal's own menu"
+    );
+    assert_eq!(
+        menus(&events),
+        5,
+        "Shift-right-click always asks for the pane menu"
     );
     assert_eq!(h.sent(), vec![], "offering and capturing sent nothing");
 }

@@ -4,7 +4,10 @@
 //! the dispatcher that runs before the terminal is what is tested. No window is created, shown or
 //! focused, and no core is involved: the terminals are fed what a core would send.
 
-use gpui::{px, size, AppContext, HeadlessAppContext, Keystroke, Window, WindowHandle};
+use gpui::{
+    point, px, size, AppContext, HeadlessAppContext, Keystroke, Modifiers, MouseButton,
+    MouseDownEvent, MouseUpEvent, PlatformInput, Window, WindowHandle,
+};
 use perch_native::client::Update;
 use perch_native::sidebar::{Attention, Model, State};
 use perch_native::terminal::attach::FromCore;
@@ -60,6 +63,19 @@ struct Shot {
 }
 
 impl Shot {
+    /// Write the picture as `name.png` into `PERCH_NATIVE_SHOT_DIR`, when it is set, to look at.
+    fn save(&self, name: &str) {
+        let Some(dir) = std::env::var_os("PERCH_NATIVE_SHOT_DIR") else {
+            return;
+        };
+        let rows = self.raw.len() / 4 / self.width;
+        let image = image::RgbaImage::from_raw(self.width as u32, rows as u32, self.raw.clone())
+            .expect("the picture is whole");
+        image
+            .save(std::path::Path::new(&dir).join(format!("{name}.png")))
+            .expect("the picture is saved");
+    }
+
     /// Pixels of `color` (within rounding) inside the box `x0..x1`, `y0..y1` (logical pixels).
     fn count(&self, color: u32, x0: f32, x1: f32, y0: f32, y1: f32) -> usize {
         let want = [(color >> 16) as u8, (color >> 8) as u8, color as u8];
@@ -208,6 +224,44 @@ impl Harness {
         self.cx
             .update_window(self.window.into(), |_, window: &mut Window, cx| {
                 window.dispatch_keystroke(keystroke, cx)
+            })
+            .unwrap()
+    }
+
+    /// A click at a window position, through the window's own event dispatch.
+    fn click(&mut self, x: f32, y: f32, button: MouseButton, modifiers: Modifiers) {
+        let position = point(px(x), px(y));
+        self.cx
+            .update_window(self.window.into(), |_, window: &mut Window, cx| {
+                window.dispatch_event(
+                    PlatformInput::MouseDown(MouseDownEvent {
+                        button,
+                        position,
+                        modifiers,
+                        click_count: 1,
+                        first_mouse: false,
+                    }),
+                    cx,
+                );
+                window.dispatch_event(
+                    PlatformInput::MouseUp(MouseUpEvent {
+                        button,
+                        position,
+                        modifiers,
+                        click_count: 1,
+                    }),
+                    cx,
+                );
+            })
+            .unwrap();
+        self.cx.run_until_parked();
+    }
+
+    /// A named command, as a key or the palette runs it.
+    fn run(&mut self, name: &str, args: Value) -> Result<(), String> {
+        self.window
+            .update(&mut self.cx, |ws, window, cx| {
+                ws.run_command(name, Some(&args), window, cx)
             })
             .unwrap()
     }
@@ -796,7 +850,127 @@ fn tabs_out_of_sight_are_parked_beyond_twelve() {
     println!("workspace_render: parked tabs ok");
 }
 
+/// A right-click in a pane opens the pane menu there, a click on an entry runs it on that pane,
+/// and a click elsewhere or any key closes it.
+fn the_pane_menu_opens_on_right_click() {
+    let mut h = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
+    h.open("alpha");
+    h.draw();
+    let (x, y) = (SIDEBAR_WIDTH + 300., 200.);
+    let plain = Modifiers::default();
+    assert_eq!(h.ws(|ws| ws.menu_labels()), None);
+    h.click(x, y, MouseButton::Right, plain);
+    let before = h.draw();
+    before.save("pane-menu");
+    let labels = h.ws(|ws| ws.menu_labels()).expect("the menu is open");
+    assert_eq!(labels[0], "Copy");
+    assert!(labels.contains(&"Split right") && labels.contains(&"Close"));
+    assert!(
+        !labels.contains(&"Stop the terminal"),
+        "a view that cannot stop its shell does not offer to"
+    );
+    assert!(
+        !labels.contains(&"Zoom pane"),
+        "a lone pane has nothing to zoom"
+    );
+    assert!(
+        before.count(0x1c1c1f, x, x + 150., y, y + 100.) > 2000,
+        "the menu is drawn where it was asked"
+    );
+
+    // An entry runs on the pane: Find opens the find bar of that terminal.
+    let find = labels.iter().position(|l| l.starts_with("Find")).unwrap();
+    assert!(!h.view(|v| v.find_open()));
+    h.click(
+        x + 20.,
+        y + 4. + 28. * find as f32 + 14.,
+        MouseButton::Left,
+        plain,
+    );
+    assert_eq!(
+        h.ws(|ws| ws.menu_labels()),
+        None,
+        "choosing closes the menu"
+    );
+    assert!(h.view(|v| v.find_open()), "Find ran on the clicked pane");
+
+    // A click elsewhere closes it without running anything; so does a key (Escape is only that).
+    h.click(x, y, MouseButton::Right, plain);
+    assert!(h.ws(|ws| ws.menu_labels()).is_some());
+    h.click(x + 400., y + 200., MouseButton::Left, plain);
+    assert_eq!(h.ws(|ws| ws.menu_labels()), None);
+    println!("workspace_render: pane menu ok");
+}
+
+/// `terminal.peek` shows a session's terminal over the window with no tab of its own; park puts
+/// it away; keep makes it a tab; show goes to a session's tab, opening one.
+fn a_peek_is_a_terminal_over_the_window() {
+    let mut h = Harness::new(model(&[
+        ("alpha", json!({})),
+        ("bravo", json!({})),
+        ("charlie", json!({})),
+    ]));
+    h.open("alpha");
+    h.draw();
+    let plain = h.draw();
+    h.run("terminal.peek", json!({"id": "bravo"})).unwrap();
+    let peeking = h.draw();
+    peeking.save("peek");
+    assert_eq!(
+        h.ws(|ws| ws.peeked().map(str::to_string)).as_deref(),
+        Some("bravo")
+    );
+    assert_eq!(h.strip(), ["alpha"], "a peek has no tab");
+    assert_ne!(plain.raw, peeking.raw, "the peek is drawn");
+    let shown = h
+        .window
+        .update(&mut h.cx, |ws, _, cx| {
+            ws.view("bravo").map(|v| !v.read(cx).is_hidden())
+        })
+        .unwrap();
+    assert_eq!(shown, Some(true), "its terminal is on screen");
+    // A session with a tab is shown by its tab.
+    assert!(h.run("terminal.peek", json!({"id": "alpha"})).is_err());
+    // Park puts it away; the terminal lets go.
+    h.run("terminal.park", json!({})).unwrap();
+    assert_eq!(h.ws(|ws| ws.peeked().map(str::to_string)), None);
+    assert!(h.ws(|ws| ws.view("bravo").is_none()));
+    assert!(
+        h.run("terminal.park", json!({})).is_err(),
+        "nothing left to put away"
+    );
+    // A second peek of the same session puts it away too.
+    h.run("terminal.peek", json!({"id": "bravo"})).unwrap();
+    h.run("terminal.peek", json!({"id": "bravo"})).unwrap();
+    assert_eq!(h.ws(|ws| ws.peeked().map(str::to_string)), None);
+    // A click outside closes it.
+    h.run("terminal.peek", json!({"id": "bravo"})).unwrap();
+    h.draw();
+    h.click(
+        SIDEBAR_WIDTH + 2.,
+        HEIGHT - 4.,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    assert_eq!(h.ws(|ws| ws.peeked().map(str::to_string)), None);
+    // Keep turns it into a tab and goes there.
+    h.run("terminal.peek", json!({"id": "bravo"})).unwrap();
+    h.run("terminal.keep", json!({"id": "bravo"})).unwrap();
+    assert_eq!(h.ws(|ws| ws.peeked().map(str::to_string)), None);
+    assert_eq!(h.strip(), ["alpha", "bravo"]);
+    assert_eq!(h.active().as_deref(), Some("bravo"));
+    // Show opens a tab for a session that has none, and goes to one that has.
+    h.run("terminal.show", json!({"id": "charlie"})).unwrap();
+    assert_eq!(h.active().as_deref(), Some("charlie"));
+    h.run("terminal.show", json!({"id": "alpha"})).unwrap();
+    assert_eq!(h.active().as_deref(), Some("alpha"));
+    assert!(h.run("terminal.show", json!({"id": "nothing"})).is_err());
+    println!("workspace_render: peek ok");
+}
+
 fn main() {
+    the_pane_menu_opens_on_right_click();
+    a_peek_is_a_terminal_over_the_window();
     tabs_out_of_sight_are_parked_beyond_twelve();
     zoom_scales_the_terminals();
     two_tabs();
