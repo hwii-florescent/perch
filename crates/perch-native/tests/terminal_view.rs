@@ -270,6 +270,13 @@ fn view(core_process: &mut Child, scratch: &Path) {
     h.wait("the arithmetic", |h| {
         h.rows().iter().any(|row| row == "typed-42")
     });
+    // The shell is told what kind of terminal this is.
+    h.type_text("echo env-$TERM-$COLORTERM-$TERM_PROGRAM");
+    h.wait("the terminal environment", |h| {
+        h.rows()
+            .iter()
+            .any(|row| row == "env-xterm-256color-truecolor-perch")
+    });
 
     // The pane's size is the shell's: resizing the window changes what `stty size` reports.
     let (cols, rows) = h.fitted().expect("laid out");
