@@ -45,7 +45,7 @@ while [ $# -gt 0 ]; do
     --build) BUILD=1 ;;
     --apps) APPS=$2; shift ;;
     --states) STATES=$2; shift ;;
-    -h | --help) sed -n '2,27p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,28p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
