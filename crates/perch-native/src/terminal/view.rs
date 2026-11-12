@@ -16,9 +16,11 @@
 //!
 
 use super::attach::{self, AgentInfo, FromCore, Piece, ToCore};
+use super::clipboard::{Clipboard, MemoryClipboard};
 use super::keys::key_bytes_with;
 use super::layout::{self, Fit, Metrics};
 use super::scroll;
+use super::select::{Pointer, Step};
 use super::settings::Settings;
 use super::vt::{
     Cell, Event, Frame, KeyInput, MouseAction, MouseButton, MouseInput, Rgb, Underline, Vt,
@@ -38,6 +40,11 @@ use gpui::{
 use perch_core::iterm_profile::TerminalProfile;
 use perch_core::protocol::SettingsData;
 use std::ops::Range;
+use std::rc::Rc;
+use std::time::Instant;
+
+/// How often a held drag past the grid's edge scrolls.
+const AUTOSCROLL_TICK: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// How long a blinking cursor stays on, and then off.
 const BLINK_HALF_PERIOD: std::time::Duration = std::time::Duration::from_millis(530);
@@ -119,6 +126,13 @@ pub struct TerminalView {
     /// The size last asked of the core. `None`: ask at the next layout.
     requested: Option<(u16, u16)>,
     scrolled: Point<f32>,
+    clipboard: Rc<dyn Clipboard>,
+    /// A left-button drag is selecting text.
+    selecting: bool,
+    /// Where the pointer last was in that drag, for scrolling under a held pointer.
+    drag_at: Option<Point<Pixels>>,
+    _autoscroll: Option<Task<()>>,
+    epoch: Instant,
     /// The blinking cursor is in its visible half.
     blink_on: bool,
     cursor_blinks: bool,
@@ -157,6 +171,11 @@ impl TerminalView {
             requested: None,
             scrolled: Point::default(),
             refit: false,
+            clipboard: Rc::new(MemoryClipboard::default()),
+            selecting: false,
+            drag_at: None,
+            _autoscroll: None,
+            epoch: Instant::now(),
             blink_on: true,
             cursor_blinks: false,
             _blink: cx.spawn(async move |this, cx| loop {
@@ -402,7 +421,13 @@ impl TerminalView {
                     self.title = title.clone();
                     cx.emit(TerminalEvent::Title(title));
                 }
-                Event::ClipboardWrite(text) => cx.emit(TerminalEvent::ClipboardWrite(text)),
+                // The same switch the web reads: a program may set the clipboard unless the
+                // `clipboardWrite` setting is off.
+                Event::ClipboardWrite(text) if self.settings.clipboard_write => {
+                    self.clipboard.write_text(&text, cx);
+                    cx.emit(TerminalEvent::ClipboardWrite(text));
+                }
+                Event::ClipboardWrite(_) => {}
             }
         }
         cx.notify();
@@ -420,6 +445,7 @@ impl TerminalView {
             return;
         }
         self.vt.scroll_to_bottom();
+        self.vt.clear_selection();
         self.blink_on = true;
         self.send(ToCore::Input(bytes));
         cx.notify();
@@ -437,15 +463,21 @@ impl TerminalView {
         repeat: bool,
         cx: &mut Context<Self>,
     ) -> bool {
+        let m = keystroke.modifiers;
+        if m.platform && !m.control && !m.alt && !m.shift {
+            match keystroke.key.as_str() {
+                "v" => return self.paste_clipboard(cx),
+                // With nothing selected the chord is left to the app, as every Command chord is.
+                "c" => return self.copy(cx),
+                "a" => {
+                    self.select_all(cx);
+                    return true;
+                }
+                _ => {}
+            }
+        }
         if !self.can_type() {
             return false;
-        }
-        let m = keystroke.modifiers;
-        if m.platform && keystroke.key == "v" && !m.control && !m.alt {
-            if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                self.paste(&text, cx);
-            }
-            return true;
         }
         match key_bytes_with(&mut self.vt, keystroke, repeat, self.settings.option_as_alt) {
             Some(bytes) => {
@@ -453,6 +485,198 @@ impl TerminalView {
                 true
             }
             None => false,
+        }
+    }
+
+    /// Copy the selection to the clipboard and end it. False, and nothing copied, when there is
+    /// none.
+    pub fn copy(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(text) = self.vt.selection_text() else {
+            return false;
+        };
+        self.clipboard.write_text(&text, cx);
+        self.vt.clear_selection();
+        cx.notify();
+        true
+    }
+
+    /// The text selected, if any.
+    pub fn selection_text(&self) -> Option<String> {
+        self.vt.selection_text()
+    }
+
+    /// Select the whole screen and its history. Copies nothing; [`Self::copy`] does that.
+    pub fn select_all(&mut self, cx: &mut Context<Self>) {
+        self.vt.select_all();
+        cx.notify();
+    }
+
+    pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
+        self.vt.clear_selection();
+        cx.notify();
+    }
+
+    /// Paste the clipboard's text. False when this view cannot type or the clipboard has none.
+    pub fn paste_clipboard(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.can_type() {
+            return false;
+        }
+        match self.clipboard.read_text(cx) {
+            Some(text) => {
+                self.paste(&text, cx);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Where copied and pasted text goes. A view starts with a clipboard of its own, in memory;
+    /// the window gives it the system's.
+    pub fn set_clipboard(&mut self, clipboard: Rc<dyn Clipboard>) {
+        self.clipboard = clipboard;
+    }
+
+    /// Where `position` is in the grid, in the terms the selection gesture takes. Positions
+    /// outside the grid are held to its edge cell.
+    fn pointer(&self, position: Point<Pixels>) -> Option<Pointer> {
+        let fit = self.fitted?;
+        let (cols, rows) = self.vt.size();
+        let local = position - self.origin;
+        let (cw, ch) = (f32::from(fit.metrics.width), f32::from(fit.metrics.height));
+        let cell = |v: f32, size: f32, count: u16| {
+            ((v / size).floor().max(0.0) as u16).min(count.saturating_sub(1))
+        };
+        Some(Pointer {
+            col: cell(f32::from(local.x), cw, cols),
+            row: cell(f32::from(local.y), ch, rows),
+            x: f32::from(local.x).max(0.0) * self.scale,
+            y: f32::from(local.y).max(0.0) * self.scale,
+            cell_width: cw * self.scale,
+            height: ch * f32::from(rows) * self.scale,
+            now_ns: self.epoch.elapsed().as_nanos() as u64 + 1,
+        })
+    }
+
+    /// A mouse button went down in the pane. The program gets it when it takes the mouse
+    /// (ending any selection of ours); otherwise the left button selects, shift extends, and
+    /// the middle button pastes.
+    pub fn mouse_down(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        let taken = self.mouse(
+            MouseAction::Press,
+            Some(event.button),
+            event.position,
+            event.modifiers,
+        );
+        if taken {
+            self.selecting = false;
+            self.vt.clear_selection();
+            cx.notify();
+            return;
+        }
+        match event.button {
+            GpuiButton::Left => {
+                let Some(at) = self.pointer(event.position) else {
+                    return;
+                };
+                if event.modifiers.shift && self.vt.extend_selection(at.col, at.row) {
+                    self.selecting = false;
+                } else {
+                    self.vt.select(Step::Press, at);
+                    self.selecting = true;
+                }
+                cx.notify();
+            }
+            GpuiButton::Middle => {
+                self.paste_clipboard(cx);
+            }
+            _ => {}
+        }
+    }
+
+    /// The pointer moved over the pane: motion for a program that takes the mouse, a drag for
+    /// the selection otherwise.
+    pub fn mouse_moved(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let held = event.pressed_button;
+        if held.is_some() && !self.buttons_down.is_empty() || held.is_none() {
+            if self.mouse(MouseAction::Motion, held, event.position, event.modifiers) {
+                return;
+            }
+        }
+        if self.selecting && held == Some(GpuiButton::Left) {
+            self.drag_to(event.position, cx);
+        }
+    }
+
+    fn drag_to(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(at) = self.pointer(position) else {
+            return;
+        };
+        self.drag_at = Some(position);
+        self.vt.select(Step::Drag, at);
+        // Past the top or bottom edge the viewport scrolls under the held pointer.
+        if self.vt.drag_autoscroll() != 0 && self._autoscroll.is_none() {
+            self._autoscroll = Some(cx.spawn(async move |this, cx| loop {
+                cx.background_executor().timer(AUTOSCROLL_TICK).await;
+                if this
+                    .update(cx, |this, cx| this.autoscroll_step(cx))
+                    .is_err()
+                {
+                    return;
+                }
+            }));
+        }
+        cx.notify();
+    }
+
+    /// Scroll one to five lines toward where a held drag points, and extend the selection to
+    /// the edge. Stops by itself when the drag no longer asks for it.
+    pub fn autoscroll_step(&mut self, cx: &mut Context<Self>) {
+        let direction = self.vt.drag_autoscroll();
+        let (Some(position), true) = (self.drag_at, self.selecting && direction != 0) else {
+            self._autoscroll = None;
+            return;
+        };
+        let Some(fit) = self.fitted else { return };
+        // The farther past the edge, the faster: a line per cell, up to five.
+        let ch = f32::from(fit.metrics.height);
+        let local = f32::from((position - self.origin).y);
+        let past = if direction < 0 {
+            -local
+        } else {
+            local - ch * f32::from(self.vt.size().1)
+        };
+        let lines = ((past / ch).ceil() as isize).clamp(1, 5);
+        self.vt.scroll_viewport(direction as isize * lines);
+        if let Some(at) = self.pointer(position) {
+            self.vt.autoscroll_tick(at);
+        }
+        cx.notify();
+    }
+
+    /// A mouse button came up: the report for a program that took the press, the end of a
+    /// selection otherwise, which copies it when the user's terminal does.
+    pub fn mouse_up(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
+        if self.mouse(
+            MouseAction::Release,
+            Some(event.button),
+            event.position,
+            event.modifiers,
+        ) {
+            return;
+        }
+        if event.button == GpuiButton::Left && std::mem::take(&mut self.selecting) {
+            self._autoscroll = None;
+            self.drag_at = None;
+            if let Some(at) = self.pointer(event.position) {
+                self.vt.select(Step::Release, at);
+            }
+            // The highlight stays; the text is copied as soon as the button is released.
+            if self.settings.copy_on_select {
+                if let Some(text) = self.vt.selection_text() {
+                    self.clipboard.write_text(&text, cx);
+                }
+            }
+            cx.notify();
         }
     }
 
@@ -1004,69 +1228,25 @@ impl gpui::Render for TerminalView {
                 this.scroll_wheel(event, cx);
                 cx.stop_propagation();
             }))
-            .on_mouse_down(
-                GpuiButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                    this.focus.focus(window, cx);
-                    this.mouse(
-                        MouseAction::Press,
-                        Some(event.button),
-                        event.position,
-                        event.modifiers,
-                    );
-                }),
-            )
-            .on_mouse_down(
-                GpuiButton::Middle,
-                cx.listener(|this, event: &MouseDownEvent, _, _| {
-                    this.mouse(
-                        MouseAction::Press,
-                        Some(event.button),
-                        event.position,
-                        event.modifiers,
-                    );
-                }),
-            )
-            .on_mouse_down(
-                GpuiButton::Right,
-                cx.listener(|this, event: &MouseDownEvent, _, _| {
-                    this.mouse(
-                        MouseAction::Press,
-                        Some(event.button),
-                        event.position,
-                        event.modifiers,
-                    );
-                }),
-            )
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, _| {
-                let held = event.pressed_button;
-                if held.is_some() && !this.buttons_down.is_empty() || held.is_none() {
-                    this.mouse(MouseAction::Motion, held, event.position, event.modifiers);
-                }
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                this.mouse_moved(event, cx);
             }));
         for button in [GpuiButton::Left, GpuiButton::Middle, GpuiButton::Right] {
             pane = pane
+                .on_mouse_down(
+                    button,
+                    cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                        this.focus.focus(window, cx);
+                        this.mouse_down(event, cx);
+                    }),
+                )
                 .on_mouse_up(
                     button,
-                    cx.listener(|this, event: &MouseUpEvent, _, _| {
-                        this.mouse(
-                            MouseAction::Release,
-                            Some(event.button),
-                            event.position,
-                            event.modifiers,
-                        );
-                    }),
+                    cx.listener(|this, event: &MouseUpEvent, _, cx| this.mouse_up(event, cx)),
                 )
                 .on_mouse_up_out(
                     button,
-                    cx.listener(|this, event: &MouseUpEvent, _, _| {
-                        this.mouse(
-                            MouseAction::Release,
-                            Some(event.button),
-                            event.position,
-                            event.modifiers,
-                        );
-                    }),
+                    cx.listener(|this, event: &MouseUpEvent, _, cx| this.mouse_up(event, cx)),
                 );
         }
         pane.child(

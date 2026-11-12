@@ -63,6 +63,9 @@ pub struct Settings {
     pub clipboard_write: bool,
     pub option_as_alt: OptionAsAlt,
     pub scrollback: usize,
+    /// Releasing a mouse selection copies it, as iTerm2 does by default. The core has no setting
+    /// for this, so it is the native terminal's own.
+    pub copy_on_select: bool,
 }
 
 impl Default for Settings {
@@ -79,6 +82,7 @@ impl Default for Settings {
             clipboard_write: true,
             option_as_alt: OptionAsAlt::Auto,
             scrollback: DEFAULT_SCROLLBACK as usize,
+            copy_on_select: true,
         }
     }
 }

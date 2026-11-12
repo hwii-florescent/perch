@@ -400,6 +400,12 @@ impl Workspace {
                 view
             }
         });
+        // Only a window that is on screen copies and pastes with the system's clipboard.
+        view.update(cx, |view, _| {
+            view.set_clipboard(std::rc::Rc::new(
+                crate::terminal::clipboard::SystemClipboard,
+            ))
+        });
         self.terminal = Some((open.session_id.clone(), view));
     }
 

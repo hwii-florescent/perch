@@ -9,9 +9,11 @@
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use gpui::{
     point, px, size, AppContext, HeadlessAppContext, KeyDownEvent, Keystroke, Modifiers,
-    ScrollDelta, ScrollWheelEvent, TouchPhase, Window, WindowHandle,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ScrollDelta, ScrollWheelEvent,
+    TouchPhase, Window, WindowHandle,
 };
 use perch_native::terminal::attach::{FromCore, ToCore};
+use perch_native::terminal::clipboard::MemoryClipboard;
 use perch_native::terminal::keys::key_bytes;
 use perch_native::terminal::layout::{MIN_COLS, MIN_FONT_PX};
 
@@ -214,6 +216,68 @@ impl Harness {
         }
     }
 
+    /// Press, drag and release the left button from one cell to another, as the pointer would.
+    /// `(col, row)` is a cell; `frac` where in it (0 left edge, 1 right edge).
+    fn drag(&mut self, from: (usize, usize, f32), to: (usize, usize, f32)) {
+        let (x0, y0) = self.pos(from);
+        let (x1, y1) = self.pos(to);
+        self.press(MouseButton::Left, x0, y0, Modifiers::default());
+        self.view(|v, cx| {
+            v.mouse_moved(
+                &MouseMoveEvent {
+                    position: point(px(x1), px(y1)),
+                    pressed_button: Some(MouseButton::Left),
+                    modifiers: Modifiers::default(),
+                },
+                cx,
+            )
+        });
+        self.release(MouseButton::Left, x1, y1, Modifiers::default());
+    }
+
+    fn pos(&mut self, (col, row, frac): (usize, usize, f32)) -> (f32, f32) {
+        let cell = self.view(|v, _| v.cell_size()).expect("laid out");
+        (
+            PAD_X + (col as f32 + frac) * f32::from(cell.width),
+            PAD_Y + (row as f32 + 0.5) * f32::from(cell.height),
+        )
+    }
+
+    fn press(&mut self, button: MouseButton, x: f32, y: f32, modifiers: Modifiers) {
+        self.view(|v, cx| {
+            v.mouse_down(
+                &MouseDownEvent {
+                    button,
+                    position: point(px(x), px(y)),
+                    modifiers,
+                    click_count: 1,
+                    first_mouse: false,
+                },
+                cx,
+            )
+        });
+    }
+
+    fn release(&mut self, button: MouseButton, x: f32, y: f32, modifiers: Modifiers) {
+        self.view(|v, cx| {
+            v.mouse_up(
+                &MouseUpEvent {
+                    button,
+                    position: point(px(x), px(y)),
+                    modifiers,
+                    click_count: 1,
+                },
+                cx,
+            )
+        });
+    }
+
+    fn click(&mut self, cell: (usize, usize, f32)) {
+        let (x, y) = self.pos(cell);
+        self.press(MouseButton::Left, x, y, Modifiers::default());
+        self.release(MouseButton::Left, x, y, Modifiers::default());
+    }
+
     fn resize(&mut self, width: f32, height: f32) {
         self.cx
             .update_window(self.window.into(), |_, window: &mut Window, cx| {
@@ -262,6 +326,7 @@ fn main() {
         workspace_attaches_the_open_session,
     );
     run("profile_and_settings", profile_and_settings);
+    run("selection_and_clipboard", selection_and_clipboard);
     println!("terminal_render: ok");
 }
 
@@ -333,6 +398,152 @@ fn profile_and_settings() {
         h.view(|v, _| v.fitted_size()).map(|s| s.0),
         Some(((900.0f32 - 40.0) / shot.cell.0 + 0.01).floor() as u16)
     );
+}
+
+/// Selecting with the pointer and the keyboard, copying, pasting, and a program's OSC 52 write,
+/// all against a clipboard of the test's own.
+fn selection_and_clipboard() {
+    let mut h = Harness::open(900., 420.);
+    let clip = std::rc::Rc::new(MemoryClipboard::new(Some("pasted\ntext")));
+    h.view(|v, _| v.set_clipboard(clip.clone()));
+    h.attach(100, 24, "ab   cd\r\nhello world\r\nsecond   line");
+    h.focus();
+    h.draw();
+
+    // A drag selects, shows it, and copies on release; the highlight stays.
+    h.drag((0, 1, 0.1), (4, 1, 0.9));
+    assert_eq!(h.view(|v, _| v.selection_text()).as_deref(), Some("hello"));
+    assert_eq!(clip.text().as_deref(), Some("hello"), "copied on release");
+    // Cells 2-4 of row 0 are blank: select across them and look at the pixels.
+    h.drag((0, 0, 0.1), (6, 0, 0.9));
+    let shot = h.draw();
+    let fg = rgb(0xffffff);
+    let selected = rgb(0x4d4d4d);
+    assert!(
+        near(shot.center(3, 0), selected),
+        "selection colour {:?}",
+        shot.center(3, 0)
+    );
+    assert!(
+        near(shot.center(20, 1), rgb(0)),
+        "other rows are not selected"
+    );
+    assert!(shot.ink(0, 0, 1, selected) > 4, "the text shows over it");
+    let _ = fg;
+
+    // Double click: a word. Triple click: the line. A click elsewhere: nothing.
+    h.click((7, 1, 0.5));
+    h.click((7, 1, 0.5));
+    assert_eq!(h.view(|v, _| v.selection_text()).as_deref(), Some("world"));
+    h.click((7, 1, 0.5));
+    assert_eq!(
+        h.view(|v, _| v.selection_text()).as_deref(),
+        Some("hello world")
+    );
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    h.click((30, 5, 0.5));
+    assert_eq!(h.view(|v, _| v.selection_text()), None);
+
+    // Shift-click moves the end of the selection.
+    h.drag((0, 1, 0.1), (1, 1, 0.9));
+    let (x, y) = h.pos((4, 1, 0.9));
+    h.press(
+        MouseButton::Left,
+        x,
+        y,
+        Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+    );
+    h.release(
+        MouseButton::Left,
+        x,
+        y,
+        Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+    );
+    assert_eq!(h.view(|v, _| v.selection_text()).as_deref(), Some("hello"));
+
+    // The selection survives scrolling through history.
+    let many: String = (0..60).map(|n| format!("row {n}\r\n")).collect();
+    h.output(&many);
+    h.drag((0, 3, 0.1), (3, 3, 0.9));
+    let picked = h.view(|v, _| v.selection_text()).expect("selected");
+    h.view(|v, cx| v.scroll_wheel(&wheel(5.), cx));
+    assert_eq!(h.view(|v, _| v.selection_text()), Some(picked));
+
+    // Select all waits for copy; copy writes the clipboard and ends the selection; typing
+    // clears it.
+    clip.write_text_for_test("old");
+    h.view(|v, cx| v.select_all(cx));
+    assert_eq!(
+        clip.text().as_deref(),
+        Some("old"),
+        "select all copies nothing"
+    );
+    let all = h.view(|v, _| v.selection_text()).unwrap();
+    assert!(
+        all.contains("hello world") && all.contains("row 59"),
+        "history included"
+    );
+    assert!(h.view(|v, cx| v.key_down(&key("cmd-c", None), cx)));
+    assert_eq!(clip.text(), Some(all));
+    assert_eq!(
+        h.view(|v, _| v.selection_text()),
+        None,
+        "copy ends the selection"
+    );
+    assert!(
+        !h.view(|v, cx| v.key_down(&key("cmd-c", None), cx)),
+        "with nothing selected the chord is left to the app"
+    );
+    h.view(|v, cx| v.select_all(cx));
+    h.sent();
+    assert!(h.view(|v, cx| v.key_down(&key("a", Some("a")), cx)));
+    assert_eq!(h.view(|v, _| v.selection_text()), None, "typing clears it");
+    h.sent();
+
+    // Paste: the command key, and a middle click.
+    clip.write_text_for_test("old");
+    assert!(h.view(|v, cx| v.key_down(&key("cmd-v", None), cx)));
+    let (x, y) = h.pos((2, 2, 0.5));
+    h.press(MouseButton::Middle, x, y, Modifiers::default());
+    let pasted: Vec<_> = h
+        .sent()
+        .into_iter()
+        .filter_map(|m| match m {
+            ToCore::Input(bytes) => Some(bytes),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(pasted, vec![b"old".to_vec(), b"old".to_vec()]);
+
+    // A program that takes the mouse gets the click, and our selection ends.
+    h.drag((0, 1, 0.1), (3, 1, 0.9));
+    assert!(h.view(|v, _| v.selection_text()).is_some());
+    h.output("\x1b[?1000h\x1b[?1006h");
+    h.click((0, 1, 0.5));
+    assert_eq!(h.view(|v, _| v.selection_text()), None);
+    assert!(h
+        .sent()
+        .iter()
+        .any(|m| matches!(m, ToCore::Input(b) if b.starts_with(b"\x1b[<0;"))));
+    h.output("\x1b[?1000l");
+
+    // OSC 52: a program sets the clipboard, unless the setting is off. A `?` read gets nothing.
+    h.output("\x1b]52;c;aGk=\x07");
+    assert_eq!(clip.text().as_deref(), Some("hi"));
+    h.output("\x1b]52;c;?\x07");
+    assert!(h.sent().is_empty(), "a program cannot read the clipboard");
+    let mut data: perch_core::protocol::SettingsData =
+        serde_json::from_str(r#"{"theme":"x"}"#).unwrap();
+    data.clipboard_write = false;
+    h.view(|v, cx| v.apply_core(None, Some(data), cx));
+    h.output("\x1b]52;c;bm8=\x07");
+    assert_eq!(clip.text().as_deref(), Some("hi"), "clipboardWrite off");
 }
 
 /// Backgrounds, foregrounds, inverse and the cursor in each shape and focus.

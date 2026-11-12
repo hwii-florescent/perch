@@ -448,6 +448,7 @@ pub struct Vt {
     mouse: g::GhosttyMouseEncoder,
     mouse_event: g::GhosttyMouseEvent,
     last_mouse_report: Vec<u8>,
+    pub(super) gesture: super::select::Gesture,
     cols: u16,
     rows: u16,
     theme: Theme,
@@ -565,6 +566,7 @@ impl Vt {
                 mouse,
                 mouse_event,
                 last_mouse_report: Vec::new(),
+                gesture: super::select::Gesture::new(),
                 cols,
                 rows,
                 theme: Theme::default(),
@@ -573,6 +575,10 @@ impl Vt {
             vt.apply_theme();
             vt
         }
+    }
+
+    pub(super) fn term(&self) -> g::GhosttyTerminal {
+        self.term
     }
 
     pub fn size(&self) -> (u16, u16) {
@@ -1263,6 +1269,7 @@ fn hold_ptr<F: Copy>(callback: Option<F>) -> *const c_void {
 
 impl Drop for Vt {
     fn drop(&mut self) {
+        self.gesture.free(self.term);
         // SAFETY: every handle was created in `new` and is freed once, the render state last
         // because the terminal's callbacks may still name it until the terminal is gone.
         unsafe {
