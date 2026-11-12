@@ -386,6 +386,10 @@ fn main() {
         send_text_types_what_it_is_given,
     );
     run(
+        "editing_keys_step_aside_for_the_real_chord",
+        editing_keys_step_aside_for_the_real_chord,
+    );
+    run(
         "files_and_images_are_sent_before_their_paths_are_typed",
         files_and_images_are_sent_before_their_paths_are_typed,
     );
@@ -1204,6 +1208,45 @@ fn send_text_types_what_it_is_given() {
     let refused = h.view(|v, cx| v.send_text("ls\r", cx));
     assert!(refused.unwrap_err().contains("view only"));
     assert_eq!(typed(&mut h), Vec::<u8>::new());
+}
+
+/// The keymap's editing keys are typed in the legacy keyboard mode and step aside once the program
+/// asks for the real chords (the kitty protocol, modifyOtherKeys), while the find field has the
+/// keys, and in a view that cannot type.
+fn editing_keys_step_aside_for_the_real_chord() {
+    let typed = |h: &mut Harness| -> Vec<Vec<u8>> {
+        h.sent()
+            .into_iter()
+            .filter_map(|m| match m {
+                ToCore::Input(bytes) => Some(bytes),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut h = Harness::open(900., 420.);
+    h.attach(80, 24, "$ ");
+    h.focus();
+    h.draw();
+    h.sent();
+    for text in ["\u{1}", "\u{5}", "\u{15}"] {
+        assert!(h.view(|v, cx| v.send_edit(text, cx)));
+        assert_eq!(typed(&mut h), vec![text.as_bytes().to_vec()]);
+    }
+    for (ask, leave) in [("\x1b[>1u", "\x1b[<u"), ("\x1b[>4;2m", "\x1b[>4;0m")] {
+        h.output(ask);
+        assert!(!h.view(|v, cx| v.send_edit("\u{1}", cx)), "{ask:?}");
+        assert_eq!(typed(&mut h), Vec::<Vec<u8>>::new());
+        h.output(leave);
+        assert!(h.view(|v, cx| v.send_edit("\u{1}", cx)), "{leave:?}");
+        typed(&mut h);
+    }
+    h.view(|v, cx| v.perform(perch_native::terminal::actions::Action::Find, cx));
+    assert!(!h.view(|v, cx| v.send_edit("\u{1}", cx)));
+    h.view(|v, cx| v.key_down(&key("escape", None), cx));
+    h.attach_as(false, true, 80, 24, "$ ");
+    h.sent();
+    assert!(!h.view(|v, cx| v.send_edit("\u{1}", cx)));
+    assert_eq!(typed(&mut h), Vec::<Vec<u8>>::new());
 }
 
 /// On a terminal on another computer, a file dropped with Option held is sent to the core first,

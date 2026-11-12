@@ -8,6 +8,11 @@
 //!    `global`), each key bound to a command (`name` or `name:value`), `send:<text>`, `terminal`
 //!    (the program gets the key) or `{command, args}`. It is read first, so the file wins.
 //!
+//! Last, in a terminal on macOS, the editing keys the web never sends the program (Command with
+//! Left, Right or Backspace go to the app there) are line start, line end and delete to line start
+//! (`LINE_EDITING`, as herdr ships them). A binding above replaces them, and [`Hit::Edit`] is
+//! typed only when the program has not asked for the real chords.
+//!
 //! A key nothing binds goes to the terminal. Nothing here reads the keyboard or runs a command:
 //! [`Keymap::resolve`] names what to run and the window runs it.
 //!
@@ -593,6 +598,16 @@ pub fn effective_spec(
     }
 }
 
+/// The editing keys a terminal gets by default on macOS, in `keys.json`'s notation, and what each
+/// types: readline's line start, line end and delete to line start (herdr's `cmd-left`,
+/// `cmd-right` and `cmd-backspace`). The Option chords are not here: the web sends the program
+/// xterm's own sequence for them, and so does the encoder.
+const LINE_EDITING: [(&str, &str); 3] = [
+    ("cmd-left", "\u{1}"),
+    ("cmd-right", "\u{5}"),
+    ("cmd-backspace", "\u{15}"),
+];
+
 /// What a press means.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Hit {
@@ -600,6 +615,9 @@ pub enum Hit {
     Run { name: String, args: Option<Value> },
     /// Type this text into the focused terminal (`send:<text>` in `keys.json`).
     Send(String),
+    /// A default editing key: type this text unless the program asked for the real chord (the
+    /// kitty keyboard protocol or modifyOtherKeys), which only the terminal can tell.
+    Edit(&'static str),
     /// `keys.json` says the program gets this key.
     Terminal,
     /// A binding in `keys.json` that cannot run. The press is swallowed and this says why.
@@ -718,6 +736,16 @@ impl Keymap {
             .map(|s| Hit::Run {
                 name: s.id.to_string(),
                 args: None,
+            })
+            .or_else(|| {
+                LINE_EDITING
+                    .iter()
+                    .find(|(spec, _)| {
+                        self.mac
+                            && context.in_terminal
+                            && parse_chord(spec).is_some_and(|c| matches(&c, keystroke))
+                    })
+                    .map(|(_, text)| Hit::Edit(text))
             })
     }
 
@@ -990,6 +1018,53 @@ mod tests {
             m.resolve(&press("ctrl-shift-x"), IN_TERMINAL)
                 .map(|h| matches!(h, Hit::Run { .. })),
             Some(true)
+        );
+    }
+
+    #[test]
+    fn the_editing_keys_are_a_mac_default_that_any_binding_replaces() {
+        let m = keymap(&[], None);
+        for (chord, text) in [
+            ("cmd-left", "\u{1}"),
+            ("cmd-right", "\u{5}"),
+            ("cmd-backspace", "\u{15}"),
+        ] {
+            assert_eq!(m.resolve(&press(chord), IN_TERMINAL), Some(Hit::Edit(text)));
+            // Only a terminal has them, and only on a Mac.
+            assert_eq!(m.resolve(&press(chord), Context::default()), None);
+            assert_eq!(
+                keymap(&[], None)
+                    .with_platform(false)
+                    .resolve(&press(chord), IN_TERMINAL),
+                None
+            );
+        }
+        // Another modifier is another chord.
+        assert_eq!(m.resolve(&press("cmd-shift-left"), IN_TERMINAL), None);
+        assert_eq!(m.resolve(&press("alt-left"), IN_TERMINAL), None);
+        // keys.json replaces them, in either section, and `terminal` hands the key to the program.
+        let file = json!({
+            "terminal": {"cmd-left": "send:\u{1b}b", "cmd-right": "terminal"},
+            "global": {"cmd-backspace": "send:x"},
+        });
+        let m = keymap(&[], Some(file));
+        assert_eq!(
+            m.resolve(&press("cmd-left"), IN_TERMINAL),
+            Some(Hit::Send("\u{1b}b".into()))
+        );
+        assert_eq!(
+            m.resolve(&press("cmd-right"), IN_TERMINAL),
+            Some(Hit::Terminal)
+        );
+        assert_eq!(
+            m.resolve(&press("cmd-backspace"), IN_TERMINAL),
+            Some(Hit::Send("x".into()))
+        );
+        // A command a person puts on the key wins too.
+        let m = keymap(&[("terminal.scrollTop", "cmd+left")], None);
+        assert_eq!(
+            run(m.resolve(&press("cmd-left"), IN_TERMINAL)),
+            "terminal.scrollTop"
         );
     }
 

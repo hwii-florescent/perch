@@ -675,6 +675,42 @@ fn keys_json_and_chosen_keys_rule() {
     println!("workspace_render: keys ok");
 }
 
+/// The Command editing keys go through the window to the focused shell as typed bytes, unless
+/// the program asked for the real chords or keys.json binds the key.
+fn editing_keys_reach_the_shell_through_the_window() {
+    let mut keyed = model(&[("alpha", json!({}))]);
+    keyed.keys_file = Some(json!({"terminal": {"cmd-backspace": "send:gone"}}));
+    let mut h = Harness::new(keyed);
+    h.open("alpha");
+    h.draw();
+    let (mut rx, core) = h.live();
+    let typed = |rx: &mut UnboundedReceiver<ToCore>| -> Vec<Vec<u8>> {
+        asked(rx)
+            .into_iter()
+            .filter_map(|m| match m {
+                ToCore::Input(bytes) => Some(bytes),
+                _ => None,
+            })
+            .collect()
+    };
+    typed(&mut rx);
+    assert!(h.press("cmd-left"));
+    assert!(h.press("cmd-right"));
+    assert!(h.press("cmd-backspace"));
+    assert_eq!(
+        typed(&mut rx),
+        vec![b"\x01".to_vec(), b"\x05".to_vec(), b"gone".to_vec()],
+        "keys.json replaces one of the three"
+    );
+    // The program asks for the kitty keyboard protocol: the keys are its to see, and the app has
+    // nothing to send for a Command chord.
+    core.unbounded_send(FromCore::Output("\x1b[>1u".into()))
+        .unwrap();
+    h.cx.run_until_parked();
+    assert!(!h.press("cmd-left"));
+    assert_eq!(typed(&mut rx), Vec::<Vec<u8>>::new());
+}
+
 fn terminal_commands_run_from_keys_and_the_palette() {
     let mut keyed = model(&[("alpha", json!({}))]);
     keyed
@@ -1442,6 +1478,7 @@ fn main() {
     the_palette_lists_and_runs_commands();
     terminal_settings_show_what_the_core_sent();
     keys_json_and_chosen_keys_rule();
+    editing_keys_reach_the_shell_through_the_window();
     terminal_commands_run_from_keys_and_the_palette();
     kept_tabs_are_hidden_not_dropped();
     println!("workspace_render: ok");

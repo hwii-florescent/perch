@@ -8,7 +8,10 @@
 // the web terminal. See THIRD_PARTY_NOTICES.md.
 
 //! What a GPUI key press sends the program: the key described to the encoder in
-//! [`super::vt`], which encodes it once, in the mode the program asked for.
+//! [`super::vt`], which encodes it once, in the mode the program asked for. A Command chord is the
+//! app's and encodes to nothing; the keymap's default editing keys (line start, line end, delete
+//! to line start) stand in for the ones the web leaves the program, and [`expects_real_chords`]
+//! says when the program wants the chords themselves instead.
 
 use super::settings::OptionAsAlt;
 use super::vt::{KeyInput, Vt};
@@ -141,8 +144,18 @@ fn control_alias_bytes(
     shifted: bool,
     legacy: Vec<u8>,
 ) -> Vec<u8> {
-    // libghostty has no getter for modifyOtherKeys. Probe with printable base text so its
-    // encoder keeps the chord when the program asked for CSI 27.
+    modify_other_keys_chord(vt, key, text, shifted).unwrap_or(legacy)
+}
+
+/// The chord Ctrl+`key` as the program wants it when it asked for modifyOtherKeys (CSI 27), else
+/// `None`. libghostty has no getter for that mode, so probe with printable base text: its
+/// encoder keeps the chord only in that mode.
+fn modify_other_keys_chord(
+    vt: &mut Vt,
+    key: g::GhosttyKey,
+    text: &str,
+    shifted: bool,
+) -> Option<Vec<u8>> {
     let mods = g::GHOSTTY_MODS_CTRL as g::GhosttyMods
         | if shifted {
             g::GHOSTTY_MODS_SHIFT as g::GhosttyMods
@@ -154,11 +167,15 @@ fn control_alias_bytes(
         unshifted: text.chars().next(),
         ..plain(key, mods)
     });
-    if encoded.starts_with(b"\x1b[27;") {
-        encoded
-    } else {
-        legacy
-    }
+    encoded.starts_with(b"\x1b[27;").then_some(encoded)
+}
+
+/// Whether the program asked for the real chords, by the kitty keyboard protocol or
+/// modifyOtherKeys. The editing keys the keymap ships (line start and end, delete to line start)
+/// step aside then: the program tells those chords apart and gets them.
+pub fn expects_real_chords(vt: &mut Vt) -> bool {
+    vt.kitty_keyboard_flags() != 0
+        || modify_other_keys_chord(vt, g::GHOSTTY_KEY_A, "a", false).is_some()
 }
 
 /// A GPUI key name as the encoder's key, whether Shift is implied by the name (`:` is shifted
@@ -359,6 +376,40 @@ mod tests {
         assert_eq!(sent(&mut vt, "alt-left"), b"\x1b[1;3D");
         assert_eq!(key_bytes(&mut vt, &stroke("cmd-c"), false), None);
         assert_eq!(key_bytes(&mut vt, &stroke("cmd-v"), false), None);
+    }
+
+    #[test]
+    fn word_motion_keys_send_what_the_web_terminal_sends() {
+        // xterm.js on macOS: Option with Left, Right and Backspace are its modified keys, which
+        // the encoder spells the same; the Command chords are the app's and send nothing.
+        let mut vt = Vt::new(80, 24);
+        assert_eq!(sent(&mut vt, "alt-left"), b"\x1b[1;3D");
+        assert_eq!(sent(&mut vt, "alt-right"), b"\x1b[1;3C");
+        assert_eq!(sent(&mut vt, "alt-backspace"), b"\x1b\x7f");
+        for chord in ["cmd-left", "cmd-right", "cmd-backspace"] {
+            assert_eq!(key_bytes(&mut vt, &stroke(chord), false), None, "{chord}");
+        }
+        // A negotiated keyboard mode changes the spelling, as it does in the web terminal.
+        vt.write(b"\x1b[>1u");
+        assert_eq!(sent(&mut vt, "alt-left"), b"\x1b[1;3D");
+        assert_eq!(sent(&mut vt, "alt-backspace"), b"\x1b[127;3u");
+    }
+
+    #[test]
+    fn the_program_asking_for_real_chords_is_told_apart() {
+        let mut vt = Vt::new(80, 24);
+        assert!(!expects_real_chords(&mut vt));
+        // modifyOtherKeys level 1 leaves control letters as they are.
+        vt.write(b"\x1b[>4;1m");
+        assert!(!expects_real_chords(&mut vt));
+        vt.write(b"\x1b[>4;2m");
+        assert!(expects_real_chords(&mut vt));
+        vt.write(b"\x1b[>4;0m");
+        assert!(!expects_real_chords(&mut vt));
+        vt.write(b"\x1b[>1u");
+        assert!(expects_real_chords(&mut vt));
+        vt.write(b"\x1b[<u");
+        assert!(!expects_real_chords(&mut vt));
     }
 
     #[test]

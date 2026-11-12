@@ -644,6 +644,10 @@ impl Workspace {
                 }
                 true
             }
+            // Where the program wants the real chord, the key goes down to it as any other.
+            Hit::Edit(text) => self
+                .focused_terminal(window, cx)
+                .is_some_and(|(_, view)| view.update(cx, |view, cx| view.send_edit(text, cx))),
             Hit::Terminal => false,
             Hit::Fault(error) => {
                 self.notice = Some(format!("keys.json: {error}"));

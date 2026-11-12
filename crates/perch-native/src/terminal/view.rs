@@ -24,7 +24,7 @@ use super::clipboard::{self, Clipboard, MemoryClipboard};
 use super::context::{self, Capture};
 use super::fallback;
 use super::graphics::Layer;
-use super::keys::key_bytes_with;
+use super::keys::{expects_real_chords, key_bytes_with};
 use super::layout::{self, Fit, Metrics};
 use super::links::{self, Target};
 use super::scroll;
@@ -396,6 +396,18 @@ impl TerminalView {
         }
         self.type_bytes(text.as_bytes().to_vec(), cx);
         Ok(())
+    }
+
+    /// Type a default editing key's `text` (the keymap's line start, line end, delete to line
+    /// start). False, typing nothing, when the program asked for the real chord (the kitty
+    /// keyboard protocol or modifyOtherKeys), when the find field has the keys, or when this view
+    /// cannot type.
+    pub fn send_edit(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
+        let typed = !self.find.open && self.can_type() && !expects_real_chords(&mut self.vt);
+        if typed {
+            self.type_bytes(text.as_bytes().to_vec(), cx);
+        }
+        typed
     }
 
     /// A view that attaches `open`'s session in `core` when its pane first has a size, and takes
