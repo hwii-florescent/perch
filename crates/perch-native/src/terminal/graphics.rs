@@ -320,6 +320,25 @@ fn virtual_geometry(
     })
 }
 
+/// The longest side of a PNG a program may send, in pixels.
+const MAX_IMAGE_SIDE: u32 = 4096;
+/// The most memory decoding one PNG may take.
+const MAX_IMAGE_ALLOC: u64 = 64 << 20;
+
+/// A PNG from a program's output as 8-bit RGBA, or `None` for one that is not a PNG, is damaged,
+/// or is larger than [`MAX_IMAGE_SIDE`] or needs more than [`MAX_IMAGE_ALLOC`] to decode. The
+/// bytes are untrusted, so the size is checked from the header, before any pixels are allocated.
+fn decode_rgba(bytes: &[u8]) -> Option<image::RgbaImage> {
+    let mut reader =
+        image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Png);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_IMAGE_SIDE);
+    limits.max_image_height = Some(MAX_IMAGE_SIDE);
+    limits.max_alloc = Some(MAX_IMAGE_ALLOC);
+    reader.limits(limits);
+    Some(reader.decode().ok()?.to_rgba8())
+}
+
 /// PNG decoding for kitty graphics: libghostty-vt leaves it to the embedder. Everything is
 /// handed back as 8-bit RGBA.
 unsafe extern "C" fn decode_png(
@@ -331,10 +350,9 @@ unsafe extern "C" fn decode_png(
 ) -> bool {
     // SAFETY: Ghostty passes a buffer of `len` bytes.
     let bytes = unsafe { std::slice::from_raw_parts(data, len) };
-    let Ok(decoded) = image::load_from_memory_with_format(bytes, image::ImageFormat::Png) else {
+    let Some(rgba) = decode_rgba(bytes) else {
         return false;
     };
-    let rgba = decoded.to_rgba8();
     let (width, height) = rgba.dimensions();
     let pixels = rgba.into_raw();
     // SAFETY: the allocation is Ghostty's, sized for the copy, and handed back as the image.
@@ -713,6 +731,36 @@ mod tests {
             columns: 4,
             rows: 2,
         }
+    }
+
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        use image::ImageEncoder;
+        let pixels = vec![200u8; (width * height * 4) as usize];
+        let mut bytes = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut bytes)
+            .write_image(&pixels, width, height, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        bytes
+    }
+
+    #[test]
+    fn a_png_decodes_unless_it_is_too_large_or_not_a_png() {
+        let image = decode_rgba(&png(3, 2)).expect("a small PNG");
+        assert_eq!(image.dimensions(), (3, 2));
+        assert_eq!(image.get_pixel(1, 1).0, [200; 4]);
+        let wide = decode_rgba(&png(MAX_IMAGE_SIDE, 1)).expect("as wide as allowed");
+        assert_eq!(wide.dimensions(), (MAX_IMAGE_SIDE, 1));
+        // These are tiny files (a few KB) that would need over a gigabyte of pixels.
+        assert!(
+            decode_rgba(&png(MAX_IMAGE_SIDE + 1, 1)).is_none(),
+            "too wide"
+        );
+        assert!(
+            decode_rgba(&png(1, MAX_IMAGE_SIDE + 1)).is_none(),
+            "too tall"
+        );
+        assert!(decode_rgba(b"not a png").is_none());
+        assert!(decode_rgba(&png(3, 2)[..30]).is_none(), "cut short");
     }
 
     #[test]
