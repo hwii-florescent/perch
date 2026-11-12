@@ -232,6 +232,8 @@ modified files carry a header saying so.
   `src/vt.rs` and `src/links.rs`): the selection gesture model, the on-screen and
   scrollback search, and link detection. Perch's versions take the click time from
   the caller, report search progress, and find links with a scanner of their own.
+- `crates/perch-native/src/terminal/scrollbar.rs` (from `src/terminal.rs`): the
+  thumb, lane and drag arithmetic of the scrollbar.
 - `crates/perch-native/src/terminal/sprites.rs` (from `src/sprites.rs`): box
   drawing, block, braille and powerline characters drawn as shapes that fit their
   cell. Only the formatting and the module path differ.

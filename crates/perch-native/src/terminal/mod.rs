@@ -8,6 +8,7 @@ pub mod keys;
 pub mod layout;
 pub mod links;
 pub mod scroll;
+pub mod scrollbar;
 pub mod search;
 pub mod select;
 pub mod settings;

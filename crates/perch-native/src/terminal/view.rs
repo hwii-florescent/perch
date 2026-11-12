@@ -22,6 +22,7 @@ use super::keys::key_bytes_with;
 use super::layout::{self, Fit, Metrics};
 use super::links::{self, Target};
 use super::scroll;
+use super::scrollbar;
 use super::select::{Pointer, Step};
 use super::settings::Settings;
 use super::sprites;
@@ -123,6 +124,15 @@ struct Painted {
     link: Vec<(u16, u16, u16)>,
     /// The composition: its text, the cell it starts at, and the cells it covers.
     marked: Option<(String, u16, u16, usize)>,
+    /// The scrollbar's rail and thumb.
+    bar: Option<(Bounds<Pixels>, Bounds<Pixels>)>,
+}
+
+/// Where the scrollbar is, for clicks: its strip and the thumb in it.
+#[derive(Clone, Copy)]
+struct BarHit {
+    lane: Bounds<Pixels>,
+    thumb: Bounds<Pixels>,
 }
 
 pub struct TerminalView {
@@ -157,6 +167,9 @@ pub struct TerminalView {
     last_pointer: Option<Point<Pixels>>,
     /// The terminal's folder when the shell has not said (OSC 7), for relative file links.
     cwd: Option<std::path::PathBuf>,
+    /// The scrollbar as last drawn, and where in its thumb a drag holds it.
+    bar: Option<BarHit>,
+    bar_grab: Option<f32>,
     /// Text an input method is composing, drawn at the cursor and not yet sent.
     marked: Option<String>,
     /// The pane is not on screen: it holds no focus and draws nothing.
@@ -211,6 +224,8 @@ impl TerminalView {
             hover_link: None,
             last_pointer: None,
             cwd: None,
+            bar: None,
+            bar_grab: None,
             marked: None,
             hidden: false,
             find: Find::default(),
@@ -612,6 +627,9 @@ impl TerminalView {
     /// (ending any selection of ours); otherwise the left button selects, shift extends, and
     /// the middle button pastes.
     pub fn mouse_down(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        if event.button == GpuiButton::Left && self.bar_press(event.position, cx) {
+            return;
+        }
         // The link key and a click on a link opens it: no selection, no report to the program.
         if event.button == GpuiButton::Left
             && Self::link_key(event.modifiers)
@@ -654,6 +672,14 @@ impl TerminalView {
     /// The pointer moved over the pane: motion for a program that takes the mouse, a drag for
     /// the selection otherwise.
     pub fn mouse_moved(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if self.bar_grab.is_some() {
+            if event.pressed_button == Some(GpuiButton::Left) {
+                self.bar_drag(event.position.y, cx);
+            } else {
+                self.bar_grab = None;
+            }
+            return;
+        }
         self.update_hover(Some(event.position), event.modifiers, cx);
         let held = event.pressed_button;
         if (held.is_some() && !self.buttons_down.is_empty() || held.is_none())
@@ -715,6 +741,9 @@ impl TerminalView {
     /// A mouse button came up: the report for a program that took the press, the end of a
     /// selection otherwise, which copies it when the user's terminal does.
     pub fn mouse_up(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
+        if self.bar_grab.take().is_some() {
+            return;
+        }
         if self.mouse(
             MouseAction::Release,
             Some(event.button),
@@ -1193,6 +1222,8 @@ impl TerminalView {
                 ));
             }
         }
+        let bar = self.scrollbar_geometry(bounds, fit.metrics);
+        self.bar = bar.map(|(hit, _)| hit);
         let frame = self.vt.frame();
         let frame_cursor_cell = frame.cursor_cell;
         self.cursor_cell = frame.cursor_cell;
@@ -1219,7 +1250,86 @@ impl TerminalView {
                     let cells = text_width(&text);
                     (text, x, y, cells)
                 }),
+            bar: bar.map(|(_, drawn)| drawn),
         }
+    }
+
+    /// The scrollbar, when there is history to scroll on the primary screen of a pane wide
+    /// enough for it, and the setting is on: its strip and thumb for clicks, and the rail and
+    /// thumb as drawn.
+    #[allow(clippy::type_complexity)]
+    fn scrollbar_geometry(
+        &self,
+        bounds: Bounds<Pixels>,
+        metrics: Metrics,
+    ) -> Option<(BarHit, (Bounds<Pixels>, Bounds<Pixels>))> {
+        let (cols, rows) = self.vt.size();
+        if !self.settings.scrollbar || self.vt.alt_screen() || cols < scrollbar::MIN_COLS {
+            return None;
+        }
+        let bar = self.vt.scrollbar();
+        let track = f32::from(metrics.height) * f32::from(rows);
+        let min = f32::from(metrics.height);
+        let (top, len) = scrollbar::thumb(bar.total, bar.offset, bar.len, track, min)?;
+        let lane = scrollbar::lane(
+            bounds,
+            self.origin,
+            metrics.width * f32::from(cols),
+            px(track),
+        );
+        let width = px(4.0);
+        let x = lane.origin.x + lane.size.width - width - px(2.0);
+        let rail = Bounds::new(
+            point(x + width / 2.0 - px(0.5), self.origin.y),
+            size(px(1.0), px(track)),
+        );
+        let thumb = Bounds::new(point(x, self.origin.y + px(top)), size(width, px(len)));
+        let hit = Bounds::new(
+            point(lane.origin.x, thumb.origin.y),
+            size(lane.size.width, thumb.size.height),
+        );
+        Some((BarHit { lane, thumb: hit }, (rail, thumb)))
+    }
+
+    /// The row the thumb lands the view on when it is held `grab` px from its top and the
+    /// pointer is at `y`.
+    fn bar_row(&self, lane: Bounds<Pixels>, grab: f32, y: Pixels) -> usize {
+        let bar = self.vt.scrollbar();
+        let track = f32::from(lane.size.height);
+        let min = track / f32::from(self.vt.size().1.max(1));
+        let top = f32::from(y - lane.origin.y) - grab;
+        scrollbar::row_at(bar.total, bar.len, track, min, top)
+    }
+
+    /// A press on the scrollbar: grab the thumb where it was pressed, or centre it on the
+    /// pointer when the press was on the track beside it. True when the press was on the bar.
+    fn bar_press(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) -> bool {
+        let Some(hit) = self.bar else { return false };
+        if !hit.lane.contains(&position) {
+            return false;
+        }
+        let grab = scrollbar::grab_at(
+            f32::from(hit.thumb.origin.y),
+            f32::from(hit.thumb.size.height),
+            f32::from(position.y),
+        );
+        self.bar_grab = Some(grab);
+        if !hit.thumb.contains(&position) {
+            let row = self.bar_row(hit.lane, grab, position.y);
+            self.vt.scroll_to_row(row);
+        }
+        cx.notify();
+        true
+    }
+
+    /// A drag of the thumb.
+    fn bar_drag(&mut self, y: Pixels, cx: &mut Context<Self>) {
+        let (Some(hit), Some(grab)) = (self.bar, self.bar_grab) else {
+            return;
+        };
+        let row = self.bar_row(hit.lane, grab, y);
+        self.vt.scroll_to_row(row);
+        cx.notify();
     }
 
     /// What the pane says about the session when it is not simply showing the shell, in the
@@ -1493,6 +1603,7 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
         blink_on,
         link,
         marked,
+        bar,
     } = painted;
     // ponytail: opacity is applied per colour, not to the pane as a group like the web's CSS
     // opacity, so text over a cell background shows the background through it twice.
@@ -1532,6 +1643,16 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
             let run = Bounds::new(at(start, y), size(cw * (x - start) as f32, ch));
             window.paint_quad(fill(snap_box(run), col(bg)));
         }
+    }
+
+    // The scrollbar: a thin rail and a thumb, over the padding.
+    if let Some((rail, thumb)) = bar {
+        let mut rail_color = color(frame.fg);
+        rail_color.a = 0.2 * opacity;
+        window.paint_quad(fill(snap_box(rail), rail_color));
+        let mut thumb_color = color(frame.fg);
+        thumb_color.a = 0.45 * opacity;
+        window.paint_quad(fill(snap_box(thumb), thumb_color).corner_radii(px(2.0)));
     }
 
     // Matches of the search: a tint over the cells, brighter on the one navigation is on.

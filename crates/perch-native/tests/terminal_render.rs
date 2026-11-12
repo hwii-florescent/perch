@@ -336,6 +336,7 @@ fn main() {
     run("links_in_the_pane", links_in_the_pane);
     run("input_method_composition", input_method_composition);
     run("stress_screen", || stress_screen(bg, fg));
+    run("scrollbar_in_the_pane", scrollbar_in_the_pane);
     run("ownership_and_named_actions", ownership_and_named_actions);
     run(
         "x10_mouse_reports_past_the_text_range",
@@ -1756,4 +1757,114 @@ fn stress_screen(bg: [u8; 3], fg: [u8; 3]) {
     // The cursor sits after the last character, drawn as the focused block.
     let (x, y) = mid(10, 14);
     assert!(differs(shot.at(x, y), bg), "the cursor block");
+}
+
+/// The scrollbar: a thumb at the right edge that shows where the view is in the history, can be
+/// grabbed and dragged or jumped by clicking the track, and is hidden when it cannot help.
+fn scrollbar_in_the_pane() {
+    use perch_core::protocol::SettingsData;
+    use perch_native::terminal::actions::{Action, Scroll};
+    let mut h = Harness::open(900., 420.);
+    h.attach(100, 24, "");
+    h.focus();
+    h.draw();
+    let bg = h.draw().at(450., 300.);
+    // Nothing to scroll: no bar.
+    assert_eq!(h.draw().at(896., 200.), bg, "no history, no scrollbar");
+    for line in 0..80 {
+        h.output(&format!("history {line}\r\n"));
+    }
+    let x = 900. - 4.;
+    let thumb = |shot: &Shot, y: f32| shot.at(x, y)[0] > 90;
+    let shot = h.draw();
+    let track = shot.cell.1 * 24.0;
+    assert!(
+        thumb(&shot, track - 20.),
+        "the thumb is at the bottom on the live screen"
+    );
+    assert!(!thumb(&shot, 100.), "and not at the top");
+    assert!(
+        differs(shot.at(x, 100.), bg),
+        "the rail runs the whole height"
+    );
+    h.sent();
+    let first = |h: &mut Harness| h.view(|v, _| v.frame().row_text(0));
+    let live = first(&mut h);
+
+    // A click on the track jumps there; the program (no mouse mode here) hears nothing.
+    h.press(MouseButton::Left, x, 100., Modifiers::default());
+    h.release(MouseButton::Left, x, 100., Modifiers::default());
+    let jumped = first(&mut h);
+    assert_ne!(jumped, live, "the click scrolled");
+    let shot = h.draw();
+    assert!(thumb(&shot, 100.), "the thumb is under the pointer");
+    assert!(
+        h.view(|v, _| v.selection_text()).is_none(),
+        "a click on the bar selects nothing"
+    );
+    assert_eq!(h.sent(), vec![]);
+
+    // A drag of the thumb follows the pointer to the ends.
+    h.press(MouseButton::Left, x, 100., Modifiers::default());
+    for y in [60., 20., 0.] {
+        h.view(|v, cx| {
+            v.mouse_moved(
+                &MouseMoveEvent {
+                    position: point(px(x), px(y)),
+                    pressed_button: Some(MouseButton::Left),
+                    modifiers: Modifiers::default(),
+                },
+                cx,
+            )
+        });
+    }
+    h.release(MouseButton::Left, x, 0., Modifiers::default());
+    assert_eq!(
+        first(&mut h),
+        "history 0",
+        "dragged to the top of the history"
+    );
+    h.press(MouseButton::Left, x, 100., Modifiers::default());
+    h.view(|v, cx| {
+        v.mouse_moved(
+            &MouseMoveEvent {
+                position: point(px(x), px(track - 1.)),
+                pressed_button: Some(MouseButton::Left),
+                modifiers: Modifiers::default(),
+            },
+            cx,
+        )
+    });
+    h.release(MouseButton::Left, x, track - 1., Modifiers::default());
+    assert_eq!(first(&mut h), live, "dragged to the bottom");
+
+    // Hidden on the alternate screen, with the setting off, and where the pane is too narrow.
+    h.output("\x1b[?1049h");
+    assert!(
+        !thumb(&h.draw(), track - 20.),
+        "no bar on the alternate screen"
+    );
+    h.output("\x1b[?1049l");
+    assert!(thumb(&h.draw(), track - 20.));
+    h.attach(4, 24, &"x\r\n".repeat(60));
+    assert!(
+        !thumb(&h.draw(), track - 20.),
+        "no room for a bar in a pane of four columns"
+    );
+    h.attach(100, 24, &"y\r\n".repeat(60));
+    assert!(thumb(&h.draw(), track - 20.));
+    let live = first(&mut h);
+    let mut data: SettingsData = serde_json::from_str(r#"{"theme":"x"}"#).unwrap();
+    data.pane_scrollbars = false;
+    h.view(|v, cx| v.apply_core(None, Some(data), cx));
+    assert!(!thumb(&h.draw(), track - 20.), "the setting turns it off");
+    h.press(MouseButton::Left, x, 100., Modifiers::default());
+    h.release(MouseButton::Left, x, 100., Modifiers::default());
+    assert_eq!(
+        first(&mut h),
+        live,
+        "a click where the bar was does not scroll"
+    );
+    h.view(|v, cx| v.perform(Action::Scroll(Scroll::Top), cx));
+    assert_eq!(first(&mut h), "history 0");
 }
