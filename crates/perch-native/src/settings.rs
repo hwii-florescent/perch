@@ -50,6 +50,8 @@ pub struct TerminalSettings {
     pub sound_blocked: String,
     /// `off`, `app` or `system`.
     pub toast_delivery: String,
+    /// Closing an agent's tab asks first.
+    pub warn_close_agent: bool,
 }
 
 impl TerminalSettings {
@@ -68,6 +70,7 @@ impl TerminalSettings {
             sound_done: settings.sound_done.clone(),
             sound_blocked: settings.sound_blocked.clone(),
             toast_delivery: settings.toast_delivery.clone(),
+            warn_close_agent: settings.warn_close_agent,
         }
     }
 }

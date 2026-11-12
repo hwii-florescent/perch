@@ -556,6 +556,12 @@ impl TerminalView {
             && self.input_lease
     }
 
+    /// Whether this view is attached to a session another view controls: it holds no input
+    /// lease, so closing it must leave the session running (the web's `isWatchingAgent`).
+    pub fn watching(&self) -> bool {
+        self.to_core.is_some() && self.status == Status::Live && !self.input_lease
+    }
+
     /// Ask the core to end the session and delete it, over this view's own connection, which
     /// holds the keyboard. Nothing happens here until the core answers with
     /// [`TerminalEvent::Ended`] or [`TerminalEvent::EndRefused`]. False, asking nothing, when the

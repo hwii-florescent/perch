@@ -2,8 +2,7 @@
 //! perch-core: a shell that ended before anyone attached, and a core that drops and returns while
 //! the shell keeps running in the terminal daemon.
 //!
-//! Closing a tab ends a plain terminal only when the core confirms it, and says so when it does
-//! not.
+//! Closing a tab ends its session only when the core confirms it, and says so when it does not.
 //!
 //! The core and the teardown are in `common`. Plain shells only; no agent runs.
 
@@ -140,8 +139,8 @@ fn a_shell_that_ended_before_attach(rig: &Rig, h: &mut Harness, id: &str) {
         alive_before,
         "no shell was started in its place"
     );
-    // A tab the core never attached has nothing to end: closing it only puts the terminal away,
-    // and says it keeps running.
+    // A tab the core never attached has nothing to end over: it closes, and says the session
+    // keeps running.
     assert!(h.press("cmd-w"));
     h.wait("the tab to go", |h| h.shown().is_empty());
     let note = h

@@ -9,8 +9,11 @@
 //!
 //! The layout is this window's alone, as the web's is per viewer: it is not sent to the core.
 //! Splitting starts a new terminal session on this computer and shows it beside the focused one.
-//! Closing a tab ends its session only when it is a plain terminal this window holds the keyboard
-//! of; any other tab is only put away, and its session keeps running and stays in the sidebar.
+//! Closing a tab ends its session, as the web does (`closeGuard.ts`): the core is asked to delete
+//! it over the terminal's own connection, and the tab goes only when the core says it is deleted.
+//! An agent's tab asks first when Settings > Warn before closing an agent is on: the first close
+//! arms, the second ends. A tab that only watches a session another view controls, and one this
+//! window is not attached to, just close: the session keeps running.
 
 use crate::client::{Command, Core};
 use crate::handoff::{open_in_perch, perch_url, Place};
@@ -53,13 +56,17 @@ const MAX_PARKED: usize = 12;
 const TOAST_FOR: Duration = Duration::from_secs(8);
 /// How long the core has to confirm that a session ended before the tab says it is still running.
 const END_WAIT: Duration = Duration::from_secs(5);
+/// How long a first close of an agent's tab waits for the second that confirms it. The notice
+/// that asks starts with [`CLOSE_ASKS`].
+const CLOSE_CONFIRM_WITHIN: Duration = Duration::from_secs(8);
+const CLOSE_ASKS: &str = "Closing ends";
 /// How long to wait before attaching a dropped terminal to the core again: it doubles from the
 /// first wait to the last, and stays there for as long as the core is away.
 const REATTACH_FIRST: Duration = Duration::from_millis(250);
 const REATTACH_LAST: Duration = Duration::from_secs(5);
 
 /// Whether a tab is a plain terminal: its session was launched as one. A session whose launch
-/// provider is not known is never taken for one, so closing its tab never ends it.
+/// provider is not known is never taken for one.
 fn is_plain(open: &OpenSession) -> bool {
     open.provider_id.as_deref() == Some(perch_core::agent_fleet::TERMINAL_PROVIDER)
 }
@@ -185,6 +192,8 @@ pub struct Workspace {
     leader: Option<Task<()>>,
     /// What the last command could not do, or did instead.
     notice: Option<String>,
+    /// The tab whose first close asked to end its agent, and the timer that takes the ask back.
+    armed_close: Option<(String, Task<()>)>,
     /// The room a lone pane has in the main area, as of the last draw: what a hidden pane is
     /// sized for.
     room: Rc<Cell<Option<Size<Pixels>>>>,
@@ -225,6 +234,7 @@ impl Workspace {
             peek: None,
             leader: None,
             notice: None,
+            armed_close: None,
             room: Rc::new(Cell::new(None)),
             clipboard: Rc::new(SystemClipboard),
             _subscriptions: vec![opened, failed, observed],
@@ -1003,16 +1013,17 @@ impl Workspace {
         Ok(())
     }
 
-    /// Close a tab. A plain terminal this window types for ends with its tab, as in the web (the
-    /// core reports a shell that was used as working for good, so its state says nothing about
-    /// whether a job runs), and the tab goes only when the core confirms that it ended. The
-    /// request goes over the terminal's own connection, the one that holds the keyboard, because
-    /// the core refuses to end a session another connection controls. If the core refuses, does
-    /// not answer in time, or the connection drops, the tab stays and says the terminal is still
-    /// running: an unconfirmed stop is never taken for an end. The core deleting the session later
-    /// still closes the tab, whatever the wait said.
-    /// Anything else, an agent above all, is put away and keeps running; ending it is a choice
-    /// made where it can be confirmed.
+    /// Close a tab, which ends its session as in the web (`requestCloseSession`). A tab that only
+    /// watches a session another view controls just leaves the view. An agent's tab asks first
+    /// while Settings > Warn before closing an agent is on (it is until the core says otherwise):
+    /// the first close arms, a second within [`CLOSE_CONFIRM_WITHIN`] ends it. Everything else
+    /// is ended at once. Ending asks the core to delete the session over the terminal's own
+    /// connection, the one that holds the keyboard, because the core refuses to end a session
+    /// another connection controls; the tab goes only when the core confirms it is deleted. If
+    /// the core refuses, does not answer in time, or the connection drops, the tab stays and says
+    /// the session is still running: an unconfirmed end is never taken for an end. The core
+    /// deleting the session later still closes the tab, whatever the wait said. A tab with no
+    /// attached terminal has no connection to ask over: it closes, and the session keeps running.
     fn close(&mut self, id: &str, cx: &mut Context<Self>) {
         let Some(pane) = self.panes.get(id) else {
             return;
@@ -1020,40 +1031,89 @@ impl Workspace {
         if pane.closing.is_some() {
             return;
         }
-        let plain = is_plain(&pane.open);
-        let asked = plain
-            && pane.open.host_id == LOCAL
-            && pane
-                .view
-                .as_ref()
-                .is_some_and(|view| view.update(cx, |view, _| view.end()));
-        if asked {
-            let id = id.to_string();
-            let task = cx.spawn({
-                let id = id.clone();
-                async move |this, cx| {
-                    cx.background_executor().timer(END_WAIT).await;
-                    let _ = this.update(cx, |this, cx| {
-                        this.close_unconfirmed(&id, "the core did not answer in time", cx)
-                    });
-                }
+        let open = pane.open.clone();
+        let view = pane.view.clone();
+        let watching = view.as_ref().is_some_and(|view| view.read(cx).watching());
+        let can_end = view.as_ref().is_some_and(|view| view.read(cx).can_end());
+        if watching || !can_end {
+            self.tabs.close(id);
+            self.panes.remove(id);
+            let why = if watching {
+                "Another view controls this session, so it keeps running."
+            } else {
+                "This window is not attached to the session, so it was not ended and keeps running."
+            };
+            let again = if is_plain(&open) {
+                "Turn on Show terminals in the sidebar to open it again."
+            } else {
+                "It is still in the sidebar."
+            };
+            self.notice = Some(format!("Closed the tab. {why} {again}"));
+            self.after_change(cx);
+            return;
+        }
+        let armed = self
+            .armed_close
+            .take()
+            .is_some_and(|(armed, _)| armed == id);
+        if !armed && self.warns_before_ending(&open, cx) {
+            let timer = cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(CLOSE_CONFIRM_WITHIN).await;
+                let _ = this.update(cx, |this, cx| {
+                    this.armed_close = None;
+                    if this
+                        .notice
+                        .as_deref()
+                        .is_some_and(|n| n.starts_with(CLOSE_ASKS))
+                    {
+                        this.notice = None;
+                    }
+                    cx.notify();
+                });
             });
-            if let Some(pane) = self.panes.get_mut(&id) {
-                pane.closing = Some(task);
-            }
-            self.notice = Some("Ending the terminal…".into());
+            self.armed_close = Some((id.to_string(), timer));
+            self.notice = Some(format!(
+                "{CLOSE_ASKS} {} and its agent. Close the tab again to confirm.",
+                open.title
+            ));
             cx.notify();
             return;
         }
-        self.tabs.close(id);
-        self.panes.remove(id);
-        self.notice = Some(if plain {
-            "Closed the tab. The terminal keeps running; turn on Show terminals in the sidebar to open it again."
-        } else {
-            "Closed the tab. The session keeps running; it is still in the sidebar."
+        let id = id.to_string();
+        let task = cx.spawn({
+            let id = id.clone();
+            async move |this, cx| {
+                cx.background_executor().timer(END_WAIT).await;
+                let _ = this.update(cx, |this, cx| {
+                    this.close_unconfirmed(&id, "the core did not answer in time", cx)
+                });
+            }
+        });
+        if let Some(view) = view {
+            view.update(cx, |view, _| view.end());
         }
-        .into());
-        self.after_change(cx);
+        if let Some(pane) = self.panes.get_mut(&id) {
+            pane.closing = Some(task);
+        }
+        self.notice = Some("Ending the session\u{2026}".into());
+        cx.notify();
+    }
+
+    /// Whether ending this tab's session asks first: it runs an agent (what the core sees in it,
+    /// else what it was launched with, as the web's `isAgentSession`) and the core's warning
+    /// setting is on, which it is until the settings arrive.
+    fn warns_before_ending(&self, open: &OpenSession, cx: &App) -> bool {
+        let sidebar = self.sidebar.read(cx);
+        let running = sidebar
+            .find_session(&open.session_id)
+            .and_then(|s| s.current_provider_id.as_deref())
+            .or(open.provider_id.as_deref());
+        running.is_some_and(|p| p != perch_core::agent_fleet::TERMINAL_PROVIDER)
+            && sidebar
+                .model()
+                .terminal
+                .as_ref()
+                .is_none_or(|t| t.warn_close_agent)
     }
 
     /// Keep the terminals of the tabs out of sight within [`MAX_PARKED`], letting go of the ones
@@ -1414,7 +1474,7 @@ impl Workspace {
     }
 
     /// The core did not confirm that a closing tab's session ended. The tab stays open, and says
-    /// the terminal is not known to have stopped.
+    /// the session is not known to have ended.
     fn close_unconfirmed(&mut self, id: &str, why: &str, cx: &mut Context<Self>) {
         let Some(pane) = self.panes.get_mut(id) else {
             return;
@@ -1423,7 +1483,7 @@ impl Workspace {
             return;
         }
         self.notice = Some(format!(
-            "The terminal is still running: {why}. The tab stays open; close it again to retry."
+            "The session is still running: {why}. The tab stays open; close it again to retry."
         ));
         cx.notify();
     }

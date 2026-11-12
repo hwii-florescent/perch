@@ -141,6 +141,9 @@ pub struct SessionView {
     /// must name again. Not what runs in the terminal now: that is only the name shown. `None`
     /// when the core records none, and then nothing is attached or ended on a guess.
     pub provider_id: Option<String>,
+    /// The provider the core sees running in it now (`currentProviderId`): an agent typed into a
+    /// shell makes it one. Closing a tab warns by this; attaching never uses it.
+    pub current_provider_id: Option<String>,
     /// `None` when the core or the computer cannot be reached.
     pub attention: Option<Attention>,
     pub project_id: Option<String>,
@@ -1017,6 +1020,7 @@ impl State {
             title: title(session),
             provider: name,
             provider_id: session.cli_provider_id.clone(),
+            current_provider_id: session.current_provider_id.clone(),
             project_id: session.project_id.clone(),
             workspace_id: workspace.map(|w| w.id.clone()),
             parent: session.parent_session_id.clone(),

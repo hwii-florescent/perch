@@ -1065,41 +1065,123 @@ fn asked(rx: &mut UnboundedReceiver<ToCore>) -> Vec<ToCore> {
     std::iter::from_fn(|| rx.try_recv().ok()).collect()
 }
 
-/// Closing a tab ends its session only when the session was launched as a terminal. What the
-/// core sees running in it now does not decide that, and a session with no recorded launch
-/// provider is never ended.
-fn closing_a_tab_ends_only_what_was_launched_as_a_terminal() {
-    let mut h = Harness::new(model(&[
+/// How many times the core was asked to end the session.
+fn ends(rx: &mut UnboundedReceiver<ToCore>) -> usize {
+    asked(rx).iter().filter(|m| **m == ToCore::End).count()
+}
+
+/// Closing a tab ends its session as the web does: a terminal at once, an agent after a second
+/// close while the warning is on (and a shell with an agent typed into it counts as one), at once
+/// when it is off. The ask is taken back after a while.
+fn closing_a_tab_ends_its_session() {
+    let sessions = [
+        ("plain", json!({"cliProviderId": "terminal"})),
+        ("agent", json!({"cliProviderId": "claude"})),
         (
             "typed",
             json!({"cliProviderId": "terminal", "currentProviderId": "claude"}),
         ),
-        (
-            "agent",
-            json!({"cliProviderId": "claude", "currentProviderId": "terminal"}),
-        ),
+    ];
+    let mut h = Harness::new(model(&sessions));
+    h.open_as("plain", Some("terminal"));
+    h.draw();
+    let (mut rx, core) = h.live();
+    assert_eq!(h.run("tabs.close", json!({})), Ok(()));
+    assert!(
+        asked(&mut rx).contains(&ToCore::End),
+        "a terminal ends at once"
+    );
+    assert!(h.notice().unwrap().starts_with("Ending the session"));
+    assert!(
+        h.ws(|ws| ws.tabs().contains("plain")),
+        "until the core says"
+    );
+    core.unbounded_send(FromCore::Ended).unwrap();
+    h.cx.run_until_parked();
+    assert!(!h.ws(|ws| ws.tabs().contains("plain")));
+
+    for id in ["agent", "typed"] {
+        h.open_as(id, None);
+        h.draw();
+        let (mut rx, core) = h.live();
+        assert_eq!(h.run("tabs.close", json!({})), Ok(()));
+        assert_eq!(ends(&mut rx), 0, "{id}: the first close only asks");
+        assert!(h.notice().unwrap().starts_with("Closing ends"), "{id}");
+        assert!(h.ws(|ws| ws.tabs().contains(id)));
+        if id == "typed" {
+            // Left alone, the ask is taken back, and the next close asks again.
+            h.cx.advance_clock(std::time::Duration::from_secs(9));
+            h.cx.run_until_parked();
+            assert_eq!(h.notice(), None);
+            assert_eq!(h.run("tabs.close", json!({})), Ok(()));
+            assert_eq!(ends(&mut rx), 0, "{id}: it asks again");
+        }
+        assert_eq!(h.run("tabs.close", json!({})), Ok(()));
+        assert_eq!(ends(&mut rx), 1, "{id}: the second ends");
+        assert!(
+            h.ws(|ws| ws.tabs().contains(id)),
+            "{id}: until the core says"
+        );
+        core.unbounded_send(FromCore::Ended).unwrap();
+        h.cx.run_until_parked();
+        assert!(!h.ws(|ws| ws.tabs().contains(id)), "{id}");
+    }
+
+    // With the warning off an agent ends at once; a core that does not confirm it keeps the tab.
+    let mut quiet = model(&sessions);
+    quiet.terminal = Some(Box::new(perch_native::settings::TerminalSettings {
+        warn_close_agent: false,
+        ..Default::default()
+    }));
+    let mut h = Harness::new(quiet);
+    h.open_as("agent", None);
+    h.draw();
+    let (mut rx, core) = h.live();
+    assert_eq!(h.run("tabs.close", json!({})), Ok(()));
+    assert_eq!(ends(&mut rx), 1);
+    h.cx.advance_clock(std::time::Duration::from_secs(6));
+    h.cx.run_until_parked();
+    assert!(h.ws(|ws| ws.tabs().contains("agent")), "unconfirmed: kept");
+    assert!(h.notice().unwrap().contains("session is still running"));
+    core.unbounded_send(FromCore::EndRefused("another view controls it".into()))
+        .unwrap();
+    h.cx.run_until_parked();
+    assert!(h.ws(|ws| ws.tabs().contains("agent")), "refused: kept");
+
+    println!("workspace_render: close ok");
+}
+
+/// A tab that only watches a session another view controls, and one with no attached terminal,
+/// leave the view and send nothing: the session keeps running.
+fn a_tab_that_cannot_end_its_session_is_put_away() {
+    let mut h = Harness::new(model(&[
+        ("watched", json!({"cliProviderId": "claude"})),
         (
             "blank",
             json!({"cliProviderId": null, "currentProviderId": "terminal"}),
         ),
     ]));
-    for (id, ends) in [("typed", true), ("agent", false), ("blank", false)] {
-        h.open_as(id, None);
-        h.draw();
-        let (mut rx, core) = h.live();
-        assert_eq!(h.run("tabs.close", json!({})), Ok(()));
-        let sent = asked(&mut rx);
-        assert_eq!(sent.contains(&ToCore::End), ends, "{id}: {sent:?}");
-        assert_eq!(h.ws(|ws| ws.tabs().contains(id)), ends, "{id}");
-        let notice = h.notice().unwrap_or_default();
-        if ends {
-            assert!(notice.starts_with("Ending the terminal"), "{notice}");
-        } else {
-            assert!(notice.contains("The session keeps running"), "{notice}");
-        }
-        drop(core);
-    }
-    println!("workspace_render: close ok");
+    h.open_as("watched", None);
+    h.draw();
+    let (mut rx, core) = h.live();
+    core.unbounded_send(FromCore::Attached {
+        replay: String::new(),
+        input: false,
+        resize: false,
+        agent: None,
+    })
+    .unwrap();
+    h.cx.run_until_parked();
+    assert_eq!(h.run("tabs.close", json!({})), Ok(()));
+    assert_eq!(ends(&mut rx), 0, "a watcher ends nothing");
+    assert!(!h.ws(|ws| ws.tabs().contains("watched")));
+    assert!(h.notice().unwrap().contains("Another view controls"));
+
+    h.open_as("blank", None);
+    h.draw();
+    assert_eq!(h.run("tabs.close", json!({})), Ok(()));
+    assert!(!h.ws(|ws| ws.tabs().contains("blank")));
+    assert!(h.notice().unwrap().contains("not attached"));
 }
 
 /// A session the core deletes closes its tab whenever the news comes: after the wait for it ran
@@ -1239,7 +1321,8 @@ fn a_session_with_no_launch_provider_is_not_attached() {
 }
 
 fn main() {
-    closing_a_tab_ends_only_what_was_launched_as_a_terminal();
+    closing_a_tab_ends_its_session();
+    a_tab_that_cannot_end_its_session_is_put_away();
     a_session_with_no_launch_provider_is_not_attached();
     a_deleted_session_closes_its_tab_whenever_the_core_says_so();
     stopping_a_terminal_from_the_pane_menu_asks_first();

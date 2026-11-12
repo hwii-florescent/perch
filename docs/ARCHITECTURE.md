@@ -34,8 +34,11 @@ shells, real agent CLIs
   running headless core through the `core.json` it writes and speaks the same protocol. Each
   terminal is its own libghostty-vt fed the same bytes as xterm.js (output and the daemon's repaint);
   there is no cell stream. Tabs, splits and their layout are local to the window and are not restored.
-  It attaches and closes a session by its saved launch provider, never the one seen running, and
-  never attaches or ends a session whose launch provider is unknown. Links from terminal output
+  It attaches a session by its saved launch provider, never the one seen running, and never
+  attaches one whose launch provider is unknown. Closing a tab ends its session as the web does
+  (`session.delete` over the terminal's own connection, the tab going only when the core confirms;
+  an agent's tab asks first while `warnCloseAgent` is on; a view that only watches, or has no
+  attached terminal, just closes). Links from terminal output
   open only `http`, `https`, `mailto` and plain non-executable files.
   What it cannot show (files, changes, browser, chat, settings beyond terminals) it hands to the
   Tauri app with `perch://open`. It is not in default builds.
