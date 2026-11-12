@@ -2,158 +2,30 @@
 //! that reaches only the pane with the keyboard, the size each pane gives its own shell, and the
 //! terminal settings changed through the core.
 //!
-//! The core runs as a child of this test, as in `terminal_view`: the same executable re-run as
-//! `__core <scratch>`, with everything it touches (database, hosts, settings, the terminal
-//! daemon, `HOME`) private to the scratch directory. Plain shells only; no agent runs. GPUI draws
-//! offscreen: no window is created, shown or focused, and every key goes through the window's own
-//! key path with `dispatch_keystroke`. The core, the shells and the daemon are stopped and checked
-//! gone by PID before the test returns.
+//! The core and the teardown are in `common`: the core is a child of this test with everything it
+//! touches private to a scratch directory, and the core, the shells and the daemon are stopped and
+//! checked gone by PID before the test returns.
 
-use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
-use gpui::{
-    px, size, AppContext, Entity, HeadlessAppContext, Keystroke, Modifiers, Window, WindowHandle,
-};
-use perch_core::server::CliArgs;
-use perch_native::client::{follow, Command as Order, Core, Update};
+mod common;
+
+use common::{Harness, Rig};
+use perch_native::client::{follow, Command as Order};
 use perch_native::settings::Change;
-use perch_native::sidebar::Attention;
-use perch_native::terminal::{Status, TerminalView};
-use perch_native::ui::Workspace;
-use perchd::proto::SessionInfo;
-use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use perch_native::terminal::Status;
+use std::time::Duration;
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    match args.get(1).map(String::as_str) {
-        // The daemon and the cleanup commands below are this executable run as perchd.
-        Some("__perchd") => perch_core::daemon::run_if_requested(),
-        Some("__core") => return run_core(Path::new(&args[2])),
-        _ => {}
-    }
-    let scratch = scratch_dir();
-    let owner = cleanup_owner(&scratch);
-    let daemon_dir = scratch.join("daemon");
-    let mut core = Command::new(std::env::current_exe().unwrap())
-        .arg("__core")
-        .arg(&scratch)
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("start the core");
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        window(&mut core, &scratch);
-    }));
-    // The shell must not be released while a core is still attached to it, so stop the core first.
-    let stopped = stop_core(&mut core).and_then(|()| stop_runtimes(&daemon_dir, &owner));
-    match (outcome, stopped) {
-        (Ok(()), Ok(())) => {
-            let _ = std::fs::remove_dir_all(&scratch);
-            println!("workspace_session: ok");
-        }
-        (outcome, stopped) => {
-            eprintln!("scratch kept at {}", scratch.display());
-            if let Err(error) = stopped {
-                eprintln!("cleanup failed: {error}");
-            }
-            match outcome {
-                Err(panic) => std::panic::resume_unwind(panic),
-                Ok(()) => std::process::exit(1),
-            }
-        }
-    }
+    common::run("workspace_session", window);
 }
 
-fn cleanup_owner(scratch: &Path) -> String {
-    format!("native-test:{}", scratch.display())
-}
-
-/// The core process: boots like the desktop app and prints `<port> <sign-in code>`.
-fn run_core(scratch: &Path) {
-    let home = scratch.join("home");
-    std::fs::create_dir_all(&home).unwrap();
-    // An empty startup file keeps zsh from offering its first-run setup menu.
-    std::fs::write(home.join(".zshrc"), "").unwrap();
-    std::env::set_var("HOME", &home);
-    std::env::set_var("PERCH_SETTINGS", scratch.join("settings.json"));
-    std::env::set_var("PERCHD_DIR", scratch.join("daemon"));
-    std::env::set_var("PERCHD_IDLE_EXIT_SECS", "1");
-    std::env::set_var("PERCH_CLEANUP_OWNER", cleanup_owner(scratch));
-    std::env::remove_var("PERCH_LOCAL_TOKEN");
-    // Records the owner so every runtime this core starts is released by name afterwards.
-    perch_core::daemon::run_if_requested();
-
-    let args = CliArgs {
-        port: 0,
-        headless: true,
-        base_path: "/".into(),
-        public_base_url: None,
-        db_path: Some(scratch.join("history.sqlite")),
-        hosts_path: Some(scratch.join("hosts.json")),
-        providers_path: None, // defaults under the scratch HOME
-        devices_path: Some(scratch.join("devices.json")),
-    };
-    let local_ui = perch_core::local_ui::LocalUi::in_process();
-    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .unwrap();
-    runtime.block_on(async {
-        let boot = tokio::spawn(perch_core::boot::boot(
-            args,
-            scratch.join("web"),
-            Some(ready_tx),
-            local_ui.clone(),
-        ));
-        match ready_rx.await {
-            Ok(address) => println!("{} {}", address.port(), local_ui.issue_login_code()),
-            Err(_) => panic!("core exited while starting: {:?}", boot.await),
-        }
-        let _ = boot.await;
-    });
-}
-
-fn scratch_dir() -> PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    // Canonical, so paths compare equal to what the core and the shell report (/var -> /private/var).
-    let base = std::fs::canonicalize(std::env::temp_dir()).unwrap();
-    let dir = base.join(format!("perch-native-test-{}-{nanos}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
-}
-
-const TIMEOUT: Duration = Duration::from_secs(20);
-/// Wide enough that two panes each hold a normal terminal.
-const WIDTH: f32 = 2000.;
-const HEIGHT: f32 = 700.;
-
-fn window(core_process: &mut Child, scratch: &Path) {
-    let (line_tx, line_rx) = std::sync::mpsc::channel();
-    let stdout = core_process.stdout.take().unwrap();
-    std::thread::spawn(move || {
-        let mut line = String::new();
-        let _ = BufReader::new(stdout).read_line(&mut line);
-        let _ = line_tx.send(line);
-    });
-    let line = line_rx
-        .recv_timeout(Duration::from_secs(30))
-        .expect("the core did not start");
-    let (port, code) = line.trim().split_once(' ').expect("the core's ready line");
-    let base = format!("http://127.0.0.1:{port}/");
-
+fn window(rig: &mut Rig) {
     // The core reads `keys.json` beside its database when a client asks for the mods state.
     std::fs::write(
-        scratch.join("keys.json"),
+        rig.scratch.join("keys.json"),
         r#"{"terminal": {"cmd-shift-y": "send:echo from-keys-$((6*7))"}}"#,
     )
     .unwrap();
+    let scratch = rig.scratch.clone();
 
     // The follower runs on this runtime's threads; the window is driven from this one.
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -161,7 +33,7 @@ fn window(core_process: &mut Child, scratch: &Path) {
         .enable_all()
         .build()
         .unwrap();
-    let core = runtime.block_on(Core::login(&base, code)).expect("sign in");
+    let (_, core) = rig.start_core(&runtime);
     let first = runtime.block_on(async {
         let mut connection = core.connect().await.expect("connect");
         let session_id = connection.create_session(None, None).await.expect("create");
@@ -319,332 +191,49 @@ fn window(core_process: &mut Child, scratch: &Path) {
     let want = format!("{} {}", single.1, single.0);
     h.wait("the remaining shell's size", |h| h.has_row(&second, &want));
 
+    // Paste goes through the terminal's own paste, from the clipboard the window was given, and
+    // the shell hears it as typed.
+    h.clipboard.write_text_for_test("echo pasted-$((5+5))");
+    assert!(h.press("cmd-v"));
+    assert!(h.press("enter"));
+    h.wait("the pasted text to run", |h| {
+        h.has_row(&second, "pasted-10")
+    });
+
+    // A new terminal from the palette is a tab; the one it covers is kept and hidden. When the
+    // room changes (the sidebar goes), the hidden shell is still given the size its pane would
+    // have, without anyone looking at it.
+    h.press("cmd-p");
+    h.type_text("new terminal");
+    h.wait("the new tab", |h| {
+        h.ws(|ws, _| ws.tabs().strip().len() == 2)
+    });
+    let third = h.active().expect("the new tab has the keyboard");
+    assert_ne!(third, second);
+    h.wait("the new shell", |h| h.ready(&third));
+    assert_eq!(h.shown(), [third.clone()]);
+    assert_eq!(h.view(&second, |v| v.is_hidden()), Some(true));
+    assert!(h.press("cmd-b"), "global.sidebar is taken");
+    h.wait("the hidden shell to follow the wider room", |h| {
+        h.view(&second, |v| v.grid_size().0 > single.0)
+            .unwrap_or(false)
+    });
+    assert_eq!(
+        h.view(&second, |v| v.is_hidden()),
+        Some(true),
+        "still unseen"
+    );
+    assert_eq!(h.shown(), [third.clone()]);
+
+    // Stopping a shell from the palette: its process ends and the view says so.
+    h.press("cmd-p");
+    h.type_text("stop the terminal");
+    h.wait("the shell to end", |h| {
+        h.view(&third, |v| matches!(v.status(), Status::Exited(_)))
+            .unwrap_or(false)
+    });
+
     h.close();
     follower.abort();
     drop(runtime);
-}
-
-struct Harness {
-    cx: HeadlessAppContext,
-    window: WindowHandle<Workspace>,
-    commands: UnboundedSender<Order>,
-    updates: UnboundedReceiver<Update>,
-}
-
-impl Harness {
-    fn new(
-        core: Core,
-        commands: UnboundedSender<Order>,
-        updates: UnboundedReceiver<Update>,
-    ) -> Self {
-        let mut cx = HeadlessAppContext::with_platform(
-            gpui_platform::current_platform(true).text_system(),
-            Arc::new(()),
-            gpui_platform::current_headless_renderer,
-        );
-        let sender = commands.clone();
-        let window = cx
-            .open_window(size(px(WIDTH), px(HEIGHT)), |_, cx| {
-                cx.new(|cx| {
-                    Workspace::new(Default::default(), Some(sender), cx)
-                        .with_core(move || Ok(core.clone()))
-                })
-            })
-            .unwrap();
-        Self {
-            cx,
-            window,
-            commands,
-            updates,
-        }
-    }
-
-    fn send(&self, order: Order) {
-        self.commands.unbounded_send(order).unwrap();
-    }
-
-    /// Hand what the follower learned to the window, as the app does.
-    fn pump(&mut self) {
-        while let Ok(update) = self.updates.try_recv() {
-            self.window
-                .update(&mut self.cx, |ws, _, cx| {
-                    ws.sidebar()
-                        .update(cx, |sidebar, cx| sidebar.apply(update, cx))
-                })
-                .unwrap();
-        }
-    }
-
-    /// Let the window, the follower and the terminals run, and draw, until `done` holds.
-    fn wait(&mut self, what: &str, done: impl Fn(&mut Self) -> bool) {
-        let deadline = Instant::now() + TIMEOUT;
-        loop {
-            self.pump();
-            self.cx.run_until_parked();
-            self.draw();
-            if done(self) {
-                return;
-            }
-            if Instant::now() > deadline {
-                let shown = self.shown();
-                let screens: Vec<_> = shown.iter().map(|id| (id.clone(), self.rows(id))).collect();
-                panic!("timed out waiting for {what}; on screen {screens:#?}");
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        }
-    }
-
-    /// Keep running a moment, for what must not happen.
-    fn settle(&mut self) {
-        let until = Instant::now() + Duration::from_millis(400);
-        while Instant::now() < until {
-            self.pump();
-            self.cx.run_until_parked();
-            self.draw();
-            std::thread::sleep(Duration::from_millis(25));
-        }
-    }
-
-    fn draw(&mut self) {
-        self.cx
-            .update_window(self.window.into(), |_, window: &mut Window, cx| {
-                let _ = window.draw(cx);
-            })
-            .unwrap();
-    }
-
-    fn ws<R>(&mut self, f: impl FnOnce(&Workspace, &gpui::App) -> R) -> R {
-        self.window
-            .update(&mut self.cx, |ws, _, cx| f(ws, cx))
-            .unwrap()
-    }
-
-    fn settings(&mut self) -> Option<perch_native::settings::TerminalSettings> {
-        self.ws(|ws, cx| ws.sidebar().read(cx).model().terminal.clone())
-    }
-
-    fn attention(&mut self, id: &str) -> Option<Attention> {
-        self.ws(|ws, cx| {
-            ws.sidebar()
-                .read(cx)
-                .find_session(id)
-                .and_then(|s| s.attention)
-        })
-    }
-
-    fn show_tab(&mut self, id: &str) {
-        let id = id.to_string();
-        self.window
-            .update(&mut self.cx, |ws, _, cx| {
-                ws.sidebar().update(cx, |sidebar, cx| {
-                    sidebar.open("local".into(), id, Some("terminal".into()), cx)
-                })
-            })
-            .unwrap();
-    }
-
-    fn shown(&mut self) -> Vec<String> {
-        self.ws(|ws, _| ws.tabs().shown())
-    }
-
-    fn active(&mut self) -> Option<String> {
-        self.ws(|ws, _| ws.tabs().active().map(str::to_string))
-    }
-
-    fn pane(&mut self, id: &str) -> Option<Entity<TerminalView>> {
-        self.ws(|ws, _| {
-            ws.terminals()
-                .into_iter()
-                .find(|(i, _)| i == id)
-                .map(|(_, v)| v)
-        })
-    }
-
-    fn view<R>(&mut self, id: &str, f: impl FnOnce(&mut TerminalView) -> R) -> Option<R> {
-        let view = self.pane(id)?;
-        Some(
-            self.window
-                .update(&mut self.cx, |_, _, cx| view.update(cx, |v, _| f(v)))
-                .unwrap(),
-        )
-    }
-
-    /// Attached, holding the keyboard of its shell, and laid out.
-    fn ready(&mut self, id: &str) -> bool {
-        self.view(id, |v| {
-            *v.status() == Status::Live && v.can_type() && v.fitted_size().is_some()
-        })
-        .unwrap_or(false)
-    }
-
-    fn fitted(&mut self, id: &str) -> (u16, u16) {
-        self.view(id, |v| v.fitted_size())
-            .flatten()
-            .expect("a laid out pane")
-    }
-
-    fn grid(&mut self, id: &str) -> (u16, u16) {
-        self.view(id, |v| v.grid_size()).expect("a pane")
-    }
-
-    /// The rows as drawn, trailing blanks dropped.
-    fn rows(&mut self, id: &str) -> Vec<String> {
-        self.view(id, |v| {
-            let frame = v.frame();
-            (0..frame.rows.len()).map(|y| frame.row_text(y)).collect()
-        })
-        .unwrap_or_default()
-    }
-
-    fn has_row(&mut self, id: &str, wanted: &str) -> bool {
-        self.rows(id).iter().any(|row| row == wanted)
-    }
-
-    /// A key through the window's own path. True when the window took it.
-    fn press(&mut self, spec: &str) -> bool {
-        self.key(Keystroke::parse(spec).unwrap())
-    }
-
-    fn key(&mut self, keystroke: Keystroke) -> bool {
-        let taken = self
-            .cx
-            .update_window(self.window.into(), |_, window: &mut Window, cx| {
-                window.dispatch_keystroke(keystroke, cx)
-            })
-            .unwrap();
-        self.cx.run_until_parked();
-        taken
-    }
-
-    /// `text` and Enter, one key at a time, as the keyboard sends them.
-    fn type_text(&mut self, text: &str) {
-        for c in text.chars() {
-            let key = Keystroke {
-                modifiers: Modifiers::default(),
-                key: c.to_string(),
-                key_char: Some(c.to_string()),
-            };
-            assert!(self.key(key), "the window took {c:?}");
-        }
-        assert!(self.press("enter"), "the window took Enter");
-    }
-
-    /// Drop the window and with it the views, which let go of their shells without ending them.
-    fn close(self) {
-        let Self { mut cx, window, .. } = self;
-        cx.update_window(window.into(), |_, window: &mut Window, _| {
-            window.remove_window();
-        })
-        .unwrap();
-        cx.run_until_parked();
-        drop(cx);
-    }
-}
-
-fn pid_gone(pid: u32) -> bool {
-    // SAFETY: signal 0 only probes whether the process exists.
-    let missing = unsafe { libc::kill(pid as i32, 0) } != 0;
-    missing && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
-}
-
-fn wait_until(what: &str, mut check: impl FnMut() -> bool) -> Result<(), String> {
-    let deadline = Instant::now() + TIMEOUT;
-    while !check() {
-        if Instant::now() > deadline {
-            return Err(format!("timed out waiting for {what}"));
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    Ok(())
-}
-
-/// This executable as the daemon's command line tool, aimed at the scratch daemon only.
-fn daemon_tool(daemon_dir: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new(std::env::current_exe().unwrap())
-        .arg("__perchd")
-        .args(args)
-        .arg("--dir")
-        .arg(daemon_dir)
-        .arg("--json")
-        // `release` refuses the default daemon, which this variable would name.
-        .env_remove("PERCHD_DIR")
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        return Err(format!(
-            "{args:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-/// Kill the core and confirm by PID that it is gone.
-fn stop_core(core: &mut Child) -> Result<(), String> {
-    let pid = core.id();
-    let _ = core.kill();
-    core.wait().map_err(|e| e.to_string())?;
-    wait_until(&format!("core {pid} to exit"), || pid_gone(pid))
-}
-
-/// Release and stop the shells this test's core started, then wait for the daemon to exit on
-/// its own, checking every process by PID.
-fn stop_runtimes(daemon_dir: &Path, owner: &str) -> Result<(), String> {
-    if !daemon_dir.join("daemon-v1.pid").exists() {
-        return Ok(());
-    }
-    let result = (|| {
-        let sessions = |tool: &str| -> Result<Vec<SessionInfo>, String> {
-            let text = daemon_tool(daemon_dir, &[tool])?;
-            serde_json::from_str(&text).map_err(|e| format!("{tool}: {e}: {text}"))
-        };
-        let shells: Vec<u32> = sessions("ps")?.iter().filter_map(|s| s.pid).collect();
-        daemon_tool(
-            daemon_dir,
-            &["release", "--owner", owner, "--reason", "test teardown"],
-        )?;
-        daemon_tool(daemon_dir, &["cleanup", "--yes"])?;
-        for session in sessions("ps")? {
-            if session.alive || !session.cleanup.group_stopped {
-                return Err(format!("shell not confirmed stopped: {session:?}"));
-            }
-        }
-        for pid in &shells {
-            wait_until(&format!("shell {pid} to exit"), || pid_gone(*pid))?;
-        }
-        let pid: u32 = std::fs::read_to_string(daemon_dir.join("daemon-v1.pid"))
-            .map_err(|e| e.to_string())?
-            .trim()
-            .parse()
-            .map_err(|_| "daemon pid file is unreadable".to_string())?;
-        // With no live shell the daemon exits by itself after its idle second.
-        wait_until(&format!("daemon {pid} to exit"), || pid_gone(pid))
-    })();
-    unload_daemon_job(daemon_dir);
-    result
-}
-
-#[cfg(not(target_os = "macos"))]
-fn unload_daemon_job(_: &Path) {}
-
-/// On macOS the daemon runs as a launchd job named in a plist inside its directory. Unload
-/// this test's job; it is the only one whose plist is there.
-#[cfg(target_os = "macos")]
-fn unload_daemon_job(daemon_dir: &Path) {
-    let Ok(entries) = std::fs::read_dir(daemon_dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if let Some(label) = name
-            .strip_suffix(".plist")
-            .filter(|l| l.starts_with(perch_core::daemon_host::JOB_PREFIX))
-        {
-            // SAFETY: getuid cannot fail.
-            let target = format!("gui/{}/{label}", unsafe { libc::getuid() });
-            let _ = Command::new("/bin/launchctl")
-                .args(["bootout", &target])
-                .output();
-        }
-    }
 }

@@ -81,6 +81,23 @@ impl Shot {
             .sum()
     }
 
+    /// Pixels that are clearly red, inside the box (an image scaled smoothly has no exact colour).
+    fn reddish(&self, x0: f32, x1: f32, y0: f32, y1: f32) -> usize {
+        let (x0, x1) = ((x0 * self.scale) as usize, (x1 * self.scale) as usize);
+        let (y0, y1) = ((y0 * self.scale) as usize, (y1 * self.scale) as usize);
+        self.raw
+            .chunks_exact(self.width * 4)
+            .enumerate()
+            .filter(|(y, _)| (y0..y1).contains(y))
+            .map(|(_, row)| {
+                row.chunks_exact(4)
+                    .enumerate()
+                    .filter(|(x, p)| (x0..x1).contains(x) && p[0] > 200 && p[1] < 60 && p[2] < 60)
+                    .count()
+            })
+            .sum()
+    }
+
     /// Near-white pixels: bright text.
     fn bright(&self, x0: f32, x1: f32, y0: f32, y1: f32) -> usize {
         let (x0, x1) = ((x0 * self.scale) as usize, (x1 * self.scale) as usize);
@@ -627,6 +644,59 @@ fn terminal_commands_run_from_keys_and_the_palette() {
     println!("workspace_render: terminal commands ok");
 }
 
+/// A tab that is not on screen stays attached and keeps what it drew: its terminal is told it is
+/// hidden and shown again with its kitty image still there.
+fn kept_tabs_are_hidden_not_dropped() {
+    const RGBA: &str = "/wAA/wD/AP8AAP///////w==";
+    let mut h = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
+    h.open("alpha");
+    h.draw();
+    h.show(
+        0,
+        &format!("\x1b_Ga=T,f=32,s=2,v=2,i=1,c=40,r=8,C=1;{RGBA}\x1b\\"),
+    );
+    let area = SIDEBAR_WIDTH..WIDTH;
+    let red = |shot: &Shot| shot.reddish(area.start, area.end, TAB_BAR_HEIGHT, HEIGHT);
+    assert!(red(&h.draw()) > 500, "alpha shows its image");
+    let uploaded = |h: &mut Harness, id: &str| {
+        h.window
+            .update(&mut h.cx, |ws, _, cx| {
+                ws.view(id).unwrap().update(cx, |v, _| v.uploaded_images())
+            })
+            .unwrap()
+    };
+    let hidden = |h: &mut Harness, id: &str| {
+        h.window
+            .update(&mut h.cx, |ws, _, cx| {
+                ws.view(id).unwrap().update(cx, |v, _| v.is_hidden())
+            })
+            .unwrap()
+    };
+    assert_eq!(uploaded(&mut h, "alpha"), 1);
+    assert!(!hidden(&mut h, "alpha"));
+
+    // Another tab takes the screen: alpha is kept, hidden, and still holds its image.
+    h.open("bravo");
+    let other = h.draw();
+    assert_eq!(red(&other), 0, "alpha is not drawn behind bravo");
+    assert!(hidden(&mut h, "alpha"), "alpha was told it is off screen");
+    assert!(!hidden(&mut h, "bravo"));
+    assert_eq!(
+        uploaded(&mut h, "alpha"),
+        1,
+        "its image survives the switch"
+    );
+    assert_eq!(h.ws(|ws| ws.terminals().len()), 1);
+
+    // Back to alpha: told it is shown, and the image is drawn again.
+    assert!(h.press("cmd-1"));
+    let back = h.draw();
+    assert!(!hidden(&mut h, "alpha"));
+    assert!(hidden(&mut h, "bravo"));
+    assert!(red(&back) > 500, "alpha shows its image again");
+    println!("workspace_render: kept tabs ok");
+}
+
 fn main() {
     two_tabs();
     attention_on_a_tab();
@@ -635,5 +705,6 @@ fn main() {
     terminal_settings_show_what_the_core_sent();
     keys_json_and_chosen_keys_rule();
     terminal_commands_run_from_keys_and_the_palette();
+    kept_tabs_are_hidden_not_dropped();
     println!("workspace_render: ok");
 }

@@ -1298,6 +1298,48 @@ impl TerminalView {
         cx.notify();
     }
 
+    /// The pane is not on screen (see [`Self::set_visible`]).
+    pub fn is_hidden(&self) -> bool {
+        self.hidden
+    }
+
+    /// Size the shell of a pane that is off screen as a pane of `bounds` would, so a program
+    /// redraws for the size it will have when its tab comes back. Does nothing for a pane that
+    /// is shown (it sizes itself as it is laid out) or that does not hold the resize lease.
+    pub fn size_while_hidden(&mut self, bounds: Size<Pixels>, window: &Window) {
+        if !self.hidden || self.status != Status::Live || !self.resize_lease {
+            return;
+        }
+        let (pad_x, pad_y) = self.settings.padding;
+        let available = size(
+            (bounds.width - px(2. * pad_x)).max(px(0.)),
+            (bounds.height - px(2. * pad_y)).max(px(0.)),
+        );
+        if available.width <= px(0.) || available.height <= px(0.) {
+            return;
+        }
+        let fit = layout::fit(
+            window,
+            available,
+            &self.settings.font_family,
+            self.settings.font_px,
+        );
+        self.fitted = Some(fit);
+        if self.requested != Some((fit.cols, fit.rows)) {
+            self.requested = Some((fit.cols, fit.rows));
+            self.send(ToCore::Resize(fit.cols, fit.rows));
+        }
+    }
+
+    /// What decides the cell a hidden pane is sized with: the face, its size and the screen.
+    pub fn cell_key(&self, window: &Window) -> (String, u32, u32) {
+        (
+            self.settings.font_family.clone(),
+            self.settings.font_px.to_bits(),
+            window.scale_factor().to_bits(),
+        )
+    }
+
     /// Hand the keyboard to the terminal.
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
         self.focus.focus(window, cx);

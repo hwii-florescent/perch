@@ -29,10 +29,11 @@ use crate::ui::{
 };
 use futures::channel::mpsc::UnboundedSender;
 use gpui::{
-    div, prelude::*, px, relative, rgb, AnyElement, App, Context, Entity, Focusable, KeyDownEvent,
-    Keystroke, MouseButton, Subscription, Task, Window,
+    canvas, div, prelude::*, px, relative, rgb, size, AnyElement, App, Context, Entity, Focusable,
+    KeyDownEvent, Keystroke, MouseButton, Pixels, Size, Subscription, Task, Window,
 };
 use serde_json::Value;
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -59,6 +60,42 @@ type Locate = Box<dyn Fn() -> anyhow::Result<Core>>;
 struct Pane {
     open: OpenSession,
     view: Option<Entity<TerminalView>>,
+    /// Gates the size a hidden pane is given.
+    settle: Settle,
+}
+
+/// Waits for a size to hold still before a hidden pane is given it: a window being dragged or a
+/// font being changed passes through many sizes, and each would be sent to a shell that nobody is
+/// looking at. The value must repeat on two draws in a row.
+struct Settle<T = (Size<Pixels>, (String, u32, u32))> {
+    last: Option<T>,
+    applied: Option<T>,
+}
+
+impl<T> Default for Settle<T> {
+    fn default() -> Self {
+        Self {
+            last: None,
+            applied: None,
+        }
+    }
+}
+
+impl<T: Clone + PartialEq> Settle<T> {
+    /// The value to apply now, if it has held for two draws and was not applied already.
+    fn tick(&mut self, now: T) -> Option<T> {
+        let held = self.last.as_ref() == Some(&now);
+        self.last = Some(now.clone());
+        (held && self.applied.as_ref() != Some(&now)).then(|| {
+            self.applied = Some(now.clone());
+            now
+        })
+    }
+
+    /// Forget what was applied: the pane was on screen and sized itself.
+    fn reset(&mut self) {
+        self.applied = None;
+    }
 }
 
 #[derive(Default)]
@@ -80,6 +117,9 @@ pub struct Workspace {
     leader: Option<Task<()>>,
     /// What the last command could not do, or did instead.
     notice: Option<String>,
+    /// The room a lone pane has in the main area, as of the last draw: what a hidden pane is
+    /// sized for.
+    room: Rc<Cell<Option<Size<Pixels>>>>,
     /// Where the terminals copy to and paste from: the system's, unless a test says otherwise.
     clipboard: Rc<dyn Clipboard>,
     _subscriptions: Vec<Subscription>,
@@ -111,6 +151,7 @@ impl Workspace {
             settings: None,
             leader: None,
             notice: None,
+            room: Rc::new(Cell::new(None)),
             clipboard: Rc::new(SystemClipboard),
             _subscriptions: vec![opened, failed, observed],
         }
@@ -140,6 +181,11 @@ impl Workspace {
     /// The terminal of the tab with the keyboard, if one was attached.
     pub fn terminal(&self) -> Option<&Entity<TerminalView>> {
         self.panes.get(self.tabs.active()?)?.view.as_ref()
+    }
+
+    /// The terminal of any open tab, on screen or not: it stays attached while its tab is kept.
+    pub fn view(&self, id: &str) -> Option<&Entity<TerminalView>> {
+        self.panes.get(id)?.view.as_ref()
     }
 
     /// The terminals on screen, in layout order, with their sessions.
@@ -193,6 +239,7 @@ impl Workspace {
                 Pane {
                     open: event.clone(),
                     view,
+                    settle: Settle::default(),
                 },
             );
         }
@@ -1351,6 +1398,26 @@ impl gpui::Render for Workspace {
                 }
             }
         }
+        // Every kept tab stays attached; the ones not on screen are told so, which ends their
+        // focus and their redraws until their tab comes back. Any change to the layout (a tab
+        // switch, a close, a zoom, a split) ends here.
+        let shown = self.tabs.shown();
+        let room = self.room.get();
+        for (id, pane) in &mut self.panes {
+            let Some(view) = &pane.view else { continue };
+            let on_screen = shown.contains(id);
+            view.update(cx, |view, cx| view.set_visible(on_screen, cx));
+            if on_screen {
+                pane.settle.reset();
+            } else if let Some(room) = room {
+                // A hidden tab's program redraws for the size its pane would have, once the
+                // window and the cell have held still for two draws.
+                let key = (room, view.read(cx).cell_key(window));
+                if pane.settle.tick(key).is_some() {
+                    view.update(cx, |view, _| view.size_while_hidden(room, window));
+                }
+            }
+        }
         let (visible, needs) = {
             let sidebar = self.sidebar.read(cx);
             (sidebar.visible(), sidebar.needs_you())
@@ -1383,11 +1450,27 @@ impl gpui::Render for Workspace {
             Some(node) => {
                 let split = matches!(node, Node::Split { .. });
                 let focused = self.tabs.active().map(str::to_string);
+                // The room one pane would have here, less the gap and the border around it.
+                let room = self.room.clone();
+                let measure = canvas(
+                    move |bounds, _, _| {
+                        let around = px(PANE_GAP + 2.);
+                        room.set(Some(size(
+                            (bounds.size.width - around).max(px(0.)),
+                            (bounds.size.height - around).max(px(0.)),
+                        )));
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full();
                 area = area.child(self.tab_bar(cx)).child(
                     div()
+                        .relative()
                         .flex_1()
                         .min_h_0()
                         .p(px(PANE_GAP / 2.))
+                        .child(measure)
                         .child(self.node(&node, focused.as_deref(), split, cx)),
                 );
             }
@@ -1433,5 +1516,25 @@ impl gpui::Render for Workspace {
             }))
             .child(sidebar)
             .child(area.children(overlays))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Settle;
+
+    #[test]
+    fn a_size_is_applied_once_it_holds_for_two_draws() {
+        let mut settle = Settle::<(u32, u32)>::default();
+        // A window being dragged passes through sizes; none of them holds.
+        assert_eq!(settle.tick((100, 50)), None);
+        assert_eq!(settle.tick((110, 50)), None);
+        assert_eq!(settle.tick((120, 50)), None);
+        // It stops: the second draw at the same size applies it, and only once.
+        assert_eq!(settle.tick((120, 50)), Some((120, 50)));
+        assert_eq!(settle.tick((120, 50)), None);
+        // Shown, the pane sizes itself; when hidden again the same size is applied afresh.
+        settle.reset();
+        assert_eq!(settle.tick((120, 50)), Some((120, 50)));
     }
 }
