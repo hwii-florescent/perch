@@ -586,6 +586,27 @@ Later: Claude stream-json mode (queue cards, rewind, streaming); remote runs.
 **Probed live first (2026-11-06):** see slice 0 above and the evidence table; nothing
 there changed the plan.
 
+## Native desktop client (GPUI)
+
+Decided 2026-11-12 ([decision](DECISIONS.md)); not the "native UI mode" above, which is the chat view.
+`crates/perch-native` is built and tested headlessly but has not been used by a person yet, and is not
+packaged. Measured 2026-11-12 with one terminal shown: 44 MB (58 MB with its headless core) against an
+estimated 231 MB for the Tauri app, whose idle figure of 146 MB was the only one measured directly.
+
+- **Built:** sidebar by project and by status, tabs, splits, agent launch (local; a launch on another
+  computer is not opened automatically), attention states, terminal settings, remote computers, command
+  palette, `keys.json`, and a terminal on Ghostty's engine with the person's profile, selection, search,
+  links, IME, OSC 52, kitty keyboard and graphics, input ownership and shared typing.
+- **Still Tauri-only** (reached with "Open in Perch"): files and the editor, changes and review, browser
+  panes, the chat view, Projects home, memory and instructions, usage, mods and stock screens, every
+  setting that is not a terminal setting, notifications, pairing a phone, updates.
+- **Before it can replace Tauri on macOS:** a pass by a person on a lit screen (drawing cost, IME, focus,
+  the hand-off end to end); packaging, signing and the release workflow with Zig; layout restore; tab
+  drag, tab menu and closed-tab history; the terminal rows still open in the parity checklist; then the
+  Tauri-only list above, starting with the editor (a spike showed `gpui-component` can draw and edit a
+  highlighted file).
+- Linux and Windows builds of the native client are untried.
+
 ## Later, bounded additions
 
 - **Honest reopen/resume:** stopped-tab UI and retained provider conversation ID.

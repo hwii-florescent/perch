@@ -7,6 +7,34 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-12 — A native desktop client in GPUI, with Ghostty's engine on both sides (owner)
+
+Owner direction, to remove the web engine's cost from the desktop (about 270 MB measured 2026-11-11).
+- **A full native app**, `crates/perch-native` (Rust, GPUI), not a native view inside the Tauri window and not
+  Ghostty compiled to WebAssembly. It is a client of the same `perch-core` over the same protocol and holds no
+  domain logic.
+- **perchd holds the screen in Ghostty's engine** (libghostty-vt) instead of `vt100`, with 10,000 lines or 10 MB
+  of scrollback, so every client attaches to the same screen. herdr is the reference for what a Ghostty terminal
+  needs. No agent hibernation.
+- **Bytes only.** The native client runs its own libghostty-vt per terminal and is fed the same output and
+  repaint bytes as xterm.js. There is no structured cell stream and no new protocol family.
+- **GPUI comes from `gpui-pre` on crates.io, pinned exactly (`=0.3.8`)**, the version herdr ships. Later
+  releases need an unstable Rust feature on the toolchain in use; upstream Zed `gpui` is not published as a
+  crate, and vendoring is kept for the day a patch is proven necessary.
+- **Zig 0.16.x is required to build `perchd` and `perch-core`**, because the pinned Ghostty commit
+  (`291fd05`, herdr's) builds only with it. Only the native client stays out of default builds
+  (`cargo build -p perch-native`).
+- **Daily set of the native client:** sidebar (projects and sessions), tabs, splits, agent launch, attention
+  states, terminal settings, remote computers, command palette and the person's keybindings. The editor was a
+  feasibility spike only.
+- **Nothing is lost.** Everything else stays in the React/Tauri app, which the native client opens at the right
+  place with `perch://open`. The native client replaces Tauri on macOS only once it is at parity;
+  [ROADMAP](ROADMAP.md) lists what is still Tauri-only. The web and phone UIs stay.
+- **Licences:** Ghostty is MIT, GPUI Apache-2.0, herdr Apache-2.0; what was adapted from herdr is recorded
+  per file in `THIRD_PARTY_NOTICES.md`.
+- This is not the "native UI mode" of 2026-11-05, which is the chat view on provider sessions inside the
+  existing app.
+
 ## 2026-11-10 — The phone is a chat app's shell: sidebar on the left, Files and Git on the right, its own view mode (SDK 1.10.2)
 
 Owner direction: redesign the phone like Claude or ChatGPT's apps. Supersedes the "one header, active pane and

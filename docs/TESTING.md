@@ -434,6 +434,14 @@ cargo test -p perch-native --test workspace_session # two shells in a split agai
 Run `cargo test` for this package on its own: building `perch-core` together with GPUI changes how
 `serde_json` orders keys and fails three unrelated core tests.
 
+- `tests/vt_xterm_fixtures.rs` writes `packages/web/src/terminalVtParity.fixtures.json` (seven stress
+  streams through the native terminal and through perchd's repaint) and fails when the file is stale
+  (`PERCH_UPDATE_FIXTURES=1` regenerates it); `terminalVtParity.test.ts` compares every cell with xterm.js.
+  The known differences are listed in that test.
+- `scripts/measure-native-memory.sh` measures the footprint of the native client and the Tauri app in
+  four states with scratch state. It opens real windows, so it uses `PERCH_NATIVE_TEST=1` (the window is
+  ordered in without the keyboard and the app is never activated; `test_mode.rs`) and
+  `PERCH_DESKTOP_TEST=1`. Read its header before running it.
 - Nothing opens a window, takes focus or calls `open`. The render tests draw through GPUI's test
   platform into a texture (set `SHOT=<folder>` to save each frame as a PNG); keys go through the window's
   own `dispatch_keystroke`, so the dispatcher that runs before the terminal is what is tested. The

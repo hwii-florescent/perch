@@ -205,18 +205,13 @@ const tally = (found: Difference[]): Record<string, number> => {
  *   in xterm.js; with the stream (not the repaint) a keycap keeps U+FE0F in xterm.js and loses it in Ghostty.
  * - colours_and_styles, text: hidden text (SGR 8) is blank in Ghostty and kept, flagged invisible, by xterm.js.
  * - colours_and_styles, flags: blink (SGR 5) and overline (SGR 53) exist in xterm.js and not in the native cell.
- * - alternate_screen_tui, bg: perchd's repaint paints the blank cells after a run of background colour with
- *   that colour too (the original left them default), so a client that attaches shows a longer bar. It is in
- *   the bytes, so xterm.js shows it as well; "repaint" is native against native and sees it without xterm.js.
  * - kitty_image, images: the native client holds the image placement; the repaint carries none and xterm.js
  *   here has no image support.
  */
 const KNOWN: Record<string, Record<string, number>> = {
-  "attach/alternate_screen_tui": { bg: 21 },
   "attach/cjk_and_emoji": { text: 12 },
   "attach/colours_and_styles": { flags: 13, text: 6 },
   "attach/kitty_image": { images: 1 },
-  "repaint/alternate_screen_tui": { bg: 21 },
   "repaint/kitty_image": { images: 1 },
   "replayed/cjk_and_emoji": { text: 12 },
   "replayed/colours_and_styles": { flags: 13, text: 6 },

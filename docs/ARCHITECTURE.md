@@ -8,9 +8,10 @@ defines acceptance evidence. Source presence is not a release certification.
 ## Process and data ownership
 
 ```text
-React / Zustand / Dockview / xterm
-  browser, paired phone/PWA, iPhone app (ios/), or Tauri webview
-                      │ HTTP + WebSocket
+React / Zustand / Dockview / xterm              GPUI + libghostty-vt
+  browser, paired phone/PWA, iPhone app (ios/),   perch-native (macOS, opt-in build)
+  or Tauri webview                                │
+                      │ HTTP + WebSocket ─────────┘
 perch-core: axum, Rust domain services, SQLite
        │ private socket              │ OpenSSH
 perchd: PTYs, history, VT state       remote perch-core / direct tmux host
@@ -29,6 +30,12 @@ shells, real agent CLIs
   client's "Open in Perch" sends it. A link that launches the app arrives before
   the page listens, so the shell holds the latest one until the page claims it
   (`open_ready`), and the page waits for its session to be listed.
+- **Native client** (`crates/perch-native`, GPUI) is another view of the same core: it finds a
+  running core through `core.json`, signs in as the desktop does and speaks the same protocol. Each
+  terminal is its own libghostty-vt fed the same bytes as xterm.js (output and the daemon's repaint);
+  there is no cell stream. Tabs, splits and their layout are local to the window and are not restored.
+  What it cannot show (files, changes, browser, chat, settings beyond terminals) it hands to the
+  Tauri app with `perch://open`. It is not in default builds.
 - **Web** renders WS-driven state and owns view-local presentation. Do not
   confuse focus/layout with runtime authority.
 - **Stock screens** (`packages/web/src/stock-ui/<id>/`) are presentation only and
