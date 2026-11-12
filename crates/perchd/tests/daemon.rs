@@ -369,3 +369,50 @@ fn a_repaint_larger_than_a_frame_still_attaches() {
     assert!(view.scrollback_rows() > 100);
     let _ = b.kill("heavy", libc::SIGKILL);
 }
+
+#[test]
+fn an_exited_session_with_a_small_stream_and_a_big_screen_replays_its_whole_repaint() {
+    // The stream is a few bytes (a screen fill) but the screen is 100,000 cells: the
+    // repaint is longer than the stream, and a client ends an exited
+    // session's attach once its seq reaches the stream's end.
+    let dir = test_dir("small-stream");
+    let a = connect(&dir);
+    let script = r"printf '\033#8\033[1;1HEXITED_MARK'";
+    a.create(
+        "painted",
+        vec!["/bin/sh".into(), "-c".into(), script.into()],
+        None,
+        vec![],
+        500,
+        200,
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while a.session("painted").unwrap().unwrap().alive {
+        assert!(Instant::now() < deadline, "the session never exited");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    for round in 0..5 {
+        let (attached, reader, _) = a.attach("painted", None).unwrap();
+        let rx = collector(reader);
+        let mut seen = Vec::new();
+        while let Ok(chunk) = rx.recv_timeout(Duration::from_secs(5)) {
+            seen.extend(chunk);
+        }
+        assert!(
+            seen.len() as u64 > attached.end + 64 * 1024,
+            "round {round}: {} bytes",
+            seen.len()
+        );
+        let mut view = perchd::screen::Screen::new(500, 200);
+        view.process(&seen);
+        assert!(
+            view.contents().starts_with("EXITED_MARK"),
+            "round {round}: {}",
+            view.contents()
+        );
+        assert_eq!(view.cursor_position(), (0, 11), "round {round}");
+        // Nothing watches an exited session, so the repaint comes alone.
+        assert!(seen.starts_with(b"\x1bc"), "round {round}");
+    }
+}

@@ -50,8 +50,8 @@
 //!
 //! # Who still needs a byte tail
 //!
-//! A fed screen's repaint replaces the tail on the client, but the daemon
-//! still sends the tail first, and the core still keeps one:
+//! A fed screen's repaint replaces the tail on the client. The daemon sends
+//! the tail first anyway for a live session, and the core keeps one:
 //!
 //! - The daemon's screen is empty for a session reloaded after a daemon
 //!   restart that has not produced output since; its repaint is empty and the
@@ -62,8 +62,12 @@
 //! - A repaint is empty when the engine fails to copy the screen; the tail is
 //!   what a client has left.
 //!
-//! perch-core's `TerminalReplay`, which serves views (not observers), does not
-//! send its tail with a repaint, only when there is none.
+//! The daemon does not send the tail of an exited session that has a repaint:
+//! nothing observes its output, and a client ends such an attach once its seq
+//! reaches the stream's end, which the tail alone does, before the repaint
+//! behind it is read. perch-core's `TerminalReplay`, which serves views (not
+//! observers), does not send its tail with a repaint, only when there is
+//! none.
 
 use ghostty_sys as g;
 use std::ptr;

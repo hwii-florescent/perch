@@ -1150,25 +1150,30 @@ fn attach(state: &State, s: &Session, conn: u64, out: &Outbox, rid: u64, since: 
         error: None,
         data: serde_json::to_value(attached).unwrap(),
     });
-    let mut seq = start;
-    for chunk in replay.chunks(CHUNK) {
-        out.send(&Frame::Data {
-            id: s.id.clone(),
-            seq,
-            bytes: chunk.to_vec(),
-        });
-        seq += chunk.len() as u64;
-    }
     // A default window starts mid-stream: end it with the exact screen and
     // modes (see `screen.rs`). It isn't part of the stream, so its seq is
     // whatever makes a client's next seq land back on `end`; an attach
-    // `since` a seq resumes the stream itself and never gets it. It goes out
-    // in frame-sized pieces, and within the replay window's size, by carrying
-    // fewer of the oldest scrollback rows.
-    if since.is_none() && end > 0 {
-        let restore = inner.screen.restore_bytes_within(DEFAULT_REPLAY as usize);
-        let mut seq = end.saturating_sub(restore.len() as u64);
-        for chunk in restore.chunks(CHUNK) {
+    // `since` a seq resumes the stream itself and never gets it.
+    //
+    // The oldest scrollback rows are left out of a repaint that would not fit
+    // the frame limit or the replay window, so it goes as one frame.
+    let restore = if since.is_none() && end > 0 {
+        // The frame carries a kind byte, the seq and the id's length and bytes.
+        let room = MAX_FRAME - 1 - 8 - 2 - s.id.len();
+        inner
+            .screen
+            .restore_bytes_within(room.min(DEFAULT_REPLAY as usize))
+    } else {
+        Vec::new()
+    };
+    // The repaint erases the tail, and a client of an exited session ends the
+    // attach as soon as its seq reaches `end`, which the tail alone does: the
+    // repaint behind it would be dropped unread. Nothing watches an exited
+    // session's output, so it gets the repaint alone. A live session keeps
+    // the tail for the observers that read it (see `screen.rs`).
+    if inner.alive || restore.is_empty() {
+        let mut seq = start;
+        for chunk in replay.chunks(CHUNK) {
             out.send(&Frame::Data {
                 id: s.id.clone(),
                 seq,
@@ -1176,6 +1181,19 @@ fn attach(state: &State, s: &Session, conn: u64, out: &Outbox, rid: u64, since: 
             });
             seq += chunk.len() as u64;
         }
+    }
+    let mut seq = end.saturating_sub(restore.len() as u64);
+    // ponytail: only a visible screen too big for one frame by itself (never
+    // trimmed) is split, and a client that ends an exited session's attach at
+    // `end` may then see it cut. Raise MAX_FRAME or send the screen as its
+    // own message if a screen that size ever happens.
+    for chunk in restore.chunks(MAX_FRAME - 1 - 8 - 2 - s.id.len()) {
+        out.send(&Frame::Data {
+            id: s.id.clone(),
+            seq,
+            bytes: chunk.to_vec(),
+        });
+        seq += chunk.len() as u64;
     }
     if inner.alive {
         inner.subscribers.insert(conn, out.clone());
