@@ -33,6 +33,14 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 const REPLY_TIMEOUT: Duration = Duration::from_secs(15);
 /// What a request that outwaited the core says.
 const NO_ANSWER: &str = "the core did not answer in time";
+/// What an error from the core starts with when the core read the request and said no.
+const REFUSED: &str = "the core refused the request: ";
+
+/// Whether the core itself said no to a request, as against a connection that could not be made,
+/// dropped, or went unanswered: only the first says anything about the session.
+pub fn is_refusal(error: &anyhow::Error) -> bool {
+    error.to_string().starts_with(REFUSED)
+}
 
 /// A prepared Context Bridge packet and the agents it could go to.
 #[derive(Debug, Clone)]
@@ -180,7 +188,7 @@ impl Core {
                 let text = error.to_string();
                 if text == NO_ANSWER {
                     bail!(crate::terminal::context::UNCONFIRMED)
-                } else if text.starts_with("the core refused the request: ") {
+                } else if text.starts_with(REFUSED) {
                     Err(error)
                 } else {
                     bail!(crate::terminal::context::DROPPED)
@@ -566,7 +574,7 @@ impl Connection {
             } = &message
             {
                 if id.as_deref() == request_id {
-                    break Err(anyhow!("the core refused the request: {text}"));
+                    break Err(anyhow!("{REFUSED}{text}"));
                 }
             }
             skipped.push_back(message);

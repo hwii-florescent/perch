@@ -1,9 +1,11 @@
 //! A session's terminal, attached from a thread of its own: the connection to the core is async
 //! and the view lives on GPUI's thread, so the two talk over channels, in bytes.
 //!
-//! The thread attaches once. When the socket drops it says so and stops: reopening would start
-//! the session again if the core had lost it, and a view cannot tell a dropped socket from a
-//! dead shell. Dropping the view's sender detaches (the shell keeps running in the core).
+//! The thread attaches once. When the socket drops it says so and stops: a view cannot tell a
+//! dropped socket from a dead shell, so it never takes the drop for an exit. Attaching again is
+//! the window's policy ([`reattach`]); the core attaches to the shell it still has and says no
+//! when it has none, so a retry cannot start the session over. Dropping the view's sender
+//! detaches (the shell keeps running in the core).
 
 use crate::client::{Core, Terminal};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
@@ -102,6 +104,31 @@ pub fn attach(
     cols: u16,
     rows: u16,
 ) -> (UnboundedSender<ToCore>, UnboundedReceiver<FromCore>) {
+    start(core, session_id, provider, cols, rows, false)
+}
+
+/// [`attach`] again, after the connection dropped. A core that cannot be reached, or does not
+/// answer, is a connection that is still down ([`FromCore::Disconnected`]), to be tried again;
+/// only a core that read the request and refused it fails the attach, as it does for a session
+/// it no longer has.
+pub fn reattach(
+    core: Core,
+    session_id: String,
+    provider: String,
+    cols: u16,
+    rows: u16,
+) -> (UnboundedSender<ToCore>, UnboundedReceiver<FromCore>) {
+    start(core, session_id, provider, cols, rows, true)
+}
+
+fn start(
+    core: Core,
+    session_id: String,
+    provider: String,
+    cols: u16,
+    rows: u16,
+    again: bool,
+) -> (UnboundedSender<ToCore>, UnboundedReceiver<FromCore>) {
     let (to_core, commands) = unbounded();
     let (events, from_core) = unbounded();
     let spawned = std::thread::Builder::new()
@@ -120,7 +147,7 @@ pub fn attach(
                     }
                 };
                 runtime.block_on(run(
-                    core, session_id, provider, cols, rows, commands, events,
+                    core, session_id, provider, cols, rows, again, commands, events,
                 ));
             }
         });
@@ -130,12 +157,14 @@ pub fn attach(
     (to_core, from_core)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run(
     core: Core,
     session_id: String,
     provider: String,
     cols: u16,
     rows: u16,
+    again: bool,
     mut commands: UnboundedReceiver<ToCore>,
     events: UnboundedSender<FromCore>,
 ) {
@@ -150,7 +179,13 @@ async fn run(
     let (mut connection, mut terminal) = match attached {
         Ok(attached) => attached,
         Err(error) => {
-            let _ = events.unbounded_send(FromCore::Failed(format!("{error:#}")));
+            let reason = format!("{error:#}");
+            let said = if again && !crate::client::is_refusal(&error) {
+                FromCore::Disconnected(reason)
+            } else {
+                FromCore::Failed(reason)
+            };
+            let _ = events.unbounded_send(said);
             return;
         }
     };

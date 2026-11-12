@@ -254,7 +254,7 @@ impl Harness {
     }
 
     /// Let the window, the follower and the terminals run, and draw, until `done` holds.
-    pub fn wait(&mut self, what: &str, done: impl Fn(&mut Self) -> bool) {
+    pub fn wait(&mut self, what: &str, mut done: impl FnMut(&mut Self) -> bool) {
         let deadline = Instant::now() + TIMEOUT;
         loop {
             self.pump();
@@ -268,6 +268,8 @@ impl Harness {
                 let screens: Vec<_> = shown.iter().map(|id| (id.clone(), self.rows(id))).collect();
                 panic!("timed out waiting for {what}; on screen {screens:#?}");
             }
+            // The executor's clock is the test's own: let it follow the real one.
+            self.cx.advance_clock(Duration::from_millis(25));
             std::thread::sleep(Duration::from_millis(25));
         }
     }
@@ -279,6 +281,7 @@ impl Harness {
             self.pump();
             self.cx.run_until_parked();
             self.draw();
+            self.cx.advance_clock(Duration::from_millis(25));
             std::thread::sleep(Duration::from_millis(25));
         }
     }
@@ -339,6 +342,20 @@ impl Harness {
         Some(
             self.window
                 .update(&mut self.cx, |_, _, cx| view.update(cx, |v, _| f(v)))
+                .unwrap(),
+        )
+    }
+
+    /// [`Self::view`] with the view's context, for what needs one.
+    pub fn view_cx<R>(
+        &mut self,
+        id: &str,
+        f: impl FnOnce(&mut TerminalView, &mut gpui::Context<TerminalView>) -> R,
+    ) -> Option<R> {
+        let view = self.pane(id)?;
+        Some(
+            self.window
+                .update(&mut self.cx, |_, _, cx| view.update(cx, f))
                 .unwrap(),
         )
     }

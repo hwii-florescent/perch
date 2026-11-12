@@ -222,6 +222,10 @@ pub struct TerminalView {
     /// scroll to an end); the view then leaves those Command chords to it, so a key the person
     /// moved is not still taken here.
     hosted: bool,
+    /// The session and provider this view attaches, kept to attach to again.
+    target: Option<(String, String)>,
+    /// A window will attach again after a drop, so the note says it is waiting for the core.
+    reconnects: bool,
 }
 
 impl TerminalView {
@@ -283,6 +287,8 @@ impl TerminalView {
             was_focused: false,
             take_focus: false,
             hosted: false,
+            target: None,
+            reconnects: false,
         }
     }
 
@@ -311,15 +317,41 @@ impl TerminalView {
         view.core = Some(core.clone());
         view.status = Status::Connecting;
         view.take_focus = true;
+        let provider = open
+            .provider_id
+            .clone()
+            .unwrap_or_else(|| perch_core::agent_fleet::TERMINAL_PROVIDER.to_string());
+        view.target = Some((open.session_id.clone(), provider.clone()));
         view.pending = Some(Pending {
             core,
             session_id: open.session_id.clone(),
-            provider: open
-                .provider_id
-                .clone()
-                .unwrap_or_else(|| perch_core::agent_fleet::TERMINAL_PROVIDER.to_string()),
+            provider,
         });
         view
+    }
+
+    /// Say that a window attaches this view again after the connection drops, so the note says
+    /// it is waiting for the core.
+    pub fn expect_reconnect(&mut self, reconnects: bool) {
+        self.reconnects = reconnects;
+    }
+
+    /// Attach to the same session again through `core`, after the connection dropped. The screen
+    /// stays as it was until the core's repaint replaces it, a search keeps its query, and
+    /// nothing is started over: the core attaches to the shell it still has, or refuses, and a
+    /// refusal is a failure to attach, never an exit. False, doing nothing, unless the view is
+    /// disconnected from a session it attached.
+    pub fn reattach(&mut self, core: Core, cx: &mut Context<Self>) -> bool {
+        let (Status::Disconnected(_), Some((session_id, provider))) =
+            (&self.status, self.target.clone())
+        else {
+            return false;
+        };
+        let (cols, rows) = self.fitted.map_or(self.vt.size(), |f| (f.cols, f.rows));
+        self.core = Some(core.clone());
+        let (to_core, from_core) = attach::reattach(core, session_id, provider, cols, rows);
+        self.link(to_core, from_core, cx);
+        true
     }
 
     /// Join the core's end of a terminal: what the view asks goes to `to_core`, what the core
@@ -1610,6 +1642,9 @@ impl TerminalView {
                 } else {
                     Some("Viewing agent".into())
                 }
+            }
+            Status::Disconnected(_) if self.reconnects => {
+                Some("Disconnected \u{2014} reconnecting to the core\u{2026}".into())
             }
             Status::Disconnected(_) => Some("Disconnected".into()),
             Status::Failed(reason) => Some(format!("Could not open the terminal: {reason}")),

@@ -65,3 +65,8 @@ harness = false
 name = "workspace_session"
 path = "tests/workspace_session.rs"
 harness = false
+
+[[test]]
+name = "workspace_lifecycle"
+path = "tests/workspace_lifecycle.rs"
+harness = false

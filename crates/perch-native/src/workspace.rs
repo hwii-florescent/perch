@@ -22,7 +22,7 @@ use crate::tabs::{Dir, Node, Side, Tabs};
 use crate::terminal::actions::{Action, Scroll};
 use crate::terminal::attach::FromCore;
 use crate::terminal::clipboard::{Clipboard, SystemClipboard};
-use crate::terminal::TerminalView;
+use crate::terminal::{Status, TerminalEvent, TerminalView};
 use crate::ui::{
     hint, label, tint, LaunchFailed, OpenSession, Sidebar, DIM_COLOR, MAIN_BG, SELECTED_BG,
     SIDEBAR_BG, TITLE_COLOR,
@@ -43,6 +43,17 @@ const LEADER_TIMEOUT: Duration = Duration::from_millis(1500);
 /// How long after a tab closes its session is asked to end, and how much later it is asked again.
 const END_WAIT: Duration = Duration::from_millis(400);
 const END_RETRY: Duration = Duration::from_millis(1100);
+/// How long to wait before attaching a dropped terminal to the core again: it doubles from the
+/// first wait to the last, and stays there for as long as the core is away.
+const REATTACH_FIRST: Duration = Duration::from_millis(250);
+const REATTACH_LAST: Duration = Duration::from_secs(5);
+
+fn reattach_delay(attempt: u32) -> Duration {
+    REATTACH_FIRST
+        .saturating_mul(2u32.saturating_pow(attempt.min(8)))
+        .min(REATTACH_LAST)
+}
+
 /// How long a started split waits for its new session.
 const SPLIT_WAIT: Duration = Duration::from_secs(20);
 pub const TAB_BAR_HEIGHT: f32 = 30.;
@@ -62,6 +73,9 @@ struct Pane {
     view: Option<Entity<TerminalView>>,
     /// Gates the size a hidden pane is given.
     settle: Settle,
+    /// Attaches the terminal again after its connection dropped, and how many tries in a row.
+    retry: Option<Task<()>>,
+    attempts: u32,
 }
 
 /// Waits for a size to hold still before a hidden pane is given it: a window being dragged or a
@@ -240,6 +254,8 @@ impl Workspace {
                     open: event.clone(),
                     view,
                     settle: Settle::default(),
+                    retry: None,
+                    attempts: 0,
                 },
             );
         }
@@ -272,14 +288,62 @@ impl Workspace {
             view.set_clipboard(clipboard);
             view.set_hosted(true);
         });
-        // A click on a link is a person's: the window runs the system's handler for it.
-        cx.subscribe(&view, |_, _, event: &crate::terminal::TerminalEvent, _| {
-            if let crate::terminal::TerminalEvent::OpenLink(target) = event {
-                crate::terminal::links::open_in_system(target);
-            }
+        view.update(cx, |view, _| view.expect_reconnect(true));
+        let id = open.session_id.clone();
+        cx.subscribe(&view, move |this, _, event: &TerminalEvent, cx| {
+            this.on_terminal(&id, event, cx)
         })
         .detach();
         Some(view)
+    }
+
+    /// What a terminal tells the window.
+    fn on_terminal(&mut self, id: &str, event: &TerminalEvent, cx: &mut Context<Self>) {
+        match event {
+            // A click on a link is a person's: the window runs the system's handler for it.
+            TerminalEvent::OpenLink(target) => crate::terminal::links::open_in_system(target),
+            TerminalEvent::Status(Status::Live) => {
+                if let Some(pane) = self.panes.get_mut(id) {
+                    pane.attempts = 0;
+                    pane.retry = None;
+                }
+            }
+            TerminalEvent::Status(Status::Disconnected(_)) => self.schedule_reattach(id, cx),
+            _ => {}
+        }
+    }
+
+    /// The connection of a terminal dropped. The shell is not known to have ended, so the screen
+    /// stays and the window tries to attach to it again, waiting longer between tries up to a
+    /// limit for as long as the core is away. A core that is back and says the session is gone
+    /// ends the tries with its own reason; nothing is ever started over.
+    fn schedule_reattach(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(pane) = self.panes.get_mut(id) else {
+            return;
+        };
+        let delay = reattach_delay(pane.attempts);
+        pane.attempts = pane.attempts.saturating_add(1);
+        let id = id.to_string();
+        pane.retry = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(delay).await;
+            let _ = this.update(cx, |this, cx| this.reattach(&id, cx));
+        }));
+    }
+
+    fn reattach(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(view) = self.panes.get(id).and_then(|pane| pane.view.clone()) else {
+            return;
+        };
+        if !matches!(view.read(cx).status(), Status::Disconnected(_)) {
+            return;
+        }
+        // The core may have restarted at another address: look for it afresh each time.
+        match self.locate.as_ref().map(|locate| locate()) {
+            Some(Ok(core)) => {
+                view.update(cx, |view, cx| view.reattach(core, cx));
+            }
+            _ => self.schedule_reattach(id, cx),
+        }
     }
 
     fn keymap(&self, cx: &App) -> Keymap {
