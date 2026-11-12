@@ -1911,11 +1911,6 @@ impl TerminalView {
             _ => layout::fit(window, available, &family, self.font_px_zoomed()),
         };
         self.fitted = Some(fit);
-        let snap = |v: Pixels| px((f32::from(v) * self.scale).round() / self.scale);
-        self.origin = point(
-            snap(bounds.origin.x + px(pad_x)),
-            snap(bounds.origin.y + px(pad_y)),
-        );
         // A pane with no room (hidden, or not laid out yet) has no size to tell anyone: the shell
         // would be squeezed to one cell and the attach would start at that.
         let sized = available.width > px(0.) && available.height > px(0.);
@@ -1944,6 +1939,13 @@ impl TerminalView {
             self.requested = Some((fit.cols, fit.rows));
             self.send(ToCore::Resize(fit.cols, fit.rows));
         }
+        self.origin = layout::grid_origin(
+            bounds,
+            (pad_x, pad_y),
+            fit.metrics.height,
+            self.vt.size().1,
+            self.scale,
+        );
         if std::mem::take(&mut self.take_focus) {
             self.focus.focus(window, cx);
         }

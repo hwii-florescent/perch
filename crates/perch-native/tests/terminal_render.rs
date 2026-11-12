@@ -45,6 +45,8 @@ struct Shot {
     width: usize,
     scale: f32,
     cell: (f32, f32),
+    /// Where the first row starts: the padding and half of the height the rows leave over.
+    top: f32,
 }
 
 impl Shot {
@@ -64,7 +66,7 @@ impl Shot {
     fn cell_origin(&self, col: usize, row: usize) -> (f32, f32) {
         (
             PAD_X + col as f32 * self.cell.0,
-            PAD_Y + row as f32 * self.cell.1,
+            self.top + row as f32 * self.cell.1,
         )
     }
 
@@ -107,6 +109,7 @@ fn differs(a: [u8; 3], b: [u8; 3]) -> bool {
 }
 
 struct Harness {
+    height: f32,
     cx: HeadlessAppContext,
     window: WindowHandle<TerminalView>,
     to_core: UnboundedReceiver<ToCore>,
@@ -134,6 +137,7 @@ impl Harness {
             })
             .unwrap();
         Self {
+            height,
             cx,
             window,
             to_core,
@@ -182,6 +186,24 @@ impl Harness {
             .unwrap()
     }
 
+    /// Where the first row starts: the padding and, as the terminal is centred vertically, half
+    /// of the height the whole rows leave over, in whole device pixels.
+    fn top(&mut self) -> f32 {
+        let scale = self
+            .cx
+            .update_window(self.window.into(), |_, window: &mut Window, _| {
+                window.scale_factor()
+            })
+            .unwrap();
+        let ch = self
+            .view(|v, _| v.cell_size())
+            .map_or(0.0, |c| f32::from(c.height));
+        let rows = self.view(|v, _| v.grid_size().1);
+        let pad = self.view(|v, _| v.settings().padding.1);
+        let spare = (self.height - 2.0 * pad - ch * f32::from(rows)).max(0.0);
+        pad + (spare * scale / 2.0).floor() / scale
+    }
+
     fn cell_width(&mut self) -> f32 {
         self.view(|v, _| v.cell_size())
             .map_or(8.0, |c| f32::from(c.width))
@@ -213,7 +235,9 @@ impl Harness {
                 .expect("write the frame");
         }
         let cell = self.view(|view, _| view.cell_size()).expect("laid out");
+        let top = self.top();
         Shot {
+            top,
             width: image.width() as usize,
             raw: image.into_raw(),
             scale,
@@ -242,9 +266,10 @@ impl Harness {
 
     fn pos(&mut self, (col, row, frac): (usize, usize, f32)) -> (f32, f32) {
         let cell = self.view(|v, _| v.cell_size()).expect("laid out");
+        let top = self.top();
         (
             PAD_X + (col as f32 + frac) * f32::from(cell.width),
-            PAD_Y + (row as f32 + 0.5) * f32::from(cell.height),
+            top + (row as f32 + 0.5) * f32::from(cell.height),
         )
     }
 
@@ -374,6 +399,10 @@ fn main() {
     );
     run("ownership_and_named_actions", ownership_and_named_actions);
     run(
+        "the_grid_is_centred_in_its_pane",
+        the_grid_is_centred_in_its_pane,
+    );
+    run(
         "x10_mouse_reports_past_the_text_range",
         x10_mouse_reports_past_the_text_range,
     );
@@ -436,7 +465,7 @@ fn profile_and_settings() {
     data.terminal_opacity = 0.5;
     h.view(|v, cx| v.apply_core(None, Some(data), cx));
     let shot = h.draw();
-    let (x, y) = (20.0 + 0.5 * shot.cell.0, 10.0 + 0.5 * shot.cell.1);
+    let (x, y) = (20.0 + 0.5 * shot.cell.0, shot.top + 0.5 * shot.cell.1);
     // The red cells now start at the padding; opacity blends them with the window behind.
     let p = shot.at(x, y);
     assert!(p[0] > p[1] && p[0] < 0xcc, "half-transparent red {p:?}");
@@ -1613,11 +1642,12 @@ fn input_and_scrolling() {
     );
 
     // Clicks reach a program that takes the mouse; shift keeps them.
+    let top = h.top();
     let down = h.view(|v, _| {
         v.mouse(
             perch_native::terminal::vt::MouseAction::Press,
             Some(gpui::MouseButton::Left),
-            point(px(PAD_X + 20.), px(PAD_Y + 20.)),
+            point(px(PAD_X + 20.), px(top + 20.)),
             Modifiers::default(),
         )
     });
@@ -1631,7 +1661,7 @@ fn input_and_scrolling() {
         v.mouse(
             perch_native::terminal::vt::MouseAction::Release,
             Some(gpui::MouseButton::Left),
-            point(px(PAD_X + 20.), px(PAD_Y + 20.)),
+            point(px(PAD_X + 20.), px(top + 20.)),
             Modifiers::default(),
         )
     });
@@ -2047,6 +2077,47 @@ fn ownership_and_named_actions() {
         .is_some_and(|n| n.starts_with("Sleeping to save memory")));
 }
 
+/// Rows rarely fill the pane: what is left is split above and below the grid, and a pointer on
+/// the grid reaches the cell drawn under it (the first cell, at the top of the pane's slack, is
+/// not row 0 of the pane).
+fn the_grid_is_centred_in_its_pane() {
+    let mut h = Harness::open(900., 420.);
+    h.attach(100, 24, "\x1b[?1000h\x1b[?1006h\x1b[41m ");
+    h.focus();
+    let shot = h.draw();
+    h.sent();
+    let (cw, ch) = shot.cell;
+    assert!(shot.top > 0.0, "the pane has height to spare");
+    let red = Theme::default().ansi[1];
+    assert!(
+        near(
+            shot.center(0, 0),
+            rgb(u32::from(red.0) << 16 | u32::from(red.1) << 8 | u32::from(red.2))
+        ),
+        "the first cell is drawn at the centred origin"
+    );
+    assert!(
+        differs(shot.at(cw / 2.0, shot.top - 1.0), shot.center(0, 0)),
+        "nothing is drawn in the slack above the grid"
+    );
+    // SGR reports are 1-based: the cell under the pointer, and the first row for the slack above.
+    for (x, y, want) in [
+        (2.5 * cw, shot.top + 2.5 * ch, "\x1b[<0;3;3M"),
+        (0.5 * cw, shot.top + 0.5 * ch, "\x1b[<0;1;1M"),
+        (0.5 * cw, shot.top - 1.0, "\x1b[<0;1;1M"),
+        (0.5 * cw, shot.top + 23.5 * ch, "\x1b[<0;1;24M"),
+    ] {
+        h.press(MouseButton::Left, x, y, Modifiers::default());
+        assert_eq!(
+            h.sent(),
+            vec![ToCore::Input(want.as_bytes().to_vec())],
+            "a click at y {y}"
+        );
+        h.release(MouseButton::Left, x, y, Modifiers::default());
+        h.sent();
+    }
+}
+
 /// A mouse report in the old X10 format whose coordinate is past column 95 is not text, which is
 /// all the core takes, so it is dropped rather than sent with the wrong position.
 fn x10_mouse_reports_past_the_text_range() {
@@ -2056,10 +2127,11 @@ fn x10_mouse_reports_past_the_text_range() {
     h.draw();
     h.sent();
     let cw = h.cell_width();
+    let top = h.top();
     h.press(
         MouseButton::Left,
         1.0 + 10.0 * cw,
-        5.0,
+        top + 5.0,
         Modifiers::default(),
     );
     let near_origin = h.sent();
@@ -2070,7 +2142,7 @@ fn x10_mouse_reports_past_the_text_range() {
     h.press(
         MouseButton::Left,
         1.0 + 150.0 * cw,
-        5.0,
+        top + 5.0,
         Modifiers::default(),
     );
     assert_eq!(h.sent(), vec![], "a report that is not text is not sent");
@@ -2310,13 +2382,13 @@ fn failed_commands_are_ticked_and_prompts_jumped_to() {
     let shot = h.draw();
     // 241 rows in all; the failed command ended on row 12 (three commands of four rows).
     let track = shot.cell.1 * 24.0;
-    let y = track * 12.0 / 241.0 + 1.0;
+    let y = shot.top + track * 12.0 / 241.0 + 1.0;
     let tick = shot.at(x, y);
     assert!(
         tick[0] > tick[1] + 60,
         "a red tick where it ended: {tick:?}"
     );
-    let elsewhere = shot.at(x, track * 100.0 / 241.0);
+    let elsewhere = shot.at(x, shot.top + track * 100.0 / 241.0);
     assert!(
         elsewhere[0] <= elsewhere[1] + 60,
         "and none where nothing failed: {elsewhere:?}"

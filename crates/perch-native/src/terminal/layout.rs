@@ -4,7 +4,9 @@
 //! width agent CLIs treat as the minimum sane one, by shrinking the font, never below
 //! [`MIN_FONT_PX`], rather than handing the program fewer columns.
 
-use gpui::{font, px, Font, FontStyle, FontWeight, Pixels, SharedString, Size, Window};
+use gpui::{
+    font, point, px, Bounds, Font, FontStyle, FontWeight, Pixels, Point, SharedString, Size, Window,
+};
 
 /// Columns a pane is kept at by scaling the font down.
 pub const MIN_COLS: u16 = 80;
@@ -127,6 +129,29 @@ pub fn fit(window: &Window, available: Size<Pixels>, family: &str, base_px: f32)
     }
 }
 
+/// Where the grid starts in a pane: the padding, plus half of the height the whole rows leave
+/// over (the terminal is centred vertically, as herdr's is; the columns' leftover stays on the
+/// right), on whole device pixels. Everything drawn or hit-tested on the grid takes this origin.
+pub fn grid_origin(
+    bounds: Bounds<Pixels>,
+    padding: (f32, f32),
+    cell_height: Pixels,
+    rows: u16,
+    scale: f32,
+) -> Point<Pixels> {
+    let spare = (f32::from(bounds.size.height)
+        - 2.0 * padding.1
+        - f32::from(cell_height) * f32::from(rows))
+    .max(0.0);
+    let snap = |v: Pixels| px((f32::from(v) * scale).round() / scale);
+    let origin = bounds.origin
+        + point(
+            px(padding.0),
+            px(padding.1 + (spare * scale / 2.0).floor() / scale),
+        );
+    point(snap(origin.x), snap(origin.y))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,6 +178,35 @@ mod tests {
             assert!(
                 (got - want).abs() < 1e-5,
                 "cell {cell}, face {face}: {got}, want {want}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_grid_is_centred_vertically_on_whole_device_pixels() {
+        let pane = |h: f32| Bounds::new(point(px(10.0), px(20.0)), gpui::size(px(300.0), px(h)));
+        // (pane height, padding, cell height, rows, scale, expected top offset in the pane)
+        for (height, pad_y, cell, rows, scale, top) in [
+            // No leftover: the padding alone.
+            (160.0, 0.0, 16.0, 10, 2.0, 0.0),
+            (180.0, 10.0, 16.0, 10, 1.0, 10.0),
+            // 20 left over: 10 above.
+            (180.0, 0.0, 16.0, 10, 1.0, 10.0),
+            // An odd 5 px at scale 1: 2 above, 3 below.
+            (165.0, 0.0, 16.0, 10, 1.0, 2.0),
+            // Half a logical pixel is a whole device pixel at scale 2: 2.5 above.
+            (165.0, 0.0, 16.0, 10, 2.0, 2.5),
+            // Padding is kept on top of the split: 10 + (200 - 20 - 160) / 2.
+            (200.0, 10.0, 16.0, 10, 1.0, 20.0),
+            // The grid taller than the pane: nothing to split.
+            (100.0, 0.0, 16.0, 10, 2.0, 0.0),
+        ] {
+            let got = grid_origin(pane(height), (4.0, pad_y), px(cell), rows, scale);
+            assert_eq!(f32::from(got.x), 14.0, "columns are not centred");
+            assert_eq!(
+                f32::from(got.y),
+                20.0 + top,
+                "pane {height}, pad {pad_y}, scale {scale}"
             );
         }
     }
