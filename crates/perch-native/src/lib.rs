@@ -8,5 +8,6 @@ pub mod handoff;
 pub mod keymap;
 pub mod sidebar;
 pub mod sound;
+pub mod tabs;
 pub mod terminal;
 pub mod ui;
