@@ -11,6 +11,7 @@ mod glass;
 #[cfg(target_os = "macos")]
 mod menu;
 mod notify;
+mod open_url;
 mod permissions;
 #[cfg(target_os = "macos")]
 mod shortcuts;
@@ -331,8 +332,15 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running perch-desktop");
+        .build(tauri::generate_context!())
+        .expect("error while building perch-desktop")
+        .run(|_app, _event| {
+            // `perch://` links (the native client's "Open in Perch") arrive as Opened events.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
+                open_url::open(_app, &urls);
+            }
+        });
 
     // Keep the runtime alive until Tauri exits (runtime drop joins all tasks).
     drop(runtime);

@@ -5,6 +5,7 @@ import { claimViewer } from "./viewer";
 import { installRelayTransport } from "./relay/transport";
 import { trackVisibleViewport } from "./visibleViewport";
 import { installContextMenuGuard } from "./contextMenuGuard";
+import "./openRequest";
 
 // Opened from a relay link: send the app's data routes through the sealed tunnel.
 // Before anything can make a request; a no-op on the LAN and the desktop app.
