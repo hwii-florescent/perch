@@ -2412,14 +2412,14 @@ declare module "@perch/sdk" {
     connected: boolean;
     /** Sessions that need the person. */
     needsYou: number;
-    onOpenSwitcher(): void;
-    onOpenSettings(): void;
-  }
     /** Opens the sidebar (the switcher). */
-
+    onOpenSwitcher(): void;
     /** Opens the Files/Git drawer (1.10.2). */
     onOpenTools(): void;
     /** Opens Settings. The stock header no longer shows it: Settings is in the switcher. */
+    onOpenSettings(): void;
+  }
+
   /** `stock:mobile-switcher`, the phone's sidebar while open, a slide-over from the left (1.10). */
   export interface MobileSwitcherProps {
     /** The sidebar's own list as Perch draws it on a phone; choosing in it closes the switcher. A copy may draw its
@@ -2430,27 +2430,27 @@ declare module "@perch/sdk" {
     onClose(): void;
     /** A session or workspace was chosen: closes the switcher and shows the session pane. */
     onPicked(): void;
-  }
-
-  /** The phone's panes. */
     /** This phone's UI/CLI view (1.10.2): its own, the computer's is not changed. */
     chatMode: "ui" | "cli";
     onChatMode(mode: "ui" | "cli"): void;
     /** Closes the switcher and opens Settings (1.10.2). */
     onOpenSettings(): void;
+  }
+
+  /** The phone's panes. */
   export type MobilePaneKind = "chat" | "files" | "gitReview";
   /** `stock:mobile-panes`, the phone's canvas (1.10): the session full-height, and a Files/Git drawer over it
    * (1.10.2; before, one pane over a bottom bar). */
   export interface MobilePanesProps {
     /** The panes this workspace has (Git only for a git checkout), in order. "chat" is the session, with no drawer. */
     panes: { kind: MobilePaneKind; label: string }[];
+    /** "chat": the drawer is closed; "files" or "gitReview": it is open on that tool. */
     shown: MobilePaneKind;
     /** The session (terminal or chat), mounted by Perch and kept mounted while the drawer is open (1.10.2). */
     session: ReactNode;
     /** The drawer's tool, mounted by Perch only while it is open; null when `shown` is "chat" or the tool needs a
      * workspace and none is picked. */
     content: ReactNode;
-    /** "chat": the drawer is closed; "files" or "gitReview": it is open on that tool. */
     workspaceId: string | null;
     /** Shows a tool in the drawer, or closes it with "chat": drops a stale Files/Git request and uncovers the session. */
     onSelect(kind: MobilePaneKind): void;
