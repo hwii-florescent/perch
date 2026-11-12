@@ -509,11 +509,11 @@ fn terminal_settings_show_what_the_core_sent() {
     assert_ne!(before.raw, waiting.raw, "the panel is drawn");
     // Once the core has sent the settings the panel shows them.
     let mut with_settings = model(&[("alpha", json!({}))]);
-    with_settings.terminal = Some(perch_native::settings::TerminalSettings {
+    with_settings.terminal = Some(Box::new(perch_native::settings::TerminalSettings {
         scrollback: 4321,
         login_shell: true,
-        dropped_path_double_quotes: false,
-    });
+        ..Default::default()
+    }));
     h.window
         .update(&mut h.cx, |ws, _, cx| {
             ws.sidebar().update(cx, |sidebar, cx| {

@@ -93,6 +93,55 @@ fn window(rig: &mut Rig) {
     h.show_tab(&first);
     h.wait("the first shell", |h| h.ready(&first));
     let single = h.fitted(&first);
+    // A scrollback saved while a terminal is open reaches that terminal at once, not only the
+    // terminals opened afterwards.
+    assert_eq!(
+        h.view(&first, |v| v.settings().scrollback),
+        Some(scrollback as usize)
+    );
+    h.send(Order::UpdateSettings(
+        Change::Scrollback(scrollback + 10).patch(),
+    ));
+    h.wait("the open terminal to follow the setting", |h| {
+        h.view(&first, |v| v.settings().scrollback) == Some(scrollback as usize + 10)
+    });
+    // The other terminal settings the panel changes go through the core the same way, and the
+    // open terminal and the panel's own copy both follow.
+    for change in [
+        Change::Opacity(0.5),
+        Change::Padding([6.0, 4.0]),
+        Change::MinimumContrast(4.5),
+        Change::PaneScrollbars(false),
+        Change::ClipboardWrite(false),
+        Change::OptionAsAlt("off"),
+        Change::ToastDelivery("system"),
+        Change::SoundEnabled(true),
+    ] {
+        h.send(Order::UpdateSettings(change.patch()));
+    }
+    h.wait("the panel's copy of the settings", |h| {
+        h.settings().is_some_and(|s| {
+            s.opacity == 0.5
+                && s.padding == [6.0, 4.0]
+                && s.minimum_contrast == 4.5
+                && !s.pane_scrollbars
+                && !s.clipboard_write
+                && s.option_as_alt == "off"
+                && s.toast_delivery == "system"
+                && s.sound_enabled
+        })
+    });
+    h.wait("the open terminal to follow", |h| {
+        h.view(&first, |v| {
+            let s = v.settings();
+            s.opacity == 0.5 && s.padding == (6.0, 4.0) && !s.scrollbar && !s.clipboard_write
+        }) == Some(true)
+    });
+    // Back to no padding, which the later size checks assume.
+    h.send(Order::UpdateSettings(Change::Padding([0.0, 0.0]).patch()));
+    h.wait("the padding to go", |h| {
+        h.view(&first, |v| v.settings().padding) == Some((0.0, 0.0))
+    });
     h.type_text("echo ready-$((40+2))");
     h.wait("the first shell to answer", |h| {
         h.has_row(&first, "ready-42")

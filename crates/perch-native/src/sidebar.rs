@@ -207,7 +207,7 @@ pub struct Model {
     /// `keys.json` as the core checked it, while there is one.
     pub keys_file: Option<Value>,
     /// The terminal settings, once the core has sent them.
-    pub terminal: Option<TerminalSettings>,
+    pub terminal: Option<Box<TerminalSettings>>,
 }
 
 /// What `host.info` said about a remote computer.
@@ -251,7 +251,7 @@ pub struct State {
     alerts: Vec<Alert>,
     keybindings: BTreeMap<String, String>,
     keys_file: Option<Value>,
-    terminal: Option<TerminalSettings>,
+    terminal: Option<Box<TerminalSettings>>,
 }
 
 /// `statusDot.sessionDotState`: what the session itself reports, before the core's attention facts.
@@ -488,7 +488,7 @@ impl State {
             ServerMessage::SettingsCurrent { settings } => {
                 self.sound_enabled = settings.sound_enabled;
                 self.keybindings.clone_from(&settings.keybindings);
-                self.terminal = Some(TerminalSettings::from_wire(settings));
+                self.terminal = Some(Box::new(TerminalSettings::from_wire(settings)));
             }
             ServerMessage::ModsState { keys, .. } => self.keys_file.clone_from(keys),
             ServerMessage::ModsChanged {} => asks.push(Request::Mods),

@@ -16,7 +16,10 @@ use crate::client::{Command, Core};
 use crate::handoff::{open_in_perch, perch_url, Place};
 use crate::keymap::{Context as KeyContext, Hit, Keymap};
 use crate::palette::{self, Entry, Kind, Outcome, Palette, SessionRef};
-use crate::settings::{scrollback_from_text, Change, MAX_SCROLLBACK, MIN_SCROLLBACK};
+use crate::settings::{
+    next_choice, scrollback_from_text, stepped, Change, CONTRAST, MAX_SCROLLBACK, MIN_SCROLLBACK,
+    OPACITY, OPTION_AS_ALT, PADDING, TOAST_DELIVERY,
+};
 use crate::sidebar::{Attention, LOCAL};
 use crate::tabs::{Dir, Node, Side, Tabs};
 use crate::terminal::actions::{Action, Scroll};
@@ -30,7 +33,7 @@ use crate::ui::{
 use futures::channel::mpsc::UnboundedSender;
 use gpui::{
     canvas, div, prelude::*, px, relative, rgb, size, AnyElement, App, Context, Entity, Focusable,
-    KeyDownEvent, Keystroke, MouseButton, Pixels, Size, Subscription, Task, Window,
+    KeyDownEvent, Keystroke, MouseButton, Pixels, SharedString, Size, Subscription, Task, Window,
 };
 use serde_json::Value;
 use std::cell::Cell;
@@ -1365,15 +1368,20 @@ impl Workspace {
                     cx.notify();
                 })
             });
+        let sound_file = |file: &str| {
+            if file.is_empty() {
+                "the system alert".to_string()
+            } else {
+                file.to_string()
+            }
+        };
+        let [across, down] = terminal.padding;
         body = body
-            .child(
-                div().flex().justify_between().items_center().child(row(
-                    "Scrollback (lines)",
-                    &format!(
-                        "{MIN_SCROLLBACK}–{MAX_SCROLLBACK} lines, Enter to save. Saved for every Perch window; this window keeps 10,000 lines per terminal for now."
-                    ),
-                )).child(scrollback_box),
-            )
+            .child(setting_row(
+                "Scrollback (lines)",
+                &format!("{MIN_SCROLLBACK}\u{2013}{MAX_SCROLLBACK} lines, Enter to save. Open terminals follow at once."),
+                scrollback_box.into_any_element(),
+            ))
             .child(self.switch(
                 "login-shell",
                 "Login shell",
@@ -1385,11 +1393,108 @@ impl Workspace {
             .child(self.switch(
                 "double-quotes",
                 "Wrap dropped paths in double quotes",
-                "Applies to file drops, which this window does not do yet.",
+                "Applies to file drops. Off uses single quotes.",
                 terminal.dropped_path_double_quotes,
                 Change::DroppedPathDoubleQuotes(!terminal.dropped_path_double_quotes),
                 cx,
             ))
+            .child(self.stepper(
+                "contrast",
+                "Minimum contrast",
+                "Text below this ratio (1 to 21) is pushed toward black or white. 1 leaves colours alone.",
+                format!("{:.1}", terminal.minimum_contrast),
+                Change::MinimumContrast(stepped(terminal.minimum_contrast, -0.5, CONTRAST)),
+                Change::MinimumContrast(stepped(terminal.minimum_contrast, 0.5, CONTRAST)),
+                cx,
+            ))
+            .child(self.switch(
+                "clipboard-write",
+                "Programs may write the clipboard",
+                "A program in a terminal can copy text with OSC 52.",
+                terminal.clipboard_write,
+                Change::ClipboardWrite(!terminal.clipboard_write),
+                cx,
+            ))
+            .child(self.switch(
+                "scrollbars",
+                "Scrollbars",
+                "A strip over the text edge while there is history to scroll.",
+                terminal.pane_scrollbars,
+                Change::PaneScrollbars(!terminal.pane_scrollbars),
+                cx,
+            ))
+            .child(self.stepper(
+                "padding-across",
+                "Padding across (px)",
+                "Space left and right of the text, 0 to 64.",
+                format!("{across}"),
+                Change::Padding([stepped(across, -2.0, PADDING), down]),
+                Change::Padding([stepped(across, 2.0, PADDING), down]),
+                cx,
+            ))
+            .child(self.stepper(
+                "padding-down",
+                "Padding down (px)",
+                "Space above and below the text, 0 to 64.",
+                format!("{down}"),
+                Change::Padding([across, stepped(down, -2.0, PADDING)]),
+                Change::Padding([across, stepped(down, 2.0, PADDING)]),
+                cx,
+            ))
+            .child(self.stepper(
+                "opacity",
+                "Opacity",
+                "0.1 to 1. Below 1, what is behind a terminal shows through.",
+                format!("{:.1}", terminal.opacity),
+                Change::Opacity(stepped(terminal.opacity, -0.1, OPACITY)),
+                Change::Opacity(stepped(terminal.opacity, 0.1, OPACITY)),
+                cx,
+            ))
+            .child(self.choice(
+                "option-as-alt",
+                "Option as Alt",
+                "auto, on, off, left or right. This window treats on, left and right as auto.",
+                &terminal.option_as_alt,
+                Change::OptionAsAlt(next_choice(&OPTION_AS_ALT, &terminal.option_as_alt)),
+                cx,
+            ))
+            .child(
+                div()
+                    .pt_2()
+                    .text_xs()
+                    .text_color(rgb(DIM_COLOR))
+                    .child("Alerts"),
+            )
+            .child(self.switch(
+                "sounds",
+                "Alert sounds",
+                "A sound when a session finishes or needs you and you are not looking at it.",
+                terminal.sound_enabled,
+                Change::SoundEnabled(!terminal.sound_enabled),
+                cx,
+            ))
+            .child(row(
+                "Sound files",
+                &format!(
+                    "Done: {}. Needs you: {}. Chosen in Perch.",
+                    sound_file(&terminal.sound_done),
+                    sound_file(&terminal.sound_blocked)
+                ),
+            ))
+            .child(self.choice(
+                "toasts",
+                "Toasts",
+                "app: a message in the window; system: a system notification; off.",
+                &terminal.toast_delivery,
+                Change::ToastDelivery(next_choice(&TOAST_DELIVERY, &terminal.toast_delivery)),
+                cx,
+            ))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(DIM_COLOR))
+                    .child("Line height, ligatures and scroll speed have no setting in the core yet."),
+            )
             .child(
                 div().id("settings-handoff").cursor_pointer().text_xs().text_color(rgb(DIM_COLOR))
                     .child("Every other setting is in Perch: Open Settings in Perch")
@@ -1419,43 +1524,95 @@ impl Workspace {
         flip: Change,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
-        div()
+        let button = div()
+            .id(id)
+            .cursor_pointer()
+            .px_2()
+            .py_1()
+            .rounded_sm()
+            .text_sm()
+            .bg(rgb(SELECTED_BG))
+            .text_color(rgb(if on { 0x4caf6a } else { DIM_COLOR }))
+            .child(if on { "On" } else { "Off" })
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.change(flip, cx);
+                cx.notify();
+            }));
+        setting_row(title, note, button.into_any_element())
+    }
+
+    /// A value with a button either side that move it by one step. Each button saves the value it
+    /// would give, so a click is one `settings.update`.
+    #[allow(clippy::too_many_arguments)]
+    fn stepper(
+        &self,
+        id: &'static str,
+        title: &str,
+        note: &str,
+        shown: String,
+        lower: Change,
+        higher: Change,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        let button = |label: &'static str, id: String, change: Change, cx: &mut Context<Self>| {
+            div()
+                .id(SharedString::from(id))
+                .cursor_pointer()
+                .px_2()
+                .py_1()
+                .rounded_sm()
+                .text_sm()
+                .bg(rgb(SELECTED_BG))
+                .text_color(rgb(TITLE_COLOR))
+                .child(label)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.change(change, cx);
+                    cx.notify();
+                }))
+        };
+        let control = div()
             .flex()
-            .justify_between()
             .items_center()
+            .gap_1()
+            .child(button("\u{2212}", format!("{id}-less"), lower, cx))
             .child(
                 div()
+                    .min_w(px(44.))
                     .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(rgb(TITLE_COLOR))
-                            .child(title.to_string()),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(DIM_COLOR))
-                            .child(note.to_string()),
-                    ),
-            )
-            .child(
-                div()
-                    .id(id)
-                    .cursor_pointer()
-                    .px_2()
-                    .py_1()
-                    .rounded_sm()
+                    .justify_center()
                     .text_sm()
-                    .bg(rgb(SELECTED_BG))
-                    .text_color(rgb(if on { 0x4caf6a } else { DIM_COLOR }))
-                    .child(if on { "On" } else { "Off" })
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.change(flip, cx);
-                        cx.notify();
-                    })),
+                    .text_color(rgb(TITLE_COLOR))
+                    .child(shown),
             )
+            .child(button("+", format!("{id}-more"), higher, cx));
+        setting_row(title, note, control.into_any_element())
+    }
+
+    /// A value that moves to the next of a few when clicked.
+    fn choice(
+        &self,
+        id: &'static str,
+        title: &str,
+        note: &str,
+        shown: &str,
+        next: Change,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        let button = div()
+            .id(id)
+            .cursor_pointer()
+            .px_2()
+            .py_1()
+            .rounded_sm()
+            .text_sm()
+            .bg(rgb(SELECTED_BG))
+            .text_color(rgb(TITLE_COLOR))
+            .child(shown.to_string())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.change(next, cx);
+                cx.notify();
+            }));
+        setting_row(title, note, button.into_any_element())
     }
 
     /// A box over the main area; a click outside it closes it.
@@ -1482,17 +1639,50 @@ impl Workspace {
                 div()
                     .w(px(width))
                     .h_auto()
-                    .max_h(px(520.))
+                    .max_h(px(560.))
                     .overflow_hidden()
                     .rounded_md()
                     .border_1()
                     .border_color(rgb(OVERLAY_BORDER))
                     .bg(rgb(SIDEBAR_BG))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(body),
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("{id}-body")))
+                            .max_h(px(558.))
+                            .overflow_y_scroll()
+                            .child(body),
+                    ),
             )
             .into_any_element()
     }
+}
+
+/// A setting: its name and what it does on the left, its control on the right.
+fn setting_row(title: &str, note: &str, control: AnyElement) -> gpui::Div {
+    div()
+        .flex()
+        .justify_between()
+        .items_center()
+        .gap_3()
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(rgb(TITLE_COLOR))
+                        .child(title.to_string()),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(DIM_COLOR))
+                        .child(note.to_string()),
+                ),
+        )
+        .child(control)
 }
 
 impl gpui::Render for Workspace {

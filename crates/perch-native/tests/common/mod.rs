@@ -301,7 +301,7 @@ impl Harness {
     }
 
     pub fn settings(&mut self) -> Option<perch_native::settings::TerminalSettings> {
-        self.ws(|ws, cx| ws.sidebar().read(cx).model().terminal.clone())
+        self.ws(|ws, cx| ws.sidebar().read(cx).model().terminal.as_deref().cloned())
     }
 
     pub fn attention(&mut self, id: &str) -> Option<Attention> {

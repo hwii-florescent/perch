@@ -1791,6 +1791,24 @@ mod tests {
     }
 
     #[test]
+    fn scrollback_follows_a_change_made_after_the_terminal_exists() {
+        let mut vt = Vt::new(80, 24);
+        vt.set_scrollback_lines(1_000);
+        for line in 0..5_000 {
+            vt.write(format!("line {line}\r\n").as_bytes());
+        }
+        let small = vt.scrollback_rows();
+        assert!((500..1_500).contains(&small), "{small} rows kept at 1,000");
+        // A larger limit keeps what comes next; the history already pruned stays gone.
+        vt.set_scrollback_lines(20_000);
+        for line in 5_000..15_000 {
+            vt.write(format!("line {line}\r\n").as_bytes());
+        }
+        let large = vt.scrollback_rows();
+        assert!(large > 9_000, "{large} rows kept at 20,000");
+    }
+
+    #[test]
     fn paste_is_bracketed_only_when_the_program_asked() {
         let mut vt = Vt::new(80, 24);
         assert_eq!(vt.paste_bytes("a\nb\r\nc"), b"a\rb\rc");
