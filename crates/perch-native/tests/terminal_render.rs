@@ -357,6 +357,10 @@ fn main() {
         dropped_files_type_their_paths,
     );
     run(
+        "send_text_types_what_it_is_given",
+        send_text_types_what_it_is_given,
+    );
+    run(
         "files_and_images_are_sent_before_their_paths_are_typed",
         files_and_images_are_sent_before_their_paths_are_typed,
     );
@@ -1139,6 +1143,34 @@ fn dropped_files_type_their_paths() {
     assert!(h
         .view(|v, _| v.note())
         .is_some_and(|n| n.contains("newer Perch core")));
+}
+
+/// A key bound to `send:<text>` types exactly that text: not wrapped as a paste, and refused with
+/// the reason by a view that may not type.
+fn send_text_types_what_it_is_given() {
+    let typed = |h: &mut Harness| -> Vec<u8> {
+        h.sent()
+            .into_iter()
+            .filter_map(|m| match m {
+                ToCore::Input(bytes) => Some(bytes),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    };
+    let mut h = Harness::open(900., 420.);
+    h.attach(80, 24, "$ ");
+    h.output("\x1b[?2004h");
+    h.focus();
+    h.draw();
+    h.sent();
+    assert_eq!(h.view(|v, cx| v.send_text("ls\r", cx)), Ok(()));
+    assert_eq!(typed(&mut h), b"ls\r".to_vec(), "no paste brackets");
+    h.attach_as(false, true, 80, 24, "$ ");
+    typed(&mut h);
+    let refused = h.view(|v, cx| v.send_text("ls\r", cx));
+    assert!(refused.unwrap_err().contains("view only"));
+    assert_eq!(typed(&mut h), Vec::<u8>::new());
 }
 
 /// On a terminal on another computer, a file dropped with Option held is sent to the core first,
