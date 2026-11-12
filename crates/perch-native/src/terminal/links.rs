@@ -128,22 +128,57 @@ pub enum Target {
     File(PathBuf),
 }
 
-/// What a link opens. A file path counts only when the file exists here; a relative one needs
-/// the terminal's folder.
+/// Schemes a click may hand to the system. Anything else, `file:` and every custom handler
+/// included, would let the program that wrote the link start another one.
+const OPENABLE_SCHEMES: [&str; 3] = ["http", "https", "mailto"];
+
+/// Kinds of file the system runs or installs when opened, not shows.
+const RUNNABLE_KINDS: [&str; 10] = [
+    "app", "command", "terminal", "tool", "workflow", "scpt", "scptd", "pkg", "mpkg", "dmg",
+];
+
+/// Whether opening `path` shows a file rather than runs something: an absolute path to a regular
+/// file that is not executable, and neither it nor any folder above it (once links are
+/// followed) is an application, a script or an installer. Folders are not opened.
+fn shows_a_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    let runnable = |p: &Path| {
+        p.components().any(|part| {
+            Path::new(part.as_os_str())
+                .extension()
+                .and_then(|kind| kind.to_str())
+                .is_some_and(|kind| RUNNABLE_KINDS.iter().any(|k| kind.eq_ignore_ascii_case(k)))
+        })
+    };
+    let Ok(real) = path.canonicalize() else {
+        return false;
+    };
+    let Ok(meta) = real.metadata() else {
+        return false;
+    };
+    path.is_absolute()
+        && meta.is_file()
+        && meta.permissions().mode() & 0o111 == 0
+        && !runnable(path)
+        && !runnable(&real)
+}
+
+/// What a link opens: a `http`, `https` or `mailto` URL, or a file that exists here and only
+/// shows when opened (see [`shows_a_file`]); a relative path needs the terminal's folder.
 pub fn resolve(link: &str, cwd: Option<&Path>) -> Option<Target> {
     // `code.rs:12` is a place in a file, not a scheme.
-    let scheme = link.split_once(':').is_some_and(|(s, rest)| {
+    let scheme = link.split_once(':').filter(|(s, rest)| {
         !rest.starts_with(|c: char| c.is_ascii_digit())
             && s.len() > 1
             && s.starts_with(|c: char| c.is_ascii_alphabetic())
             && s.chars()
                 .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
     });
-    if scheme {
-        if let Some(path) = file_url_path(link).filter(|p| p.exists()) {
-            return Some(Target::File(path));
-        }
-        return Some(Target::Url(link.to_owned()));
+    if let Some((scheme, _)) = scheme {
+        return OPENABLE_SCHEMES
+            .iter()
+            .any(|s| scheme.eq_ignore_ascii_case(s))
+            .then(|| Target::Url(link.to_owned()));
     }
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let expanded = if let Some(rest) = link.strip_prefix("~/") {
@@ -165,7 +200,7 @@ pub fn resolve(link: &str, cwd: Option<&Path>) -> Option<Target> {
         cwd?.join(expanded)
     };
     if full.exists() {
-        return Some(Target::File(full));
+        return shows_a_file(&full).then_some(Target::File(full));
     }
     // The period ending a sentence, or `:42` / `:42:7` naming a place in the file.
     let text = full.to_str()?;
@@ -178,9 +213,8 @@ pub fn resolve(link: &str, cwd: Option<&Path>) -> Option<Target> {
             _ => break,
         }
     }
-    Path::new(bare)
-        .exists()
-        .then(|| Target::File(PathBuf::from(bare)))
+    let bare = PathBuf::from(bare);
+    shows_a_file(&bare).then_some(Target::File(bare))
 }
 
 /// The path a `file:` URL names on this computer, percent-decoded.
@@ -559,13 +593,92 @@ mod tests {
             "a relative path needs a folder"
         );
         let url = format!("file://{}/code.rs", dir.display());
-        assert_eq!(resolve(&url, None), Some(Target::File(dir.join("code.rs"))));
+        assert_eq!(resolve(&url, None), None, "a file: URL is not opened");
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(
             pwd_path("file://host.local/Users/a%20b"),
             Some(PathBuf::from("/Users/a b"))
         );
         assert_eq!(pwd_path("/Users/x"), Some(PathBuf::from("/Users/x")));
+    }
+
+    #[test]
+    fn only_web_and_mail_urls_are_handed_to_the_system() {
+        for ok in [
+            "http://a.dev",
+            "https://a.dev/x?y=1",
+            "HTTPS://A.DEV",
+            "mailto:me@a.dev",
+        ] {
+            assert_eq!(resolve(ok, None), Some(Target::Url(ok.into())), "{ok}");
+        }
+        for bad in [
+            "file:///Users/me/Downloads/x.command",
+            "FILE:///Applications/Calculator.app",
+            "ssh://host",
+            "ftp://host/x",
+            "tel:123",
+            "javascript:alert(1)",
+            "x-apple.systempreferences:com.apple.preference",
+            "vscode://file/etc/passwd",
+            "magnet:?xt=urn:btih:1",
+        ] {
+            assert_eq!(resolve(bad, None), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_path_opens_only_when_it_shows_a_plain_file() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let dir = std::env::temp_dir().join(format!("perch-links-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Tool.app/Contents")).unwrap();
+        std::fs::create_dir_all(dir.join("folder")).unwrap();
+        for name in [
+            "notes.txt",
+            "run.sh",
+            "x.command",
+            "X.COMMAND",
+            "a.terminal",
+            "a.tool",
+            "a.workflow",
+            "a.scpt",
+            "a.pkg",
+            "a.dmg",
+            "Tool.app/Contents/Info.txt",
+        ] {
+            std::fs::write(dir.join(name), "").unwrap();
+        }
+        std::fs::set_permissions(dir.join("run.sh"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+        symlink(dir.join("notes.txt"), dir.join("shown.txt")).unwrap();
+        symlink(dir.join("x.command"), dir.join("looks-plain.txt")).unwrap();
+        symlink(dir.join("run.sh"), dir.join("runs.txt")).unwrap();
+
+        for ok in ["notes.txt", "shown.txt", "notes.txt:12:3", "notes.txt."] {
+            assert!(resolve(ok, Some(&dir)).is_some(), "{ok}");
+        }
+        for bad in [
+            "run.sh",
+            "runs.txt",
+            "x.command",
+            "X.COMMAND",
+            "looks-plain.txt",
+            "a.terminal",
+            "a.tool",
+            "a.workflow",
+            "a.scpt",
+            "a.pkg",
+            "a.dmg",
+            "x.command:3",
+            "Tool.app",
+            "Tool.app/Contents/Info.txt",
+            "folder",
+            "/",
+        ] {
+            assert_eq!(resolve(bad, Some(&dir)), None, "{bad}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
