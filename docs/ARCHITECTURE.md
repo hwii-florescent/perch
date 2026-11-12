@@ -35,7 +35,10 @@ shells, real agent CLIs
   terminal is its own libghostty-vt fed the same bytes as xterm.js (output and the daemon's repaint);
   there is no cell stream. Tabs, splits and their layout are local to the window and are not restored.
   It attaches a session by its saved launch provider, never the one seen running, and never
-  attaches one whose launch provider is unknown. Closing a tab ends its session as the web does
+  attaches one whose launch provider is unknown. A listed session nobody has launched anything in
+  (no provider, `cliStarted` false) lists the launch choices in its tab instead, and the one
+  picked attaches that session, as the web's `startCli` does; a session started with no recorded
+  provider keeps the refusal. Closing a tab ends its session as the web does
   (`session.delete` over the terminal's own connection, the tab going only when the core confirms;
   an agent's tab asks first while `warnCloseAgent` is on; a view that only watches, or has no
   attached terminal, just closes). Links from terminal output

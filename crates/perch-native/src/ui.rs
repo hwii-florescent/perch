@@ -57,6 +57,11 @@ pub struct OpenSession {
     /// again. Known from the row (`cliProviderId`), or from the launch for a session the core
     /// does not list yet. `None` when the core records none: no terminal is attached then.
     pub provider_id: Option<String>,
+    /// The core lists the session with no provider and nothing ever started in it, so nobody has
+    /// launched anything yet: the tab offers the launch choices and attaches under the one picked.
+    /// False for a session the core does not list (unknown is not blank) and for one started
+    /// without a recorded provider (never guessed).
+    pub blank: bool,
     /// The core's address, while connected.
     pub core_url: Option<String>,
 }
@@ -163,6 +168,7 @@ impl Sidebar {
         let row = self.find_session(&session_id);
         let title = row.map_or_else(|| "New session".to_string(), |s| s.title.clone());
         let provider_id = row.and_then(|s| s.provider_id.clone()).or(provider);
+        let blank = provider_id.is_none() && row.is_some_and(|s| !s.cli_started);
         self.notice = None;
         self.nav.selected = Some((host_id.clone(), session_id.clone()));
         self.nav.workspace = None;
@@ -172,6 +178,7 @@ impl Sidebar {
             session_id,
             title,
             provider_id,
+            blank,
             core_url: self.model.core_url.clone(),
         });
         cx.notify();
@@ -186,6 +193,7 @@ impl Sidebar {
             session_id: session_id.to_string(),
             title: row.title.clone(),
             provider_id: row.provider_id.clone(),
+            blank: row.provider_id.is_none() && !row.cli_started,
             core_url: self.model.core_url.clone(),
         })
     }

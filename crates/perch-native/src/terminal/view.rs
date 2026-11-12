@@ -12,7 +12,10 @@
 //!   needs the input lease.
 //! - A dropped connection leaves the screen as it was and says so. It is never taken for the end
 //!   of the shell, and nothing here reattaches, which would start the session again.
-//!
+//! - A session the core lists as blank (no provider, nothing ever started in it) has no shell to
+//!   attach yet: the pane lists the launch choices, and the one picked is attached for this
+//!   session once the window agrees (see [`TerminalEvent::Chose`]). The core records the provider
+//!   an attach names as the session's own, so nothing else ever picks one.
 //!
 
 use super::actions::{Action, Scroll};
@@ -33,7 +36,8 @@ use super::vt::{
     Cell, Event, Frame, KeyInput, MouseAction, MouseButton, MouseInput, Rgb, Underline, Vt,
 };
 use crate::client::Core;
-use crate::ui::OpenSession;
+use crate::sidebar::Provider;
+use crate::ui::{OpenSession, SELECTED_BG, TITLE_COLOR};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures::StreamExt;
 use ghostty_sys as g;
@@ -103,6 +107,10 @@ pub enum TerminalEvent {
     /// A person right-clicked where the pane's program did not take the click (Shift always gets
     /// here): the window may open its pane menu at this point.
     MenuAsked(Point<Pixels>),
+    /// A person picked the provider a blank session starts with. Nothing is attached until the
+    /// window, which sees the session's row, says it is still blank ([`TerminalView::start_with`])
+    /// or not ([`TerminalView::refuse_choice`]).
+    Chose(String),
 }
 
 impl EventEmitter<TerminalEvent> for TerminalView {}
@@ -154,6 +162,14 @@ async fn yield_now() {
 /// How often the search indexes while it has more to do, and while it has not.
 const SEARCH_BUSY: std::time::Duration = std::time::Duration::from_millis(33);
 const SEARCH_IDLE: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// What a blank session's pane offers instead of a shell.
+struct Choice {
+    core: Core,
+    session_id: String,
+    options: Vec<Provider>,
+    selected: usize,
+}
 
 /// Where to attach once the pane has a size to attach at.
 struct Pending {
@@ -215,6 +231,8 @@ pub struct TerminalView {
     status: Status,
     title: String,
     pending: Option<Pending>,
+    /// The launch choices of a blank session, until one is started.
+    choice: Option<Choice>,
     to_core: Option<UnboundedSender<ToCore>>,
     _reader: Option<Task<()>>,
     /// Output the core sent that the screen has not taken yet, in order, and how many bytes of
@@ -308,6 +326,7 @@ impl TerminalView {
             status: Status::Detached,
             title: String::new(),
             pending: None,
+            choice: None,
             to_core: None,
             _reader: None,
             backlog: VecDeque::new(),
@@ -382,11 +401,21 @@ impl TerminalView {
     /// A view that attaches `open`'s session in `core` when its pane first has a size, and takes
     /// the keyboard focus then. The core records the provider an attach names as the session's
     /// own, so a session whose launch provider is not known is not attached: the view says so
-    /// and nothing is sent.
+    /// and nothing is sent. A blank session (`open.blank`) is not attached either, but lists the
+    /// choices the window gives it ([`Self::set_choices`]) for the person to pick from.
     pub fn attach(core: Core, open: &OpenSession, cx: &mut Context<Self>) -> Self {
         let mut view = Self::new(cx);
         view.place.local = open.host_id == "local";
         view.place.host_id = open.host_id.clone();
+        if open.blank {
+            view.choice = Some(Choice {
+                core,
+                session_id: open.session_id.clone(),
+                options: Vec::new(),
+                selected: 0,
+            });
+            return view;
+        }
         let Some(provider) = open.provider_id.clone() else {
             view.core_said(
                 FromCore::Failed(
@@ -407,6 +436,71 @@ impl TerminalView {
             provider,
         });
         view
+    }
+
+    /// Whether the pane is offering the choices of a blank session.
+    pub fn choosing(&self) -> bool {
+        self.choice.is_some()
+    }
+
+    /// The providers a blank session can start with (the window's launch list). Nothing while the
+    /// pane is not choosing.
+    pub fn set_choices(&mut self, options: Vec<Provider>, cx: &mut Context<Self>) {
+        let Some(choice) = self.choice.as_mut().filter(|c| c.options != options) else {
+            return;
+        };
+        choice.selected = choice.selected.min(options.len().saturating_sub(1));
+        choice.options = options;
+        cx.notify();
+    }
+
+    /// Attach this view's session under `provider`, at the pane's size once it has one. False,
+    /// doing nothing, unless the pane is choosing.
+    pub fn start_with(&mut self, provider: &str, cx: &mut Context<Self>) -> bool {
+        let Some(choice) = self.choice.take() else {
+            return false;
+        };
+        self.core = Some(choice.core.clone());
+        self.target = Some((choice.session_id.clone(), provider.to_string()));
+        self.pending = Some(Pending {
+            core: choice.core,
+            session_id: choice.session_id,
+            provider: provider.to_string(),
+        });
+        self.take_focus = true;
+        self.set_status(Status::Connecting, cx);
+        true
+    }
+
+    /// Drop the choices and say why nothing was started, as a failure to attach.
+    pub fn refuse_choice(&mut self, reason: &str, cx: &mut Context<Self>) {
+        if self.choice.take().is_some() {
+            self.core_said(FromCore::Failed(reason.into()), cx);
+        }
+    }
+
+    /// Up and Down move through the choices and Enter picks.
+    fn choice_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) -> bool {
+        let m = keystroke.modifiers;
+        if m.platform || m.control || m.alt || m.shift {
+            return false;
+        }
+        let Some(choice) = self.choice.as_mut() else {
+            return false;
+        };
+        let last = choice.options.len().saturating_sub(1);
+        match keystroke.key.as_str() {
+            "up" => choice.selected = choice.selected.saturating_sub(1),
+            "down" => choice.selected = (choice.selected + 1).min(last),
+            "enter" => {
+                if let Some(option) = choice.options.get(choice.selected) {
+                    cx.emit(TerminalEvent::Chose(option.id.clone()));
+                }
+            }
+            _ => return false,
+        }
+        cx.notify();
+        true
     }
 
     /// Say that a window attaches this view again after the connection drops, so the note says
@@ -895,6 +989,9 @@ impl TerminalView {
         repeat: bool,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.choice.is_some() {
+            return self.choice_key(keystroke, cx);
+        }
         if self.find.open {
             return self.find_key(keystroke, cx);
         }
@@ -2045,6 +2142,9 @@ impl TerminalView {
         if let Some(reason) = &self.drop_notice {
             return Some(reason.clone());
         }
+        if self.choice.is_some() {
+            return Some("Nothing is running in this session. Choose what to start.".into());
+        }
         let sleeping = self.agent.is_some_and(|a| a.state == AgentState::Sleeping);
         match &self.status {
             Status::Detached => Some("Not connected".into()),
@@ -2744,6 +2844,34 @@ impl gpui::Render for TerminalView {
             .size_full(),
         )
         .when(self.find.open, |pane| pane.child(self.find_bar(cx)))
+        .when_some(self.choice.as_ref(), |pane, choice| {
+            pane.child(
+                div()
+                    .absolute()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .children(choice.options.iter().enumerate().map(|(i, option)| {
+                        let (picked, id) = (i == choice.selected, option.id.clone());
+                        div()
+                            .id(format!("choice-{}", option.id))
+                            .cursor_pointer()
+                            .w(px(240.))
+                            .px_3()
+                            .py_1()
+                            .text_sm()
+                            .text_color(rgb(if picked { TITLE_COLOR } else { NOTE_COLOR }))
+                            .when(picked, |row| row.bg(rgb(SELECTED_BG)))
+                            .child(format!("Start {}", option.name))
+                            .on_mouse_down(GpuiButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |_, _, _, cx| {
+                                cx.emit(TerminalEvent::Chose(id.clone()));
+                            }))
+                    })),
+            )
+        })
         .when_some(note, |pane, note| {
             pane.child(
                 div()

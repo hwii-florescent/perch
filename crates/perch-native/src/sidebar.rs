@@ -141,6 +141,10 @@ pub struct SessionView {
     /// must name again. Not what runs in the terminal now: that is only the name shown. `None`
     /// when the core records none, and then nothing is attached or ended on a guess.
     pub provider_id: Option<String>,
+    /// Whether anything was ever started in it (`cliStarted`). With no `provider_id` it tells a
+    /// session nobody launched anything in (the tab offers the choices) from one the core
+    /// started without recording who (nothing is attached on a guess).
+    pub cli_started: bool,
     /// The provider the core sees running in it now (`currentProviderId`): an agent typed into a
     /// shell makes it one. Closing a tab warns by this; attaching never uses it.
     pub current_provider_id: Option<String>,
@@ -1020,6 +1024,7 @@ impl State {
             title: title(session),
             provider: name,
             provider_id: session.cli_provider_id.clone(),
+            cli_started: session.cli_started,
             current_provider_id: session.current_provider_id.clone(),
             project_id: session.project_id.clone(),
             workspace_id: workspace.map(|w| w.id.clone()),

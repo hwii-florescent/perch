@@ -9,7 +9,7 @@ use gpui::{
     point, px, size, AppContext, HeadlessAppContext, Keystroke, Modifiers, MouseButton,
     MouseDownEvent, MouseUpEvent, PlatformInput, Window, WindowHandle,
 };
-use perch_native::client::Update;
+use perch_native::client::{Command, Core, Update};
 use perch_native::sidebar::{Alert, Attention, Heard, Model, State, Toast};
 use perch_native::terminal::attach::{FromCore, ToCore};
 use perch_native::terminal::clipboard::MemoryClipboard;
@@ -26,6 +26,19 @@ fn message(value: Value) -> perch_core::protocol::ServerMessage {
 
 /// One project that can start a terminal, holding a session per `(id, flags)`.
 fn model(sessions: &[(&str, Value)]) -> Model {
+    model_with_agents(sessions, &[])
+}
+
+/// [`model`] where the core also offers the agents named in `agents`.
+fn model_with_agents(sessions: &[(&str, Value)], agents: &[&str]) -> Model {
+    let manifests: Vec<Value> = std::iter::once("terminal")
+        .chain(agents.iter().copied())
+        .map(|id| {
+            json!({"id": id, "displayName": id, "supportedModes": ["cli"],
+                   "resumability": "none", "capabilities": ["interactiveTerminal"],
+                   "statusDetection": "none", "available": true})
+        })
+        .collect();
     let mut state = State::default();
     state.connect();
     state.apply(&message(json!({
@@ -34,10 +47,7 @@ fn model(sessions: &[(&str, Value)]) -> Model {
             "id": "p", "hostId": "local", "name": "Work", "path": "/work", "favorite": false,
             "createdAt": 0, "updatedAt": 0}]})));
     state.apply(&message(
-        json!({"type": "agent.manifest.list", "requestId": "r", "manifests": [
-        {"id": "terminal", "displayName": "Terminal", "supportedModes": ["cli"],
-         "resumability": "none", "capabilities": ["interactiveTerminal"],
-         "statusDetection": "none", "available": true}]}),
+        json!({"type": "agent.manifest.list", "requestId": "r", "manifests": manifests}),
     ));
     let sessions: Vec<Value> = sessions
         .iter()
@@ -145,6 +155,15 @@ struct Harness {
 
 impl Harness {
     fn new(model: Model) -> Self {
+        // A core that cannot be found: every tab gets a terminal that has no shell.
+        Self::build(model, None, || Err(anyhow::anyhow!("no core in this test")))
+    }
+
+    fn build(
+        model: Model,
+        commands: Option<UnboundedSender<Command>>,
+        locate: impl Fn() -> anyhow::Result<Core> + 'static,
+    ) -> Self {
         let mut cx = HeadlessAppContext::with_platform(
             gpui_platform::current_platform(true).text_system(),
             Arc::new(()),
@@ -154,10 +173,9 @@ impl Harness {
         let held = clipboard.clone();
         let window = cx
             .open_window(size(px(WIDTH), px(HEIGHT)), |_, cx| {
-                // A core that cannot be found: every tab gets a terminal that has no shell.
                 cx.new(|cx| {
-                    Workspace::new(model, None, cx)
-                        .with_core(|| Err(anyhow::anyhow!("no core in this test")))
+                    Workspace::new(model, commands, cx)
+                        .with_core(locate)
                         .with_clipboard(held)
                 })
             })
@@ -1302,6 +1320,7 @@ fn a_session_with_no_launch_provider_is_not_attached() {
                 session_id: "blank".into(),
                 title: "blank".into(),
                 provider_id: None,
+                blank: false,
                 core_url: None,
             };
             cx.new(|cx| TerminalView::attach(core, &open, cx))
@@ -1320,7 +1339,93 @@ fn a_session_with_no_launch_provider_is_not_attached() {
     println!("workspace_render: no launch provider ok");
 }
 
+/// A listed session nobody launched anything in offers the launch choices in its tab, and the
+/// one picked attaches that session. One started without a recorded provider is never offered
+/// them, and neither is one that was started elsewhere while the person chose.
+fn a_blank_session_offers_the_launch_choices() {
+    let (commands, mut launched) = unbounded();
+    let sessions = [
+        ("blank", json!({"cliProviderId": null, "cliStarted": false})),
+        (
+            "started",
+            json!({"cliProviderId": null, "cliStarted": true}),
+        ),
+        ("late", json!({"cliProviderId": null, "cliStarted": false})),
+    ];
+    let mut h = Harness::build(
+        model_with_agents(&sessions, &["claude"]),
+        Some(commands),
+        // Nothing listens here: the terminal that is attached gives up on its own.
+        || Core::with_token("http://127.0.0.1:9/", "t"),
+    );
+
+    h.open_as("blank", None);
+    h.draw();
+    assert!(h.ws(|ws| ws.open().is_some_and(|o| o.blank)));
+    let (choosing, status, note) = h.view(|v| (v.choosing(), v.status().clone(), v.note()));
+    assert!(choosing);
+    assert_eq!(
+        status,
+        Status::Detached,
+        "nothing is attached before a choice"
+    );
+    assert!(note.is_some_and(|n| n.contains("Choose")));
+    // The choices are the launch list, the terminal first: Down moves to the agent after it and
+    // Enter starts this session with it.
+    assert!(h.press("down"));
+    assert!(h.press("enter"));
+    let open = h.ws(|ws| ws.open().cloned()).unwrap();
+    assert_eq!(
+        (
+            open.session_id.as_str(),
+            open.provider_id.as_deref(),
+            open.blank
+        ),
+        ("blank", Some("claude"), false)
+    );
+    let (choosing, status) = h.view(|v| (v.choosing(), v.status().clone()));
+    assert!(!choosing);
+    assert_eq!(status, Status::Connecting);
+    while let Ok(command) = launched.try_recv() {
+        assert!(
+            !matches!(command, Command::Launch { .. }),
+            "the choice starts no new session: {command:?}"
+        );
+    }
+
+    // Started with no recorded provider: real uncertainty, so no choices and no guess.
+    h.open_as("started", None);
+    let (choosing, status) = h.view(|v| (v.choosing(), v.status().clone()));
+    assert!(!choosing);
+    assert!(matches!(&status, Status::Failed(note) if note.contains("will not guess")));
+
+    // The row changes while the person is choosing: nothing is started.
+    h.open_as("late", None);
+    h.draw();
+    assert!(h.view(|v| v.choosing()));
+    let started = model_with_agents(
+        &[(
+            "late",
+            json!({"cliProviderId": "claude", "cliStarted": true}),
+        )],
+        &["claude"],
+    );
+    h.window
+        .update(&mut h.cx, |ws, _, cx| {
+            ws.sidebar()
+                .update(cx, |sidebar, cx| sidebar.apply(Update::Model(started), cx))
+        })
+        .unwrap();
+    assert!(h.press("enter"));
+    let (choosing, status) = h.view(|v| (v.choosing(), v.status().clone()));
+    assert!(!choosing);
+    assert!(matches!(&status, Status::Failed(note) if note.contains("started elsewhere")));
+    assert_eq!(h.ws(|ws| ws.open().cloned()).unwrap().provider_id, None);
+    println!("workspace_render: blank session choices ok");
+}
+
 fn main() {
+    a_blank_session_offers_the_launch_choices();
     closing_a_tab_ends_its_session();
     a_tab_that_cannot_end_its_session_is_put_away();
     a_session_with_no_launch_provider_is_not_attached();

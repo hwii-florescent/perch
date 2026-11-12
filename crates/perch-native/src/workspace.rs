@@ -14,6 +14,9 @@
 //! An agent's tab asks first when Settings > Warn before closing an agent is on: the first close
 //! arms, the second ends. A tab that only watches a session another view controls, and one this
 //! window is not attached to, just close: the session keeps running.
+//!
+//! A tab for a blank session (listed, nothing ever launched in it) lists the launch choices of its
+//! computer; the one picked attaches that session, after the row is checked to be still blank.
 
 use crate::client::{Command, Core};
 use crate::handoff::{open_in_perch, perch_url, Place};
@@ -23,7 +26,7 @@ use crate::settings::{
     next_choice, scrollback_from_text, stepped, Change, CONTRAST, MAX_SCROLLBACK, MIN_SCROLLBACK,
     OPACITY, OPTION_AS_ALT, PADDING, TOAST_DELIVERY,
 };
-use crate::sidebar::{Attention, Heard, LOCAL};
+use crate::sidebar::{Attention, Heard, Provider, LOCAL};
 use crate::tabs::{Dir, Node, Side, Tabs};
 use crate::terminal::actions::{Action, Scroll};
 use crate::terminal::attach::FromCore;
@@ -65,8 +68,9 @@ const CLOSE_ASKS: &str = "Closing ends";
 const REATTACH_FIRST: Duration = Duration::from_millis(250);
 const REATTACH_LAST: Duration = Duration::from_secs(5);
 
-/// Whether a tab is a plain terminal: its session was launched as one. A session whose launch
-/// provider is not known is never taken for one.
+/// Whether a tab is a plain terminal: its session was launched as one (or, for a blank session,
+/// was started as one from the tab's choices). A session whose launch provider is not known is
+/// never taken for one.
 fn is_plain(open: &OpenSession) -> bool {
     open.provider_id.as_deref() == Some(perch_core::agent_fleet::TERMINAL_PROVIDER)
 }
@@ -382,6 +386,8 @@ impl Workspace {
             view.set_zoom(zoom, cx);
         });
         view.update(cx, |view, _| view.expect_reconnect(true));
+        let choices = self.launch_choices(&open.host_id, cx);
+        view.update(cx, |view, cx| view.set_choices(choices, cx));
         let id = open.session_id.clone();
         cx.subscribe(&view, move |this, _, event: &TerminalEvent, cx| {
             this.on_terminal(&id, event, cx)
@@ -390,12 +396,57 @@ impl Workspace {
         Some(view)
     }
 
+    /// The providers a session on `host_id` can start with: the list the palette and the New
+    /// session panel offer for that computer.
+    fn launch_choices(&self, host_id: &str, cx: &App) -> Vec<Provider> {
+        self.sidebar
+            .read(cx)
+            .model()
+            .hosts
+            .iter()
+            .find(|h| h.id == host_id)
+            .map(|h| h.providers.clone())
+            .unwrap_or_default()
+    }
+
+    /// A person picked `provider` for the blank session in tab `id`: attach that session under it,
+    /// as the web's `startCli` does. The core records the provider an attach names as the
+    /// session's own, so a session another view started while the person was choosing, which the
+    /// row now says, is not given a second one.
+    fn start_chosen(&mut self, id: &str, provider: &str, cx: &mut Context<Self>) {
+        let blank = self
+            .sidebar
+            .read(cx)
+            .find_session(id)
+            .is_some_and(|s| s.provider_id.is_none() && !s.cli_started);
+        let Some(pane) = self.panes.get_mut(id) else {
+            return;
+        };
+        let Some(view) = pane.view.clone() else {
+            return;
+        };
+        if blank {
+            pane.open.provider_id = Some(provider.to_string());
+            pane.open.blank = false;
+            view.update(cx, |view, cx| view.start_with(provider, cx));
+        } else {
+            view.update(cx, |view, cx| {
+                view.refuse_choice(
+                    "This session was started elsewhere while you chose, so nothing was started.",
+                    cx,
+                )
+            });
+        }
+        cx.notify();
+    }
+
     /// What a terminal tells the window.
     fn on_terminal(&mut self, id: &str, event: &TerminalEvent, cx: &mut Context<Self>) {
         match event {
             // A click on a link is a person's: the window runs the system's handler for it.
             TerminalEvent::OpenLink(target) => crate::terminal::links::open_in_system(target),
             TerminalEvent::MenuAsked(at) => self.open_menu(id, *at, cx),
+            TerminalEvent::Chose(provider) => self.start_chosen(id, provider, cx),
             TerminalEvent::Status(Status::Live) => {
                 if let Some(pane) = self.panes.get_mut(id) {
                     pane.attempts = 0;
@@ -957,13 +1008,7 @@ impl Workspace {
                 title: s.title.clone(),
             })
             .collect();
-        let providers = sidebar
-            .model()
-            .hosts
-            .iter()
-            .find(|h| h.id == LOCAL)
-            .map(|h| h.providers.clone())
-            .unwrap_or_default();
+        let providers = self.launch_choices(LOCAL, cx);
         self.palette = Some(Palette::new(palette::entries(
             &keymap,
             &sessions,
@@ -2271,6 +2316,17 @@ impl gpui::Render for Workspace {
         // switch, a close, a zoom, a split) ends here.
         let shown = self.tabs.shown();
         let room = self.room.get();
+        // A blank session's choices follow the computer's launch list as it arrives.
+        let choosing: Vec<_> = self
+            .panes
+            .values()
+            .filter_map(|pane| Some((pane.view.clone()?, &pane.open.host_id)))
+            .filter(|(view, _)| view.read(cx).choosing())
+            .map(|(view, host)| (view, self.launch_choices(host, cx)))
+            .collect();
+        for (view, choices) in choosing {
+            view.update(cx, |view, cx| view.set_choices(choices, cx));
+        }
         for (id, pane) in &mut self.panes {
             let Some(view) = &pane.view else { continue };
             let on_screen = shown.contains(id) || self.peek.as_ref() == Some(id);

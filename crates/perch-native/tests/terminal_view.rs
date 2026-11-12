@@ -13,6 +13,7 @@ use gpui::{
 };
 use perch_core::server::CliArgs;
 use perch_native::client::Core;
+use perch_native::sidebar::Provider;
 use perch_native::terminal::actions::Action;
 use perch_native::terminal::attach::FromCore;
 use perch_native::terminal::{Status, TerminalView};
@@ -406,6 +407,58 @@ fn view(core_process: &mut Child, scratch: &Path) {
 
     // Dropping the view lets go of the shell without ending it.
     h.close();
+
+    // A blank session has nothing to attach until a provider is picked. The pick attaches that
+    // session under it, and the core records it as the session's own.
+    let blank_id = setup.block_on(async {
+        let mut connection = other_core.connect().await.expect("connect");
+        connection.create_session(None, None).await.expect("create")
+    });
+    let blank = OpenSession {
+        host_id: "local".into(),
+        session_id: blank_id.clone(),
+        title: "blank".into(),
+        provider_id: None,
+        blank: true,
+        core_url: None,
+    };
+    let mut b = Harness::show(other_core.clone(), blank, 700., 300.);
+    let terminal = || Provider {
+        id: "terminal".into(),
+        name: "Terminal".into(),
+    };
+    b.view(|v, cx| v.set_choices(vec![terminal()], cx));
+    b.draw();
+    assert!(b.view(|v, _| v.choosing()));
+    assert_eq!(
+        b.status(),
+        Status::Detached,
+        "nothing is attached before a pick"
+    );
+    let recorded = |sessions: Vec<perch_core::protocol::SessionSummary>| {
+        sessions
+            .into_iter()
+            .find(|s| s.id == blank_id)
+            .and_then(|s| s.cli_provider_id)
+    };
+    let listed = || {
+        setup.block_on(async {
+            let mut connection = other_core.connect().await.expect("connect");
+            recorded(connection.snapshot().await.expect("snapshot").sessions)
+        })
+    };
+    assert_eq!(listed(), None, "the core records no provider yet");
+    assert!(b.view(|v, cx| v.key_down(&key_event("enter"), cx)));
+    assert!(b.view(|v, cx| v.start_with("terminal", cx)));
+    b.wait("the picked terminal to attach", |b| {
+        b.status() == Status::Live
+    });
+    b.type_text("echo picked-$((40+2))");
+    b.wait("the shell's answer", |b| {
+        b.rows().iter().any(|row| row == "picked-42")
+    });
+    assert_eq!(listed().as_deref(), Some("terminal"));
+    b.close();
 }
 
 struct Harness {
@@ -415,18 +468,23 @@ struct Harness {
 
 impl Harness {
     fn open(core: Core, session_id: &str, width: f32, height: f32) -> Self {
-        let mut cx = HeadlessAppContext::with_platform(
-            gpui_platform::current_platform(true).text_system(),
-            Arc::new(()),
-            gpui_platform::current_headless_renderer,
-        );
         let open = OpenSession {
             host_id: "local".into(),
             session_id: session_id.into(),
             title: "shell".into(),
             provider_id: Some("terminal".into()),
+            blank: false,
             core_url: None,
         };
+        Self::show(core, open, width, height)
+    }
+
+    fn show(core: Core, open: OpenSession, width: f32, height: f32) -> Self {
+        let mut cx = HeadlessAppContext::with_platform(
+            gpui_platform::current_platform(true).text_system(),
+            Arc::new(()),
+            gpui_platform::current_headless_renderer,
+        );
         let window = cx
             .open_window(size(px(width), px(height)), |_, cx| {
                 cx.new(|cx| TerminalView::attach(core, &open, cx))
