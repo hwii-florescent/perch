@@ -202,6 +202,8 @@ pub struct TerminalView {
     /// Where the pointer last was in that drag, for scrolling under a held pointer.
     drag_at: Option<Point<Pixels>>,
     _autoscroll: Option<Task<()>>,
+    /// Wakes the view when a synchronised-output block the program never ends must be shown.
+    _hold_wake: Option<Task<()>>,
     epoch: Instant,
     /// The blinking cursor is in its visible half.
     blink_on: bool,
@@ -259,6 +261,7 @@ impl TerminalView {
             selecting: false,
             drag_at: None,
             _autoscroll: None,
+            _hold_wake: None,
             epoch: Instant::now(),
             blink_on: true,
             cursor_blinks: false,
@@ -529,7 +532,21 @@ impl TerminalView {
                 Event::ClipboardWrite(_) => {}
             }
         }
-        cx.notify();
+        // A pane that is not on screen draws nothing, so output to it redraws nothing; it is
+        // drawn afresh when it comes back.
+        if !self.hidden {
+            cx.notify();
+        }
+        // A block the program began and never ended is shown at its deadline even if no more
+        // bytes arrive to prompt a redraw.
+        self._hold_wake = self.vt.render_hold_deadline().map(|deadline| {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(deadline.saturating_duration_since(std::time::Instant::now()))
+                    .await;
+                let _ = this.update(cx, |_, cx| cx.notify());
+            })
+        });
     }
 
     fn send(&self, message: ToCore) {

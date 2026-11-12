@@ -339,6 +339,10 @@ fn main() {
     run("scrollbar_in_the_pane", scrollbar_in_the_pane);
     run("kitty_images", kitty_images);
     run("context_bridge_offer", context_bridge_offer);
+    run(
+        "output_wakes_only_what_is_shown",
+        output_wakes_only_what_is_shown,
+    );
     run("ownership_and_named_actions", ownership_and_named_actions);
     run(
         "x10_mouse_reports_past_the_text_range",
@@ -891,6 +895,42 @@ fn colours_and_cursor(bg: [u8; 3], fg: [u8; 3]) {
     assert!(
         differs(shot.at(x + shot.cell.0 / 2.0, y + shot.cell.1 - 0.75), fg),
         "hidden cursor is not drawn"
+    );
+}
+
+/// Output to a pane that is not on screen redraws nothing, and a synchronised-output block the
+/// program never ends is shown at its deadline although no more bytes arrive.
+fn output_wakes_only_what_is_shown() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let mut h = Harness::open(900., 420.);
+    h.attach(80, 24, "");
+    h.draw();
+    let redraws = Rc::new(Cell::new(0u32));
+    let _watch = h.view(|_, cx| {
+        let counter = redraws.clone();
+        let me = cx.entity();
+        cx.observe(&me, move |_, _, _| counter.set(counter.get() + 1))
+    });
+    h.view(|v, cx| v.set_visible(false, cx));
+    h.cx.run_until_parked();
+    let before = redraws.get();
+    h.output("quiet");
+    assert_eq!(redraws.get(), before, "a hidden pane is not redrawn");
+    h.view(|v, cx| v.set_visible(true, cx));
+    h.cx.run_until_parked();
+    assert!(redraws.get() > before, "it is drawn when it comes back");
+
+    h.output("\x1b[?2026hheld");
+    let before = redraws.get();
+    // The executor's clock is the test's own; the hold is measured on the real one.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    h.cx.advance_clock(std::time::Duration::from_millis(1100));
+    h.cx.run_until_parked();
+    assert!(redraws.get() > before, "the held frame wakes the view");
+    assert!(
+        h.view(|v, _| v.frame().row_text(0)).contains("held"),
+        "and shows what the program held back"
     );
 }
 
