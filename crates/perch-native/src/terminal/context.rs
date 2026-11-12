@@ -30,6 +30,8 @@ pub struct Place {
     pub workspace_id: Option<String>,
     /// The workspace is on this computer: remote workspaces are never guessed from paths.
     pub local: bool,
+    /// The computer the session runs on, when it is not this one (`local` is true for "local").
+    pub host_id: String,
 }
 
 impl Place {
@@ -160,6 +162,7 @@ mod tests {
             capabilities: vec![CAPABILITY.into()],
             workspace_id: Some("w1".into()),
             local: true,
+            ..Default::default()
         }
     }
 

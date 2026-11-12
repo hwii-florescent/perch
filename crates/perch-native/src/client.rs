@@ -36,6 +36,23 @@ const NO_ANSWER: &str = "the core did not answer in time";
 /// What an error from the core starts with when the core read the request and said no.
 const REFUSED: &str = "the core refused the request: ";
 
+/// The most the core takes for one uploaded file.
+pub const MAX_UPLOAD_BYTES: u64 = 1 << 30;
+/// An upload to another computer is staged and then copied; the core allows it an hour.
+const UPLOAD_WAIT: Duration = Duration::from_secs(3700);
+
+/// `text` for a URL query: unreserved characters stay, every other byte is `%XX`.
+fn percent_encode(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
 /// Whether the core itself said no to a request, as against a connection that could not be made,
 /// dropped, or went unanswered: only the first says anything about the session.
 pub fn is_refusal(error: &anyhow::Error) -> bool {
@@ -195,6 +212,116 @@ impl Core {
                 }
             }
         }
+    }
+
+    /// `POST {base}upload`: the file at `path` is staged by the core under its uploads folder, or,
+    /// with `host_id` (a computer reached over SSH, which needs `upload.scp.v1`), copied there
+    /// with SCP. Returns the file's path on the machine the terminal runs on. The core checks
+    /// that the session is on that host and refuses anything else; nothing falls back to a local
+    /// copy.
+    pub async fn upload(
+        &self,
+        session_id: &str,
+        host_id: Option<&str>,
+        path: &std::path::Path,
+    ) -> Result<String> {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow!("{} has no name that can be sent", path.display()))?;
+        let file = tokio::fs::File::open(path)
+            .await
+            .with_context(|| format!("could not read {name}"))?;
+        let meta = file.metadata().await?;
+        if !meta.is_file() {
+            bail!("{name} is not a file; drop files, not folders");
+        }
+        if meta.len() == 0 {
+            bail!("{name} is empty");
+        }
+        if meta.len() > MAX_UPLOAD_BYTES {
+            bail!("{name} is larger than 1 GiB");
+        }
+        let mut target = format!(
+            "upload?sessionId={}&name={}",
+            percent_encode(session_id),
+            percent_encode(name)
+        );
+        if let Some(host) = host_id {
+            target += &format!("&hostId={}&scp=1", percent_encode(host));
+        }
+        self.post(
+            &target,
+            "application/octet-stream",
+            meta.len(),
+            file,
+            UPLOAD_WAIT,
+        )
+        .await
+    }
+
+    /// `POST {base}clipboard-image`: the core stages an image under its own clipboard folder and
+    /// answers with its path. This computer only; the core stages nothing on another.
+    pub async fn stage_clipboard_image(&self, extension: &str, bytes: &[u8]) -> Result<String> {
+        let target = format!("clipboard-image?ext={}", percent_encode(extension));
+        let mime = format!("image/{extension}");
+        self.post(&target, &mime, bytes.len() as u64, bytes, REPLY_TIMEOUT)
+            .await
+    }
+
+    /// One HTTP/1.1 POST of `length` bytes read from `body`, answered with the `path` of the
+    /// core's JSON reply. The core's reason is kept when it says no.
+    async fn post(
+        &self,
+        target: &str,
+        content_type: &str,
+        length: u64,
+        mut body: impl tokio::io::AsyncRead + Unpin,
+        wait: Duration,
+    ) -> Result<String> {
+        let mut stream = TcpStream::connect(&self.authority)
+            .await
+            .with_context(|| format!("could not reach the core at {}", self.authority))?;
+        let head = format!(
+            "POST {}{target} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: {content_type}\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n",
+            self.base_path, self.authority, self.token
+        );
+        let exchange = async {
+            stream.write_all(head.as_bytes()).await?;
+            // The core may answer (and close) before it has read everything, as it does for a
+            // refusal; what it said is worth more than the broken pipe.
+            let sent = tokio::io::copy(&mut body, &mut stream).await;
+            let mut response = Vec::new();
+            let _ = stream.read_to_end(&mut response).await;
+            Ok::<_, anyhow::Error>((sent, response))
+        };
+        let (sent, response) = tokio::time::timeout(wait, exchange)
+            .await
+            .map_err(|_| anyhow!(NO_ANSWER))??;
+        let response = String::from_utf8_lossy(&response);
+        let Some((head, text)) = response.split_once("\r\n\r\n") else {
+            sent.context("the upload was cut off")?;
+            bail!("the core sent no answer");
+        };
+        let status = head.split_whitespace().nth(1).unwrap_or_default();
+        if status != "200" {
+            let said: String = text.trim().chars().take(300).collect();
+            bail!(
+                "the core refused the upload ({status}){}",
+                if said.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {said}")
+                }
+            );
+        }
+        // ponytail: the core answers with a length; a chunked reply would need decoding here.
+        let reply: Value =
+            serde_json::from_str(text.trim()).context("the core's answer is not JSON")?;
+        reply["path"]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| anyhow!("the core returned no path"))
     }
 
     /// Open the core's WebSocket.
@@ -1007,6 +1134,7 @@ mod tests {
             capabilities: vec![CAPABILITY.into()],
             workspace_id: Some("w".into()),
             local: true,
+            ..Default::default()
         };
         let mut capture = Capture::new(&place, "s", "output", "op".into()).unwrap();
         (

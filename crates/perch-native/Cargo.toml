@@ -21,10 +21,10 @@ anyhow = "1"
 # Reads the bundled symbols font's glyph outlines, the version GPUI's text system uses.
 ttf-parser = "0.25"
 # The version GPUI uses, for the frames it draws and the PNG images kitty graphics send.
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "tiff", "bmp"] }
 futures = "0.3"
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time", "macros", "fs"] }
 tokio-tungstenite = "0.24"
 # crates.io pre-release snapshot of Zed's GPUI, pinned exactly.
 gpui = { package = "gpui-pre", version = "=0.3.8" }

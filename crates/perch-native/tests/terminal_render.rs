@@ -357,6 +357,10 @@ fn main() {
         dropped_files_type_their_paths,
     );
     run(
+        "files_and_images_are_sent_before_their_paths_are_typed",
+        files_and_images_are_sent_before_their_paths_are_typed,
+    );
+    run(
         "a_pane_with_no_room_tells_nobody_its_size",
         a_pane_with_no_room_tells_nobody_its_size,
     );
@@ -1128,13 +1132,148 @@ fn dropped_files_type_their_paths() {
     assert_eq!(h.view(|v, _| v.note()), None);
     typed(&mut h);
 
-    // Another machine's terminal needs an upload: nothing is typed.
+    // Another machine's terminal needs a core that sends files there: nothing is typed.
     h.view(|v, _| v.set_local(false));
     assert!(!h.view(|v, cx| v.drop_paths(&files, cx)));
     assert_eq!(typed(&mut h), Vec::<u8>::new());
     assert!(h
         .view(|v, _| v.note())
-        .is_some_and(|n| n.contains("another machine")));
+        .is_some_and(|n| n.contains("newer Perch core")));
+}
+
+/// On a terminal on another computer, a file dropped with Option held is sent to the core first,
+/// and the path it made there is what gets typed, once the core says it arrived and only if the
+/// view can still type. A clipboard image is staged by the core and its path typed, on a terminal
+/// on this computer; text on the clipboard wins over a picture of it.
+fn files_and_images_are_sent_before_their_paths_are_typed() {
+    use gpui::ImageFormat;
+    use perch_native::terminal::attach::UPLOAD_SCP;
+    use std::path::PathBuf;
+    let typed = |h: &mut Harness| -> (Vec<u8>, Vec<ToCore>) {
+        let mut bytes = Vec::new();
+        let mut rest = Vec::new();
+        for message in h.sent() {
+            match message {
+                ToCore::Input(b) => bytes.extend(b),
+                other => rest.push(other),
+            }
+        }
+        (bytes, rest)
+    };
+    let mut h = Harness::open(900., 420.);
+    let clip = std::rc::Rc::new(MemoryClipboard::new(None));
+    h.view(|v, _| {
+        v.set_clipboard(clip.clone());
+        v.set_host("work");
+    });
+    h.attach(80, 24, "$ ");
+    h.focus();
+    h.draw();
+    h.sent();
+    let files = vec![PathBuf::from("/tmp/a b.txt"), PathBuf::from("/tmp/c.png")];
+    let note = |h: &mut Harness| h.view(|v, _| v.note()).unwrap_or_default();
+
+    // A core that does not send files elsewhere: refused, and nothing leaves the view.
+    assert!(!h.view(|v, cx| v.drop_files(&files, true, cx)));
+    assert!(note(&mut h).contains("newer Perch core"));
+    assert_eq!(typed(&mut h), (Vec::new(), Vec::new()));
+    h.say(FromCore::Capabilities(vec![UPLOAD_SCP.into()]));
+
+    // Without Option it is the same gesture as a local drop and is refused, saying how.
+    assert!(!h.view(|v, cx| v.drop_files(&files, false, cx)));
+    assert!(note(&mut h).contains("Hold Option"));
+    assert_eq!(typed(&mut h), (Vec::new(), Vec::new()));
+
+    // With Option: one request for all the files, in order, naming the computer; the paths are
+    // not typed until the core answers, and a second drop waits.
+    assert!(h.view(|v, cx| v.drop_files(&files, true, cx)));
+    assert_eq!(
+        typed(&mut h),
+        (
+            Vec::new(),
+            vec![ToCore::Upload {
+                host_id: Some("work".into()),
+                files: files.clone()
+            }]
+        )
+    );
+    assert!(!h.view(|v, cx| v.drop_files(&files, true, cx)));
+    assert!(note(&mut h).contains("Still sending"));
+    h.say(FromCore::Uploaded {
+        paths: vec!["/home/me/.perch/a b.txt".into(), "/home/me/it's.png".into()],
+        errors: vec![],
+    });
+    assert_eq!(
+        typed(&mut h).0,
+        b"'/home/me/.perch/a b.txt' '/home/me/it'\\''s.png' ".to_vec()
+    );
+    assert_eq!(h.view(|v, _| v.note()), None);
+
+    // One file failed: the other is typed, and the reason stays on the pane.
+    assert!(h.view(|v, cx| v.drop_files(&files, true, cx)));
+    typed(&mut h);
+    h.say(FromCore::Uploaded {
+        paths: vec!["/r/ok".into()],
+        errors: vec!["c.png: the core refused the upload (502): scp failed".into()],
+    });
+    assert_eq!(typed(&mut h).0, b"'/r/ok' ".to_vec());
+    assert!(note(&mut h).contains("scp failed"));
+
+    // The keyboard went to another view while the files were on their way: nothing is typed.
+    assert!(h.view(|v, cx| v.drop_files(&files, true, cx)));
+    typed(&mut h);
+    h.attach_as(false, true, 80, 24, "$ ");
+    h.say(FromCore::Uploaded {
+        paths: vec!["/r/late".into()],
+        errors: vec![],
+    });
+    assert_eq!(typed(&mut h).0, Vec::<u8>::new());
+    assert!(note(&mut h).contains("Terminal input changed"));
+    h.attach(80, 24, "$ ");
+    typed(&mut h);
+
+    // A clipboard image on a terminal on another computer is not sent anywhere.
+    clip.write_image_for_test(ImageFormat::Png, vec![1, 2, 3]);
+    assert!(!h.view(|v, cx| v.paste_clipboard(cx)));
+    assert!(note(&mut h).contains("terminals on this computer"));
+    assert_eq!(typed(&mut h), (Vec::new(), Vec::new()));
+
+    // On this computer the core stages it; text beside it wins.
+    h.view(|v, _| v.set_host("local"));
+    clip.write_text_for_test("words");
+    assert!(h.view(|v, cx| v.paste_clipboard(cx)));
+    assert_eq!(typed(&mut h), (b"words".to_vec(), Vec::new()));
+    let image = {
+        let picture = image::RgbImage::from_pixel(2, 2, image::Rgb([9, 9, 9]));
+        let mut tiff = std::io::Cursor::new(Vec::new());
+        picture
+            .write_to(&mut tiff, image::ImageFormat::Tiff)
+            .unwrap();
+        tiff.into_inner()
+    };
+    let clip = std::rc::Rc::new(MemoryClipboard::new(None));
+    h.view(|v, _| v.set_clipboard(clip.clone()));
+    clip.write_image_for_test(ImageFormat::Tiff, image);
+    assert!(h.view(|v, cx| v.paste_clipboard(cx)));
+    let (_, asked) = typed(&mut h);
+    let [ToCore::StageImage { extension, bytes }] = asked.as_slice() else {
+        panic!("one image staged: {asked:?}");
+    };
+    assert_eq!(*extension, "png");
+    assert_eq!(&bytes[1..4], b"PNG", "the TIFF went as a PNG");
+    h.say(FromCore::Uploaded {
+        paths: vec!["/home/me/.perch/clipboard-images/x.png".into()],
+        errors: vec![],
+    });
+    assert_eq!(
+        typed(&mut h).0,
+        b"'/home/me/.perch/clipboard-images/x.png' ".to_vec()
+    );
+
+    // An image no terminal program is expected to read is refused, saying so.
+    clip.write_image_for_test(ImageFormat::Svg, b"<svg/>".to_vec());
+    assert!(!h.view(|v, cx| v.paste_clipboard(cx)));
+    assert!(note(&mut h).contains("cannot be pasted"));
 }
 
 /// A pane squeezed to nothing by its padding is not a size: the shell is not resized to one cell.

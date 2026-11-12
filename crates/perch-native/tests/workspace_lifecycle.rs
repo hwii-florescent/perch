@@ -105,6 +105,7 @@ fn scenario(rig: &mut Rig) {
     a_core_that_drops_and_returns(rig, &runtime, &current, &mut h, &kept);
     closing_waits_for_the_core(rig, &runtime, &current, &mut h);
     typing_is_shared_but_stopping_is_not(rig, &runtime, &current, &mut h);
+    files_and_images_reach_the_core(rig, &runtime, &current, &mut h);
 
     h.close();
     follower.abort();
@@ -306,6 +307,84 @@ fn closing_waits_for_the_core(
     );
     // SAFETY: as above.
     unsafe { libc::kill(core_pid, libc::SIGCONT) };
+}
+
+/// A file is copied to the core and an image staged by it, each answering with the path it made
+/// under the core's own folders; a file for a computer the core does not know is refused with
+/// the core's reason, and nothing is copied on this computer instead, nor typed.
+fn files_and_images_reach_the_core(
+    rig: &Rig,
+    runtime: &tokio::runtime::Runtime,
+    current: &Arc<Mutex<Core>>,
+    h: &mut Harness,
+) {
+    let core = current.lock().unwrap().clone();
+    let id = new_shells(runtime, &core, 1, false).remove(0);
+    let file = rig.scratch.join("report 1.txt");
+    std::fs::write(&file, "contents\n").unwrap();
+    let home = rig.scratch.join("home");
+
+    let path = runtime
+        .block_on(core.upload(&id, None, &file))
+        .expect("a local copy");
+    assert!(
+        path.starts_with(home.join(".perch/uploads").to_str().unwrap()),
+        "{path}"
+    );
+    assert!(
+        path.ends_with("report_1.txt") || path.ends_with("report 1.txt"),
+        "{path}"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "contents\n");
+
+    let png = vec![0x89, b'P', b'N', b'G', 13, 10, 26, 10];
+    let staged = runtime
+        .block_on(core.stage_clipboard_image("png", &png))
+        .expect("a staged image");
+    assert!(
+        staged.starts_with(home.join(".perch/clipboard-images").to_str().unwrap()),
+        "{staged}"
+    );
+    assert_eq!(std::fs::read(&staged).unwrap(), png);
+
+    let empty = rig.scratch.join("empty");
+    std::fs::write(&empty, "").unwrap();
+    let refusal = runtime
+        .block_on(core.upload(&id, None, &empty))
+        .unwrap_err();
+    assert!(refusal.to_string().contains("empty"), "{refusal:#}");
+    let refusal = runtime
+        .block_on(core.upload(&id, None, &rig.scratch))
+        .unwrap_err();
+    assert!(refusal.to_string().contains("not a file"), "{refusal:#}");
+
+    // Through the view: dropped with Option held on a terminal the view takes for another
+    // computer's. The core has no such host, says so, and the view types nothing.
+    h.wait("the session to be listed", |h| h.attention(&id).is_some());
+    h.show_tab(&id);
+    h.wait("the shell", |h| h.ready(&id));
+    h.view_cx(&id, |v, cx| {
+        v.set_host("nowhere");
+        assert!(v.drop_files(std::slice::from_ref(&file), true, cx));
+    });
+    h.wait("the core's answer", |h| {
+        h.view(&id, |v| v.note().is_some_and(|n| n.contains("SSH host")))
+            .unwrap_or(false)
+    });
+    let note = h.view(&id, |v| v.note()).flatten().unwrap();
+    assert!(
+        note.contains("report 1.txt") && note.contains("disabled, missing"),
+        "{note}"
+    );
+    assert!(!h.has_row(&id, "report"), "nothing was typed");
+    let staged_here = home.join(".perch/uploads").join(&id);
+    let stray = std::fs::read_dir(&staged_here)
+        .map(|d| d.count())
+        .unwrap_or(0);
+    assert_eq!(
+        stray, 1,
+        "only the local copy made above exists, not one for the refused drop"
+    );
 }
 
 /// Another connection holds a shell's keyboard. The core allows shared typing, so this window

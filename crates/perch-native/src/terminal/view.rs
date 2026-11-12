@@ -17,7 +17,7 @@
 
 use super::actions::{Action, Scroll};
 use super::attach::{self, AgentInfo, FromCore, Piece, ToCore};
-use super::clipboard::{Clipboard, MemoryClipboard};
+use super::clipboard::{self, Clipboard, MemoryClipboard};
 use super::context::{self, Capture};
 use super::fallback;
 use super::graphics::Layer;
@@ -254,6 +254,8 @@ pub struct TerminalView {
     _autoscroll: Option<Task<()>>,
     /// Why the last file drop typed nothing, until the next one or the next key.
     drop_notice: Option<String>,
+    /// Files or an image are on their way to the core; the next waits for them.
+    sending: bool,
     /// Wakes the view when a synchronised-output block the program never ends must be shown.
     _hold_wake: Option<Task<()>>,
     epoch: Instant,
@@ -330,6 +332,7 @@ impl TerminalView {
             _autoscroll: None,
             _hold_wake: None,
             drop_notice: None,
+            sending: false,
             epoch: Instant::now(),
             blink_on: true,
             cursor_blinks: false,
@@ -371,6 +374,7 @@ impl TerminalView {
     pub fn attach(core: Core, open: &OpenSession, cx: &mut Context<Self>) -> Self {
         let mut view = Self::new(cx);
         view.place.local = open.host_id == "local";
+        view.place.host_id = open.host_id.clone();
         view.core = Some(core.clone());
         view.status = Status::Connecting;
         view.take_focus = true;
@@ -632,6 +636,7 @@ impl TerminalView {
                 self.place.workspace_id = Some(workspace_id).filter(|w| !w.is_empty());
             }
             FromCore::Settings(settings) => self.apply_core(None, Some(*settings), cx),
+            FromCore::Uploaded { paths, errors } => self.arrived(paths, errors, cx),
             FromCore::Agent(agent) => {
                 // A lease taken from this view ends its typing; one it took starts it, and the
                 // size is told again.
@@ -646,8 +651,13 @@ impl TerminalView {
             FromCore::Exited(code) => self.set_status(Status::Exited(code), cx),
             FromCore::Ended => cx.emit(TerminalEvent::Ended),
             FromCore::EndRefused(reason) => cx.emit(TerminalEvent::EndRefused(reason)),
-            FromCore::Failed(reason) => self.set_status(Status::Failed(reason), cx),
+            FromCore::Failed(reason) => {
+                self.sending = false;
+                self.set_status(Status::Failed(reason), cx)
+            }
             FromCore::Disconnected(reason) => {
+                // What was on its way was dropped with the connection.
+                self.sending = false;
                 // The screen stays; the shell is not known to have ended.
                 self.input_lease = false;
                 self.resize_lease = false;
@@ -933,6 +943,12 @@ impl TerminalView {
         self.place.local = local;
     }
 
+    /// [`Self::set_local`] for a session on the computer `host_id`.
+    pub fn set_host(&mut self, host_id: &str) {
+        self.place.local = host_id == "local";
+        self.place.host_id = host_id.to_owned();
+    }
+
     /// Whether the Context Bridge is offered for this terminal's selection.
     pub fn can_ask_agent(&self) -> bool {
         self.place.available() && self.vt.has_selection()
@@ -968,24 +984,47 @@ impl TerminalView {
         if let Some(paths) = self.clipboard.read_paths(cx) {
             return self.drop_paths(&paths, cx);
         }
-        match self.clipboard.read_text(cx) {
-            Some(text) => {
-                self.paste(&text, cx);
-                true
-            }
+        if let Some(text) = self.clipboard.read_text(cx) {
+            self.paste(&text, cx);
+            return true;
+        }
+        // Text first: an application that puts a picture of what it copied beside the text means
+        // the text.
+        match self.clipboard.read_image(cx) {
+            Some((format, bytes)) => self.paste_image(format, bytes, cx),
             None => false,
         }
     }
 
     /// Files dropped on the pane, or pasted from the file manager: their quoted paths are typed
     /// as one paste, with no Enter. False, with the reason in [`Self::note`], when nothing was
-    /// typed: the terminal is not writable, it is on another machine (that needs an upload this
-    /// view does not do), or a path cannot be typed safely.
+    /// typed: the terminal is not writable, or a path cannot be typed safely. A terminal on
+    /// another machine is [`Self::drop_files`]'s.
     pub fn drop_paths(&mut self, paths: &[std::path::PathBuf], cx: &mut Context<Self>) -> bool {
+        self.drop_files(paths, false, cx)
+    }
+
+    /// [`Self::drop_paths`] with whether Option was held. On a terminal on another machine the
+    /// files are copied there first, as the web does, only on that explicit gesture and from a
+    /// core that does it (`upload.scp.v1`); their paths on that machine are typed once the core
+    /// says they arrived ([`FromCore::Uploaded`]).
+    pub fn drop_files(
+        &mut self,
+        paths: &[std::path::PathBuf],
+        option_held: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let refusal = if !self.can_type() {
             Some("File drops need a connected terminal this view may type in".to_string())
         } else if !self.place.local {
-            Some("A file dropped on a terminal on another machine needs an upload this view does not do".to_string())
+            match self.send_files(paths, option_held) {
+                Ok(()) => {
+                    self.drop_notice = Some("Sending to this terminal's computer\u{2026}".into());
+                    cx.notify();
+                    return true;
+                }
+                Err(reason) => Some(reason),
+            }
         } else {
             match super::drop::paste_text(paths, self.settings.dropped_path_double_quotes) {
                 Ok(text) => {
@@ -998,6 +1037,99 @@ impl TerminalView {
         self.drop_notice = refusal;
         cx.notify();
         false
+    }
+
+    /// Whether this core copies files to another computer, and nothing is already on its way.
+    fn can_send_elsewhere(&self) -> Result<(), String> {
+        if !self
+            .place
+            .capabilities
+            .iter()
+            .any(|c| c == attach::UPLOAD_SCP)
+        {
+            return Err("Sending a file to another computer needs a newer Perch core".into());
+        }
+        if self.sending {
+            return Err("Still sending the earlier files".into());
+        }
+        Ok(())
+    }
+
+    fn send_files(
+        &mut self,
+        files: &[std::path::PathBuf],
+        option_held: bool,
+    ) -> Result<(), String> {
+        self.can_send_elsewhere()?;
+        if !option_held {
+            return Err(
+                "Hold Option while dropping to send the file to this terminal's computer with SCP"
+                    .into(),
+            );
+        }
+        if files.is_empty() {
+            return Err("Nothing was dropped".into());
+        }
+        self.sending = true;
+        self.send(ToCore::Upload {
+            host_id: Some(self.place.host_id.clone()),
+            files: files.to_vec(),
+        });
+        Ok(())
+    }
+
+    /// The clipboard's image, put in a file by the core and its path typed. Only for a terminal on
+    /// this computer, as on the web: another computer's files are sent by dropping them with
+    /// Option held.
+    fn paste_image(
+        &mut self,
+        format: gpui::ImageFormat,
+        bytes: Vec<u8>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let refusal = if !self.place.local {
+            Some("A clipboard image pastes into terminals on this computer; save it and drop the file with Option held to send it to another".to_string())
+        } else if self.sending {
+            Some("Still sending the earlier files".to_string())
+        } else {
+            match clipboard::staged_image(format, bytes) {
+                Some(image) => {
+                    self.sending = true;
+                    self.send(ToCore::StageImage {
+                        extension: image.extension,
+                        bytes: image.bytes,
+                    });
+                    self.drop_notice = Some("Pasting the clipboard image\u{2026}".into());
+                    cx.notify();
+                    return true;
+                }
+                None => {
+                    Some("The clipboard image is in a format that cannot be pasted".to_string())
+                }
+            }
+        };
+        self.drop_notice = refusal;
+        cx.notify();
+        false
+    }
+
+    /// The core put these files in place: type their paths if this view can still type, say so
+    /// if not, and say what did not arrive.
+    fn arrived(&mut self, paths: Vec<String>, errors: Vec<String>, cx: &mut Context<Self>) {
+        self.sending = false;
+        let mut said = errors.join("; ");
+        if !paths.is_empty() {
+            if !self.can_type() {
+                said = "Terminal input changed while sending. Nothing was typed; send again when it is writable".into();
+            } else {
+                match super::drop::paste_words(&paths, self.settings.dropped_path_double_quotes) {
+                    Ok(text) => self.paste(&text, cx),
+                    Err(reason) => said = reason,
+                }
+            }
+        }
+        self.drop_notice = (!said.is_empty()).then_some(said);
+        cx.notify();
     }
 
     /// Where copied and pasted text goes. A view starts with a clipboard of its own, in memory;
@@ -2494,9 +2626,11 @@ impl gpui::Render for TerminalView {
                     this.modifiers_changed(event.modifiers, cx);
                 },
             ))
-            .on_drop(cx.listener(|this, dropped: &gpui::ExternalPaths, _, cx| {
-                this.drop_paths(dropped.paths(), cx);
-            }))
+            .on_drop(
+                cx.listener(|this, dropped: &gpui::ExternalPaths, window, cx| {
+                    this.drop_files(dropped.paths(), window.modifiers().alt, cx);
+                }),
+            )
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
                 this.scroll_wheel(event, cx);
                 cx.stop_propagation();

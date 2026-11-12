@@ -18,6 +18,9 @@ use perch_core::protocol::SettingsData;
 /// The capability with which the core lets a view type without holding the input lease.
 pub const SHARED_INPUT: &str = "terminal.sharedInput";
 
+/// The capability with which the core copies a dropped file to the computer a session runs on.
+pub const UPLOAD_SCP: &str = "upload.scp.v1";
+
 /// What the view asks of the core.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ToCore {
@@ -33,6 +36,19 @@ pub enum ToCore {
     /// a session another connection controls. It answers with [`FromCore::Ended`] or
     /// [`FromCore::EndRefused`].
     End,
+    /// Copy these files to the core, in order, over a connection of their own, so typing is not
+    /// held up: staged on this computer, or, with `host_id`, copied to that computer over SSH.
+    /// Answered with [`FromCore::Uploaded`].
+    Upload {
+        host_id: Option<String>,
+        files: Vec<std::path::PathBuf>,
+    },
+    /// Have the core stage this image (`extension` names its format) on this computer. Answered
+    /// with [`FromCore::Uploaded`].
+    StageImage {
+        extension: &'static str,
+        bytes: Vec<u8>,
+    },
 }
 
 /// What the core says about the terminal.
@@ -68,6 +84,12 @@ pub enum FromCore {
     Ended,
     /// The core would not end the session; it keeps running.
     EndRefused(String),
+    /// What an [`ToCore::Upload`] or [`ToCore::StageImage`] came to: the path of each file that
+    /// arrived, in order, and a line for each that did not.
+    Uploaded {
+        paths: Vec<String>,
+        errors: Vec<String>,
+    },
     /// Could not attach.
     Failed(String),
     /// The connection to the core dropped after attaching. The shell is not known to have ended.
@@ -296,6 +318,10 @@ async fn run(
                         ending = true;
                         connection.delete_session(&session_id).await
                     }
+                    Some(job) => {
+                        transfer(core.clone(), session_id.clone(), events.clone(), job);
+                        Ok(())
+                    }
                 };
                 if let Err(error) = sent {
                     break Some(format!("{error:#}"));
@@ -311,6 +337,36 @@ async fn run(
             let _ = connection.release_terminal(&terminal).await;
         }
     }
+}
+
+/// Carry out an upload or an image staging beside the attached connection and say how it went.
+fn transfer(core: Core, session_id: String, events: UnboundedSender<FromCore>, job: ToCore) {
+    tokio::spawn(async move {
+        let (mut paths, mut errors) = (Vec::new(), Vec::new());
+        match job {
+            ToCore::Upload { host_id, files } => {
+                for file in files {
+                    match core.upload(&session_id, host_id.as_deref(), &file).await {
+                        Ok(path) => paths.push(path),
+                        Err(error) => {
+                            let name = file
+                                .file_name()
+                                .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                            errors.push(format!("{name}: {error:#}"));
+                        }
+                    }
+                }
+            }
+            ToCore::StageImage { extension, bytes } => {
+                match core.stage_clipboard_image(extension, &bytes).await {
+                    Ok(path) => paths.push(path),
+                    Err(error) => errors.push(format!("clipboard image: {error:#}")),
+                }
+            }
+            _ => return,
+        }
+        let _ = events.unbounded_send(FromCore::Uploaded { paths, errors });
+    });
 }
 
 /// A piece of output: text for the terminal, or the PTY's new size.

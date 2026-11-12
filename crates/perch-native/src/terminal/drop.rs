@@ -3,7 +3,7 @@
 //!
 //! The web terminal uploads a dropped file first and pastes the path of the copy; the native
 //! view has the file itself on this machine and pastes its path. A terminal on another machine
-//! would need that upload, which this view does not do.
+//! gets the upload too (with Option held, as on the web), and the path of the copy there.
 
 use std::path::PathBuf;
 
@@ -36,12 +36,21 @@ pub fn quote_path(path: &str, double_quotes: bool) -> Result<String, String> {
 /// The text to paste for `paths`: every path quoted, joined by spaces, and a space after the last
 /// so what the person types next is a word of its own.
 pub fn paste_text(paths: &[PathBuf], double_quotes: bool) -> Result<String, String> {
+    let paths: Vec<&str> = paths
+        .iter()
+        .map(|path| {
+            path.to_str()
+                .ok_or_else(|| "A dropped path is not valid text".to_string())
+        })
+        .collect::<Result<_, _>>()?;
+    paste_words(&paths, double_quotes)
+}
+
+/// [`paste_text`] for paths already known as text, such as the copies a core made.
+pub fn paste_words<S: AsRef<str>>(paths: &[S], double_quotes: bool) -> Result<String, String> {
     let mut words = Vec::with_capacity(paths.len());
     for path in paths {
-        let path = path
-            .to_str()
-            .ok_or_else(|| "A dropped path is not valid text".to_string())?;
-        words.push(quote_path(path, double_quotes)?);
+        words.push(quote_path(path.as_ref(), double_quotes)?);
     }
     if words.is_empty() {
         return Err("Nothing was dropped".into());
