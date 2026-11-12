@@ -7,7 +7,7 @@
 use gpui::{px, size, AppContext, HeadlessAppContext, Window};
 use perch_core::protocol::ServerMessage;
 use perch_native::sidebar::{Attention, State};
-use perch_native::ui::{tint, Workspace, SIDEBAR_WIDTH};
+use perch_native::ui::{tint, OpenSession, Workspace, SIDEBAR_WIDTH};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -43,6 +43,8 @@ fn state(sessions: &[(&str, Value)]) -> State {
 }
 
 struct Frame {
+    /// What the main area was told to show.
+    opened: Option<OpenSession>,
     /// RGBA, row by row.
     raw: Vec<u8>,
     width: usize,
@@ -76,22 +78,25 @@ impl Frame {
 }
 
 /// Draw the window for `state`, with `open` picked first when given.
-fn draw(cx: &mut HeadlessAppContext, state: &State, open: Option<&str>) -> Frame {
+fn draw(cx: &mut HeadlessAppContext, state: &State, open: Option<(&str, Option<&str>)>) -> Frame {
     let model = state.model();
     let window = cx
         .open_window(size(px(640.), px(360.)), |_, cx| {
             cx.new(|cx| Workspace::new(model, None, cx))
         })
         .unwrap();
-    if let Some(id) = open {
+    if let Some((id, launched_with)) = open {
         window
             .update(cx, |workspace, _, cx| {
                 workspace.sidebar().update(cx, |sidebar, cx| {
-                    sidebar.open("local".into(), id.into(), cx)
+                    sidebar.open("local".into(), id.into(), launched_with.map(Into::into), cx)
                 })
             })
             .unwrap();
     }
+    let opened = window
+        .update(cx, |workspace, _, _| workspace.open().cloned())
+        .unwrap();
     let (image, scale) = cx
         .update_window(window.into(), |_, window: &mut Window, cx| {
             let _ = window.draw(cx);
@@ -102,6 +107,7 @@ fn draw(cx: &mut HeadlessAppContext, state: &State, open: Option<&str>) -> Frame
         })
         .unwrap();
     Frame {
+        opened,
         width: image.width() as usize,
         raw: image.into_raw(),
         sidebar_edge: (SIDEBAR_WIDTH * scale) as usize,
@@ -179,7 +185,7 @@ fn main() {
 
     // Disconnected: the row is still there, with no state claimed.
     let mut dropped = state(&[("session", json!({"blocked": true}))]);
-    dropped.disconnect();
+    dropped.disconnect(Some("connection refused".into()));
     let dropped = draw(&mut cx, &dropped, None);
     assert_eq!(dropped.count(tint(Attention::NeedsYou).1, true), 0);
     assert_eq!(dropped.count(tint(Attention::NeedsYou).0, true), 0);
@@ -189,10 +195,25 @@ fn main() {
     );
 
     // Picking a session shows its title in the main area.
-    let picked = draw(&mut cx, &state(&idle(&["alpha"])), Some("alpha"));
+    let picked = draw(&mut cx, &state(&idle(&["alpha"])), Some(("alpha", None)));
     assert!(
         picked.bright(false) > 20,
         "the open session's title is drawn in the main area"
+    );
+    // The seam to the terminal view: which session, and the provider to attach with.
+    let opened = picked.opened.unwrap();
+    assert_eq!(
+        (opened.session_id.as_str(), opened.title.as_str()),
+        ("alpha", "alpha")
+    );
+    assert_eq!(opened.provider_id.as_deref(), Some("claude"));
+    // A session just launched is not listed yet: the launch says what it runs.
+    let fresh = draw(&mut cx, &state(&[]), Some(("new", Some("codex"))))
+        .opened
+        .unwrap();
+    assert_eq!(
+        (fresh.title.as_str(), fresh.provider_id.as_deref()),
+        ("New session", Some("codex"))
     );
 
     println!(

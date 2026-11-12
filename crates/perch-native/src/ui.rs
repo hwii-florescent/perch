@@ -6,6 +6,7 @@
 //! placeholder naming the open session; the terminal view replaces it there.
 
 use crate::client::{Command, Update};
+use crate::handoff::{open_in_perch, perch_url, Place};
 use crate::sidebar::{Attention, HostView, Model, ProjectView, SessionView};
 use futures::channel::mpsc::UnboundedSender;
 use gpui::{
@@ -37,6 +38,11 @@ pub struct OpenSession {
     pub host_id: String,
     pub session_id: String,
     pub title: String,
+    /// The provider the session runs, which a terminal attaching to it must name. Known from the
+    /// row, or from the launch for a session the core does not list yet.
+    pub provider_id: Option<String>,
+    /// The core's address, for handing the session to the browser UI.
+    pub core_url: Option<String>,
 }
 
 pub struct Sidebar {
@@ -71,28 +77,39 @@ impl Sidebar {
             Update::Launched {
                 host_id,
                 session_id,
-            } => self.open(host_id, session_id, cx),
+                provider,
+            } => self.open(host_id, session_id, Some(provider), cx),
             Update::LaunchFailed(error) => self.notice = Some(error),
         }
         cx.notify();
     }
 
-    /// Pick a session: highlight it and tell the window to show it.
-    pub fn open(&mut self, host_id: String, session_id: String, cx: &mut Context<Self>) {
-        let title = self
+    /// Pick a session: highlight it and tell the window to show it. `provider` is what it was
+    /// launched with; a listed session says its own.
+    pub fn open(
+        &mut self,
+        host_id: String,
+        session_id: String,
+        provider: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let row = self
             .model
             .hosts
             .iter()
             .flat_map(|h| &h.projects)
             .flat_map(|p| &p.sessions)
-            .find(|s| s.id == session_id)
-            .map_or_else(|| "New session".to_string(), |s| s.title.clone());
+            .find(|s| s.id == session_id);
+        let title = row.map_or_else(|| "New session".to_string(), |s| s.title.clone());
+        let provider_id = row.and_then(|s| s.provider_id.clone()).or(provider);
         self.notice = None;
         self.selected = Some(session_id.clone());
         cx.emit(OpenSession {
             host_id,
             session_id,
             title,
+            provider_id,
+            core_url: self.model.core_url.clone(),
         });
         cx.notify();
     }
@@ -106,7 +123,9 @@ impl Sidebar {
     fn header(&self, cx: &mut Context<Self>) -> gpui::Div {
         let status = if !self.model.connected {
             "Disconnected, trying again".to_string()
-        } else if self.model.needs_you > 0 {
+        } else if self.model.needs_you == 1 {
+            "1 needs you".to_string()
+        } else if self.model.needs_you > 1 {
             format!("{} need you", self.model.needs_you)
         } else {
             String::new()
@@ -236,7 +255,7 @@ impl Sidebar {
             .text_sm()
             .text_color(rgb(TITLE_COLOR))
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.open(host_id.clone(), session_id.clone(), cx)
+                this.open(host_id.clone(), session_id.clone(), None, cx)
             }));
         if self.selected.as_deref() == Some(session.id.as_str()) {
             row = row.bg(rgb(SELECTED_BG));
@@ -282,6 +301,14 @@ impl gpui::Render for Sidebar {
             .gap_3()
             .bg(rgb(SIDEBAR_BG))
             .child(self.header(cx));
+        if let Some(reason) = self
+            .model
+            .offline_reason
+            .as_ref()
+            .filter(|_| !self.model.connected)
+        {
+            sidebar = sidebar.child(hint(reason.clone()));
+        }
         if let Some(notice) = &self.notice {
             sidebar = sidebar.child(hint(notice.clone()));
         }
@@ -304,6 +331,7 @@ impl gpui::Render for Sidebar {
 pub struct Workspace {
     sidebar: Entity<Sidebar>,
     open: Option<OpenSession>,
+    handoff_error: Option<String>,
     _open_session: Subscription,
 }
 
@@ -316,11 +344,13 @@ impl Workspace {
         let sidebar = cx.new(|_| Sidebar::new(model, commands));
         let subscription = cx.subscribe(&sidebar, |this, _, event: &OpenSession, cx| {
             this.open = Some(event.clone());
+            this.handoff_error = None;
             cx.notify();
         });
         Self {
             sidebar,
             open: None,
+            handoff_error: None,
             _open_session: subscription,
         }
     }
@@ -336,12 +366,48 @@ impl Workspace {
 }
 
 impl gpui::Render for Workspace {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Placeholder for the terminal view: it takes this slot and the session named here.
-        let main = match &self.open {
-            Some(open) => div().text_color(rgb(TITLE_COLOR)).child(open.title.clone()),
-            None => div().text_color(rgb(DIM_COLOR)).child("Select a session"),
-        };
+        let mut main = div().flex().flex_col().items_center().gap_3().text_sm();
+        match &self.open {
+            Some(open) => {
+                main = main.child(div().text_color(rgb(TITLE_COLOR)).child(open.title.clone()));
+                // What this client cannot do yet is one click away in Perch. Only a click runs it.
+                if let Some(base) = open.core_url.clone() {
+                    let mut links = div().flex().gap_3().text_xs().text_color(rgb(DIM_COLOR));
+                    for (name, place) in [
+                        ("Files", Place::Files),
+                        ("Changes", Place::Changes),
+                        ("Browser", Place::Browser),
+                        ("Chat", Place::Chat),
+                        ("Settings", Place::Settings("general")),
+                    ] {
+                        let url = perch_url(&base, Some(&open.session_id), place);
+                        links = links.child(
+                            div()
+                                .id(format!("open-in-perch-{name}"))
+                                .cursor_pointer()
+                                .child(format!("Open {name} in Perch"))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.handoff_error =
+                                        open_in_perch(&url).err().map(|e| e.to_string());
+                                    cx.notify();
+                                })),
+                        );
+                    }
+                    main = main.child(links);
+                }
+                if let Some(error) = &self.handoff_error {
+                    main = main.child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(DIM_COLOR))
+                            .child(error.clone()),
+                    );
+                }
+            }
+            None => main = main.child(div().text_color(rgb(DIM_COLOR)).child("Select a session")),
+        }
         div()
             .flex()
             .size_full()
@@ -353,7 +419,6 @@ impl gpui::Render for Workspace {
                     .flex_1()
                     .items_center()
                     .justify_center()
-                    .text_sm()
                     .child(main),
             )
     }

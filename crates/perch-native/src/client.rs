@@ -441,6 +441,7 @@ pub enum Update {
     Launched {
         host_id: String,
         session_id: String,
+        provider: String,
     },
     LaunchFailed(String),
 }
@@ -459,20 +460,29 @@ pub async fn follow(
     let mut shown = None;
     loop {
         // ponytail: a fixed delay between attempts; back off if a dead core ever gets hammered.
-        if let Ok(core) = locate() {
-            if let Ok(connection) = core.connect().await {
-                let gone = live(connection, &mut state, &mut shown, &mut commands, &updates).await;
-                if matches!(gone, Ok(())) {
-                    return;
-                }
-            }
-        }
-        state.disconnect();
+        let ended = attempt(&mut locate, &mut state, &mut shown, &mut commands, &updates).await;
+        let Err(error) = ended else { return };
+        state.disconnect(Some(format!("{error:#}")));
         if !publish(&state, &mut shown, &updates) {
             return;
         }
         tokio::time::sleep(retry).await;
     }
+}
+
+/// Find the core, connect and follow it: `Ok` when the window closed, `Err` for why it is not
+/// being followed (not found, refused, or dropped).
+async fn attempt(
+    locate: &mut impl FnMut() -> Result<Core>,
+    state: &mut State,
+    shown: &mut Option<Model>,
+    commands: &mut UnboundedReceiver<Command>,
+    updates: &UnboundedSender<Update>,
+) -> Result<()> {
+    let core = locate()?;
+    let connection = core.connect().await?;
+    state.core_url = Some(core.base_url());
+    live(connection, state, shown, commands, updates).await
 }
 
 /// Send the model if it changed. False once the window is gone.
@@ -511,7 +521,7 @@ async fn live(
                 Some(Command::ShowTerminals(show)) => state.show_terminals = show,
                 Some(Command::Launch { host_id, cwd, provider }) => {
                     let update = match connection.start_session(&host_id, cwd.as_deref(), &provider).await {
-                        Ok(session_id) => Update::Launched { host_id, session_id },
+                        Ok(session_id) => Update::Launched { host_id, session_id, provider },
                         Err(error) => Update::LaunchFailed(format!("{error:#}")),
                     };
                     if updates.unbounded_send(update).is_err() {
@@ -764,6 +774,22 @@ mod tests {
                 "{types:?}"
             );
         }
+        following.abort();
+    }
+
+    #[tokio::test]
+    async fn says_why_the_core_cannot_be_followed() {
+        let (_commands_tx, commands) = futures::channel::mpsc::unbounded();
+        let (updates_tx, mut updates) = futures::channel::mpsc::unbounded();
+        let following = tokio::spawn(follow(
+            || Err(anyhow!("core.json says the core has no token")),
+            commands,
+            updates_tx,
+            Duration::from_millis(20),
+        ));
+        let model = model_where(&mut updates, |m| m.offline_reason.is_some()).await;
+        assert!(!model.connected);
+        assert!(model.offline_reason.unwrap().contains("no token"));
         following.abort();
     }
 

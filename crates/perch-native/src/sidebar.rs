@@ -63,6 +63,8 @@ pub struct SessionView {
     pub title: String,
     /// Who runs in it: an agent's name, or "Terminal".
     pub provider: String,
+    /// The provider's id as the core knows it, which attaching a terminal must name again.
+    pub provider_id: Option<String>,
     /// `None` when the core or the computer cannot be reached.
     pub attention: Option<Attention>,
 }
@@ -96,7 +98,11 @@ pub struct HostView {
 pub struct Model {
     /// Whether the connection to the core is up.
     pub connected: bool,
-    /// Sessions that need you on reachable computers.
+    /// Why it is not, when the last attempt said.
+    pub offline_reason: Option<String>,
+    /// The core's address as the browser UI uses it, while connected.
+    pub core_url: Option<String>,
+    /// Sessions that need you on reachable computers, listed or not.
     pub needs_you: usize,
     pub hosts: Vec<HostView>,
 }
@@ -104,6 +110,9 @@ pub struct Model {
 #[derive(Default)]
 pub struct State {
     connected: bool,
+    offline_reason: Option<String>,
+    /// Set by whoever connects: the address of the core being followed.
+    pub core_url: Option<String>,
     /// List plain terminals started inside a project (Show terminals).
     pub show_terminals: bool,
     hosts: Vec<(String, String)>,
@@ -121,12 +130,15 @@ impl State {
     /// before the drop outlives its first answer.
     pub fn connect(&mut self) {
         self.connected = true;
+        self.offline_reason = None;
         self.host_states.clear();
     }
 
-    /// The socket is gone. Rows stay, with no state claimed.
-    pub fn disconnect(&mut self) {
+    /// The socket is gone, or never came up (`reason`). Rows stay, with no state claimed.
+    pub fn disconnect(&mut self, reason: Option<String>) {
         self.connected = false;
+        self.offline_reason = reason;
+        self.core_url = None;
     }
 
     /// Fold one message from the core in. Returns what to ask for next.
@@ -234,14 +246,17 @@ impl State {
             .into_iter()
             .map(|(id, name)| self.host_view(id, name))
             .collect();
-        let needs_you = hosts
+        // Every session on a reachable computer counts, whether or not its row is listed.
+        let needs_you = self
+            .sessions
             .iter()
-            .flat_map(|h| &h.projects)
-            .flat_map(|p| &p.sessions)
-            .filter(|s| s.attention == Some(Attention::NeedsYou))
+            .filter(|s| self.reachable(&s.host_id))
+            .filter(|s| self.attention_of(s) == Attention::NeedsYou)
             .count();
         Model {
             connected: self.connected,
+            offline_reason: self.offline_reason.clone(),
+            core_url: self.core_url.clone(),
             needs_you,
             hosts,
         }
@@ -346,6 +361,7 @@ impl State {
             host_id: session.host_id.clone(),
             title: title(session),
             provider: name,
+            provider_id: id.map(str::to_string),
             attention: reachable.then(|| self.attention_of(session)),
         }
     }
@@ -567,9 +583,10 @@ mod tests {
             session("s1", LOCAL, "a", json!({"blocked": true})),
             session("s2", LOCAL, "a", json!({"status": "running"})),
         ]));
-        state.disconnect();
+        state.disconnect(Some("connection refused".into()));
         let model = state.model();
         assert!(!model.connected);
+        assert_eq!(model.offline_reason.as_deref(), Some("connection refused"));
         assert_eq!(model.needs_you, 0);
         assert_eq!(model.hosts[0].state, "unknown");
         // Last-known rows stay, with no state: not exited, not idle.
@@ -581,6 +598,7 @@ mod tests {
 
         // The core comes back: its first answers replace what was kept.
         state.connect();
+        assert_eq!(state.model().offline_reason, None);
         state.apply(&session_list(vec![session("s2", LOCAL, "a", json!({}))]));
         assert_eq!(
             shown(&state.model(), 0, 0),
@@ -670,6 +688,17 @@ mod tests {
         assert_eq!(model.hosts[0].projects.last().unwrap().name, "Other");
     }
 
+    fn state_with_blocked_terminal() -> State {
+        let mut state = state();
+        state.apply(&session_list(vec![session(
+            "t",
+            LOCAL,
+            "a",
+            json!({"cliProviderId": "terminal", "blocked": true}),
+        )]));
+        state
+    }
+
     #[test]
     fn terminals_in_projects_stay_tabs() {
         let mut state = state();
@@ -703,6 +732,14 @@ mod tests {
 
         state.show_terminals = true;
         assert_eq!(shown(&state.model(), 0, 0).len(), 2);
+
+        // A terminal that needs you counts whether or not its row is shown.
+        let blocked = |show| {
+            let mut state = state_with_blocked_terminal();
+            state.show_terminals = show;
+            state.model().needs_you
+        };
+        assert_eq!((blocked(false), blocked(true)), (1, 1));
     }
 
     #[test]
@@ -726,6 +763,10 @@ mod tests {
         let model = state.model();
         let ids: Vec<_> = model.hosts[0].providers.iter().map(|p| &*p.id).collect();
         assert_eq!(ids, ["terminal", "claude"]);
-        assert_eq!(model.hosts[0].projects[0].sessions[0].provider, "CLAUDE");
+        let row = &model.hosts[0].projects[0].sessions[0];
+        assert_eq!(
+            (row.provider.as_str(), row.provider_id.as_deref()),
+            ("CLAUDE", Some("claude"))
+        );
     }
 }
