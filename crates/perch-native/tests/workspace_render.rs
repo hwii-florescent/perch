@@ -9,7 +9,7 @@ use gpui::{
     MouseDownEvent, MouseUpEvent, PlatformInput, Window, WindowHandle,
 };
 use perch_native::client::Update;
-use perch_native::sidebar::{Attention, Model, State};
+use perch_native::sidebar::{Alert, Attention, Heard, Model, State, Toast};
 use perch_native::terminal::attach::FromCore;
 use perch_native::terminal::clipboard::MemoryClipboard;
 use perch_native::terminal::TerminalView;
@@ -968,7 +968,57 @@ fn a_peek_is_a_terminal_over_the_window() {
     println!("workspace_render: peek ok");
 }
 
+/// A toast says which session finished or needs the person, goes by itself after a while, and a
+/// click on it opens that session. Nothing is played or sent to the system here.
+fn a_toast_names_the_session_and_opens_it() {
+    let mut h = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
+    h.open("alpha");
+    let plain = h.draw();
+    let heard = |alert: Alert| Heard {
+        alert,
+        session_id: "bravo".into(),
+        title: "bravo".into(),
+        sound: true,
+        file: None,
+        toast: Toast::App,
+    };
+    h.window
+        .update(&mut h.cx, |ws, _, cx| ws.toast(heard(Alert::Blocked), cx))
+        .unwrap();
+    let shown = h.draw();
+    shown.save("toast");
+    assert_ne!(plain.raw, shown.raw, "the toast is drawn");
+    assert_eq!(
+        h.ws(|ws| ws.toast_text().map(str::to_string)).as_deref(),
+        Some("bravo needs you")
+    );
+
+    // A click opens the session and takes the toast away.
+    h.click(
+        WIDTH - 40.,
+        TAB_BAR_HEIGHT + 30.,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    assert_eq!(h.active().as_deref(), Some("bravo"));
+    assert_eq!(h.ws(|ws| ws.toast_text().map(str::to_string)), None);
+
+    // Left alone, it goes by itself; a newer one replaces an older.
+    h.window
+        .update(&mut h.cx, |ws, _, cx| ws.toast(heard(Alert::Done), cx))
+        .unwrap();
+    assert_eq!(
+        h.ws(|ws| ws.toast_text().map(str::to_string)).as_deref(),
+        Some("bravo finished")
+    );
+    h.cx.advance_clock(std::time::Duration::from_secs(9));
+    h.cx.run_until_parked();
+    assert_eq!(h.ws(|ws| ws.toast_text().map(str::to_string)), None);
+    println!("workspace_render: toast ok");
+}
+
 fn main() {
+    a_toast_names_the_session_and_opens_it();
     the_pane_menu_opens_on_right_click();
     a_peek_is_a_terminal_over_the_window();
     tabs_out_of_sight_are_parked_beyond_twelve();

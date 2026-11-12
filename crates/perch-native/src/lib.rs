@@ -6,6 +6,7 @@ pub mod actions;
 pub mod client;
 pub mod handoff;
 pub mod keymap;
+pub mod notify;
 pub mod palette;
 pub mod settings;
 pub mod sidebar;

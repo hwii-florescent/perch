@@ -69,13 +69,58 @@ pub enum Request {
     Workspaces(String),
 }
 
-/// A sound the person should hear.
+/// What a session's change is worth telling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Alert {
     /// A session finished a turn.
     Done,
     /// A session is waiting on an answer.
     Blocked,
+}
+
+/// How a toast is delivered (`toastDelivery`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Toast {
+    Off,
+    /// A message in the window.
+    App,
+    /// A system notification.
+    System,
+}
+
+impl Toast {
+    fn parse(how: &str) -> Self {
+        match how {
+            "off" => Self::Off,
+            "system" => Self::System,
+            _ => Self::App,
+        }
+    }
+}
+
+/// A session finished or needs the person while they are not looking at it: the app plays the
+/// sound and shows the toast. The follower only reports it; it never plays or shows anything.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Heard {
+    pub alert: Alert,
+    pub session_id: String,
+    pub title: String,
+    /// Sounds are on. `file` is the person's own sound for this alert, when they chose one that
+    /// can be played; otherwise the system's alert sounds.
+    pub sound: bool,
+    pub file: Option<std::path::PathBuf>,
+    pub toast: Toast,
+}
+
+impl Heard {
+    /// What the toast says.
+    pub fn text(&self) -> String {
+        let what = match self.alert {
+            Alert::Done => "finished",
+            Alert::Blocked => "needs you",
+        };
+        format!("{} {what}", self.title)
+    }
 }
 
 /// An agent (or the plain terminal) a session can start with.
@@ -248,7 +293,9 @@ pub struct State {
     held: Option<String>,
     sound_enabled: bool,
     window_active: bool,
-    alerts: Vec<Alert>,
+    alerts: Vec<Heard>,
+    /// Where the person's own sound files are: the folder that holds `mods/`.
+    sounds_in: Option<std::path::PathBuf>,
     keybindings: BTreeMap<String, String>,
     keys_file: Option<Value>,
     terminal: Option<Box<TerminalSettings>>,
@@ -365,8 +412,8 @@ impl State {
         self.window_active = active;
     }
 
-    /// The sounds due since the last call.
-    pub fn take_alerts(&mut self) -> Vec<Alert> {
+    /// The sounds and toasts due since the last call.
+    pub fn take_alerts(&mut self) -> Vec<Heard> {
         std::mem::take(&mut self.alerts)
     }
 
@@ -490,7 +537,10 @@ impl State {
                 self.keybindings.clone_from(&settings.keybindings);
                 self.terminal = Some(Box::new(TerminalSettings::from_wire(settings)));
             }
-            ServerMessage::ModsState { keys, .. } => self.keys_file.clone_from(keys),
+            ServerMessage::ModsState { keys, folder, .. } => {
+                self.keys_file.clone_from(keys);
+                self.sounds_in = std::path::Path::new(folder).parent().map(Into::into);
+            }
             ServerMessage::ModsChanged {} => asks.push(Request::Mods),
             ServerMessage::AgentManifestList {
                 host_id, manifests, ..
@@ -529,9 +579,28 @@ impl State {
             let done =
                 before.status == SessionStatus::Running && session.status == SessionStatus::Idle;
             let viewed = self.viewing.as_deref() == Some(session.id.as_str());
-            if self.sound_enabled && (blocked || done) && (!viewed || !self.window_active) {
-                self.alerts
-                    .push(if blocked { Alert::Blocked } else { Alert::Done });
+            if (blocked || done) && (!viewed || !self.window_active) {
+                let alert = if blocked { Alert::Blocked } else { Alert::Done };
+                let settings = self.terminal.as_deref();
+                let toast = settings.map_or(Toast::App, |t| Toast::parse(&t.toast_delivery));
+                let chosen = settings.map(|t| match alert {
+                    Alert::Done => t.sound_done.as_str(),
+                    Alert::Blocked => t.sound_blocked.as_str(),
+                });
+                if self.sound_enabled || toast != Toast::Off {
+                    self.alerts.push(Heard {
+                        alert,
+                        session_id: session.id.clone(),
+                        title: session.title.clone(),
+                        sound: self.sound_enabled,
+                        file: self
+                            .sounds_in
+                            .as_deref()
+                            .zip(chosen)
+                            .and_then(|(folder, rel)| crate::sound::file_in(folder, rel)),
+                        toast,
+                    });
+                }
             }
         }
         match previous {
@@ -1910,6 +1979,49 @@ mod tests {
         serde_json::from_value::<perch_core::protocol::ClientMessage>(frame).unwrap();
     }
 
+    fn alerts(state: &mut State) -> Vec<Alert> {
+        state.take_alerts().iter().map(|h| h.alert).collect()
+    }
+
+    #[test]
+    fn the_persons_own_sound_is_found_beside_the_mods_folder() {
+        let root = std::env::temp_dir().join(format!("perch-heard-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("mods")).unwrap();
+        std::fs::write(root.join("ding.mp3"), b"x").unwrap();
+        let mut state = state();
+        state.apply(&message(
+            json!({"type": "mods.state", "requestId": "r", "mods": [],
+            "layouts": [], "layout": null, "policy": {}, "safeMode": false,
+            "folder": root.join("mods").display().to_string(), "keys": null}),
+        ));
+        state.apply(&message(json!({"type": "settings.current", "settings": {
+            "defaultCwd": null, "soundEnabled": true, "soundDone": "ding.mp3",
+            "soundBlocked": "missing.mp3"}})));
+        state.apply(&session_list(vec![
+            session("s1", LOCAL, "a", json!({"status": "running"})),
+            session("s2", LOCAL, "a", json!({})),
+        ]));
+        state.set_window_active(false);
+        state.apply(&updated(session("s1", LOCAL, "a", json!({}))));
+        state.apply(&updated(session(
+            "s2",
+            LOCAL,
+            "a",
+            json!({"blocked": true}),
+        )));
+        let heard = state.take_alerts();
+        assert_eq!(heard.len(), 2);
+        assert!(heard[0]
+            .file
+            .as_ref()
+            .is_some_and(|f| f.ends_with("ding.mp3")));
+        assert_eq!(
+            heard[1].file, None,
+            "a file that is not there is the system's alert"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     fn settings(sound: bool, keys: Value) -> ServerMessage {
         message(json!({"type": "settings.current", "settings":
             {"defaultCwd": null, "soundEnabled": sound, "keybindings": keys}}))
@@ -1976,14 +2088,14 @@ mod tests {
         assert!(state.take_alerts().is_empty());
 
         state.apply(&updated(session("s1", LOCAL, "a", json!({}))));
-        assert_eq!(state.take_alerts(), [Alert::Done]);
+        assert_eq!(alerts(&mut state), [Alert::Done]);
         state.apply(&updated(session(
             "s2",
             LOCAL,
             "a",
             json!({"status": "running", "blocked": true}),
         )));
-        assert_eq!(state.take_alerts(), [Alert::Blocked]);
+        assert_eq!(alerts(&mut state), [Alert::Blocked]);
         assert!(state.take_alerts().is_empty(), "taken once");
 
         // The chat in front of the person, in the window they are looking at, is silent;
@@ -2005,7 +2117,7 @@ mod tests {
         )));
         state.set_window_active(false);
         state.apply(&updated(session("s1", LOCAL, "a", json!({}))));
-        assert_eq!(state.take_alerts(), [Alert::Done]);
+        assert_eq!(alerts(&mut state), [Alert::Done]);
 
         // Off, or after a reconnect (a list is read again first), nothing sounds.
         state.apply(&updated(session(
@@ -2016,7 +2128,25 @@ mod tests {
         )));
         state.apply(&settings(false, json!({})));
         state.apply(&updated(session("s1", LOCAL, "a", json!({}))));
-        assert!(state.take_alerts().is_empty(), "sound is off");
+        let heard = state.take_alerts();
+        assert_eq!(
+            heard.iter().map(|h| (h.sound, h.toast)).collect::<Vec<_>>(),
+            [(false, Toast::App)],
+            "sound is off: the toast alone is due"
+        );
+        assert_eq!(heard[0].text(), "s1 finished");
+        assert_eq!(heard[0].session_id, "s1");
+        // Toasts off as well: nothing is due.
+        state.apply(&message(json!({"type": "settings.current", "settings":
+            {"defaultCwd": null, "soundEnabled": false, "toastDelivery": "off"}})));
+        state.apply(&updated(session(
+            "s1",
+            LOCAL,
+            "a",
+            json!({"status": "running"}),
+        )));
+        state.apply(&updated(session("s1", LOCAL, "a", json!({}))));
+        assert!(state.take_alerts().is_empty(), "sound and toasts are off");
         state.apply(&settings(true, json!({})));
         state.apply(&updated(session(
             "s2",

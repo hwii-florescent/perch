@@ -13,7 +13,7 @@
 //! only derives `Deserialize`, so outgoing frames are built as JSON; `frames_match_the_core_protocol`
 //! checks each one against the real type.
 
-use crate::sidebar::{Alert, Model, Request, State, LOCAL};
+use crate::sidebar::{Heard, Model, Request, State, LOCAL};
 use anyhow::{anyhow, bail, Context, Result};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures::{SinkExt, StreamExt};
@@ -644,7 +644,7 @@ pub enum Update {
         host_id: String,
     },
     /// A session finished or needs you and the person should hear it.
-    Alert(Alert),
+    Alert(Heard),
 }
 
 /// A launch on the core's own computer, waiting for the core to say it worked.

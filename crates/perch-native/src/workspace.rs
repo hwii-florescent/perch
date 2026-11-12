@@ -20,7 +20,7 @@ use crate::settings::{
     next_choice, scrollback_from_text, stepped, Change, CONTRAST, MAX_SCROLLBACK, MIN_SCROLLBACK,
     OPACITY, OPTION_AS_ALT, PADDING, TOAST_DELIVERY,
 };
-use crate::sidebar::{Attention, LOCAL};
+use crate::sidebar::{Attention, Heard, LOCAL};
 use crate::tabs::{Dir, Node, Side, Tabs};
 use crate::terminal::actions::{Action, Scroll};
 use crate::terminal::attach::FromCore;
@@ -49,6 +49,8 @@ const LEADER_TIMEOUT: Duration = Duration::from_millis(1500);
 /// terminal lets go of the shell (which keeps running) and attaches again, with the core's
 /// repaint, when the tab is shown.
 const MAX_PARKED: usize = 12;
+/// How long a toast stays before it goes by itself.
+const TOAST_FOR: Duration = Duration::from_secs(8);
 /// How long the core has to confirm that a session ended before the tab says it is still running.
 const END_WAIT: Duration = Duration::from_secs(5);
 /// How long to wait before attaching a dropped terminal to the core again: it doubles from the
@@ -133,6 +135,14 @@ struct SettingsPanel {
     editing: Option<String>,
 }
 
+/// A message in the window about a session that finished or needs the person.
+struct Toast {
+    session_id: String,
+    text: String,
+    /// Takes the toast away after [`TOAST_FOR`].
+    _timer: Task<()>,
+}
+
 /// The menu a right-click in a pane opens: its entries are commands, run on that pane.
 struct PaneMenu {
     at: Point<Pixels>,
@@ -154,6 +164,7 @@ pub struct Workspace {
     /// Counts the changes of what is on screen, for [`Pane::seen`].
     tick: u64,
     menu: Option<PaneMenu>,
+    toast: Option<Toast>,
     /// The session whose terminal is over the window for a moment (`terminal.peek`), with no tab
     /// of its own unless it is kept.
     peek: Option<String>,
@@ -196,6 +207,7 @@ impl Workspace {
             zoom: Zoom::default(),
             tick: 0,
             menu: None,
+            toast: None,
             peek: None,
             leader: None,
             notice: None,
@@ -1074,6 +1086,62 @@ impl Workspace {
                 }
             }
         }
+    }
+
+    /// Show a toast for a session that finished or needs the person: it goes by itself, or when
+    /// clicked, which also opens the session. Only the newest is kept.
+    pub fn toast(&mut self, heard: Heard, cx: &mut Context<Self>) {
+        let session_id = heard.session_id.clone();
+        let mine = session_id.clone();
+        let timer = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(TOAST_FOR).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.toast.as_ref().is_some_and(|t| t.session_id == mine) {
+                    this.toast = None;
+                    cx.notify();
+                }
+            });
+        });
+        self.toast = Some(Toast {
+            session_id,
+            text: heard.text(),
+            _timer: timer,
+        });
+        cx.notify();
+    }
+
+    /// The toast's text, while one is up.
+    pub fn toast_text(&self) -> Option<&str> {
+        self.toast.as_ref().map(|t| t.text.as_str())
+    }
+
+    fn toast_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let toast = self.toast.as_ref()?;
+        let session = toast.session_id.clone();
+        Some(
+            div()
+                .id("toast")
+                .absolute()
+                .top(px(TAB_BAR_HEIGHT + 12.))
+                .right_3()
+                .max_w(px(360.))
+                .px_3()
+                .py_2()
+                .rounded_md()
+                .border_1()
+                .border_color(rgb(OVERLAY_BORDER))
+                .bg(rgb(SIDEBAR_BG))
+                .cursor_pointer()
+                .text_sm()
+                .text_color(rgb(TITLE_COLOR))
+                .child(toast.text.clone())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.toast = None;
+                    let result = this.show_session(&session, cx);
+                    this.finish(result, cx);
+                }))
+                .into_any_element(),
+        )
     }
 
     /// Open the pane menu at `at` for the pane `id`. A pane in a split takes the keyboard first,
@@ -2200,7 +2268,8 @@ impl gpui::Render for Workspace {
             .palette_view(cx)
             .or_else(|| self.settings_view(cx))
             .into_iter()
-            .chain(self.peek_view(cx));
+            .chain(self.peek_view(cx))
+            .chain(self.toast_view(cx));
         div()
             .relative()
             .flex()
