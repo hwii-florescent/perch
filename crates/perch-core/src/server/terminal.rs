@@ -1193,6 +1193,8 @@ pub(super) fn handle_terminal_resize(
         state.app.hub.forward(&host_id, raw_text);
         return;
     }
+    // The same bounds an open checks, so viewers are never told a size the daemon clamps.
+    let (cols, rows) = (cols.clamp(1, 1000), rows.clamp(1, 1000));
     if let Some(key) = state.app.agent_runtime.key_for_terminal(&terminal_id) {
         let lease = state
             .agent_resize_leases
