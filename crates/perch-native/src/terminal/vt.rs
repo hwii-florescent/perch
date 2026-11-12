@@ -554,10 +554,11 @@ impl Vt {
                 g::GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES,
                 &SCROLLBACK_BYTES as *const usize as *const c_void,
             );
-            // Kitty graphics are not drawn yet, so no image is stored.
+            // Images the program sends are kept, up to a cap, so the view can draw them.
+            super::graphics::install_png_decoder();
             set(
                 g::GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT,
-                &0u64 as *const u64 as *const c_void,
+                &super::graphics::STORAGE_LIMIT as *const u64 as *const c_void,
             );
             let mut vt = Vt {
                 term,
@@ -1101,6 +1102,12 @@ impl Vt {
             if self.theme.minimum_contrast > 1.0 && !keeps_program_colour(&text) {
                 fg = readable(fg, bg.unwrap_or(bg_default), self.theme.minimum_contrast);
             }
+            // A placeholder cell draws no text and no rules: its colours name an image, and the
+            // image is drawn over it.
+            let placeholder = text.starts_with('\u{10eeee}');
+            if placeholder {
+                text.clear();
+            }
             Cell {
                 text,
                 fg,
@@ -1108,8 +1115,9 @@ impl Vt {
                 bold: style.bold,
                 italic: style.italic,
                 faint: style.faint,
-                underline: style.underline != 0,
+                underline: style.underline != 0 && !placeholder,
                 underline_style: match style.underline {
+                    _ if placeholder => Underline::None,
                     g::GHOSTTY_SGR_UNDERLINE_SINGLE => Underline::Single,
                     g::GHOSTTY_SGR_UNDERLINE_DOUBLE => Underline::Double,
                     g::GHOSTTY_SGR_UNDERLINE_CURLY => Underline::Curly,
@@ -1118,7 +1126,7 @@ impl Vt {
                     _ => Underline::None,
                 },
                 underline_color,
-                strike: style.strikethrough,
+                strike: style.strikethrough && !placeholder,
                 wide: wide == g::GHOSTTY_CELL_WIDE_WIDE,
                 selected,
             }

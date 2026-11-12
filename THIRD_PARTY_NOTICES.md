@@ -232,6 +232,11 @@ modified files carry a header saying so.
   `src/vt.rs` and `src/links.rs`): the selection gesture model, the on-screen and
   scrollback search, and link detection. Perch's versions take the click time from
   the caller, report search progress, and find links with a scanner of their own.
+- `crates/perch-native/src/terminal/graphics.rs` (from `src/vt.rs`): the kitty
+  graphics placement read, the Unicode-placeholder resolution and its geometry,
+  the PNG decode hook and the BGRA conversion. Perch decodes PNGs with the `image`
+  crate and reads the placeholder diacritic table from the Ghostty checkout at
+  build time.
 - `crates/perch-native/src/terminal/scrollbar.rs` (from `src/terminal.rs`): the
   thumb, lane and drag arithmetic of the scrollbar.
 - `crates/perch-native/src/terminal/sprites.rs` (from `src/sprites.rs`): box

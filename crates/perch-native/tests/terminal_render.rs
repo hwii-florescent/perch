@@ -337,6 +337,7 @@ fn main() {
     run("input_method_composition", input_method_composition);
     run("stress_screen", || stress_screen(bg, fg));
     run("scrollbar_in_the_pane", scrollbar_in_the_pane);
+    run("kitty_images", kitty_images);
     run("ownership_and_named_actions", ownership_and_named_actions);
     run(
         "x10_mouse_reports_past_the_text_range",
@@ -1613,6 +1614,10 @@ fn stress_screen(bg: [u8; 3], fg: [u8; 3]) {
     screen.push_str("\u{2514}\u{2500}\u{2500}\u{2534}\u{2500}\u{2500}\u{2518}\r\n");
     screen.push_str("\u{2588}\u{2593}\u{2592}\u{2591}\u{2580}\u{2584}\u{28ff}\u{2801}\r\n");
     screen.push_str("\x1b[44;37m\u{e0b0}\x1b[0m\r\n");
+    // A kitty image (raw pixels: red, green, blue, white) over 4x2 cells two rows below.
+    screen.push_str(
+        "\x1b[17;1H\x1b_Ga=T,f=32,s=2,v=2,i=1,c=4,r=2,C=1,q=2;/wAA/wD/AP8AAP///////w==\x1b\\\x1b[15;1H",
+    );
     screen.push_str("\u{65e5}\u{672c}\u{8a9e} \u{1f600}x");
     h.attach(100, 30, &screen);
     h.focus();
@@ -1754,6 +1759,17 @@ fn stress_screen(bg: [u8; 3], fg: [u8; 3]) {
         }) > 0,
         "the emoji has colour"
     );
+    // The image sits over its cells, its quadrants in their own colours.
+    let (r, g, b, w) = (
+        shot.center(0, 16),
+        shot.center(3, 16),
+        shot.center(0, 17),
+        shot.center(3, 17),
+    );
+    assert!(r[0] > 100 && r[1] < 70 && r[2] < 70, "image red {r:?}");
+    assert!(g[1] > 100 && g[0] < 70 && g[2] < 70, "image green {g:?}");
+    assert!(b[2] > 100 && b[0] < 70 && b[1] < 70, "image blue {b:?}");
+    assert!(w.iter().all(|c| *c > 100), "image white {w:?}");
     // The cursor sits after the last character, drawn as the focused block.
     let (x, y) = mid(10, 14);
     assert!(differs(shot.at(x, y), bg), "the cursor block");
@@ -1867,4 +1883,68 @@ fn scrollbar_in_the_pane() {
     );
     h.view(|v, cx| v.perform(Action::Scroll(Scroll::Top), cx));
     assert_eq!(first(&mut h), "history 0");
+}
+
+/// Kitty graphics: images a program sends are drawn where it put them, in pixels, whether sent
+/// as raw pixels or a PNG and whether placed directly or by Unicode placeholders; the program
+/// gets its acknowledgements; and an image that scrolls away is let go.
+fn kitty_images() {
+    const RGBA: &str = "/wAA/wD/AP8AAP///////w==";
+    const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGP4z8DAAMIM/4EAAB/uBfsL2WiLAAAAAElFTkSuQmCC";
+    let (red, green, blue, white) = ([255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 255]);
+    let mut h = Harness::open(900., 520.);
+    h.attach(100, 30, "");
+    h.focus();
+    h.draw();
+    h.sent();
+    // Raw RGBA, shown where the cursor is over 4x2 cells; the cursor stays. It asks for its
+    // reply, which the program must get.
+    h.output(&format!(
+        "\x1b_Ga=T,f=32,s=2,v=2,i=1,c=4,r=2,C=1;{RGBA}\x1b\\"
+    ));
+    // A PNG, three rows down.
+    h.output(&format!(
+        "\x1b[4;1H\x1b_Ga=T,f=100,i=2,c=4,r=2,C=1,q=2;{PNG}\x1b\\"
+    ));
+    // A virtual placement: the image is shown by the placeholder cells, whose foreground
+    // colour names it. Row 0 of the image first, then row 1 (U+0305 and U+030D are rows 0, 1).
+    h.output(&format!(
+        "\x1b[7;1H\x1b_Ga=T,U=1,f=32,s=2,v=2,i=9,c=4,r=2,q=2;{RGBA}\x1b\\"
+    ));
+    h.output("\x1b[38;5;9m\x1b[7;1H\u{10eeee}\u{305}\u{305}\u{10eeee}\u{10eeee}\u{10eeee}");
+    h.output("\x1b[8;1H\u{10eeee}\u{30d}\u{305}\u{10eeee}\u{10eeee}\u{10eeee}\x1b[0m");
+    let shot = h.draw();
+    let sent = h.sent();
+    assert!(
+        sent.iter()
+            .any(|m| matches!(m, ToCore::Input(b) if b.windows(8).any(|w| w == b"\x1b_Gi=1;O"))),
+        "the program is told the image arrived: {sent:?}"
+    );
+    for (top, name) in [(0usize, "direct"), (3, "png"), (6, "placeholder")] {
+        for (col, row, want) in [(0, 0, red), (3, 0, green), (0, 1, blue), (3, 1, white)] {
+            // The image is scaled smoothly, so a cell's colour is its quadrant's, not exact.
+            let got = shot.center(col, top + row);
+            let hit = (0..3).all(|c| {
+                if want[c] == 255 {
+                    got[c] > 100
+                } else {
+                    got[c] < 70
+                }
+            });
+            assert!(
+                hit,
+                "{name} image, cell ({col}, {row}): {got:?} vs {want:?}"
+            );
+        }
+    }
+    // One upload for each direct image, and one for each row of the placeholder image.
+    assert_eq!(h.view(|v, _| v.uploaded_images()), 4, "uploaded");
+    // An image scrolls with the text and is let go once it is off the screen.
+    h.output(&"\r\n".repeat(60));
+    let shot = h.draw();
+    assert!(
+        near(shot.center(0, 0), shot.at(450., 500.)),
+        "the image scrolled away"
+    );
+    assert_eq!(h.view(|v, _| v.uploaded_images()), 0, "and was let go");
 }

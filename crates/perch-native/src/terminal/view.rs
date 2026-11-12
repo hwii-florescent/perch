@@ -18,6 +18,7 @@
 use super::actions::{Action, Scroll};
 use super::attach::{self, AgentInfo, FromCore, Piece, ToCore};
 use super::clipboard::{Clipboard, MemoryClipboard};
+use super::graphics::Layer;
 use super::keys::key_bytes_with;
 use super::layout::{self, Fit, Metrics};
 use super::links::{self, Target};
@@ -36,16 +37,18 @@ use futures::StreamExt;
 use ghostty_sys as g;
 use gpui::{
     canvas, div, fill, outline, point, prelude::*, px, rgb, size, App, BorderStyle, Bounds,
-    Context, ElementInputHandler, EntityInputHandler, EventEmitter, FocusHandle, Focusable, Hsla,
-    KeyDownEvent, Keystroke, Modifiers, MouseButton as GpuiButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, ScrollWheelEvent, SharedString, Size, Task, TextAlign, TextRun,
-    UTF16Selection, Window, WindowAppearance,
+    Context, Corners, ElementInputHandler, EntityInputHandler, EventEmitter, FocusHandle,
+    Focusable, Hsla, KeyDownEvent, Keystroke, Modifiers, MouseButton as GpuiButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, RenderImage, ScrollWheelEvent, SharedString, Size,
+    Task, TextAlign, TextRun, UTF16Selection, Window, WindowAppearance,
 };
 use perch_core::agent_fleet::AgentState;
 use perch_core::iterm_profile::TerminalProfile;
 use perch_core::protocol::SettingsData;
+use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
 
 /// How often a held drag past the grid's edge scrolls.
@@ -126,7 +129,12 @@ struct Painted {
     marked: Option<(String, u16, u16, usize)>,
     /// The scrollbar's rail and thumb.
     bar: Option<(Bounds<Pixels>, Bounds<Pixels>)>,
+    /// Kitty graphics images, where they go and in which layer.
+    images: Vec<(Layer, Bounds<Pixels>, Arc<RenderImage>)>,
 }
+
+/// An image as uploaded: the image, the version of its pixels, and the part of it drawn.
+type ImageKey = (u32, u64, [u32; 4]);
 
 /// Where the scrollbar is, for clicks: its strip and the thumb in it.
 #[derive(Clone, Copy)]
@@ -167,6 +175,8 @@ pub struct TerminalView {
     last_pointer: Option<Point<Pixels>>,
     /// The terminal's folder when the shell has not said (OSC 7), for relative file links.
     cwd: Option<std::path::PathBuf>,
+    /// Uploaded images, kept while some placement on the screen still draws them.
+    images: HashMap<ImageKey, Arc<RenderImage>>,
     /// The scrollbar as last drawn, and where in its thumb a drag holds it.
     bar: Option<BarHit>,
     bar_grab: Option<f32>,
@@ -224,6 +234,7 @@ impl TerminalView {
             hover_link: None,
             last_pointer: None,
             cwd: None,
+            images: HashMap::new(),
             bar: None,
             bar_grab: None,
             marked: None,
@@ -1222,6 +1233,7 @@ impl TerminalView {
                 ));
             }
         }
+        let images = self.image_layers(fit.metrics);
         let bar = self.scrollbar_geometry(bounds, fit.metrics);
         self.bar = bar.map(|(hit, _)| hit);
         let frame = self.vt.frame();
@@ -1251,7 +1263,54 @@ impl TerminalView {
                     (text, x, y, cells)
                 }),
             bar: bar.map(|(_, drawn)| drawn),
+            images,
         }
+    }
+
+    /// How many image versions are uploaded: those some placement on the screen draws.
+    pub fn uploaded_images(&self) -> usize {
+        self.images.len()
+    }
+
+    /// The images on the screen as uploaded and placed: each is uploaded once per version of its
+    /// pixels and part drawn, and dropped when no placement draws it.
+    fn image_layers(&mut self, metrics: Metrics) -> Vec<(Layer, Bounds<Pixels>, Arc<RenderImage>)> {
+        let mut layers = Vec::new();
+        let mut keep = std::collections::HashSet::new();
+        for placement in self.vt.placements() {
+            let key = (placement.image, placement.generation, placement.source);
+            keep.insert(key);
+            if !self.images.contains_key(&key) {
+                let upload = self
+                    .vt
+                    .image_bgra(placement.image, placement.source)
+                    .and_then(|(w, h, bgra)| image::RgbaImage::from_raw(w, h, bgra));
+                if let Some(buffer) = upload {
+                    self.images.insert(
+                        key,
+                        Arc::new(RenderImage::new(vec![image::Frame::new(buffer)])),
+                    );
+                }
+            }
+            let Some(data) = self.images.get(&key) else {
+                continue;
+            };
+            let [x, y, mut width, mut height] =
+                placement.pixel_geometry(f32::from(metrics.width), f32::from(metrics.height));
+            if placement.cell_pixels.is_none() {
+                // A direct placement is measured in device pixels.
+                width /= self.scale;
+                height /= self.scale;
+            }
+            let at = self.origin + point(px(x), px(y));
+            layers.push((
+                placement.layer(),
+                Bounds::new(at, size(px(width), px(height))),
+                data.clone(),
+            ));
+        }
+        self.images.retain(|k, _| keep.contains(k));
+        layers
     }
 
     /// The scrollbar, when there is history to scroll on the primary screen of a pane wide
@@ -1604,6 +1663,7 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
         link,
         marked,
         bar,
+        images,
     } = painted;
     // ponytail: opacity is applied per colour, not to the pane as a group like the web's CSS
     // opacity, so text over a cell background shows the background through it twice.
@@ -1627,6 +1687,12 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
     let strike = baseline - metrics.ascent * 0.35;
 
     window.paint_quad(fill(bounds, col(frame.bg)));
+    let paint_images = |layer: Layer, window: &mut Window| {
+        for (_, area, data) in images.iter().filter(|(l, ..)| *l == layer) {
+            let _ = window.paint_image(*area, *area, Corners::default(), data.clone(), 0, false);
+        }
+    };
+    paint_images(Layer::UnderBackground, window);
 
     // Backgrounds first, a run of one colour as one quad so neighbours meet without a seam.
     for (y, row) in frame.rows.iter().enumerate() {
@@ -1645,16 +1711,6 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
         }
     }
 
-    // The scrollbar: a thin rail and a thumb, over the padding.
-    if let Some((rail, thumb)) = bar {
-        let mut rail_color = color(frame.fg);
-        rail_color.a = 0.2 * opacity;
-        window.paint_quad(fill(snap_box(rail), rail_color));
-        let mut thumb_color = color(frame.fg);
-        thumb_color.a = 0.45 * opacity;
-        window.paint_quad(fill(snap_box(thumb), thumb_color).corner_radii(px(2.0)));
-    }
-
     // Matches of the search: a tint over the cells, brighter on the one navigation is on.
     for span in &frame.search {
         let amount = if span.selected { 0.55 } else { 0.28 };
@@ -1666,6 +1722,8 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
         );
         window.paint_quad(fill(snap_box(run), tint));
     }
+
+    paint_images(Layer::UnderText, window);
 
     // Glyphs: a run of cells with one look is one line, placed a cell apart; a wide character
     // or a cluster is a run of its own.
@@ -1777,6 +1835,8 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
         window.paint_quad(fill(snap_box(rule), col(frame.fg)));
     }
 
+    paint_images(Layer::OverText, window);
+
     // The cursor, over the glyph it covers. A blinking one is off half the time while focused.
     if let Some(cursor) = frame.cursor.filter(|c| blink_on || !focused || !c.blink) {
         let (x, y) = (cursor.x as usize, cursor.y as usize);
@@ -1855,6 +1915,16 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
             size(cw * cells as f32, thickness),
         );
         window.paint_quad(fill(snap_box(rule), col(frame.fg)));
+    }
+
+    // The scrollbar: a thin rail and a thumb, over the padding.
+    if let Some((rail, thumb)) = bar {
+        let mut rail_color = color(frame.fg);
+        rail_color.a = 0.2 * opacity;
+        window.paint_quad(fill(snap_box(rail), rail_color));
+        let mut thumb_color = color(frame.fg);
+        thumb_color.a = 0.45 * opacity;
+        window.paint_quad(fill(snap_box(thumb), thumb_color).corner_radii(px(2.0)));
     }
 }
 

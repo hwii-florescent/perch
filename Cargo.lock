@@ -5386,6 +5386,7 @@ dependencies = [
  "ghostty-sys",
  "gpui-pre",
  "gpui-pre-platform",
+ "image",
  "libc",
  "perch-core",
  "perchd",
