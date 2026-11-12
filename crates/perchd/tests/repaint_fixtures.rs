@@ -93,6 +93,15 @@ fn cases() -> Vec<Value> {
             json!({ "lines": 500 }),
         ),
         case("input_modes", 100, 30, input_modes, 4096, json!({})),
+        // A wide character that doesn't fit the last column wraps whole.
+        case(
+            "wide_character_at_a_wrap",
+            10,
+            4,
+            "123456789世界abc\r\nafter",
+            4096,
+            json!({ "logical": ["123456789世界abc", "after"] }),
+        ),
         case(
             "soft_wrapped_lines",
             20,

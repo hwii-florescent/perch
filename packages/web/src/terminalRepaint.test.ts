@@ -162,6 +162,19 @@ describe("a default attach into xterm.js", () => {
     dispose();
   });
 
+  it("wraps a wide character that does not fit the last column the way Ghostty did", async () => {
+    const fixture = byName("wide_character_at_a_wrap");
+    const { term, dispose } = await view(fixture, fixture.tail, fixture.repaint);
+    expectScreenOf(term, fixture, false);
+    const buffer = term.buffer.normal;
+    expect(buffer.getLine(1)?.isWrapped).toBe(true);
+    expect([rowText(term, 0, true), rowText(term, 1, true), rowText(term, 2, true)]).toEqual(["123456789", "世界abc", "after"]);
+    term.resize(40, fixture.rows);
+    expect(rowText(term, 0, true)).toBe("123456789世界abc");
+    expect(rowText(term, 1, true)).toBe("after");
+    dispose();
+  });
+
   it("leaves no duplicate scrollback when the replayed tail comes before the repaint", async () => {
     const fixture = byName("scrollback");
     const alone = await view(fixture, fixture.repaint);
