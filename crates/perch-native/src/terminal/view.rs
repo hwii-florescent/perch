@@ -1322,7 +1322,12 @@ impl TerminalView {
             snap(bounds.origin.x + px(pad_x)),
             snap(bounds.origin.y + px(pad_y)),
         );
-        if let Some(pending) = self.pending.take() {
+        // A pane with no room (hidden, or not laid out yet) has no size to tell anyone: the shell
+        // would be squeezed to one cell and the attach would start at that.
+        let sized = available.width > px(0.) && available.height > px(0.);
+        if !sized {
+            // Nothing to attach at or to resize to yet.
+        } else if let Some(pending) = self.pending.take() {
             // The shell starts at the size of the pane it opens in.
             self.vt.resize(fit.cols, fit.rows, self.cell_px());
             let (to_core, from_core) = attach::attach(

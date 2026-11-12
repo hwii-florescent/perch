@@ -1004,6 +1004,34 @@ fn dropped_files_type_their_paths() {
         .is_some_and(|n| n.contains("another machine")));
 }
 
+/// A pane squeezed to nothing by its padding is not a size: the shell is not resized to one cell.
+fn a_pane_with_no_room_tells_nobody_its_size() {
+    let resizes = |h: &mut Harness| {
+        h.sent()
+            .into_iter()
+            .filter(|m| matches!(m, ToCore::Resize(..)))
+            .count()
+    };
+    let mut h = Harness::open(100., 100.);
+    let mut data: perch_core::protocol::SettingsData =
+        serde_json::from_str(r#"{"theme":"x"}"#).unwrap();
+    data.terminal_padding = [64.0, 64.0];
+    h.view(|v, cx| v.apply_core(None, Some(data.clone()), cx));
+    h.attach(80, 24, "");
+    h.draw();
+    assert_eq!(resizes(&mut h), 0, "no room, no size");
+    assert_eq!(
+        h.view(|v, _| v.grid_size()),
+        (80, 24),
+        "the screen is the core's"
+    );
+    // Given room, the owner tells the core.
+    data.terminal_padding = [0.0, 0.0];
+    h.view(|v, cx| v.apply_core(None, Some(data), cx));
+    h.draw();
+    assert_eq!(resizes(&mut h), 1, "with room it asks once");
+}
+
 /// Bold, italic, faint, underline and strikethrough.
 fn attributes(bg: [u8; 3], fg: [u8; 3]) {
     let mut h = Harness::open(900., 420.);
