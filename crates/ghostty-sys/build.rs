@@ -1,3 +1,11 @@
+// The libghostty-vt build flags and the bindgen configuration below (header
+// allow-lists, enum naming, macOS SDK sysroot) follow
+// crates/ghostty-sys/build.rs of herdr (https://github.com/herdrdev/herdr-app,
+// commit 4c8c622d7965a6f6787f55b1896b70795fc68918), licensed under the Apache
+// License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0). The Zig
+// version check, target mapping and the rest are Perch's own. Modified for
+// Perch; see THIRD_PARTY_NOTICES.md.
+
 //! Builds libghostty-vt from the `third_party/ghostty` submodule with Zig and
 //! generates Rust bindings from its C headers.
 //!

@@ -170,8 +170,8 @@ SOFTWARE.
 `perchd`'s terminal screen is [Ghostty](https://github.com/ghostty-org/ghostty)'s
 terminal engine, commit `291fd050b9e9c293c8adb6a140742649b7e42d3a`, vendored as the
 `third_party/ghostty` git submodule and compiled with Zig by `crates/ghostty-sys`.
-`crates/ghostty-sys/build.rs` and `crates/perchd/src/screen.rs` are Perch's own code,
-written against Ghostty's public C headers. Ghostty is distributed under this notice:
+`crates/perchd/src/screen.rs` is Perch's own code, written against Ghostty's public C
+headers. Ghostty is distributed under this notice:
 
 MIT License
 
@@ -205,3 +205,14 @@ sources), each under its own licence, which travels with that source:
 - [uucode](https://github.com/jacobsandlund/uucode): MIT, with Unicode Data Files
   (Unicode License v3) and Bjoern Hoehrmann's UTF-8 decoder (MIT).
 - Zig's compiler runtime (`compiler_rt`): MIT.
+
+## herdr build configuration for libghostty-vt
+
+The Zig invocation flags and the bindgen configuration in
+`crates/ghostty-sys/build.rs` (header allow-lists, enum naming, the macOS SDK
+sysroot) and the lint allowances in `crates/ghostty-sys/src/lib.rs` follow
+`crates/ghostty-sys/` of [herdr](https://github.com/herdrdev/herdr-app), commit
+`4c8c622d7965a6f6787f55b1896b70795fc68918`, licensed under the Apache License,
+Version 2.0 (<http://www.apache.org/licenses/LICENSE-2.0>). Perch's copies are
+modified: the Zig version check, the Rust-to-Zig target mapping and the
+submodule path are Perch's own. No other herdr code is included.

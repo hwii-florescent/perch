@@ -271,6 +271,25 @@ struct Extra {
     screen_state: bool,
 }
 
+/// How many bytes at the end of `bytes` are the start of a UTF-8 character
+/// whose remaining bytes haven't arrived.
+fn unfinished_utf8_len(bytes: &[u8]) -> usize {
+    for back in 1..=bytes.len().min(3) {
+        let byte = bytes[bytes.len() - back];
+        if byte & 0xc0 == 0x80 {
+            continue;
+        }
+        let needs = match byte {
+            0xc2..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf4 => 4,
+            _ => return 0,
+        };
+        return if back < needs { back } else { 0 };
+    }
+    0
+}
+
 fn mode_id(number: u16, ansi: bool) -> g::GhosttyMode {
     (number & 0x7fff) | (u16::from(ansi) << 15)
 }
@@ -293,6 +312,12 @@ pub struct Screen {
     /// (a session reloaded after a daemon restart) knows nothing, and its
     /// blank repaint would erase the replayed history it should complement.
     fed: bool,
+    /// The first bytes of a UTF-8 character the last read ended inside. They
+    /// are kept out of the terminal, which would print a replacement
+    /// character for them when a repaint cancels its unfinished input, and
+    /// handed on at the end of the repaint instead, where the live stream
+    /// resumes.
+    held: Vec<u8>,
 }
 
 // SAFETY: the native terminal has no thread affinity; it is only unsafe to use
@@ -326,12 +351,22 @@ impl Screen {
             cols,
             rows,
             fed: false,
+            held: Vec::new(),
         }
     }
 
     pub fn process(&mut self, bytes: &[u8]) {
         self.fed |= !bytes.is_empty();
-        self.term.write(bytes);
+        if self.held.is_empty() {
+            let cut = bytes.len() - unfinished_utf8_len(bytes);
+            self.term.write(&bytes[..cut]);
+            self.held.extend_from_slice(&bytes[cut..]);
+        } else {
+            self.held.extend_from_slice(bytes);
+            let cut = self.held.len() - unfinished_utf8_len(&self.held);
+            self.term.write(&self.held[..cut]);
+            self.held.drain(..cut);
+        }
     }
 
     pub fn set_size(&mut self, cols: u16, rows: u16) {
@@ -412,12 +447,16 @@ impl Screen {
     /// Empty when there is nothing to say or it can't be said (never fed;
     /// native failure); callers then keep what they already have.
     pub fn restore(&self) -> String {
+        String::from_utf8_lossy(&self.restore_bytes()).into_owned()
+    }
+
+    /// [`Self::restore`] as the bytes themselves: when the output so far ends
+    /// inside a UTF-8 character, so do they, ready for the rest of it.
+    pub fn restore_bytes(&self) -> Vec<u8> {
         if !self.fed {
-            return String::new();
+            return Vec::new();
         }
-        self.try_restore()
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-            .unwrap_or_default()
+        self.try_restore().unwrap_or_default()
     }
 
     fn try_restore(&self) -> Option<Vec<u8>> {
@@ -488,8 +527,10 @@ impl Screen {
         if !autowrap {
             out.extend(b"\x1b[?7l");
         }
-        // The live stream resumes inside this sequence if one is open.
+        // The live stream resumes inside this sequence or character if one
+        // is open.
         out.extend(self.term.continuation());
+        out.extend(&self.held);
         Some(out)
     }
 }
@@ -537,19 +578,19 @@ mod tests {
 
     /// What a client gets on attach: a fresh emulator fed the repaint.
     fn reattached(source: &Screen) -> Screen {
-        fed(source.cols, source.rows, source.restore().as_bytes())
+        fed(source.cols, source.rows, &source.restore_bytes())
     }
 
     /// The reattached screen is the source in everything a user or an app
     /// can observe, and asking it to repaint again says the same thing.
     fn assert_same(source: &Screen, view: &Screen) {
-        assert!(!source.restore().is_empty());
+        assert!(!source.restore_bytes().is_empty());
         assert_eq!(view.transcript(), source.transcript());
         assert_eq!(view.cursor_position(), source.cursor_position());
         assert_eq!(view.alternate_screen(), source.alternate_screen());
         assert_eq!(view.scrollback_rows(), source.scrollback_rows());
         assert_eq!(view.title(), source.title());
-        assert_eq!(view.restore(), source.restore());
+        assert_eq!(view.restore_bytes(), source.restore_bytes());
     }
 
     #[test]
@@ -751,5 +792,48 @@ mod tests {
         source.set_size(100, 30);
         let view = reattached(&source);
         assert_same(&source, &view);
+    }
+
+    #[test]
+    fn a_character_split_by_the_attach_point_completes_after_it() {
+        for prefix in [&b""[..], b"\x1b[?1049h"] {
+            let mut start = prefix.to_vec();
+            start.extend(b"before \xe4\xb8");
+            let mut source = fed(80, 24, &start);
+            let mut view = reattached(&source);
+            for screen in [&mut source, &mut view] {
+                screen.process(b"\x96 after");
+            }
+            assert_eq!(view.contents(), "before \u{4e16} after");
+            assert_same(&source, &view);
+        }
+    }
+
+    #[test]
+    fn a_sequence_longer_than_the_continuation_limit_does_not_end_repaints() {
+        let mut source = fed(80, 24, b"hello\x1b]0;");
+        source.process(&vec![b'x'; CONTINUATION_BYTES + 1024]);
+        // Whether or not it can be repainted now, it must not panic.
+        let _ = source.restore();
+        source.process(b"\x07 after");
+        let view = reattached(&source);
+        assert!(!source.restore_bytes().is_empty());
+        assert_same(&source, &view);
+    }
+
+    #[test]
+    fn output_is_the_same_wherever_a_read_ends_inside_a_character() {
+        let bytes = "a\u{e9}\u{4e16}\u{1f600}b".as_bytes();
+        let mut whole = fed(20, 3, bytes);
+        for split in 0..=bytes.len() {
+            let mut halves = Screen::new(20, 3);
+            halves.process(&bytes[..split]);
+            halves.process(&bytes[split..]);
+            assert_eq!(halves.contents(), whole.contents(), "split at {split}");
+            assert_eq!(halves.restore_bytes(), whole.restore_bytes());
+        }
+        whole.process(b"\xe4");
+        whole.process(b"\xb8\x96");
+        assert!(whole.contents().ends_with('\u{4e16}'));
     }
 }

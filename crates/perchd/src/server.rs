@@ -1164,7 +1164,7 @@ fn attach(state: &State, s: &Session, conn: u64, out: &Outbox, rid: u64, since: 
     // whatever makes a client's next seq land back on `end`; an attach
     // `since` a seq resumes the stream itself and never gets it.
     if since.is_none() && end > 0 {
-        let restore = inner.screen.restore().into_bytes();
+        let restore = inner.screen.restore_bytes();
         if !restore.is_empty() {
             out.send(&Frame::Data {
                 id: s.id.clone(),
