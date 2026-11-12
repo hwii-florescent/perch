@@ -765,7 +765,39 @@ fn zoom_scales_the_terminals() {
     println!("workspace_render: zoom ok");
 }
 
+/// Tabs out of sight keep their terminal attached up to twelve; the one unseen longest lets go
+/// and attaches again when it is shown.
+fn tabs_out_of_sight_are_parked_beyond_twelve() {
+    let names: Vec<String> = (0..15).map(|n| format!("s{n:02}")).collect();
+    let sessions: Vec<(&str, Value)> = names.iter().map(|n| (n.as_str(), json!({}))).collect();
+    let mut h = Harness::new(model(&sessions));
+    for name in &names[..14] {
+        h.open(name);
+        h.draw();
+    }
+    let attached = |h: &mut Harness, id: &str| h.ws(|ws| ws.view(id).is_some());
+    // 14 open, one on screen: twelve kept, the first parked.
+    assert!(!attached(&mut h, "s00"), "the oldest tab let go");
+    for name in &names[1..14] {
+        assert!(attached(&mut h, name), "{name} is kept");
+    }
+    assert_eq!(h.ws(|ws| ws.tabs().strip().len()), 14, "no tab was closed");
+
+    // Showing it attaches it again, and now the one unseen longest is parked.
+    h.open("s00");
+    h.draw();
+    assert!(attached(&mut h, "s00"));
+    assert!(!attached(&mut h, "s01"));
+    assert!(attached(&mut h, "s02"));
+    // One more tab: s02 is next.
+    h.open(&names[14]);
+    h.draw();
+    assert!(!attached(&mut h, "s02"));
+    println!("workspace_render: parked tabs ok");
+}
+
 fn main() {
+    tabs_out_of_sight_are_parked_beyond_twelve();
     zoom_scales_the_terminals();
     two_tabs();
     attention_on_a_tab();

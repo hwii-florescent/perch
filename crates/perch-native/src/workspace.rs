@@ -44,6 +44,10 @@ use std::time::{Duration, Instant};
 
 /// How long a follow-up key after the leader chord is awaited.
 const LEADER_TIMEOUT: Duration = Duration::from_millis(1500);
+/// How many tabs out of sight keep their terminal attached. A tab beyond them is parked: its
+/// terminal lets go of the shell (which keeps running) and attaches again, with the core's
+/// repaint, when the tab is shown.
+const MAX_PARKED: usize = 12;
 /// How long the core has to confirm that a session ended before the tab says it is still running.
 const END_WAIT: Duration = Duration::from_secs(5);
 /// How long to wait before attaching a dropped terminal to the core again: it doubles from the
@@ -82,6 +86,10 @@ struct Pane {
     /// The tab was asked to close and the core has not yet said the session ended; the task
     /// gives up waiting.
     closing: Option<Task<()>>,
+    /// When the tab was last on screen, to park the one longest out of sight.
+    seen: u64,
+    /// The terminal was let go of to stay within [`MAX_PARKED`]; showing the tab attaches it.
+    parked: bool,
 }
 
 /// Waits for a size to hold still before a hidden pane is given it: a window being dragged or a
@@ -135,6 +143,8 @@ pub struct Workspace {
     settings: Option<SettingsPanel>,
     /// The zoom every terminal in the window is at.
     zoom: Zoom,
+    /// Counts the changes of what is on screen, for [`Pane::seen`].
+    tick: u64,
     /// The leader chord was pressed; dropped when its time is up.
     leader: Option<Task<()>>,
     /// What the last command could not do, or did instead.
@@ -172,6 +182,7 @@ impl Workspace {
             palette: None,
             settings: None,
             zoom: Zoom::default(),
+            tick: 0,
             leader: None,
             notice: None,
             room: Rc::new(Cell::new(None)),
@@ -266,6 +277,8 @@ impl Workspace {
                     retry: None,
                     attempts: 0,
                     closing: None,
+                    seen: 0,
+                    parked: false,
                 },
             );
         }
@@ -277,6 +290,7 @@ impl Workspace {
             }
             None => self.tabs.open(&id),
         }
+        self.keep_in_bounds(cx);
         cx.notify();
     }
 
@@ -396,6 +410,7 @@ impl Workspace {
 
     /// Tell the sidebar which tab is shown, so it is marked read and highlighted.
     fn after_change(&mut self, cx: &mut Context<Self>) {
+        self.keep_in_bounds(cx);
         let target = self.tabs.active().and_then(|id| {
             let open = &self.panes.get(id)?.open;
             Some((
@@ -942,6 +957,45 @@ impl Workspace {
         }
         .into());
         self.after_change(cx);
+    }
+
+    /// Keep the terminals of the tabs out of sight within [`MAX_PARKED`], letting go of the ones
+    /// longest unseen, and attach again any shown tab that was parked.
+    fn keep_in_bounds(&mut self, cx: &mut Context<Self>) {
+        self.tick += 1;
+        let shown = self.tabs.shown();
+        for id in &shown {
+            let Some(pane) = self.panes.get_mut(id) else {
+                continue;
+            };
+            pane.seen = self.tick;
+            if pane.parked {
+                let open = pane.open.clone();
+                let view = self.attach(&open, cx);
+                if let Some(pane) = self.panes.get_mut(id) {
+                    pane.view = view;
+                    pane.parked = false;
+                }
+            }
+        }
+        let mut hidden: Vec<(u64, String)> = self
+            .panes
+            .iter()
+            .filter(|(id, pane)| {
+                pane.view.is_some() && pane.closing.is_none() && !shown.contains(id)
+            })
+            .map(|(id, pane)| (pane.seen, id.clone()))
+            .collect();
+        if hidden.len() > MAX_PARKED {
+            hidden.sort();
+            for (_, id) in hidden.drain(..hidden.len() - MAX_PARKED) {
+                if let Some(pane) = self.panes.get_mut(&id) {
+                    pane.view = None;
+                    pane.retry = None;
+                    pane.parked = true;
+                }
+            }
+        }
     }
 
     /// Zoom every terminal, shown or kept, and say the level.
