@@ -424,27 +424,45 @@ assertions match with `contains`, not equality.
 
 ```sh
 cargo test -p perch-native            # everything below
-cargo test -p perch-native --lib      # state reduction, actions, frames, launch correlation and reconnect against a stand-in core, hand-off URL
+cargo test -p perch-native --lib      # state reduction, actions, frames, launch correlation and reconnect against a stand-in core, hand-off URL; tab and split model, key resolution, command palette filtering, terminal settings
 cargo test -p perch-native --test sidebar_render    # headless GPUI render of the sidebar (project and By status views, nested rows); no window opens
+cargo test -p perch-native --test workspace_render  # the window drawn offscreen: tabs, a split with different content in each pane, the palette, the terminal settings, attention on a tab, keys.json and chosen keys
 cargo test -p perch-native --test terminal_session  # a real core as a child process
+cargo test -p perch-native --test workspace_session # two shells in a split against a real core, and the settings round trip
 ```
 
-- Nothing opens a window, takes focus or calls `open`. The render test draws through GPUI's test
-  platform into a texture; the hand-off test checks the URL and never runs the opener.
+Run `cargo test` for this package on its own: building `perch-core` together with GPUI changes how
+`serde_json` orders keys and fails three unrelated core tests.
+
+- Nothing opens a window, takes focus or calls `open`. The render tests draw through GPUI's test
+  platform into a texture (set `SHOT=<folder>` to save each frame as a PNG); keys go through the window's
+  own `dispatch_keystroke`, so the dispatcher that runs before the terminal is what is tested. The
+  hand-off test checks the URL and never runs the opener.
 - `terminal_session` boots a core in a scratch directory (database, hosts, settings, daemon and
   `HOME` all private) and starts only plain shells: a shell is signed in, then watched appearing, changing
   state and being started from the sidebar's follower. It stops the core, shells and daemon and checks each by
   PID; on failure it keeps the scratch directory and says so. Agent providers are covered by unit tests of the
   frames built, never by a real turn.
+- `workspace_session` runs the same way and drives the whole window: a shell in a tab, `cmd-d` starts a second
+  shell through the core and splits it in, typing through the window reaches only the pane with the keyboard,
+  each pane's `stty size` equals its own fitted size (narrower than the single pane before the split), closing
+  the tab ends the session and the other pane refits to the whole area. It also changes the terminal settings
+  through the core's settings route and checks the follower learns them and the core saved them. The window is
+  2000 px wide so each half is a normal terminal.
 - A plain shell never ends an agent turn, so `unseen` (Done) and the core clearing it on viewing cannot be
   produced against the real core without a paid turn. `terminal_session` checks that viewing a session is
   accepted and the follower keeps following; the Done hold, alerts and needs-you order are unit tests of the
   reducer fed the same messages. A launch on another computer is correlated only by a stand-in core, since the
   hub's `session.created` names no request.
-- "Open in Perch" sends `perch://open?place=…&session=…`. `crates/perch-desktop/src/open_url.rs` (link parsing)
-  and `packages/web/src/openRequest.ts` (acting on it) have their own tests; neither opens the system opener.
+- A shell that was used stays Working in the core for good (only an agent's turn ends), so a test cannot wait for
+  Idle after typing. GPUI's test clock is simulated: a timer in the window fires as soon as the test runs the
+  executor, so anything that must wait for a real process uses real time.
+- "Open in Perch" sends `perch://open?place=…&session=…`. `crates/perch-desktop/src/open_url.rs` (link parsing,
+  and holding a link that launches the app until the page claims it) and `packages/web/src/openRequest.ts`
+  (acting on it, once the session is listed) have their own tests; neither opens the system opener.
   `cargo test -p perch-desktop` needs the web bundle to exist, as every build of that crate does.
-- A plain shell inside a project has no sidebar row (Show terminals off), so the test starts shells in Chats.
+- A plain shell inside a project has no sidebar row (Show terminals off), so `terminal_session` starts shells in
+  Chats; the render tests give their sessions an agent provider for the same reason.
 - Remote computers go through the core's hub on the same socket, so they are tested as messages in
   `sidebar.rs` and not against a real remote.
 
