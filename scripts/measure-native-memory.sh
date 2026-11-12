@@ -18,8 +18,14 @@
 # on free ports. The installed Perch and ~/.perch are never touched. Every process started here
 # is tracked and stopped on exit; the scratch daemon's launchd job is unloaded.
 #
-# Env: SETTLE (10) SAMPLES (3) SAMPLE_GAP (2) BUSY_SECONDS (45) WINDOW (1280x800) KEEP=1 keeps the
-# scratch directory and logs.
+# The desktop app's window is hidden and cannot be driven without an input event, so only its idle
+# state is measured directly. States b-d of the web page are measured in Playwright's headless
+# WebKit (the engine Tauri's webview runs) against a headless core, and the table adds the page's
+# growth over its idle state to the real app's idle footprint as an estimate. Needs playwright-core
+# (PW_DIR, default e2e/) and, for a browser build installed elsewhere, WEBKIT_RUN (its launcher).
+#
+# Env: SETTLE (10) SAMPLES (3) SAMPLE_GAP (2) BUSY_SECONDS (45) WINDOW (1280x800) PW_DIR WEBKIT_RUN
+# KEEP=1 keeps the scratch directory and logs.
 
 set -u -o pipefail
 
@@ -39,7 +45,7 @@ while [ $# -gt 0 ]; do
     --build) BUILD=1 ;;
     --apps) APPS=$2; shift ;;
     --states) STATES=$2; shift ;;
-    -h | --help) sed -n '2,25p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,27p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
