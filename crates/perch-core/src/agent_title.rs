@@ -205,19 +205,19 @@ fn blocked() -> ProviderSignal {
     }
 }
 
-/// Follows the OSC title through a PTY stream. vt100 owns the escape-state
-/// machine, so a title split across reads, BEL vs ST terminators and OSC
-/// look-alikes inside other sequences are handled for free. The screen is a
-/// standard 24x80 without scrollback: vt100 underflows on a 1-row grid.
+/// Follows the OSC title through a PTY stream. The terminal emulator owns the
+/// escape-state machine, so a title split across reads, BEL vs ST terminators
+/// and OSC look-alikes inside other sequences are handled for free. The
+/// screen is a standard 24x80 without scrollback: only the title matters.
 pub struct TitleTracker {
-    parser: vt100::Parser,
+    screen: perchd::screen::Screen,
     status: Option<TitleStatus>,
 }
 
 impl Default for TitleTracker {
     fn default() -> Self {
         Self {
-            parser: vt100::Parser::new(24, 80, 0),
+            screen: perchd::screen::Screen::without_scrollback(80, 24),
             status: None,
         }
     }
@@ -228,8 +228,8 @@ impl TitleTracker {
     /// changed. A title that says nothing keeps the last status: process
     /// exit, not a shell title, is what ends a session here.
     pub fn feed(&mut self, text: &str) -> Option<(Option<TitleStatus>, TitleStatus)> {
-        self.parser.process(text.as_bytes());
-        let next = classify(self.parser.screen().title())?;
+        self.screen.process(text.as_bytes());
+        let next = classify(&self.screen.title())?;
         let previous = self.status.replace(next);
         (previous != Some(next)).then_some((previous, next))
     }

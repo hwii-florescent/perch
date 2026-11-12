@@ -304,17 +304,14 @@ fn a_default_attach_ends_with_the_exact_screen() {
     assert!(attached.start > 0, "the window must start past the paint");
     let mut seen = Vec::new();
     wait_for(&collector(reader), &mut seen, "TUI_DONE\u{1b}");
-    let mut view = vt100::Parser::new(30, 100, 0);
+    let mut view = perchd::screen::Screen::new(100, 30);
     view.process(&seen);
-    assert!(view.screen().alternate_screen());
+    assert!(view.alternate_screen());
     assert!(
-        view.screen().contents().starts_with("TUI_HEADER"),
+        view.contents().starts_with("TUI_HEADER"),
         "{}",
-        view.screen().contents()
+        view.contents()
     );
-    assert_eq!(
-        view.screen().mouse_protocol_mode(),
-        vt100::MouseProtocolMode::PressRelease
-    );
+    assert!(view.dec_mode(1000));
     let _ = b.kill("tui", libc::SIGKILL);
 }

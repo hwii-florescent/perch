@@ -150,7 +150,13 @@ Execution survives an **app/core** restart while perchd lives, not daemon death,
 reboot or explicit stop. Dead-daemon descriptors/history are retained for seven
 days. History is bounded (8 MiB, compacted to its newest half), not an unlimited
 transcript or an fsync-per-write guarantee. Replay includes retained output and
-a screen/mode repaint; gaps and storage failures are disclosed.
+a repaint; gaps and storage failures are disclosed. The repaint
+(`perchd::screen`) comes from Ghostty's terminal engine (libghostty-vt, built
+by `crates/ghostty-sys` from the pinned `third_party/ghostty` submodule). It
+starts with a terminal reset and carries up to 10,000 lines or 10 MB of
+scrollback, both screens, cursor, modes, keyboard stacks and a half-received
+escape sequence, so it replaces the replayed tail on the client. A screen that
+never saw output (a session reloaded after a daemon restart) sends no repaint.
 
 Released-only cleanup is daemon-authoritative (`released-cleanup.v1`). New
 runtimes are retained; legacy/restored ownership is unknown. Only an explicit

@@ -29,8 +29,11 @@ pub const TRANSPORT_LOST: i32 = i32::MIN;
 pub const MAX_TERMINAL_REPLAY_BYTES: usize = perchd::proto::DEFAULT_REPLAY as usize;
 
 /// Bounded UTF-8 replay shared by shell and provider runtimes: the recent
-/// output (for scrollback), then a repaint of the current screen and its
-/// modes, which the tail alone loses (see `perchd::screen`).
+/// output, then a repaint of the whole screen (scrollback, contents, modes),
+/// which the tail alone loses (see `perchd::screen`). The repaint starts with
+/// a terminal reset, so it replaces the tail rather than adding to it; the
+/// tail still carries the in-band size markers and is what a screen that was
+/// never fed (nothing to repaint) falls back to.
 pub(crate) struct TerminalReplay {
     chunks: VecDeque<String>,
     bytes: usize,
@@ -91,6 +94,10 @@ impl TerminalReplay {
         }
         let repaint = self.screen.restore();
         // Older chunks make room for the repaint, keeping the replay bounded.
+        // ponytail: a repaint alone can pass the bound (10,000 rows of dense
+        // styled text); it can't be cut without corrupting the screen it
+        // restores, so it goes out whole. Cap the scrollback it carries if
+        // that ever bites.
         let mut excess = (self.bytes + repaint.len()).saturating_sub(MAX_TERMINAL_REPLAY_BYTES);
         let mut text = String::new();
         for chunk in &self.chunks {
@@ -1519,10 +1526,10 @@ mod tests {
         }
         let text = replay.text();
         assert!(text.len() <= MAX_TERMINAL_REPLAY_BYTES);
-        let mut view = vt100::Parser::new(30, 100, 0);
+        let mut view = perchd::screen::Screen::new(100, 30);
         view.process(text.as_bytes());
-        let screen = view.screen().contents();
-        assert!(view.screen().alternate_screen());
+        let screen = view.contents();
+        assert!(view.alternate_screen());
         assert!(screen.starts_with("HEADER"), "{screen}");
         assert!(
             screen.contains("> prompt") && screen.contains("status 19999"),
@@ -1530,13 +1537,13 @@ mod tests {
         );
         // Mouse reporting (the wheel), autowrap and the kitty keyboard flags
         // were set once, at startup, long before the tail.
-        assert_eq!(
-            view.screen().mouse_protocol_mode(),
-            vt100::MouseProtocolMode::PressRelease
-        );
-        assert!(text.ends_with("\x1b[?7l"));
-        // The repaint now restores the saved keyboard stack as well as flags.
-        assert!(text.contains("\x1b[<16u\x1b[=0u\x1b[>7u"));
+        assert!(view.dec_mode(1000) && view.dec_mode(1006));
+        assert!(text.ends_with("\x1b[?7l") && !view.dec_mode(7));
+        // The repaint also restores the saved keyboard stack, not only the
+        // flags: a later pop gets back to what the app saw before it started.
+        assert_eq!(view.keyboard_flags(), 7);
+        view.process(b"\x1b[<u");
+        assert_eq!(view.keyboard_flags(), 0);
     }
 
     /// Off by default is the whole safety story for this setting: a login

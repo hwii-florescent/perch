@@ -577,11 +577,11 @@ fn handle(state: &Arc<State>, conn: u64, out: &Outbox, msg: ClientMsg) {
         Request::Snapshot { id } => match state.get(&id) {
             Some(s) => {
                 let inner = s.inner.lock().unwrap();
-                let screen = inner.screen.screen();
+                let screen = &inner.screen;
                 let (cursor_row, cursor_col) = screen.cursor_position();
                 reply(Ok(serde_json::to_value(Snapshot {
                     text: screen.contents(),
-                    title: screen.title().to_string(),
+                    title: screen.title(),
                     cursor_row,
                     cursor_col,
                     alternate_screen: screen.alternate_screen(),
@@ -1165,11 +1165,13 @@ fn attach(state: &State, s: &Session, conn: u64, out: &Outbox, rid: u64, since: 
     // `since` a seq resumes the stream itself and never gets it.
     if since.is_none() && end > 0 {
         let restore = inner.screen.restore().into_bytes();
-        out.send(&Frame::Data {
-            id: s.id.clone(),
-            seq: end.saturating_sub(restore.len() as u64),
-            bytes: restore,
-        });
+        if !restore.is_empty() {
+            out.send(&Frame::Data {
+                id: s.id.clone(),
+                seq: end.saturating_sub(restore.len() as u64),
+                bytes: restore,
+            });
+        }
     }
     if inner.alive {
         inner.subscribers.insert(conn, out.clone());
@@ -1264,7 +1266,7 @@ mod tests {
             .as_ref()
             .unwrap()
             .contains("Execution continues"));
-        assert!(inner.screen.screen().contents().contains("still running"));
+        assert!(inner.screen.contents().contains("still running"));
         drop(inner);
         // Even if truncating the old log also failed, daemon restart cannot
         // reinterpret old bytes under a new offset.
