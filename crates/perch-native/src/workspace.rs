@@ -9,9 +9,8 @@
 //!
 //! The layout is this window's alone, as the web's is per viewer: it is not sent to the core.
 //! Splitting starts a new terminal session on this computer and shows it beside the focused one.
-//! Closing a tab ends its session only when it is a terminal this window holds the keyboard of
-//! and nothing is running in it; any other tab is only put away, and its session keeps running
-//! and stays in the sidebar.
+//! Closing a tab ends its session only when it is a plain terminal this window holds the keyboard
+//! of; any other tab is only put away, and its session keeps running and stays in the sidebar.
 
 use crate::client::{Command, Core};
 use crate::handoff::{open_in_perch, perch_url, Place};
@@ -37,6 +36,9 @@ use std::time::{Duration, Instant};
 
 /// How long a follow-up key after the leader chord is awaited.
 const LEADER_TIMEOUT: Duration = Duration::from_millis(1500);
+/// How long after a tab closes its session is asked to end, and how much later it is asked again.
+const END_WAIT: Duration = Duration::from_millis(400);
+const END_RETRY: Duration = Duration::from_millis(1100);
 /// How long a started split waits for its new session.
 const SPLIT_WAIT: Duration = Duration::from_secs(20);
 pub const TAB_BAR_HEIGHT: f32 = 30.;
@@ -261,7 +263,9 @@ impl Workspace {
                     return true;
                 }
                 palette::Edit::Escape => {
-                    self.settings.as_mut().map(|p| p.editing = None);
+                    if let Some(panel) = self.settings.as_mut() {
+                        panel.editing = None;
+                    }
                     cx.notify();
                     return true;
                 }
@@ -705,35 +709,51 @@ impl Workspace {
         Ok(())
     }
 
-    /// Close a tab. A terminal this window types for, with nothing running in it, ends with its
-    /// tab, as in the web. Anything else is put away and keeps running; ending it is a choice
+    /// Close a tab. A plain terminal this window types for ends with its tab, as in the web (the
+    /// core reports a shell that was used as working for good, so its state says nothing about
+    /// whether a job runs).
+    /// Anything else, an agent above all, is put away and keeps running; ending it is a choice
     /// made where it can be confirmed.
     fn close(&mut self, id: &str, cx: &mut Context<Self>) {
         let ends = self.panes.get(id).is_some_and(|pane| {
-            let sidebar = self.sidebar.read(cx);
-            let idle = sidebar
-                .find_session(id)
-                .is_some_and(|s| s.attention == Some(Attention::Idle));
             let plain = pane
                 .open
                 .provider_id
                 .as_deref()
                 .is_none_or(|p| p == perch_core::agent_fleet::TERMINAL_PROVIDER);
             let holds = pane.view.as_ref().is_some_and(|v| v.read(cx).can_type());
-            plain && idle && holds && pane.open.host_id == LOCAL
+            plain && holds && pane.open.host_id == LOCAL
         });
         self.tabs.close(id);
         self.panes.remove(id);
         if ends {
-            self.sidebar.update(cx, |sidebar, _| {
-                sidebar.send(Command::Close(id.to_string()))
-            });
+            self.end_session(id.to_string(), cx);
         } else {
             self.notice = Some(
                 "Closed the tab. The session keeps running; it is still in the sidebar.".into(),
             );
         }
         self.after_change(cx);
+    }
+
+    /// Ask the core to end a session whose tab was just closed. The core refuses to end a session
+    /// another connection controls, and the dropped terminal's own connection keeps the shell's
+    /// keyboard until it has let go, so the request waits for that, in real time, and is made
+    /// once more in case the release was slow. A refusal leaves the session running and listed.
+    // ponytail: two fixed waits, not a signal from the terminal's release; upgrade path is the
+    // terminal reporting when its connection has let go.
+    fn end_session(&self, id: String, cx: &mut Context<Self>) {
+        let Some(commands) = self.sidebar.read(cx).commands() else {
+            return;
+        };
+        std::thread::spawn(move || {
+            for wait in [END_WAIT, END_RETRY] {
+                std::thread::sleep(wait);
+                if commands.unbounded_send(Command::Close(id.clone())).is_err() {
+                    return;
+                }
+            }
+        });
     }
 
     fn paste(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
@@ -754,7 +774,9 @@ impl Workspace {
         let typed = self.settings.as_ref().and_then(|p| p.editing.clone());
         if let Some(n) = typed.as_deref().and_then(scrollback_from_text) {
             self.change(Change::Scrollback(n), cx);
-            self.settings.as_mut().map(|p| p.editing = None);
+            if let Some(panel) = self.settings.as_mut() {
+                panel.editing = None;
+            }
         }
         cx.notify();
     }

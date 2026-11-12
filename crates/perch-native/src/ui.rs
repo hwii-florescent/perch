@@ -221,6 +221,11 @@ impl Sidebar {
         cx.notify();
     }
 
+    /// A way to send the follower commands later, from another thread.
+    pub fn commands(&self) -> Option<UnboundedSender<Command>> {
+        self.commands.clone()
+    }
+
     pub fn send(&self, command: Command) {
         if let Some(commands) = &self.commands {
             let _ = commands.unbounded_send(command);

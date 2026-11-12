@@ -307,7 +307,7 @@ mod tests {
         assert_eq!(by_id("tabs.next").keys.as_deref(), Some("⇧⌘]"));
         assert_eq!(by_id("global.navigator").title, "Open Navigator");
         assert_eq!(by_id("global.sidebar").keys.as_deref(), Some("⌘B"));
-        assert_eq!(by_id("sessions.new").title.starts_with("New session"), true);
+        assert!(by_id("sessions.new").title.starts_with("New session"));
         assert_eq!(by_id("session:s1").title, "Go to Fix the build");
         assert_eq!(by_id("launch:claude").title, "New Claude");
         assert_eq!(by_id("handoff:files").title, "Open Files in Perch");

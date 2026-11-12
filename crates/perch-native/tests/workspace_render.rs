@@ -271,7 +271,7 @@ fn two_tabs() {
     assert_eq!(h.active().as_deref(), Some("alpha"));
     assert!(h.press("cmd-w"));
     assert_eq!(h.strip(), Vec::<String>::new());
-    assert_eq!(h.ws(|ws| ws.open().is_none()), true);
+    assert!(h.ws(|ws| ws.open().is_none()));
     println!("workspace_render: two tabs ok");
 }
 

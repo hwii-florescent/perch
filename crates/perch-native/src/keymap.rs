@@ -414,10 +414,7 @@ pub fn parse_combo(spec: &str, mac: bool) -> Option<Chord> {
 pub fn parse_chord(spec: &str) -> Option<Chord> {
     let mut chord = Chord::default();
     let mut rest = spec.trim().to_lowercase();
-    loop {
-        let Some((name, after)) = rest.split_once('-') else {
-            break;
-        };
+    while let Some((name, after)) = rest.split_once('-') {
         match name {
             "ctrl" | "control" => chord.ctrl = true,
             "alt" | "option" | "opt" => chord.alt = true,
@@ -618,7 +615,7 @@ impl Keymap {
         if context.leader {
             return Some(self.follow_up(keystroke));
         }
-        if let Some(hit) = self.from_file(keystroke, context) {
+        if let Some(hit) = self.file_hit(keystroke, context) {
             return Some(hit);
         }
         all_shortcuts()
@@ -651,7 +648,7 @@ impl Keymap {
         }
     }
 
-    fn from_file(&self, keystroke: &Keystroke, context: Context) -> Option<Hit> {
+    fn file_hit(&self, keystroke: &Keystroke, context: Context) -> Option<Hit> {
         let sections = self.file.as_ref()?.as_object()?;
         let order = [context.in_terminal.then_some("terminal"), Some("global")];
         for name in order.into_iter().flatten() {
