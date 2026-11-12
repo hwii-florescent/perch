@@ -979,11 +979,12 @@ impl EntityInputHandler for TerminalView {
         let fit = self.fitted?;
         let (x, y) = self.cursor_cell?;
         let cell = size(fit.metrics.width, fit.metrics.height);
-        Some(Bounds::new(
-            self.origin + point(cell.width * f32::from(x), cell.height * f32::from(y)),
-            cell,
-        ))
-        .filter(|_| element.size.width > px(0.))
+        (element.size.width > px(0.)).then(|| {
+            Bounds::new(
+                self.origin + point(cell.width * f32::from(x), cell.height * f32::from(y)),
+                cell,
+            )
+        })
     }
 
     fn character_index_for_point(

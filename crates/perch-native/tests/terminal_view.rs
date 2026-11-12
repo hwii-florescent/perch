@@ -190,9 +190,7 @@ fn view(core_process: &mut Child, scratch: &Path) {
 
     // Typing goes through the keyboard path and the shell's answer is drawn.
     h.type_text("printf '%s\\n' \"$HOME\"");
-    h.wait("the shell's answer", |h| {
-        h.rows().iter().any(|row| *row == home)
-    });
+    h.wait("the shell's answer", |h| h.rows().contains(&home));
     h.type_text("echo typed-$((20+22))");
     h.wait("the arithmetic", |h| {
         h.rows().iter().any(|row| row == "typed-42")
@@ -207,7 +205,7 @@ fn view(core_process: &mut Child, scratch: &Path) {
     h.type_text("stty size");
     let want = format!("{rows} {cols}");
     h.wait("the shell to report the new size", |h| {
-        h.rows().iter().any(|row| *row == want)
+        h.rows().contains(&want)
     });
     assert_eq!(h.grid(), (cols, rows));
 
