@@ -202,6 +202,8 @@ pub struct TerminalView {
     /// Where the pointer last was in that drag, for scrolling under a held pointer.
     drag_at: Option<Point<Pixels>>,
     _autoscroll: Option<Task<()>>,
+    /// Why the last file drop typed nothing, until the next one or the next key.
+    drop_notice: Option<String>,
     /// Wakes the view when a synchronised-output block the program never ends must be shown.
     _hold_wake: Option<Task<()>>,
     epoch: Instant,
@@ -262,6 +264,7 @@ impl TerminalView {
             drag_at: None,
             _autoscroll: None,
             _hold_wake: None,
+            drop_notice: None,
             epoch: Instant::now(),
             blink_on: true,
             cursor_blinks: false,
@@ -563,6 +566,7 @@ impl TerminalView {
         self.vt.scroll_to_bottom();
         self.vt.clear_selection();
         self.blink_on = true;
+        self.drop_notice = None;
         self.send(ToCore::Input(bytes));
         cx.notify();
     }
@@ -596,6 +600,10 @@ impl TerminalView {
                     self.select_all(cx);
                     return true;
                 }
+                // The web terminal's own chords: clear the history, jump to its ends.
+                "k" => return self.perform(Action::Clear, cx),
+                "up" => return self.perform(Action::Scroll(Scroll::Top), cx),
+                "down" => return self.perform(Action::Scroll(Scroll::Bottom), cx),
                 _ => {}
             }
         }
@@ -678,6 +686,10 @@ impl TerminalView {
         if !self.can_type() {
             return false;
         }
+        // Files copied in the file manager paste as paths, as if dropped.
+        if let Some(paths) = self.clipboard.read_paths(cx) {
+            return self.drop_paths(&paths, cx);
+        }
         match self.clipboard.read_text(cx) {
             Some(text) => {
                 self.paste(&text, cx);
@@ -685,6 +697,29 @@ impl TerminalView {
             }
             None => false,
         }
+    }
+
+    /// Files dropped on the pane, or pasted from the file manager: their quoted paths are typed
+    /// as one paste, with no Enter. False, with the reason in [`Self::note`], when nothing was
+    /// typed: the terminal is not writable, it is on another machine (that needs an upload this
+    /// view does not do), or a path cannot be typed safely.
+    pub fn drop_paths(&mut self, paths: &[std::path::PathBuf], cx: &mut Context<Self>) -> bool {
+        let refusal = if !self.can_type() {
+            Some("File drops need a connected terminal this view may type in".to_string())
+        } else if !self.place.local {
+            Some("A file dropped on a terminal on another machine needs an upload this view does not do".to_string())
+        } else {
+            match super::drop::paste_text(paths, self.settings.dropped_path_double_quotes) {
+                Ok(text) => {
+                    self.paste(&text, cx);
+                    return true;
+                }
+                Err(reason) => Some(reason),
+            }
+        };
+        self.drop_notice = refusal;
+        cx.notify();
+        false
     }
 
     /// Where copied and pasted text goes. A view starts with a clipboard of its own, in memory;
@@ -1484,6 +1519,9 @@ impl TerminalView {
     /// What the pane says about the session when it is not simply showing the shell, in the
     /// words the web's agent chip uses.
     pub fn note(&self) -> Option<String> {
+        if let Some(reason) = &self.drop_notice {
+            return Some(reason.clone());
+        }
         let sleeping = self.agent.is_some_and(|a| a.state == AgentState::Sleeping);
         match &self.status {
             Status::Detached => Some("Not connected".into()),
@@ -2107,6 +2145,9 @@ impl gpui::Render for TerminalView {
                     this.modifiers_changed(event.modifiers, cx);
                 },
             ))
+            .on_drop(cx.listener(|this, dropped: &gpui::ExternalPaths, _, cx| {
+                this.drop_paths(dropped.paths(), cx);
+            }))
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
                 this.scroll_wheel(event, cx);
                 cx.stop_propagation();

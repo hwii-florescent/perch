@@ -66,6 +66,8 @@ pub struct Settings {
     /// Releasing a mouse selection copies it, as iTerm2 does by default. The core has no setting
     /// for this, so it is the native terminal's own.
     pub copy_on_select: bool,
+    /// Dropped paths are double-quoted rather than single-quoted (`droppedPathDoubleQuotes`).
+    pub dropped_path_double_quotes: bool,
 }
 
 impl Default for Settings {
@@ -83,6 +85,7 @@ impl Default for Settings {
             option_as_alt: OptionAsAlt::Auto,
             scrollback: DEFAULT_SCROLLBACK as usize,
             copy_on_select: true,
+            dropped_path_double_quotes: false,
         }
     }
 }
@@ -199,6 +202,7 @@ impl Settings {
                 1.0
             };
             settings.clipboard_write = data.clipboard_write;
+            settings.dropped_path_double_quotes = data.dropped_path_double_quotes;
             settings.scrollbar = data.pane_scrollbars;
             let pad = |v: f64| {
                 if v.is_finite() {

@@ -521,7 +521,7 @@ fn selection_and_clipboard() {
         !h.view(|v, cx| v.key_down(&key("cmd-c", None), cx)),
         "with nothing selected the chord is left to the app"
     );
-    h.view(|v, cx| v.select_all(cx));
+    assert!(h.view(|v, cx| v.key_down(&key("cmd-a", None), cx)));
     h.sent();
     assert!(h.view(|v, cx| v.key_down(&key("a", Some("a")), cx)));
     assert_eq!(h.view(|v, _| v.selection_text()), None, "typing clears it");
@@ -932,6 +932,72 @@ fn output_wakes_only_what_is_shown() {
         h.view(|v, _| v.frame().row_text(0)).contains("held"),
         "and shows what the program held back"
     );
+}
+
+/// Files dropped on the pane, or copied in the file manager and pasted, are typed as quoted
+/// paths without Enter; a terminal on another machine and an unsafe path type nothing.
+fn dropped_files_type_their_paths() {
+    use std::path::PathBuf;
+    let typed = |h: &mut Harness| -> Vec<u8> {
+        h.sent()
+            .into_iter()
+            .filter_map(|m| match m {
+                ToCore::Input(bytes) => Some(bytes),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    };
+    let mut h = Harness::open(900., 420.);
+    let clip = std::rc::Rc::new(MemoryClipboard::new(None));
+    h.view(|v, _| {
+        v.set_clipboard(clip.clone());
+        v.set_local(true);
+    });
+    h.attach(80, 24, "$ ");
+    h.focus();
+    h.draw();
+    h.sent();
+
+    let files = vec![PathBuf::from("/tmp/a b"), PathBuf::from("/tmp/it's")];
+    assert!(h.view(|v, cx| v.drop_paths(&files, cx)));
+    assert_eq!(typed(&mut h), b"'/tmp/a b' '/tmp/it'\\''s' ".to_vec());
+
+    // Pasted from the file manager: the same, and bracketed when the program asked.
+    h.output("\x1b[?2004h");
+    clip.write_paths_for_test(files.clone());
+    assert!(h.view(|v, cx| v.key_down(&key("cmd-v", None), cx)));
+    assert_eq!(
+        typed(&mut h),
+        b"\x1b[200~'/tmp/a b' '/tmp/it'\\''s' \x1b[201~".to_vec()
+    );
+
+    // The setting picks double quotes.
+    let mut data: perch_core::protocol::SettingsData =
+        serde_json::from_str(r#"{"theme":"x"}"#).unwrap();
+    data.dropped_path_double_quotes = true;
+    h.view(|v, cx| v.apply_core(None, Some(data), cx));
+    assert!(h.view(|v, cx| v.drop_paths(&[PathBuf::from("/tmp/$x")], cx)));
+    assert_eq!(typed(&mut h), b"\x1b[200~\"/tmp/\\$x\" \x1b[201~".to_vec());
+
+    // A control character in a path types nothing and says why.
+    assert!(!h.view(|v, cx| v.drop_paths(&[PathBuf::from("/tmp/a\nb")], cx)));
+    assert_eq!(typed(&mut h), Vec::<u8>::new());
+    assert!(h
+        .view(|v, _| v.note())
+        .is_some_and(|n| n.contains("control character")));
+    // The next key clears the reason.
+    assert!(h.view(|v, cx| v.key_down(&key("a", Some("a")), cx)));
+    assert_eq!(h.view(|v, _| v.note()), None);
+    typed(&mut h);
+
+    // Another machine's terminal needs an upload: nothing is typed.
+    h.view(|v, _| v.set_local(false));
+    assert!(!h.view(|v, cx| v.drop_paths(&files, cx)));
+    assert_eq!(typed(&mut h), Vec::<u8>::new());
+    assert!(h
+        .view(|v, _| v.note())
+        .is_some_and(|n| n.contains("another machine")));
 }
 
 /// Bold, italic, faint, underline and strikethrough.
@@ -1575,16 +1641,17 @@ fn ownership_and_named_actions() {
     );
     h.view(|v, cx| v.perform(Action::Scroll(Scroll::Lines(5)), cx));
     assert_eq!(n(top(&mut h)), n(live.clone()) - 19);
-    h.view(|v, cx| v.perform(Action::Scroll(Scroll::Top), cx));
+    // The web terminal's chords do the same: Command-Up and Command-Down, Command-K.
+    assert!(h.view(|v, cx| v.key_down(&key("cmd-up", None), cx)));
     assert_eq!(top(&mut h), "history 0", "the oldest line");
-    h.view(|v, cx| v.perform(Action::Scroll(Scroll::Bottom), cx));
+    assert!(h.view(|v, cx| v.key_down(&key("cmd-down", None), cx)));
     assert_eq!(top(&mut h), live, "back at the live screen");
     assert_eq!(
         h.sent(),
         vec![],
         "moving the view tells the program nothing"
     );
-    h.view(|v, cx| v.perform(Action::Clear, cx));
+    assert!(h.view(|v, cx| v.key_down(&key("cmd-k", None), cx)));
     h.view(|v, cx| v.perform(Action::Scroll(Scroll::Top), cx));
     assert_eq!(top(&mut h), live, "no history is left above the screen");
     assert_eq!(h.sent(), vec![], "clearing tells the program nothing");
