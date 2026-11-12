@@ -424,8 +424,8 @@ assertions match with `contains`, not equality.
 
 ```sh
 cargo test -p perch-native            # everything below
-cargo test -p perch-native --lib      # state reduction, frames, reconnect against a stand-in core, hand-off URL
-cargo test -p perch-native --test sidebar_render    # headless GPUI render of the sidebar; no window opens
+cargo test -p perch-native --lib      # state reduction, actions, frames, launch correlation and reconnect against a stand-in core, hand-off URL
+cargo test -p perch-native --test sidebar_render    # headless GPUI render of the sidebar (project and By status views, nested rows); no window opens
 cargo test -p perch-native --test terminal_session  # a real core as a child process
 ```
 
@@ -436,6 +436,14 @@ cargo test -p perch-native --test terminal_session  # a real core as a child pro
   state and being started from the sidebar's follower. It stops the core, shells and daemon and checks each by
   PID; on failure it keeps the scratch directory and says so. Agent providers are covered by unit tests of the
   frames built, never by a real turn.
+- A plain shell never ends an agent turn, so `unseen` (Done) and the core clearing it on viewing cannot be
+  produced against the real core without a paid turn. `terminal_session` checks that viewing a session is
+  accepted and the follower keeps following; the Done hold, alerts and needs-you order are unit tests of the
+  reducer fed the same messages. A launch on another computer is correlated only by a stand-in core, since the
+  hub's `session.created` names no request.
+- "Open in Perch" sends `perch://open?place=…&session=…`. `crates/perch-desktop/src/open_url.rs` (link parsing)
+  and `packages/web/src/openRequest.ts` (acting on it) have their own tests; neither opens the system opener.
+  `cargo test -p perch-desktop` needs the web bundle to exist, as every build of that crate does.
 - A plain shell inside a project has no sidebar row (Show terminals off), so the test starts shells in Chats.
 - Remote computers go through the core's hub on the same socket, so they are tested as messages in
   `sidebar.rs` and not against a real remote.

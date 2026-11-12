@@ -22,7 +22,11 @@ shells, real agent CLIs
   Git/review, agent lifecycle and attention. Server adapters dispatch to domain
   services rather than implementing another model in React.
 - **Desktop** runs the same core in-process and adds narrow OS integration,
-  notifications and native child browser webviews.
+  notifications and native child browser webviews. On macOS it registers the
+  `perch://` scheme: `perch://open?place=<files|changes|browser|chat|settings>[&session=<id>]`
+  (`open_url.rs`, `openRequest.ts`) only navigates to a place on a session the
+  window already knows, and carries no credential, path or command. The native
+  client's "Open in Perch" sends it.
 - **Web** renders WS-driven state and owns view-local presentation. Do not
   confuse focus/layout with runtime authority.
 - **Stock screens** (`packages/web/src/stock-ui/<id>/`) are presentation only and
