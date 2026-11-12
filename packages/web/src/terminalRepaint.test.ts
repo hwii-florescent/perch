@@ -175,13 +175,6 @@ describe("a default attach into xterm.js", () => {
     dispose();
   });
 
-  it("keeps a combining mark and a VS16 symbol where Ghostty put them", async () => {
-    const fixture = byName("grapheme_clusters");
-    const { term, dispose } = await view(fixture, fixture.tail, fixture.repaint);
-    expectScreenOf(term, fixture);
-    dispose();
-  });
-
   it("leaves no duplicate scrollback when the replayed tail comes before the repaint", async () => {
     const fixture = byName("scrollback");
     const alone = await view(fixture, fixture.repaint);

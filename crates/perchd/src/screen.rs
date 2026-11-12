@@ -976,7 +976,6 @@ impl Screen {
         );
         // A daemon screen never draws images, and a repaint can't carry them.
         term.set(g::GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &0u64);
-        term.set_mode_bit(2027, true);
         Self {
             term,
             cols,
@@ -1368,15 +1367,6 @@ mod tests {
         let mut screen = Screen::new(cols, rows);
         screen.process(bytes);
         screen
-    }
-
-    #[test]
-    fn a_symbol_with_vs16_is_two_cells_from_the_start() {
-        let screen = fed(10, 2, "\u{270d}\u{fe0f}x".as_bytes());
-        assert!(screen.dec_mode(2027));
-        assert_eq!(screen.cursor_position(), (0, 3));
-        // The repaint carries the mode, so a client that reads it parses as this screen did.
-        assert_same(&screen, &reattached(&screen));
     }
 
     /// What a client gets on attach: a fresh emulator fed the repaint.

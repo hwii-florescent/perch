@@ -12,8 +12,8 @@
 //! program, in whatever keyboard and mouse modes it has asked for.
 //!
 //! The server keeps its own emulator (`perchd::screen`) to repaint an attach; this one is the
-//! view's. Both have grapheme clustering (mode 2027) on from the start, so their width rules,
-//! and therefore where a row wraps, agree, and a combining sequence or VS16 emoji is one cell.
+//! view's. Both turn grapheme clustering (mode 2027) on only when the program asks, so their
+//! width rules, and therefore where a row wraps, agree.
 //!
 //! Everything here is a read of, or a write to, native handles that are not thread-safe, so a
 //! [`Vt`] is neither `Send` nor `Sync`: one thread owns it.
@@ -36,8 +36,6 @@ const MAX_HOLD: Duration = Duration::from_millis(1000);
 
 const BRACKETED_PASTE: g::GhosttyMode = 2004;
 const SYNC_OUTPUT: g::GhosttyMode = 2026;
-/// Grapheme clustering, which the daemon's screen has on from the start as well.
-const GRAPHEME_CLUSTERING: g::GhosttyMode = 2027;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Rgb(pub u8, pub u8, pub u8);
@@ -593,14 +591,6 @@ impl Vt {
             set(
                 g::GHOSTTY_TERMINAL_OPT_USERDATA,
                 &mut *shared as *mut Shared as *const c_void,
-            );
-            let clustering = g::GhosttyTerminalModeConfig {
-                mode: GRAPHEME_CLUSTERING,
-                value: true,
-            };
-            set(
-                g::GHOSTTY_TERMINAL_OPT_MODE,
-                &clustering as *const g::GhosttyTerminalModeConfig as *const c_void,
             );
             let hold: g::GhosttyTerminalRenderHoldFn = Some(on_render_hold);
             set(g::GHOSTTY_TERMINAL_OPT_RENDER_HOLD, hold_ptr(hold));
@@ -1611,20 +1601,20 @@ mod tests {
     }
 
     #[test]
-    fn grapheme_clusters_stay_in_one_cell_from_the_start() {
+    fn grapheme_clusters_stay_in_one_cell_once_the_program_asks() {
         // A combining accent joins its base in any mode.
         let mut vt = fed(10, 1, "e\u{301}x");
         let frame = vt.frame();
         assert_eq!(frame.rows[0][0].text, "e\u{301}");
         assert_eq!(frame.rows[0][1].text, "x");
-        // A text-style symbol followed by VS16 becomes a two-cell emoji, with no request.
-        let mut emoji = fed(10, 1, "\u{270d}\u{fe0f}x");
+        // A text-style symbol followed by VS16 becomes a two-cell emoji under mode 2027.
+        let mut emoji = fed(10, 1, "\x1b[?2027h\u{270d}\u{fe0f}x");
         let frame = emoji.frame();
         assert_eq!(frame.rows[0][0].text, "\u{270d}\u{fe0f}");
         assert!(frame.rows[0][0].wide);
         assert_eq!(frame.rows[0][2].text, "x");
-        // A program that turns the mode off gets the symbol's own width: one cell.
-        let mut plain = fed(10, 1, "\x1b[?2027l\u{270d}\u{fe0f}x");
+        // Without the mode the width is the symbol's own: one cell.
+        let mut plain = fed(10, 1, "\u{270d}\u{fe0f}x");
         assert!(!plain.frame().rows[0][0].wide);
     }
 
