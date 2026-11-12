@@ -41,3 +41,8 @@ harness = false
 name = "sidebar_render"
 path = "tests/sidebar_render.rs"
 harness = false
+
+[[test]]
+name = "terminal_render"
+path = "tests/terminal_render.rs"
+harness = false

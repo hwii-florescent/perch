@@ -489,6 +489,11 @@ impl Vt {
         (self.cols, self.rows)
     }
 
+    /// The colour behind cells that have none of their own.
+    pub fn background(&self) -> Rgb {
+        self.theme.bg
+    }
+
     pub fn set_theme(&mut self, theme: Theme) {
         if self.theme != theme {
             self.theme = theme;

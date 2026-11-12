@@ -1,0 +1,698 @@
+//! Renders the terminal view offscreen from the messages a core sends and checks what is drawn
+//! and what the view asks of the core.
+//!
+//! GPUI's test platform draws through the real Metal renderer into a texture
+//! (`Window::render_to_image`); no window is created, shown or focused. The core is a pair of
+//! channels the test holds the far ends of. This is its own binary with a custom `main`, as Zed's
+//! headless tests are, so AppKit runs on the main thread.
+
+use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
+use gpui::{
+    point, px, size, AppContext, HeadlessAppContext, KeyDownEvent, Keystroke, Modifiers,
+    ScrollDelta, ScrollWheelEvent, TouchPhase, Window, WindowHandle,
+};
+use perch_native::terminal::attach::{FromCore, ToCore};
+use perch_native::terminal::keys::key_bytes;
+use perch_native::terminal::layout::{MIN_COLS, MIN_FONT_PX, PAD_X, PAD_Y};
+use perch_native::terminal::vt::Theme;
+use perch_native::terminal::{Status, TerminalEvent, TerminalView};
+use std::sync::Arc;
+
+/// Default colours of the terminal, as pixels.
+fn rgb(hex: u32) -> [u8; 3] {
+    [(hex >> 16) as u8, (hex >> 8) as u8, hex as u8]
+}
+
+struct Shot {
+    raw: Vec<u8>,
+    width: usize,
+    scale: f32,
+    cell: (f32, f32),
+}
+
+impl Shot {
+    /// The pixel at a logical position.
+    fn at(&self, x: f32, y: f32) -> [u8; 3] {
+        let (px, py) = ((x * self.scale) as usize, (y * self.scale) as usize);
+        let i = (py * self.width + px) * 4;
+        [self.raw[i], self.raw[i + 1], self.raw[i + 2]]
+    }
+
+    /// The middle of a cell.
+    fn center(&self, col: usize, row: usize) -> [u8; 3] {
+        let (x, y) = self.cell_origin(col, row);
+        self.at(x + self.cell.0 / 2.0, y + self.cell.1 / 2.0)
+    }
+
+    fn cell_origin(&self, col: usize, row: usize) -> (f32, f32) {
+        (
+            PAD_X + col as f32 * self.cell.0,
+            PAD_Y + row as f32 * self.cell.1,
+        )
+    }
+
+    /// Pixels in the `cols` x 1 cells at (`col`, `row`) that are not `background`.
+    fn ink(&self, col: usize, row: usize, cols: usize, background: [u8; 3]) -> usize {
+        self.count(col, row, cols, |p| differs(p, background))
+    }
+
+    fn count(
+        &self,
+        col: usize,
+        row: usize,
+        cols: usize,
+        matches: impl Fn([u8; 3]) -> bool,
+    ) -> usize {
+        let (x0, y0) = self.cell_origin(col, row);
+        let (x1, y1) = (x0 + self.cell.0 * cols as f32, y0 + self.cell.1);
+        let mut n = 0;
+        let mut y = y0;
+        while y < y1 - 0.5 {
+            let mut x = x0;
+            while x < x1 - 0.5 {
+                if matches(self.at(x, y)) {
+                    n += 1;
+                }
+                x += 1.0 / self.scale;
+            }
+            y += 1.0 / self.scale;
+        }
+        n
+    }
+}
+
+fn near(a: [u8; 3], b: [u8; 3]) -> bool {
+    a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= 3)
+}
+
+fn differs(a: [u8; 3], b: [u8; 3]) -> bool {
+    !near(a, b)
+}
+
+struct Harness {
+    cx: HeadlessAppContext,
+    window: WindowHandle<TerminalView>,
+    to_core: UnboundedReceiver<ToCore>,
+    from_core: UnboundedSender<FromCore>,
+}
+
+impl Harness {
+    /// A terminal view of `width` x `height` logical pixels, linked to a core this test plays.
+    fn open(width: f32, height: f32) -> Self {
+        let mut cx = HeadlessAppContext::with_platform(
+            gpui_platform::current_platform(true).text_system(),
+            Arc::new(()),
+            gpui_platform::current_headless_renderer,
+        );
+        let window = cx
+            .open_window(size(px(width), px(height)), |_, cx| {
+                cx.new(TerminalView::new)
+            })
+            .unwrap();
+        let (to_core_tx, to_core) = unbounded();
+        let (from_core, from_core_rx) = unbounded();
+        window
+            .update(&mut cx, |view, _, cx| {
+                view.link(to_core_tx, from_core_rx, cx)
+            })
+            .unwrap();
+        Self {
+            cx,
+            window,
+            to_core,
+            from_core,
+        }
+    }
+
+    fn say(&mut self, event: FromCore) {
+        self.from_core.unbounded_send(event).unwrap();
+        self.cx.run_until_parked();
+    }
+
+    /// The core attaches the view as the owner of everything and repaints it at `cols` x `rows`.
+    fn attach(&mut self, cols: u16, rows: u16, screen: &str) {
+        self.attach_as(true, true, cols, rows, screen);
+    }
+
+    fn attach_as(&mut self, input: bool, resize: bool, cols: u16, rows: u16, screen: &str) {
+        self.say(FromCore::Attached {
+            replay: format!("\x1b[8;{rows};{cols}t{screen}"),
+            input,
+            resize,
+        });
+    }
+
+    fn output(&mut self, text: &str) {
+        self.say(FromCore::Output(text.into()));
+    }
+
+    /// Everything the view has sent the core so far.
+    fn sent(&mut self) -> Vec<ToCore> {
+        let mut sent = Vec::new();
+        while let Ok(message) = self.to_core.try_recv() {
+            sent.push(message);
+        }
+        sent
+    }
+
+    fn view<R>(
+        &mut self,
+        f: impl FnOnce(&mut TerminalView, &mut gpui::Context<TerminalView>) -> R,
+    ) -> R {
+        self.window
+            .update(&mut self.cx, |view, _, cx| f(view, cx))
+            .unwrap()
+    }
+
+    fn focus(&mut self) {
+        self.window
+            .update(&mut self.cx, |view, window, cx| view.focus(window, cx))
+            .unwrap();
+    }
+
+    fn draw(&mut self) -> Shot {
+        let (image, scale) = self
+            .cx
+            .update_window(self.window.into(), |_, window: &mut Window, cx| {
+                let _ = window.draw(cx);
+                (
+                    window.render_to_image().expect("offscreen render"),
+                    window.scale_factor(),
+                )
+            })
+            .unwrap();
+        let cell = self.view(|view, _| view.cell_size()).expect("laid out");
+        Shot {
+            width: image.width() as usize,
+            raw: image.into_raw(),
+            scale,
+            cell: (f32::from(cell.width), f32::from(cell.height)),
+        }
+    }
+
+    fn resize(&mut self, width: f32, height: f32) {
+        self.cx
+            .update_window(self.window.into(), |_, window: &mut Window, cx| {
+                window.resize(size(px(width), px(height)));
+                window.bounds_changed(cx);
+            })
+            .unwrap();
+    }
+}
+
+fn key(text: &str, key_char: Option<&str>) -> KeyDownEvent {
+    let mut keystroke = Keystroke::parse(text).unwrap();
+    keystroke.key_char = key_char.map(Into::into);
+    KeyDownEvent {
+        keystroke,
+        is_held: false,
+        prefer_character_input: false,
+    }
+}
+
+fn wheel(lines: f32) -> ScrollWheelEvent {
+    ScrollWheelEvent {
+        position: point(px(100.), px(100.)),
+        delta: ScrollDelta::Lines(point(0., lines)),
+        modifiers: Modifiers::default(),
+        touch_phase: TouchPhase::Moved,
+    }
+}
+
+fn main() {
+    let theme = Theme::default();
+    let (bg, fg) = (
+        rgb(u32::from(theme.bg.0) << 16 | u32::from(theme.bg.1) << 8 | u32::from(theme.bg.2)),
+        rgb(0xffffff),
+    );
+
+    colours_and_cursor(bg, fg);
+    attributes(bg, fg);
+    wide_and_emoji(bg);
+    resize_authority();
+    narrow_panes_shrink_the_font();
+    input_and_scrolling();
+    disconnect_keeps_the_screen();
+    println!("terminal_render: ok");
+}
+
+/// Backgrounds, foregrounds, inverse and the cursor in each shape and focus.
+fn colours_and_cursor(bg: [u8; 3], fg: [u8; 3]) {
+    let mut h = Harness::open(900., 420.);
+    // Row 0: ANSI backgrounds red, green, blue (two cells each) then a truecolour one.
+    // Row 1: a truecolour foreground full block, an inverse blank, then plain text.
+    h.attach(
+        100,
+        24,
+        "\x1b[41m  \x1b[42m  \x1b[44m  \x1b[48;2;10;200;30m  \x1b[0m\r\n\
+         \x1b[38;2;255;128;0m\u{2588}\u{2588}\x1b[0m\x1b[7m  \x1b[0mHello",
+    );
+    let shot = h.draw();
+    let t = Theme::default();
+    let hex = |c: perch_native::terminal::vt::Rgb| {
+        rgb(u32::from(c.0) << 16 | u32::from(c.1) << 8 | u32::from(c.2))
+    };
+    assert!(
+        near(shot.center(0, 0), hex(t.ansi[1])),
+        "red background {:?}",
+        shot.center(0, 0)
+    );
+    assert!(near(shot.center(1, 0), hex(t.ansi[1])));
+    assert!(near(shot.center(2, 0), hex(t.ansi[2])), "green background");
+    assert!(near(shot.center(4, 0), hex(t.ansi[4])), "blue background");
+    assert!(
+        near(shot.center(6, 0), [10, 200, 30]),
+        "truecolour background"
+    );
+    assert!(
+        near(shot.center(8, 0), bg),
+        "default background past the runs"
+    );
+    // A full block is the foreground colour at its middle, over the default background.
+    assert!(
+        near(shot.center(0, 1), [255, 128, 0]),
+        "truecolour foreground {:?}",
+        shot.center(0, 1)
+    );
+    assert!(near(shot.center(1, 1), [255, 128, 0]));
+    // Inverse paints the foreground colour as background.
+    assert!(
+        near(shot.center(2, 1), fg),
+        "inverse blank {:?}",
+        shot.center(2, 1)
+    );
+    // Text is ink in its own cells only.
+    for (col, ch) in "Hello".chars().enumerate() {
+        assert!(shot.ink(4 + col, 1, 1, bg) > 4, "ink for {ch:?}");
+    }
+    assert_eq!(
+        shot.ink(10, 1, 1, bg),
+        0,
+        "nothing after the text and the cursor"
+    );
+    // The cursor sits after "Hello" at column 9; the pane is not focused, so it is an outline:
+    // its edge is the cursor colour and its middle is not.
+    let (x, y) = shot.cell_origin(9, 1);
+    assert!(
+        near(shot.at(x + 1.0 / shot.scale, y + shot.cell.1 / 2.0), fg),
+        "hollow cursor edge"
+    );
+    assert!(near(shot.center(9, 1), bg), "hollow cursor is empty");
+
+    // Focused, the cursor is a filled block over its cell.
+    h.focus();
+    let shot = h.draw();
+    assert!(near(shot.center(9, 1), fg), "block cursor fills its cell");
+    // The cell under a block cursor shows its glyph in the background colour: the 'H' of
+    // "Hello" is the cell at column 4 of row 1.
+    h.output("\x1b[2;5H");
+    let shot = h.draw();
+    assert!(
+        shot.count(4, 1, 1, |p| near(p, fg)) > 20,
+        "the block covers the cell"
+    );
+    assert!(
+        shot.ink(4, 1, 1, fg) > 10,
+        "the glyph under it is drawn in the background colour"
+    );
+
+    // Bar and underline shapes (focused), and a hidden cursor.
+    h.output("\x1b[1;1H\x1b[6 q");
+    let shot = h.draw();
+    let (x, y) = shot.cell_origin(0, 0);
+    assert!(
+        near(shot.at(x + 0.5, y + shot.cell.1 / 2.0), fg),
+        "bar at the left edge"
+    );
+    h.output("\x1b[4 q");
+    let shot = h.draw();
+    assert!(
+        near(shot.at(x + shot.cell.0 / 2.0, y + shot.cell.1 - 0.75), fg),
+        "underline cursor at the bottom"
+    );
+    h.output("\x1b[?25l");
+    let shot = h.draw();
+    assert!(
+        differs(shot.at(x + shot.cell.0 / 2.0, y + shot.cell.1 - 0.75), fg),
+        "hidden cursor is not drawn"
+    );
+}
+
+/// Bold, italic, faint, underline and strikethrough.
+fn attributes(bg: [u8; 3], fg: [u8; 3]) {
+    let mut h = Harness::open(900., 420.);
+    h.attach(
+        100,
+        24,
+        "M\x1b[1mM\x1b[0m\x1b[3mM\x1b[0m\x1b[2mM\x1b[0m\r\n\
+         \x1b[4m   \x1b[0m\r\n\x1b[9m   \x1b[0m\r\n   ",
+    );
+    let shot = h.draw();
+    let plain = shot.ink(0, 0, 1, bg);
+    let bold = shot.ink(1, 0, 1, bg);
+    let italic = shot.ink(2, 0, 1, bg);
+    assert!(plain > 10, "plain M has ink");
+    assert!(bold > plain, "bold M has more ink ({bold} vs {plain})");
+    assert_ne!(italic, plain, "italic M differs from upright");
+    // Faint text is the foreground at 60 percent over the background: no pixel reaches full.
+    let brightest = shot.count(3, 0, 1, |p| p[0] > 250);
+    assert_eq!(brightest, 0, "faint text never reaches full brightness");
+    assert!(shot.ink(3, 0, 1, bg) > 10);
+    // An underline is a rule of the foreground colour, a cell wide, below the baseline.
+    let rule = |row: usize| shot.count(0, row, 3, |p| near(p, fg));
+    let (cell_pixels, _) = (shot.cell.0 * shot.scale, 0);
+    assert!(
+        rule(1) as f32 >= cell_pixels * 3.0 * 0.9,
+        "underline spans three cells ({})",
+        rule(1)
+    );
+    assert!(
+        rule(2) as f32 >= cell_pixels * 3.0 * 0.9,
+        "strikethrough spans three cells ({})",
+        rule(2)
+    );
+    assert_eq!(rule(3), 0, "plain blanks draw nothing");
+    // The strike is higher in the cell than the underline.
+    let first_rule_row = |row: usize| {
+        let (x, y) = shot.cell_origin(1, row);
+        let mut dy = 0.0;
+        while dy < shot.cell.1 {
+            if near(shot.at(x + 2.0, y + dy), fg) {
+                return dy;
+            }
+            dy += 1.0 / shot.scale;
+        }
+        panic!("no rule in row {row}");
+    };
+    assert!(
+        first_rule_row(2) < first_rule_row(1),
+        "strike above underline"
+    );
+}
+
+/// CJK, emoji and a combining mark take their cells and are drawn, with fallback fonts.
+fn wide_and_emoji(bg: [u8; 3]) {
+    let mut h = Harness::open(900., 420.);
+    h.attach(100, 24, "\u{4e16}\u{754c}ab\r\n\u{1f600}x\r\ne\u{301}z");
+    let shot = h.draw();
+    // Each CJK character is ink across its two cells; the next cell starts the next glyph.
+    assert!(
+        shot.ink(0, 0, 1, bg) > 10 && shot.ink(1, 0, 1, bg) > 10,
+        "first wide character spans two cells"
+    );
+    assert!(
+        shot.ink(2, 0, 1, bg) > 10 && shot.ink(3, 0, 1, bg) > 10,
+        "second wide character spans two cells"
+    );
+    assert!(shot.ink(4, 0, 1, bg) > 4, "'a' follows in the fifth cell");
+    // The emoji is coloured: it has pixels that are not grey, in its two cells.
+    let coloured = shot.count(0, 1, 2, |p| {
+        let (hi, lo) = (p.iter().max().unwrap(), p.iter().min().unwrap());
+        hi - lo > 60
+    });
+    assert!(coloured > 20, "emoji is drawn in colour ({coloured})");
+    assert!(
+        shot.ink(2, 1, 1, bg) > 4,
+        "'x' follows the emoji in the third cell"
+    );
+    // The accent shares the cell of its base letter, and 'z' keeps the second cell.
+    assert!(shot.ink(0, 2, 1, bg) > 4);
+    assert!(shot.ink(1, 2, 1, bg) > 4);
+}
+
+/// The owner fits the pane and asks for it once; a view that doesn't own the size takes the
+/// core's and never asks.
+fn resize_authority() {
+    let mut h = Harness::open(900., 420.);
+    h.attach(80, 24, "prompt$ ");
+    // The replay's size marker set the grid; nothing has been laid out yet.
+    assert_eq!(h.view(|v, _| v.grid_size()), (80, 24));
+    let shot = h.draw();
+    let fitted = h.view(|v, _| v.fitted_size()).unwrap();
+    assert!(fitted.0 >= MIN_COLS && fitted.1 > 1);
+    // The owner tells the core the size it fits, once, right after attaching.
+    assert_eq!(h.sent(), vec![ToCore::Resize(fitted.0, fitted.1)]);
+    h.draw();
+    assert_eq!(h.sent(), vec![], "an unchanged pane asks nothing more");
+    // The core applies it and announces it in the stream; the grid follows.
+    h.output(&format!("\x1b[8;{};{}t", fitted.1, fitted.0));
+    assert_eq!(h.view(|v, _| v.grid_size()), fitted);
+    let _ = shot;
+    // A smaller pane asks again, with a size the cell and pane explain.
+    h.resize(700., 300.);
+    h.draw();
+    let smaller = h.view(|v, _| v.fitted_size()).unwrap();
+    assert!(
+        smaller.0 < fitted.0 && smaller.1 < fitted.1,
+        "{smaller:?} vs {fitted:?}"
+    );
+    assert_eq!(h.sent(), vec![ToCore::Resize(smaller.0, smaller.1)]);
+    // The pane's cells: width and height divide the padded pane exactly.
+    let cell = h.view(|v, _| v.cell_size()).unwrap();
+    let (cw, ch) = (f32::from(cell.width), f32::from(cell.height));
+    assert_eq!(smaller.0, ((700. - 2. * PAD_X) / cw + 0.01).floor() as u16);
+    assert_eq!(smaller.1, ((300. - 2. * PAD_Y) / ch + 0.01).floor() as u16);
+
+    // A view that doesn't hold the resize lease never sends a size and takes the core's.
+    let mut other = Harness::open(900., 420.);
+    other.attach_as(true, false, 120, 40, "");
+    other.draw();
+    other.resize(700., 300.);
+    other.draw();
+    assert_eq!(
+        other.sent(),
+        vec![],
+        "a view without the resize lease sends no size"
+    );
+    assert_eq!(other.view(|v, _| v.grid_size()), (120, 40));
+    other.output("\x1b[8;50;90t");
+    assert_eq!(other.view(|v, _| v.grid_size()), (90, 50));
+    // It still draws what the program draws at that size.
+    other.output("\x1b[1;1Hfar");
+    let shot = other.draw();
+    assert!(shot.ink(0, 0, 3, rgb(0x000000)) > 10);
+}
+
+/// Below 80 columns the font shrinks, down to a floor, instead of the grid.
+fn narrow_panes_shrink_the_font() {
+    let mut h = Harness::open(900., 420.);
+    h.attach(80, 24, "");
+    h.draw();
+    let normal = h.view(|v, _| v.font_px()).unwrap();
+    assert!(
+        (normal - 13.0).abs() < 0.01,
+        "a wide pane keeps the base size"
+    );
+
+    h.resize(560., 420.);
+    h.draw();
+    let (cols, _) = h.view(|v, _| v.fitted_size()).unwrap();
+    let shrunk = h.view(|v, _| v.font_px()).unwrap();
+    assert!(cols >= MIN_COLS, "{cols} columns in a narrow pane");
+    assert!(
+        shrunk < normal && shrunk >= MIN_FONT_PX,
+        "font shrank to {shrunk}"
+    );
+
+    // Past the floor the grid gives way.
+    h.resize(300., 420.);
+    h.draw();
+    let (cols, _) = h.view(|v, _| v.fitted_size()).unwrap();
+    assert!(cols < MIN_COLS, "{cols} columns in a very narrow pane");
+    assert!((h.view(|v, _| v.font_px()).unwrap() - MIN_FONT_PX).abs() < 0.01);
+}
+
+/// Keys, paste, the wheel and the mouse go to the program as the program asked.
+fn input_and_scrolling() {
+    let mut h = Harness::open(900., 420.);
+    h.attach(100, 24, "");
+    h.draw();
+    h.sent();
+
+    let typed =
+        |h: &mut Harness, event: KeyDownEvent| -> bool { h.view(|v, cx| v.key_down(&event, cx)) };
+    assert!(typed(&mut h, key("a", Some("a"))));
+    assert!(typed(&mut h, key("enter", None)));
+    assert!(typed(&mut h, key("ctrl-c", None)));
+    assert!(typed(&mut h, key("up", None)));
+    assert!(
+        !typed(&mut h, key("cmd-c", None)),
+        "command chords belong to the app"
+    );
+    assert!(
+        !typed(&mut h, key("shift", None)),
+        "a modifier alone sends nothing"
+    );
+    let sent: Vec<u8> = h
+        .sent()
+        .into_iter()
+        .flat_map(|m| match m {
+            ToCore::Input(b) => b,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(sent, b"a\r\x03\x1b[A");
+
+    // Bracketed paste only when the program asked.
+    h.view(|v, cx| v.paste("one\ntwo", cx));
+    assert_eq!(h.sent(), vec![ToCore::Input(b"one\rtwo".to_vec())]);
+    h.output("\x1b[?2004h");
+    h.view(|v, cx| v.paste("one\ntwo", cx));
+    assert_eq!(
+        h.sent(),
+        vec![ToCore::Input(b"\x1b[200~one\ntwo\x1b[201~".to_vec())]
+    );
+
+    // Kitty keyboard flags the program set.
+    h.output("\x1b[>1u");
+    typed(&mut h, key("escape", None));
+    assert_eq!(h.sent(), vec![ToCore::Input(b"\x1b[27u".to_vec())]);
+    h.output("\x1b[<u");
+
+    // The wheel scrolls history on the primary screen; typing returns to the bottom.
+    for line in 0..80 {
+        h.output(&format!("history {line}\r\n"));
+    }
+    h.draw();
+    let bottom = h.view(|v, _| v.frame().row_text(0));
+    h.view(|v, cx| v.scroll_wheel(&wheel(2.0), cx));
+    let scrolled = h.view(|v, _| v.frame().row_text(0));
+    assert_ne!(scrolled, bottom);
+    let old: usize = scrolled.trim_start_matches("history ").parse().unwrap();
+    let live: usize = bottom.trim_start_matches("history ").parse().unwrap();
+    assert!(old < live, "scrolled back from {live} to {old}");
+    assert_eq!(h.sent(), vec![], "scrolling history sends nothing");
+    h.view(|v, cx| v.scroll_wheel(&wheel(-1.0), cx));
+    assert!(
+        h.view(|v, _| v.frame().row_text(0)) != scrolled,
+        "the wheel turns both ways"
+    );
+    assert!(typed(&mut h, key("a", Some("a"))));
+    assert_eq!(
+        h.view(|v, _| v.frame().row_text(0)),
+        bottom,
+        "typing returns to the live screen"
+    );
+    h.sent();
+
+    // On the alternate screen without the mouse the wheel types arrow keys.
+    h.output("\x1b[?1049h");
+    h.view(|v, cx| v.scroll_wheel(&wheel(1.0), cx));
+    let arrows = h.sent();
+    assert_eq!(arrows.len(), 1);
+    assert!(matches!(&arrows[0], ToCore::Input(b) if b.starts_with(b"\x1b[A") && b.len() % 3 == 0));
+    // With the mouse on, the program gets wheel buttons at the pointer.
+    h.output("\x1b[?1000h\x1b[?1006h");
+    h.draw();
+    h.view(|v, cx| v.scroll_wheel(&wheel(1.0), cx));
+    let reports = h.sent();
+    assert!(
+        matches!(&reports[0], ToCore::Input(b) if b.starts_with(b"\x1b[<64;")),
+        "{reports:?}"
+    );
+
+    // Clicks reach a program that takes the mouse; shift keeps them.
+    let down = h.view(|v, _| {
+        v.mouse(
+            perch_native::terminal::vt::MouseAction::Press,
+            Some(gpui::MouseButton::Left),
+            point(px(PAD_X + 20.), px(PAD_Y + 20.)),
+            Modifiers::default(),
+        )
+    });
+    assert!(down);
+    let sent = h.sent();
+    assert!(
+        matches!(&sent[0], ToCore::Input(b) if b.starts_with(b"\x1b[<0;") && b.ends_with(b"M")),
+        "{sent:?}"
+    );
+    let up = h.view(|v, _| {
+        v.mouse(
+            perch_native::terminal::vt::MouseAction::Release,
+            Some(gpui::MouseButton::Left),
+            point(px(PAD_X + 20.), px(PAD_Y + 20.)),
+            Modifiers::default(),
+        )
+    });
+    assert!(up);
+    assert!(matches!(&h.sent()[0], ToCore::Input(b) if b.ends_with(b"m")));
+    let shifted = h.view(|v, _| {
+        v.mouse(
+            perch_native::terminal::vt::MouseAction::Press,
+            Some(gpui::MouseButton::Left),
+            point(px(30.), px(30.)),
+            Modifiers::shift(),
+        )
+    });
+    assert!(!shifted, "shift keeps the mouse for the terminal");
+    assert_eq!(h.sent(), vec![]);
+
+    // Without the input lease nothing is typed.
+    let mut watcher = Harness::open(900., 420.);
+    watcher.attach_as(false, false, 80, 24, "watching");
+    watcher.draw();
+    assert!(!watcher.view(|v, cx| v.key_down(&key("a", Some("a")), cx)));
+    watcher.view(|v, cx| v.paste("x", cx));
+    assert_eq!(watcher.sent(), vec![]);
+    // The key encoder is not involved at all for a key that types nothing.
+    let mut vt = perch_native::terminal::vt::Vt::new(80, 24);
+    assert_eq!(
+        key_bytes(&mut vt, &Keystroke::parse("cmd-q").unwrap(), false),
+        None
+    );
+}
+
+/// A dropped connection leaves the screen as it was and says so; it is not an exit.
+fn disconnect_keeps_the_screen() {
+    let mut h = Harness::open(900., 420.);
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let seen = events.clone();
+    let subscription = h
+        .window
+        .update(&mut h.cx, |_, _, cx| {
+            let view = cx.entity();
+            cx.subscribe(&view, move |_, _, event: &TerminalEvent, _| {
+                seen.borrow_mut().push(event.clone())
+            })
+        })
+        .unwrap();
+    h.attach(80, 24, "\x1b]2;the title\x07still here\r\n");
+    h.draw();
+    let before = h.view(|v, _| v.frame().row_text(0));
+    assert_eq!(before, "still here");
+    assert_eq!(h.view(|v, _| v.title().to_string()), "the title");
+    h.say(FromCore::Disconnected(
+        "the core closed the connection".into(),
+    ));
+    assert!(matches!(
+        h.view(|v, _| v.status().clone()),
+        Status::Disconnected(_)
+    ));
+    assert_eq!(
+        h.view(|v, _| v.frame().row_text(0)),
+        before,
+        "the screen is kept"
+    );
+    let shot = h.draw();
+    assert!(shot.ink(0, 0, 10, rgb(0x000000)) > 20, "and still drawn");
+    assert!(
+        !h.view(|v, cx| v.key_down(&key("a", Some("a")), cx)),
+        "nothing is typed into a dropped terminal"
+    );
+    assert_eq!(
+        h.sent()
+            .iter()
+            .filter(|m| matches!(m, ToCore::Input(_)))
+            .count(),
+        0
+    );
+    // Only the core saying so marks the shell as ended.
+    h.say(FromCore::Exited(3));
+    assert_eq!(h.view(|v, _| v.status().clone()), Status::Exited(3));
+    let events = events.borrow();
+    assert!(events.contains(&TerminalEvent::Title("the title".into())));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, TerminalEvent::Status(Status::Disconnected(_)))));
+    drop(subscription);
+}

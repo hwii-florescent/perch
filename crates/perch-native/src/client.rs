@@ -161,12 +161,27 @@ pub struct Terminal {
     pub id: String,
     pub replay: String,
     session_id: String,
+    /// The provider whose terminal this is; the controls and the release name it.
+    provider: String,
     /// Names this attachment to the core; the core requires it to equal the open request's id.
     view_id: String,
     /// The generations of the input and resize leases this connection holds. The core accepts
     /// typing and resizing only from the holder; `None` means another view holds it.
     input: Option<u64>,
     resize: Option<u64>,
+}
+
+impl Terminal {
+    /// This connection holds the lease that lets it type.
+    pub fn owns_input(&self) -> bool {
+        self.input.is_some()
+    }
+
+    /// This connection holds the lease that lets it size the shell; the core drops a resize
+    /// from any other.
+    pub fn owns_resize(&self) -> bool {
+        self.resize.is_some()
+    }
 }
 
 pub struct Connection {
@@ -258,8 +273,20 @@ impl Connection {
         cols: u16,
         rows: u16,
     ) -> Result<Terminal> {
+        self.open_terminal_as(session_id, TERMINAL_PROVIDER, cols, rows)
+            .await
+    }
+
+    /// [`Self::open_terminal`] for the terminal of any provider the session runs.
+    pub async fn open_terminal_as(
+        &mut self,
+        session_id: &str,
+        provider: &str,
+        cols: u16,
+        rows: u16,
+    ) -> Result<Terminal> {
         let id = self.request_id();
-        self.send(open_frame(&id, session_id, TERMINAL_PROVIDER, cols, rows))
+        self.send(open_frame(&id, session_id, provider, cols, rows))
             .await?;
         let (terminal_id, replay, workspace_id) = self
             .reply(Some(&id), |m| match m {
@@ -276,12 +303,17 @@ impl Connection {
                 _ => None,
             })
             .await?;
-        let input = self.acquire(session_id, &workspace_id, "input").await?;
-        let resize = self.acquire(session_id, &workspace_id, "resize").await?;
+        let input = self
+            .acquire(session_id, provider, &workspace_id, "input")
+            .await?;
+        let resize = self
+            .acquire(session_id, provider, &workspace_id, "resize")
+            .await?;
         Ok(Terminal {
             id: terminal_id,
             replay,
             session_id: session_id.to_string(),
+            provider: provider.to_string(),
             view_id: id,
             input,
             resize,
@@ -291,12 +323,19 @@ impl Connection {
     async fn acquire(
         &mut self,
         session_id: &str,
+        provider: &str,
         workspace_id: &str,
         channel: &str,
     ) -> Result<Option<u64>> {
         let id = self.request_id();
-        self.send(acquire_frame(&id, session_id, workspace_id, channel))
-            .await?;
+        self.send(acquire_frame_as(
+            &id,
+            session_id,
+            provider,
+            workspace_id,
+            channel,
+        ))
+        .await?;
         self.reply(Some(&id), |m| match m {
             ServerMessage::AgentControl {
                 request_id, lease, ..
@@ -330,7 +369,7 @@ impl Connection {
     pub async fn release_terminal(&mut self, terminal: &Terminal) -> Result<()> {
         self.send(release_frame(
             &terminal.session_id,
-            TERMINAL_PROVIDER,
+            &terminal.provider,
             &terminal.view_id,
         ))
         .await
@@ -564,9 +603,26 @@ fn request_frame(request_id: &str, request: &Request) -> Value {
     }
 }
 
+#[cfg(test)]
 fn acquire_frame(request_id: &str, session_id: &str, workspace_id: &str, channel: &str) -> Value {
+    acquire_frame_as(
+        request_id,
+        session_id,
+        TERMINAL_PROVIDER,
+        workspace_id,
+        channel,
+    )
+}
+
+fn acquire_frame_as(
+    request_id: &str,
+    session_id: &str,
+    provider: &str,
+    workspace_id: &str,
+    channel: &str,
+) -> Value {
     json!({"type": "agent.control.acquire", "requestId": request_id, "sessionId": session_id,
-           "workspaceId": workspace_id, "agentId": TERMINAL_PROVIDER, "channel": channel,
+           "workspaceId": workspace_id, "agentId": provider, "channel": channel,
            "ifUnowned": true})
 }
 
