@@ -365,6 +365,10 @@ fn main() {
         files_and_images_are_sent_before_their_paths_are_typed,
     );
     run(
+        "failed_commands_are_ticked_and_prompts_jumped_to",
+        failed_commands_are_ticked_and_prompts_jumped_to,
+    );
+    run(
         "a_pane_with_no_room_tells_nobody_its_size",
         a_pane_with_no_room_tells_nobody_its_size,
     );
@@ -2281,6 +2285,60 @@ fn stress_screen(bg: [u8; 3], fg: [u8; 3]) {
 
 /// The scrollbar: a thumb at the right edge that shows where the view is in the history, can be
 /// grabbed and dragged or jumped by clicking the track, and is hidden when it cannot help.
+/// A shell that reports its prompts (OSC 133) can be jumped through command by command, and a
+/// command that failed leaves a red tick on the scrollbar where it ended.
+fn failed_commands_are_ticked_and_prompts_jumped_to() {
+    use perch_native::terminal::actions::Action;
+    let mark = |rest: &str| format!("\x1b]133;{rest}\x1b\\");
+    let mut h = Harness::open(900., 420.);
+    h.attach(100, 24, "");
+    h.focus();
+    h.draw();
+    let mut stream = String::new();
+    for n in 0..60 {
+        let code = if n == 2 { 1 } else { 0 };
+        stream += &format!(
+            "{}$ cmd{n}\r\n{}out\r\nout\r\nout\r\n",
+            mark("A"),
+            mark("C")
+        );
+        stream += &mark(&format!("D;{code}"));
+    }
+    stream += &mark("A");
+    h.output(&stream);
+    let x = 900. - 4.;
+    let shot = h.draw();
+    // 241 rows in all; the failed command ended on row 12 (three commands of four rows).
+    let track = shot.cell.1 * 24.0;
+    let y = track * 12.0 / 241.0 + 1.0;
+    let tick = shot.at(x, y);
+    assert!(
+        tick[0] > tick[1] + 60,
+        "a red tick where it ended: {tick:?}"
+    );
+    let elsewhere = shot.at(x, track * 100.0 / 241.0);
+    assert!(
+        elsewhere[0] <= elsewhere[1] + 60,
+        "and none where nothing failed: {elsewhere:?}"
+    );
+
+    let first = |h: &mut Harness| h.view(|v, _| v.frame().row_text(0));
+    let live = first(&mut h);
+    let mut seen = vec![live.clone()];
+    while h.view(|v, cx| v.perform(Action::Command(-1), cx)) {
+        seen.push(first(&mut h));
+        assert!(seen.len() < 400, "the jumps end at the first prompt");
+    }
+    assert!(seen.len() > 10, "each jump moved the view: {}", seen.len());
+    assert_eq!(first(&mut h), "$ cmd0", "the first prompt is at the top");
+    assert!(h.view(|v, cx| v.perform(Action::Command(1), cx)));
+    assert_ne!(first(&mut h), "$ cmd0", "and forward goes on");
+    // Past the newest command is the live screen.
+    while h.view(|v, cx| v.perform(Action::Command(1), cx)) {}
+    assert_eq!(first(&mut h), live, "back at the bottom");
+    assert!(!h.view(|v, cx| v.perform(Action::Command(1), cx)));
+}
+
 fn scrollbar_in_the_pane() {
     use perch_core::protocol::SettingsData;
     use perch_native::terminal::actions::{Action, Scroll};

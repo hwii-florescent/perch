@@ -174,10 +174,19 @@ struct Painted {
     link: Vec<(u16, u16, u16)>,
     /// The composition: its text, the cell it starts at, and the cells it covers.
     marked: Option<(String, u16, u16, usize)>,
-    /// The scrollbar's rail and thumb.
-    bar: Option<(Bounds<Pixels>, Bounds<Pixels>)>,
+    /// The scrollbar's rail and thumb, and a tick for each command that failed.
+    bar: Option<Bar>,
     /// Kitty graphics images, where they go and in which layer.
     images: Vec<(Layer, Bounds<Pixels>, Arc<RenderImage>)>,
+}
+
+/// What the scrollbar draws: its rail and thumb, and the marks of failed commands in the red of
+/// the terminal's own palette.
+struct Bar {
+    rail: Bounds<Pixels>,
+    thumb: Bounds<Pixels>,
+    ticks: Vec<Bounds<Pixels>>,
+    failure: Rgb,
 }
 
 /// An image as uploaded: the image, the version of its pixels, and the part of it drawn.
@@ -1838,7 +1847,8 @@ impl TerminalView {
         }
         let images = self.image_layers(fit.metrics);
         let bar = self.scrollbar_geometry(bounds, fit.metrics);
-        self.bar = bar.map(|(hit, _)| hit);
+        let (hit, bar) = bar.unzip();
+        self.bar = hit;
         let frame = self.vt.frame();
         let frame_cursor_cell = frame.cursor_cell;
         self.cursor_cell = frame.cursor_cell;
@@ -1865,7 +1875,7 @@ impl TerminalView {
                     let cells = text_width(&text);
                     (text, x, y, cells)
                 }),
-            bar: bar.map(|(_, drawn)| drawn),
+            bar,
             images,
         }
     }
@@ -1919,12 +1929,11 @@ impl TerminalView {
     /// The scrollbar, when there is history to scroll on the primary screen of a pane wide
     /// enough for it, and the setting is on: its strip and thumb for clicks, and the rail and
     /// thumb as drawn.
-    #[allow(clippy::type_complexity)]
     fn scrollbar_geometry(
         &self,
         bounds: Bounds<Pixels>,
         metrics: Metrics,
-    ) -> Option<(BarHit, (Bounds<Pixels>, Bounds<Pixels>))> {
+    ) -> Option<(BarHit, Bar)> {
         let (cols, rows) = self.vt.size();
         if !self.settings.scrollbar || self.vt.alt_screen() || cols < scrollbar::MIN_COLS {
             return None;
@@ -1950,7 +1959,28 @@ impl TerminalView {
             point(lane.origin.x, thumb.origin.y),
             size(lane.size.width, thumb.size.height),
         );
-        Some((BarHit { lane, thumb: hit }, (rail, thumb)))
+        // A tick sits where its row is in the whole scrollback, two pixels tall and the rail's
+        // own width across the thumb's lane.
+        let ticks = self
+            .vt
+            .failed_rows()
+            .into_iter()
+            .filter(|&row| row < bar.total)
+            .map(|row| {
+                let y = self.origin.y + px(track * row as f32 / bar.total as f32);
+                Bounds::new(point(x - px(2.0), y), size(width + px(4.0), px(2.0)))
+            })
+            .collect();
+        let failure = self.vt.failure_color();
+        Some((
+            BarHit { lane, thumb: hit },
+            Bar {
+                rail,
+                thumb,
+                ticks,
+                failure,
+            },
+        ))
     }
 
     /// The row the thumb lands the view on when it is held `grab` px from its top and the
@@ -2055,6 +2085,16 @@ impl TerminalView {
                 }
                 cx.notify();
                 true
+            }
+            Action::Command(by) => {
+                let mut moved = self.vt.scroll_prompt(by);
+                // Past the newest command is the live screen.
+                if !moved && by > 0 && !self.vt.scrollbar().at_bottom() {
+                    self.vt.scroll_to_bottom();
+                    moved = true;
+                }
+                cx.notify();
+                moved
             }
             Action::Copy => self.copy(cx),
             Action::Paste => self.paste_clipboard(cx),
@@ -2588,13 +2628,24 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
     }
 
     // The scrollbar: a thin rail and a thumb, over the padding.
-    if let Some((rail, thumb)) = bar {
+    if let Some(Bar {
+        rail,
+        thumb,
+        ticks,
+        failure,
+    }) = bar
+    {
         let mut rail_color = color(frame.fg);
         rail_color.a = 0.2 * opacity;
         window.paint_quad(fill(snap_box(rail), rail_color));
         let mut thumb_color = color(frame.fg);
         thumb_color.a = 0.45 * opacity;
         window.paint_quad(fill(snap_box(thumb), thumb_color).corner_radii(px(2.0)));
+        for tick in ticks {
+            let mut tick_color = color(failure);
+            tick_color.a = 0.9 * opacity;
+            window.paint_quad(fill(snap_box(tick), tick_color));
+        }
     }
 }
 

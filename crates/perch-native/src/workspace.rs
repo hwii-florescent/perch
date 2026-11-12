@@ -1432,6 +1432,14 @@ impl Workspace {
                 Action::Paste,
                 "Nothing was pasted: this terminal is view only, or the clipboard has no text.",
             ),
+            "terminal.prevCommand" => (
+                Action::Command(-1),
+                "That terminal has no earlier command marked; the shell must report prompts (OSC 133).",
+            ),
+            "terminal.nextCommand" => (
+                Action::Command(1),
+                "That terminal is already at its newest command.",
+            ),
             "terminal.scrollTop" => (Action::Scroll(Scroll::Top), ""),
             "terminal.scrollBottom" => (Action::Scroll(Scroll::Bottom), ""),
             "terminal.scrollPageUp" => (Action::Scroll(Scroll::Pages(-1.0)), ""),

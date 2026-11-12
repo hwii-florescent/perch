@@ -341,6 +341,55 @@ struct Shared {
     replies: Vec<u8>,
     /// The last OSC 52 write since the events were taken.
     clipboard: Option<String>,
+    /// Where commands that failed ended (OSC 133 D with a non-zero code), followed through
+    /// scrolling and pruning by the terminal itself; the oldest go past [`MAX_FAILED`].
+    failed: Vec<g::GhosttyTrackedGridRef>,
+}
+
+/// Failed commands remembered per terminal.
+const MAX_FAILED: usize = 500;
+
+unsafe extern "C" fn on_semantic_prompt(
+    term: g::GhosttyTerminal,
+    userdata: *mut c_void,
+    event: *const g::GhosttyTerminalSemanticPrompt,
+) {
+    // SAFETY: as in `on_write_pty`; Ghostty passes an event that is valid for this call.
+    let (shared, event) = unsafe { (&mut *(userdata as *mut Shared), &*event) };
+    if event.kind != g::GHOSTTY_SEMANTIC_PROMPT_COMMAND_END
+        || !event.has_exit_code
+        || event.exit_code == 0
+    {
+        return;
+    }
+    let mut row = 0u16;
+    // SAFETY: reading the cursor row writes a u16; tracking takes a point in the active area.
+    unsafe {
+        let read = g::ghostty_terminal_get(
+            term,
+            g::GHOSTTY_TERMINAL_DATA_CURSOR_Y,
+            (&mut row as *mut u16).cast(),
+        );
+        let mut tracked = ptr::null_mut();
+        let point = g::GhosttyPoint {
+            tag: g::GHOSTTY_POINT_TAG_ACTIVE,
+            value: g::GhosttyPointValue {
+                coordinate: g::GhosttyPointCoordinate {
+                    x: 0,
+                    y: u32::from(row),
+                },
+            },
+        };
+        if read == g::GHOSTTY_SUCCESS
+            && g::ghostty_terminal_grid_ref_track(term, point, &mut tracked) == g::GHOSTTY_SUCCESS
+            && !tracked.is_null()
+        {
+            shared.failed.push(tracked);
+            if shared.failed.len() > MAX_FAILED {
+                g::ghostty_tracked_grid_ref_free(shared.failed.remove(0));
+            }
+        }
+    }
 }
 
 unsafe extern "C" fn on_write_pty(
@@ -538,6 +587,7 @@ impl Vt {
                 title_changed: false,
                 replies: Vec::new(),
                 clipboard: None,
+                failed: Vec::new(),
             });
             let set = |option, value: *const c_void| g::ghostty_terminal_set(term, option, value);
             set(
@@ -558,6 +608,8 @@ impl Vt {
             set(g::GHOSTTY_TERMINAL_OPT_TITLE_CHANGED, hold_ptr(title));
             let size: g::GhosttyTerminalSizeFn = Some(on_size);
             set(g::GHOSTTY_TERMINAL_OPT_SIZE, hold_ptr(size));
+            let prompt: g::GhosttyTerminalSemanticPromptFn = Some(on_semantic_prompt);
+            set(g::GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT, hold_ptr(prompt));
             let write: g::GhosttyTerminalWritePtyFn = Some(on_write_pty);
             set(g::GHOSTTY_TERMINAL_OPT_WRITE_PTY, hold_ptr(write));
             let clipboard: g::GhosttyTerminalClipboardWriteFn = Some(on_clipboard_write);
@@ -863,6 +915,39 @@ impl Vt {
     pub fn scroll_to_bottom(&mut self) {
         self.cache_valid = false;
         self.scroll(g::GHOSTTY_SCROLL_VIEWPORT_BOTTOM, |_| {});
+    }
+
+    /// Scroll to the previous (negative) or next (positive) prompt the shell marked with OSC 133.
+    /// False when there was none that way and the view did not move.
+    pub fn scroll_prompt(&mut self, delta: isize) -> bool {
+        let before = self.scrollbar().offset;
+        self.cache_valid = false;
+        self.scroll(g::GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT, |s| {
+            s.value.delta_prompt = delta
+        });
+        self.scrollbar().offset != before
+    }
+
+    /// The rows, counted from the oldest line as the scrollbar counts them, where a command
+    /// ended with a failure and which are still held.
+    pub fn failed_rows(&self) -> Vec<u64> {
+        self.shared
+            .failed
+            .iter()
+            .filter_map(|&tracked| {
+                let mut at = g::GhosttyPointCoordinate::default();
+                // SAFETY: the handle is ours until `Drop`; it writes one coordinate.
+                let found = unsafe {
+                    g::ghostty_tracked_grid_ref_point(tracked, g::GHOSTTY_POINT_TAG_SCREEN, &mut at)
+                };
+                (found == g::GHOSTTY_SUCCESS).then_some(u64::from(at.y))
+            })
+            .collect()
+    }
+
+    /// The red of the terminal's palette, which marks failed commands.
+    pub fn failure_color(&self) -> Rgb {
+        self.theme.ansi[1]
     }
 
     pub fn scrollbar(&self) -> Scrollbar {
@@ -1402,6 +1487,10 @@ impl Drop for Vt {
     fn drop(&mut self) {
         self.search.free();
         self.gesture.free(self.term);
+        for tracked in self.shared.failed.drain(..) {
+            // SAFETY: each handle was made by the terminal's callback and is freed once, here.
+            unsafe { g::ghostty_tracked_grid_ref_free(tracked) };
+        }
         // SAFETY: every handle was created in `new` and is freed once, the render state last
         // because the terminal's callbacks may still name it until the terminal is gone.
         unsafe {
@@ -1537,6 +1626,43 @@ mod tests {
         // A program that turns the mode off gets the symbol's own width: one cell.
         let mut plain = fed(10, 1, "\x1b[?2027l\u{270d}\u{fe0f}x");
         assert!(!plain.frame().rows[0][0].wide);
+    }
+
+    /// Three commands of a prompt line and three output lines each, the second of which fails.
+    fn commands() -> Vt {
+        let mark = |rest: &str| format!("\x1b]133;{rest}\x1b\\");
+        let mut stream = String::new();
+        for (n, code) in [(1, 0), (2, 1), (3, 0)] {
+            stream += &format!("{}$ cmd{n}\r\n{}", mark("A"), mark("C"));
+            stream += "out\r\nout\r\nout\r\n";
+            stream += &mark(&format!("D;{code}"));
+        }
+        stream += &mark("A");
+        fed(20, 5, &stream)
+    }
+
+    #[test]
+    fn a_failed_command_is_remembered_where_it_ended_and_prompts_can_be_jumped_to() {
+        let mut vt = commands();
+        // The second command's prompt was on row 4 and its output ended on row 7: the failure
+        // is marked where the next prompt was drawn, row 8, counted from the oldest line.
+        assert_eq!(vt.failed_rows(), vec![8]);
+        let bottom = vt.scrollbar().offset;
+        assert!(vt.scroll_prompt(-1), "back to the previous prompt");
+        let one_back = vt.scrollbar().offset;
+        assert!(one_back < bottom);
+        assert!(vt.scroll_prompt(-1));
+        assert!(vt.scrollbar().offset < one_back);
+        while vt.scroll_prompt(-1) {}
+        assert!(!vt.scroll_prompt(-1), "nothing before the first prompt");
+        assert!(vt.scroll_prompt(1), "and forward again");
+        // More output scrolls the history; the mark stays on its line.
+        vt.write("more\r\n".repeat(30).as_bytes());
+        assert_eq!(vt.failed_rows(), vec![8]);
+        // A shell that does not report an exit code, or reports success, marks nothing.
+        let mut plain = fed(20, 5, "\x1b]133;D\x1b\\\x1b]133;D;0\x1b\\");
+        assert_eq!(plain.failed_rows(), Vec::<u64>::new());
+        plain.write(b"x");
     }
 
     #[test]

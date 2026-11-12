@@ -69,6 +69,9 @@ pub enum Action {
     /// itself; nothing is sent to it.
     Clear,
     Find,
+    /// Scroll to the previous (negative) or next (positive) command the shell marked (OSC 133);
+    /// past the newest goes to the bottom.
+    Command(isize),
     /// Take the input and the size from whichever view holds them.
     TakeControl,
     /// End the shell. Needs the input lease.

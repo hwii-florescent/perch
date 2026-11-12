@@ -168,6 +168,16 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Scroll to the bottom",
         &["mod+down"],
     ),
+    terminal(
+        "terminal.prevCommand",
+        "Jump to the previous command",
+        &["cmd+shift+up", "ctrl+shift+pageup"],
+    ),
+    terminal(
+        "terminal.nextCommand",
+        "Jump to the next command",
+        &["cmd+shift+down", "ctrl+shift+pagedown"],
+    ),
     terminal("terminal.scrollPageUp", "Scroll up a page", &[""]),
     terminal("terminal.scrollPageDown", "Scroll down a page", &[""]),
     terminal(
@@ -366,6 +376,8 @@ pub const TYPED: &[(&str, Option<&str>)] = &[
     ("terminal.copy", None),
     ("terminal.selectAll", None),
     ("terminal.scroll", None),
+    ("terminal.prevCommand", None),
+    ("terminal.nextCommand", None),
     ("terminal.takeControl", None),
     ("terminal.kill", None),
     ("terminal.show", Some("id")),
