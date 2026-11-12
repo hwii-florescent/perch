@@ -344,6 +344,15 @@ fn main() {
         output_wakes_only_what_is_shown,
     );
     run(
+        "output_that_changes_nothing_does_not_redraw",
+        output_that_changes_nothing_does_not_redraw,
+    );
+    run("a_flood_is_parsed_in_turns", a_flood_is_parsed_in_turns);
+    run(
+        "output_far_behind_is_dropped_and_the_terminal_detaches",
+        output_far_behind_is_dropped_and_the_terminal_detaches,
+    );
+    run(
         "dropped_files_type_their_paths",
         dropped_files_type_their_paths,
     );
@@ -940,6 +949,126 @@ fn output_wakes_only_what_is_shown() {
         h.view(|v, _| v.frame().row_text(0)).contains("held"),
         "and shows what the program held back"
     );
+}
+
+/// Output that leaves the screen as it was (a title, a cursor that stays) wakes nobody; output
+/// that changes a letter or the cursor does.
+fn output_that_changes_nothing_does_not_redraw() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let mut h = Harness::open(900., 420.);
+    h.attach(80, 24, "hello");
+    h.draw();
+    let redraws = Rc::new(Cell::new(0u32));
+    let _watch = h.view(|_, cx| {
+        let counter = redraws.clone();
+        let me = cx.entity();
+        cx.observe(&me, move |_, _, _| counter.set(counter.get() + 1))
+    });
+    let changes = |h: &mut Harness, text: &str| {
+        h.draw();
+        let before = redraws.get();
+        h.output(text);
+        redraws.get() - before
+    };
+    assert_eq!(
+        changes(&mut h, "\x1b]0;a title\x07"),
+        0,
+        "a title is not on the screen"
+    );
+    assert_eq!(changes(&mut h, "\x1b]0;another\x07"), 0);
+    assert!(changes(&mut h, "!") > 0, "a letter is");
+    assert!(changes(&mut h, "\x1b[?25l") > 0, "a cursor that goes is");
+    assert_eq!(
+        changes(&mut h, "\x1b[?25l"),
+        0,
+        "a cursor that stays hidden is not"
+    );
+    assert!(
+        changes(&mut h, "\x1b_Ga=q,i=1;\x1b\\") > 0,
+        "graphics always draw"
+    );
+}
+
+/// A flood is parsed a turn at a time with the window's other work between the turns, and what
+/// the shell wrote last is on the screen when it has all been parsed.
+fn a_flood_is_parsed_in_turns() {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+    let mut h = Harness::open(900., 420.);
+    h.attach(80, 24, "");
+    h.draw();
+    // The window's other work: a task that does one tick each time it is given the thread.
+    let ticks = Rc::new(Cell::new(0u32));
+    let working = ticks.clone();
+    h.cx.update(|cx| {
+        cx.spawn(async move |_| {
+            for _ in 0..100_000 {
+                working.set(working.get() + 1);
+                let mut yielded = false;
+                std::future::poll_fn(|task| {
+                    if std::mem::replace(&mut yielded, true) {
+                        std::task::Poll::Ready(())
+                    } else {
+                        task.waker().wake_by_ref();
+                        std::task::Poll::Pending
+                    }
+                })
+                .await;
+            }
+        })
+        .detach();
+    });
+    // What the tick counter said each time the view asked to be drawn.
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let _watch = h.view(|_, cx| {
+        let (ticks, seen) = (ticks.clone(), seen.clone());
+        let me = cx.entity();
+        cx.observe(&me, move |_, _, _| seen.borrow_mut().push(ticks.get()))
+    });
+
+    let flood: String = (0..400_000).map(|n| format!("line {n}\r\n")).collect();
+    assert!(flood.len() > 4 * 1024 * 1024);
+    h.view(|v, cx| v.output(&flood, cx));
+    assert!(
+        h.view(|v, _| v.backlog_bytes()) > flood.len() / 2,
+        "a turn does not take all of it"
+    );
+    h.cx.run_until_parked();
+    assert_eq!(h.view(|v, _| v.backlog_bytes()), 0, "all of it was parsed");
+    let turns = h.view(|v, _| v.turns());
+    assert!(turns >= 8, "{turns} turns for {} bytes", flood.len());
+    let mut distinct = seen.borrow().clone();
+    distinct.dedup();
+    assert!(
+        distinct.len() >= 5,
+        "the window's other work ran between the turns: {distinct:?}"
+    );
+    let rows = h.view(|v, _| (0..24).map(|y| v.frame().row_text(y)).collect::<Vec<_>>());
+    assert!(rows.iter().any(|r| r == "line 399999"), "{rows:?}");
+    assert!(
+        !rows.iter().any(|r| r == "line 0"),
+        "the oldest lines scrolled away"
+    );
+}
+
+/// Output so far behind that it could not be caught up is dropped, with the connection, and the
+/// terminal says it is waiting to attach again; the screen it had stays.
+fn output_far_behind_is_dropped_and_the_terminal_detaches() {
+    let mut h = Harness::open(900., 420.);
+    h.attach(80, 24, "kept");
+    h.draw();
+    h.sent();
+    let huge = "x".repeat(perch_native::terminal::view::MAX_BACKLOG + 1);
+    h.output(&huge);
+    assert!(matches!(
+        h.view(|v, _| v.status().clone()),
+        Status::Disconnected(_)
+    ));
+    assert_eq!(h.view(|v, _| v.backlog_bytes()), 0, "nothing is kept of it");
+    assert!(!h.view(|v, _| v.can_type()));
+    assert!(h.view(|v, _| v.frame().row_text(0)).contains("kept"));
+    assert!(h.view(|v, _| v.note()).is_some());
 }
 
 /// Files dropped on the pane, or copied in the file manager and pasted, are typed as quoted

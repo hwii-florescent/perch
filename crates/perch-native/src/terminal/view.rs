@@ -47,7 +47,7 @@ use gpui::{
 use perch_core::agent_fleet::AgentState;
 use perch_core::iterm_profile::TerminalProfile;
 use perch_core::protocol::SettingsData;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -115,6 +115,41 @@ struct Find {
     replace_on_type: bool,
 }
 
+/// What the screen is to take, in the order the core sent it.
+enum Work {
+    Text(String),
+    /// The shell's terminal was resized.
+    Size(u16, u16),
+    /// What follows is a replay of the past (the attach repaint), or no longer is.
+    Replay(bool),
+}
+
+/// The time one turn of parsing may take before the window gets the thread back: live output
+/// gets a short one, so typing and drawing stay quick; the repaint on attaching gets a long one,
+/// because nothing is worth drawing until it is in.
+const LIVE_BUDGET: std::time::Duration = std::time::Duration::from_millis(6);
+const REPLAY_BUDGET: std::time::Duration = std::time::Duration::from_millis(250);
+/// The most live text one turn parses, whatever the clock says.
+const TURN_BYTES: usize = 512 * 1024;
+/// Output this far behind is not parsed: it is dropped and the terminal is attached again, which
+/// repaints the screen as the core has it (the web's `recoverTerminalStream`).
+pub const MAX_BACKLOG: usize = 16 * 1024 * 1024;
+
+/// Give the thread back once, and come back at the next turn of the executor.
+async fn yield_now() {
+    let mut yielded = false;
+    std::future::poll_fn(|cx| {
+        if yielded {
+            std::task::Poll::Ready(())
+        } else {
+            yielded = true;
+            cx.waker().wake_by_ref();
+            std::task::Poll::Pending
+        }
+    })
+    .await
+}
+
 /// How often the search indexes while it has more to do, and while it has not.
 const SEARCH_BUSY: std::time::Duration = std::time::Duration::from_millis(33);
 const SEARCH_IDLE: std::time::Duration = std::time::Duration::from_millis(200);
@@ -172,6 +207,14 @@ pub struct TerminalView {
     pending: Option<Pending>,
     to_core: Option<UnboundedSender<ToCore>>,
     _reader: Option<Task<()>>,
+    /// Output the core sent that the screen has not taken yet, in order, and how many bytes of
+    /// text it holds. A turn parses what fits its budget; a task parses the rest between turns
+    /// of the window's own work.
+    backlog: VecDeque<Work>,
+    backlog_bytes: usize,
+    draining: Option<Task<()>>,
+    /// How many turns of parsing have run.
+    parse_turns: u64,
     /// The leases this connection holds.
     input_lease: bool,
     resize_lease: bool,
@@ -255,6 +298,10 @@ impl TerminalView {
             pending: None,
             to_core: None,
             _reader: None,
+            backlog: VecDeque::new(),
+            backlog_bytes: 0,
+            draining: None,
+            parse_turns: 0,
             input_lease: false,
             resize_lease: false,
             fitted: None,
@@ -564,9 +611,14 @@ impl TerminalView {
                 // The size is told once after attaching, as the web terminal does, whatever
                 // the fit looks like.
                 self.requested = None;
-                self.vt.set_replaying(true);
-                self.output(&replay, cx);
-                self.vt.set_replaying(false);
+                // A new attach repaints from a reset: what was waiting from before is moot.
+                self.backlog.clear();
+                self.backlog_bytes = 0;
+                self.draining = None;
+                self.backlog.push_back(Work::Replay(true));
+                self.enqueue(&replay);
+                self.backlog.push_back(Work::Replay(false));
+                self.flush(cx);
                 self.set_status(Status::Live, cx);
             }
             FromCore::Output(data) => self.output(&data, cx),
@@ -606,17 +658,128 @@ impl TerminalView {
     }
 
     /// Feed output to the screen, taking the sizes in it as they come: the core announces every
-    /// resize in the stream, in order with the bytes it applies to.
+    /// resize in the stream, in order with the bytes it applies to. What does not fit the turn's
+    /// budget is parsed between the window's other work ([`Self::backlog_bytes`] says how much
+    /// waits).
     pub fn output(&mut self, data: &str, cx: &mut Context<Self>) {
+        self.enqueue(data);
+        self.flush(cx);
+    }
+
+    /// How many turns of parsing have run: one per call that parsed anything, more for a flood.
+    pub fn turns(&self) -> u64 {
+        self.parse_turns
+    }
+
+    /// How many bytes of output wait to be parsed.
+    pub fn backlog_bytes(&self) -> usize {
+        self.backlog_bytes
+    }
+
+    fn enqueue(&mut self, data: &str) {
         for piece in attach::split_size_markers(data) {
             match piece {
-                Piece::Text(text) => self.vt.write(text.as_bytes()),
-                Piece::Size { cols, rows } => {
+                Piece::Text(text) => {
+                    self.backlog_bytes += text.len();
+                    match self.backlog.back_mut() {
+                        Some(Work::Text(last)) => last.push_str(text),
+                        _ => self.backlog.push_back(Work::Text(text.to_owned())),
+                    }
+                }
+                Piece::Size { cols, rows } => self.backlog.push_back(Work::Size(cols, rows)),
+            }
+        }
+    }
+
+    /// Parse what fits a turn now and see that the rest follows, or give up on a stream that is
+    /// further behind than the window can catch up.
+    fn flush(&mut self, cx: &mut Context<Self>) {
+        if self.backlog_bytes > MAX_BACKLOG {
+            self.overloaded(cx);
+            return;
+        }
+        // A task is already working through it, in order.
+        if self.draining.is_some() {
+            return;
+        }
+        if self.turn(cx) {
+            self.draining = Some(cx.spawn(async move |this, cx| loop {
+                yield_now().await;
+                match this.update(cx, |this, cx| this.turn(cx)) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        let _ = this.update(cx, |this, _| this.draining = None);
+                        return;
+                    }
+                    Err(_) => return,
+                }
+            }));
+        }
+    }
+
+    /// The core sent more than [`MAX_BACKLOG`] bytes the window had not parsed. Nothing is lost
+    /// that attaching again does not repaint, so the queue is dropped, the connection let go
+    /// (the shell keeps running), and the window attaches again as it does after any drop.
+    fn overloaded(&mut self, cx: &mut Context<Self>) {
+        self.backlog.clear();
+        self.backlog_bytes = 0;
+        self.draining = None;
+        self._reader = None;
+        self.to_core = None;
+        self.core_said(
+            FromCore::Disconnected("the terminal sent output faster than it could be shown".into()),
+            cx,
+        );
+    }
+
+    /// One turn of parsing: until the budget or the byte limit is spent. True when output is left.
+    fn turn(&mut self, cx: &mut Context<Self>) -> bool {
+        self.parse_turns += 1;
+        let started = std::time::Instant::now();
+        let mut bytes = 0;
+        let mut images = false;
+        while let Some(work) = self.backlog.pop_front() {
+            match work {
+                Work::Replay(on) => self.vt.set_replaying(on),
+                Work::Size(cols, rows) => {
                     let cell = self.cell_px();
                     self.vt.resize(cols, rows, cell);
                 }
+                Work::Text(mut text) => {
+                    // Live text is cut to the room left in the turn, on a character boundary.
+                    if !self.vt.replaying() && text.len() > TURN_BYTES - bytes {
+                        let mut cut = TURN_BYTES - bytes;
+                        while cut > 0 && !text.is_char_boundary(cut) {
+                            cut -= 1;
+                        }
+                        if cut == 0 {
+                            cut = text.chars().next().map_or(0, char::len_utf8);
+                        }
+                        let rest = text.split_off(cut);
+                        self.backlog.push_front(Work::Text(rest));
+                    }
+                    bytes += text.len();
+                    self.backlog_bytes -= text.len();
+                    images |= text.contains("\x1b_G");
+                    self.vt.write(text.as_bytes());
+                }
+            }
+            let budget = if self.vt.replaying() {
+                REPLAY_BUDGET
+            } else {
+                LIVE_BUDGET
+            };
+            if started.elapsed() >= budget || (!self.vt.replaying() && bytes >= TURN_BYTES) {
+                break;
             }
         }
+        self.after_parsing(images, cx);
+        !self.backlog.is_empty()
+    }
+
+    /// What follows from the bytes just parsed: the answers to the program's queries, what it
+    /// asked of the window, and a redraw if anything on screen changed.
+    fn after_parsing(&mut self, images: bool, cx: &mut Context<Self>) {
         // Answers to the program's queries go back only from the view that types for it: the
         // others would answer twice.
         let replies = self.vt.take_replies();
@@ -650,8 +813,9 @@ impl TerminalView {
             }
         }
         // A pane that is not on screen draws nothing, so output to it redraws nothing; it is
-        // drawn afresh when it comes back.
-        if !self.hidden {
+        // drawn afresh when it comes back. Output that changes nothing visible (a title that
+        // spins, a cursor that stays) redraws nothing either.
+        if !self.hidden && (self.vt.needs_draw() || images) {
             cx.notify();
         }
         // A block the program began and never ended is shown at its deadline even if no more

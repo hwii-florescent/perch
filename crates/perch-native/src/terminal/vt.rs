@@ -21,6 +21,7 @@
 use ghostty_sys as g;
 use std::ffi::c_void;
 use std::ptr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Scrollback kept per terminal: whichever of these Ghostty reaches first. Ghostty prunes whole
@@ -208,7 +209,8 @@ pub struct Cursor {
 /// The visible rows, read once.
 #[derive(Clone, Debug)]
 pub struct Frame {
-    pub rows: Vec<Vec<Cell>>,
+    /// Each row is shared with the frame before it when the terminal did not change it.
+    pub rows: Vec<Arc<Vec<Cell>>>,
     /// Where to draw the cursor; `None` when the program hid it or it is scrolled out of view.
     pub cursor: Option<Cursor>,
     /// The cursor's cell even when hidden: where an input method puts its candidate window.
@@ -224,7 +226,7 @@ impl Frame {
     pub fn row_text(&self, y: usize) -> String {
         let mut text = String::new();
         let mut tail = false;
-        for cell in self.rows.get(y).into_iter().flatten() {
+        for cell in self.rows.get(y).into_iter().flat_map(|row| row.iter()) {
             // The second half of a wide character has no text of its own.
             if !tail {
                 text.push_str(if cell.text.is_empty() {
@@ -458,6 +460,15 @@ pub struct Vt {
     /// Replies and clipboard writes are dropped while a replay is fed: they answer queries and
     /// requests the program made long ago.
     replaying: bool,
+    /// The rows of the last frame read, which an unchanged row is taken from, and whether they
+    /// can be: not after anything that changes how a row reads other than the terminal's own
+    /// dirty flags (the theme, a resize, a scroll, a selection).
+    row_cache: Vec<Arc<Vec<Cell>>>,
+    cache_valid: bool,
+    /// The cursor as last asked about, for [`Vt::needs_draw`].
+    cursor_seen: Option<(bool, bool, u16, u16, i32, bool)>,
+    /// Read every row afresh, as before rows were reused (for comparing).
+    pub reread_all_rows: bool,
 }
 
 fn ok(result: g::GhosttyResult, what: &str) {
@@ -576,6 +587,10 @@ impl Vt {
                 rows,
                 theme: Theme::default(),
                 replaying: false,
+                row_cache: Vec::new(),
+                cache_valid: false,
+                cursor_seen: None,
+                reread_all_rows: false,
             };
             vt.apply_theme();
             vt
@@ -634,6 +649,7 @@ impl Vt {
     pub fn set_theme(&mut self, theme: Theme) {
         if self.theme != theme {
             self.theme = theme;
+            self.cache_valid = false;
             self.apply_theme();
         }
     }
@@ -694,6 +710,10 @@ impl Vt {
         self.replaying = replaying;
     }
 
+    pub fn replaying(&self) -> bool {
+        self.replaying
+    }
+
     /// Resize the grid, reflowing the screen and its history. `cell` is a cell in device
     /// pixels, for the terminal size reports a program may ask for.
     pub fn resize(&mut self, cols: u16, rows: u16, cell: (u32, u32)) {
@@ -711,6 +731,7 @@ impl Vt {
         let done = unsafe { g::ghostty_terminal_resize(self.term, cols, rows, cell_w, cell_h) };
         if done == g::GHOSTTY_SUCCESS {
             (self.cols, self.rows) = (cols, rows);
+            self.cache_valid = false;
         }
     }
 
@@ -813,20 +834,24 @@ impl Vt {
 
     /// Scroll the viewport by lines: negative toward older output.
     pub fn scroll_viewport(&mut self, delta: isize) {
+        self.cache_valid = false;
         self.scroll(g::GHOSTTY_SCROLL_VIEWPORT_DELTA, |s| s.value.delta = delta);
     }
 
     /// Scroll so `row`, counted from the oldest line, is the first visible row.
     pub fn scroll_to_row(&mut self, row: usize) {
+        self.cache_valid = false;
         self.scroll(g::GHOSTTY_SCROLL_VIEWPORT_ROW, |s| s.value.row = row);
     }
 
     pub fn scroll_to_top(&mut self) {
+        self.cache_valid = false;
         self.scroll(g::GHOSTTY_SCROLL_VIEWPORT_TOP, |_| {});
     }
 
     /// Back to the live screen.
     pub fn scroll_to_bottom(&mut self) {
+        self.cache_valid = false;
         self.scroll(g::GHOSTTY_SCROLL_VIEWPORT_BOTTOM, |_| {});
     }
 
@@ -898,8 +923,48 @@ impl Vt {
         out
     }
 
+    /// Whether what was parsed since the last frame changed anything a frame shows: a row, or
+    /// the cursor (its place, look or visibility). Output that only sets a title, or redraws
+    /// the same text, changes nothing. A block the program holds back shows nothing yet.
+    pub fn needs_draw(&mut self) -> bool {
+        if self.shared.held_since.is_some() {
+            return false;
+        }
+        let state = self.shared.state;
+        // SAFETY: handles are owned by self; each getter writes the type its key documents.
+        unsafe {
+            g::ghostty_render_state_update(state, self.term);
+            let mut dirty: g::GhosttyRenderStateDirty = g::GHOSTTY_RENDER_STATE_DIRTY_FULL;
+            g::ghostty_render_state_get(
+                state,
+                g::GHOSTTY_RENDER_STATE_DATA_DIRTY,
+                (&mut dirty as *mut g::GhosttyRenderStateDirty).cast(),
+            );
+            let mut cur = g::GhosttyRenderStateCursor {
+                size: std::mem::size_of::<g::GhosttyRenderStateCursor>(),
+                ..Default::default()
+            };
+            g::ghostty_render_state_get(
+                state,
+                g::GHOSTTY_RENDER_STATE_DATA_CURSOR,
+                (&mut cur as *mut g::GhosttyRenderStateCursor).cast(),
+            );
+            let seen = (
+                cur.visible,
+                cur.viewport_has_value,
+                cur.viewport_x,
+                cur.viewport_y,
+                cur.visual_style as i32,
+                cur.blinking,
+            );
+            let moved = self.cursor_seen.replace(seen) != Some(seen);
+            dirty != g::GHOSTTY_RENDER_STATE_DIRTY_FALSE || moved
+        }
+    }
+
     /// Updates the render state (unless a synchronised-output block holds the frame back) and
-    /// reads the visible rows.
+    /// reads the visible rows. A row the terminal did not change since the last frame is the
+    /// same row, not read again.
     pub fn frame(&mut self) -> Frame {
         if let Some(since) = self.shared.held_since {
             if since.elapsed() > MAX_HOLD {
@@ -937,13 +1002,39 @@ impl Vt {
             let fg_default = Rgb::from(colors.foreground);
             let bg_default = Rgb::from(colors.background);
 
-            let mut rows = Vec::with_capacity(self.rows as usize);
+            let mut dirty: g::GhosttyRenderStateDirty = g::GHOSTTY_RENDER_STATE_DIRTY_FULL;
+            g::ghostty_render_state_get(
+                state,
+                g::GHOSTTY_RENDER_STATE_DATA_DIRTY,
+                (&mut dirty as *mut g::GhosttyRenderStateDirty).cast(),
+            );
+            // A selection shows in the cells without the terminal marking its rows, so rows are
+            // not reused while there is one, nor for the frame after it ends.
+            let selecting = self.has_selection();
+            let reuse = !self.reread_all_rows
+                && self.cache_valid
+                && !selecting
+                && self.row_cache.len() == self.rows as usize
+                && dirty != g::GHOSTTY_RENDER_STATE_DIRTY_FULL;
+            let mut rows: Vec<Arc<Vec<Cell>>> = Vec::with_capacity(self.rows as usize);
             g::ghostty_render_state_get(
                 state,
                 g::GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR,
                 (&mut self.rows_it as *mut g::GhosttyRenderStateRowIterator).cast(),
             );
             while g::ghostty_render_state_row_iterator_next(self.rows_it) {
+                if reuse {
+                    let mut changed = true;
+                    g::ghostty_render_state_row_get(
+                        self.rows_it,
+                        g::GHOSTTY_RENDER_STATE_ROW_DATA_DIRTY,
+                        (&mut changed as *mut bool).cast(),
+                    );
+                    if !changed {
+                        rows.push(self.row_cache[rows.len()].clone());
+                        continue;
+                    }
+                }
                 g::ghostty_render_state_row_get(
                     self.rows_it,
                     g::GHOSTTY_RENDER_STATE_ROW_DATA_CELLS,
@@ -953,8 +1044,10 @@ impl Vt {
                 while g::ghostty_render_state_row_cells_next(self.cells) {
                     row.push(self.read_cell(&colors));
                 }
-                rows.push(row);
+                rows.push(Arc::new(row));
             }
+            self.row_cache.clone_from(&rows);
+            self.cache_valid = !selecting;
 
             let mut cur = g::GhosttyRenderStateCursor {
                 size: std::mem::size_of::<g::GhosttyRenderStateCursor>(),
@@ -1806,6 +1899,173 @@ mod tests {
         }
         let large = vt.scrollback_rows();
         assert!(large > 9_000, "{large} rows kept at 20,000");
+    }
+
+    #[test]
+    fn output_that_changes_nothing_needs_no_draw() {
+        let mut vt = Vt::new(40, 6);
+        vt.write(b"hello");
+        vt.frame();
+        // The first look at the cursor is a change; after that, unchanged is unchanged.
+        assert!(vt.needs_draw());
+        vt.frame();
+        assert!(!vt.needs_draw(), "nothing happened");
+        vt.write(b"\x1b]0;a title\x07");
+        assert!(!vt.needs_draw(), "a title is not on the screen");
+        vt.write(b"!");
+        assert!(vt.needs_draw(), "a letter is");
+        vt.frame();
+        vt.write(b"\x1b[?25l");
+        assert!(vt.needs_draw(), "a cursor that goes is");
+        vt.frame();
+        vt.write(b"\x1b[?25l");
+        assert!(!vt.needs_draw(), "a cursor that stays hidden is not");
+        // A block the program holds back shows nothing yet.
+        vt.write(b"\x1b[?2026hheld");
+        assert!(!vt.needs_draw());
+        vt.write(b"\x1b[?2026l");
+        assert!(vt.needs_draw());
+    }
+
+    /// A row the terminal did not change is the very row of the frame before; and whatever the
+    /// terminal does, a frame that reuses rows reads the same as one that reads them all afresh.
+    #[test]
+    fn reused_rows_read_as_rows_read_afresh() {
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = move |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        };
+        let mut reused = Vt::new(30, 8);
+        let mut fresh = Vt::new(30, 8);
+        fresh.reread_all_rows = true;
+        let (mut shared_rows, mut frames) = (0, 0);
+        let mut last: Option<Frame> = None;
+        for step in 0..600 {
+            let text = |n: &mut dyn FnMut(u64) -> u64| {
+                let words = [
+                    "alpha",
+                    "β",
+                    "日本",
+                    "\u{1f600}",
+                    "e\u{301}",
+                    "x",
+                    "  ",
+                    "tab\t",
+                ];
+                (0..1 + n(6))
+                    .map(|_| words[n(words.len() as u64) as usize])
+                    .collect::<String>()
+            };
+            let op: Vec<u8> = match next(12) {
+                0..=3 => format!("{}\r\n", text(&mut next)).into_bytes(),
+                4 => format!("\x1b[{};{}H{}", 1 + next(8), 1 + next(30), text(&mut next))
+                    .into_bytes(),
+                5 => format!("\x1b[{}m{}\x1b[0m", 30 + next(8), text(&mut next)).into_bytes(),
+                6 => format!("\x1b[{}K", next(3)).into_bytes(),
+                7 => format!("\x1b[{};{}r", 1 + next(3), 5 + next(4)).into_bytes(),
+                8 => b"\x1b[1;1H\x1b[2J".to_vec(),
+                9 => b"\x1b[?1049h".to_vec(),
+                10 => b"\x1b[?1049l".to_vec(),
+                _ => text(&mut next).into_bytes(),
+            };
+            reused.write(&op);
+            fresh.write(&op);
+            match next(14) {
+                0 => {
+                    reused.select_all();
+                    fresh.select_all();
+                }
+                1 => {
+                    reused.clear_selection();
+                    fresh.clear_selection();
+                }
+                2 => {
+                    let by = next(7) as isize - 3;
+                    reused.scroll_viewport(by);
+                    fresh.scroll_viewport(by);
+                }
+                3 => {
+                    reused.scroll_to_bottom();
+                    fresh.scroll_to_bottom();
+                }
+                4 => {
+                    let (c, r) = (20 + next(20) as u16, 5 + next(6) as u16);
+                    reused.resize(c, r, (8, 16));
+                    fresh.resize(c, r, (8, 16));
+                }
+                5 => {
+                    let theme = Theme {
+                        bg: Rgb(step as u8, 20, 30),
+                        ..Theme::default()
+                    };
+                    reused.set_theme(theme.clone());
+                    fresh.set_theme(theme);
+                }
+                _ => {}
+            }
+            // Not every step is drawn: frames are taken when a view draws.
+            if next(3) == 0 {
+                continue;
+            }
+            let a = reused.frame();
+            let b = fresh.frame();
+            assert_eq!(a.rows.len(), b.rows.len(), "step {step}");
+            for (y, (x, y2)) in a.rows.iter().zip(&b.rows).enumerate() {
+                assert_eq!(x, y2, "step {step}, row {y}");
+            }
+            assert_eq!(a.cursor, b.cursor, "step {step}");
+            if let Some(before) = &last {
+                shared_rows += a
+                    .rows
+                    .iter()
+                    .zip(&before.rows)
+                    .filter(|(x, y)| Arc::ptr_eq(x, y))
+                    .count();
+                frames += 1;
+            }
+            last = Some(a);
+        }
+        assert!(frames > 100);
+        assert!(
+            shared_rows > frames,
+            "{shared_rows} rows were reused in {frames} frames: the reuse did not happen"
+        );
+    }
+
+    /// What reusing rows saves: a 200 x 60 screen where one row changes between frames. Run with
+    /// `cargo test -p perch-native --release --lib -- --ignored --nocapture frame_cost`.
+    #[test]
+    #[ignore = "a measurement, not a check"]
+    fn frame_cost_with_and_without_reused_rows() {
+        let time = |reread: bool| {
+            let mut vt = Vt::new(200, 60);
+            vt.reread_all_rows = reread;
+            for line in 0..60 {
+                vt.write(
+                    format!(
+                        "\x1b[3{}mline {line} {}\x1b[0m\r\n",
+                        line % 8,
+                        "x".repeat(150)
+                    )
+                    .as_bytes(),
+                );
+            }
+            vt.frame();
+            let started = Instant::now();
+            for n in 0..500 {
+                vt.write(format!("\x1b[30;1Hchanged {n}").as_bytes());
+                vt.frame();
+            }
+            started.elapsed() / 500
+        };
+        eprintln!(
+            "per frame, one row changed: {:?} reading every row, {:?} reusing the others",
+            time(true),
+            time(false)
+        );
     }
 
     #[test]

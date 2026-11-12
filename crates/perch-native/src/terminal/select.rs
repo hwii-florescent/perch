@@ -461,7 +461,12 @@ mod tests {
         vt.scroll_viewport(10);
         assert_eq!(vt.selection_text().as_deref(), Some(text.as_str()));
         vt.scroll_viewport(-10);
-        assert!(vt.frame().rows.iter().flatten().any(|c| c.selected));
+        assert!(vt
+            .frame()
+            .rows
+            .iter()
+            .flat_map(|row| row.iter())
+            .any(|c| c.selected));
     }
 
     #[test]
