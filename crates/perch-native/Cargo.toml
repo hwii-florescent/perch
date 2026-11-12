@@ -1,0 +1,37 @@
+[package]
+name = "perch-native"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native GPUI desktop client for a running perch-core."
+
+[lib]
+name = "perch_native"
+path = "src/lib.rs"
+
+[[bin]]
+name = "perch-native"
+path = "src/main.rs"
+
+[dependencies]
+perch-core = { path = "../perch-core" }
+perchd = { path = "../perchd" }
+anyhow = "1"
+futures = "0.3"
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time", "macros"] }
+tokio-tungstenite = "0.24"
+# crates.io pre-release snapshot of Zed's GPUI, pinned exactly.
+gpui = { package = "gpui-pre", version = "=0.3.8" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit", "runtime_shaders"] }
+
+[dev-dependencies]
+libc = "0.2"
+# `Window::render_to_image` and the Metal headless renderer exist only behind test-support.
+gpui = { package = "gpui-pre", version = "=0.3.8", features = ["test-support"] }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit", "runtime_shaders", "test-support"] }
+
+[[test]]
+name = "terminal_session"
+path = "tests/terminal_session.rs"
+harness = false
