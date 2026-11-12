@@ -201,7 +201,7 @@ impl Connection {
     }
 
     /// Attach the shell of a session (starting it if needed) and take control of its input
-    /// and size, as the web client does for a plain terminal.
+    /// and size, unless another view (the desktop app, say) already holds them.
     pub async fn open_terminal(
         &mut self,
         session_id: &str,
@@ -372,7 +372,8 @@ fn open_frame(request_id: &str, session_id: &str, cols: u16, rows: u16) -> Value
 
 fn acquire_frame(request_id: &str, session_id: &str, workspace_id: &str, channel: &str) -> Value {
     json!({"type": "agent.control.acquire", "requestId": request_id, "sessionId": session_id,
-           "workspaceId": workspace_id, "agentId": TERMINAL_PROVIDER, "channel": channel})
+           "workspaceId": workspace_id, "agentId": TERMINAL_PROVIDER, "channel": channel,
+           "ifUnowned": true})
 }
 
 fn input_frame(terminal_id: &str, generation: u64, data: &str) -> Value {
@@ -407,6 +408,14 @@ mod tests {
             serde_json::from_value::<ClientMessage>(frame.clone())
                 .unwrap_or_else(|e| panic!("{frame}: {e}"));
         }
+        // Taking control must never steal it from another view.
+        assert!(matches!(
+            serde_json::from_value::<ClientMessage>(acquire_frame("r", "s", "w", "input")).unwrap(),
+            ClientMessage::AgentControlAcquire {
+                if_unowned: true,
+                ..
+            }
+        ));
     }
 
     #[test]

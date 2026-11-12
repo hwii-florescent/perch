@@ -184,6 +184,17 @@ async fn session(core_process: &mut Child, scratch: &Path) {
     })
     .await;
 
+    // The shell itself runs under the scratch HOME, not only the core.
+    connection
+        .terminal_input(&terminal, "printf '%s\\n' \"$HOME\"\n")
+        .await
+        .unwrap();
+    let home_line = home.display().to_string();
+    read_until(&mut connection, &terminal.id, &mut screen, |text| {
+        has_line(text, &home_line)
+    })
+    .await;
+
     connection
         .terminal_resize(&terminal, 100, 30)
         .await
