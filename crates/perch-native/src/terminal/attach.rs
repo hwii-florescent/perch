@@ -276,18 +276,19 @@ async fn run(
                         break None;
                     }
                 }
-                Ok(ServerMessage::SessionDeleted { session_id: gone }) if ending && gone == session_id => {
-                    let _ = events.unbounded_send(FromCore::Ended);
-                    break None;
-                }
-                // The refusal carries no request id; this is the only request in flight.
-                Ok(ServerMessage::Error { message, .. }) if ending => {
-                    ending = false;
-                    if events.unbounded_send(FromCore::EndRefused(message)).is_err() {
+                Ok(message) => match end_answer(&message, &session_id, ending) {
+                    Some(EndAnswer::Ended) => {
+                        let _ = events.unbounded_send(FromCore::Ended);
                         break None;
                     }
-                }
-                Ok(_) => {}
+                    Some(EndAnswer::Refused(reason)) => {
+                        ending = false;
+                        if events.unbounded_send(FromCore::EndRefused(reason)).is_err() {
+                            break None;
+                        }
+                    }
+                    None => {}
+                },
                 Err(error) => break Some(format!("{error:#}")),
             },
             command = commands.next() => {
@@ -336,6 +337,39 @@ async fn run(
         None => {
             let _ = connection.release_terminal(&terminal).await;
         }
+    }
+}
+
+/// What the core's answer to ending the session is.
+#[derive(Debug, PartialEq, Eq)]
+enum EndAnswer {
+    /// The session is gone.
+    Ended,
+    /// The core would not end it, and why.
+    Refused(String),
+}
+
+/// The error codes with which the core refuses `session.delete` (`handle_session_delete`): another
+/// view controls the session, or it could not be ended. The refusal carries no request id.
+const END_REFUSALS: [&str; 2] = ["agent_control_required", "session_delete_failed"];
+
+/// Whether `message` settles the end of `session_id`. The session being deleted is the answer
+/// whenever it arrives and whoever asked: a late one still ends the tab. An error is a refusal
+/// only while this connection has asked and only with a code the core refuses with; any other
+/// error is not about the request, so the wait goes on.
+fn end_answer(message: &ServerMessage, session_id: &str, ending: bool) -> Option<EndAnswer> {
+    match message {
+        ServerMessage::SessionDeleted { session_id: gone } if gone == session_id => {
+            Some(EndAnswer::Ended)
+        }
+        ServerMessage::Error {
+            message,
+            code: Some(code),
+            ..
+        } if ending && END_REFUSALS.contains(&code.as_str()) => {
+            Some(EndAnswer::Refused(message.clone()))
+        }
+        _ => None,
     }
 }
 
@@ -430,6 +464,50 @@ fn number(text: &str) -> Option<(u16, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn error(code: Option<&str>) -> ServerMessage {
+        ServerMessage::Error {
+            message: "no".into(),
+            request_id: None,
+            code: code.map(str::to_string),
+            retryable: false,
+        }
+    }
+
+    #[test]
+    fn the_session_being_deleted_ends_it_whenever_that_arrives() {
+        let gone = |id: &str| ServerMessage::SessionDeleted {
+            session_id: id.into(),
+        };
+        for ending in [true, false] {
+            assert_eq!(
+                end_answer(&gone("s1"), "s1", ending),
+                Some(EndAnswer::Ended)
+            );
+            assert_eq!(end_answer(&gone("other"), "s1", ending), None);
+        }
+    }
+
+    #[test]
+    fn only_a_refusal_the_core_gives_to_a_delete_stops_the_wait() {
+        let refused = |code| end_answer(&error(code), "s1", true);
+        assert_eq!(
+            refused(Some("agent_control_required")),
+            Some(EndAnswer::Refused("no".into()))
+        );
+        assert_eq!(
+            refused(Some("session_delete_failed")),
+            Some(EndAnswer::Refused("no".into()))
+        );
+        // An error about something else leaves the request unanswered.
+        assert_eq!(refused(Some("invalid_message")), None);
+        assert_eq!(refused(None), None);
+        // And nothing was asked, so no error is a refusal.
+        assert_eq!(
+            end_answer(&error(Some("agent_control_required")), "s1", false),
+            None
+        );
+    }
 
     #[test]
     fn size_markers_are_cut_out_wherever_they_sit() {

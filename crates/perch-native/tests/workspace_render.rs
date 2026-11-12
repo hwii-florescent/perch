@@ -195,8 +195,8 @@ impl Harness {
         self.cx.run_until_parked();
     }
 
-    /// Show a session the way the sidebar does when it is picked, naming `launched` only for a
-    /// session the sidebar does not list.
+    /// Show a session the way the sidebar does when it is picked. A plain terminal is not listed,
+    /// so the launch says what it is: `launched`.
     fn open_as(&mut self, id: &str, launched: Option<&str>) {
         let (id, launched) = (id.to_string(), launched.map(str::to_string));
         self.window
@@ -1102,6 +1102,109 @@ fn closing_a_tab_ends_only_what_was_launched_as_a_terminal() {
     println!("workspace_render: close ok");
 }
 
+/// A session the core deletes closes its tab whenever the news comes: after the wait for it ran
+/// out, after a refusal, and when this window never asked.
+fn a_deleted_session_closes_its_tab_whenever_the_core_says_so() {
+    let mut h = Harness::new(model(&[
+        ("late", json!({"cliProviderId": "terminal"})),
+        ("refused", json!({"cliProviderId": "terminal"})),
+        ("elsewhere", json!({"cliProviderId": "terminal"})),
+    ]));
+    // The answer comes after the five seconds the window waits.
+    h.open_as("late", Some("terminal"));
+    h.draw();
+    let (mut rx, core) = h.live();
+    assert_eq!(h.run("tabs.close", json!({})), Ok(()));
+    assert!(asked(&mut rx).contains(&ToCore::End));
+    h.cx.advance_clock(std::time::Duration::from_secs(6));
+    h.cx.run_until_parked();
+    assert!(
+        h.ws(|ws| ws.tabs().contains("late")),
+        "the tab waits no longer"
+    );
+    assert!(h.notice().unwrap().contains("still running"));
+    core.unbounded_send(FromCore::Ended).unwrap();
+    h.cx.run_until_parked();
+    assert!(
+        !h.ws(|ws| ws.tabs().contains("late")),
+        "a late deletion closes it"
+    );
+
+    // A refusal keeps the tab; the deletion that follows still closes it.
+    h.open_as("refused", Some("terminal"));
+    h.draw();
+    let (mut rx, core) = h.live();
+    assert_eq!(h.run("tabs.close", json!({})), Ok(()));
+    assert!(asked(&mut rx).contains(&ToCore::End));
+    core.unbounded_send(FromCore::EndRefused("another view controls it".into()))
+        .unwrap();
+    h.cx.run_until_parked();
+    assert!(h.ws(|ws| ws.tabs().contains("refused")));
+    assert!(h.notice().unwrap().contains("the core refused"));
+    core.unbounded_send(FromCore::Ended).unwrap();
+    h.cx.run_until_parked();
+    assert!(!h.ws(|ws| ws.tabs().contains("refused")));
+
+    // Someone else deleted a session this window shows and never asked to end.
+    h.open_as("elsewhere", Some("terminal"));
+    h.draw();
+    let (_rx, core) = h.live();
+    core.unbounded_send(FromCore::Ended).unwrap();
+    h.cx.run_until_parked();
+    assert!(!h.ws(|ws| ws.tabs().contains("elsewhere")));
+    println!("workspace_render: deleted session ok");
+}
+
+/// The pane menu stops a terminal's process only on a second, explicit click.
+fn stopping_a_terminal_from_the_pane_menu_asks_first() {
+    let mut h = Harness::new(model(&[("alpha", json!({"cliProviderId": "claude"}))]));
+    h.open_as("alpha", None);
+    h.draw();
+    let (mut rx, _core) = h.live();
+    let (x, y) = (SIDEBAR_WIDTH + 300., 200.);
+    let plain = Modifiers::default();
+    h.click(x, y, MouseButton::Right, plain);
+    h.draw();
+    let labels = h.ws(|ws| ws.menu_labels()).expect("the menu is open");
+    let stop = labels
+        .iter()
+        .position(|l| *l == "Stop the terminal")
+        .unwrap();
+    // Rows are about 30 pixels tall; the click lands in the middle of the entry.
+    let item = (x + 20., y + 4. + 30. * stop as f32 + 15.);
+    h.click(item.0, item.1, MouseButton::Left, plain);
+    h.draw();
+    let labels = h.ws(|ws| ws.menu_labels()).expect("still open");
+    assert_eq!(labels[stop], "Stop \u{2014} confirm");
+    assert!(
+        !asked(&mut rx).contains(&ToCore::Kill),
+        "the first click stops nothing"
+    );
+    // A click elsewhere takes the question back; asking again starts over.
+    h.click(x + 400., y + 200., MouseButton::Left, plain);
+    assert_eq!(h.ws(|ws| ws.menu_labels()), None);
+    h.click(x, y, MouseButton::Right, plain);
+    h.draw();
+    assert_eq!(
+        h.ws(|ws| ws.menu_labels()).unwrap()[stop],
+        "Stop the terminal"
+    );
+    h.click(item.0, item.1, MouseButton::Left, plain);
+    h.draw();
+    assert!(!asked(&mut rx).contains(&ToCore::Kill));
+    h.click(item.0, item.1, MouseButton::Left, plain);
+    assert_eq!(
+        h.ws(|ws| ws.menu_labels()),
+        None,
+        "choosing closes the menu"
+    );
+    assert!(
+        asked(&mut rx).contains(&ToCore::Kill),
+        "the second click stops it"
+    );
+    println!("workspace_render: stop confirm ok");
+}
+
 /// A session with no recorded launch provider is not attached under a guessed one.
 fn a_session_with_no_launch_provider_is_not_attached() {
     let mut cx = HeadlessAppContext::with_platform(
@@ -1138,6 +1241,8 @@ fn a_session_with_no_launch_provider_is_not_attached() {
 fn main() {
     closing_a_tab_ends_only_what_was_launched_as_a_terminal();
     a_session_with_no_launch_provider_is_not_attached();
+    a_deleted_session_closes_its_tab_whenever_the_core_says_so();
+    stopping_a_terminal_from_the_pane_menu_asks_first();
     a_toast_names_the_session_and_opens_it();
     the_pane_menu_opens_on_right_click();
     a_peek_is_a_terminal_over_the_window();

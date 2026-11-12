@@ -89,7 +89,8 @@ pub enum TerminalEvent {
     /// The program asks to set the system clipboard. Nothing has been written.
     ClipboardWrite(String),
     Status(Status),
-    /// The core confirmed that the session this terminal shows ended (see [`TerminalView::end`]).
+    /// The core deleted the session this terminal shows, when asked to (see [`TerminalView::end`])
+    /// or by anyone else, and however long after.
     Ended,
     /// The core would not end the session; it keeps running. The reason is the core's.
     EndRefused(String),

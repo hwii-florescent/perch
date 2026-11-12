@@ -149,6 +149,11 @@ struct Toast {
     _timer: Task<()>,
 }
 
+/// The pane menu's entry that stops the terminal's process, and what it reads once it asks to be
+/// confirmed.
+const STOP: &str = "Stop the terminal";
+const STOP_CONFIRM: &str = "Stop \u{2014} confirm";
+
 /// The menu a right-click in a pane opens: its entries are commands, run on that pane.
 struct PaneMenu {
     at: Point<Pixels>,
@@ -397,8 +402,10 @@ impl Workspace {
                 }
                 self.schedule_reattach(id, cx);
             }
+            // The core deleted the session: its tab goes, whether this window asked for it, or
+            // asked too long ago to be waiting still.
             TerminalEvent::Ended => {
-                if self.panes.get(id).is_some_and(|p| p.closing.is_some()) {
+                if self.panes.contains_key(id) {
                     self.tabs.close(id);
                     self.panes.remove(id);
                     self.notice = None;
@@ -1000,7 +1007,8 @@ impl Workspace {
     /// request goes over the terminal's own connection, the one that holds the keyboard, because
     /// the core refuses to end a session another connection controls. If the core refuses, does
     /// not answer in time, or the connection drops, the tab stays and says the terminal is still
-    /// running: an unconfirmed stop is never taken for an end.
+    /// running: an unconfirmed stop is never taken for an end. The core deleting the session later
+    /// still closes the tab, whatever the wait said.
     /// Anything else, an agent above all, is put away and keeps running; ending it is a choice
     /// made where it can be confirmed.
     fn close(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -1167,7 +1175,7 @@ impl Workspace {
             items.push(("Zoom pane", "panes.zoom"));
         }
         if can_stop {
-            items.push(("Stop the terminal", "terminal.kill"));
+            items.push((STOP, "terminal.kill"));
         }
         items.push(("Close", "tabs.close"));
         self.menu = Some(PaneMenu { at, items });
@@ -1200,6 +1208,17 @@ impl Workspace {
                     .hover(|row| row.bg(rgb(SELECTED_BG)))
                     .child(label)
                     .on_click(cx.listener(move |this, _, window, cx| {
+                        // Stopping the process cannot be taken back, and an agent may be what is
+                        // running: the first click asks, only the second stops it.
+                        if label == STOP {
+                            if let Some(item) =
+                                this.menu.as_mut().and_then(|menu| menu.items.get_mut(at))
+                            {
+                                item.0 = STOP_CONFIRM;
+                            }
+                            cx.notify();
+                            return;
+                        }
                         this.menu = None;
                         if let Err(error) = this.run_command(command, None, window, cx) {
                             this.notice = Some(error);
