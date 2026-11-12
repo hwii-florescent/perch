@@ -263,6 +263,23 @@ async fn session(core_process: &mut Child, scratch: &Path) {
     watch.launch(LOCAL, Some("/not/a/project"), "terminal");
     let refused = watch.launch_error().await;
     assert!(refused.contains("not a project"), "{refused}");
+
+    // Looking at a session sends the core the request the web makes (`session.subscribe`), and
+    // the sidebar keeps following: the row it looks at is still there, and a session started
+    // afterwards still arrives live. (Done, and the sidebar holding a read chat in it, needs an
+    // agent turn to end; a plain shell's session never settles, so that is covered where the
+    // model is built, against the same messages.)
+    watch
+        .commands
+        .unbounded_send(Order::View(launched.clone()))
+        .unwrap();
+    watch.launch(LOCAL, None, "terminal");
+    let after = watch.launched().await;
+    let model = watch
+        .model_where(|m| sessions_of(m).iter().any(|s| s.id == after))
+        .await;
+    assert!(sessions_of(&model).iter().any(|s| s.id == launched));
+    assert_eq!(model.needs_you, 0);
     watch.task.abort();
 }
 
@@ -310,6 +327,7 @@ impl Watch {
             Update::Model(model) => self.latest = model,
             Update::Launched { session_id, .. } => self.launched.push_back(Ok(session_id)),
             Update::LaunchFailed(error) => self.launched.push_back(Err(error)),
+            Update::Requested { .. } | Update::Alert(_) => {}
         }
     }
 
