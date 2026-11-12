@@ -8,9 +8,9 @@
 
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use gpui::{
-    point, px, size, AppContext, HeadlessAppContext, KeyDownEvent, Keystroke, Modifiers,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ScrollDelta, ScrollWheelEvent,
-    TouchPhase, Window, WindowHandle,
+    point, px, size, AppContext, Bounds, EntityInputHandler, HeadlessAppContext, KeyDownEvent,
+    Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ScrollDelta,
+    ScrollWheelEvent, TouchPhase, Window, WindowHandle,
 };
 use perch_native::terminal::attach::{FromCore, ToCore};
 use perch_native::terminal::clipboard::MemoryClipboard;
@@ -329,6 +329,7 @@ fn main() {
     run("selection_and_clipboard", selection_and_clipboard);
     run("find_in_the_pane", find_in_the_pane);
     run("links_in_the_pane", links_in_the_pane);
+    run("input_method_composition", input_method_composition);
     println!("terminal_render: ok");
 }
 
@@ -578,13 +579,20 @@ fn links_in_the_pane() {
     h.focus();
     h.draw();
     h.sent();
-    let cmd = Modifiers { platform: true, ..Default::default() };
+    let cmd = Modifiers {
+        platform: true,
+        ..Default::default()
+    };
     let at = |h: &mut Harness, cell: (usize, usize, f32)| h.pos(cell);
     let mv = |h: &mut Harness, cell: (usize, usize, f32), modifiers: Modifiers| {
         let (x, y) = at(h, cell);
         h.view(|v, cx| {
             v.mouse_moved(
-                &MouseMoveEvent { position: point(px(x), px(y)), pressed_button: None, modifiers },
+                &MouseMoveEvent {
+                    position: point(px(x), px(y)),
+                    pressed_button: None,
+                    modifiers,
+                },
                 cx,
             )
         });
@@ -594,7 +602,9 @@ fn links_in_the_pane() {
     mv(&mut h, (10, 0, 0.5), Modifiers::default());
     assert!(h.view(|v, _| v.hovered_link().is_none()));
     mv(&mut h, (10, 0, 0.5), cmd);
-    let hit = h.view(|v, _| v.hovered_link().cloned()).expect("a link under the pointer");
+    let hit = h
+        .view(|v, _| v.hovered_link().cloned())
+        .expect("a link under the pointer");
     assert_eq!(hit.target, "https://example.com/docs");
     let shot = h.draw();
     let base = shot.cell_origin(6, 0);
@@ -604,7 +614,10 @@ fn links_in_the_pane() {
         .count();
     assert!(underline >= 1, "the underline under the link");
     h.view(|v, cx| v.modifiers_changed(Modifiers::default(), cx));
-    assert!(h.view(|v, _| v.hovered_link().is_none()), "letting go of the key ends it");
+    assert!(
+        h.view(|v, _| v.hovered_link().is_none()),
+        "letting go of the key ends it"
+    );
 
     // Command-click on a link says so; it does not select, and a program that takes the mouse
     // is not told of the click.
@@ -614,9 +627,14 @@ fn links_in_the_pane() {
     h.release(MouseButton::Left, x, y, cmd);
     assert_eq!(
         events.borrow().last(),
-        Some(&TerminalEvent::OpenLink(Target::Url("https://example.com/docs".into())))
+        Some(&TerminalEvent::OpenLink(Target::Url(
+            "https://example.com/docs".into()
+        )))
     );
-    assert!(h.sent().is_empty(), "the click was not reported to the program");
+    assert!(
+        h.sent().is_empty(),
+        "the click was not reported to the program"
+    );
     h.output("\x1b[?1000l");
     assert_eq!(h.view(|v, _| v.selection_text()), None);
 
@@ -625,19 +643,27 @@ fn links_in_the_pane() {
     h.press(MouseButton::Left, x, y, cmd);
     assert_eq!(
         events.borrow().last(),
-        Some(&TerminalEvent::OpenLink(Target::Url("https://marked.example/target".into())))
+        Some(&TerminalEvent::OpenLink(Target::Url(
+            "https://marked.example/target".into()
+        )))
     );
     let (x, y) = at(&mut h, (7, 2, 0.5));
     h.press(MouseButton::Left, x, y, cmd);
     assert_eq!(
         events.borrow().last(),
-        Some(&TerminalEvent::OpenLink(Target::File(dir.join("notes.txt")))),
+        Some(&TerminalEvent::OpenLink(Target::File(
+            dir.join("notes.txt")
+        ))),
         "the file next to the terminal"
     );
     let count = events.borrow().len();
     let (x, y) = at(&mut h, (26, 2, 0.5));
     h.press(MouseButton::Left, x, y, cmd);
-    assert_eq!(events.borrow().len(), count, "a file that does not exist is not a link");
+    assert_eq!(
+        events.borrow().len(),
+        count,
+        "a file that does not exist is not a link"
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -665,7 +691,10 @@ fn find_in_the_pane() {
     h.draw();
     h.sent();
 
-    assert!(h.view(|v, cx| v.key_down(&key("cmd-f", None), cx)), "cmd-f opens the bar");
+    assert!(
+        h.view(|v, cx| v.key_down(&key("cmd-f", None), cx)),
+        "cmd-f opens the bar"
+    );
     assert!(h.view(|v, _| v.find_open()));
     assert_eq!(h.view(|v, _| v.find_label()), "");
     type_keys(&mut h, "needle");
@@ -683,35 +712,46 @@ fn find_in_the_pane() {
     let span = spans[0];
     let (x, y) = shot.cell_origin(usize::from(span.start), usize::from(span.row));
     let tinted = shot.at(x + 0.5 / shot.scale, y + 0.5 / shot.scale);
-    assert!(near(tinted, [71, 59, 17]), "28 percent of the tint {tinted:?}");
+    assert!(
+        near(tinted, [71, 59, 17]),
+        "28 percent of the tint {tinted:?}"
+    );
 
     // Enter selects the next match and scrolls it into view; the oldest is in history.
     for _ in 0..3 {
         assert!(h.view(|v, cx| v.key_down(&key("enter", None), cx)));
     }
-    assert!(h.view(|v, _| v.frame().row_text(0) == "Needle in history" || (0..24).any(|r| v.frame().row_text(r) == "Needle in history")));
+    assert!(h.view(|v, _| v.frame().row_text(0) == "Needle in history"
+        || (0..24).any(|r| v.frame().row_text(r) == "Needle in history")));
     let label = h.view(|v, _| v.find_label());
     assert!(label.ends_with("/ 3"), "{label}");
     let shot = h.draw();
     let spans = h.view(|v, _| v.frame().search);
-    let selected = spans.iter().find(|s| s.selected).expect("the selected match is in view");
+    let selected = spans
+        .iter()
+        .find(|s| s.selected)
+        .expect("the selected match is in view");
     let (x, y) = shot.cell_origin(usize::from(selected.start), usize::from(selected.row));
     let bright = shot.at(x + 0.5 / shot.scale, y + 0.5 / shot.scale);
-    assert!(near(bright, [140, 116, 34]), "55 percent of the tint {bright:?}");
+    assert!(
+        near(bright, [140, 116, 34]),
+        "55 percent of the tint {bright:?}"
+    );
     assert!(h.view(|v, cx| v.key_down(&key("shift-enter", None), cx)));
     let after = h.view(|v, _| v.find_label());
     assert_ne!(after, label, "shift-enter went the other way");
 
     // Nothing typed, navigated or composed reached the shell.
     assert!(h.view(|v, cx| v.key_down(&key("backspace", None), cx)));
-    let composed = h
-        .window
-        .update(&mut h.cx, |view, window, cx| {
-            gpui::EntityInputHandler::replace_text_in_range(view, None, "é", window, cx)
-        });
+    let composed = h.window.update(&mut h.cx, |view, window, cx| {
+        gpui::EntityInputHandler::replace_text_in_range(view, None, "é", window, cx)
+    });
     composed.unwrap();
     assert_eq!(h.view(|v, _| v.find_query().to_string()), "needlé");
-    assert!(h.sent().iter().all(|m| !matches!(m, ToCore::Input(_))), "the shell heard nothing");
+    assert!(
+        h.sent().iter().all(|m| !matches!(m, ToCore::Input(_))),
+        "the shell heard nothing"
+    );
     // Paste goes into the field too.
     clip.write_text_for_test("needle\nsecond line");
     assert!(h.view(|v, cx| v.key_down(&key("cmd-v", None), cx)));
@@ -728,7 +768,11 @@ fn find_in_the_pane() {
     h.view(|v, cx| v.open_find(cx));
     assert_eq!(h.view(|v, _| v.find_query().to_string()), "zzz");
     type_keys(&mut h, "x");
-    assert_eq!(h.view(|v, _| v.find_query().to_string()), "x", "typing replaced the old query");
+    assert_eq!(
+        h.view(|v, _| v.find_query().to_string()),
+        "x",
+        "typing replaced the old query"
+    );
     // The bar is on screen at the top right.
     let shot = h.draw();
     assert!(shot.ink(88, 0, 10, rgb(0)) > 100, "the find bar is drawn");
@@ -1249,4 +1293,85 @@ fn disconnect_keeps_the_screen() {
         .iter()
         .any(|e| matches!(e, TerminalEvent::Status(Status::Disconnected(_)))));
     drop(subscription);
+}
+
+/// Text an input method is composing shows at the cursor, underlined, and reaches the shell
+/// only once committed. A pane taken off screen drops it and tells the program it lost focus.
+fn input_method_composition() {
+    let mut h = Harness::open(900., 420.);
+    h.attach(100, 24, "hi\x1b[?1004h");
+    h.focus();
+    let before = h.draw();
+    let bg = before.at(450., 300.);
+    h.sent();
+    fn ime<R>(
+        h: &mut Harness,
+        f: impl FnOnce(&mut TerminalView, &mut Window, &mut gpui::Context<TerminalView>) -> R,
+    ) -> R {
+        h.window
+            .update(&mut h.cx, |view, window, cx| f(view, window, cx))
+            .unwrap()
+    }
+    ime(&mut h, |v, w, cx| {
+        v.replace_and_mark_text_in_range(None, "\u{3042}", None, w, cx)
+    });
+    assert_eq!(
+        ime(&mut h, |v, w, cx| v.marked_text_range(w, cx)),
+        Some(0..1),
+        "the composition is marked"
+    );
+    let shot = h.draw();
+    // "hi" holds columns 0..2: the wide character covers two cells from the cursor, underlined.
+    assert_eq!(
+        before.ink(3, 0, 1, bg),
+        0,
+        "the cell after the cursor is empty"
+    );
+    assert!(
+        shot.ink(3, 0, 1, bg) > 0,
+        "the preview covers two cells from the cursor"
+    );
+    let rule = shot.count(2, 0, 2, |p| near(p, rgb(0xffffff)));
+    assert!(rule > 0, "and underlined in the text colour");
+    assert!(
+        h.sent().iter().all(|m| !matches!(m, ToCore::Input(_))),
+        "nothing is sent while composing"
+    );
+    ime(&mut h, |v, w, cx| {
+        assert!(v
+            .bounds_for_range(
+                1..1,
+                Bounds::from_corners(point(px(0.), px(0.)), point(px(900.), px(420.))),
+                w,
+                cx
+            )
+            .is_some());
+    });
+    ime(&mut h, |v, w, cx| {
+        v.replace_text_in_range(None, "\u{3042}", w, cx)
+    });
+    assert_eq!(ime(&mut h, |v, w, cx| v.marked_text_range(w, cx)), None);
+    assert_eq!(
+        h.sent()
+            .into_iter()
+            .filter_map(|m| match m {
+                ToCore::Input(b) => Some(b),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec!["\u{3042}".as_bytes().to_vec()],
+        "the commit is typed once"
+    );
+    // Off screen: composition is dropped and the program hears focus leave.
+    ime(&mut h, |v, w, cx| {
+        v.replace_and_mark_text_in_range(None, "x", None, w, cx)
+    });
+    h.view(|v, cx| v.set_visible(false, cx));
+    assert_eq!(ime(&mut h, |v, w, cx| v.marked_text_range(w, cx)), None);
+    assert!(
+        h.sent()
+            .iter()
+            .any(|m| matches!(m, ToCore::Input(b) if b == b"\x1b[O")),
+        "focus-out reaches the program"
+    );
 }

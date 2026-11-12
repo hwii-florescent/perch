@@ -118,6 +118,8 @@ struct Painted {
     opacity: f32,
     blink_on: bool,
     link: Vec<(u16, u16, u16)>,
+    /// The composition: its text, the cell it starts at, and the cells it covers.
+    marked: Option<(String, u16, u16, usize)>,
 }
 
 pub struct TerminalView {
@@ -152,6 +154,10 @@ pub struct TerminalView {
     last_pointer: Option<Point<Pixels>>,
     /// The terminal's folder when the shell has not said (OSC 7), for relative file links.
     cwd: Option<std::path::PathBuf>,
+    /// Text an input method is composing, drawn at the cursor and not yet sent.
+    marked: Option<String>,
+    /// The pane is not on screen: it holds no focus and draws nothing.
+    hidden: bool,
     find: Find,
     _find_timer: Option<Task<()>>,
     clipboard: Rc<dyn Clipboard>,
@@ -202,6 +208,8 @@ impl TerminalView {
             hover_link: None,
             last_pointer: None,
             cwd: None,
+            marked: None,
+            hidden: false,
             find: Find::default(),
             _find_timer: None,
             clipboard: Rc::new(MemoryClipboard::default()),
@@ -326,7 +334,7 @@ impl TerminalView {
 
     /// Flip a blinking cursor to its other half. A cursor that does not blink stays on.
     pub fn blink_tick(&mut self, cx: &mut Context<Self>) {
-        if self.cursor_blinks && self.was_focused {
+        if self.cursor_blinks && self.was_focused && !self.hidden {
             self.blink_on = !self.blink_on;
             cx.notify();
         } else if !self.blink_on {
@@ -645,10 +653,10 @@ impl TerminalView {
     pub fn mouse_moved(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         self.update_hover(Some(event.position), event.modifiers, cx);
         let held = event.pressed_button;
-        if held.is_some() && !self.buttons_down.is_empty() || held.is_none() {
-            if self.mouse(MouseAction::Motion, held, event.position, event.modifiers) {
-                return;
-            }
+        if (held.is_some() && !self.buttons_down.is_empty() || held.is_none())
+            && self.mouse(MouseAction::Motion, held, event.position, event.modifiers)
+        {
+            return;
         }
         if self.selecting && held == Some(GpuiButton::Left) {
             self.drag_to(event.position, cx);
@@ -748,7 +756,12 @@ impl TerminalView {
         self.vt.link_at(at.col, at.row)
     }
 
-    fn update_hover(&mut self, position: Option<Point<Pixels>>, modifiers: Modifiers, cx: &mut Context<Self>) {
+    fn update_hover(
+        &mut self,
+        position: Option<Point<Pixels>>,
+        modifiers: Modifiers,
+        cx: &mut Context<Self>,
+    ) {
         self.last_pointer = position;
         let hit = position
             .filter(|_| Self::link_key(modifiers))
@@ -1076,6 +1089,22 @@ impl TerminalView {
     }
 
     /// Hand the keyboard to the terminal.
+    /// Tell the view whether its pane is on screen. A pane taken off screen is no longer
+    /// focused (the program is told, if it asked), drops any composition, and stops blinking.
+    pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if self.hidden == !visible {
+            return;
+        }
+        self.hidden = !visible;
+        if self.hidden {
+            self.marked = None;
+            if std::mem::take(&mut self.was_focused) && self.can_type() && self.vt.dec_mode(1004) {
+                self.send(ToCore::Input(b"\x1b[O".to_vec()));
+            }
+        }
+        cx.notify();
+    }
+
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
         self.focus.focus(window, cx);
     }
@@ -1158,6 +1187,7 @@ impl TerminalView {
             }
         }
         let frame = self.vt.frame();
+        let frame_cursor_cell = frame.cursor_cell;
         self.cursor_cell = frame.cursor_cell;
         self.cursor_blinks = frame.cursor.is_some_and(|c| c.blink);
         Painted {
@@ -1169,7 +1199,19 @@ impl TerminalView {
             family,
             opacity: self.settings.opacity,
             blink_on: self.blink_on,
-            link: self.hover_link.as_ref().map(|h| h.spans.clone()).unwrap_or_default(),
+            link: self
+                .hover_link
+                .as_ref()
+                .map(|h| h.spans.clone())
+                .unwrap_or_default(),
+            marked: self
+                .marked
+                .clone()
+                .zip(frame_cursor_cell)
+                .map(|(text, (x, y))| {
+                    let cells = text_width(&text);
+                    (text, x, y, cells)
+                }),
         }
     }
 
@@ -1245,15 +1287,21 @@ impl TerminalView {
                     .text_color(rgb(NOTE_COLOR))
                     .child(self.find_label()),
             )
-            .child(button("find-previous", "↑").on_click(cx.listener(|this, _, _, cx| {
-                this.find_previous(cx);
-            })))
-            .child(button("find-next", "↓").on_click(cx.listener(|this, _, _, cx| {
-                this.find_next(cx);
-            })))
-            .child(button("find-close", "×").on_click(cx.listener(|this, _, _, cx| {
-                this.close_find(cx);
-            })))
+            .child(
+                button("find-previous", "↑").on_click(cx.listener(|this, _, _, cx| {
+                    this.find_previous(cx);
+                })),
+            )
+            .child(
+                button("find-next", "↓").on_click(cx.listener(|this, _, _, cx| {
+                    this.find_next(cx);
+                })),
+            )
+            .child(
+                button("find-close", "×").on_click(cx.listener(|this, _, _, cx| {
+                    this.close_find(cx);
+                })),
+            )
     }
 }
 
@@ -1261,6 +1309,26 @@ impl Focusable for TerminalView {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
     }
+}
+
+/// How many cells `text` takes on the screen, by the terminal's own rules for clusters.
+fn text_width(text: &str) -> usize {
+    let codepoints: Vec<u32> = text.chars().map(u32::from).collect();
+    let (mut at, mut total) = (0, 0);
+    while at < codepoints.len() {
+        let mut width = 0u8;
+        // SAFETY: the pointer and length describe the rest of `codepoints`.
+        let used = unsafe {
+            g::ghostty_unicode_grapheme_width(
+                codepoints[at..].as_ptr(),
+                codepoints.len() - at,
+                &mut width,
+            )
+        };
+        total += usize::from(width);
+        at += used.max(1);
+    }
+    total
 }
 
 fn color(c: Rgb) -> Hsla {
@@ -1342,6 +1410,7 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
         opacity,
         blink_on,
         link,
+        marked,
     } = painted;
     // ponytail: opacity is applied per colour, not to the pane as a group like the web's CSS
     // opacity, so text over a cell background shows the background through it twice.
@@ -1534,6 +1603,42 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
             _ => window.paint_quad(outline(snap_box(cell), c, BorderStyle::Solid)),
         }
     }
+
+    // What an input method is composing: over the cells at the cursor, underlined.
+    if let Some((text, x, y, cells)) = marked {
+        let (x, y) = (usize::from(x), usize::from(y));
+        let run = Bounds::new(at(x, y), size(cw * cells as f32, ch));
+        window.paint_quad(fill(snap_box(run), col(frame.bg)));
+        // Each cell is placed on its own, so a wide character is followed by its spacer.
+        let text: String = text
+            .chars()
+            .flat_map(|c| {
+                let wide = text_width(c.encode_utf8(&mut [0; 4])) == 2;
+                [Some(c), wide.then_some(' ')]
+            })
+            .flatten()
+            .collect();
+        let run_style = TextRun {
+            len: text.len(),
+            font: layout::cell_font(&family, false, false),
+            color: col(frame.fg),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let line = window.text_system().shape_line(
+            SharedString::from(text),
+            px(metrics.font_px),
+            &[run_style],
+            Some(cw),
+        );
+        let _ = line.paint(at(x, y), ch, TextAlign::Left, None, window, cx);
+        let rule = Bounds::new(
+            at(x, y) + point(px(0.), underline),
+            size(cw * cells as f32, thickness),
+        );
+        window.paint_quad(fill(snap_box(rule), col(frame.fg)));
+    }
 }
 
 impl gpui::Render for TerminalView {
@@ -1558,9 +1663,11 @@ impl gpui::Render for TerminalView {
                 }
             }))
             .when(self.hover_link.is_some(), |pane| pane.cursor_pointer())
-            .on_modifiers_changed(cx.listener(|this, event: &gpui::ModifiersChangedEvent, _, cx| {
-                this.modifiers_changed(event.modifiers, cx);
-            }))
+            .on_modifiers_changed(cx.listener(
+                |this, event: &gpui::ModifiersChangedEvent, _, cx| {
+                    this.modifiers_changed(event.modifiers, cx);
+                },
+            ))
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
                 this.scroll_wheel(event, cx);
                 cx.stop_propagation();
@@ -1627,13 +1734,18 @@ impl gpui::Render for TerminalView {
 impl EntityInputHandler for TerminalView {
     fn text_for_range(
         &mut self,
-        _range: Range<usize>,
+        range: Range<usize>,
         adjusted: &mut Option<Range<usize>>,
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<String> {
-        *adjusted = Some(0..0);
-        Some(String::new())
+        // The only text the input method can ask about is its own composition.
+        let marked = self.marked.as_deref().unwrap_or_default();
+        let units: Vec<u16> = marked.encode_utf16().collect();
+        let end = range.end.min(units.len());
+        let start = range.start.min(end);
+        *adjusted = Some(start..end);
+        Some(String::from_utf16_lossy(&units[start..end]))
     }
 
     fn selected_text_range(
@@ -1642,17 +1754,25 @@ impl EntityInputHandler for TerminalView {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
+        let end = self
+            .marked
+            .as_deref()
+            .map_or(0, |m| m.encode_utf16().count());
         Some(UTF16Selection {
-            range: 0..0,
+            range: end..end,
             reversed: false,
         })
     }
 
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
-        None
+        self.marked.as_deref().map(|m| 0..m.encode_utf16().count())
     }
 
-    fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {}
+    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        if self.marked.take().is_some() {
+            cx.notify();
+        }
+    }
 
     fn replace_text_in_range(
         &mut self,
@@ -1661,6 +1781,7 @@ impl EntityInputHandler for TerminalView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.marked = None;
         if self.find.open {
             // The find field holds the keys, composed text included.
             self.find_type(text, cx);
@@ -1672,27 +1793,45 @@ impl EntityInputHandler for TerminalView {
     fn replace_and_mark_text_in_range(
         &mut self,
         _range: Option<Range<usize>>,
-        _text: &str,
+        text: &str,
         _selected: Option<Range<usize>>,
         _: &mut Window,
-        _: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
+        // Composition is shown at the cursor and sent only once committed. While the find field
+        // holds the keys, or this view cannot type, nothing is shown.
+        let shown = (!text.is_empty() && !self.find.open && self.can_type() && !self.hidden)
+            .then(|| text.to_owned());
+        if self.marked != shown {
+            self.marked = shown;
+            cx.notify();
+        }
     }
 
     fn bounds_for_range(
         &mut self,
-        _range: Range<usize>,
+        range: Range<usize>,
         element: Bounds<Pixels>,
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        // The candidate window goes at the cursor.
+        // The candidate window goes at the cursor, after the text being composed.
         let fit = self.fitted?;
         let (x, y) = self.cursor_cell?;
         let cell = size(fit.metrics.width, fit.metrics.height);
+        let before: String = self
+            .marked
+            .as_deref()
+            .map(|m| m.chars().take(range.end).collect())
+            .unwrap_or_default();
+        let offset = text_width(&before) as f32;
         (element.size.width > px(0.)).then(|| {
             Bounds::new(
-                self.origin + point(cell.width * f32::from(x), cell.height * f32::from(y)),
+                self.origin
+                    + point(
+                        cell.width * (f32::from(x) + offset),
+                        cell.height * f32::from(y),
+                    ),
                 cell,
             )
         })
