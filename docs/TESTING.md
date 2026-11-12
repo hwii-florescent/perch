@@ -5,7 +5,8 @@
 The terminal engine is built from source: run `git submodule update --init
 third_party/ghostty` once, and have **Zig 0.16.x** on `PATH` (or `ZIG=/path/to/zig`).
 The pinned Ghostty commit does not build with Zig 0.17; `crates/ghostty-sys`
-says so when the version is wrong.
+says so when the version is wrong. Generating the bindings also needs libclang
+(Xcode's command line tools on macOS).
 
 ```sh
 cargo test -p perch-core                 # add a substring for focused tests
@@ -432,7 +433,8 @@ cargo test -p perch-native --test workspace_session # two shells in a split agai
 ```
 
 Run `cargo test` for this package on its own: building `perch-core` together with GPUI changes how
-`serde_json` orders keys and fails three unrelated core tests.
+`serde_json` orders keys and fails three unrelated core tests. `cargo test --workspace` hits the same
+three failures for the same reason.
 
 - `tests/vt_xterm_fixtures.rs` writes `packages/web/src/terminalVtParity.fixtures.json` (seven stress
   streams through the native terminal and through perchd's repaint) and fails when the file is stale

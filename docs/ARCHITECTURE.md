@@ -31,7 +31,7 @@ shells, real agent CLIs
   the page listens, so the shell holds the latest one until the page claims it
   (`open_ready`), and the page waits for its session to be listed.
 - **Native client** (`crates/perch-native`, GPUI) is another view of the same core: it finds a
-  running core through `core.json`, signs in as the desktop does and speaks the same protocol. Each
+  running headless core through the `core.json` it writes and speaks the same protocol. Each
   terminal is its own libghostty-vt fed the same bytes as xterm.js (output and the daemon's repaint);
   there is no cell stream. Tabs, splits and their layout are local to the window and are not restored.
   What it cannot show (files, changes, browser, chat, settings beyond terminals) it hands to the
@@ -166,9 +166,10 @@ transcript or an fsync-per-write guarantee. Replay includes retained output and
 a repaint; gaps and storage failures are disclosed. The repaint
 (`perchd::screen`) comes from Ghostty's terminal engine (libghostty-vt, built
 by `crates/ghostty-sys` from the pinned `third_party/ghostty` submodule). It
-starts with a terminal reset and carries up to 10,000 lines or 10 MB of
-scrollback, both screens, cursor, modes, keyboard stacks and a half-received
-escape sequence, so it replaces the replayed tail on the client. A screen that
+starts with a terminal reset and carries the scrollback the screen holds (up to
+10,000 lines or 10 MB; an attach sends at most 4 MiB and drops the oldest rows
+first), both screens, cursor, modes, keyboard stacks and a half-received escape
+sequence, so it replaces the replayed tail on the client. A screen that
 never saw output (a session reloaded after a daemon restart) sends no repaint.
 
 Released-only cleanup is daemon-authoritative (`released-cleanup.v1`). New

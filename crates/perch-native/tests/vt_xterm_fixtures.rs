@@ -115,7 +115,7 @@ fn case(name: &str, stream: &str) -> Value {
     vt.write(stream.as_bytes());
     let from_stream = dump(&mut vt);
 
-    let mut screen = Screen::new(COLS, ROWS);
+    let mut screen = Screen::new(COLS, ROWS).expect("the engine allocates a screen");
     screen.process(stream.as_bytes());
     let repaint =
         String::from_utf8(screen.restore_bytes_within(perchd::proto::DEFAULT_REPLAY as usize))
