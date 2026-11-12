@@ -8,9 +8,12 @@ use gpui::{px, size, AppContext, HeadlessAppContext, Keystroke, Window, WindowHa
 use perch_native::client::Update;
 use perch_native::sidebar::{Attention, Model, State};
 use perch_native::terminal::attach::FromCore;
+use perch_native::terminal::clipboard::MemoryClipboard;
+use perch_native::terminal::TerminalView;
 use perch_native::ui::{tint, Workspace, SIDEBAR_WIDTH};
 use perch_native::workspace::TAB_BAR_HEIGHT;
 use serde_json::{json, Value};
+use std::rc::Rc;
 use std::sync::Arc;
 
 fn message(value: Value) -> perch_core::protocol::ServerMessage {
@@ -102,6 +105,8 @@ const HEIGHT: f32 = 520.;
 struct Harness {
     cx: HeadlessAppContext,
     window: WindowHandle<Workspace>,
+    /// What the terminals copy to and paste from; the real clipboard is never touched.
+    clipboard: Rc<MemoryClipboard>,
 }
 
 impl Harness {
@@ -111,16 +116,37 @@ impl Harness {
             Arc::new(()),
             gpui_platform::current_headless_renderer,
         );
+        let clipboard = Rc::new(MemoryClipboard::default());
+        let held = clipboard.clone();
         let window = cx
             .open_window(size(px(WIDTH), px(HEIGHT)), |_, cx| {
                 // A core that cannot be found: every tab gets a terminal that has no shell.
                 cx.new(|cx| {
                     Workspace::new(model, None, cx)
                         .with_core(|| Err(anyhow::anyhow!("no core in this test")))
+                        .with_clipboard(held)
                 })
             })
             .unwrap();
-        Self { cx, window }
+        Self {
+            cx,
+            window,
+            clipboard,
+        }
+    }
+
+    /// The terminal with the keyboard.
+    fn view<R>(&mut self, f: impl FnOnce(&mut TerminalView) -> R) -> R {
+        self.window
+            .update(&mut self.cx, |ws, _, cx| {
+                let view = ws.terminal().expect("a terminal on screen").clone();
+                view.update(cx, |view, _| f(view))
+            })
+            .unwrap()
+    }
+
+    fn notice(&mut self) -> Option<String> {
+        self.ws(|ws| ws.notice().map(str::to_string))
     }
 
     fn open(&mut self, id: &str) {
@@ -516,6 +542,91 @@ fn keys_json_and_chosen_keys_rule() {
     println!("workspace_render: keys ok");
 }
 
+fn terminal_commands_run_from_keys_and_the_palette() {
+    let mut keyed = model(&[("alpha", json!({}))]);
+    keyed
+        .keybindings
+        .insert("terminal.clear".into(), "cmd+shift+k".into());
+    keyed.keys_file = Some(json!({"terminal": {"alt-j": "send:ls"}}));
+    let mut h = Harness::new(keyed);
+    h.open("alpha");
+    h.draw();
+    // 200 numbered lines: the first ones have scrolled into the history.
+    let screen: String = (1..=200).map(|n| format!("line {n}\r\n")).collect();
+    h.show(0, &screen);
+    h.draw();
+    let top = |h: &mut Harness| h.view(|v| v.frame().row_text(0));
+    let has = |h: &mut Harness, text: &str| {
+        h.view(|v| {
+            let frame = v.frame();
+            (0..frame.rows.len()).any(|y| frame.row_text(y) == text)
+        })
+    };
+    assert!(has(&mut h, "line 200"), "the live screen is on show");
+
+    // Scroll to an end: the window's keymap runs the terminal's action, so the program is not
+    // asked (it is not even attached here), and the view moves.
+    assert!(h.press("cmd-up"), "terminal.scrollTop is taken");
+    assert_eq!(top(&mut h), "line 1");
+    assert!(h.press("cmd-down"), "terminal.scrollBottom is taken");
+    assert!(has(&mut h, "line 200"));
+
+    // A page at a time, from the palette.
+    h.press("cmd-p");
+    h.type_text("scroll up a page");
+    assert!(h.press("enter"));
+    assert!(!has(&mut h, "line 200"), "a page up left the bottom");
+    let paged = top(&mut h);
+    h.press("cmd-p");
+    h.type_text("scroll down a page");
+    h.press("enter");
+    assert!(has(&mut h, "line 200"), "and a page down came back");
+    assert_ne!(paged, top(&mut h));
+    assert_eq!(h.notice(), None);
+
+    // Select all waits for copy; copy writes the selection to the clipboard and ends it.
+    assert!(h.press("cmd-a"));
+    assert!(h.view(|v| v.selection_text()).is_some());
+    assert_eq!(h.clipboard.text(), None, "select all copies nothing");
+    assert!(h.press("cmd-c"));
+    let copied = h.clipboard.text().expect("copied");
+    assert!(copied.contains("line 200"), "the whole screen and history");
+    assert!(h.view(|v| v.selection_text()).is_none());
+    // With nothing selected the window says so instead of sending the key to the program.
+    assert!(h.press("cmd-c"));
+    assert_eq!(
+        h.notice().as_deref(),
+        Some("Nothing is selected in that terminal.")
+    );
+
+    // Find opens from its key. While its field holds the keys, paste goes into the field.
+    assert!(h.press("cmd-f"));
+    assert!(h.view(|v| v.find_open()));
+    h.clipboard.write_text_for_test("line 17");
+    h.press("cmd-v");
+    assert_eq!(h.view(|v| v.find_query().to_string()), "line 17");
+    h.press("escape");
+    assert!(!h.view(|v| v.find_open()));
+
+    // A key the person moved: the old one is no longer taken (the view's own chord is gone
+    // too), and the new one clears the history.
+    h.press("cmd-up");
+    assert_eq!(top(&mut h), "line 1");
+    h.press("cmd-k");
+    assert_eq!(top(&mut h), "line 1", "cmd-k no longer clears");
+    assert!(h.press("cmd-shift-k"));
+    h.press("cmd-up");
+    assert_ne!(top(&mut h), "line 1", "the history is gone");
+
+    // `send:` types through the terminal's own send, which refuses a view that cannot type.
+    h.press("alt-j");
+    assert_eq!(
+        h.notice().as_deref(),
+        Some("This terminal is view only: another view controls it.")
+    );
+    println!("workspace_render: terminal commands ok");
+}
+
 fn main() {
     two_tabs();
     attention_on_a_tab();
@@ -523,5 +634,6 @@ fn main() {
     the_palette_lists_and_runs_commands();
     terminal_settings_show_what_the_core_sent();
     keys_json_and_chosen_keys_rule();
+    terminal_commands_run_from_keys_and_the_palette();
     println!("workspace_render: ok");
 }

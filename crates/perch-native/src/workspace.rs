@@ -19,7 +19,9 @@ use crate::palette::{self, Entry, Kind, Outcome, Palette, SessionRef};
 use crate::settings::{scrollback_from_text, Change, MAX_SCROLLBACK, MIN_SCROLLBACK};
 use crate::sidebar::{Attention, LOCAL};
 use crate::tabs::{Dir, Node, Side, Tabs};
+use crate::terminal::actions::{Action, Scroll};
 use crate::terminal::attach::FromCore;
+use crate::terminal::clipboard::{Clipboard, SystemClipboard};
 use crate::terminal::TerminalView;
 use crate::ui::{
     hint, label, tint, LaunchFailed, OpenSession, Sidebar, DIM_COLOR, MAIN_BG, SELECTED_BG,
@@ -27,11 +29,12 @@ use crate::ui::{
 };
 use futures::channel::mpsc::UnboundedSender;
 use gpui::{
-    div, prelude::*, px, relative, rgb, AnyElement, App, Context, Entity, EntityInputHandler,
-    Focusable, KeyDownEvent, Keystroke, MouseButton, Subscription, Task, Window,
+    div, prelude::*, px, relative, rgb, AnyElement, App, Context, Entity, Focusable, KeyDownEvent,
+    Keystroke, MouseButton, Subscription, Task, Window,
 };
 use serde_json::Value;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// How long a follow-up key after the leader chord is awaited.
@@ -77,6 +80,8 @@ pub struct Workspace {
     leader: Option<Task<()>>,
     /// What the last command could not do, or did instead.
     notice: Option<String>,
+    /// Where the terminals copy to and paste from: the system's, unless a test says otherwise.
+    clipboard: Rc<dyn Clipboard>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -106,6 +111,7 @@ impl Workspace {
             settings: None,
             leader: None,
             notice: None,
+            clipboard: Rc::new(SystemClipboard),
             _subscriptions: vec![opened, failed, observed],
         }
     }
@@ -114,6 +120,12 @@ impl Workspace {
     /// area never touches the network.
     pub fn with_core(mut self, locate: impl Fn() -> anyhow::Result<Core> + 'static) -> Self {
         self.locate = Some(Box::new(locate));
+        self
+    }
+
+    /// Copy and paste through `clipboard` instead of the system's.
+    pub fn with_clipboard(mut self, clipboard: Rc<dyn Clipboard>) -> Self {
+        self.clipboard = clipboard;
         self
     }
 
@@ -198,6 +210,7 @@ impl Workspace {
     /// A terminal for `open`: attached to the core `locate` finds, or showing why it cannot be.
     fn attach(&self, open: &OpenSession, cx: &mut Context<Self>) -> Option<Entity<TerminalView>> {
         let located = self.locate.as_ref()?();
+        let clipboard = self.clipboard.clone();
         let view = cx.new(|cx| match located {
             Ok(core) => TerminalView::attach(core, open, cx),
             Err(error) => {
@@ -206,11 +219,11 @@ impl Workspace {
                 view
             }
         });
-        // Only a window that is on screen copies and pastes with the system's clipboard.
+        // Only a window that is on screen copies and pastes with the system's clipboard, and its
+        // keymap, not the view, decides what the Command chords do.
         view.update(cx, |view, _| {
-            view.set_clipboard(std::rc::Rc::new(
-                crate::terminal::clipboard::SystemClipboard,
-            ))
+            view.set_clipboard(clipboard);
+            view.set_hosted(true);
         });
         // A click on a link is a person's: the window runs the system's handler for it.
         cx.subscribe(&view, |_, _, event: &crate::terminal::TerminalEvent, _| {
@@ -297,6 +310,18 @@ impl Workspace {
         let Some(hit) = keymap.resolve(keystroke, context) else {
             return false;
         };
+        // While the find field holds the keys, copy, paste and the rest act on the field, which
+        // is the view's to handle; only reopening the find bar is the window's.
+        if let Hit::Run { name, .. } = &hit {
+            let finding = name.starts_with("terminal.")
+                && name != "terminal.find"
+                && self
+                    .focused_terminal(window, cx)
+                    .is_some_and(|(_, view)| view.read(cx).find_open());
+            if finding {
+                return false;
+            }
+        }
         self.notice = None;
         match hit {
             Hit::Run { name, args } => {
@@ -355,13 +380,7 @@ impl Workspace {
         let (_, view) = self
             .focused_terminal(window, cx)
             .ok_or("send: types into a terminal, and none has focus.")?;
-        if !view.read(cx).can_type() {
-            return Err("This terminal is view only: another view controls it.".into());
-        }
-        view.update(cx, |view, cx| {
-            view.replace_text_in_range(None, text, window, cx)
-        });
-        Ok(())
+        view.update(cx, |view, cx| view.send_text(text, cx))
     }
 
     fn palette_key(
@@ -627,7 +646,7 @@ impl Workspace {
                 self.tabs.swap_next();
                 cx.notify();
             }
-            "terminal.paste" => self.paste(cx)?,
+            _ if name.starts_with("terminal.") => self.terminal_command(name, args, cx)?,
             _ if name.starts_with("tabs.jump") => {
                 let n = name["tabs.jump".len()..].parse().ok();
                 self.select(Some(n.ok_or_else(|| format!("No command {name}."))?), cx)?;
@@ -772,18 +791,56 @@ impl Workspace {
         });
     }
 
-    fn paste(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
+    /// A terminal's named action (`terminal.find`, `terminal.scroll {pages: -1}`, ...) on the tab
+    /// on screen. The key dispatcher and the palette both end here.
+    fn terminal_command(
+        &mut self,
+        name: &str,
+        args: Option<&Value>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
         let view = self
             .terminal()
             .cloned()
             .ok_or("No terminal is on screen.")?;
-        let text = cx
-            .read_from_clipboard()
-            .and_then(|item| item.text())
-            .filter(|t| !t.is_empty())
-            .ok_or("The clipboard has no text.")?;
-        view.update(cx, |view, cx| view.paste(&text, cx));
-        Ok(())
+        // The action, and what to say if the view did nothing.
+        let (action, nothing) = match name {
+            "terminal.find" => (Action::Find, ""),
+            "terminal.clear" => (Action::Clear, ""),
+            "terminal.selectAll" => (Action::SelectAll, ""),
+            "terminal.copy" => (Action::Copy, "Nothing is selected in that terminal."),
+            "terminal.paste" => (
+                Action::Paste,
+                "Nothing was pasted: this terminal is view only, or the clipboard has no text.",
+            ),
+            "terminal.scrollTop" => (Action::Scroll(Scroll::Top), ""),
+            "terminal.scrollBottom" => (Action::Scroll(Scroll::Bottom), ""),
+            "terminal.scrollPageUp" => (Action::Scroll(Scroll::Pages(-1.0)), ""),
+            "terminal.scrollPageDown" => (Action::Scroll(Scroll::Pages(1.0)), ""),
+            "terminal.scroll" => {
+                let get = |key: &str| args.and_then(|a| a.get(key));
+                let by = Scroll::parse(
+                    get("lines").and_then(Value::as_i64),
+                    get("pages").and_then(Value::as_f64),
+                    get("to").and_then(Value::as_str),
+                )?;
+                (Action::Scroll(by), "")
+            }
+            "terminal.takeControl" => (
+                Action::TakeControl,
+                "Nothing to take: this view already controls the terminal, or it is not attached.",
+            ),
+            "terminal.kill" => (
+                Action::Kill,
+                "This terminal cannot be stopped from here: another view controls it, or it is not attached.",
+            ),
+            _ => return Err(format!("No command {name}.")),
+        };
+        if view.update(cx, |view, cx| view.perform(action, cx)) {
+            Ok(())
+        } else {
+            Err(nothing.to_string())
+        }
     }
 
     fn commit_scrollback(&mut self, cx: &mut Context<Self>) {

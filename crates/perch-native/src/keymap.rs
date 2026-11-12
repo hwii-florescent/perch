@@ -27,7 +27,8 @@ pub enum Scope {
     OutsideTerminal,
     /// A follow-up key after the leader chord.
     Leader,
-    /// Run by the terminal itself (find, clear, jumps), not by the window.
+    /// A command on the terminal that has the keyboard (find, clear, copy, scroll). It applies only
+    /// while a terminal has the keyboard; the window runs it on that terminal.
     Terminal,
 }
 
@@ -49,6 +50,14 @@ const fn s(id: &'static str, title: &'static str, keys: &'static [&'static str])
         keys,
         scope: Scope::Any,
     }
+}
+
+const fn terminal(
+    id: &'static str,
+    title: &'static str,
+    keys: &'static [&'static str],
+) -> Shortcut {
+    scoped(id, title, keys, Scope::Terminal)
 }
 
 const fn scoped(
@@ -135,11 +144,44 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Focus the pane below",
         &["cmd+alt+down", "ctrl+shift+alt+down"],
     ),
-    s(
+    // The terminal's own commands. The web runs these in the terminal (`terminalSearch.ts`); here
+    // the window's keymap runs them, so a person's choice of key applies and a key bound here
+    // never reaches the program. Page up and down, stop and take control have no default key.
+    terminal("terminal.find", "Find in the terminal", &["mod+f"]),
+    terminal(
+        "terminal.clear",
+        "Clear the terminal (screen and scrollback)",
+        &["mod+k"],
+    ),
+    terminal("terminal.scrollTop", "Scroll to the top", &["mod+up"]),
+    terminal(
+        "terminal.scrollBottom",
+        "Scroll to the bottom",
+        &["mod+down"],
+    ),
+    terminal("terminal.scrollPageUp", "Scroll up a page", &[""]),
+    terminal("terminal.scrollPageDown", "Scroll down a page", &[""]),
+    terminal(
+        "terminal.copy",
+        "Copy the terminal's selected text to the clipboard",
+        &["mod+c"],
+    ),
+    terminal(
         "terminal.paste",
         "Paste the clipboard's text into a terminal",
+        &["mod+v"],
+    ),
+    terminal(
+        "terminal.selectAll",
+        "Select all of the terminal's text",
+        &["mod+a"],
+    ),
+    terminal(
+        "terminal.takeControl",
+        "Take this terminal's input and size from the view that holds them",
         &[""],
     ),
+    terminal("terminal.kill", "Stop the terminal's process", &[""]),
     scoped(
         "leader.arm",
         "Leader prefix (then a follow-up key)",
@@ -307,6 +349,13 @@ pub const TYPED: &[(&str, Option<&str>)] = &[
     ("app.settings", None),
     ("app.palette", None),
     ("terminal.paste", None),
+    ("terminal.find", None),
+    ("terminal.clear", None),
+    ("terminal.copy", None),
+    ("terminal.selectAll", None),
+    ("terminal.scroll", None),
+    ("terminal.takeControl", None),
+    ("terminal.kill", None),
 ];
 
 /// A key as a combination of modifiers and one key. `key` is the base key: `]` for both `]` and
@@ -618,14 +667,24 @@ impl Keymap {
         if let Some(hit) = self.file_hit(keystroke, context) {
             return Some(hit);
         }
-        all_shortcuts()
-            .filter(|s| match s.scope {
-                Scope::Any => true,
-                Scope::OutsideTerminal => !context.in_terminal,
-                Scope::Leader | Scope::Terminal => false,
-            })
-            .find(|s| {
-                effective_spec(s, &self.chosen, self.mac).is_some_and(|c| matches(&c, keystroke))
+        let bound = |s: &Shortcut| {
+            effective_spec(s, &self.chosen, self.mac).is_some_and(|c| matches(&c, keystroke))
+        };
+        // The terminal's own commands are the more specific, so they win a key another command
+        // shares with them (`ctrl+shift+up` on systems where `mod` is Control+Shift).
+        let terminal = context
+            .in_terminal
+            .then(|| all_shortcuts().find(|s| s.scope == Scope::Terminal && bound(s)))
+            .flatten();
+        terminal
+            .or_else(|| {
+                all_shortcuts()
+                    .filter(|s| match s.scope {
+                        Scope::Any => true,
+                        Scope::OutsideTerminal => !context.in_terminal,
+                        Scope::Leader | Scope::Terminal => false,
+                    })
+                    .find(bound)
             })
             .map(|s| Hit::Run {
                 name: s.id.to_string(),
@@ -859,7 +918,11 @@ mod tests {
             run(m.resolve(&press("cmd-k"), Context::default())),
             "global.navigatorAlt"
         );
-        assert_eq!(m.resolve(&press("cmd-k"), IN_TERMINAL), None);
+        // In a terminal the same key is the terminal's own clear, not the navigator.
+        assert_eq!(
+            run(m.resolve(&press("cmd-k"), IN_TERMINAL)),
+            "terminal.clear"
+        );
     }
 
     #[test]

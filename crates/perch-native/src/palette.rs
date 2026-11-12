@@ -57,6 +57,8 @@ pub fn entries(
     let mut out: Vec<Entry> = all_shortcuts()
         // The alternate and the leader's follow-ups are other keys for the same commands.
         .filter(|s| matches!(s.scope, Scope::Any | Scope::Terminal) && !s.id.ends_with("Alt"))
+        // A terminal's commands act on the tab on screen.
+        .filter(|s| has_tab || s.scope != Scope::Terminal)
         .filter(|s| s.id != "leader.arm")
         .map(|s| Entry {
             id: s.id.into(),

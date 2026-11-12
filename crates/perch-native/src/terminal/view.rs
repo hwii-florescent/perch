@@ -218,6 +218,10 @@ pub struct TerminalView {
     buttons_down: Vec<GpuiButton>,
     was_focused: bool,
     take_focus: bool,
+    /// A window's keymap runs the terminal's commands (find, clear, copy, paste, select all,
+    /// scroll to an end); the view then leaves those Command chords to it, so a key the person
+    /// moved is not still taken here.
+    hosted: bool,
 }
 
 impl TerminalView {
@@ -278,7 +282,25 @@ impl TerminalView {
             buttons_down: Vec::new(),
             was_focused: false,
             take_focus: false,
+            hosted: false,
         }
+    }
+
+    /// Let a window's keymap decide what the Command chords do (see `hosted`). A view on its own
+    /// keeps its fixed chords.
+    pub fn set_hosted(&mut self, hosted: bool) {
+        self.hosted = hosted;
+    }
+
+    /// Type `text` into the program exactly as given: no paste wrapping and no newline change,
+    /// under the same lease as typing. For a window's explicit sends (`send:` in `keys.json`); it
+    /// is not a paste and never goes to the find field. The error says why nothing was typed.
+    pub fn send_text(&mut self, text: &str, cx: &mut Context<Self>) -> Result<(), String> {
+        if !self.can_type() {
+            return Err("This terminal is view only: another view controls it.".into());
+        }
+        self.type_bytes(text.as_bytes().to_vec(), cx);
+        Ok(())
     }
 
     /// A view that attaches `open`'s session in `core` when its pane first has a size, and takes
@@ -587,7 +609,7 @@ impl TerminalView {
             return self.find_key(keystroke, cx);
         }
         let m = keystroke.modifiers;
-        if m.platform && !m.control && !m.alt && !m.shift {
+        if !self.hosted && m.platform && !m.control && !m.alt && !m.shift {
             match keystroke.key.as_str() {
                 "f" => {
                     self.open_find(cx);
