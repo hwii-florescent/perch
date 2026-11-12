@@ -8,13 +8,14 @@
 
 use crate::client::Command;
 use crate::sidebar::{step_needing, HostView, Model, ProjectView, LOCAL};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
 /// A named thing the sidebar can do, and the keys the web binds to it by default.
 pub struct Action {
     pub id: &'static str,
     pub description: &'static str,
-    /// Defaults for macOS, then for other systems; `mod` is Command on macOS, Control elsewhere.
+    /// Defaults for macOS, then for other systems; one entry is both and `""` is none there.
+    /// `mod` is Command on macOS and Control+Shift elsewhere.
     pub keys: &'static [&'static str],
 }
 
@@ -48,7 +49,7 @@ pub const ACTIONS: [Action; 17] = [
         "New session: pick a computer, a project, then an agent or terminal",
         &["cmd+shift+t", "alt+shift+t"],
     ),
-    action("nests.scratchpad", "New quickchat", &["cmd+shift+n"]),
+    action("nests.scratchpad", "New quickchat", &["cmd+shift+n", ""]),
     action(
         "nests.prev",
         "Previous workspace",
@@ -110,16 +111,6 @@ pub const ACTIONS: [Action; 17] = [
         &[],
     ),
 ];
-
-/// The keys an action answers to: the person's choice if they made one (an empty one unbinds it),
-/// else the defaults.
-pub fn keys_of(action: &Action, chosen: &BTreeMap<String, String>) -> Vec<String> {
-    match chosen.get(action.id) {
-        Some(key) if key.is_empty() => Vec::new(),
-        Some(key) => vec![key.clone()],
-        None => action.keys.iter().map(|k| k.to_string()).collect(),
-    }
-}
 
 /// How the sidebar lists work: the tree of projects, or sections by state.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -527,21 +518,6 @@ mod tests {
         }
         assert_eq!(Nav::default().run("tabs.new", &model), None);
         assert_eq!(Nav::default().run("nests.jumpx", &model), None);
-    }
-
-    #[test]
-    fn a_chosen_key_replaces_the_defaults() {
-        let sidebar = &ACTIONS[0];
-        let mut chosen = BTreeMap::new();
-        assert_eq!(keys_of(sidebar, &chosen), ["mod+b"]);
-        chosen.insert("global.sidebar".to_string(), "cmd+shift+b".to_string());
-        assert_eq!(keys_of(sidebar, &chosen), ["cmd+shift+b"]);
-        chosen.insert("global.sidebar".to_string(), String::new());
-        assert!(
-            keys_of(sidebar, &chosen).is_empty(),
-            "an empty choice unbinds it"
-        );
-        assert!(keys_of(&ACTIONS[2], &BTreeMap::new()).is_empty());
     }
 
     #[test]
