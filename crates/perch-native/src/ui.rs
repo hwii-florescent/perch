@@ -406,6 +406,13 @@ impl Workspace {
                 crate::terminal::clipboard::SystemClipboard,
             ))
         });
+        // A click on a link is a person's: the window runs the system's handler for it.
+        cx.subscribe(&view, |_, _, event: &crate::terminal::TerminalEvent, _| {
+            if let crate::terminal::TerminalEvent::OpenLink(target) = event {
+                crate::terminal::links::open_in_system(target);
+            }
+        })
+        .detach();
         self.terminal = Some((open.session_id.clone(), view));
     }
 

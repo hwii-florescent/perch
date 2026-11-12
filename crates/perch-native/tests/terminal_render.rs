@@ -328,6 +328,7 @@ fn main() {
     run("profile_and_settings", profile_and_settings);
     run("selection_and_clipboard", selection_and_clipboard);
     run("find_in_the_pane", find_in_the_pane);
+    run("links_in_the_pane", links_in_the_pane);
     println!("terminal_render: ok");
 }
 
@@ -545,6 +546,99 @@ fn selection_and_clipboard() {
     h.view(|v, cx| v.apply_core(None, Some(data), cx));
     h.output("\x1b]52;c;bm8=\x07");
     assert_eq!(clip.text().as_deref(), Some("hi"), "clipboardWrite off");
+}
+
+/// Links: found in the text and in OSC 8, underlined under the link key, and a click on one with
+/// the key held is an event for the window to act on, never an action of the view's own.
+fn links_in_the_pane() {
+    use perch_native::terminal::links::Target;
+    let dir = std::env::temp_dir().join(format!("perch-render-links-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("notes.txt"), "").unwrap();
+    let mut h = Harness::open(900., 420.);
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let seen = events.clone();
+    let _subscription = h
+        .window
+        .update(&mut h.cx, |_, _, cx| {
+            let view = cx.entity();
+            cx.subscribe(&view, move |_, _, event: &TerminalEvent, _| {
+                seen.borrow_mut().push(event.clone())
+            })
+        })
+        .unwrap();
+    h.view(|v, _| v.set_cwd(Some(dir.clone())));
+    h.attach(
+        100,
+        24,
+        "visit https://example.com/docs now\r\n\
+         \x1b]8;;https://marked.example/target\x07click me\x1b]8;;\x07\r\n\
+         open ./notes.txt:7 and ./missing.txt\r\n",
+    );
+    h.focus();
+    h.draw();
+    h.sent();
+    let cmd = Modifiers { platform: true, ..Default::default() };
+    let at = |h: &mut Harness, cell: (usize, usize, f32)| h.pos(cell);
+    let mv = |h: &mut Harness, cell: (usize, usize, f32), modifiers: Modifiers| {
+        let (x, y) = at(h, cell);
+        h.view(|v, cx| {
+            v.mouse_moved(
+                &MouseMoveEvent { position: point(px(x), px(y)), pressed_button: None, modifiers },
+                cx,
+            )
+        });
+    };
+
+    // Without the link key nothing is a link; with it the link is underlined.
+    mv(&mut h, (10, 0, 0.5), Modifiers::default());
+    assert!(h.view(|v, _| v.hovered_link().is_none()));
+    mv(&mut h, (10, 0, 0.5), cmd);
+    let hit = h.view(|v, _| v.hovered_link().cloned()).expect("a link under the pointer");
+    assert_eq!(hit.target, "https://example.com/docs");
+    let shot = h.draw();
+    let base = shot.cell_origin(6, 0);
+    let underline = (0..shot.cell.1 as usize * shot.scale as usize)
+        .map(|i| shot.at(base.0 + 2.0, base.1 + i as f32 / shot.scale))
+        .filter(|p| near(*p, rgb(0xffffff)))
+        .count();
+    assert!(underline >= 1, "the underline under the link");
+    h.view(|v, cx| v.modifiers_changed(Modifiers::default(), cx));
+    assert!(h.view(|v, _| v.hovered_link().is_none()), "letting go of the key ends it");
+
+    // Command-click on a link says so; it does not select, and a program that takes the mouse
+    // is not told of the click.
+    h.output("\x1b[?1000h\x1b[?1006h");
+    let (x, y) = at(&mut h, (10, 0, 0.5));
+    h.press(MouseButton::Left, x, y, cmd);
+    h.release(MouseButton::Left, x, y, cmd);
+    assert_eq!(
+        events.borrow().last(),
+        Some(&TerminalEvent::OpenLink(Target::Url("https://example.com/docs".into())))
+    );
+    assert!(h.sent().is_empty(), "the click was not reported to the program");
+    h.output("\x1b[?1000l");
+    assert_eq!(h.view(|v, _| v.selection_text()), None);
+
+    // OSC 8 opens its own URI; a file opens only if it exists, ':7' dropped.
+    let (x, y) = at(&mut h, (3, 1, 0.5));
+    h.press(MouseButton::Left, x, y, cmd);
+    assert_eq!(
+        events.borrow().last(),
+        Some(&TerminalEvent::OpenLink(Target::Url("https://marked.example/target".into())))
+    );
+    let (x, y) = at(&mut h, (7, 2, 0.5));
+    h.press(MouseButton::Left, x, y, cmd);
+    assert_eq!(
+        events.borrow().last(),
+        Some(&TerminalEvent::OpenLink(Target::File(dir.join("notes.txt")))),
+        "the file next to the terminal"
+    );
+    let count = events.borrow().len();
+    let (x, y) = at(&mut h, (26, 2, 0.5));
+    h.press(MouseButton::Left, x, y, cmd);
+    assert_eq!(events.borrow().len(), count, "a file that does not exist is not a link");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// Typing into the pane as the keyboard does.

@@ -5,6 +5,7 @@ pub mod attach;
 pub mod clipboard;
 pub mod keys;
 pub mod layout;
+pub mod links;
 pub mod scroll;
 pub mod search;
 pub mod select;

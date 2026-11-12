@@ -19,6 +19,7 @@ use super::attach::{self, AgentInfo, FromCore, Piece, ToCore};
 use super::clipboard::{Clipboard, MemoryClipboard};
 use super::keys::key_bytes_with;
 use super::layout::{self, Fit, Metrics};
+use super::links::{self, Target};
 use super::scroll;
 use super::select::{Pointer, Step};
 use super::settings::Settings;
@@ -79,6 +80,9 @@ pub enum TerminalEvent {
     /// The program asks to set the system clipboard. Nothing has been written.
     ClipboardWrite(String),
     Status(Status),
+    /// A person clicked a link with the link key held. Opening it is the window's: it runs the
+    /// system's handler, which the terminal never does itself.
+    OpenLink(Target),
 }
 
 impl EventEmitter<TerminalEvent> for TerminalView {}
@@ -113,6 +117,7 @@ struct Painted {
     family: String,
     opacity: f32,
     blink_on: bool,
+    link: Vec<(u16, u16, u16)>,
 }
 
 pub struct TerminalView {
@@ -142,6 +147,11 @@ pub struct TerminalView {
     /// The size last asked of the core. `None`: ask at the next layout.
     requested: Option<(u16, u16)>,
     scrolled: Point<f32>,
+    /// The link under the pointer while the link key is held, and where the pointer is.
+    hover_link: Option<links::Hit>,
+    last_pointer: Option<Point<Pixels>>,
+    /// The terminal's folder when the shell has not said (OSC 7), for relative file links.
+    cwd: Option<std::path::PathBuf>,
     find: Find,
     _find_timer: Option<Task<()>>,
     clipboard: Rc<dyn Clipboard>,
@@ -189,6 +199,9 @@ impl TerminalView {
             requested: None,
             scrolled: Point::default(),
             refit: false,
+            hover_link: None,
+            last_pointer: None,
+            cwd: None,
             find: Find::default(),
             _find_timer: None,
             clipboard: Rc::new(MemoryClipboard::default()),
@@ -588,6 +601,13 @@ impl TerminalView {
     /// (ending any selection of ours); otherwise the left button selects, shift extends, and
     /// the middle button pastes.
     pub fn mouse_down(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        // The link key and a click on a link opens it: no selection, no report to the program.
+        if event.button == GpuiButton::Left
+            && Self::link_key(event.modifiers)
+            && self.open_link_at(event.position, cx)
+        {
+            return;
+        }
         let taken = self.mouse(
             MouseAction::Press,
             Some(event.button),
@@ -623,6 +643,7 @@ impl TerminalView {
     /// The pointer moved over the pane: motion for a program that takes the mouse, a drag for
     /// the selection otherwise.
     pub fn mouse_moved(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        self.update_hover(Some(event.position), event.modifiers, cx);
         let held = event.pressed_button;
         if held.is_some() && !self.buttons_down.is_empty() || held.is_none() {
             if self.mouse(MouseAction::Motion, held, event.position, event.modifiers) {
@@ -704,6 +725,58 @@ impl TerminalView {
                 }
             }
             cx.notify();
+        }
+    }
+
+    /// The folder relative file links are read against, until the shell reports its own.
+    pub fn set_cwd(&mut self, cwd: Option<std::path::PathBuf>) {
+        self.cwd = cwd;
+    }
+
+    /// Whether the key that turns the pointer over a link into a click on it is held: Command.
+    fn link_key(modifiers: Modifiers) -> bool {
+        modifiers.platform && !modifiers.alt && !modifiers.shift && !modifiers.control
+    }
+
+    /// The link under the pointer, for the underline and the pointing hand.
+    pub fn hovered_link(&self) -> Option<&links::Hit> {
+        self.hover_link.as_ref()
+    }
+
+    fn link_under(&self, position: Point<Pixels>) -> Option<links::Hit> {
+        let at = self.pointer(position)?;
+        self.vt.link_at(at.col, at.row)
+    }
+
+    fn update_hover(&mut self, position: Option<Point<Pixels>>, modifiers: Modifiers, cx: &mut Context<Self>) {
+        self.last_pointer = position;
+        let hit = position
+            .filter(|_| Self::link_key(modifiers))
+            .and_then(|p| self.link_under(p));
+        if hit != self.hover_link {
+            self.hover_link = hit;
+            cx.notify();
+        }
+    }
+
+    /// The link key was pressed or let go with the pointer at rest.
+    pub fn modifiers_changed(&mut self, modifiers: Modifiers, cx: &mut Context<Self>) {
+        self.update_hover(self.last_pointer, modifiers, cx);
+    }
+
+    /// Open the link at `position`, if there is one that leads somewhere: say so, and do
+    /// nothing more. A file counts only when it exists here.
+    fn open_link_at(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) -> bool {
+        let Some(hit) = self.link_under(position) else {
+            return false;
+        };
+        let cwd = self.cwd.clone().or_else(|| self.vt.pwd());
+        match links::resolve(&hit.target, cwd.as_deref()) {
+            Some(target) => {
+                cx.emit(TerminalEvent::OpenLink(target));
+                true
+            }
+            None => false,
         }
     }
 
@@ -1096,6 +1169,7 @@ impl TerminalView {
             family,
             opacity: self.settings.opacity,
             blink_on: self.blink_on,
+            link: self.hover_link.as_ref().map(|h| h.spans.clone()).unwrap_or_default(),
         }
     }
 
@@ -1267,6 +1341,7 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
         family,
         opacity,
         blink_on,
+        link,
     } = painted;
     // ponytail: opacity is applied per colour, not to the pane as a group like the web's CSS
     // opacity, so text over a cell background shows the background through it twice.
@@ -1409,6 +1484,15 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
         }
     }
 
+    // The link under the pointer is underlined.
+    for (row, first, last) in link {
+        let rule = Bounds::new(
+            at(usize::from(first), usize::from(row)) + point(px(0.), underline),
+            size(cw * f32::from(last - first + 1), thickness),
+        );
+        window.paint_quad(fill(snap_box(rule), col(frame.fg)));
+    }
+
     // The cursor, over the glyph it covers. A blinking one is off half the time while focused.
     if let Some(cursor) = frame.cursor.filter(|c| blink_on || !focused || !c.blink) {
         let (x, y) = (cursor.x as usize, cursor.y as usize);
@@ -1472,6 +1556,10 @@ impl gpui::Render for TerminalView {
                 if this.key_down(event, cx) {
                     cx.stop_propagation();
                 }
+            }))
+            .when(self.hover_link.is_some(), |pane| pane.cursor_pointer())
+            .on_modifiers_changed(cx.listener(|this, event: &gpui::ModifiersChangedEvent, _, cx| {
+                this.modifiers_changed(event.modifiers, cx);
             }))
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
                 this.scroll_wheel(event, cx);
