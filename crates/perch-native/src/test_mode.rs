@@ -8,6 +8,9 @@
 //!   run in order once the core has been heard from: `open <session id>` shows that session as a
 //!   tab, `split right|down` starts a terminal beside the focused one, `pause <ms>` waits.
 //!   Blank lines and lines starting with `#` are skipped.
+//!
+//! The terminal never asks the system which Option key is down in this mode (it sees none), so a
+//! run does not depend on the real keyboard.
 
 use gpui::{AsyncApp, WindowHandle};
 use perch_native::sidebar::LOCAL;

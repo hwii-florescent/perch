@@ -3,9 +3,9 @@
 // (https://github.com/herdrdev/herdr-app, commit
 // 4c8c622d7965a6f6787f55b1896b70795fc68918), licensed under the Apache License,
 // Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0). Modified for Perch:
-// no Windows input mode and no per-side Option setting (GPUI 0.3 does not report
-// the side): Option types Alt sequences unless the `optionAsAlt` setting is off, as in
-// the web terminal. See THIRD_PARTY_NOTICES.md.
+// no Windows input mode, and the Option side is read from the system at key time
+// (GPUI 0.3 does not report it) and applied as the web terminal's `optionAsAlt`
+// does. See THIRD_PARTY_NOTICES.md.
 
 //! What a GPUI key press sends the program: the key described to the encoder in
 //! [`super::vt`], which encodes it once, in the mode the program asked for. A Command chord is the
@@ -18,24 +18,103 @@ use super::vt::{KeyInput, Vt};
 use ghostty_sys as g;
 use gpui::Keystroke;
 
+/// Which Option key is down.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OptionSide {
+    /// Neither is down, or the system did not say.
+    None,
+    Left,
+    Right,
+    Both,
+}
+
+/// Whether Option acts as Alt for `key` under `setting` with `side` down, as the web terminal
+/// does: a key with a name (the arrows, Backspace, F1) always carries Alt, xterm.js encodes it
+/// so; a key that types a character carries it only when the setting names an Option key that
+/// is down, and otherwise types the layout's character.
+pub fn option_is_alt(setting: OptionAsAlt, side: OptionSide, key: &str) -> bool {
+    if named(key) && key != "space" {
+        return true;
+    }
+    match setting {
+        OptionAsAlt::Auto => true,
+        OptionAsAlt::Off => false,
+        OptionAsAlt::Left => matches!(side, OptionSide::Left | OptionSide::Both),
+        OptionAsAlt::Right => matches!(side, OptionSide::Right | OptionSide::Both),
+    }
+}
+
+/// The Option side to decide `keystroke` by under `setting`: asked of the system only when the
+/// setting names a side and Option is down, else [`OptionSide::None`].
+pub fn option_side_for(setting: OptionAsAlt, keystroke: &Keystroke) -> OptionSide {
+    if keystroke.modifiers.alt && matches!(setting, OptionAsAlt::Left | OptionAsAlt::Right) {
+        held_option_side()
+    } else {
+        OptionSide::None
+    }
+}
+
+/// The Option side from the device-dependent bits of the modifier flags (`NX_DEVICELALTKEYMASK`
+/// and `NX_DEVICERALTKEYMASK`).
+fn option_side_of_flags(flags: u64) -> OptionSide {
+    const LEFT: u64 = 0x20;
+    const RIGHT: u64 = 0x40;
+    match (flags & LEFT != 0, flags & RIGHT != 0) {
+        (true, true) => OptionSide::Both,
+        (true, false) => OptionSide::Left,
+        (false, true) => OptionSide::Right,
+        (false, false) => OptionSide::None,
+    }
+}
+
+/// Which Option key the system says is down. GPUI reports only that Option is, so this asks the
+/// HID system's modifier state at key time: a key a program posts without the hardware has no
+/// side, and neither has one the person let go of before this ran. Test mode
+/// (`PERCH_NATIVE_TEST=1`) never asks, so a headless run does not depend on the real keyboard.
+#[cfg(target_os = "macos")]
+pub fn held_option_side() -> OptionSide {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        /// `CGEventSourceFlagsState`: the modifier flags of an event source's state table.
+        fn CGEventSourceFlagsState(state: i32) -> u64;
+    }
+    /// `kCGEventSourceStateHIDSystemState`.
+    const HID_SYSTEM_STATE: i32 = 1;
+    if std::env::var_os("PERCH_NATIVE_TEST").is_some_and(|v| v == "1") {
+        return OptionSide::None;
+    }
+    // SAFETY: a plain query of the system's modifier state; it takes no pointers.
+    option_side_of_flags(unsafe { CGEventSourceFlagsState(HID_SYSTEM_STATE) })
+}
+
+/// Other systems do not tell the sides apart: either counts, so `left` and `right` act as `auto`.
+#[cfg(not(target_os = "macos"))]
+pub fn held_option_side() -> OptionSide {
+    OptionSide::Both
+}
+
 /// The bytes for `keystroke`, or `None` when the terminal has nothing to say for it (a key with
 /// no meaning here, or a Command chord, which belongs to the app).
 pub fn key_bytes(vt: &mut Vt, keystroke: &Keystroke, repeat: bool) -> Option<Vec<u8>> {
-    key_bytes_with(vt, keystroke, repeat, OptionAsAlt::Auto)
+    key_bytes_with(vt, keystroke, repeat, OptionAsAlt::Auto, OptionSide::None)
 }
 
-/// [`key_bytes`] under the `optionAsAlt` setting: with it off, Option types the keyboard
-/// layout's character instead of an Alt sequence.
+/// [`key_bytes`] under the `optionAsAlt` setting and the Option key that is down
+/// ([`option_is_alt`]): where Option is not Alt it types the keyboard layout's character. Option
+/// still counts as held, consumed by that character, so a program that asked for every key as an
+/// escape code (kitty `>9u`) is told, as herdr's encoder does; the web has no answer there.
 pub fn key_bytes_with(
     vt: &mut Vt,
     keystroke: &Keystroke,
     repeat: bool,
     option: OptionAsAlt,
+    side: OptionSide,
 ) -> Option<Vec<u8>> {
     let mut m = keystroke.modifiers;
-    if option == OptionAsAlt::Off {
-        m.alt = false;
-    }
+    // Option was held, whether or not it acts as Alt: a program that asked for every key as an
+    // escape code is told so, and the layout's character it made is the text.
+    let option_held = m.alt;
+    m.alt = option_held && option_is_alt(option, side, &keystroke.key);
     if m.platform {
         return None;
     }
@@ -79,11 +158,15 @@ pub fn key_bytes_with(
     if m.control {
         mods |= g::GHOSTTY_MODS_CTRL as g::GhosttyMods;
     }
-    if m.alt {
+    if option_held {
         mods |= g::GHOSTTY_MODS_ALT as g::GhosttyMods;
     }
-    // Shift made the text; the kitty protocol must not report it again.
-    let consumed = mods & g::GHOSTTY_MODS_SHIFT as g::GhosttyMods;
+    // Shift made the text; the kitty protocol must not report it again. Nor Option, when it made
+    // the layout's character instead of an Alt chord.
+    let mut consumed = mods & g::GHOSTTY_MODS_SHIFT as g::GhosttyMods;
+    if option_held && !m.alt {
+        consumed |= g::GHOSTTY_MODS_ALT as g::GhosttyMods;
+    }
     let text = if m.alt {
         // macOS turns Option-x into another character; Alt sequences name the key itself.
         alt_text(&keystroke.key, shifted || m.shift)
@@ -275,13 +358,116 @@ mod tests {
         let mut option_s = stroke("alt-s");
         option_s.key_char = Some("ß".into());
         assert_eq!(
-            key_bytes_with(&mut vt, &option_s, false, OptionAsAlt::Off).unwrap(),
+            key_bytes_with(
+                &mut vt,
+                &option_s,
+                false,
+                OptionAsAlt::Off,
+                OptionSide::None
+            )
+            .unwrap(),
             "ß".as_bytes()
         );
         assert_eq!(
-            key_bytes_with(&mut vt, &option_s, false, OptionAsAlt::Auto).unwrap(),
+            key_bytes_with(
+                &mut vt,
+                &option_s,
+                false,
+                OptionAsAlt::Auto,
+                OptionSide::None
+            )
+            .unwrap(),
             b"\x1bs"
         );
+    }
+
+    fn option(key: &str, text: Option<&str>) -> Keystroke {
+        Keystroke {
+            modifiers: gpui::Modifiers::alt(),
+            key: key.into(),
+            key_char: text.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn option_sides_encode_shortcuts_and_native_text() {
+        use OptionAsAlt::{Auto, Left, Off, Right};
+        use OptionSide::{Both, None as Nothing};
+        let sides = [Nothing, OptionSide::Left, OptionSide::Right, Both];
+        // Plain, kitty disambiguate (`>1u`), and kitty report-all (`>9u`).
+        for (mode, kitty) in [(&b""[..], 0), (b"\x1b[>1u", 1), (b"\x1b[>9u", 2)] {
+            for setting in [Auto, Off, Left, Right] {
+                for side in sides {
+                    let as_alt = match setting {
+                        Auto => true,
+                        Off => false,
+                        Left => matches!(side, OptionSide::Left | Both),
+                        Right => matches!(side, OptionSide::Right | Both),
+                    };
+                    let mut vt = Vt::new(20, 3);
+                    vt.write(mode);
+                    let mut send = |key: &str, text: Option<&str>| {
+                        key_bytes_with(&mut vt, &option(key, text), false, setting, side).unwrap()
+                    };
+                    let why = format!("{setting:?} {side:?} {mode:?}");
+                    // A letter: Alt names the key, otherwise the layout's character is typed. A
+                    // program that asked for every key as an escape code is still told Option
+                    // was held.
+                    for native in ["\u{3c0}", "@"] {
+                        let expected: &[u8] = match (as_alt, kitty) {
+                            (true, 0) => b"\x1bp",
+                            (_, 2) | (true, _) => b"\x1b[112;3u",
+                            (false, _) => native.as_bytes(),
+                        };
+                        assert_eq!(send("p", Some(native)), expected, "{why} {native}");
+                    }
+                    // An arrow and Backspace carry Alt whatever the setting and the side.
+                    assert_eq!(send("left", None), b"\x1b[1;3D", "{why}");
+                    let backspace: &[u8] = if kitty > 0 {
+                        b"\x1b[127;3u"
+                    } else {
+                        b"\x1b\x7f"
+                    };
+                    assert_eq!(send("backspace", None), backspace, "{why}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_side_comes_from_the_systems_device_bits() {
+        assert_eq!(option_side_of_flags(0), OptionSide::None);
+        assert_eq!(option_side_of_flags(0x20), OptionSide::Left);
+        assert_eq!(option_side_of_flags(0x40), OptionSide::Right);
+        assert_eq!(option_side_of_flags(0x60), OptionSide::Both);
+        // The other bits of the flags (Shift, Command, the generic Option bit) say nothing.
+        assert_eq!(
+            option_side_of_flags(0x0008_0000 | 0x0002_0000),
+            OptionSide::None
+        );
+        assert_eq!(option_side_of_flags(0x0008_0000 | 0x20), OptionSide::Left);
+    }
+
+    #[test]
+    fn the_system_is_asked_only_for_a_named_side_with_option_down() {
+        // These never reach the system, so they hold whatever the keyboard is doing.
+        for setting in [OptionAsAlt::Auto, OptionAsAlt::Off] {
+            assert_eq!(
+                option_side_for(setting, &option("p", None)),
+                OptionSide::None
+            );
+        }
+        let plain = stroke("p");
+        for setting in [OptionAsAlt::Left, OptionAsAlt::Right] {
+            assert_eq!(option_side_for(setting, &plain), OptionSide::None);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_system_query_links_and_answers() {
+        // Only that it links and returns; which key is down is not this test's to decide.
+        let _ = held_option_side();
     }
 
     #[test]

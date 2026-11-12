@@ -24,7 +24,7 @@ use super::clipboard::{self, Clipboard, MemoryClipboard};
 use super::context::{self, Capture};
 use super::fallback;
 use super::graphics::Layer;
-use super::keys::{expects_real_chords, key_bytes_with};
+use super::keys::{expects_real_chords, key_bytes_with, option_side_for};
 use super::layout::{self, Fit, Metrics};
 use super::links::{self, Target};
 use super::scroll;
@@ -1031,7 +1031,13 @@ impl TerminalView {
         if !self.can_type() {
             return false;
         }
-        match key_bytes_with(&mut self.vt, keystroke, repeat, self.settings.option_as_alt) {
+        match key_bytes_with(
+            &mut self.vt,
+            keystroke,
+            repeat,
+            self.settings.option_as_alt,
+            option_side_for(self.settings.option_as_alt, keystroke),
+        ) {
             Some(bytes) => {
                 self.type_bytes(bytes, cx);
                 true

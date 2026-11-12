@@ -25,23 +25,27 @@ pub const MIN_SCROLLBACK: u32 = 100;
 pub const MAX_SCROLLBACK: u32 = 200_000;
 pub const DEFAULT_SCROLLBACK: u32 = 10_000;
 
-/// Whether Option types Alt sequences (`optionAsAlt`).
+/// Whether Option types Alt sequences (`optionAsAlt`), as the web terminal reads it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum OptionAsAlt {
-    /// The keyboard layout's characters.
+    /// Neither Option key: both type the keyboard layout's characters.
     Off,
-    /// Alt sequences. GPUI does not say which Option key is down, so `left` and `right` act as
-    /// `auto` for both.
+    /// Both Option keys (`auto` and `on` are alike: a web view cannot tell the layout either).
     #[default]
     Auto,
+    /// Only the left Option key.
+    Left,
+    /// Only the right Option key.
+    Right,
 }
 
 impl OptionAsAlt {
     fn parse(text: &str) -> Self {
-        if text == "off" {
-            Self::Off
-        } else {
-            Self::Auto
+        match text {
+            "off" => Self::Off,
+            "left" => Self::Left,
+            "right" => Self::Right,
+            _ => Self::Auto,
         }
     }
 }
@@ -309,6 +313,20 @@ mod tests {
             pick_family(Some("\"Fira Code\", Menlo"), &["Menlo".into()]),
             "Menlo"
         );
+    }
+
+    #[test]
+    fn option_as_alt_reads_each_of_the_webs_five_words() {
+        for (word, read) in [
+            ("auto", OptionAsAlt::Auto),
+            ("on", OptionAsAlt::Auto),
+            ("off", OptionAsAlt::Off),
+            ("left", OptionAsAlt::Left),
+            ("right", OptionAsAlt::Right),
+            ("nonsense", OptionAsAlt::Auto),
+        ] {
+            assert_eq!(OptionAsAlt::parse(word), read, "{word}");
+        }
     }
 
     #[test]
