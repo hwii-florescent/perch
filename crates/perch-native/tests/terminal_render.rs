@@ -343,6 +343,10 @@ fn main() {
         "output_wakes_only_what_is_shown",
         output_wakes_only_what_is_shown,
     );
+    run(
+        "dropped_files_type_their_paths",
+        dropped_files_type_their_paths,
+    );
     run("ownership_and_named_actions", ownership_and_named_actions);
     run(
         "x10_mouse_reports_past_the_text_range",
