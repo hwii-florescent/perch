@@ -1461,6 +1461,42 @@ mod tests {
     }
 
     #[test]
+    fn a_program_that_asks_for_in_band_size_reports_gets_each_change() {
+        let mut vt = Vt::new(20, 4);
+        vt.resize(30, 5, (9, 18));
+        assert!(
+            vt.take_replies().is_empty(),
+            "a shell receives no resize input"
+        );
+        vt.write(b"\x1b[?2048h");
+        assert_eq!(
+            vt.take_replies(),
+            b"\x1b[48;5;30;90;270t",
+            "enabling reports the geometry"
+        );
+        vt.resize(40, 6, (9, 18));
+        assert_eq!(vt.take_replies(), b"\x1b[48;6;40;108;360t");
+        assert!(vt.take_replies().is_empty(), "each change is reported once");
+        vt.write(b"\x1b[?2048l");
+        vt.resize(50, 7, (9, 18));
+        assert!(vt.take_replies().is_empty());
+    }
+
+    #[test]
+    fn five_thousand_styled_lines_stay_reachable_at_either_width() {
+        for cols in [80u16, 200] {
+            let mut vt = Vt::new(cols, 24);
+            for n in 0..5000 {
+                vt.write(format!("\x1b[3{}mline {n}\x1b[0m\r\n", n % 8).as_bytes());
+            }
+            vt.scroll_to_top();
+            assert_eq!(vt.frame().row_text(0), "line 0", "{cols} columns");
+            vt.scroll_to_bottom();
+            assert!(vt.frame().row_text(22).starts_with("line 4999"));
+        }
+    }
+
+    #[test]
     fn keys_encode_in_the_mode_the_program_asked_for() {
         let mut vt = Vt::new(80, 24);
         assert_eq!(vt.encode_key(key(g::GHOSTTY_KEY_ENTER, 0)), b"\r");
