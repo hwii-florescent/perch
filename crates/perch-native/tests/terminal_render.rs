@@ -974,6 +974,25 @@ fn wide_and_emoji(bg: [u8; 3]) {
     // The accent shares the cell of its base letter, and 'z' keeps the second cell.
     assert!(shot.ink(0, 2, 1, bg) > 4);
     assert!(shot.ink(1, 2, 1, bg) > 4);
+
+    // A block cursor on a wide character covers both of its cells, edge to edge.
+    h.focus();
+    h.output("\x1b[1;1H");
+    let shot = h.draw();
+    let inset = 1.0 / shot.scale;
+    for col in [0, 1] {
+        let (x, y) = shot.cell_origin(col, 0);
+        let corner = shot.at(x + shot.cell.0 - inset, y + inset);
+        assert!(
+            near(corner, rgb(0xffffff)),
+            "cursor covers column {col}: {corner:?}"
+        );
+    }
+    let (x, y) = shot.cell_origin(2, 0);
+    assert!(
+        near(shot.at(x + shot.cell.0 - inset, y + inset), bg),
+        "and stops at the character's second cell"
+    );
 }
 
 /// The owner fits the pane and asks for it once; a view that doesn't own the size takes the

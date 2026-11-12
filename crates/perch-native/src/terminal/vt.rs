@@ -1583,6 +1583,66 @@ mod tests {
     }
 
     #[test]
+    fn minimum_contrast_lifts_text_but_leaves_shape_glyphs_alone() {
+        let dim = "\x1b[38;2;20;20;20m";
+        let feed = |minimum: f32| {
+            let mut vt = Vt::new(20, 2);
+            vt.set_theme(Theme {
+                minimum_contrast: minimum,
+                ..Theme::default()
+            });
+            vt.write(format!("{dim}a\u{2500}\u{e0b0}\u{2588}").as_bytes());
+            vt.frame()
+        };
+        let bg = Theme::default().bg;
+        // Off (1): the program's own dark grey on black stays unreadable.
+        let off = feed(1.0);
+        assert_eq!(off.rows[0][0].fg, Rgb(20, 20, 20));
+        // On: the letter is pushed until it meets the ratio, the shapes keep their colour.
+        let on = feed(4.5);
+        assert!(contrast(on.rows[0][0].fg, bg) >= 4.5, "{:?}", on.rows[0][0]);
+        for x in 1..4 {
+            assert_eq!(
+                on.rows[0][x].fg,
+                Rgb(20, 20, 20),
+                "column {x} keeps its colour"
+            );
+        }
+        // Text that already meets the ratio is not touched.
+        let mut vt = Vt::new(20, 2);
+        vt.set_theme(Theme {
+            minimum_contrast: 4.5,
+            ..Theme::default()
+        });
+        vt.write(b"\x1b[38;2;240;240;100mr");
+        assert_eq!(vt.frame().rows[0][0].fg, Rgb(240, 240, 100));
+    }
+
+    #[test]
+    fn a_drag_is_reported_in_the_modes_that_ask_for_it_and_pixels_when_the_program_wants_them() {
+        let drag = |col: u32, row: u32| MouseInput {
+            any_pressed: true,
+            ..mouse(MouseAction::Motion, Some(MouseButton::Left), col, row)
+        };
+        // Press-and-release tracking never sees motion.
+        let mut vt = fed(80, 24, "\x1b[?1000h\x1b[?1006h");
+        vt.encode_mouse(mouse(MouseAction::Press, Some(MouseButton::Left), 2, 2));
+        assert!(vt.encode_mouse(drag(3, 2)).is_empty());
+        // Button tracking reports a drag once per changed cell, and not inside the pressed cell.
+        vt.write(b"\x1b[?1002h");
+        vt.encode_mouse(mouse(MouseAction::Press, Some(MouseButton::Left), 2, 2));
+        assert!(vt.encode_mouse(drag(2, 2)).is_empty(), "same cell");
+        assert_eq!(vt.encode_mouse(drag(3, 2)), b"\x1b[<32;4;3M");
+        assert!(vt.encode_mouse(drag(3, 2)).is_empty(), "once per cell");
+        // Pixel format: positions are the pointer's own pixels.
+        vt.write(b"\x1b[?1016h");
+        assert_eq!(
+            vt.encode_mouse(mouse(MouseAction::Press, Some(MouseButton::Left), 2, 2)),
+            b"\x1b[<0;25;50M"
+        );
+    }
+
+    #[test]
     fn a_fractional_cell_size_reports_the_cell_under_the_pointer() {
         let mut vt = fed(100, 10, "\x1b[?1000h\x1b[?1006h");
         let at = |col: f32| MouseInput {
