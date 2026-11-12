@@ -5,8 +5,9 @@
 
 use futures::StreamExt;
 use gpui::{prelude::*, px, size, App, Bounds, WindowBounds, WindowOptions};
-use perch_native::client::{follow, Core};
+use perch_native::client::{follow, Core, Update};
 use perch_native::sidebar::Model;
+use perch_native::sound;
 use perch_native::ui::Workspace;
 use std::time::Duration;
 
@@ -45,6 +46,11 @@ fn main() {
         let workspace = window.update(cx, |_, _, cx| cx.entity()).expect("window");
         cx.spawn(async move |cx| {
             while let Some(update) = update_rx.next().await {
+                // A sound is due: play it here, not in the view, so no test ever does.
+                if let Update::Alert(alert) = update {
+                    sound::play(alert);
+                    continue;
+                }
                 let sidebar = workspace.read_with(cx, |workspace, _| workspace.sidebar().clone());
                 sidebar.update(cx, |sidebar, cx| sidebar.apply(update, cx));
             }

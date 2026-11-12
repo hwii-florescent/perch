@@ -28,16 +28,21 @@ pub const TRANSPORT_LOST: i32 = i32::MIN;
 // whole transfer. Page the scrollback in on demand if either bites.
 pub const MAX_TERMINAL_REPLAY_BYTES: usize = perchd::proto::DEFAULT_REPLAY as usize;
 
-/// Bounded UTF-8 replay shared by shell and provider runtimes: the recent
-/// output, then a repaint of the whole screen (scrollback, contents, modes),
-/// which the tail alone loses (see `perchd::screen`). The repaint starts with
-/// a terminal reset, so it replaces the tail rather than adding to it; the
-/// tail still carries the in-band size markers and is what a screen that was
-/// never fed (nothing to repaint) falls back to.
+/// Bounded UTF-8 replay shared by shell and provider runtimes: a repaint of
+/// the whole screen (scrollback, contents, modes), which a byte tail alone
+/// loses (see `perchd::screen`). The repaint starts with a terminal reset, so
+/// whatever precedes it is erased and the tail is not sent with it; the
+/// current size marker is, because the reset does not carry it.
+///
+/// The tail is still kept for a screen that can't repaint (the engine failed
+/// to copy it, or nothing but size markers has arrived), which then replays
+/// the tail as before. It stays within [`MAX_TERMINAL_REPLAY_BYTES`] either way.
 pub(crate) struct TerminalReplay {
     chunks: VecDeque<String>,
     bytes: usize,
     screen: perchd::screen::Screen,
+    /// The PTY's size as the last in-band size marker set it.
+    size: Option<(u16, u16)>,
 }
 
 impl Default for TerminalReplay {
@@ -63,6 +68,7 @@ impl TerminalReplay {
             chunks: VecDeque::new(),
             bytes: 0,
             screen: perchd::screen::Screen::new(cols, rows),
+            size: None,
         }
     }
 
@@ -71,7 +77,10 @@ impl TerminalReplay {
             return;
         }
         match parse_size_marker(data) {
-            Some((cols, rows)) => self.screen.set_size(cols, rows),
+            Some((cols, rows)) => {
+                self.screen.set_size(cols, rows);
+                self.size = Some((cols, rows));
+            }
             None => self.screen.process(data.as_bytes()),
         }
         let mut start = data.len().saturating_sub(MAX_TERMINAL_REPLAY_BYTES);
@@ -92,22 +101,18 @@ impl TerminalReplay {
         if self.chunks.is_empty() {
             return String::new();
         }
-        let repaint = self.screen.restore();
-        // Older chunks make room for the repaint, keeping the replay bounded.
-        // ponytail: a repaint alone can pass the bound (10,000 rows of dense
-        // styled text); it can't be cut without corrupting the screen it
-        // restores, so it goes out whole. Cap the scrollback it carries if
-        // that ever bites.
-        let mut excess = (self.bytes + repaint.len()).saturating_sub(MAX_TERMINAL_REPLAY_BYTES);
-        let mut text = String::new();
-        for chunk in &self.chunks {
-            if excess > 0 {
-                excess = excess.saturating_sub(chunk.len());
-                continue;
-            }
-            text += chunk;
+        let marker = self
+            .size
+            .map(|(cols, rows)| pty_size_marker(cols, rows))
+            .unwrap_or_default();
+        // A repaint too big for the bound carries fewer of its oldest
+        // scrollback rows, never a cut sequence.
+        let room = MAX_TERMINAL_REPLAY_BYTES - marker.len().min(MAX_TERMINAL_REPLAY_BYTES);
+        let repaint = self.screen.restore_bytes_within(room);
+        if repaint.is_empty() {
+            return self.chunks.iter().map(String::as_str).collect();
         }
-        text + &repaint
+        marker + &String::from_utf8_lossy(&repaint)
     }
 }
 
@@ -1544,6 +1549,59 @@ mod tests {
         assert_eq!(view.keyboard_flags(), 7);
         view.process(b"\x1b[<u");
         assert_eq!(view.keyboard_flags(), 0);
+    }
+
+    /// The repaint erases what precedes it, so the tail is not sent with it;
+    /// the size marker still leads, since the reset leaves the size alone.
+    #[test]
+    fn replay_sends_the_size_and_the_repaint_not_the_tail_it_erases() {
+        let mut replay = TerminalReplay::new(80, 24);
+        replay.push("old output\r\n");
+        replay.push(&pty_size_marker(100, 30));
+        replay.push("\x1b[H\x1b[2J\x1b[3Jnew output");
+        let text = replay.text();
+        assert!(text.starts_with(&format!("{}\x1bc", pty_size_marker(100, 30))));
+        assert!(!text.contains("old output"));
+        assert_eq!(text.matches("\x1b[8;").count(), 1);
+        let mut view = perchd::screen::Screen::new(100, 30);
+        view.process(text.as_bytes());
+        assert_eq!(view.contents(), "new output");
+    }
+
+    /// Nothing to repaint (only a size has arrived): the tail is all there is.
+    #[test]
+    fn replay_without_output_keeps_the_size_markers() {
+        let mut replay = TerminalReplay::new(80, 24);
+        assert_eq!(replay.text(), "");
+        replay.push(&pty_size_marker(100, 30));
+        assert_eq!(replay.text(), pty_size_marker(100, 30));
+    }
+
+    /// 10,000 rows of 500 styled columns repaint to far more than the bound.
+    /// The oldest scrollback goes, whole rows at a time; the newest rows, the
+    /// screen and its modes arrive uncut.
+    #[test]
+    fn a_repaint_larger_than_the_bound_drops_old_scrollback_not_sequences() {
+        let mut replay = TerminalReplay::new(500, 24);
+        for line in 0..10_000 {
+            let styled: String = (0..250)
+                .map(|cell| format!("\x1b[3{};4{}mx", (cell + line) % 8, (cell + line / 3) % 8))
+                .collect();
+            replay.push(&format!("{styled}\x1b[0m {line}\r\n"));
+        }
+        replay.push("$ \x1b[?2004h");
+        let text = replay.text();
+        assert!(
+            text.len() <= MAX_TERMINAL_REPLAY_BYTES,
+            "{} bytes",
+            text.len()
+        );
+        assert!(text.starts_with("\x1bc"));
+        let mut view = perchd::screen::Screen::new(500, 24);
+        view.process(text.as_bytes());
+        assert!(view.contents().ends_with("$"), "{}", view.contents());
+        assert!(view.dec_mode(2004));
+        assert!(view.scrollback_rows() > 100);
     }
 
     /// Off by default is the whole safety story for this setting: a login

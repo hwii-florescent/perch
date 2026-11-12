@@ -11,6 +11,7 @@ mod glass;
 #[cfg(target_os = "macos")]
 mod menu;
 mod notify;
+mod open_url;
 mod permissions;
 #[cfg(target_os = "macos")]
 mod shortcuts;
@@ -236,7 +237,17 @@ fn main() {
     let url: tauri::WebviewUrl =
         tauri::WebviewUrl::External(sign_in_url.parse().expect("invalid server URL"));
 
-    let builder = tauri::Builder::default();
+    let builder = tauri::Builder::default()
+        .manage(open_url::Handoff::default())
+        // A page that is loading is not listening for `perch://` links yet (`open_url.rs`).
+        .on_page_load(|webview, payload| {
+            use tauri::Manager;
+            if webview.label() == "main"
+                && payload.event() == tauri::webview::PageLoadEvent::Started
+            {
+                webview.state::<open_url::Handoff>().reset();
+            }
+        });
     // macOS uses real UserNotifications permission/delivery IPC instead of the
     // plugin’s unconditional desktop grant and legacy notification shim.
     #[cfg(not(target_os = "macos"))]
@@ -253,6 +264,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             open_external,
+            open_url::open_ready,
             set_traffic_lights,
             capture_window,
             open_in_default_app,
@@ -331,8 +343,15 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running perch-desktop");
+        .build(tauri::generate_context!())
+        .expect("error while building perch-desktop")
+        .run(|_app, _event| {
+            // `perch://` links (the native client's "Open in Perch") arrive as Opened events.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
+                open_url::open(_app, &urls);
+            }
+        });
 
     // Keep the runtime alive until Tauri exits (runtime drop joins all tasks).
     drop(runtime);

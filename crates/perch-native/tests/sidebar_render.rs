@@ -4,10 +4,10 @@
 //! (`Window::render_to_image`); no window is created, shown or focused. This is its own
 //! binary with a custom `main`, as Zed's headless tests are, so AppKit runs on the main thread.
 
-use gpui::{px, size, AppContext, HeadlessAppContext, Window};
+use gpui::{px, size, AppContext, Context, HeadlessAppContext, Window};
 use perch_core::protocol::ServerMessage;
 use perch_native::sidebar::{Attention, State};
-use perch_native::ui::{tint, OpenSession, Workspace, SIDEBAR_WIDTH};
+use perch_native::ui::{tint, OpenSession, Sidebar, Workspace, SIDEBAR_WIDTH};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -65,6 +65,26 @@ impl Frame {
         self.pixels(sidebar, |p| p[..3].iter().all(|c| *c >= 0xc0))
     }
 
+    /// The sidebar's text lines, top to bottom: for each run of pixel rows holding bright
+    /// pixels, the leftmost bright column and the first pixel row.
+    fn lines(&self) -> Vec<(usize, usize)> {
+        let mut lines: Vec<(usize, usize)> = Vec::new();
+        let mut previous_bright = false;
+        for (y, row) in self.raw.chunks_exact(self.width * 4).enumerate() {
+            let left = row
+                .chunks_exact(4)
+                .take(self.sidebar_edge)
+                .position(|p| p[..3].iter().all(|c| *c >= 0xc0));
+            match (left, previous_bright) {
+                (Some(x), true) => lines.last_mut().unwrap().0 = lines.last().unwrap().0.min(x),
+                (Some(x), false) => lines.push((x, y)),
+                (None, _) => {}
+            }
+            previous_bright = left.is_some();
+        }
+        lines
+    }
+
     fn pixels(&self, sidebar: bool, matches: impl Fn(&[u8; 4]) -> bool) -> usize {
         self.raw
             .chunks_exact(4)
@@ -79,6 +99,16 @@ impl Frame {
 
 /// Draw the window for `state`, with `open` picked first when given.
 fn draw(cx: &mut HeadlessAppContext, state: &State, open: Option<(&str, Option<&str>)>) -> Frame {
+    draw_with(cx, state, open, |_, _| {})
+}
+
+/// As [`draw`], after `setup` has acted on the sidebar.
+fn draw_with(
+    cx: &mut HeadlessAppContext,
+    state: &State,
+    open: Option<(&str, Option<&str>)>,
+    setup: impl FnOnce(&mut Sidebar, &mut Context<Sidebar>),
+) -> Frame {
     let model = state.model();
     let window = cx
         .open_window(size(px(640.), px(360.)), |_, cx| {
@@ -94,6 +124,11 @@ fn draw(cx: &mut HeadlessAppContext, state: &State, open: Option<(&str, Option<&
             })
             .unwrap();
     }
+    window
+        .update(cx, |workspace, _, cx| {
+            workspace.sidebar().update(cx, setup);
+        })
+        .unwrap();
     let opened = window
         .update(cx, |workspace, _, _| workspace.open().cloned())
         .unwrap();
@@ -214,6 +249,69 @@ fn main() {
     assert_eq!(
         (fresh.title.as_str(), fresh.provider_id.as_deref()),
         ("New session", Some("codex"))
+    );
+
+    // A sub-session sits indented under its lead; two sessions side by side do not.
+    let lead = json!({});
+    let kid = json!({"parentSessionId": "lead"});
+    let nested = draw(
+        &mut cx,
+        &state(&[("lead", lead.clone()), ("kid", kid)]),
+        None,
+    );
+    let flat = draw(&mut cx, &state(&[("lead", lead), ("kid", json!({}))]), None);
+    let (nested, flat) = (nested.lines(), flat.lines());
+    assert_eq!(nested.len(), flat.len(), "{nested:?} / {flat:?}");
+    assert!(nested.len() >= 2, "{nested:?}");
+    let last = nested.len() - 1;
+    assert!(
+        nested[last].0 >= nested[last - 1].0 + 8,
+        "the sub-session is indented under its lead: {nested:?}"
+    );
+    assert!(
+        flat[last].0 <= flat[last - 1].0 + 3,
+        "two chats in one project line up: {flat:?}"
+    );
+
+    // By status regroups the same chats by state, needs-you first, whatever order the core
+    // listed them in.
+    let listed = state(&[
+        ("busy", json!({"status": "running"})),
+        ("quiet", json!({})),
+        ("stuck", json!({"blocked": true})),
+    ]);
+    let by_project = draw(&mut cx, &listed, None);
+    let by_status = draw_with(&mut cx, &listed, None, |sidebar, cx| {
+        assert!(sidebar.run_action("sidebar.organize", cx));
+    });
+    assert_ne!(
+        by_project.raw, by_status.raw,
+        "organize changes the sidebar"
+    );
+    assert!(
+        by_status.lines().len() > by_project.lines().len(),
+        "By status adds a heading for each state"
+    );
+    let first_fill = |frame: &Frame, attention: Attention| {
+        let want = tint(attention).0;
+        let want = [(want >> 16) as u8, (want >> 8) as u8, want as u8];
+        frame
+            .raw
+            .chunks_exact(frame.width * 4)
+            .position(|row| {
+                row.chunks_exact(4)
+                    .take(frame.sidebar_edge)
+                    .any(|p| p[..3].iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 2))
+            })
+            .unwrap_or_else(|| panic!("no {attention:?} fill"))
+    };
+    assert!(
+        first_fill(&by_status, Attention::NeedsYou) < first_fill(&by_status, Attention::Working),
+        "needs you is listed before working"
+    );
+    assert!(
+        first_fill(&by_project, Attention::NeedsYou) > first_fill(&by_project, Attention::Working),
+        "the project view keeps the core's order"
     );
 
     println!(

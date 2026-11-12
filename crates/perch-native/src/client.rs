@@ -13,7 +13,7 @@
 //! only derives `Deserialize`, so outgoing frames are built as JSON; `frames_match_the_core_protocol`
 //! checks each one against the real type.
 
-use crate::sidebar::{Model, Request, State, LOCAL};
+use crate::sidebar::{Alert, Model, Request, State, LOCAL};
 use anyhow::{anyhow, bail, Context, Result};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures::{SinkExt, StreamExt};
@@ -342,34 +342,6 @@ impl Connection {
         .await
     }
 
-    /// A new session running `provider` (the terminal, or an agent the computer lists). The core
-    /// starts the process and keeps it across this connection; nothing runs here. Only the
-    /// core's own computer starts it now: the core cannot open a persistent view of a remote
-    /// session, so a remote one starts when a terminal attaches to it.
-    pub async fn start_session(
-        &mut self,
-        host_id: &str,
-        cwd: Option<&str>,
-        provider: &str,
-    ) -> Result<String> {
-        let remote = host_id != LOCAL;
-        let session_id = self.create_session(cwd, remote.then_some(host_id)).await?;
-        if !remote {
-            let id = self.request_id();
-            self.send(open_frame(&id, &session_id, provider, 80, 24))
-                .await?;
-            self.reply(Some(&id), |m| match m {
-                ServerMessage::AgentTerminalOpened { request_id, .. } if *request_id == id => {
-                    Some(())
-                }
-                _ => None,
-            })
-            .await?;
-            self.send(release_frame(&session_id, provider, &id)).await?;
-        }
-        Ok(session_id)
-    }
-
     /// Ask the core for something; the answer arrives through [`Connection::next`].
     pub async fn request(&mut self, request: &Request) -> Result<()> {
         let id = self.request_id();
@@ -616,6 +588,19 @@ pub enum Command {
     },
     /// List plain terminals started inside a project.
     ShowTerminals(bool),
+    /// The window now shows this session: the core marks it read, and keeps doing so after a
+    /// reconnect.
+    View(String),
+    /// Whether the window is the one the person is looking at, which decides if a sound plays.
+    WindowActive(bool),
+    /// Turn a configured remote computer on or off, as its Settings switch does.
+    SetHostEnabled { host_id: String, enabled: bool },
+    /// Give a session a new title, as the sidebar's rename does.
+    Rename { session_id: String, title: String },
+    /// End a session, as closing its tab does for a shell that is idle.
+    Close(String),
+    /// Change settings: the `settings.update` patch, with only the fields that changed.
+    UpdateSettings(Value),
 }
 
 /// What the window learns.
@@ -630,6 +615,114 @@ pub enum Update {
         provider: String,
     },
     LaunchFailed(String),
+    /// A session was asked for on another computer. Nothing says which session is the one just
+    /// made (see [`Launch`]), so none is opened; the core lists it once it has activity.
+    Requested {
+        host_id: String,
+    },
+    /// A session finished or needs you and the person should hear it.
+    Alert(Alert),
+}
+
+/// A launch on the core's own computer, waiting for the core to say it worked.
+///
+/// The core answers `session.create` with `session.created`, which names no request, and a
+/// session created on a remote computer is broadcast to every viewer. A `session.created` is
+/// therefore only a candidate. The provider is then started in it under this launch's own request
+/// id, and the core refuses that for any session that lives on another computer, so only a session
+/// this connection made on the core's own computer is ever opened. Nothing is guessed: a launch
+/// that cannot be confirmed fails and opens nothing.
+struct Launch {
+    host_id: String,
+    provider: String,
+    /// The request id the provider start travels under.
+    open_id: String,
+    /// The candidate, once a `session.created` arrived.
+    session: Option<String>,
+    deadline: Instant,
+}
+
+/// What a message changes in a launch: frames to send, and how it ended, if it did.
+#[derive(Default)]
+struct Step {
+    send: Vec<Value>,
+    done: Option<Update>,
+}
+
+impl Launch {
+    fn new(host_id: String, provider: String, open_id: String) -> Self {
+        Self {
+            host_id,
+            provider,
+            open_id,
+            session: None,
+            deadline: Instant::now() + REPLY_TIMEOUT,
+        }
+    }
+
+    fn fail(message: String) -> Step {
+        Step {
+            done: Some(Update::LaunchFailed(message)),
+            ..Step::default()
+        }
+    }
+
+    fn on_message(&mut self, message: &ServerMessage) -> Step {
+        match (&self.session, message) {
+            (None, ServerMessage::SessionCreated { session_id }) => {
+                self.session = Some(session_id.clone());
+                Step {
+                    send: vec![open_frame(
+                        &self.open_id,
+                        session_id,
+                        &self.provider,
+                        80,
+                        24,
+                    )],
+                    done: None,
+                }
+            }
+            // The core refuses some creates (a folder it was not given) with an error that
+            // names no request.
+            (
+                None,
+                ServerMessage::Error {
+                    message,
+                    request_id: None,
+                    ..
+                },
+            ) => Self::fail(format!("the core refused the request: {message}")),
+            (
+                Some(session_id),
+                ServerMessage::AgentTerminalOpened {
+                    request_id, status, ..
+                },
+            ) if *request_id == self.open_id => {
+                if status.key.session_id != *session_id {
+                    return Self::fail("the core started a different session".into());
+                }
+                Step {
+                    send: vec![release_frame(session_id, &self.provider, &self.open_id)],
+                    done: Some(Update::Launched {
+                        host_id: self.host_id.clone(),
+                        session_id: session_id.clone(),
+                        provider: self.provider.clone(),
+                    }),
+                }
+            }
+            (
+                Some(_),
+                ServerMessage::Error {
+                    message,
+                    request_id: Some(id),
+                    ..
+                },
+            ) if *id == self.open_id => {
+                Self::fail(format!("the core could not start it: {message}"))
+            }
+            _ => Step::default(),
+        }
+    }
 }
 
 /// Follow the core until the window is gone: show what it says, and after a drop find it again
@@ -668,7 +761,14 @@ async fn attempt(
     let core = locate()?;
     let connection = core.connect().await?;
     state.core_url = Some(core.base_url());
-    live(connection, state, shown, commands, updates).await
+    let mut launch = None;
+    let ended = live(connection, state, shown, commands, updates, &mut launch).await;
+    if launch.is_some() && ended.is_err() {
+        // The core may or may not have made the session; it is never started again.
+        let lost = Update::LaunchFailed("the connection to the core dropped".into());
+        let _ = updates.unbounded_send(lost);
+    }
+    ended
 }
 
 /// Send the model if it changed. False once the window is gone.
@@ -681,13 +781,16 @@ fn publish(state: &State, shown: &mut Option<Model>, updates: &UnboundedSender<U
     updates.unbounded_send(Update::Model(model)).is_ok()
 }
 
-/// One connection's life: `Ok` when the window closed, `Err` when the socket dropped.
+/// One connection's life: `Ok` when the window closed, `Err` when the socket dropped. Requests
+/// never wait for their answer here: a launch is a small state machine fed by the same frames
+/// as everything else, so the sidebar keeps following the core while one is in flight.
 async fn live(
     mut connection: Connection,
     state: &mut State,
     shown: &mut Option<Model>,
     commands: &mut UnboundedReceiver<Command>,
     updates: &UnboundedSender<Update>,
+    launch: &mut Option<Launch>,
 ) -> Result<()> {
     state.connect();
     connection.send(json!({"type": "session.list"})).await?;
@@ -695,31 +798,111 @@ async fn live(
     connection
         .request(&Request::Providers(LOCAL.into()))
         .await?;
+    // `keys.json` rides on the mods state.
+    connection.request(&Request::Mods).await?;
+    // What the window was showing is viewed again, so the core still counts it as read.
+    if let Some(id) = state.viewing() {
+        connection.send(subscribe_frame(id)).await?;
+    }
     loop {
+        let deadline = launch.as_ref().map(|l| l.deadline);
+        let expired = async {
+            match deadline {
+                Some(at) => tokio::time::sleep_until(at).await,
+                None => std::future::pending().await,
+            }
+        };
         tokio::select! {
             message = connection.next() => {
-                for ask in state.apply(&message?) {
+                let message = message?;
+                if let Some(step) = launch.as_mut().map(|l| l.on_message(&message)) {
+                    for frame in step.send {
+                        connection.send(frame).await?;
+                    }
+                    if let Some(update) = step.done {
+                        *launch = None;
+                        if updates.unbounded_send(update).is_err() {
+                            return Ok(());
+                        }
+                    }
+                }
+                for ask in state.apply(&message) {
                     connection.request(&ask).await?;
+                }
+                for alert in state.take_alerts() {
+                    if updates.unbounded_send(Update::Alert(alert)).is_err() {
+                        return Ok(());
+                    }
                 }
             }
             command = commands.next() => match command {
                 None => return Ok(()),
                 Some(Command::ShowTerminals(show)) => state.show_terminals = show,
+                Some(Command::WindowActive(active)) => state.set_window_active(active),
+                Some(Command::View(id)) => {
+                    connection.send(subscribe_frame(&id)).await?;
+                    state.view(&id);
+                }
+                Some(Command::Rename { session_id, title }) => {
+                    connection.send(rename_frame(&session_id, &title)).await?;
+                }
+                Some(Command::Close(session_id)) => {
+                    connection.send(delete_frame(&session_id)).await?;
+                }
+                Some(Command::UpdateSettings(patch)) => {
+                    connection.send(settings_frame(patch)).await?;
+                }
+                Some(Command::SetHostEnabled { host_id, enabled }) => {
+                    if let Some(frame) = state.host_enabled_frame(&host_id, enabled) {
+                        connection.send(frame).await?;
+                    }
+                }
                 Some(Command::Launch { host_id, cwd, provider }) => {
-                    let update = match connection.start_session(&host_id, cwd.as_deref(), &provider).await {
-                        Ok(session_id) => Update::Launched { host_id, session_id, provider },
-                        Err(error) => Update::LaunchFailed(format!("{error:#}")),
+                    let update = if host_id != LOCAL {
+                        connection.send(create_frame(cwd.as_deref(), Some(&host_id))).await?;
+                        Update::Requested { host_id }
+                    } else if launch.is_some() {
+                        Update::LaunchFailed("a session is already starting".into())
+                    } else {
+                        connection.send(create_frame(cwd.as_deref(), None)).await?;
+                        let open_id = connection.request_id();
+                        *launch = Some(Launch::new(host_id, provider, open_id));
+                        // Nothing to tell the window yet.
+                        continue;
                     };
                     if updates.unbounded_send(update).is_err() {
                         return Ok(());
                     }
                 }
             },
+            _ = expired => {
+                *launch = None;
+                let late = Update::LaunchFailed("the core did not answer in time".into());
+                if updates.unbounded_send(late).is_err() {
+                    return Ok(());
+                }
+            }
         }
         if !publish(state, shown, updates) {
             return Ok(());
         }
     }
+}
+
+fn subscribe_frame(session_id: &str) -> Value {
+    json!({"type": "session.subscribe", "sessionId": session_id})
+}
+
+fn rename_frame(session_id: &str, title: &str) -> Value {
+    json!({"type": "session.rename", "sessionId": session_id, "title": title})
+}
+
+fn delete_frame(session_id: &str) -> Value {
+    json!({"type": "session.delete", "sessionId": session_id})
+}
+
+fn settings_frame(patch: Value) -> Value {
+    json!({"type": "settings.update", "patch": patch})
 }
 
 fn create_frame(cwd: Option<&str>, host_id: Option<&str>) -> Value {
@@ -740,12 +923,16 @@ fn release_frame(session_id: &str, provider: &str, view_id: &str) -> Value {
 fn request_frame(request_id: &str, request: &Request) -> Value {
     let host = |host: &str| (host != LOCAL).then(|| host.to_string());
     match request {
+        Request::Mods => json!({"type": "mods.list", "requestId": request_id}),
         Request::Attention => json!({"type": "attention.list"}),
         Request::Projects(h) => {
             json!({"type": "project.list", "requestId": request_id, "hostId": host(h)})
         }
         Request::Providers(h) => {
             json!({"type": "agent.manifest.list", "requestId": request_id, "hostId": host(h)})
+        }
+        Request::Workspaces(h) => {
+            json!({"type": "workspace.snapshot", "requestId": request_id, "hostId": host(h)})
         }
     }
 }
@@ -818,9 +1005,17 @@ mod tests {
             open_frame("r", "s", "claude", 80, 24),
             release_frame("s", "claude", "r"),
             request_frame("r", &Request::Attention),
+            request_frame("r", &Request::Mods),
+            rename_frame("s", "a new title"),
+            delete_frame("s"),
+            settings_frame(json!({"terminalScrollback": 5000})),
+            settings_frame(json!({"terminalLoginShell": true, "droppedPathDoubleQuotes": false})),
             request_frame("r", &Request::Projects(LOCAL.into())),
             request_frame("r", &Request::Projects("build-box".into())),
             request_frame("r", &Request::Providers("build-box".into())),
+            request_frame("r", &Request::Workspaces(LOCAL.into())),
+            request_frame("r", &Request::Workspaces("build-box".into())),
+            subscribe_frame("s"),
             acquire_frame("r", "s", "w", "input"),
             acquire_frame("r", "s", "w", "resize"),
             input_frame("t", 1, "echo hi\n"),
@@ -845,6 +1040,12 @@ mod tests {
             request_frame("r", &Request::Projects(LOCAL.into()))["hostId"],
             Value::Null
         );
+        // Viewing a session is the request the web makes, not a resume (which would mint a
+        // session for an id the core does not own).
+        assert!(matches!(
+            serde_json::from_value::<ClientMessage>(subscribe_frame("s")).unwrap(),
+            ClientMessage::SessionSubscribe { session_id } if session_id == "s"
+        ));
         // Taking control must never steal it from another view.
         assert!(matches!(
             serde_json::from_value::<ClientMessage>(acquire_frame("r", "s", "w", "input")).unwrap(),
@@ -1014,6 +1215,252 @@ mod tests {
         let model = model_where(&mut updates, |m| m.offline_reason.is_some()).await;
         assert!(!model.connected);
         assert!(model.offline_reason.unwrap().contains("no token"));
+        following.abort();
+    }
+
+    fn created(id: &str) -> ServerMessage {
+        serde_json::from_value(json!({"type": "session.created", "sessionId": id})).unwrap()
+    }
+
+    fn opened(request_id: &str, session_id: &str) -> ServerMessage {
+        serde_json::from_value(json!({
+            "type": "agent.terminal.opened", "requestId": request_id, "terminalId": "t",
+            "replay": "", "status": {
+                "key": {"workspaceId": "w", "sessionId": session_id, "agentId": "terminal"},
+                "providerId": "terminal", "resumable": false, "state": "idle", "reason": "",
+                "lastTransitionMs": 0, "lastActivityMs": 0, "revision": 1,
+                "transitionSequence": 1}}))
+        .unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    fn refused(request_id: Option<&str>, text: &str) -> ServerMessage {
+        serde_json::from_value(json!({"type": "error", "message": text, "requestId": request_id}))
+            .unwrap()
+    }
+
+    fn launch() -> Launch {
+        Launch::new(LOCAL.into(), "terminal".into(), "open-1".into())
+    }
+
+    #[test]
+    fn a_launch_confirmed_by_the_core_is_opened() {
+        let mut launch = launch();
+        // Nothing the core says about anything else moves it.
+        assert!(launch
+            .on_message(&refused(Some("other"), "no"))
+            .done
+            .is_none());
+        let step = launch.on_message(&created("s1"));
+        assert!(step.done.is_none());
+        // It starts the provider in the candidate, under its own request id.
+        assert_eq!(step.send, [open_frame("open-1", "s1", "terminal", 80, 24)]);
+        // An answer to another request is not its answer.
+        assert!(launch.on_message(&opened("other", "s1")).done.is_none());
+        let step = launch.on_message(&opened("open-1", "s1"));
+        assert!(matches!(
+            step.done,
+            Some(Update::Launched { ref host_id, ref session_id, ref provider })
+                if host_id == LOCAL && session_id == "s1" && provider == "terminal"
+        ));
+        assert_eq!(step.send, [release_frame("s1", "terminal", "open-1")]);
+    }
+
+    #[test]
+    fn a_session_another_viewer_made_is_never_opened() {
+        // A session made on a remote computer is broadcast to every viewer as `session.created`.
+        // Starting the provider in it is refused by the core, so the launch fails: it opens
+        // nothing, and the session that really was made is never taken for this one.
+        let mut launch = launch();
+        launch.on_message(&created("theirs"));
+        let step = launch.on_message(&refused(
+            Some("open-1"),
+            "persistent agent views are not supported by this remote host",
+        ));
+        match step.done {
+            Some(Update::LaunchFailed(text)) => assert!(text.contains("remote host"), "{text}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(step.send.is_empty());
+
+        // The core answering for a different session than the candidate is no confirmation.
+        let mut launch = self::launch();
+        launch.on_message(&created("s1"));
+        let step = launch.on_message(&opened("open-1", "s2"));
+        assert!(matches!(step.done, Some(Update::LaunchFailed(_))));
+        assert!(
+            step.send.is_empty(),
+            "nothing is released that was not opened"
+        );
+    }
+
+    #[test]
+    fn a_create_the_core_refuses_fails_at_once() {
+        let mut launch = launch();
+        let step = launch.on_message(&refused(None, "/x is not a project in perch"));
+        match step.done {
+            Some(Update::LaunchFailed(text)) => assert!(text.contains("not a project"), "{text}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Accepts one connection, sends `frames`, and calls `on_frame` for each text frame the
+    /// client sends until it hangs up.
+    async fn scripted_core(
+        listener: tokio::net::TcpListener,
+        frames: Vec<Value>,
+        mut on_frame: impl FnMut(&Value) -> Vec<Value> + Send + 'static,
+    ) {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+        for frame in frames {
+            socket.send(Message::text(frame.to_string())).await.unwrap();
+        }
+        while let Some(Ok(Message::Text(text))) = socket.next().await {
+            let sent: Value = serde_json::from_str(&text).unwrap();
+            for frame in on_frame(&sent) {
+                socket.send(Message::text(frame.to_string())).await.unwrap();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_launch_in_flight_does_not_stop_the_sidebar_following_the_core() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let core = Core::with_token(
+            &format!("http://{}/", listener.local_addr().unwrap()),
+            "token",
+        )
+        .unwrap();
+        let list = |blocked| {
+            json!({"type": "session.list",
+                   "sessions": [session_frame("s1", json!({"blocked": blocked}))]})
+        };
+        // The core never answers the create; it keeps talking about everything else.
+        tokio::spawn(scripted_core(listener, vec![list(true)], move |sent| {
+            if sent["type"] == "session.create" {
+                vec![list(false)]
+            } else {
+                vec![]
+            }
+        }));
+        let (commands_tx, commands) = futures::channel::mpsc::unbounded();
+        let (updates_tx, mut updates) = futures::channel::mpsc::unbounded();
+        let following = tokio::spawn(follow(
+            move || Ok(core.clone()),
+            commands,
+            updates_tx,
+            Duration::from_millis(50),
+        ));
+        let needs = |model: &Model| model.needs_you == 1;
+        model_where(&mut updates, needs).await;
+
+        let start = |commands: &futures::channel::mpsc::UnboundedSender<Command>| {
+            commands
+                .unbounded_send(Command::Launch {
+                    host_id: LOCAL.into(),
+                    cwd: None,
+                    provider: "terminal".into(),
+                })
+                .unwrap()
+        };
+        start(&commands_tx);
+        // The launch waits on the core for up to REPLY_TIMEOUT; the sidebar must not.
+        let begun = Instant::now();
+        model_where(&mut updates, |m| m.needs_you == 0).await;
+        assert!(
+            begun.elapsed() < Duration::from_secs(5),
+            "the follow loop stalled"
+        );
+
+        // One launch at a time: a second is refused rather than guessed at.
+        start(&commands_tx);
+        let wait = async {
+            loop {
+                if let Some(Update::LaunchFailed(text)) = updates.next().await {
+                    return text;
+                }
+            }
+        };
+        let text = tokio::time::timeout(Duration::from_secs(5), wait)
+            .await
+            .unwrap();
+        assert!(text.contains("already starting"), "{text}");
+        following.abort();
+    }
+
+    #[tokio::test]
+    async fn a_launch_on_another_computer_opens_nothing() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let core = Core::with_token(
+            &format!("http://{}/", listener.local_addr().unwrap()),
+            "token",
+        )
+        .unwrap();
+        let (seen_tx, mut seen) = tokio::sync::mpsc::unbounded_channel();
+        let hello = json!({"type": "session.list", "sessions": []});
+        tokio::spawn(scripted_core(listener, vec![hello], move |sent| {
+            seen_tx.send(sent.clone()).unwrap();
+            if sent["type"] == "session.create" {
+                // The hub's broadcast: it names no request and no computer.
+                vec![json!({"type": "session.created", "sessionId": "someone-elses"})]
+            } else {
+                vec![]
+            }
+        }));
+        let (commands_tx, commands) = futures::channel::mpsc::unbounded();
+        let (updates_tx, mut updates) = futures::channel::mpsc::unbounded();
+        let following = tokio::spawn(follow(
+            move || Ok(core.clone()),
+            commands,
+            updates_tx,
+            Duration::from_millis(50),
+        ));
+        model_where(&mut updates, |m| m.connected).await;
+        commands_tx
+            .unbounded_send(Command::Launch {
+                host_id: "build-box".into(),
+                cwd: Some("/work".into()),
+                provider: "terminal".into(),
+            })
+            .unwrap();
+        // The create goes out for that computer, and the window is told it was asked, not
+        // handed a session.
+        let create = loop {
+            let sent = tokio::time::timeout(Duration::from_secs(5), seen.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if sent["type"] == "session.create" {
+                break sent;
+            }
+        };
+        assert_eq!(create["hostId"], "build-box");
+        let wait = async {
+            loop {
+                match updates.next().await.unwrap() {
+                    Update::Requested { host_id } => return host_id,
+                    Update::Launched { .. } => panic!("an uncorrelated create was opened"),
+                    _ => {}
+                }
+            }
+        };
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), wait)
+                .await
+                .unwrap(),
+            "build-box"
+        );
+        // And what the core broadcast next opens nothing, and starts nothing.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        while let Ok(sent) = seen.try_recv() {
+            assert!(
+                !sent["type"].as_str().unwrap().starts_with("agent.terminal"),
+                "{sent}"
+            );
+        }
+        while let Ok(update) = updates.try_recv() {
+            assert!(!matches!(update, Update::Launched { .. }), "{update:?}");
+        }
         following.abort();
     }
 
