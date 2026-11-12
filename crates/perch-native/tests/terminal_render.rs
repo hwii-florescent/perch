@@ -1474,6 +1474,10 @@ fn disconnect_keeps_the_screen() {
     // Only the core saying so marks the shell as ended.
     h.say(FromCore::Exited(3));
     assert_eq!(h.view(|v, _| v.status().clone()), Status::Exited(3));
+    assert_eq!(
+        h.view(|v, _| v.note()).as_deref(),
+        Some("Shell exited (code 3)")
+    );
     let events = events.borrow();
     assert!(events.contains(&TerminalEvent::Title("the title".into())));
     assert!(events
