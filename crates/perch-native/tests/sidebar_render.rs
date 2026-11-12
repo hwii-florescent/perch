@@ -1,45 +1,98 @@
-//! Renders the window offscreen with fake sessions and checks the sidebar shows them.
+//! Renders the window offscreen from the messages a core sends and checks what is drawn.
 //!
 //! GPUI's test platform draws through the real Metal renderer into a texture
 //! (`Window::render_to_image`); no window is created, shown or focused. This is its own
 //! binary with a custom `main`, as Zed's headless tests are, so AppKit runs on the main thread.
 
 use gpui::{px, size, AppContext, HeadlessAppContext, Window};
-use perch_core::protocol::{ProjectSummary, SessionSummary};
-use perch_native::client::Snapshot;
-use perch_native::ui::{Load, Workspace, SIDEBAR_WIDTH};
+use perch_core::protocol::ServerMessage;
+use perch_native::sidebar::{Attention, State};
+use perch_native::ui::{tint, Workspace, SIDEBAR_WIDTH};
+use serde_json::{json, Value};
 use std::sync::Arc;
 
-fn project(id: &str, name: &str) -> ProjectSummary {
-    serde_json::from_value(serde_json::json!({
-        "id": id, "hostId": "local", "name": name, "path": "/work", "favorite": false,
-        "createdAt": 0, "updatedAt": 0,
-    }))
-    .unwrap()
+fn message(value: Value) -> ServerMessage {
+    serde_json::from_value(value).unwrap()
 }
 
-fn session(title: &str, project_id: &str) -> SessionSummary {
-    serde_json::from_value(serde_json::json!({
-        "id": title, "title": title, "cwd": "/work", "createdAt": 0, "status": "idle",
-        "projectId": project_id,
-    }))
-    .unwrap()
+/// A sidebar state with one project, holding a session per `(title, flags)`.
+fn state(sessions: &[(&str, Value)]) -> State {
+    let mut state = State::default();
+    state.connect();
+    state.apply(&message(json!({
+        "type": "project.list", "requestId": "r", "hostId": "local", "snapshotEpoch": "e",
+        "snapshotRevision": 1, "projects": [{
+            "id": "p", "hostId": "local", "name": "Work", "path": "/work", "favorite": false,
+            "createdAt": 0, "updatedAt": 0}]})));
+    let sessions: Vec<Value> = sessions
+        .iter()
+        .map(|(title, flags)| {
+            let mut session = json!({
+                "id": title, "title": title, "cwd": "/work", "createdAt": 0, "status": "idle",
+                "hostId": "local", "projectId": "p", "cliProviderId": "claude"});
+            for (key, value) in flags.as_object().unwrap() {
+                session[key] = value.clone();
+            }
+            session
+        })
+        .collect();
+    state.apply(&message(
+        json!({"type": "session.list", "sessions": sessions}),
+    ));
+    state
 }
 
-/// What the sidebar and the main area show for `titles`: the number of title-colored pixels in each.
-fn bright_pixels(cx: &mut HeadlessAppContext, titles: &[&str]) -> (usize, usize, Vec<u8>) {
-    let snapshot = Snapshot {
-        projects: vec![project("p", "Work")],
-        sessions: titles.iter().map(|t| session(t, "p")).collect(),
-    };
+struct Frame {
+    /// RGBA, row by row.
+    raw: Vec<u8>,
+    width: usize,
+    sidebar_edge: usize,
+}
+
+impl Frame {
+    /// Pixels of `color` (within rounding) in the sidebar, or in the main area.
+    fn count(&self, color: u32, sidebar: bool) -> usize {
+        let want = [(color >> 16) as u8, (color >> 8) as u8, color as u8];
+        self.pixels(sidebar, |p| {
+            p[..3].iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 2)
+        })
+    }
+
+    /// Near-white pixels: title text. The background, dim hints and state fills never get this bright.
+    fn bright(&self, sidebar: bool) -> usize {
+        self.pixels(sidebar, |p| p[..3].iter().all(|c| *c >= 0xc0))
+    }
+
+    fn pixels(&self, sidebar: bool, matches: impl Fn(&[u8; 4]) -> bool) -> usize {
+        self.raw
+            .chunks_exact(4)
+            .enumerate()
+            .filter(|(i, p)| {
+                (i % self.width < self.sidebar_edge) == sidebar
+                    && matches(&[p[0], p[1], p[2], p[3]])
+            })
+            .count()
+    }
+}
+
+/// Draw the window for `state`, with `open` picked first when given.
+fn draw(cx: &mut HeadlessAppContext, state: &State, open: Option<&str>) -> Frame {
+    let model = state.model();
     let window = cx
         .open_window(size(px(640.), px(360.)), |_, cx| {
-            cx.new(|_| Workspace {
-                load: Load::Ready(snapshot),
-            })
+            cx.new(|cx| Workspace::new(model, None, cx))
         })
         .unwrap();
-    let image = cx
+    if let Some(id) = open {
+        window
+            .update(cx, |workspace, _, cx| {
+                workspace.sidebar().update(cx, |sidebar, cx| {
+                    sidebar.open("local".into(), id.into(), cx)
+                })
+            })
+            .unwrap();
+    }
+    let (image, scale) = cx
         .update_window(window.into(), |_, window: &mut Window, cx| {
             let _ = window.draw(cx);
             (
@@ -48,20 +101,11 @@ fn bright_pixels(cx: &mut HeadlessAppContext, titles: &[&str]) -> (usize, usize,
             )
         })
         .unwrap();
-    let (image, scale) = image;
-    let edge = (SIDEBAR_WIDTH * scale) as u32;
-    let (mut sidebar, mut main) = (0, 0);
-    for (x, _, pixel) in image.enumerate_pixels() {
-        // Title text is near-white; the background and the dim hints never get this bright.
-        if pixel.0[..3].iter().all(|channel| *channel >= 0xc0) {
-            if x < edge {
-                sidebar += 1;
-            } else {
-                main += 1;
-            }
-        }
+    Frame {
+        width: image.width() as usize,
+        raw: image.into_raw(),
+        sidebar_edge: (SIDEBAR_WIDTH * scale) as usize,
     }
-    (sidebar, main, image.into_raw())
 }
 
 fn main() {
@@ -70,20 +114,95 @@ fn main() {
         Arc::new(()),
         gpui_platform::current_headless_renderer,
     );
-    let (none, none_main, _) = bright_pixels(&mut cx, &[]);
-    let (one, one_main, alpha) = bright_pixels(&mut cx, &["alpha"]);
-    let (three, _, _) = bright_pixels(&mut cx, &["alpha", "bravo", "charlie"]);
-    let (_, _, bravo) = bright_pixels(&mut cx, &["bravo"]);
-    assert_eq!(none, 0, "a sidebar with no sessions has no title text");
-    assert!(
-        one > 20,
-        "one session title should be drawn, got {one} pixels"
+    let idle = |titles: &[&'static str]| -> Vec<(&'static str, Value)> {
+        titles.iter().map(|t| (*t, json!({}))).collect()
+    };
+
+    // Titles are drawn, and only titles.
+    let none = draw(&mut cx, &state(&[]), None);
+    let one = draw(&mut cx, &state(&idle(&["alpha"])), None);
+    let three = draw(&mut cx, &state(&idle(&["alpha", "bravo", "charlie"])), None);
+    let bravo = draw(&mut cx, &state(&idle(&["bravo"])), None);
+    assert_eq!(
+        none.bright(true),
+        0,
+        "a sidebar with no sessions has no title text"
     );
+    assert!(one.bright(true) > 20, "one session title should be drawn");
     assert!(
-        three > one,
-        "three titles draw more than one ({three} vs {one})"
+        three.bright(true) > one.bright(true),
+        "three titles draw more than one"
     );
-    assert_eq!(none_main + one_main, 0, "the main area stays quiet");
-    assert_ne!(alpha, bravo, "the title text is what differs");
-    println!("sidebar_render: ok (title pixels: 0, {one}, {three})");
+    assert_eq!(
+        none.bright(false) + one.bright(false),
+        0,
+        "the main area stays quiet"
+    );
+    assert_ne!(one.raw, bravo.raw, "the title text is what differs");
+
+    // A state is drawn as its fill and nothing else is: needs you, done and working each
+    // have their own, and idle has none.
+    let states: [(Attention, Value); 3] = [
+        (Attention::NeedsYou, json!({"blocked": true})),
+        (Attention::Done, json!({"unseen": true})),
+        (Attention::Working, json!({"status": "running"})),
+    ];
+    let mut counts = Vec::new();
+    for (attention, flags) in &states {
+        let frame = draw(&mut cx, &state(&[("session", flags.clone())]), None);
+        let fills: Vec<usize> = states
+            .iter()
+            .map(|(other, _)| frame.count(tint(*other).1, true))
+            .collect();
+        for (i, (other, _)) in states.iter().enumerate() {
+            let own = other == attention;
+            assert_eq!(
+                fills[i] > 30,
+                own,
+                "{attention:?} drew {other:?}'s fill ({fills:?})"
+            );
+        }
+        assert!(
+            frame.count(tint(*attention).0, true) > 10,
+            "{attention:?} has a dot"
+        );
+        counts.push(frame);
+    }
+    let quiet = draw(&mut cx, &state(&idle(&["session"])), None);
+    for (attention, _) in &states {
+        assert_eq!(
+            quiet.count(tint(*attention).1, true),
+            0,
+            "idle has no label fill"
+        );
+    }
+
+    // Disconnected: the row is still there, with no state claimed.
+    let mut dropped = state(&[("session", json!({"blocked": true}))]);
+    dropped.disconnect();
+    let dropped = draw(&mut cx, &dropped, None);
+    assert_eq!(dropped.count(tint(Attention::NeedsYou).1, true), 0);
+    assert_eq!(dropped.count(tint(Attention::NeedsYou).0, true), 0);
+    assert!(
+        dropped.bright(true) > 20,
+        "the last-known title is still drawn"
+    );
+
+    // Picking a session shows its title in the main area.
+    let picked = draw(&mut cx, &state(&idle(&["alpha"])), Some("alpha"));
+    assert!(
+        picked.bright(false) > 20,
+        "the open session's title is drawn in the main area"
+    );
+
+    println!(
+        "sidebar_render: ok (title pixels {}, {}; fills {:?})",
+        one.bright(true),
+        three.bright(true),
+        counts
+            .iter()
+            .zip(&states)
+            .map(|(f, (a, _))| f.count(tint(*a).1, true))
+            .collect::<Vec<_>>()
+    );
 }

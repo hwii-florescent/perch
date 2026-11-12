@@ -1,4 +1,5 @@
-//! Signs in to a real perch-core and types into a shell it runs.
+//! Signs in to a real perch-core, types into a shell it runs, and checks the sidebar's follower
+//! sees the sessions come and change live and can start one.
 //!
 //! The core runs as a child of this test: the same executable re-run as `__core <scratch>`,
 //! booted in-process like the desktop app, so a sign-in code is the only way in. Everything it
@@ -8,8 +9,10 @@
 //! must answer first. The core, the shell and the daemon are stopped and checked gone by PID
 //! before the test returns.
 
+use futures::StreamExt;
 use perch_core::server::CliArgs;
-use perch_native::client::Core;
+use perch_native::client::{follow, Command as Order, Core, Update};
+use perch_native::sidebar::{Attention, Model, SessionView, LOCAL};
 use perchd::proto::SessionInfo;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -147,7 +150,7 @@ async fn session(core_process: &mut Child, scratch: &Path) {
     assert!(Core::login(&base, "0000").await.is_err());
 
     let mut connection = core.connect().await.expect("connect");
-    let session_id = connection.create_session(None).await.expect("create");
+    let session_id = connection.create_session(None, None).await.expect("create");
     let terminal = connection
         .open_terminal(&session_id, 80, 24)
         .await
@@ -171,6 +174,27 @@ async fn session(core_process: &mut Child, scratch: &Path) {
             .iter()
             .any(|p| Some(&p.id) == session.project_id.as_ref()),
         "the session's project is listed"
+    );
+
+    // The sidebar's follower is a second connection: what it learns arrives as broadcasts.
+    let mut watch = Watch::follow(core.clone());
+    watch
+        .model_where(|m| m.connected && m.hosts[0].projects.is_empty())
+        .await;
+
+    // The session the shell opened appears in the sidebar, live, with the state the core reports.
+    let model = watch
+        .model_where(|m| sessions_of(m).iter().any(|s| s.id == session_id))
+        .await;
+    let row = sessions_of(&model)
+        .into_iter()
+        .find(|s| s.id == session_id)
+        .unwrap();
+    assert_eq!(row.attention, Some(Attention::Idle));
+    assert!(model.hosts[0].projects[0].quickchat);
+    assert!(
+        model.hosts[0].providers.iter().any(|p| p.id == "terminal"),
+        "the core lists the terminal as something to start"
     );
 
     let mut screen = terminal.replay.clone();
@@ -207,6 +231,130 @@ async fn session(core_process: &mut Child, scratch: &Path) {
         has_line(text, "30 100")
     })
     .await;
+
+    // A command running in the shell is a state change the sidebar follows.
+    connection
+        .terminal_input(&terminal, "sleep 2; echo slept-$((1+1))\n")
+        .await
+        .unwrap();
+    watch
+        .model_where(|m| {
+            sessions_of(m)
+                .iter()
+                .any(|s| s.id == session_id && s.attention == Some(Attention::Working))
+        })
+        .await;
+
+    // Let it finish: teardown refuses a shell that still has a job running.
+    read_until(&mut connection, &terminal.id, &mut screen, |text| {
+        has_line(text, "slept-2")
+    })
+    .await;
+
+    // Starting a session from the sidebar: the core makes it, and it shows up live.
+    watch.launch(LOCAL, None, "terminal");
+    let launched = watch.launched().await;
+    watch
+        .model_where(|m| sessions_of(m).iter().any(|s| s.id == launched))
+        .await;
+    assert_ne!(launched, session_id);
+
+    // A folder the core was not given is refused at once, and nothing is created.
+    watch.launch(LOCAL, Some("/not/a/project"), "terminal");
+    let refused = watch.launch_error().await;
+    assert!(refused.contains("not a project"), "{refused}");
+    watch.task.abort();
+}
+
+/// The sidebar's follower, as the window runs it.
+struct Watch {
+    commands: futures::channel::mpsc::UnboundedSender<Order>,
+    updates: futures::channel::mpsc::UnboundedReceiver<Update>,
+    latest: Model,
+    launched: std::collections::VecDeque<Result<String, String>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Watch {
+    fn follow(core: Core) -> Self {
+        let (commands, command_rx) = futures::channel::mpsc::unbounded();
+        let (update_tx, updates) = futures::channel::mpsc::unbounded();
+        let task = tokio::spawn(follow(
+            move || Ok(core.clone()),
+            command_rx,
+            update_tx,
+            Duration::from_millis(100),
+        ));
+        Self {
+            commands,
+            updates,
+            latest: Model::default(),
+            launched: Default::default(),
+            task,
+        }
+    }
+
+    fn launch(&self, host_id: &str, cwd: Option<&str>, provider: &str) {
+        self.commands
+            .unbounded_send(Order::Launch {
+                host_id: host_id.into(),
+                cwd: cwd.map(Into::into),
+                provider: provider.into(),
+            })
+            .unwrap();
+    }
+
+    /// The next update, folded into what is known.
+    async fn step(&mut self) {
+        match self.updates.next().await.expect("the follower ended") {
+            Update::Model(model) => self.latest = model,
+            Update::Launched { session_id, .. } => self.launched.push_back(Ok(session_id)),
+            Update::LaunchFailed(error) => self.launched.push_back(Err(error)),
+        }
+    }
+
+    async fn model_where(&mut self, want: impl Fn(&Model) -> bool) -> Model {
+        let wait = async {
+            while !want(&self.latest) {
+                self.step().await;
+            }
+        };
+        if tokio::time::timeout(Duration::from_secs(20), wait)
+            .await
+            .is_err()
+        {
+            panic!("no matching sidebar; it showed {:?}", self.latest);
+        }
+        self.latest.clone()
+    }
+
+    async fn launch_result(&mut self) -> Result<String, String> {
+        let wait = async {
+            while self.launched.is_empty() {
+                self.step().await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(20), wait)
+            .await
+            .expect("the launch was never answered");
+        self.launched.pop_front().unwrap()
+    }
+
+    async fn launched(&mut self) -> String {
+        self.launch_result().await.expect("the launch failed")
+    }
+
+    async fn launch_error(&mut self) -> String {
+        self.launch_result().await.expect_err("the launch worked")
+    }
+}
+
+fn sessions_of(model: &Model) -> Vec<SessionView> {
+    model.hosts[0]
+        .projects
+        .iter()
+        .flat_map(|p| p.sessions.clone())
+        .collect()
 }
 
 /// Append this terminal's output to `screen` until `done` holds for what it shows.
