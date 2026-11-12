@@ -215,6 +215,8 @@ pub struct Frame {
     pub cursor_cell: Option<(u16, u16)>,
     pub fg: Rgb,
     pub bg: Rgb,
+    /// Matches of the search in these rows.
+    pub search: Vec<super::search::Span>,
 }
 
 impl Frame {
@@ -449,6 +451,7 @@ pub struct Vt {
     mouse_event: g::GhosttyMouseEvent,
     last_mouse_report: Vec<u8>,
     pub(super) gesture: super::select::Gesture,
+    pub(super) search: super::search::State,
     cols: u16,
     rows: u16,
     theme: Theme,
@@ -567,6 +570,7 @@ impl Vt {
                 mouse_event,
                 last_mouse_report: Vec::new(),
                 gesture: super::select::Gesture::new(),
+                search: Default::default(),
                 cols,
                 rows,
                 theme: Theme::default(),
@@ -676,6 +680,7 @@ impl Vt {
     pub fn write(&mut self, bytes: &[u8]) {
         // SAFETY: ptr/len describe `bytes`; Ghostty copies what it keeps.
         unsafe { g::ghostty_terminal_vt_write(self.term, bytes.as_ptr(), bytes.len()) };
+        self.feed_search();
         if self.replaying {
             self.shared.replies.clear();
             self.shared.clipboard = None;
@@ -802,6 +807,7 @@ impl Vt {
         set(&mut scroll);
         // SAFETY: plain call on the owned handle.
         unsafe { g::ghostty_terminal_scroll_viewport(self.term, scroll) };
+        self.feed_search();
     }
 
     /// Scroll the viewport by lines: negative toward older output.
@@ -993,6 +999,7 @@ impl Vt {
                 cursor_cell: cur.viewport_has_value.then_some((x, cur.viewport_y)),
                 fg: fg_default,
                 bg: bg_default,
+                search: self.search.spans.clone(),
             }
         }
     }
@@ -1269,6 +1276,7 @@ fn hold_ptr<F: Copy>(callback: Option<F>) -> *const c_void {
 
 impl Drop for Vt {
     fn drop(&mut self) {
+        self.search.free();
         self.gesture.free(self.term);
         // SAFETY: every handle was created in `new` and is freed once, the render state last
         // because the terminal's callbacks may still name it until the terminal is gone.

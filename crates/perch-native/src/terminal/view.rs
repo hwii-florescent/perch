@@ -49,6 +49,9 @@ const AUTOSCROLL_TICK: std::time::Duration = std::time::Duration::from_millis(50
 /// How long a blinking cursor stays on, and then off.
 const BLINK_HALF_PERIOD: std::time::Duration = std::time::Duration::from_millis(530);
 
+/// The tint of a search match.
+const MATCH_COLOR: Rgb = Rgb(0xff, 0xd3, 0x3d);
+
 /// Dim text for what the terminal says about itself.
 const NOTE_COLOR: u32 = 0x8a8a90;
 
@@ -79,6 +82,19 @@ pub enum TerminalEvent {
 }
 
 impl EventEmitter<TerminalEvent> for TerminalView {}
+
+/// The find bar: its query, and whether typing replaces it (a reopened bar starts with the last
+/// query selected).
+#[derive(Default)]
+struct Find {
+    open: bool,
+    query: String,
+    replace_on_type: bool,
+}
+
+/// How often the search indexes while it has more to do, and while it has not.
+const SEARCH_BUSY: std::time::Duration = std::time::Duration::from_millis(33);
+const SEARCH_IDLE: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Where to attach once the pane has a size to attach at.
 struct Pending {
@@ -126,6 +142,8 @@ pub struct TerminalView {
     /// The size last asked of the core. `None`: ask at the next layout.
     requested: Option<(u16, u16)>,
     scrolled: Point<f32>,
+    find: Find,
+    _find_timer: Option<Task<()>>,
     clipboard: Rc<dyn Clipboard>,
     /// A left-button drag is selecting text.
     selecting: bool,
@@ -171,6 +189,8 @@ impl TerminalView {
             requested: None,
             scrolled: Point::default(),
             refit: false,
+            find: Find::default(),
+            _find_timer: None,
             clipboard: Rc::new(MemoryClipboard::default()),
             selecting: false,
             drag_at: None,
@@ -463,9 +483,16 @@ impl TerminalView {
         repeat: bool,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.find.open {
+            return self.find_key(keystroke, cx);
+        }
         let m = keystroke.modifiers;
         if m.platform && !m.control && !m.alt && !m.shift {
             match keystroke.key.as_str() {
+                "f" => {
+                    self.open_find(cx);
+                    return true;
+                }
                 "v" => return self.paste_clipboard(cx),
                 // With nothing selected the chord is left to the app, as every Command chord is.
                 "c" => return self.copy(cx),
@@ -678,6 +705,148 @@ impl TerminalView {
             }
             cx.notify();
         }
+    }
+
+    pub fn find_open(&self) -> bool {
+        self.find.open
+    }
+
+    pub fn find_query(&self) -> &str {
+        &self.find.query
+    }
+
+    /// Open the find bar. It keeps the last query, selected, so typing replaces it.
+    pub fn open_find(&mut self, cx: &mut Context<Self>) {
+        self.find.open = true;
+        self.find.replace_on_type = !self.find.query.is_empty();
+        let query = self.find.query.clone();
+        self.vt.search(&query);
+        self._find_timer = Some(cx.spawn(async move |this, cx| {
+            let mut wait = SEARCH_BUSY;
+            loop {
+                cx.background_executor().timer(wait).await;
+                match this.update(cx, |this, cx| this.search_tick(cx)) {
+                    Ok(next) => wait = next,
+                    Err(_) => return,
+                }
+            }
+        }));
+        cx.notify();
+    }
+
+    /// Close the bar and clear the highlights; the query is kept for next time.
+    pub fn close_find(&mut self, cx: &mut Context<Self>) {
+        self.find.open = false;
+        self._find_timer = None;
+        self.vt.search("");
+        cx.notify();
+    }
+
+    /// Replace the query.
+    pub fn set_find_query(&mut self, query: &str, cx: &mut Context<Self>) {
+        self.find.query = query.to_owned();
+        self.find.replace_on_type = false;
+        if self.find.open {
+            self.vt.search(query);
+        }
+        cx.notify();
+    }
+
+    /// Type into the find field.
+    fn find_type(&mut self, text: &str, cx: &mut Context<Self>) {
+        let mut query = if std::mem::take(&mut self.find.replace_on_type) {
+            String::new()
+        } else {
+            self.find.query.clone()
+        };
+        query.push_str(text);
+        self.set_find_query(&query, cx);
+    }
+
+    pub fn find_next(&mut self, cx: &mut Context<Self>) -> bool {
+        let moved = self.vt.search_navigate(false);
+        cx.notify();
+        moved
+    }
+
+    pub fn find_previous(&mut self, cx: &mut Context<Self>) -> bool {
+        let moved = self.vt.search_navigate(true);
+        cx.notify();
+        moved
+    }
+
+    /// One bounded step of indexing. Returns how long to wait before the next: soon while there
+    /// is more to index, rarely once done.
+    pub fn search_tick(&mut self, cx: &mut Context<Self>) -> std::time::Duration {
+        if self.vt.search_step() {
+            cx.notify();
+        }
+        if self.vt.search_progress().complete {
+            SEARCH_IDLE
+        } else {
+            SEARCH_BUSY
+        }
+    }
+
+    /// What the find bar says of the search: `n / total`, `total matches`, `total+` while it
+    /// still indexes, `Searching…` before anything is known, `No matches`.
+    pub fn find_label(&self) -> String {
+        if self.find.query.is_empty() {
+            return String::new();
+        }
+        let p = self.vt.search_progress();
+        match (p.total, p.selected, p.complete) {
+            (0, _, true) => "No matches".into(),
+            (0, _, false) => "Searching…".into(),
+            (total, Some(n), true) => format!("{} / {total}", n + 1),
+            (total, _, true) => format!("{total} matches"),
+            (total, _, false) => format!("{total}+"),
+        }
+    }
+
+    /// A key while the find bar is open. Nothing reaches the program.
+    fn find_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) -> bool {
+        let m = keystroke.modifiers;
+        match keystroke.key.as_str() {
+            "escape" => self.close_find(cx),
+            "enter" if m.shift => {
+                self.find_previous(cx);
+            }
+            "enter" => {
+                self.find_next(cx);
+            }
+            "backspace" => {
+                let mut query = std::mem::take(&mut self.find.query);
+                if std::mem::take(&mut self.find.replace_on_type) {
+                    query.clear();
+                } else {
+                    query.pop();
+                }
+                self.set_find_query(&query, cx);
+            }
+            // The copy and paste keys act on the field.
+            "v" if m.platform => {
+                if let Some(text) = self.clipboard.read_text(cx) {
+                    let line = text.lines().next().unwrap_or_default().to_owned();
+                    self.find_type(&line, cx);
+                }
+            }
+            "c" if m.platform => {
+                let query = self.find.query.clone();
+                self.clipboard.write_text(&query, cx);
+            }
+            _ if m.platform => return false,
+            _ => {
+                if let Some(text) = keystroke
+                    .key_char
+                    .as_deref()
+                    .filter(|t| !m.control && !t.chars().any(char::is_control))
+                {
+                    self.find_type(text, cx);
+                }
+            }
+        }
+        true
     }
 
     /// Paste text: bracketed when the program asked for it, newlines as Enter otherwise.
@@ -946,6 +1115,74 @@ impl TerminalView {
     }
 }
 
+impl TerminalView {
+    /// The find bar over the pane's top right: the query, the match counter and the buttons.
+    /// A click on it never reaches the terminal underneath.
+    fn find_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let button = |id: &'static str, label: &'static str| {
+            div()
+                .id(id)
+                .w(px(22.))
+                .h(px(22.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_sm()
+                .bg(rgb(0x3a3a40))
+                .text_color(rgb(0xd8d8de))
+                .hover(|style| style.bg(rgb(0x4a4a52)))
+                .child(label)
+        };
+        let query = if self.find.query.is_empty() {
+            SharedString::from("Find…")
+        } else {
+            SharedString::from(self.find.query.clone())
+        };
+        div()
+            .id("terminal-find")
+            .absolute()
+            .top_2()
+            .right_3()
+            .flex()
+            .items_center()
+            .gap_1()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .bg(rgb(0x2a2a2e))
+            .text_xs()
+            .text_color(rgb(0xd8d8de))
+            .on_mouse_down(GpuiButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .w(px(150.))
+                    .px_1()
+                    .overflow_hidden()
+                    .text_color(if self.find.query.is_empty() {
+                        rgb(NOTE_COLOR)
+                    } else {
+                        rgb(0xd8d8de)
+                    })
+                    .child(query),
+            )
+            .child(
+                div()
+                    .min_w(px(56.))
+                    .text_color(rgb(NOTE_COLOR))
+                    .child(self.find_label()),
+            )
+            .child(button("find-previous", "↑").on_click(cx.listener(|this, _, _, cx| {
+                this.find_previous(cx);
+            })))
+            .child(button("find-next", "↓").on_click(cx.listener(|this, _, _, cx| {
+                this.find_next(cx);
+            })))
+            .child(button("find-close", "×").on_click(cx.listener(|this, _, _, cx| {
+                this.close_find(cx);
+            })))
+    }
+}
+
 impl Focusable for TerminalView {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
@@ -1069,6 +1306,18 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
             let run = Bounds::new(at(start, y), size(cw * (x - start) as f32, ch));
             window.paint_quad(fill(snap_box(run), col(bg)));
         }
+    }
+
+    // Matches of the search: a tint over the cells, brighter on the one navigation is on.
+    for span in &frame.search {
+        let amount = if span.selected { 0.55 } else { 0.28 };
+        let mut tint = color(MATCH_COLOR);
+        tint.a = amount * opacity;
+        let run = Bounds::new(
+            at(usize::from(span.start), usize::from(span.row)),
+            size(cw * f32::from(span.end - span.start + 1), ch),
+        );
+        window.paint_quad(fill(snap_box(run), tint));
     }
 
     // Glyphs: a run of cells with one look is one line, placed a cell apart; a wide character
@@ -1270,6 +1519,7 @@ impl gpui::Render for TerminalView {
             )
             .size_full(),
         )
+        .when(self.find.open, |pane| pane.child(self.find_bar(cx)))
         .when_some(note, |pane, note| {
             pane.child(
                 div()
@@ -1323,7 +1573,10 @@ impl EntityInputHandler for TerminalView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.can_type() {
+        if self.find.open {
+            // The find field holds the keys, composed text included.
+            self.find_type(text, cx);
+        } else if self.can_type() {
             self.type_bytes(text.as_bytes().to_vec(), cx);
         }
     }

@@ -327,6 +327,7 @@ fn main() {
     );
     run("profile_and_settings", profile_and_settings);
     run("selection_and_clipboard", selection_and_clipboard);
+    run("find_in_the_pane", find_in_the_pane);
     println!("terminal_render: ok");
 }
 
@@ -544,6 +545,99 @@ fn selection_and_clipboard() {
     h.view(|v, cx| v.apply_core(None, Some(data), cx));
     h.output("\x1b]52;c;bm8=\x07");
     assert_eq!(clip.text().as_deref(), Some("hi"), "clipboardWrite off");
+}
+
+/// Typing into the pane as the keyboard does.
+fn type_keys(h: &mut Harness, text: &str) {
+    for c in text.chars() {
+        let s = c.to_string();
+        assert!(h.view(|v, cx| v.key_down(&key(&s, Some(&s)), cx)), "{c:?}");
+    }
+}
+
+/// Finding text: the bar, the counter, the highlights, navigation into history, and that the
+/// shell hears none of it.
+fn find_in_the_pane() {
+    let mut h = Harness::open(900., 420.);
+    let clip = std::rc::Rc::new(MemoryClipboard::new(None));
+    h.view(|v, _| v.set_clipboard(clip.clone()));
+    let mut screen = String::from("Needle in history\r\n");
+    for n in 0..60 {
+        screen += &format!("filler {n}\r\n");
+    }
+    screen += "a needle here\r\nnothing\r\nNEEDLE again";
+    h.attach(100, 24, &screen);
+    h.focus();
+    h.draw();
+    h.sent();
+
+    assert!(h.view(|v, cx| v.key_down(&key("cmd-f", None), cx)), "cmd-f opens the bar");
+    assert!(h.view(|v, _| v.find_open()));
+    assert_eq!(h.view(|v, _| v.find_label()), "");
+    type_keys(&mut h, "needle");
+    // Indexing runs in steps; the label says so until it is done.
+    let mut ticks = 0;
+    while h.view(|v, cx| v.search_tick(cx)) == std::time::Duration::from_millis(33) {
+        ticks += 1;
+        assert!(ticks < 1000, "the search never finished");
+    }
+    assert_eq!(h.view(|v, _| v.find_label()), "3 matches");
+    // Matches are tinted: a live one at the low opacity, over the default background.
+    let shot = h.draw();
+    let spans = h.view(|v, _| v.frame().search);
+    assert_eq!(spans.len(), 2, "two matches are on screen: {spans:?}");
+    let span = spans[0];
+    let (x, y) = shot.cell_origin(usize::from(span.start), usize::from(span.row));
+    let tinted = shot.at(x + 0.5 / shot.scale, y + 0.5 / shot.scale);
+    assert!(near(tinted, [71, 59, 17]), "28 percent of the tint {tinted:?}");
+
+    // Enter selects the next match and scrolls it into view; the oldest is in history.
+    for _ in 0..3 {
+        assert!(h.view(|v, cx| v.key_down(&key("enter", None), cx)));
+    }
+    assert!(h.view(|v, _| v.frame().row_text(0) == "Needle in history" || (0..24).any(|r| v.frame().row_text(r) == "Needle in history")));
+    let label = h.view(|v, _| v.find_label());
+    assert!(label.ends_with("/ 3"), "{label}");
+    let shot = h.draw();
+    let spans = h.view(|v, _| v.frame().search);
+    let selected = spans.iter().find(|s| s.selected).expect("the selected match is in view");
+    let (x, y) = shot.cell_origin(usize::from(selected.start), usize::from(selected.row));
+    let bright = shot.at(x + 0.5 / shot.scale, y + 0.5 / shot.scale);
+    assert!(near(bright, [140, 116, 34]), "55 percent of the tint {bright:?}");
+    assert!(h.view(|v, cx| v.key_down(&key("shift-enter", None), cx)));
+    let after = h.view(|v, _| v.find_label());
+    assert_ne!(after, label, "shift-enter went the other way");
+
+    // Nothing typed, navigated or composed reached the shell.
+    assert!(h.view(|v, cx| v.key_down(&key("backspace", None), cx)));
+    let composed = h
+        .window
+        .update(&mut h.cx, |view, window, cx| {
+            gpui::EntityInputHandler::replace_text_in_range(view, None, "é", window, cx)
+        });
+    composed.unwrap();
+    assert_eq!(h.view(|v, _| v.find_query().to_string()), "needlé");
+    assert!(h.sent().iter().all(|m| !matches!(m, ToCore::Input(_))), "the shell heard nothing");
+    // Paste goes into the field too.
+    clip.write_text_for_test("needle\nsecond line");
+    assert!(h.view(|v, cx| v.key_down(&key("cmd-v", None), cx)));
+    assert_eq!(h.view(|v, _| v.find_query().to_string()), "needléneedle");
+
+    // No match, then escape: highlights gone, query kept, the next open starts selected.
+    h.view(|v, cx| v.set_find_query("zzz", cx));
+    while h.view(|v, cx| v.search_tick(cx)) == std::time::Duration::from_millis(33) {}
+    assert_eq!(h.view(|v, _| v.find_label()), "No matches");
+    assert!(h.view(|v, cx| v.key_down(&key("escape", None), cx)));
+    assert!(!h.view(|v, _| v.find_open()));
+    assert!(h.view(|v, _| v.frame().search).is_empty());
+    assert!(h.sent().is_empty());
+    h.view(|v, cx| v.open_find(cx));
+    assert_eq!(h.view(|v, _| v.find_query().to_string()), "zzz");
+    type_keys(&mut h, "x");
+    assert_eq!(h.view(|v, _| v.find_query().to_string()), "x", "typing replaced the old query");
+    // The bar is on screen at the top right.
+    let shot = h.draw();
+    assert!(shot.ink(88, 0, 10, rgb(0)) > 100, "the find bar is drawn");
 }
 
 /// Backgrounds, foregrounds, inverse and the cursor in each shape and focus.
