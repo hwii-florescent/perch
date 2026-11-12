@@ -348,6 +348,14 @@ impl Tabs {
         self.show(id);
     }
 
+    /// Whether the focused tab's split can take another pane.
+    pub fn has_room(&self) -> bool {
+        self.active().is_some()
+            && self
+                .set_of(self.active())
+                .is_none_or(|i| self.sets[i].leaves().len() < MAX_SPLIT)
+    }
+
     /// Put a new tab on `side` of the focused one, and give it the keyboard. `false` when there
     /// is no focused tab, the set is full, or the tab is already in this set.
     pub fn split(&mut self, new: &str, side: Side) -> bool {

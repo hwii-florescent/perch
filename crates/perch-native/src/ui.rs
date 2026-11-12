@@ -8,26 +8,23 @@
 //! terminal ([`TerminalView`]); without a core to attach to it is that name alone.
 
 use crate::actions::{launch_command, startable, Nav, NewSession, Organize, Outcome};
-use crate::client::{Command, Core, Update};
-use crate::handoff::{open_in_perch, perch_url, Place};
+use crate::client::{Command, Update};
 use crate::sidebar::{
     Attention, HostView, Model, ProjectView, SessionView, StatusCluster, StatusSection,
     WorkspaceView,
 };
-use crate::terminal::attach::FromCore;
-use crate::terminal::TerminalView;
 use futures::channel::mpsc::UnboundedSender;
-use gpui::{
-    div, prelude::*, px, rgb, Context, Entity, EventEmitter, IntoElement, Subscription, Window,
-};
+use gpui::{div, prelude::*, px, rgb, Context, EventEmitter, IntoElement, Subscription, Window};
+
+pub use crate::workspace::Workspace;
 
 /// Sidebar text: a session title is bright, a project name and a hint dim. The render test
 /// counts the bright pixels, so nothing else in the window may be this bright.
 pub const TITLE_COLOR: u32 = 0xeeeeee;
-const DIM_COLOR: u32 = 0x8a8a90;
-const SIDEBAR_BG: u32 = 0x1c1c1f;
-const MAIN_BG: u32 = 0x131315;
-const SELECTED_BG: u32 = 0x2a2a30;
+pub(crate) const DIM_COLOR: u32 = 0x8a8a90;
+pub(crate) const SIDEBAR_BG: u32 = 0x1c1c1f;
+pub(crate) const MAIN_BG: u32 = 0x131315;
+pub(crate) const SELECTED_BG: u32 = 0x2a2a30;
 pub const SIDEBAR_WIDTH: f32 = 240.;
 
 /// A state's dot, and the quiet fill behind its label.
@@ -72,9 +69,16 @@ pub struct Sidebar {
     commands: Option<UnboundedSender<Command>>,
     /// Tells the core whether this window is the one being looked at.
     activation: Option<Subscription>,
+    /// The session the last launch made, which the window opens as a tab or a split.
+    launched: Option<String>,
 }
 
 impl EventEmitter<OpenSession> for Sidebar {}
+
+/// A launch the person asked for did not produce a session.
+pub struct LaunchFailed;
+
+impl EventEmitter<LaunchFailed> for Sidebar {}
 
 impl Sidebar {
     pub fn new(model: Model, commands: Option<UnboundedSender<Command>>) -> Self {
@@ -85,6 +89,7 @@ impl Sidebar {
             notice: None,
             commands,
             activation: None,
+            launched: None,
         }
     }
 
@@ -96,8 +101,14 @@ impl Sidebar {
                 host_id,
                 session_id,
                 provider,
-            } => self.open(host_id, session_id, Some(provider), cx),
-            Update::LaunchFailed(error) => self.notice = Some(error),
+            } => {
+                self.launched = Some(session_id.clone());
+                self.open(host_id, session_id, Some(provider), cx);
+            }
+            Update::LaunchFailed(error) => {
+                self.notice = Some(error);
+                cx.emit(LaunchFailed);
+            }
             Update::Requested { host_id } => {
                 let name = self
                     .model
@@ -148,17 +159,7 @@ impl Sidebar {
         provider: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let row = self
-            .model
-            .hosts
-            .iter()
-            .flat_map(|h| &h.projects)
-            .flat_map(|p| {
-                p.sessions
-                    .iter()
-                    .chain(p.workspaces.iter().flat_map(|w| &w.sessions))
-            })
-            .find(|s| s.id == session_id);
+        let row = self.find_session(&session_id);
         let title = row.map_or_else(|| "New session".to_string(), |s| s.title.clone());
         let provider_id = row.and_then(|s| s.provider_id.clone()).or(provider);
         self.notice = None;
@@ -175,7 +176,52 @@ impl Sidebar {
         cx.notify();
     }
 
-    fn send(&self, command: Command) {
+    /// The session of the model with this id.
+    pub fn find_session(&self, id: &str) -> Option<&SessionView> {
+        self.model
+            .hosts
+            .iter()
+            .flat_map(|h| &h.projects)
+            .flat_map(|p| {
+                p.sessions
+                    .iter()
+                    .chain(p.workspaces.iter().flat_map(|w| &w.sessions))
+            })
+            .find(|s| s.id == id)
+    }
+
+    pub fn model(&self) -> &Model {
+        &self.model
+    }
+
+    /// The session the last launch made, until another launch makes one.
+    pub fn launched(&self) -> Option<&str> {
+        self.launched.as_deref()
+    }
+
+    /// Start `provider` where the New session panel would point, which is where the session being
+    /// looked at lives. Only on this computer: a session started on another is not opened (see
+    /// [`Update::Requested`]), so a split or a tab would never show it.
+    pub fn launch(&mut self, provider: &str, cx: &mut Context<Self>) -> Result<(), String> {
+        let target = self.nav.new_session_target(&self.model, false);
+        if target.host_id != crate::sidebar::LOCAL {
+            return Err("A session started on another computer is not opened here.".into());
+        }
+        let command = launch_command(&self.model, &target, provider)
+            .ok_or_else(|| "There is no project here to start it in.".to_string())?;
+        self.notice = None;
+        self.send(command);
+        cx.notify();
+        Ok(())
+    }
+
+    /// Nothing is picked: the last tab was closed.
+    pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
+        self.nav.selected = None;
+        cx.notify();
+    }
+
+    pub fn send(&self, command: Command) {
         if let Some(commands) = &self.commands {
             let _ = commands.unbounded_send(command);
         }
@@ -690,7 +736,7 @@ impl Sidebar {
 }
 
 /// The small tinted word that names a state.
-fn label(attention: Attention) -> gpui::Div {
+pub(crate) fn label(attention: Attention) -> gpui::Div {
     div()
         .flex_none()
         .px_1()
@@ -790,173 +836,7 @@ impl gpui::Render for Sidebar {
     }
 }
 
-/// Finds the core to attach a terminal to, each time one is opened: the core may have
-/// restarted, and a restart changes its address and credential.
-type Locate = Box<dyn Fn() -> anyhow::Result<Core>>;
-
-pub struct Workspace {
-    sidebar: Entity<Sidebar>,
-    open: Option<OpenSession>,
-    locate: Option<Locate>,
-    /// The terminal of the open session, with the session it belongs to.
-    terminal: Option<(String, Entity<TerminalView>)>,
-    /// Why the last hand-off to Perch did not go.
-    handoff_error: Option<String>,
-    _open_session: Subscription,
-}
-
-impl Workspace {
-    pub fn new(
-        model: Model,
-        commands: Option<UnboundedSender<Command>>,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        let sidebar = cx.new(|_| Sidebar::new(model, commands));
-        let subscription = cx.subscribe(&sidebar, |this, _, event: &OpenSession, cx| {
-            this.open = Some(event.clone());
-            this.handoff_error = None;
-            this.show_terminal(event, cx);
-            cx.notify();
-        });
-        // The sidebar's own changes (hiding it, a count) redraw the window around it.
-        cx.observe(&sidebar, |_, _, cx| cx.notify()).detach();
-        Self {
-            sidebar,
-            open: None,
-            locate: None,
-            terminal: None,
-            handoff_error: None,
-            _open_session: subscription,
-        }
-    }
-
-    /// Attach the terminals of opened sessions to the core `locate` finds. Without it the main
-    /// area never touches the network.
-    pub fn with_core(mut self, locate: impl Fn() -> anyhow::Result<Core> + 'static) -> Self {
-        self.locate = Some(Box::new(locate));
-        self
-    }
-
-    pub fn sidebar(&self) -> &Entity<Sidebar> {
-        &self.sidebar
-    }
-
-    /// The terminal of the open session, if one was attached.
-    pub fn terminal(&self) -> Option<&Entity<TerminalView>> {
-        self.terminal.as_ref().map(|(_, view)| view)
-    }
-
-    /// Replace the terminal when another session is picked; picking the same one keeps it, and
-    /// dropping the old view detaches it (its shell keeps running in the core).
-    fn show_terminal(&mut self, open: &OpenSession, cx: &mut Context<Self>) {
-        let Some(locate) = &self.locate else { return };
-        if matches!(&self.terminal, Some((id, _)) if *id == open.session_id) {
-            return;
-        }
-        let located = locate();
-        let view = cx.new(|cx| match located {
-            Ok(core) => TerminalView::attach(core, open, cx),
-            Err(error) => {
-                let mut view = TerminalView::new(cx);
-                view.core_said(FromCore::Failed(format!("{error:#}")), cx);
-                view
-            }
-        });
-        self.terminal = Some((open.session_id.clone(), view));
-    }
-
-    /// The session the main area shows.
-    pub fn open(&self) -> Option<&OpenSession> {
-        self.open.as_ref()
-    }
-}
-
-impl gpui::Render for Workspace {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut main = div().flex().flex_col().items_center().gap_3().text_sm();
-        match &self.open {
-            Some(open) => {
-                main = main.child(div().text_color(rgb(TITLE_COLOR)).child(open.title.clone()));
-                // What this client cannot do yet is one click away in Perch. Only a click runs it.
-                let mut links = div().flex().gap_3().text_xs().text_color(rgb(DIM_COLOR));
-                for (name, place) in [
-                    ("Files", Place::Files),
-                    ("Changes", Place::Changes),
-                    ("Browser", Place::Browser),
-                    ("Chat", Place::Chat),
-                    ("Settings", Place::Settings),
-                ] {
-                    let url = perch_url(Some(&open.session_id), place);
-                    links = links.child(
-                        div()
-                            .id(format!("open-in-perch-{name}"))
-                            .cursor_pointer()
-                            .child(format!("Open {name} in Perch"))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.handoff_error =
-                                    open_in_perch(&url).err().map(|e| e.to_string());
-                                cx.notify();
-                            })),
-                    );
-                }
-                main = main.child(links);
-                if let Some(error) = &self.handoff_error {
-                    main = main.child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(DIM_COLOR))
-                            .child(error.clone()),
-                    );
-                }
-            }
-            None => main = main.child(div().text_color(rgb(DIM_COLOR)).child("Select a session")),
-        }
-        let (visible, needs) = {
-            let sidebar = self.sidebar.read(cx);
-            (sidebar.visible(), sidebar.needs_you())
-        };
-        let sidebar = if visible {
-            self.sidebar.clone().into_any_element()
-        } else {
-            // Hidden, the sidebar leaves a control that shows it, with the count that needs you.
-            let toggle = self.sidebar.clone();
-            div()
-                .id("show-sidebar")
-                .cursor_pointer()
-                .p_2()
-                .text_xs()
-                .text_color(rgb(DIM_COLOR))
-                .child(if needs > 0 {
-                    format!("Sidebar · {needs}")
-                } else {
-                    "Sidebar".to_string()
-                })
-                .on_click(move |_, _, cx| {
-                    toggle.update(cx, |sidebar, cx| {
-                        sidebar.run_action("global.sidebar", cx);
-                    })
-                })
-                .into_any_element()
-        };
-        let area = div().flex().flex_1().min_w_0();
-        let area = match self.terminal() {
-            // The name and links stay above the terminal, which takes the rest.
-            Some(terminal) => area
-                .flex_col()
-                .child(div().flex().justify_center().py_2().child(main))
-                .child(div().flex_1().min_h_0().child(terminal.clone())),
-            None => area.items_center().justify_center().child(main),
-        };
-        div()
-            .flex()
-            .size_full()
-            .bg(rgb(MAIN_BG))
-            .child(sidebar)
-            .child(area)
-    }
-}
-
-fn hint(text: impl Into<gpui::SharedString>) -> gpui::Div {
+pub(crate) fn hint(text: impl Into<gpui::SharedString>) -> gpui::Div {
     div()
         .text_sm()
         .text_color(rgb(DIM_COLOR))
