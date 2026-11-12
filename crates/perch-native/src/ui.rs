@@ -7,7 +7,7 @@
 //! runs through [`Sidebar::run_action`]. The main area names the open session above its
 //! terminal ([`TerminalView`]); without a core to attach to it is that name alone.
 
-use crate::actions::{launch_command, startable, Nav, NewSession, Organize, Outcome};
+use crate::actions::{launch_command, pin_command, startable, Nav, NewSession, Organize, Outcome};
 use crate::client::{Command, Update};
 use crate::sidebar::{
     Attention, HostView, Model, ProjectView, SessionView, StatusCluster, StatusSection,
@@ -210,6 +210,22 @@ impl Sidebar {
                     .chain(p.workspaces.iter().flat_map(|w| &w.sessions))
             })
             .find(|s| s.id == id)
+    }
+
+    /// Pin or unpin a workspace (the current one without an `id`) by asking the core, which
+    /// the sidebar then follows.
+    pub fn pin_workspace(&self, id: Option<&str>, pinned: Option<bool>) -> Result<(), String> {
+        self.send(pin_command(&self.nav, &self.model, id, pinned)?);
+        Ok(())
+    }
+
+    /// The current workspace, when the core can pin it: whether it is pinned.
+    pub fn pinned(&self) -> Option<bool> {
+        self.model
+            .can_pin_workspace
+            .then(|| self.nav.current_workspace(&self.model))
+            .flatten()
+            .map(|w| w.pinned)
     }
 
     pub fn model(&self) -> &Model {

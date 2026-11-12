@@ -767,6 +767,9 @@ pub enum Command {
     SetHostEnabled { host_id: String, enabled: bool },
     /// Give a session a new title, as the sidebar's rename does.
     Rename { session_id: String, title: String },
+    /// Pin a workspace to the top of its project, or unpin it. The sidebar follows the core's
+    /// answer, not this request.
+    PinWorkspace { workspace_id: String, pinned: bool },
     /// Change settings: the `settings.update` patch, with only the fields that changed.
     UpdateSettings(Value),
 }
@@ -1014,6 +1017,10 @@ async fn live(
                 Some(Command::Rename { session_id, title }) => {
                     connection.send(rename_frame(&session_id, &title)).await?;
                 }
+                Some(Command::PinWorkspace { workspace_id, pinned }) => {
+                    let id = connection.request_id();
+                    connection.send(pin_frame(&id, &workspace_id, pinned)).await?;
+                }
                 Some(Command::UpdateSettings(patch)) => {
                     connection.send(settings_frame(patch)).await?;
                 }
@@ -1060,6 +1067,11 @@ fn subscribe_frame(session_id: &str) -> Value {
 
 fn rename_frame(session_id: &str, title: &str) -> Value {
     json!({"type": "session.rename", "sessionId": session_id, "title": title})
+}
+
+fn pin_frame(request_id: &str, workspace_id: &str, pinned: bool) -> Value {
+    json!({"type": "workspace.pin", "requestId": request_id, "workspaceId": workspace_id,
+           "pinned": pinned})
 }
 
 fn delete_frame(session_id: &str) -> Value {
@@ -1164,6 +1176,19 @@ mod tests {
     }
 
     #[test]
+    fn a_pin_frame_is_the_cores_workspace_pin() {
+        for pinned in [true, false] {
+            let message: ClientMessage =
+                serde_json::from_value(pin_frame("r", "w1", pinned)).unwrap();
+            assert!(
+                matches!(&message, ClientMessage::WorkspacePin { request_id, workspace_id, pinned: p }
+                    if request_id == "r" && workspace_id == "w1" && *p == pinned),
+                "{message:?}"
+            );
+        }
+    }
+
+    #[test]
     fn frames_match_the_core_protocol() {
         for frame in [
             json!({"type": "project.list", "requestId": "r"}),
@@ -1177,6 +1202,7 @@ mod tests {
             request_frame("r", &Request::Attention),
             request_frame("r", &Request::Mods),
             rename_frame("s", "a new title"),
+            pin_frame("r", "w", true),
             delete_frame("s"),
             settings_frame(json!({"terminalScrollback": 5000})),
             settings_frame(json!({"terminalLoginShell": true, "droppedPathDoubleQuotes": false})),

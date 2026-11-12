@@ -53,6 +53,7 @@ pub fn entries(
     sessions: &[SessionRef],
     providers: &[Provider],
     has_tab: bool,
+    pinned: Option<bool>,
 ) -> Vec<Entry> {
     let mut out: Vec<Entry> = all_shortcuts()
         // The alternate and the leader's follow-ups are other keys for the same commands.
@@ -77,6 +78,20 @@ pub fn entries(
             title: "Rename a session's tab (empty: its own title again)".into(),
             keys: None,
             kind: Kind::Prompt,
+        });
+    }
+    // The current workspace, when there is one the core can pin.
+    if let Some(pinned) = pinned {
+        out.push(Entry {
+            id: "workspace.pin".into(),
+            title: if pinned {
+                "Unpin workspace"
+            } else {
+                "Pin workspace"
+            }
+            .into(),
+            keys: None,
+            kind: Kind::Command,
         });
     }
     out.extend(sessions.iter().map(|s| Entry {
@@ -298,11 +313,25 @@ mod tests {
             id: "claude".into(),
             name: "Claude".into(),
         }];
-        entries(&keymap(), &sessions, &providers, true)
+        entries(&keymap(), &sessions, &providers, true, None)
     }
 
     fn titles(entries: &[Entry], idx: Vec<usize>) -> Vec<String> {
         idx.into_iter().map(|i| entries[i].id.clone()).collect()
+    }
+
+    #[test]
+    fn the_pin_entry_names_what_it_will_do() {
+        let title = |pinned| {
+            entries(&keymap(), &[], &[], true, pinned)
+                .into_iter()
+                .find(|e| e.id == "workspace.pin")
+                .map(|e| e.title)
+        };
+        assert_eq!(title(Some(false)).as_deref(), Some("Pin workspace"));
+        assert_eq!(title(Some(true)).as_deref(), Some("Unpin workspace"));
+        // No workspace to pin, or a core that cannot: no entry.
+        assert_eq!(title(None), None);
     }
 
     #[test]
@@ -322,7 +351,7 @@ mod tests {
         assert!(all.iter().all(|e| e.id != "global.navigatorAlt"));
         assert!(all.iter().all(|e| !e.id.starts_with("leader.")));
         // Without a tab there is nothing to rename.
-        assert!(entries(&keymap(), &[], &[], false)
+        assert!(entries(&keymap(), &[], &[], false, None)
             .iter()
             .all(|e| e.id != "tab.rename"));
     }

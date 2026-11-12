@@ -26,6 +26,8 @@ pub const LOCAL: &str = "local";
 const ATTENTION_CAPABILITY: &str = "attention.v1";
 /// Capability under which the core answers `workspace.snapshot`.
 const WORKSPACE_CAPABILITY: &str = "workspace.snapshot";
+/// Capability under which the core answers `workspace.pin`.
+const WORKSPACE_PIN_CAPABILITY: &str = "workspace.pin";
 
 /// A session's state, from most to least urgent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -256,6 +258,8 @@ pub struct Model {
     /// longest-waiting first, then any other blocked session.
     pub needing: Vec<String>,
     pub hosts: Vec<HostView>,
+    /// Whether the core takes `workspace.pin`.
+    pub can_pin_workspace: bool,
     /// The person's key choices by action id (`settings.keybindings`).
     pub keybindings: BTreeMap<String, String>,
     /// `keys.json` as the core checked it, while there is one.
@@ -696,6 +700,7 @@ impl State {
             needs_you: needing.len(),
             needing,
             hosts,
+            can_pin_workspace: has(&self.local_capabilities, WORKSPACE_PIN_CAPABILITY),
             keybindings: self.keybindings.clone(),
             keys_file: self.keys_file.clone(),
             terminal: self.terminal.clone(),
@@ -1645,6 +1650,29 @@ mod tests {
     }
 
     #[test]
+    fn a_pin_shows_when_the_core_broadcasts_it() {
+        let mut state = state();
+        state.apply(&snapshot(vec![
+            workspace("w1", "a", json!({"updatedAt": 5})),
+            workspace("w2", "a", json!({})),
+        ]));
+        let order = |state: &State| -> Vec<(String, bool)> {
+            state.model().hosts[0].projects[0]
+                .workspaces
+                .iter()
+                .map(|w| (w.id.clone(), w.pinned))
+                .collect()
+        };
+        assert_eq!(order(&state), [("w1".into(), false), ("w2".into(), false)]);
+        state.apply(&message(
+            json!({"type": "workspace.updated", "requestId": "native-1",
+            "workspace": workspace("w2", "a", json!({"pinned": true})),
+            "snapshotEpoch": "e", "snapshotRevision": 2}),
+        ));
+        assert_eq!(order(&state), [("w2".into(), true), ("w1".into(), false)]);
+    }
+
+    #[test]
     fn workspaces_are_asked_for_only_where_the_core_has_them() {
         let mut state = State::default();
         state.connect();
@@ -1655,10 +1683,14 @@ mod tests {
             )
         };
         assert!(state.apply(&info(json!([]))).is_empty());
+        assert!(!state.model().can_pin_workspace);
         assert_eq!(
             state.apply(&info(json!(["attention.v1", "workspace.snapshot"]))),
             [Request::Attention, Request::Workspaces(LOCAL.into())]
         );
+        assert!(!state.model().can_pin_workspace, "snapshots are not pins");
+        state.apply(&info(json!(["workspace.snapshot", "workspace.pin"])));
+        assert!(state.model().can_pin_workspace);
         let connected = |caps: Value| {
             message(
                 json!({"type": "host.info", "hostId": "h", "name": "h", "state": "connected",

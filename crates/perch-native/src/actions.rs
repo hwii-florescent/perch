@@ -7,7 +7,7 @@
 //! [`Model::keybindings`]) means the same thing in both clients.
 
 use crate::client::Command;
-use crate::sidebar::{step_needing, HostView, Model, ProjectView, LOCAL};
+use crate::sidebar::{step_needing, HostView, Model, ProjectView, WorkspaceView, LOCAL};
 use std::collections::HashSet;
 
 /// A named thing the sidebar can do, and the keys the web binds to it by default.
@@ -331,6 +331,17 @@ impl Nav {
         }
     }
 
+    /// The checkout of this computer the person is in: the one picked, else the one holding the
+    /// session shown.
+    pub fn current_workspace<'a>(&self, model: &'a Model) -> Option<&'a WorkspaceView> {
+        let mut all = local_workspaces(model);
+        match (&self.workspace, &self.selected) {
+            (Some(id), _) => all.find(|w| w.id == *id),
+            (None, Some((_, session))) => all.find(|w| w.sessions.iter().any(|s| s.id == *session)),
+            (None, None) => None,
+        }
+    }
+
     /// Previous or next workspace, wrapping.
     fn step_workspace(&mut self, model: &Model, step: i32) -> Outcome {
         let stops = self.stops(model);
@@ -405,6 +416,41 @@ impl Nav {
             project_id: project.map(|p| p.id.clone()),
         }
     }
+}
+
+/// The checkouts on this computer, the only ones the core pins.
+fn local_workspaces(model: &Model) -> impl Iterator<Item = &WorkspaceView> {
+    model
+        .hosts
+        .iter()
+        .filter(|h| h.id == LOCAL)
+        .flat_map(|h| &h.projects)
+        .flat_map(|p| &p.workspaces)
+}
+
+/// The command that pins workspace `id`, or unpins it; the current workspace without an `id`.
+/// Without `pinned` the workspace's state is flipped.
+pub fn pin_command(
+    nav: &Nav,
+    model: &Model,
+    id: Option<&str>,
+    pinned: Option<bool>,
+) -> Result<Command, String> {
+    if !model.can_pin_workspace {
+        return Err("This core cannot pin workspaces.".into());
+    }
+    let workspace = match id {
+        Some(id) => local_workspaces(model)
+            .find(|w| w.id == id)
+            .ok_or_else(|| format!("No workspace {id} on this computer."))?,
+        None => nav
+            .current_workspace(model)
+            .ok_or("There is no workspace to pin.")?,
+    };
+    Ok(Command::PinWorkspace {
+        workspace_id: workspace.id.clone(),
+        pinned: pinned.unwrap_or(!workspace.pinned),
+    })
 }
 
 /// The computer a session of the model is on.
@@ -734,5 +780,59 @@ mod tests {
         assert!(!nav.collapsed.contains("box/a"));
         nav.toggle_project("local", "a");
         assert!(nav.collapsed.is_empty());
+    }
+
+    #[test]
+    fn pinning_flips_the_current_workspace_or_sets_a_named_one() {
+        let mut p = project("b", &[]);
+        p.workspaces = vec![
+            WorkspaceView {
+                id: "b1".into(),
+                sessions: vec![session("s3")],
+                ..Default::default()
+            },
+            WorkspaceView {
+                id: "b2".into(),
+                pinned: true,
+                ..Default::default()
+            },
+        ];
+        let mut model = model(vec![p], &[]);
+        model.can_pin_workspace = true;
+        let pin = |nav: &Nav, model: &Model, id, pinned| match pin_command(nav, model, id, pinned) {
+            Ok(Command::PinWorkspace {
+                workspace_id,
+                pinned,
+            }) => Ok((workspace_id, pinned)),
+            Ok(other) => panic!("{other:?}"),
+            Err(error) => Err(error),
+        };
+        let mut nav = Nav::default();
+        assert!(pin(&nav, &model, None, None).is_err(), "nothing is current");
+        // A session shown in an unpinned checkout: pin it.
+        nav.selected = Some((LOCAL.into(), "s3".into()));
+        assert_eq!(pin(&nav, &model, None, None), Ok(("b1".into(), true)));
+        // A pinned checkout picked in the tree: unpin it.
+        nav.workspace = Some("b2".into());
+        assert_eq!(pin(&nav, &model, None, None), Ok(("b2".into(), false)));
+        // Named, with and without the state wanted.
+        assert_eq!(pin(&nav, &model, Some("b1"), None), Ok(("b1".into(), true)));
+        assert_eq!(
+            pin(&nav, &model, Some("b2"), Some(true)),
+            Ok(("b2".into(), true))
+        );
+        assert_eq!(
+            pin(&nav, &model, Some("b1"), Some(false)),
+            Ok(("b1".into(), false))
+        );
+        assert!(pin(&nav, &model, Some("nope"), None).is_err());
+        // The core pins its own computer's workspaces only.
+        model.hosts[0].id = "build-box".into();
+        assert!(pin(&nav, &model, Some("b1"), None).is_err());
+        assert!(pin(&nav, &model, None, None).is_err());
+        model.hosts[0].id = LOCAL.into();
+        // A core without the message is not asked.
+        model.can_pin_workspace = false;
+        assert!(pin(&nav, &model, None, None).is_err());
     }
 }

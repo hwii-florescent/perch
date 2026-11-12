@@ -384,6 +384,7 @@ pub const TYPED: &[(&str, Option<&str>)] = &[
     ("terminal.peek", Some("id")),
     ("terminal.keep", Some("id")),
     ("terminal.park", None),
+    ("workspace.pin", Some("id")),
 ];
 
 /// A key as a combination of modifiers and one key. `key` is the base key: `]` for both `]` and

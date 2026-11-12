@@ -845,6 +845,12 @@ impl Workspace {
                 };
                 cx.notify();
             }
+            "workspace.pin" => {
+                // Bare, it flips the current workspace; with arguments it is the web's, which
+                // pins unless `pinned` is false.
+                let pinned = args.map(|a| a.get("pinned").and_then(Value::as_bool) != Some(false));
+                self.sidebar.read(cx).pin_workspace(text("id"), pinned)?;
+            }
             "terminal.show" => {
                 let id = text("id").ok_or("This command needs {id}.")?.to_string();
                 self.show_session(&id, cx)?;
@@ -1009,11 +1015,13 @@ impl Workspace {
             })
             .collect();
         let providers = self.launch_choices(LOCAL, cx);
+        let pinned = sidebar.pinned();
         self.palette = Some(Palette::new(palette::entries(
             &keymap,
             &sessions,
             &providers,
             self.tabs.active().is_some(),
+            pinned,
         )));
         cx.notify();
     }
