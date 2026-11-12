@@ -511,9 +511,14 @@ impl TerminalView {
         }
         for event in self.vt.take_events() {
             match event {
+                // The spinner an agent puts in front of its title is not part of it; a title that
+                // only spins is not a change.
                 Event::Title(title) => {
-                    self.title = title.clone();
-                    cx.emit(TerminalEvent::Title(title));
+                    let shown = super::title::shown_title(&title).into_owned();
+                    if shown != self.title {
+                        self.title = shown.clone();
+                        cx.emit(TerminalEvent::Title(shown));
+                    }
                 }
                 // The same switch the web reads: a program may set the clipboard unless the
                 // `clipboardWrite` setting is off.
