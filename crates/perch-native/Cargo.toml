@@ -51,3 +51,8 @@ harness = false
 name = "terminal_view"
 path = "tests/terminal_view.rs"
 harness = false
+
+[[test]]
+name = "workspace_render"
+path = "tests/workspace_render.rs"
+harness = false

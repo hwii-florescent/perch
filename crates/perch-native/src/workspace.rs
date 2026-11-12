@@ -456,16 +456,29 @@ impl Workspace {
             .unwrap_or_default()
     }
 
-    /// A tab's name: the session's title now, else the one it was opened with.
+    /// A tab's name: the session's title now (a plain terminal is not listed), else the title its
+    /// program set, else what it was opened as.
     fn title_of(&self, id: &str, cx: &App) -> String {
+        let named = |title: String| Some(title).filter(|t| !t.trim().is_empty());
         let listed = self
             .sidebar
             .read(cx)
             .find_session(id)
-            .map(|s| s.title.clone())
-            .filter(|t| !t.trim().is_empty());
+            .and_then(|s| named(s.title.clone()));
+        let pane = self.panes.get(id);
+        let program = pane
+            .and_then(|p| p.view.as_ref())
+            .and_then(|v| named(v.read(cx).title().to_string()));
+        let plain = pane.is_some_and(|p| {
+            p.open
+                .provider_id
+                .as_deref()
+                .is_none_or(|id| id == perch_core::agent_fleet::TERMINAL_PROVIDER)
+        });
         listed
-            .or_else(|| self.panes.get(id).map(|p| p.open.title.clone()))
+            .or(program)
+            .or_else(|| plain.then(|| "Terminal".to_string()))
+            .or_else(|| pane.map(|p| p.open.title.clone()))
             .unwrap_or_else(|| "New session".into())
     }
 
