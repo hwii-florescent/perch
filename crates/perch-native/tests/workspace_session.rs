@@ -148,6 +148,13 @@ fn window(core_process: &mut Child, scratch: &Path) {
     let (port, code) = line.trim().split_once(' ').expect("the core's ready line");
     let base = format!("http://127.0.0.1:{port}/");
 
+    // The core reads `keys.json` beside its database when a client asks for the mods state.
+    std::fs::write(
+        scratch.join("keys.json"),
+        r#"{"terminal": {"cmd-shift-y": "send:echo from-keys-$((6*7))"}}"#,
+    )
+    .unwrap();
+
     // The follower runs on this runtime's threads; the window is driven from this one.
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -217,6 +224,18 @@ fn window(core_process: &mut Child, scratch: &Path) {
     h.type_text("echo ready-$((40+2))");
     h.wait("the first shell to answer", |h| {
         h.has_row(&first, "ready-42")
+    });
+
+    // A `send:` key in keys.json, which the core served, is typed into the focused shell through
+    // its text input; Enter is the person's.
+    h.wait("keys.json", |h| {
+        h.ws(|ws, cx| ws.sidebar().read(cx).model().keys_file.is_some())
+    });
+    assert!(h.press("cmd-shift-y"), "the send key is taken");
+    assert!(!h.has_row(&first, "from-keys-42"), "typed, not yet run");
+    assert!(h.press("enter"));
+    h.wait("the sent text to run", |h| {
+        h.has_row(&first, "from-keys-42")
     });
 
     // Splitting right starts a second shell through the core and shows it beside the first.

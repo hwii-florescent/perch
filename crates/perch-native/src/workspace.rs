@@ -739,7 +739,9 @@ impl Workspace {
     /// Ask the core to end a session whose tab was just closed. The core refuses to end a session
     /// another connection controls, and the dropped terminal's own connection keeps the shell's
     /// keyboard until it has let go, so the request waits for that, in real time, and is made
-    /// once more in case the release was slow. A refusal leaves the session running and listed.
+    /// once more in case the release was slow. If both are refused the shell keeps running: an
+    /// agent stays listed in the sidebar, but a plain terminal has no row there and would run
+    /// unseen until the core is asked about it again.
     // ponytail: two fixed waits, not a signal from the terminal's release; upgrade path is the
     // terminal reporting when its connection has let go.
     fn end_session(&self, id: String, cx: &mut Context<Self>) {
