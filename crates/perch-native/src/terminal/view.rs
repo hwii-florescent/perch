@@ -1903,7 +1903,14 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
                         &[run],
                         Some(cw),
                     );
-                    let _ = line.paint(at(start, y), ch, TextAlign::Left, None, window, cx);
+                    let _ = line.paint(
+                        at(start, y) + point(metrics.glyph_x, px(0.)),
+                        ch,
+                        TextAlign::Left,
+                        None,
+                        window,
+                        cx,
+                    );
                 }
             }
             if first.underline {
@@ -1968,7 +1975,14 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
                         &[run],
                         Some(cw),
                     );
-                    let _ = line.paint(at(x, y), ch, TextAlign::Left, None, window, cx);
+                    let _ = line.paint(
+                        at(x, y) + point(metrics.glyph_x, px(0.)),
+                        ch,
+                        TextAlign::Left,
+                        None,
+                        window,
+                        cx,
+                    );
                 }
             }
             (true, Bar) => {
@@ -2012,7 +2026,14 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
             &[run_style],
             Some(cw),
         );
-        let _ = line.paint(at(x, y), ch, TextAlign::Left, None, window, cx);
+        let _ = line.paint(
+            at(x, y) + point(metrics.glyph_x, px(0.)),
+            ch,
+            TextAlign::Left,
+            None,
+            window,
+            cx,
+        );
         let rule = Bounds::new(
             at(x, y) + point(px(0.), underline),
             size(cw * cells as f32, thickness),
