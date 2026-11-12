@@ -90,6 +90,15 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Scope::OutsideTerminal,
     ),
     s("global.settings", "Open Settings", &["mod+,"]),
+    // VS Code's keys, as the web's: Command on a Mac, Control elsewhere.
+    s("view.zoomIn", "Zoom in", &["cmd+=", "ctrl+="]),
+    s(
+        "view.zoomInShift",
+        "Zoom in (the + key)",
+        &["cmd+shift+=", "ctrl+shift+="],
+    ),
+    s("view.zoomOut", "Zoom out", &["cmd+-", "ctrl+-"]),
+    s("view.zoomReset", "Reset zoom", &["cmd+0", "ctrl+0"]),
     s(
         "tabs.new",
         "New tab (pick a harness) in this workspace",
@@ -348,6 +357,9 @@ pub const TYPED: &[(&str, Option<&str>)] = &[
     ("pane.focus", Some("pane")),
     ("app.settings", None),
     ("app.palette", None),
+    ("app.zoom_in", None),
+    ("app.zoom_out", None),
+    ("app.zoom_reset", None),
     ("terminal.paste", None),
     ("terminal.find", None),
     ("terminal.clear", None),

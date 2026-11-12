@@ -30,6 +30,7 @@ use crate::ui::{
     hint, label, tint, LaunchFailed, OpenSession, Sidebar, DIM_COLOR, MAIN_BG, SELECTED_BG,
     SIDEBAR_BG, TITLE_COLOR,
 };
+use crate::zoom::Zoom;
 use futures::channel::mpsc::UnboundedSender;
 use gpui::{
     canvas, div, prelude::*, px, relative, rgb, size, AnyElement, App, Context, Entity, Focusable,
@@ -132,6 +133,8 @@ pub struct Workspace {
     pending_split: Option<(Side, Instant)>,
     palette: Option<Palette>,
     settings: Option<SettingsPanel>,
+    /// The zoom every terminal in the window is at.
+    zoom: Zoom,
     /// The leader chord was pressed; dropped when its time is up.
     leader: Option<Task<()>>,
     /// What the last command could not do, or did instead.
@@ -168,6 +171,7 @@ impl Workspace {
             pending_split: None,
             palette: None,
             settings: None,
+            zoom: Zoom::default(),
             leader: None,
             notice: None,
             room: Rc::new(Cell::new(None)),
@@ -290,9 +294,11 @@ impl Workspace {
         });
         // Only a window that is on screen copies and pastes with the system's clipboard, and its
         // keymap, not the view, decides what the Command chords do.
-        view.update(cx, |view, _| {
+        let zoom = self.zoom.factor();
+        view.update(cx, |view, cx| {
             view.set_clipboard(clipboard);
             view.set_hosted(true);
+            view.set_zoom(zoom, cx);
         });
         view.update(cx, |view, _| view.expect_reconnect(true));
         let id = open.session_id.clone();
@@ -686,6 +692,9 @@ impl Workspace {
                 };
                 cx.notify();
             }
+            "view.zoomIn" | "view.zoomInShift" | "app.zoom_in" => self.zoom_to(self.zoom.in_(), cx),
+            "view.zoomOut" | "app.zoom_out" => self.zoom_to(self.zoom.out(), cx),
+            "view.zoomReset" | "app.zoom_reset" => self.zoom_to(self.zoom.reset(), cx),
             "tabs.new" | "tab.new" => {
                 self.sidebar
                     .update(cx, |sidebar, cx| sidebar.run_action("sessions.new", cx));
@@ -933,6 +942,16 @@ impl Workspace {
         }
         .into());
         self.after_change(cx);
+    }
+
+    /// Zoom every terminal, shown or kept, and say the level.
+    fn zoom_to(&mut self, zoom: Zoom, cx: &mut Context<Self>) {
+        self.zoom = zoom;
+        for view in self.panes.values().filter_map(|pane| pane.view.as_ref()) {
+            view.update(cx, |view, cx| view.set_zoom(zoom.factor(), cx));
+        }
+        self.notice = Some(format!("Zoom {}%", (zoom.factor() * 100.0).round()));
+        cx.notify();
     }
 
     /// The core did not confirm that a closing tab's session ended. The tab stays open, and says

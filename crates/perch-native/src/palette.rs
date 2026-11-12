@@ -56,7 +56,11 @@ pub fn entries(
 ) -> Vec<Entry> {
     let mut out: Vec<Entry> = all_shortcuts()
         // The alternate and the leader's follow-ups are other keys for the same commands.
-        .filter(|s| matches!(s.scope, Scope::Any | Scope::Terminal) && !s.id.ends_with("Alt"))
+        .filter(|s| {
+            matches!(s.scope, Scope::Any | Scope::Terminal)
+                && !s.id.ends_with("Alt")
+                && s.id != "view.zoomInShift"
+        })
         // A terminal's commands act on the tab on screen.
         .filter(|s| has_tab || s.scope != Scope::Terminal)
         .filter(|s| s.id != "leader.arm")
@@ -366,17 +370,17 @@ mod tests {
     #[test]
     fn enter_runs_the_selected_entry_and_escape_closes() {
         let mut p = Palette::new(all());
-        for c in "zoom".chars() {
+        for c in "restore".chars() {
             p.key(&press(&c.to_string()));
         }
-        assert_eq!(p.query, "zoom");
+        assert_eq!(p.query, "restore");
         assert_eq!(p.selected, 0, "typing selects the best match");
         let Outcome::Run(entry) = p.key(&press("enter")) else {
             panic!("enter runs")
         };
         assert_eq!(entry.id, "panes.zoom");
         p.key(&press("backspace"));
-        assert_eq!(p.query, "zoo");
+        assert_eq!(p.query, "restor");
         assert_eq!(p.key(&press("escape")), Outcome::Close);
         // Nothing matches: Enter does nothing.
         let mut none = Palette::new(all());

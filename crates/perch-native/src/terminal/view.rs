@@ -217,6 +217,8 @@ pub struct TerminalView {
     _blink: Task<()>,
     /// Lay the pane out afresh once, whatever holds the size: the font changed.
     refit: bool,
+    /// The window's zoom: what the font and the padding are multiplied by.
+    zoom: f32,
     /// Where the cursor was at the last frame, hidden or not.
     cursor_cell: Option<(u16, u16)>,
     buttons_down: Vec<GpuiButton>,
@@ -258,6 +260,7 @@ impl TerminalView {
             requested: None,
             scrolled: Point::default(),
             refit: false,
+            zoom: 1.0,
             hover_link: None,
             last_pointer: None,
             cwd: None,
@@ -1384,6 +1387,24 @@ impl TerminalView {
         cx.notify();
     }
 
+    /// Scale the text and the padding by `factor` (the window's zoom), refitting the grid.
+    pub fn set_zoom(&mut self, factor: f32, cx: &mut Context<Self>) {
+        if (self.zoom - factor).abs() > f32::EPSILON {
+            self.zoom = factor;
+            self.refit = true;
+            cx.notify();
+        }
+    }
+
+    fn font_px_zoomed(&self) -> f32 {
+        self.settings.font_px * self.zoom
+    }
+
+    fn padding_zoomed(&self) -> (f32, f32) {
+        let (x, y) = self.settings.padding;
+        (x * self.zoom, y * self.zoom)
+    }
+
     /// The pane is not on screen (see [`Self::set_visible`]).
     pub fn is_hidden(&self) -> bool {
         self.hidden
@@ -1396,7 +1417,7 @@ impl TerminalView {
         if !self.hidden || self.status != Status::Live || !self.resize_lease {
             return;
         }
-        let (pad_x, pad_y) = self.settings.padding;
+        let (pad_x, pad_y) = self.padding_zoomed();
         let available = size(
             (bounds.width - px(2. * pad_x)).max(px(0.)),
             (bounds.height - px(2. * pad_y)).max(px(0.)),
@@ -1408,7 +1429,7 @@ impl TerminalView {
             window,
             available,
             &self.settings.font_family,
-            self.settings.font_px,
+            self.font_px_zoomed(),
         );
         self.fitted = Some(fit);
         if self.requested != Some((fit.cols, fit.rows)) {
@@ -1421,7 +1442,7 @@ impl TerminalView {
     pub fn cell_key(&self, window: &Window) -> (String, u32, u32) {
         (
             self.settings.font_family.clone(),
-            self.settings.font_px.to_bits(),
+            self.font_px_zoomed().to_bits(),
             window.scale_factor().to_bits(),
         )
     }
@@ -1447,7 +1468,7 @@ impl TerminalView {
         if self.applied_dark != Some(dark) {
             self.apply_settings(cx);
         }
-        let (pad_x, pad_y) = self.settings.padding;
+        let (pad_x, pad_y) = self.padding_zoomed();
         let family = self.settings.font_family.clone();
         let available = size(
             (bounds.size.width - px(2. * pad_x)).max(px(0.)),
@@ -1464,7 +1485,7 @@ impl TerminalView {
                 metrics: layout::metrics(window, &family, fit.metrics.font_px),
                 ..fit
             },
-            _ => layout::fit(window, available, &family, self.settings.font_px),
+            _ => layout::fit(window, available, &family, self.font_px_zoomed()),
         };
         self.fitted = Some(fit);
         let snap = |v: Pixels| px((f32::from(v) * self.scale).round() / self.scale);

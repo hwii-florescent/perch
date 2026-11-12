@@ -14,3 +14,4 @@ pub mod tabs;
 pub mod terminal;
 pub mod ui;
 pub mod workspace;
+pub mod zoom;

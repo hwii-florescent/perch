@@ -473,7 +473,7 @@ fn the_palette_lists_and_runs_commands() {
     );
 
     // Typing narrows it and does not reach the terminal; Enter runs the command.
-    h.type_text("zoom");
+    h.type_text("restore");
     assert!(h.press("enter"));
     assert!(!h.ws(|ws| ws.palette_open()));
     assert!(
@@ -697,7 +697,76 @@ fn kept_tabs_are_hidden_not_dropped() {
     println!("workspace_render: kept tabs ok");
 }
 
+/// Zoom keys scale every terminal's text, kept ones and ones opened afterwards, and refit the
+/// grid; reset puts it back. The level is capped at both ends. (The window is narrow, so zooming
+/// in is held back by the 80-column minimum: the steps down show the scale.)
+fn zoom_scales_the_terminals() {
+    let mut h = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
+    h.open("alpha");
+    h.draw();
+    let font = |h: &mut Harness, id: &str| {
+        h.window
+            .update(&mut h.cx, |ws, _, cx| {
+                ws.view(id)
+                    .unwrap()
+                    .update(cx, |v, _| (v.font_px().unwrap(), v.grid_size()))
+            })
+            .unwrap()
+    };
+    let near = |a: f32, b: f32| (a - b).abs() < 0.2;
+    let (base, grid) = font(&mut h, "alpha");
+
+    assert!(h.press("cmd--"), "view.zoomOut is taken");
+    h.draw();
+    let (smaller, smaller_grid) = font(&mut h, "alpha");
+    assert!(near(smaller, base / 1.2), "{base} -> {smaller}");
+    assert!(
+        smaller_grid.0 > grid.0 && smaller_grid.1 > grid.1,
+        "{grid:?} -> {smaller_grid:?}"
+    );
+    assert_eq!(h.notice().as_deref(), Some("Zoom 83%"));
+
+    // A tab opened afterwards is at the same zoom, and a tab kept out of sight follows.
+    h.open("bravo");
+    h.draw();
+    assert!(near(font(&mut h, "bravo").0, base / 1.2));
+    assert!(h.press("cmd--"));
+    h.draw();
+    assert!(near(font(&mut h, "bravo").0, base / 1.44));
+    assert!(h.press("cmd-1"));
+    h.draw();
+    assert!(
+        near(font(&mut h, "alpha").0, base / 1.44),
+        "the kept tab followed"
+    );
+
+    // The + key, with and without Shift, steps up; reset goes back to 100%.
+    assert!(h.press("cmd-shift-="));
+    h.draw();
+    assert!(near(font(&mut h, "alpha").0, base / 1.2));
+    assert!(h.press("cmd-="));
+    h.draw();
+    assert_eq!(font(&mut h, "alpha"), (base, grid));
+    assert!(h.press("cmd--"));
+    assert!(h.press("cmd-0"));
+    h.draw();
+    assert_eq!(font(&mut h, "alpha"), (base, grid));
+    assert_eq!(h.notice().as_deref(), Some("Zoom 100%"));
+
+    // The ends of the range.
+    for _ in 0..12 {
+        assert!(h.press("cmd-="));
+    }
+    assert_eq!(h.notice().as_deref(), Some("Zoom 430%"));
+    for _ in 0..20 {
+        assert!(h.press("cmd--"));
+    }
+    assert_eq!(h.notice().as_deref(), Some("Zoom 40%"));
+    println!("workspace_render: zoom ok");
+}
+
 fn main() {
+    zoom_scales_the_terminals();
     two_tabs();
     attention_on_a_tab();
     a_split_shows_each_pane();
