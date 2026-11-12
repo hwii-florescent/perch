@@ -26,6 +26,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true # third_party/ghostty, built by ghostty-sys
+      # The pinned Ghostty only builds with Zig 0.16.x (see crates/ghostty-sys/build.rs).
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
       - name: Linux webview deps
         if: runner.os == 'Linux'
         run: |
@@ -78,6 +84,12 @@ jobs:
       TARGET: ${{ matrix.arch }}-unknown-linux-musl
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true # third_party/ghostty, built by ghostty-sys
+      # The pinned Ghostty only builds with Zig 0.16.x (see crates/ghostty-sys/build.rs).
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
       - run: sudo apt-get update && sudo apt-get install -y musl-tools
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -130,6 +142,12 @@ jobs:
       CC_aarch64_unknown_linux_musl: musl-gcc
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true # third_party/ghostty, built by ghostty-sys
+      # The pinned Ghostty only builds with Zig 0.16.x (see crates/ghostty-sys/build.rs).
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - uses: dtolnay/rust-toolchain@stable

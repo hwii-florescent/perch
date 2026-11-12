@@ -2,6 +2,11 @@
 
 ## Normal checks
 
+The terminal engine is built from source: run `git submodule update --init
+third_party/ghostty` once, and have **Zig 0.16.x** on `PATH` (or `ZIG=/path/to/zig`).
+The pinned Ghostty commit does not build with Zig 0.17; `crates/ghostty-sys`
+says so when the version is wrong.
+
 ```sh
 cargo test -p perch-core                 # add a substring for focused tests
 cargo test -p perchd
