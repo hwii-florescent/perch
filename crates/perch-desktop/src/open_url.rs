@@ -87,7 +87,10 @@ mod tests {
 
     #[test]
     fn a_place_and_a_session_are_read() {
-        assert_eq!(parse("perch://open?place=browser"), request("browser", None));
+        assert_eq!(
+            parse("perch://open?place=browser"),
+            request("browser", None)
+        );
         assert_eq!(
             parse("perch://open?place=files&session=host:3f2a-b.9_x"),
             request("files", Some("host:3f2a-b.9_x"))
@@ -139,6 +142,9 @@ mod tests {
             r#"window.dispatchEvent(new CustomEvent('perch:open', { detail: {"place":"chat","session":"s-1"} }))"#
         );
         let none = super::script(&request("settings", None).unwrap());
-        assert!(none.contains(r#"{"place":"settings","session":null}"#), "{none}");
+        assert!(
+            none.contains(r#"{"place":"settings","session":null}"#),
+            "{none}"
+        );
     }
 }
