@@ -1162,15 +1162,19 @@ fn attach(state: &State, s: &Session, conn: u64, out: &Outbox, rid: u64, since: 
     // A default window starts mid-stream: end it with the exact screen and
     // modes (see `screen.rs`). It isn't part of the stream, so its seq is
     // whatever makes a client's next seq land back on `end`; an attach
-    // `since` a seq resumes the stream itself and never gets it.
+    // `since` a seq resumes the stream itself and never gets it. It goes out
+    // in frame-sized pieces, and within the replay window's size, by carrying
+    // fewer of the oldest scrollback rows.
     if since.is_none() && end > 0 {
-        let restore = inner.screen.restore_bytes();
-        if !restore.is_empty() {
+        let restore = inner.screen.restore_bytes_within(DEFAULT_REPLAY as usize);
+        let mut seq = end.saturating_sub(restore.len() as u64);
+        for chunk in restore.chunks(CHUNK) {
             out.send(&Frame::Data {
                 id: s.id.clone(),
-                seq: end.saturating_sub(restore.len() as u64),
-                bytes: restore,
+                seq,
+                bytes: chunk.to_vec(),
             });
+            seq += chunk.len() as u64;
         }
     }
     if inner.alive {
