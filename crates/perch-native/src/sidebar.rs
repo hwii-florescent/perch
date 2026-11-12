@@ -11,6 +11,7 @@
 //! The rules mirror the web client's `attention.ts`, `statusView.ts`, `sidebarOrder.ts` and
 //! `navigation.ts`.
 
+use crate::settings::TerminalSettings;
 use perch_core::agent_fleet::TERMINAL_PROVIDER;
 use perch_core::protocol::{
     AttentionEvent, ProjectSummary, ServerMessage, SessionStatus, SessionSummary, SshHostEntry,
@@ -60,6 +61,8 @@ impl Attention {
 /// Something the client asks the core for because of what it just read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
+    /// The mods state, which carries `keys.json`.
+    Mods,
     Attention,
     Projects(String),
     Providers(String),
@@ -201,6 +204,10 @@ pub struct Model {
     pub hosts: Vec<HostView>,
     /// The person's key choices by action id (`settings.keybindings`).
     pub keybindings: BTreeMap<String, String>,
+    /// `keys.json` as the core checked it, while there is one.
+    pub keys_file: Option<Value>,
+    /// The terminal settings, once the core has sent them.
+    pub terminal: Option<TerminalSettings>,
 }
 
 /// What `host.info` said about a remote computer.
@@ -243,6 +250,8 @@ pub struct State {
     window_active: bool,
     alerts: Vec<Alert>,
     keybindings: BTreeMap<String, String>,
+    keys_file: Option<Value>,
+    terminal: Option<TerminalSettings>,
 }
 
 /// `statusDot.sessionDotState`: what the session itself reports, before the core's attention facts.
@@ -479,7 +488,10 @@ impl State {
             ServerMessage::SettingsCurrent { settings } => {
                 self.sound_enabled = settings.sound_enabled;
                 self.keybindings.clone_from(&settings.keybindings);
+                self.terminal = Some(TerminalSettings::from_wire(settings));
             }
+            ServerMessage::ModsState { keys, .. } => self.keys_file.clone_from(keys),
+            ServerMessage::ModsChanged {} => asks.push(Request::Mods),
             ServerMessage::AgentManifestList {
                 host_id, manifests, ..
             } => {
@@ -607,6 +619,8 @@ impl State {
             needing,
             hosts,
             keybindings: self.keybindings.clone(),
+            keys_file: self.keys_file.clone(),
+            terminal: self.terminal.clone(),
         }
     }
 
@@ -1899,6 +1913,41 @@ mod tests {
     fn settings(sound: bool, keys: Value) -> ServerMessage {
         message(json!({"type": "settings.current", "settings":
             {"defaultCwd": null, "soundEnabled": sound, "keybindings": keys}}))
+    }
+
+    #[test]
+    fn terminal_settings_and_the_keys_file_reach_the_model() {
+        let mut state = state();
+        assert_eq!(state.model().terminal, None, "unknown until the core says");
+        state.apply(&message(json!({"type": "settings.current", "settings": {
+            "defaultCwd": null, "terminalScrollback": 4000, "terminalLoginShell": true}})));
+        let terminal = state.model().terminal.unwrap();
+        assert_eq!(
+            (
+                terminal.scrollback,
+                terminal.login_shell,
+                terminal.dropped_path_double_quotes
+            ),
+            (4000, true, false)
+        );
+        let keys = json!({"global": {"cmd-t": "tab.next"}});
+        let mods = |keys: Value| {
+            message(
+                json!({"type": "mods.state", "requestId": "r", "mods": [], "layouts": [],
+                "layout": null, "policy": {}, "safeMode": false, "folder": "/m", "keys": keys}),
+            )
+        };
+        state.apply(&mods(keys.clone()));
+        assert_eq!(state.model().keys_file, Some(keys));
+        // The file was removed: the state says no keys and the model follows.
+        state.apply(&message(
+            json!({"type": "mods.state", "requestId": "r", "mods": [],
+            "layouts": [], "policy": {}, "safeMode": false, "folder": "/m"}),
+        ));
+        assert_eq!(state.model().keys_file, None);
+        // A change in the folder is asked about again.
+        let asks = state.apply(&message(json!({"type": "mods.changed"})));
+        assert!(matches!(asks.as_slice(), [Request::Mods]));
     }
 
     #[test]

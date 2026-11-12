@@ -313,11 +313,7 @@ impl Tabs {
         self.leave(id);
         if self.active.as_deref() == Some(id) {
             self.zoomed = false;
-            self.active = self
-                .strip
-                .get(at)
-                .or_else(|| self.strip.last())
-                .cloned();
+            self.active = self.strip.get(at).or_else(|| self.strip.last()).cloned();
         }
         true
     }
@@ -440,9 +436,8 @@ impl Tabs {
             if gap < -eps || overlap <= eps {
                 continue;
             }
-            let better = best.is_none_or(|(_, g, o)| {
-                gap < g - eps || ((gap - g).abs() <= eps && overlap > o)
-            });
+            let better = best
+                .is_none_or(|(_, g, o)| gap < g - eps || ((gap - g).abs() <= eps && overlap > o));
             if better {
                 best = Some((id, gap, overlap));
             }
@@ -461,7 +456,10 @@ impl Tabs {
     /// The next or previous pane of the split, wrapping (`panes.next`, `panes.prev`).
     pub fn cycle(&mut self, by: isize) -> bool {
         let shown = self.shown();
-        let Some(at) = shown.iter().position(|id| Some(id.as_str()) == self.active()) else {
+        let Some(at) = shown
+            .iter()
+            .position(|id| Some(id.as_str()) == self.active())
+        else {
             return false;
         };
         if shown.len() < 2 {
@@ -497,7 +495,10 @@ impl Tabs {
     /// Swap with the next pane in layout order.
     pub fn swap_next(&mut self) -> bool {
         let shown = self.shown();
-        let Some(at) = shown.iter().position(|id| Some(id.as_str()) == self.active()) else {
+        let Some(at) = shown
+            .iter()
+            .position(|id| Some(id.as_str()) == self.active())
+        else {
             return false;
         };
         if shown.len() < 2 {

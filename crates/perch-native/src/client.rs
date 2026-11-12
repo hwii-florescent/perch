@@ -448,6 +448,12 @@ pub enum Command {
     WindowActive(bool),
     /// Turn a configured remote computer on or off, as its Settings switch does.
     SetHostEnabled { host_id: String, enabled: bool },
+    /// Give a session a new title, as the sidebar's rename does.
+    Rename { session_id: String, title: String },
+    /// End a session, as closing its tab does for a shell that is idle.
+    Close(String),
+    /// Change settings: the `settings.update` patch, with only the fields that changed.
+    UpdateSettings(Value),
 }
 
 /// What the window learns.
@@ -645,6 +651,8 @@ async fn live(
     connection
         .request(&Request::Providers(LOCAL.into()))
         .await?;
+    // `keys.json` rides on the mods state.
+    connection.request(&Request::Mods).await?;
     // What the window was showing is viewed again, so the core still counts it as read.
     if let Some(id) = state.viewing() {
         connection.send(subscribe_frame(id)).await?;
@@ -688,6 +696,15 @@ async fn live(
                     connection.send(subscribe_frame(&id)).await?;
                     state.view(&id);
                 }
+                Some(Command::Rename { session_id, title }) => {
+                    connection.send(rename_frame(&session_id, &title)).await?;
+                }
+                Some(Command::Close(session_id)) => {
+                    connection.send(delete_frame(&session_id)).await?;
+                }
+                Some(Command::UpdateSettings(patch)) => {
+                    connection.send(settings_frame(patch)).await?;
+                }
                 Some(Command::SetHostEnabled { host_id, enabled }) => {
                     if let Some(frame) = state.host_enabled_frame(&host_id, enabled) {
                         connection.send(frame).await?;
@@ -729,6 +746,18 @@ fn subscribe_frame(session_id: &str) -> Value {
     json!({"type": "session.subscribe", "sessionId": session_id})
 }
 
+fn rename_frame(session_id: &str, title: &str) -> Value {
+    json!({"type": "session.rename", "sessionId": session_id, "title": title})
+}
+
+fn delete_frame(session_id: &str) -> Value {
+    json!({"type": "session.delete", "sessionId": session_id})
+}
+
+fn settings_frame(patch: Value) -> Value {
+    json!({"type": "settings.update", "patch": patch})
+}
+
 fn create_frame(cwd: Option<&str>, host_id: Option<&str>) -> Value {
     json!({"type": "session.create", "cwd": cwd, "hostId": host_id})
 }
@@ -747,6 +776,7 @@ fn release_frame(session_id: &str, provider: &str, view_id: &str) -> Value {
 fn request_frame(request_id: &str, request: &Request) -> Value {
     let host = |host: &str| (host != LOCAL).then(|| host.to_string());
     match request {
+        Request::Mods => json!({"type": "mods.list", "requestId": request_id}),
         Request::Attention => json!({"type": "attention.list"}),
         Request::Projects(h) => {
             json!({"type": "project.list", "requestId": request_id, "hostId": host(h)})
@@ -809,6 +839,11 @@ mod tests {
             open_frame("r", "s", "claude", 80, 24),
             release_frame("s", "claude", "r"),
             request_frame("r", &Request::Attention),
+            request_frame("r", &Request::Mods),
+            rename_frame("s", "a new title"),
+            delete_frame("s"),
+            settings_frame(json!({"terminalScrollback": 5000})),
+            settings_frame(json!({"terminalLoginShell": true, "droppedPathDoubleQuotes": false})),
             request_frame("r", &Request::Projects(LOCAL.into())),
             request_frame("r", &Request::Projects("build-box".into())),
             request_frame("r", &Request::Providers("build-box".into())),
