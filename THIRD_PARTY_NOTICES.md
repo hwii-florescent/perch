@@ -237,6 +237,8 @@ modified files carry a header saying so.
   the fitting of icons and oversize fallback glyphs to their cells.
 - `crates/perch-native/src/terminal/layout.rs` (from `src/terminal.rs`): the
   re-centring of glyphs in a cell rounded to whole device pixels.
+- `crates/perch-native/src/terminal/title.rs` (from `src/terminal.rs`): the removal of an
+  agent's spinner from a title.
 - `crates/perch-native/src/terminal/graphics.rs` (from `src/vt.rs`): the kitty
   graphics placement read, the Unicode-placeholder resolution and its geometry,
   the PNG decode hook and the BGRA conversion. Perch decodes PNGs with the `image`

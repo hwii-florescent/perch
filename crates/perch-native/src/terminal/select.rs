@@ -463,4 +463,34 @@ mod tests {
         vt.scroll_viewport(-10);
         assert!(vt.frame().rows.iter().flatten().any(|c| c.selected));
     }
+
+    #[test]
+    fn a_wrapped_line_is_copied_whole_without_its_trailing_blanks() {
+        let mut vt = Vt::new(10, 4);
+        vt.write(b"0123456789abcdef   \r\nnext");
+        vt.select(Step::Press, at(0, 0, 1.0, 1));
+        vt.select(Step::Drag, at(9, 1, 98.0, 2));
+        vt.select(Step::Release, at(9, 1, 98.0, 3));
+        assert_eq!(vt.selection_text().as_deref(), Some("0123456789abcdef"));
+    }
+
+    #[test]
+    fn a_drag_past_an_edge_asks_the_viewport_to_scroll_that_way() {
+        let mut vt = Vt::new(20, 3);
+        for n in 0..30 {
+            vt.write(format!("line {n}\r\n").as_bytes());
+        }
+        vt.scroll_viewport(-10);
+        vt.select(Step::Press, at(2, 1, 25.0, 1));
+        let beyond = |y: f32| Pointer {
+            y,
+            ..at(2, 1, 25.0, 2)
+        };
+        vt.select(Step::Drag, beyond(30.0));
+        assert_eq!(vt.drag_autoscroll(), 0, "inside the grid");
+        vt.select(Step::Drag, beyond(-12.0));
+        assert_eq!(vt.drag_autoscroll(), -1, "above it");
+        vt.select(Step::Drag, beyond(75.0));
+        assert_eq!(vt.drag_autoscroll(), 1, "below it");
+    }
 }
