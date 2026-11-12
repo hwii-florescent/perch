@@ -53,8 +53,9 @@ pub struct OpenSession {
     pub host_id: String,
     pub session_id: String,
     pub title: String,
-    /// The provider the session runs, which a terminal attaching to it must name again. Known from
-    /// the row, or from the launch for a session the core does not list yet.
+    /// The provider the session was launched with, which a terminal attaching to it must name
+    /// again. Known from the row (`cliProviderId`), or from the launch for a session the core
+    /// does not list yet. `None` when the core records none: no terminal is attached then.
     pub provider_id: Option<String>,
     /// The core's address, while connected.
     pub core_url: Option<String>,

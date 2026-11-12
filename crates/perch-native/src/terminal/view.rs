@@ -379,18 +379,26 @@ impl TerminalView {
     }
 
     /// A view that attaches `open`'s session in `core` when its pane first has a size, and takes
-    /// the keyboard focus then. Without a provider the session's own terminal is attached.
+    /// the keyboard focus then. The core records the provider an attach names as the session's
+    /// own, so a session whose launch provider is not known is not attached: the view says so
+    /// and nothing is sent.
     pub fn attach(core: Core, open: &OpenSession, cx: &mut Context<Self>) -> Self {
         let mut view = Self::new(cx);
         view.place.local = open.host_id == "local";
         view.place.host_id = open.host_id.clone();
+        let Some(provider) = open.provider_id.clone() else {
+            view.core_said(
+                FromCore::Failed(
+                    "The core records no agent for this session, so Perch will not guess one to attach with."
+                        .into(),
+                ),
+                cx,
+            );
+            return view;
+        };
         view.core = Some(core.clone());
         view.status = Status::Connecting;
         view.take_focus = true;
-        let provider = open
-            .provider_id
-            .clone()
-            .unwrap_or_else(|| perch_core::agent_fleet::TERMINAL_PROVIDER.to_string());
         view.target = Some((open.session_id.clone(), provider.clone()));
         view.pending = Some(Pending {
             core,

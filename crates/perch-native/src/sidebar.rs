@@ -137,7 +137,9 @@ pub struct SessionView {
     pub title: String,
     /// Who runs in it: an agent's name, or "Terminal".
     pub provider: String,
-    /// The provider's id as the core knows it, which attaching a terminal must name again.
+    /// The provider the session was launched with (`cliProviderId`), which attaching a terminal
+    /// must name again. Not what runs in the terminal now: that is only the name shown. `None`
+    /// when the core records none, and then nothing is attached or ended on a guess.
     pub provider_id: Option<String>,
     /// `None` when the core or the computer cannot be reached.
     pub attention: Option<Attention>,
@@ -1014,7 +1016,7 @@ impl State {
             host_id: session.host_id.clone(),
             title: title(session),
             provider: name,
-            provider_id: id.map(str::to_string),
+            provider_id: session.cli_provider_id.clone(),
             project_id: session.project_id.clone(),
             workspace_id: workspace.map(|w| w.id.clone()),
             parent: session.parent_session_id.clone(),
@@ -1092,6 +1094,8 @@ fn project_name(project: &ProjectSummary) -> String {
     }
 }
 
+/// The provider shown for a session: what runs in it now, else what it was launched with. For
+/// display and listing only; attaching and closing use `cli_provider_id`.
 fn provider_id(session: &SessionSummary) -> Option<&str> {
     session
         .current_provider_id
@@ -1476,6 +1480,45 @@ mod tests {
             state.model().needs_you
         };
         assert_eq!((blocked(false), blocked(true)), (1, 1));
+    }
+
+    #[test]
+    fn a_session_is_attached_with_its_launch_provider_not_the_one_seen_running() {
+        let mut state = state();
+        state.show_terminals = true;
+        state.apply(&session_list(vec![
+            // `claude` was typed in a terminal tab.
+            session(
+                "typed",
+                LOCAL,
+                "a",
+                json!({"cliProviderId": "terminal", "currentProviderId": "claude"}),
+            ),
+            // An agent whose foreground job reads `terminal`.
+            session(
+                "agent",
+                LOCAL,
+                "a",
+                json!({"cliProviderId": "claude", "currentProviderId": "terminal"}),
+            ),
+            // The core records no launch provider.
+            session(
+                "blank",
+                LOCAL,
+                "a",
+                json!({"cliProviderId": null, "currentProviderId": "claude"}),
+            ),
+        ]));
+        let model = state.model();
+        let rows = &model.hosts[0].projects[0].sessions;
+        let of = |id: &str| rows.iter().find(|r| r.id == id).unwrap();
+        // What the row says it runs is the observed provider...
+        assert_eq!(of("typed").provider, "claude");
+        assert_eq!(of("agent").provider, "Terminal");
+        // ...but what a terminal attaches with is the launch provider, or nothing.
+        assert_eq!(of("typed").provider_id.as_deref(), Some("terminal"));
+        assert_eq!(of("agent").provider_id.as_deref(), Some("claude"));
+        assert_eq!(of("blank").provider_id, None);
     }
 
     #[test]

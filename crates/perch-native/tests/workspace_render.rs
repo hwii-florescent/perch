@@ -4,15 +4,16 @@
 //! the dispatcher that runs before the terminal is what is tested. No window is created, shown or
 //! focused, and no core is involved: the terminals are fed what a core would send.
 
+use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use gpui::{
     point, px, size, AppContext, HeadlessAppContext, Keystroke, Modifiers, MouseButton,
     MouseDownEvent, MouseUpEvent, PlatformInput, Window, WindowHandle,
 };
 use perch_native::client::Update;
 use perch_native::sidebar::{Alert, Attention, Heard, Model, State, Toast};
-use perch_native::terminal::attach::FromCore;
+use perch_native::terminal::attach::{FromCore, ToCore};
 use perch_native::terminal::clipboard::MemoryClipboard;
-use perch_native::terminal::TerminalView;
+use perch_native::terminal::{Status, TerminalView};
 use perch_native::ui::{tint, Workspace, SIDEBAR_WIDTH};
 use perch_native::workspace::TAB_BAR_HEIGHT;
 use serde_json::{json, Value};
@@ -192,6 +193,43 @@ impl Harness {
             })
             .unwrap();
         self.cx.run_until_parked();
+    }
+
+    /// Show a session the way the sidebar does when it is picked, naming `launched` only for a
+    /// session the sidebar does not list.
+    fn open_as(&mut self, id: &str, launched: Option<&str>) {
+        let (id, launched) = (id.to_string(), launched.map(str::to_string));
+        self.window
+            .update(&mut self.cx, |ws, _, cx| {
+                ws.sidebar().update(cx, |sidebar, cx| {
+                    sidebar.open("local".into(), id, launched, cx)
+                })
+            })
+            .unwrap();
+        self.cx.run_until_parked();
+    }
+
+    /// Stand in for the core on the terminal with the keyboard: it is attached and holds the
+    /// keyboard, and what it asks of the core arrives on the receiver. Keep the sender to keep
+    /// the terminal attached, and answer through it.
+    fn live(&mut self) -> (UnboundedReceiver<ToCore>, UnboundedSender<FromCore>) {
+        let (to_core, asked) = unbounded();
+        let (core, from_core) = unbounded();
+        self.window
+            .update(&mut self.cx, |ws, _, cx| {
+                let view = ws.terminal().expect("a terminal on screen").clone();
+                view.update(cx, |view, cx| view.link(to_core, from_core, cx))
+            })
+            .unwrap();
+        core.unbounded_send(FromCore::Attached {
+            replay: String::new(),
+            input: true,
+            resize: true,
+            agent: None,
+        })
+        .unwrap();
+        self.cx.run_until_parked();
+        (asked, core)
     }
 
     fn draw(&mut self) -> Shot {
@@ -1023,7 +1061,83 @@ fn a_toast_names_the_session_and_opens_it() {
     println!("workspace_render: toast ok");
 }
 
+fn asked(rx: &mut UnboundedReceiver<ToCore>) -> Vec<ToCore> {
+    std::iter::from_fn(|| rx.try_recv().ok()).collect()
+}
+
+/// Closing a tab ends its session only when the session was launched as a terminal. What the
+/// core sees running in it now does not decide that, and a session with no recorded launch
+/// provider is never ended.
+fn closing_a_tab_ends_only_what_was_launched_as_a_terminal() {
+    let mut h = Harness::new(model(&[
+        (
+            "typed",
+            json!({"cliProviderId": "terminal", "currentProviderId": "claude"}),
+        ),
+        (
+            "agent",
+            json!({"cliProviderId": "claude", "currentProviderId": "terminal"}),
+        ),
+        (
+            "blank",
+            json!({"cliProviderId": null, "currentProviderId": "terminal"}),
+        ),
+    ]));
+    for (id, ends) in [("typed", true), ("agent", false), ("blank", false)] {
+        h.open_as(id, None);
+        h.draw();
+        let (mut rx, core) = h.live();
+        assert_eq!(h.run("tabs.close", json!({})), Ok(()));
+        let sent = asked(&mut rx);
+        assert_eq!(sent.contains(&ToCore::End), ends, "{id}: {sent:?}");
+        assert_eq!(h.ws(|ws| ws.tabs().contains(id)), ends, "{id}");
+        let notice = h.notice().unwrap_or_default();
+        if ends {
+            assert!(notice.starts_with("Ending the terminal"), "{notice}");
+        } else {
+            assert!(notice.contains("The session keeps running"), "{notice}");
+        }
+        drop(core);
+    }
+    println!("workspace_render: close ok");
+}
+
+/// A session with no recorded launch provider is not attached under a guessed one.
+fn a_session_with_no_launch_provider_is_not_attached() {
+    let mut cx = HeadlessAppContext::with_platform(
+        gpui_platform::current_platform(true).text_system(),
+        Arc::new(()),
+        gpui_platform::current_headless_renderer,
+    );
+    let window = cx
+        .open_window(size(px(WIDTH), px(HEIGHT)), |_, cx| {
+            let core = perch_native::client::Core::with_token("http://127.0.0.1:9/", "t").unwrap();
+            let open = perch_native::ui::OpenSession {
+                host_id: "local".into(),
+                session_id: "blank".into(),
+                title: "blank".into(),
+                provider_id: None,
+                core_url: None,
+            };
+            cx.new(|cx| TerminalView::attach(core, &open, cx))
+        })
+        .unwrap();
+    let (status, can_type) = window
+        .update(&mut cx, |view, _, _| {
+            (view.status().clone(), view.can_type())
+        })
+        .unwrap();
+    assert!(
+        matches!(&status, Status::Failed(note) if note.contains("will not guess")),
+        "{status:?}"
+    );
+    assert!(!can_type);
+    println!("workspace_render: no launch provider ok");
+}
+
 fn main() {
+    closing_a_tab_ends_only_what_was_launched_as_a_terminal();
+    a_session_with_no_launch_provider_is_not_attached();
     a_toast_names_the_session_and_opens_it();
     the_pane_menu_opens_on_right_click();
     a_peek_is_a_terminal_over_the_window();

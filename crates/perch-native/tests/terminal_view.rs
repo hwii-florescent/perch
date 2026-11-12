@@ -424,7 +424,7 @@ impl Harness {
             host_id: "local".into(),
             session_id: session_id.into(),
             title: "shell".into(),
-            provider_id: None,
+            provider_id: Some("terminal".into()),
             core_url: None,
         };
         let window = cx

@@ -58,6 +58,12 @@ const END_WAIT: Duration = Duration::from_secs(5);
 const REATTACH_FIRST: Duration = Duration::from_millis(250);
 const REATTACH_LAST: Duration = Duration::from_secs(5);
 
+/// Whether a tab is a plain terminal: its session was launched as one. A session whose launch
+/// provider is not known is never taken for one, so closing its tab never ends it.
+fn is_plain(open: &OpenSession) -> bool {
+    open.provider_id.as_deref() == Some(perch_core::agent_fleet::TERMINAL_PROVIDER)
+}
+
 fn reattach_delay(attempt: u32) -> Duration {
     REATTACH_FIRST
         .saturating_mul(2u32.saturating_pow(attempt.min(8)))
@@ -731,12 +737,7 @@ impl Workspace {
         let program = pane
             .and_then(|p| p.view.as_ref())
             .and_then(|v| named(v.read(cx).title().to_string()));
-        let plain = pane.is_some_and(|p| {
-            p.open
-                .provider_id
-                .as_deref()
-                .is_none_or(|id| id == perch_core::agent_fleet::TERMINAL_PROVIDER)
-        });
+        let plain = pane.is_some_and(|p| is_plain(&p.open));
         listed
             .or(program)
             .or_else(|| plain.then(|| "Terminal".to_string()))
@@ -1009,11 +1010,7 @@ impl Workspace {
         if pane.closing.is_some() {
             return;
         }
-        let plain = pane
-            .open
-            .provider_id
-            .as_deref()
-            .is_none_or(|p| p == perch_core::agent_fleet::TERMINAL_PROVIDER);
+        let plain = is_plain(&pane.open);
         let asked = plain
             && pane.open.host_id == LOCAL
             && pane
