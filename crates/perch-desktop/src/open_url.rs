@@ -4,19 +4,78 @@
 //! show with a `perch:open` event (`packages/web/src/openRequest.ts` acts on it).
 //!
 //! The link names a place and a session id and nothing else. It is checked here and again in the
-//! page, and it only ever navigates: nothing is created, run or sent. A link that arrives before
-//! the page has loaded (the app was not running) is dropped, not queued.
+//! page, and it only ever navigates: nothing is created, run or sent.
+//!
+//! A link that launches the app arrives before the page has loaded, when an event would reach no
+//! one. The latest valid link is kept in [`Handoff`] until the page, once its listener is in
+//! place, claims it with `open_ready`; from then on links are delivered as events. A page load
+//! resets this, so a reload claims again and a link is never delivered to a page that is not
+//! listening. A claimed link is gone: it is delivered once.
+
+use std::sync::Mutex;
 
 #[cfg(any(target_os = "macos", test))]
 const OPEN_EVENT: &str = "perch:open";
 #[cfg(any(target_os = "macos", test))]
 const PLACES: [&str; 5] = ["files", "changes", "browser", "chat", "settings"];
 
-#[cfg(any(target_os = "macos", test))]
-#[derive(Debug, PartialEq, Eq)]
-struct OpenRequest {
+#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenRequest {
     place: &'static str,
     session: Option<String>,
+}
+
+impl OpenRequest {
+    /// What the page receives: the `detail` of `perch:open`, and what `open_ready` returns.
+    fn detail(&self) -> serde_json::Value {
+        serde_json::json!({ "place": self.place, "session": self.session })
+    }
+}
+
+/// Where a link goes: to the page when it is listening, otherwise held for it.
+#[derive(Default)]
+pub struct Handoff(Mutex<HandoffState>);
+
+#[derive(Default)]
+struct HandoffState {
+    /// The page has claimed and is listening for events.
+    listening: bool,
+    /// The latest link that arrived while it was not.
+    held: Option<OpenRequest>,
+}
+
+impl Handoff {
+    /// A link arrived: `Some` when the page is listening and should be told now, else it is held
+    /// (replacing an older held link) for the page to claim.
+    #[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+    fn arrive(&self, request: OpenRequest) -> Option<OpenRequest> {
+        let mut state = self.0.lock().unwrap();
+        if state.listening {
+            return Some(request);
+        }
+        state.held = Some(request);
+        None
+    }
+
+    /// The page is listening: from now on links are delivered; the held one, if any, is returned
+    /// and forgotten.
+    fn claim(&self) -> Option<OpenRequest> {
+        let mut state = self.0.lock().unwrap();
+        state.listening = true;
+        state.held.take()
+    }
+
+    /// The page is loading, or gone: it is not listening.
+    pub fn reset(&self) {
+        self.0.lock().unwrap().listening = false;
+    }
+}
+
+/// The page's listener is in place: hand over the link that launched the app, if one is waiting.
+#[tauri::command]
+pub fn open_ready(handoff: tauri::State<'_, Handoff>) -> Option<serde_json::Value> {
+    handoff.claim().map(|request| request.detail())
 }
 
 /// What a session id may be made of: a UUID, or a host-qualified one.
@@ -52,7 +111,7 @@ fn parse(url: &str) -> Option<OpenRequest> {
 
 #[cfg(any(target_os = "macos", test))]
 fn script(request: &OpenRequest) -> String {
-    let detail = serde_json::json!({ "place": request.place, "session": request.session });
+    let detail = request.detail();
     format!("window.dispatchEvent(new CustomEvent('{OPEN_EVENT}', {{ detail: {detail} }}))")
 }
 
@@ -65,10 +124,17 @@ pub fn open(app: &tauri::AppHandle, urls: &[tauri::Url]) {
     };
     let ui = app.clone();
     let _ = app.run_on_main_thread(move || {
-        if let Some(window) = ui.get_webview_window("main") {
-            let _ = window.unminimize();
-            let _ = window.show();
-            let _ = window.set_focus();
+        let handoff = ui.state::<Handoff>();
+        let Some(window) = ui.get_webview_window("main") else {
+            // No page to tell: keep it for the one that opens.
+            handoff.reset();
+            handoff.arrive(request);
+            return;
+        };
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        if let Some(request) = handoff.arrive(request) {
             let _ = window.eval(script(&request));
         }
     });
@@ -77,6 +143,50 @@ pub fn open(app: &tauri::AppHandle, urls: &[tauri::Url]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn link(place: &'static str) -> OpenRequest {
+        request(place, Some("s1")).unwrap()
+    }
+
+    #[test]
+    fn a_link_before_the_page_listens_is_held_and_claimed_once() {
+        let handoff = Handoff::default();
+        assert_eq!(
+            handoff.arrive(link("files")),
+            None,
+            "nobody is listening yet"
+        );
+        // The latest link wins.
+        assert_eq!(handoff.arrive(link("chat")), None);
+        assert_eq!(handoff.claim(), Some(link("chat")));
+        assert_eq!(handoff.claim(), None, "delivered once");
+    }
+
+    #[test]
+    fn once_the_page_listens_links_are_delivered_not_held() {
+        let handoff = Handoff::default();
+        handoff.claim();
+        assert_eq!(handoff.arrive(link("files")), Some(link("files")));
+        assert_eq!(handoff.claim(), None, "nothing was kept back");
+    }
+
+    #[test]
+    fn a_page_load_stops_delivery_until_it_claims_again() {
+        let handoff = Handoff::default();
+        handoff.claim();
+        handoff.reset();
+        assert_eq!(handoff.arrive(link("changes")), None);
+        assert_eq!(handoff.claim(), Some(link("changes")));
+    }
+
+    #[test]
+    fn the_claim_is_what_the_page_reads() {
+        let detail = link("browser").detail();
+        assert_eq!(
+            detail,
+            serde_json::json!({"place": "browser", "session": "s1"})
+        );
+    }
 
     fn request(place: &'static str, session: Option<&str>) -> Option<OpenRequest> {
         Some(OpenRequest {

@@ -237,7 +237,17 @@ fn main() {
     let url: tauri::WebviewUrl =
         tauri::WebviewUrl::External(sign_in_url.parse().expect("invalid server URL"));
 
-    let builder = tauri::Builder::default();
+    let builder = tauri::Builder::default()
+        .manage(open_url::Handoff::default())
+        // A page that is loading is not listening for `perch://` links yet (`open_url.rs`).
+        .on_page_load(|webview, payload| {
+            use tauri::Manager;
+            if webview.label() == "main"
+                && payload.event() == tauri::webview::PageLoadEvent::Started
+            {
+                webview.state::<open_url::Handoff>().reset();
+            }
+        });
     // macOS uses real UserNotifications permission/delivery IPC instead of the
     // plugin’s unconditional desktop grant and legacy notification shim.
     #[cfg(not(target_os = "macos"))]
@@ -254,6 +264,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             open_external,
+            open_url::open_ready,
             set_traffic_lights,
             capture_window,
             open_in_default_app,
