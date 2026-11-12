@@ -30,6 +30,18 @@
 //!   any row would move (an erase can leave a wrap flag over a blank row) the
 //!   repaint is made again with one line per row, which has no wraps and every
 //!   row in place.
+//! - **Blanks.** Ghostty's formatter writes the empty cells between two cells
+//!   of a line as spaces in the style of the cell before them, so a gap an app
+//!   skipped over after painted cells (cursor-forward past a coloured, inverse
+//!   or underlined run) would come back painted. Each such run is found by
+//!   reading the cells ([`Term::find_gaps`]) and the formatter is called in
+//!   pieces that end just before it: it resets the style when it stops, and
+//!   the next piece starts with the blanks. The pieces count toward the size
+//!   limit like any other bytes. Not carried: a run with no text on one side
+//!   in its row (the formatter prints nothing for a part of a row without
+//!   text) is left as the formatter writes it, painted, and nothing moves;
+//!   and a run that reaches across a soft wrap can't be cut in joined rows,
+//!   so the repaint is made with one line per row.
 //! - **Size.** The scrollback goes in whole rows, newest first, as many as fit
 //!   the caller's limit; the bytes themselves are never cut. The visible rows,
 //!   modes and a pending sequence are not trimmed (see the `ponytail:` note on
@@ -223,6 +235,22 @@ impl Term {
         (ok == g::GHOSTTY_SUCCESS).then_some(grid_ref)
     }
 
+    /// The cells from `start` to `end`, each `(column, row)` in `tag`'s
+    /// coordinates, end included.
+    fn span(
+        &self,
+        tag: g::GhosttyPointTag,
+        start: (u16, u32),
+        end: (u16, u32),
+    ) -> Option<g::GhosttySelection> {
+        Some(g::GhosttySelection {
+            size: std::mem::size_of::<g::GhosttySelection>(),
+            start: self.grid_ref(tag, start.0, start.1)?,
+            end: self.grid_ref(tag, end.0, end.1)?,
+            rectangle: false,
+        })
+    }
+
     /// `count` rows of `tag`'s coordinate space from row `first`, `cols` wide.
     fn rows_selection(
         &self,
@@ -231,32 +259,18 @@ impl Term {
         first: u32,
         count: u32,
     ) -> Option<g::GhosttySelection> {
-        Some(g::GhosttySelection {
-            size: std::mem::size_of::<g::GhosttySelection>(),
-            start: self.grid_ref(tag, 0, first)?,
-            end: self.grid_ref(tag, cols.checked_sub(1)?, first + count.checked_sub(1)?)?,
-            rectangle: false,
-        })
+        self.span(
+            tag,
+            (0, first),
+            (cols.checked_sub(1)?, first + count.checked_sub(1)?),
+        )
     }
 
     /// Whether row `y` of `tag`'s coordinates continues the line above it:
     /// the row above ended in a soft wrap.
     fn continues_line_above(&self, tag: g::GhosttyPointTag, y: u32) -> bool {
-        let Some(grid_ref) = self.grid_ref(tag, 0, y) else {
-            return false;
-        };
-        let (mut row, mut continues) = (0, false);
-        // SAFETY: the ref was just produced by this terminal; the row key
-        // writes a bool.
-        unsafe {
-            g::ghostty_grid_ref_row(&grid_ref, &mut row) == g::GHOSTTY_SUCCESS
-                && g::ghostty_row_get(
-                    row,
-                    g::GHOSTTY_ROW_DATA_WRAP_CONTINUATION,
-                    (&mut continues as *mut bool).cast(),
-                ) == g::GHOSTTY_SUCCESS
-                && continues
-        }
+        self.grid_ref(tag, 0, y)
+            .is_some_and(|row| row_flag(&row, g::GHOSTTY_ROW_DATA_WRAP_CONTINUATION))
     }
 
     /// The text of `count` rows of `tag`'s coordinates from row `first`,
@@ -340,6 +354,137 @@ impl Term {
         }
     }
 
+    /// What Ghostty's formatter makes of the cell `grid_ref` points at.
+    fn cell_kind(grid_ref: &g::GhosttyGridRef) -> Option<CellKind> {
+        let mut cell = 0;
+        let (mut content, mut wide) = (0, 0);
+        let (mut text, mut styling) = (false, false);
+        let keys = [
+            g::GHOSTTY_CELL_DATA_CONTENT_TAG,
+            g::GHOSTTY_CELL_DATA_WIDE,
+            g::GHOSTTY_CELL_DATA_HAS_TEXT,
+            g::GHOSTTY_CELL_DATA_HAS_STYLING,
+        ];
+        let mut values = [
+            (&mut content as *mut i32).cast(),
+            (&mut wide as *mut i32).cast(),
+            (&mut text as *mut bool).cast(),
+            (&mut styling as *mut bool).cast(),
+        ];
+        // SAFETY: the ref came from a live terminal; each key writes the type
+        // its value pointer has here.
+        let ok = unsafe {
+            g::ghostty_grid_ref_cell(grid_ref, &mut cell) == g::GHOSTTY_SUCCESS
+                && g::ghostty_cell_get_multi(
+                    cell,
+                    keys.len(),
+                    keys.as_ptr(),
+                    values.as_mut_ptr(),
+                    ptr::null_mut(),
+                ) == g::GHOSTTY_SUCCESS
+        };
+        if !ok {
+            return None;
+        }
+        // A cell erased in a colour holds the colour as its content.
+        let erased = content >= g::GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE;
+        Some(match wide {
+            g::GHOSTTY_CELL_WIDE_SPACER_HEAD | g::GHOSTTY_CELL_WIDE_SPACER_TAIL => CellKind::Spacer,
+            g::GHOSTTY_CELL_WIDE_NARROW if !erased && !text && !styling => CellKind::Blank,
+            _ => CellKind::Filled {
+                text,
+                painted: erased || styling,
+            },
+        })
+    }
+
+    /// Where [`Self::format_vt_rows`] has to cut the active screen's rows so
+    /// the formatter's blanks come out unpainted; see [`Gaps`]. `unwrap` is
+    /// the layout the rows will be formatted in.
+    fn find_gaps(&self, cols: u16, rows: u16, unwrap: bool) -> Option<Gaps> {
+        let history = self.get::<usize>(g::GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS)? as u32;
+        let mut gaps = Gaps::default();
+        let mut kinds = Vec::with_capacity(cols.into());
+        // Whether the formatter reaches the next row with a painted style
+        // still open: the row above is printed and wraps into it.
+        let (mut open, mut painted) = (false, false);
+        for y in 0..history + u32::from(rows) {
+            let mut at = self.grid_ref(g::GHOSTTY_POINT_TAG_SCREEN, 0, y)?;
+            let wraps = unwrap && row_flag(&at, g::GHOSTTY_ROW_DATA_WRAP);
+            kinds.clear();
+            for x in 0..cols {
+                at.x = x;
+                kinds.push(Self::cell_kind(&at)?);
+            }
+            let text = |kind: &CellKind| matches!(kind, CellKind::Filled { text: true, .. });
+            let Some(last_text) = kinds.iter().rposition(text) else {
+                // A row without text prints nothing and ends the style.
+                (open, painted) = (false, false);
+                continue;
+            };
+            painted &= open;
+            let (mut blanks, mut text_before) = (None, false);
+            for (x, kind) in kinds.iter().enumerate() {
+                match *kind {
+                    CellKind::Spacer => {}
+                    CellKind::Blank => {
+                        blanks.get_or_insert(x);
+                    }
+                    CellKind::Filled { text, painted: now } => {
+                        if let (Some(start), true) = (blanks.take(), painted) {
+                            if start == 0 {
+                                // Blanks that began on the row above.
+                                gaps.spans_rows = true;
+                            } else if text_before && last_text >= x {
+                                gaps.cuts.push((y, start as u16));
+                                text_before = false;
+                            }
+                            // ponytail: a run with no text on one side in its
+                            // row is not cut (the formatter prints nothing
+                            // for a part of a row without text), so it still
+                            // comes back painted. To fix it, write the
+                            // colour-erased cells here as SGR, `ECH n` and
+                            // `CUF n`, and cut around them.
+                        }
+                        (painted, text_before) = (now, text_before || text);
+                    }
+                }
+            }
+            gaps.spans_rows |= wraps && painted && blanks.is_some();
+            open = wraps;
+        }
+        Some(gaps)
+    }
+
+    /// [`Self::format`] as VT of `count` rows from row `first` of the screen's
+    /// coordinates, in pieces cut at `cuts`. The formatter ends its output
+    /// with a style reset, so the blanks that start the next piece are
+    /// written unpainted. Only the first piece carries the modes and only the
+    /// last the state that follows the cells.
+    fn format_vt_rows(
+        &self,
+        cols: u16,
+        (first, count): (u32, u32),
+        layout: Layout,
+        extra: Extra,
+        cuts: &[(u32, u16)],
+    ) -> Option<Vec<u8>> {
+        let (tag, vt) = (g::GHOSTTY_POINT_TAG_SCREEN, g::GHOSTTY_FORMATTER_FORMAT_VT);
+        let end = (cols.checked_sub(1)?, first + count.checked_sub(1)?);
+        let (mut start, mut modes, mut out) = ((0, first), extra.modes, Vec::new());
+        for &(y, x) in cuts.iter().filter(|(y, _)| (first..=end.1).contains(y)) {
+            let piece = Extra {
+                modes,
+                screen_state: false,
+            };
+            out.extend(self.format(vt, layout, piece, &self.span(tag, start, (x - 1, y))?)?);
+            (start, modes) = ((x, y), false);
+        }
+        let piece = Extra { modes, ..extra };
+        out.extend(self.format(vt, layout, piece, &self.span(tag, start, end)?)?);
+        Some(out)
+    }
+
     /// The kitty keyboard flags of the active screen, top of stack first,
     /// popping the stack empty as it goes: only the copy [`Screen::restore`]
     /// owns is ever probed. Entries at the bottom that are zero are
@@ -357,6 +502,44 @@ impl Term {
         }
         stack
     }
+}
+
+/// A flag of the row `grid_ref` is in.
+fn row_flag(grid_ref: &g::GhosttyGridRef, key: g::GhosttyRowData) -> bool {
+    let (mut row, mut flag) = (0, false);
+    // SAFETY: the ref came from a terminal that is still alive; the row keys
+    // used here write a bool.
+    unsafe {
+        g::ghostty_grid_ref_row(grid_ref, &mut row) == g::GHOSTTY_SUCCESS
+            && g::ghostty_row_get(row, key, (&mut flag as *mut bool).cast()) == g::GHOSTTY_SUCCESS
+            && flag
+    }
+}
+
+/// What Ghostty's formatter makes of a cell.
+#[derive(Clone, Copy)]
+enum CellKind {
+    /// The other half of a wide character: no output of its own.
+    Spacer,
+    /// No text and no style: written as a space, and only if a cell with
+    /// output follows it on the line.
+    Blank,
+    Filled {
+        text: bool,
+        /// Not in the default style, or erased in a colour.
+        painted: bool,
+    },
+}
+
+/// Blank cells the formatter would write, as spaces, in the style of the
+/// cell before them (its style is only reset for a cell that follows).
+#[derive(Default)]
+struct Gaps {
+    /// `(row, column)` of the first blank of each such run, in order, in the
+    /// screen's coordinates.
+    cuts: Vec<(u32, u16)>,
+    /// A run reaches across a soft wrap, which joined rows can't cut.
+    spans_rows: bool,
 }
 
 /// How a [`Term::format`] call lays out rows.
@@ -640,6 +823,7 @@ impl Screen {
         }
 
         let alternate = copy.alternate();
+        let mut gaps = copy.find_gaps(cols, rows, layout.unwrap)?;
         let mut alternate_part = Vec::new();
         let mut alternate_keys = Vec::new();
         let mut alternate_rows = String::new();
@@ -648,7 +832,10 @@ impl Screen {
             // saves the primary's cursor, clears the alternate and keeps the
             // cursor and style, which the rows below don't expect.
             alternate_part = b"\x1b[?1049h\x1b[0m\x1b[H".to_vec();
-            alternate_part.extend(paint_active(&copy, cols, rows, false, layout)?);
+            if gaps.spans_rows {
+                return Some(None);
+            }
+            alternate_part.extend(paint_active(&copy, cols, rows, false, layout, &gaps)?);
             alternate_keys = copy.drain_keyboard_stack();
             alternate_rows = copy.rows_text(g::GHOSTTY_POINT_TAG_ACTIVE, cols, 0, rows.into())?;
             // Back to the primary screen, whichever of the three alternate
@@ -657,12 +844,16 @@ impl Screen {
             copy.write(b"\x1b[?1049l");
             copy.set_mode_bit(47, false);
             copy.set_mode_bit(1047, false);
+            gaps = copy.find_gaps(cols, rows, layout.unwrap)?;
+        }
+        if gaps.spans_rows {
+            return Some(None);
         }
 
         // After the history: the visible rows (the emulator's own rows line
         // up with them), then everything that follows from them.
         let history = copy.get::<usize>(g::GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS)?;
-        let visible = paint_active(&copy, cols, rows, true, layout)?;
+        let visible = paint_active(&copy, cols, rows, true, layout, &gaps)?;
         let mut rest = visible.clone();
         rest.extend(keyboard_stack_sequence(&copy.drain_keyboard_stack()).bytes());
         if alternate {
@@ -692,7 +883,7 @@ impl Screen {
 
         let fixed = head.len() + rest.len();
         let mut keep = history;
-        let mut scrollback = paint_history(&copy, cols, rows, history, keep, layout)?;
+        let mut scrollback = paint_history(&copy, (cols, rows), (history, keep), layout, &gaps)?;
         // Output grows with the rows kept, nearly in proportion: aim a
         // little under the limit and measure again.
         for _ in 0..6 {
@@ -702,7 +893,7 @@ impl Screen {
             let budget = max_bytes.saturating_sub(fixed) as u128;
             let smaller = (keep as u128 * budget * 9 / 10 / scrollback.len() as u128) as usize;
             keep = smaller.min(keep - 1);
-            scrollback = paint_history(&copy, cols, rows, history, keep, layout)?;
+            scrollback = paint_history(&copy, (cols, rows), (history, keep), layout, &gaps)?;
         }
         if fixed.saturating_add(scrollback.len()) > max_bytes {
             keep = 0;
@@ -780,11 +971,10 @@ fn replays_as(
 /// above the visible rows of an emulator of this size.
 fn paint_history(
     term: &Term,
-    cols: u16,
-    rows: u16,
-    history: usize,
-    keep: usize,
+    (cols, rows): (u16, u16),
+    (history, keep): (usize, usize),
     layout: Layout,
+    gaps: &Gaps,
 ) -> Option<Vec<u8>> {
     if keep == 0 {
         return Some(Vec::new());
@@ -800,14 +990,9 @@ fn paint_history(
     {
         joined += 1;
     }
-    let selection = term.rows_selection(
-        g::GHOSTTY_POINT_TAG_SCREEN,
-        cols,
-        history - keep,
-        keep + joined,
-    )?;
+    let range = (history - keep, keep + joined);
     let vt = g::GHOSTTY_FORMATTER_FORMAT_VT;
-    let mut out = term.format(vt, layout, NO_EXTRAS, &selection)?;
+    let mut out = term.format_vt_rows(cols, range, layout, NO_EXTRAS, &gaps.cuts)?;
     // Blank rows format to nothing, so the row the cursor stops on is not
     // known from the text: count it with one line per row, where it is the
     // number of line feeds. Then feed it down to the bottom of the screen
@@ -817,6 +1002,7 @@ fn paint_history(
         unwrap: false,
         ..layout
     };
+    let selection = term.rows_selection(g::GHOSTTY_POINT_TAG_SCREEN, cols, range.0, range.1)?;
     let last_row = term
         .format(vt, per_row, NO_EXTRAS, &selection)?
         .iter()
@@ -831,13 +1017,20 @@ fn paint_history(
 }
 
 /// The visible rows of the active screen with the state that follows them.
-fn paint_active(term: &Term, cols: u16, rows: u16, modes: bool, layout: Layout) -> Option<Vec<u8>> {
-    let selection = term.rows_selection(g::GHOSTTY_POINT_TAG_ACTIVE, cols, 0, u32::from(rows))?;
+fn paint_active(
+    term: &Term,
+    cols: u16,
+    rows: u16,
+    modes: bool,
+    layout: Layout,
+    gaps: &Gaps,
+) -> Option<Vec<u8>> {
+    let history = term.get::<usize>(g::GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS)? as u32;
     let extra = Extra {
         modes,
         screen_state: true,
     };
-    term.format(g::GHOSTTY_FORMATTER_FORMAT_VT, layout, extra, &selection)
+    term.format_vt_rows(cols, (history, rows.into()), layout, extra, &gaps.cuts)
 }
 
 #[cfg(test)]
@@ -876,6 +1069,88 @@ mod tests {
         fed(source.cols, source.rows, &source.restore_bytes())
     }
 
+    /// How every cell of `screen`, history first, looks: colours and text
+    /// attributes, with `-` for a cell in the default style. Whether the cell
+    /// holds text is left out: an empty cell and a space look alike.
+    fn cell_looks(screen: &Screen) -> Vec<Vec<String>> {
+        let color = |c: &g::GhosttyStyleColor| match c.tag {
+            g::GHOSTTY_STYLE_COLOR_PALETTE => format!("p{}", unsafe { c.value.palette }),
+            g::GHOSTTY_STYLE_COLOR_RGB => {
+                let rgb = unsafe { c.value.rgb };
+                format!("#{:02x}{:02x}{:02x}", rgb.r, rgb.g, rgb.b)
+            }
+            _ => "-".into(),
+        };
+        let total = screen.scrollback_rows() as u32 + u32::from(screen.rows);
+        (0..total)
+            .map(|y| {
+                (0..screen.cols)
+                    .map(|x| {
+                        let at = screen
+                            .term
+                            .grid_ref(g::GHOSTTY_POINT_TAG_SCREEN, x, y)
+                            .unwrap();
+                        let mut style = g::GhosttyStyle {
+                            size: std::mem::size_of::<g::GhosttyStyle>(),
+                            ..Default::default()
+                        };
+                        let (mut cell, mut tag) = (0u64, 0i32);
+                        let (mut palette, mut rgb) = (0u8, g::GhosttyColorRgb::default());
+                        // SAFETY: the ref was just produced by this terminal;
+                        // each key writes the type it is given here.
+                        unsafe {
+                            g::ghostty_grid_ref_style(&at, &mut style);
+                            g::ghostty_grid_ref_cell(&at, &mut cell);
+                            let key = g::GHOSTTY_CELL_DATA_CONTENT_TAG;
+                            g::ghostty_cell_get(cell, key, (&mut tag as *mut i32).cast());
+                            let key = g::GHOSTTY_CELL_DATA_COLOR_PALETTE;
+                            g::ghostty_cell_get(cell, key, (&mut palette as *mut u8).cast());
+                            let key = g::GHOSTTY_CELL_DATA_COLOR_RGB;
+                            g::ghostty_cell_get(
+                                cell,
+                                key,
+                                (&mut rgb as *mut g::GhosttyColorRgb).cast(),
+                            );
+                        }
+                        // A cell erased in a colour holds the colour as its
+                        // content; a printed one holds it in its style.
+                        let background = match tag {
+                            g::GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE => format!("p{palette}"),
+                            g::GHOSTTY_CELL_CONTENT_BG_COLOR_RGB => {
+                                format!("#{:02x}{:02x}{:02x}", rgb.r, rgb.g, rgb.b)
+                            }
+                            _ => color(&style.bg_color),
+                        };
+                        let flags: String = [
+                            (style.bold, 'b'),
+                            (style.italic, 'i'),
+                            (style.faint, 'f'),
+                            (style.blink, 'k'),
+                            (style.inverse, 'v'),
+                            (style.invisible, 'h'),
+                            (style.strikethrough, 's'),
+                            (style.overline, 'o'),
+                        ]
+                        .iter()
+                        .filter_map(|&(on, c)| on.then_some(c))
+                        .collect();
+                        let look = format!(
+                            "{}/{background}/{}/{flags}/{}",
+                            color(&style.fg_color),
+                            color(&style.underline_color),
+                            style.underline
+                        );
+                        if look == "-/-/-//0" {
+                            "-".into()
+                        } else {
+                            look
+                        }
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
     /// The reattached screen is the source in everything a user or an app
     /// can observe, and asking it to repaint again says the same thing.
     fn assert_same(source: &Screen, view: &Screen) {
@@ -889,6 +1164,180 @@ mod tests {
             String::from_utf8_lossy(&view.restore_bytes()),
             String::from_utf8_lossy(&source.restore_bytes())
         );
+    }
+
+    /// Two cells painted in `style`, seven untouched cells (skipped with
+    /// cursor-forward, so empty and in the default style), then `marker`.
+    fn gap_row(style: &str, marker: &str) -> String {
+        format!("{style}  \x1b[7C\x1b[0m {marker}\r\n")
+    }
+
+    /// The looks of the first row of `screen` reading `marker`.
+    fn row_looks(screen: &Screen, marker: &str) -> Vec<String> {
+        let row = screen
+            .transcript()
+            .lines()
+            .position(|line| line.contains(marker))
+            .expect("the marker row");
+        cell_looks(screen).swap_remove(row)
+    }
+
+    /// Of the row reading `marker`, the gap (columns 2 to 8) is in the
+    /// default style in `screen` while the two cells before it are painted.
+    fn assert_gap_unpainted(screen: &Screen, marker: &str) {
+        let looks = row_looks(screen, marker);
+        assert_ne!(looks[0], "-", "the cells before the gap are painted");
+        assert_eq!(looks[0], looks[1]);
+        assert!(
+            looks[2..9].iter().all(|look| look == "-"),
+            "gap cells are painted: {:?}",
+            &looks[..10]
+        );
+    }
+
+    /// The gap comes back in the default style, and everything else as it was.
+    fn assert_gap_stays_unpainted(source: &Screen, marker: &str) {
+        let view = reattached(source);
+        assert_same(source, &view);
+        assert_eq!(cell_looks(&view), cell_looks(source));
+        assert_gap_unpainted(source, marker);
+        assert_gap_unpainted(&view, marker);
+    }
+
+    #[test]
+    fn a_gap_after_painted_cells_stays_unpainted_on_the_visible_rows() {
+        for style in [
+            "\x1b[48;5;238m",
+            "\x1b[7m",
+            "\x1b[4m",
+            "\x1b[48;2;10;20;30m",
+        ] {
+            let mut source = Screen::new(40, 8);
+            source.process(format!("top\r\n{}$ ", gap_row(style, "gap-marker")).as_bytes());
+            assert_eq!(source.scrollback_rows(), 0);
+            assert_gap_stays_unpainted(&source, "gap-marker");
+        }
+    }
+
+    #[test]
+    fn a_gap_after_painted_cells_stays_unpainted_in_scrollback() {
+        for style in ["\x1b[48;5;238m", "\x1b[7m", "\x1b[4m"] {
+            let mut source = Screen::new(40, 6);
+            source.process(gap_row(style, "gap-marker").as_bytes());
+            for line in 0..20 {
+                source.process(format!("line {line}\r\n").as_bytes());
+            }
+            assert!(source.scrollback_rows() > 10);
+            assert_gap_stays_unpainted(&source, "gap-marker");
+        }
+    }
+
+    #[test]
+    fn a_gap_after_painted_cells_stays_unpainted_on_the_alternate_screen() {
+        for style in ["\x1b[48;5;238m", "\x1b[7m", "\x1b[4m"] {
+            let mut source = Screen::new(40, 8);
+            source.process(b"shell\r\n\x1b[?1049h\x1b[H");
+            source.process(format!("{}$ ", gap_row(style, "gap-marker")).as_bytes());
+            assert!(source.alternate_screen());
+            assert_gap_stays_unpainted(&source, "gap-marker");
+        }
+    }
+
+    #[test]
+    fn gaps_in_a_trimmed_repaint_stay_unpainted_and_count_toward_the_limit() {
+        let mut source = Screen::new(40, 6);
+        for line in 0..400 {
+            let style = ["\x1b[48;5;238m", "\x1b[7m", "\x1b[4m"][line % 3];
+            source.process(gap_row(style, &format!("gap-marker {line}")).as_bytes());
+        }
+        let limit = 4_000;
+        assert!(source.restore_bytes().len() > 3 * limit, "the premise");
+        let bytes = source.restore_bytes_within(limit);
+        assert!(bytes.len() <= limit, "{} bytes", bytes.len());
+        let view = fed(40, 6, &bytes);
+        let kept = view.scrollback_rows();
+        assert!(kept > 20 && kept < 300, "{kept} rows kept");
+        let (before, after) = (cell_looks(&source), cell_looks(&view));
+        assert_eq!(after[..], before[before.len() - after.len()..]);
+        assert_gap_unpainted(&view, "gap-marker 399");
+        assert_gap_unpainted(&view, &format!("gap-marker {}", 399 - kept));
+    }
+
+    #[test]
+    fn a_gap_inside_a_wrapped_line_keeps_the_wrap() {
+        // Inverse text wraps; on the second row a gap follows it, then text.
+        let mut source = Screen::new(12, 5);
+        source.process(b"\x1b[7mabcdefghijklxy\x1b[4C\x1b[0mzz");
+        assert_eq!(source.term.find_gaps(12, 5, true).unwrap().cuts, [(1, 2)]);
+        let mut view = reattached(&source);
+        assert_same(&source, &view);
+        assert_eq!(cell_looks(&view), cell_looks(&source));
+        assert_eq!(wrap_flags(&view), wrap_flags(&source));
+        assert_same_after_widening(&mut source, &mut view);
+    }
+
+    #[test]
+    fn a_gap_that_crosses_a_soft_wrap_stays_unpainted() {
+        // Inverse text wraps onto the second row; the cells at the start of
+        // that row are erased to the default style and text follows them.
+        let mut source = Screen::new(12, 5);
+        source.process(b"\x1b[7mabcdefghijkl123456\x1b[2;1H\x1b[0m\x1b[2X\x1b[2;4H\x1b[7mxy");
+        assert_eq!(wrap_flags(&source)[..2], [(true, false), (false, true)]);
+        let view = reattached(&source);
+        assert_same(&source, &view);
+        assert_eq!(cell_looks(&view), cell_looks(&source));
+        let looks = &cell_looks(&view)[1];
+        assert!(looks[..2].iter().all(|look| look == "-"), "{looks:?}");
+        assert_ne!(looks[3], "-");
+    }
+
+    #[test]
+    fn erased_cells_next_to_a_gap_keep_every_cell_in_its_column() {
+        // A colour-erased run has no text, so the formatter can't print it on
+        // its own: such a gap can come back painted, but nothing moves.
+        for (bytes, text) in [
+            (
+                "\x1b[44m\x1b[3X\x1b[3C\x1b[0m\x1b[5C text\r\nnext",
+                "         text",
+            ),
+            ("\x1b[44mab\x1b[5C\x1b[3X\x1b[0m\r\nnext", "ab"),
+            (
+                "\x1b[44m\x1b[2X\x1b[5C\x1b[2X\x1b[0m\x1b[2C zz\r\nnext",
+                "        zz",
+            ),
+        ] {
+            let source = fed(30, 5, bytes.as_bytes());
+            let view = reattached(&source);
+            assert_eq!(view.transcript(), source.transcript());
+            assert!(source.transcript().starts_with(text), "{bytes:?}");
+            assert_eq!(view.cursor_position(), source.cursor_position());
+        }
+        // With text on both sides of the gap the cuts apply.
+        let source = fed(30, 5, b"\x1b[44mab\x1b[5C\x1b[3X\x1b[3C\x1b[0mzz\r\nnext");
+        let view = reattached(&source);
+        assert_same(&source, &view);
+        assert_eq!(cell_looks(&view), cell_looks(&source));
+    }
+
+    #[test]
+    fn random_output_keeps_the_style_of_every_cell_of_a_row_with_text() {
+        for seed in 1..=60 {
+            let source = random_screen(seed * 0x9e37_79b9, true);
+            let (before, after) = (cell_looks(&source), cell_looks(&reattached(&source)));
+            for (row, line) in source.transcript().lines().enumerate() {
+                // Not carried: rows that read blank (the formatter skips a
+                // row of erased cells) and the last column (where a wide
+                // character that didn't fit leaves a marker).
+                if !line.is_empty() {
+                    let cols = usize::from(source.cols) - 1;
+                    assert_eq!(
+                        after[row][..cols],
+                        before[row][..cols],
+                        "seed {seed}, row {row}"
+                    );
+                }
+            }
+        }
     }
 
     /// Per row of scrollback and screen: (soft-wrapped, continues the row above).
