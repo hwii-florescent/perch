@@ -233,6 +233,7 @@ fn main() {
     narrow_panes_shrink_the_font();
     input_and_scrolling();
     disconnect_keeps_the_screen();
+    workspace_attaches_the_open_session();
     println!("terminal_render: ok");
 }
 
@@ -639,6 +640,62 @@ fn input_and_scrolling() {
     assert_eq!(
         key_bytes(&mut vt, &Keystroke::parse("cmd-q").unwrap(), false),
         None
+    );
+}
+
+/// Picking a session gives the main area a terminal for it, only when there is a core to
+/// find; picking the same one again keeps it, another replaces it.
+fn workspace_attaches_the_open_session() {
+    use perch_native::sidebar::Model;
+    use perch_native::ui::Workspace;
+
+    let mut cx = HeadlessAppContext::with_platform(
+        gpui_platform::current_platform(true).text_system(),
+        Arc::new(()),
+        gpui_platform::current_headless_renderer,
+    );
+    let pick = |cx: &mut HeadlessAppContext, window: WindowHandle<Workspace>, id: &str| {
+        window
+            .update(cx, |workspace, _, cx| {
+                workspace.sidebar().update(cx, |sidebar, cx| {
+                    sidebar.open("local".into(), id.into(), Some("terminal".into()), cx)
+                })
+            })
+            .unwrap();
+        cx.run_until_parked();
+        window
+            .update(cx, |workspace, _, _| workspace.terminal().cloned())
+            .unwrap()
+    };
+
+    // No core to attach to: the main area keeps its quiet title and makes no terminal.
+    let bare = cx
+        .open_window(size(px(640.), px(360.)), |_, cx| {
+            cx.new(|cx| Workspace::new(Model::default(), None, cx))
+        })
+        .unwrap();
+    assert!(pick(&mut cx, bare, "alpha").is_none());
+
+    // A core that cannot be found shows as a failed terminal, not as nothing.
+    let lost = cx
+        .open_window(size(px(640.), px(360.)), |_, cx| {
+            cx.new(|cx| {
+                Workspace::new(Model::default(), None, cx)
+                    .with_core(|| Err(anyhow::anyhow!("no core is running")))
+            })
+        })
+        .unwrap();
+    let first = pick(&mut cx, lost, "alpha").expect("a terminal for the session");
+    let status = first.read_with(&cx, |view, _| view.status().clone());
+    assert!(
+        matches!(&status, Status::Failed(reason) if reason.contains("no core is running")),
+        "{status:?}"
+    );
+    assert_eq!(pick(&mut cx, lost, "alpha").unwrap(), first, "same session");
+    assert_ne!(
+        pick(&mut cx, lost, "beta").unwrap(),
+        first,
+        "another session"
     );
 }
 

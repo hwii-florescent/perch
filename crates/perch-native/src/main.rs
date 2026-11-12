@@ -34,7 +34,12 @@ fn main() {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     ..Default::default()
                 },
-                |_, cx| cx.new(|cx| Workspace::new(Model::default(), Some(command_tx), cx)),
+                |_, cx| {
+                    cx.new(|cx| {
+                        Workspace::new(Model::default(), Some(command_tx), cx)
+                            .with_core(|| Core::discover(&perchd::server::default_dir()))
+                    })
+                },
             )
             .expect("could not open the window");
         let workspace = window.update(cx, |_, _, cx| cx.entity()).expect("window");
