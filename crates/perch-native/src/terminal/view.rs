@@ -24,6 +24,7 @@ use super::links::{self, Target};
 use super::scroll;
 use super::select::{Pointer, Step};
 use super::settings::Settings;
+use super::sprites;
 use super::vt::{
     Cell, Event, Frame, KeyInput, MouseAction, MouseButton, MouseInput, Rgb, Underline, Vt,
 };
@@ -1419,6 +1420,7 @@ fn color(c: Rgb) -> Hsla {
 fn same_run(a: &Cell, b: &Cell) -> bool {
     !b.wide
         && b.text.chars().count() <= 1
+        && !sprites::is_sprite(&b.text)
         && a.fg == b.fg
         && a.bold == b.bold
         && a.italic == b.italic
@@ -1565,7 +1567,11 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
                     &cell.text
                 });
             };
-            if first.wide || first.text.chars().count() > 1 {
+            let sprite = sprites::is_sprite(&first.text);
+            if sprite {
+                // Shapes that fit the cell, not glyphs from the font.
+                x += 1;
+            } else if first.wide || first.text.chars().count() > 1 {
                 push(first, &mut text);
                 glyphs = 1;
                 x += 1 + usize::from(first.wide);
@@ -1587,6 +1593,14 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
             let mut fg = col(first.fg);
             if first.faint {
                 fg.a = 0.6;
+            }
+            if sprite {
+                sprites::paint(
+                    &first.text,
+                    Bounds::new(at(start, y), size(cw, ch)),
+                    fg,
+                    window,
+                );
             }
             if glyphs > 0 {
                 // Trailing blanks carry no ink.
@@ -1653,7 +1667,9 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
         match (focused, cursor.shape) {
             (true, Block) => {
                 window.paint_quad(fill(snap_box(cell), c));
-                if let Some(glyph) = under.filter(|c| !c.text.is_empty()) {
+                if let Some(glyph) = under.filter(|c| sprites::is_sprite(&c.text)) {
+                    sprites::paint(&glyph.text, cell, col(cursor.text), window);
+                } else if let Some(glyph) = under.filter(|c| !c.text.is_empty()) {
                     let run = TextRun {
                         len: glyph.text.len(),
                         font: layout::cell_font(&family, glyph.bold, glyph.italic),

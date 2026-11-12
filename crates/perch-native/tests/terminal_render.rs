@@ -335,6 +335,7 @@ fn main() {
     run("find_in_the_pane", find_in_the_pane);
     run("links_in_the_pane", links_in_the_pane);
     run("input_method_composition", input_method_composition);
+    run("stress_screen", || stress_screen(bg, fg));
     run("ownership_and_named_actions", ownership_and_named_actions);
     run(
         "x10_mouse_reports_past_the_text_range",
@@ -1579,4 +1580,180 @@ fn x10_mouse_reports_past_the_text_range() {
         Modifiers::default(),
     );
     assert_eq!(h.sent(), vec![], "a report that is not text is not sent");
+}
+
+/// One screen with everything the terminal draws: the colour cube and a truecolour ramp, text
+/// styles, box drawing, blocks, braille and powerline shapes that fill their cells, wide text,
+/// and the cursor. Pixels are checked; set `PERCH_NATIVE_SHOT_DIR` to look at the frame.
+fn stress_screen(bg: [u8; 3], fg: [u8; 3]) {
+    let mut h = Harness::open(900., 520.);
+    let mut screen = String::new();
+    // Rows 0..6: the 6x6x6 colour cube, 36 colours a row.
+    for row in 0..6 {
+        for n in 0..36 {
+            screen.push_str(&format!("\x1b[48;5;{}m ", 16 + row * 36 + n));
+        }
+        screen.push_str("\x1b[0m\r\n");
+    }
+    // Row 6: the grayscale ramp. Row 7: a truecolour ramp.
+    for n in 232..256 {
+        screen.push_str(&format!("\x1b[48;5;{n}m "));
+    }
+    screen.push_str("\x1b[0m\r\n");
+    for n in 0..64 {
+        screen.push_str(&format!("\x1b[48;2;{};{};{}m ", n * 4, 255 - n * 4, 128));
+    }
+    screen.push_str("\x1b[0m\r\n");
+    // Row 8: styles. Rows 9..12: a box. Row 12: blocks and braille. Row 13: powerline.
+    // Row 14: wide text.
+    screen.push_str("\x1b[1mbold\x1b[0m \x1b[3mital\x1b[0m \x1b[4mline\x1b[0m \x1b[9mstrk\x1b[0m \x1b[2mfaint\x1b[0m \x1b[31;1mred\x1b[0m\r\n");
+    screen.push_str("\u{250c}\u{2500}\u{2500}\u{252c}\u{2500}\u{2500}\u{2510}\r\n");
+    screen.push_str("\u{2502}  \u{2502}  \u{2502}\r\n");
+    screen.push_str("\u{2514}\u{2500}\u{2500}\u{2534}\u{2500}\u{2500}\u{2518}\r\n");
+    screen.push_str("\u{2588}\u{2593}\u{2592}\u{2591}\u{2580}\u{2584}\u{28ff}\u{2801}\r\n");
+    screen.push_str("\x1b[44;37m\u{e0b0}\x1b[0m\r\n");
+    screen.push_str("\u{65e5}\u{672c}\u{8a9e} \u{1f600}x");
+    h.attach(100, 30, &screen);
+    h.focus();
+    let shot = h.draw();
+
+    // The colour cube, the grayscale ramp and the truecolour ramp are the palette's colours.
+    let level = |v: usize| if v == 0 { 0 } else { (55 + 40 * v) as u8 };
+    for n in [16usize, 21, 46, 51, 196, 201, 226, 231, 100, 150] {
+        let i = n - 16;
+        let want = [level(i / 36), level(i / 6 % 6), level(i % 6)];
+        let (row, col) = (i / 36, i % 36);
+        assert!(
+            near(shot.center(col, row), want),
+            "256-colour {n}: {:?} vs {want:?}",
+            shot.center(col, row)
+        );
+    }
+    for (col, n) in [(0usize, 232usize), (11, 243), (23, 255)] {
+        let v = (8 + 10 * (n - 232)) as u8;
+        assert!(near(shot.center(col, 6), [v, v, v]), "gray {n}");
+    }
+    for col in [0usize, 20, 63] {
+        let n = col as u8;
+        assert!(
+            near(shot.center(col, 7), [n * 4, 255 - n * 4, 128]),
+            "truecolour {col}"
+        );
+    }
+
+    // Styles: each draws ink the plain text does not, and the faint text is dimmer.
+    assert!(shot.ink(0, 8, 4, bg) > 0 && shot.ink(5, 8, 4, bg) > 0);
+    let underline_row = shot.count(10, 8, 4, |p| near(p, fg));
+    assert!(
+        underline_row > 0,
+        "underline and text are in the foreground colour"
+    );
+    let (red_x, _) = shot.cell_origin(28, 8);
+    assert!(
+        (0..shot.cell.0 as usize * 3).any(|dx| {
+            let p = shot.at(
+                red_x + dx as f32,
+                shot.cell_origin(0, 8).1 + shot.cell.1 / 2.0,
+            );
+            p[0] > 150 && p[1] < 90 && p[2] < 90
+        }),
+        "bold red text"
+    );
+
+    // Box drawing fits the cell exactly: lines meet at cell edges without gaps, corners reach
+    // the middle of their cell and nothing is drawn in the empty quarter.
+    let (cw, ch) = shot.cell;
+    let mid = |col: usize, row: usize| {
+        let (x, y) = shot.cell_origin(col, row);
+        (x + cw / 2.0, y + ch / 2.0)
+    };
+    let edge = |col: usize, row: usize| {
+        let (x, y) = shot.cell_origin(col, row);
+        (x, y + ch / 2.0)
+    };
+    for col in [1usize, 2, 4, 5] {
+        let (x, y) = mid(col, 9);
+        assert!(near(shot.at(x, y), fg), "horizontal line in cell {col}");
+        let (x, y) = edge(col, 9);
+        assert!(
+            near(shot.at(x, y), fg),
+            "no seam between cells at column {col}"
+        );
+    }
+    let (x, y) = mid(0, 9);
+    assert!(near(shot.at(x, y), fg), "the corner reaches the middle");
+    let (x0, y0) = shot.cell_origin(0, 9);
+    assert!(
+        near(shot.at(x0 + 1.0, y0 + 1.0), bg),
+        "the corner leaves its empty quarter bare"
+    );
+    let (x, y) = mid(3, 10);
+    assert!(
+        near(shot.at(x, y), fg),
+        "the vertical line of the tee below"
+    );
+    let (x, y) = mid(1, 10);
+    assert!(near(shot.at(x, y), bg), "inside the box is empty");
+    let (x, y) = (
+        shot.cell_origin(3, 10).0 + cw / 2.0,
+        shot.cell_origin(3, 10).1 + 0.5,
+    );
+    assert!(
+        near(shot.at(x, y), fg)
+            && near(shot.at(x, shot.cell_origin(3, 11).1 - 0.5 / shot.scale), fg),
+        "verticals reach both edges"
+    );
+
+    // Blocks fill the cell exactly; shades are a blend; halves cover half; braille is dots.
+    let full = shot.count(0, 12, 1, |p| near(p, fg));
+    let all = shot.count(0, 12, 1, |_| true);
+    assert_eq!(full, all, "a full block has no gaps");
+    let shade = shot.center(3, 12);
+    assert!(
+        differs(shade, bg) && differs(shade, fg),
+        "a light shade is a blend: {shade:?}"
+    );
+    let upper = shot.count(4, 12, 1, |p| near(p, fg));
+    assert!(
+        upper.abs_diff(all / 2) <= all / 20,
+        "an upper half block covers half the cell"
+    );
+    let lower_top = shot.at(
+        shot.cell_origin(5, 12).0 + cw / 2.0,
+        shot.cell_origin(5, 12).1 + 1.0,
+    );
+    assert!(
+        near(lower_top, bg),
+        "a lower half block leaves the top empty"
+    );
+    let dots = shot.count(6, 12, 1, |p| near(p, fg));
+    assert!(
+        dots > 0 && dots < all,
+        "a braille cell has dots, not a fill: {dots}/{all}"
+    );
+
+    // A powerline arrow fills the cell on its flat side and points to the other.
+    let (x0, y0) = shot.cell_origin(0, 13);
+    assert!(
+        near(shot.at(x0 + cw * 0.05, y0 + ch * 0.5), rgb(0xc0c0c0))
+            || differs(
+                shot.at(x0 + cw * 0.05, y0 + ch * 0.5),
+                shot.at(x0 + cw * 0.95, y0 + ch * 0.02)
+            ),
+        "the arrow is solid at its base"
+    );
+    assert!(shot.ink(0, 13, 1, bg) > 0);
+
+    // Wide characters take two cells; the emoji is coloured.
+    assert!(shot.ink(0, 14, 2, bg) > 0 && shot.ink(2, 14, 2, bg) > 0 && shot.ink(4, 14, 2, bg) > 0);
+    assert!(
+        shot.count(7, 14, 2, |p| {
+            let (hi, lo) = (p.iter().max().unwrap(), p.iter().min().unwrap());
+            hi - lo > 60
+        }) > 0,
+        "the emoji has colour"
+    );
+    // The cursor sits after the last character, drawn as the focused block.
+    let (x, y) = mid(10, 14);
+    assert!(differs(shot.at(x, y), bg), "the cursor block");
 }

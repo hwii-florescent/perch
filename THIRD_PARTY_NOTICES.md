@@ -221,11 +221,17 @@ modified files carry a header saying so.
   submodule path are Perch's own.
 - `crates/perch-native/src/terminal/vt.rs` (from `src/vt.rs`): the render-state
   frame read, the render-hold, OSC 52 and size-report callbacks, and the key and
-  mouse encoder calls. Perch's version has no theme file, search, links,
-  selection or kitty graphics; its paste encoding, replay muting and scroll
-  reads are Perch's own.
+  mouse encoder calls. Its theme, selection, search and link reads are in the
+  files below; its paste encoding, replay muting and scroll reads are Perch's own.
 - `crates/perch-native/src/terminal/keys.rs` (from `src/terminal.rs`): the table
   that maps GPUI key names to Ghostty keys, the shifted-punctuation table and the
   legacy control aliases.
 - `crates/perch-native/src/terminal/scroll.rs` (from `src/terminal.rs`): the
   wheel and trackpad step accumulation.
+- `crates/perch-native/src/terminal/select.rs`, `search.rs` and `links.rs` (from
+  `src/vt.rs` and `src/links.rs`): the selection gesture model, the on-screen and
+  scrollback search, and link detection. Perch's versions take the click time from
+  the caller, report search progress, and find links with a scanner of their own.
+- `crates/perch-native/src/terminal/sprites.rs` (from `src/sprites.rs`): box
+  drawing, block, braille and powerline characters drawn as shapes that fit their
+  cell. Only the formatting and the module path differ.

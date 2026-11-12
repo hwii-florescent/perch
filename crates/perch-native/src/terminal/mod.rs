@@ -11,6 +11,7 @@ pub mod scroll;
 pub mod search;
 pub mod select;
 pub mod settings;
+pub mod sprites;
 pub mod view;
 pub mod vt;
 
