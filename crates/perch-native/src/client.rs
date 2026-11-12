@@ -290,7 +290,17 @@ impl Core {
             stream.write_all(head.as_bytes()).await?;
             // The core may answer (and close) before it has read everything, as it does for a
             // refusal; what it said is worth more than the broken pipe.
-            let sent = tokio::io::copy(&mut body, &mut stream).await;
+            let sent = tokio::io::copy(&mut (&mut body).take(length), &mut stream).await;
+            // The head promised `length` bytes. A body that ended sooner (a file that shrank
+            // while it was read) leaves the core waiting for the rest: stop here, which closes
+            // the connection, rather than wait out the reply for nothing.
+            if let Ok(copied) = sent {
+                if copied < length {
+                    bail!(
+                        "the upload stopped after {copied} of {length} bytes: the file changed while it was sent"
+                    );
+                }
+            }
             let mut response = Vec::new();
             let _ = stream.read_to_end(&mut response).await;
             Ok::<_, anyhow::Error>((sent, response))
@@ -348,6 +358,14 @@ impl Core {
 
 /// `http://127.0.0.1:7788/` into `("127.0.0.1:7788", "/")`.
 fn split_base_url(base_url: &str) -> Result<(String, String)> {
+    // The address is written into request lines and headers by hand: a line break or a space in
+    // it, from a `core.json` that is not ours, would add headers or requests of its own.
+    if base_url
+        .chars()
+        .any(|c| c.is_control() || c.is_whitespace())
+    {
+        bail!("the core address has a character that is not allowed in one");
+    }
     let rest = base_url
         .strip_prefix("http://")
         .ok_or_else(|| anyhow!("the core address must start with http://"))?;
@@ -1614,6 +1632,112 @@ mod tests {
             assert!(!matches!(update, Update::Launched { .. }), "{update:?}");
         }
         following.abort();
+    }
+
+    /// A server that answers the first POST once it has the head and `Content-Length` body
+    /// bytes and closes, then reports the body bytes it received in all.
+    async fn upload_server() -> (String, tokio::task::JoinHandle<usize>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let seen = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut received = Vec::new();
+            let mut chunk = [0u8; 1024];
+            let (mut head_end, mut length, mut replied) = (None, 0usize, false);
+            loop {
+                let n = stream.read(&mut chunk).await.unwrap_or(0);
+                received.extend_from_slice(&chunk[..n]);
+                if head_end.is_none() {
+                    head_end = received
+                        .windows(4)
+                        .position(|w| w == b"\r\n\r\n")
+                        .map(|i| i + 4);
+                    if let Some(end) = head_end {
+                        let head = String::from_utf8_lossy(&received[..end]).to_lowercase();
+                        length = head
+                            .split("content-length: ")
+                            .nth(1)
+                            .and_then(|rest| rest.split("\r\n").next()?.parse().ok())
+                            .unwrap();
+                    }
+                }
+                let body = head_end.map_or(0, |end| received.len() - end);
+                if !replied && head_end.is_some() && body >= length {
+                    replied = true;
+                    let reply = "{\"path\":\"/staged\"}";
+                    let _ = stream
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{reply}",
+                                reply.len()
+                            )
+                            .as_bytes(),
+                        )
+                        .await;
+                    // `Connection: close`, as the core does; what still arrives is counted.
+                    let _ = stream.shutdown().await;
+                }
+                if n == 0 {
+                    return body;
+                }
+            }
+        });
+        (url, seen)
+    }
+
+    #[tokio::test]
+    async fn an_upload_sends_exactly_the_length_it_promised() {
+        // A file that grew after its size was read: only the promised bytes go out.
+        let (url, seen) = upload_server().await;
+        let core = Core::with_token(&url, "t").unwrap();
+        let body = vec![7u8; 5000];
+        let path = core
+            .post(
+                "upload",
+                "application/octet-stream",
+                10,
+                &body[..],
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+        assert_eq!(path, "/staged");
+        assert_eq!(seen.await.unwrap(), 10);
+
+        // A file that shrank: the upload fails at once, not after waiting out the core.
+        let (url, seen) = upload_server().await;
+        let core = Core::with_token(&url, "t").unwrap();
+        let started = std::time::Instant::now();
+        let error = core
+            .post(
+                "upload",
+                "application/octet-stream",
+                10,
+                &b"four"[..],
+                Duration::from_secs(30),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("stopped after 4 of 10 bytes"),
+            "{error:#}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert_eq!(seen.await.unwrap(), 4);
+    }
+
+    #[test]
+    fn an_address_with_a_line_break_is_refused() {
+        for bad in [
+            "http://127.0.0.1:1/a\r\nX-Evil: 1\r\n/",
+            "http://127.0.0.1:1/a\nb/",
+            "http://127.0.0.1:80\r\nX-Evil: 1/",
+            "http://127.0.0.1:1/a b/",
+            "http://127.0.0.1:1/a\0/",
+        ] {
+            assert!(split_base_url(bad).is_err(), "{bad:?}");
+            assert!(Core::with_token(bad, "t").is_err(), "{bad:?}");
+        }
     }
 
     #[test]
