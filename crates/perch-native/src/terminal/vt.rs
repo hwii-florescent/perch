@@ -1051,6 +1051,19 @@ impl Vt {
                 (&mut color as *mut g::GhosttyColorRgb).cast(),
             ) == g::GHOSTTY_SUCCESS)
                 .then(|| Rgb::from(color));
+            // Bold text in one of the eight base colours uses its bright twin, as xterm does
+            // (`drawBoldTextInBrightColors`, which the web terminal turns on).
+            let fg = match style.fg_color.tag {
+                g::GHOSTTY_STYLE_COLOR_PALETTE
+                    if style.bold && style.fg_color.value.palette < 8 =>
+                {
+                    colors
+                        .palette
+                        .get(usize::from(style.fg_color.value.palette) + 8)
+                        .map_or(fg, |c| Rgb::from(*c))
+                }
+                _ => fg,
+            };
             let (mut fg, mut bg) = (fg, bg);
             if style.inverse {
                 let new_fg = bg.unwrap_or(bg_default);
@@ -1360,7 +1373,7 @@ mod tests {
         let red = cell(6, 0);
         assert_eq!(red.text, "b");
         assert!(red.bold);
-        assert_eq!(red.fg, theme.ansi[1]);
+        assert_eq!(red.fg, theme.ansi[9], "bold takes the bright twin of red");
         let fancy = cell(15, 0);
         assert!(fancy.italic && fancy.underline && fancy.strike && fancy.faint);
         // Truecolour foreground over an ANSI background.
@@ -1458,6 +1471,32 @@ mod tests {
         // A resize to nothing is ignored.
         vt.resize(0, 5, (8, 16));
         assert_eq!(vt.size(), (20, 5));
+    }
+
+    #[test]
+    fn a_bare_line_feed_only_moves_down() {
+        let mut vt = fed(10, 3, "ab\ncd");
+        let frame = vt.frame();
+        assert_eq!(frame.row_text(0), "ab");
+        assert_eq!(frame.row_text(1), "  cd");
+    }
+
+    #[test]
+    fn bold_takes_the_bright_colour_only_for_the_base_eight() {
+        let theme = Theme::default();
+        let mut vt = fed(
+            20,
+            1,
+            "\x1b[1;31ma\x1b[1;91mb\x1b[1;38;5;1mc\x1b[1;38;2;1;2;3md\x1b[31me",
+        );
+        let row = &vt.frame().rows[0];
+        assert_eq!(row[0].fg, theme.ansi[9], "bold red");
+        assert_eq!(row[1].fg, theme.ansi[9], "bright red stays");
+        assert_eq!(
+            row[2].fg, theme.ansi[9],
+            "256-colour index 1 is the same colour"
+        );
+        assert_eq!(row[3].fg, Rgb(1, 2, 3), "truecolour is left alone");
     }
 
     #[test]
