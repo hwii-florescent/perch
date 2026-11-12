@@ -479,11 +479,21 @@ impl Connection {
         .await
     }
 
-    pub async fn terminal_input(&mut self, terminal: &Terminal, data: &str) -> Result<()> {
-        let generation = terminal
-            .input
-            .ok_or_else(|| anyhow!("another view controls this terminal's input"))?;
-        self.send(input_frame(&terminal.id, generation, data)).await
+    /// Type into a terminal: under the input lease when this connection holds it, otherwise, when
+    /// the core allows `shared` typing (it advertises `terminal.sharedInput`), as a view that
+    /// watches the terminal. The core refuses shared input from a connection that is not
+    /// watching it.
+    pub async fn terminal_input(
+        &mut self,
+        terminal: &Terminal,
+        data: &str,
+        shared: bool,
+    ) -> Result<()> {
+        match terminal.input {
+            Some(generation) => self.send(input_frame(&terminal.id, generation, data)).await,
+            None if shared => self.send(shared_input_frame(&terminal.id, data)).await,
+            None => bail!("another view controls this terminal's input"),
+        }
     }
 
     pub async fn terminal_resize(
@@ -974,6 +984,10 @@ fn acquire_frame_as(
 
 fn input_frame(terminal_id: &str, generation: u64, data: &str) -> Value {
     json!({"type": "terminal.input", "terminalId": terminal_id, "data": data, "generation": generation})
+}
+
+fn shared_input_frame(terminal_id: &str, data: &str) -> Value {
+    json!({"type": "terminal.input", "terminalId": terminal_id, "data": data, "shared": true})
 }
 
 fn resize_frame(terminal_id: &str, generation: u64, cols: u16, rows: u16) -> Value {

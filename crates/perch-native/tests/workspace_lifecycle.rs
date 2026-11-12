@@ -11,6 +11,7 @@ mod common;
 
 use common::{Harness, Rig};
 use perch_native::client::{follow, Core};
+use perch_native::terminal::actions::Action;
 use perch_native::terminal::Status;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -35,7 +36,7 @@ fn new_shells(
             let terminal = connection.open_terminal(&id, 80, 24).await.expect("open");
             if first_exits && n == 0 {
                 connection
-                    .terminal_input(&terminal, "exit\r")
+                    .terminal_input(&terminal, "exit\r", false)
                     .await
                     .unwrap();
             }
@@ -103,6 +104,7 @@ fn scenario(rig: &mut Rig) {
     a_shell_that_ended_before_attach(rig, &mut h, &ended);
     a_core_that_drops_and_returns(rig, &runtime, &current, &mut h, &kept);
     closing_waits_for_the_core(rig, &runtime, &current, &mut h);
+    typing_is_shared_but_stopping_is_not(rig, &runtime, &current, &mut h);
 
     h.close();
     follower.abort();
@@ -304,4 +306,47 @@ fn closing_waits_for_the_core(
     );
     // SAFETY: as above.
     unsafe { libc::kill(core_pid, libc::SIGCONT) };
+}
+
+/// Another connection holds a shell's keyboard. The core allows shared typing, so this window
+/// types in the same shell; stopping it, and ending its session by closing the tab, need the
+/// keyboard and are not offered.
+fn typing_is_shared_but_stopping_is_not(
+    rig: &mut Rig,
+    runtime: &tokio::runtime::Runtime,
+    current: &Arc<Mutex<Core>>,
+    h: &mut Harness,
+) {
+    let core = current.lock().unwrap().clone();
+    // Kept open for the whole scenario: it is the view that holds the keyboard.
+    let (_holder, id) = runtime.block_on(async {
+        let mut connection = core.connect().await.expect("connect");
+        let id = connection.create_session(None, None).await.expect("create");
+        let terminal = connection.open_terminal(&id, 80, 24).await.expect("open");
+        assert!(terminal.owns_input(), "the first view holds the keyboard");
+        ((connection, terminal), id)
+    });
+    h.wait("the session to be listed", |h| h.attention(&id).is_some());
+    h.show_tab(&id);
+    h.wait("the shared view", |h| {
+        h.view(&id, |v| v.can_type() && !v.can_stop())
+            .unwrap_or(false)
+    });
+    assert!(
+        h.view(&id, |v| v.note()).flatten().is_none(),
+        "nothing to warn about"
+    );
+
+    h.type_text("echo shared-$((6*7))");
+    h.wait("the shell to hear it", |h| h.has_row(&id, "shared-42"));
+
+    // Stopping needs the keyboard.
+    assert!(!h.view_cx(&id, |v, cx| v.perform(Action::Kill, cx)).unwrap());
+    let alive = shells(rig).iter().filter(|s| s.1).count();
+    // Closing only puts the tab away; the session and its shell go on.
+    assert!(h.press("cmd-w"));
+    h.wait("the tab to go", |h| !has_tab(h, &id));
+    h.settle();
+    assert!(h.attention(&id).is_some(), "the session is still listed");
+    assert_eq!(shells(rig).iter().filter(|s| s.1).count(), alive);
 }

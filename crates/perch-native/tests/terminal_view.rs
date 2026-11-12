@@ -14,6 +14,7 @@ use gpui::{
 use perch_core::server::CliArgs;
 use perch_native::client::Core;
 use perch_native::terminal::actions::Action;
+use perch_native::terminal::attach::FromCore;
 use perch_native::terminal::{Status, TerminalView};
 use perch_native::ui::OpenSession;
 use perchd::proto::SessionInfo;
@@ -202,7 +203,7 @@ fn view(core_process: &mut Child, scratch: &Path) {
             .await
             .expect("open terminal");
         connection
-            .terminal_input(&terminal, "echo before-the-view\n")
+            .terminal_input(&terminal, "echo before-the-view\n", false)
             .await
             .unwrap();
         let mut screen = terminal.replay.clone();
@@ -329,7 +330,14 @@ fn view(core_process: &mut Child, scratch: &Path) {
             .expect("take control");
         (connection, terminal)
     });
-    h.wait("the lease to be lost", |h| !h.can_type());
+    h.wait("the lease to be lost", |h| !h.view(|v, _| v.can_stop()));
+    // This core lets a view type without the keyboard, so typing goes on and stopping does not.
+    assert!(h.can_type());
+    assert_eq!(h.view(|v, _| v.note()), None);
+    // A core that does not offer shared typing leaves a view without the lease read-only.
+    let capabilities = h.view(|v, _| v.capabilities().to_vec());
+    h.view(|v, cx| v.core_said(FromCore::Capabilities(Vec::new()), cx));
+    assert!(!h.can_type());
     assert_eq!(
         h.view(|v, _| v.note()).as_deref(),
         Some("Another view is typing in this agent")
@@ -339,7 +347,9 @@ fn view(core_process: &mut Child, scratch: &Path) {
         "a view without the lease does not take keys"
     );
     assert!(h.view(|v, cx| v.perform(Action::TakeControl, cx)));
-    h.wait("control to come back", |h| h.can_type());
+    h.wait("control to come back", |h| h.view(|v, _| v.can_stop()));
+    h.view(|v, cx| v.core_said(FromCore::Capabilities(capabilities), cx));
+    assert!(h.can_type());
     assert_eq!(h.view(|v, _| v.note()), None);
     h.type_text("echo mine-again");
     h.wait("the shell to answer the view that took control back", |h| {

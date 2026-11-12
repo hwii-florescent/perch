@@ -493,9 +493,31 @@ impl TerminalView {
         can
     }
 
-    /// Whether this connection may type: attached, holding the input lease.
-    pub fn can_type(&self) -> bool {
+    /// What the core advertised on connecting.
+    pub fn capabilities(&self) -> &[String] {
+        &self.place.capabilities
+    }
+
+    /// Whether the core lets a view type without the input lease, as the web's shared typing does.
+    fn shared_input(&self) -> bool {
+        self.place
+            .capabilities
+            .iter()
+            .any(|c| c == attach::SHARED_INPUT)
+    }
+
+    /// Whether this connection may stop the shell: attached, holding the input lease. Typing may
+    /// be shared (see [`Self::can_type`]); ending the shell never is.
+    pub fn can_stop(&self) -> bool {
         self.to_core.is_some() && self.status == Status::Live && self.input_lease
+    }
+
+    /// Whether this connection may type: attached, holding the input lease or, when the core
+    /// allows it, watching the terminal and typing alongside the view that holds it.
+    pub fn can_type(&self) -> bool {
+        self.to_core.is_some()
+            && self.status == Status::Live
+            && (self.input_lease || self.shared_input())
     }
 
     /// The rows as they are drawn.
@@ -592,7 +614,13 @@ impl TerminalView {
         // Answers to the program's queries go back only from the view that types for it: the
         // others would answer twice.
         let replies = self.vt.take_replies();
-        if !replies.is_empty() && self.input_lease && self.resize_lease {
+        // With shared typing the holder of the size answers, as the web does.
+        let answers = if self.shared_input() {
+            self.resize_lease
+        } else {
+            self.input_lease && self.resize_lease
+        };
+        if !replies.is_empty() && answers {
             self.send(ToCore::Input(replies));
         }
         for event in self.vt.take_events() {
@@ -1655,13 +1683,13 @@ impl TerminalView {
             Status::Connecting => Some("Connecting".into()),
             Status::Live => {
                 let Some(agent) = self.agent else {
-                    return (!self.input_lease).then(|| "Viewing agent".into());
+                    return (!self.can_type()).then(|| "Viewing agent".into());
                 };
                 if agent.state == AgentState::Reconnecting {
                     Some("Reconnecting\u{2026}".into())
                 } else if agent.resize_on_device && !agent.resize {
                     Some("A phone sets this terminal's size".into())
-                } else if self.input_lease {
+                } else if self.can_type() {
                     None
                 } else if agent.input_elsewhere {
                     Some("Another view is typing in this agent".into())
@@ -1729,7 +1757,7 @@ impl TerminalView {
                 true
             }
             Action::Kill => {
-                if !self.can_type() {
+                if !self.can_stop() {
                     return false;
                 }
                 self.send(ToCore::Kill);

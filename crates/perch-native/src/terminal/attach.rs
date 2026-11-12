@@ -15,6 +15,9 @@ use perch_core::iterm_profile::TerminalProfile;
 use perch_core::protocol::ServerMessage;
 use perch_core::protocol::SettingsData;
 
+/// The capability with which the core lets a view type without holding the input lease.
+pub const SHARED_INPUT: &str = "terminal.sharedInput";
+
 /// What the view asks of the core.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ToCore {
@@ -215,6 +218,8 @@ async fn run(
         let _ = connection.release_terminal(&terminal).await;
         return;
     }
+    // Whether the core lets a view that does not hold the keyboard type (`server.info`).
+    let mut shared = false;
     // The session this connection asked the core to end, until the core answers.
     let mut ending = false;
     let dropped = loop {
@@ -231,6 +236,7 @@ async fn run(
                     }
                 }
                 Ok(ServerMessage::ServerInfo { terminal_profile, capabilities, .. }) => {
+                    shared = capabilities.iter().any(|c| c == SHARED_INPUT);
                     if events.unbounded_send(FromCore::Profile(terminal_profile)).is_err()
                         || events.unbounded_send(FromCore::Capabilities(capabilities)).is_err()
                     {
@@ -270,7 +276,7 @@ async fn run(
                         // The core takes input as a JSON string, so the view sends only what is
                         // UTF-8 (it drops an X10 mouse report whose bytes are not).
                         connection
-                            .terminal_input(&terminal, &String::from_utf8_lossy(&bytes))
+                            .terminal_input(&terminal, &String::from_utf8_lossy(&bytes), shared)
                             .await
                     }
                     Some(ToCore::Resize(cols, rows)) => {

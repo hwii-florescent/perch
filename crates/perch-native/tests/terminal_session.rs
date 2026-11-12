@@ -200,7 +200,7 @@ async fn session(core_process: &mut Child, scratch: &Path) {
     let mut screen = terminal.replay.clone();
     // Typed ahead of the prompt: the pty keeps it until the shell reads.
     connection
-        .terminal_input(&terminal, "echo hi\n")
+        .terminal_input(&terminal, "echo hi\n", false)
         .await
         .unwrap();
     read_until(&mut connection, &terminal.id, &mut screen, |text| {
@@ -210,7 +210,7 @@ async fn session(core_process: &mut Child, scratch: &Path) {
 
     // The shell itself runs under the scratch HOME, not only the core.
     connection
-        .terminal_input(&terminal, "printf '%s\\n' \"$HOME\"\n")
+        .terminal_input(&terminal, "printf '%s\\n' \"$HOME\"\n", false)
         .await
         .unwrap();
     let home_line = home.display().to_string();
@@ -224,7 +224,7 @@ async fn session(core_process: &mut Child, scratch: &Path) {
         .await
         .unwrap();
     connection
-        .terminal_input(&terminal, "stty size\n")
+        .terminal_input(&terminal, "stty size\n", false)
         .await
         .unwrap();
     read_until(&mut connection, &terminal.id, &mut screen, |text| {
@@ -234,7 +234,7 @@ async fn session(core_process: &mut Child, scratch: &Path) {
 
     // A command running in the shell is a state change the sidebar follows.
     connection
-        .terminal_input(&terminal, "sleep 2; echo slept-$((1+1))\n")
+        .terminal_input(&terminal, "sleep 2; echo slept-$((1+1))\n", false)
         .await
         .unwrap();
     watch
