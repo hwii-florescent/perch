@@ -15,6 +15,7 @@
 //!
 //!
 
+use super::actions::{Action, Scroll};
 use super::attach::{self, AgentInfo, FromCore, Piece, ToCore};
 use super::clipboard::{Clipboard, MemoryClipboard};
 use super::keys::key_bytes_with;
@@ -38,6 +39,7 @@ use gpui::{
     MouseUpEvent, Pixels, Point, ScrollWheelEvent, SharedString, Size, Task, TextAlign, TextRun,
     UTF16Selection, Window, WindowAppearance,
 };
+use perch_core::agent_fleet::AgentState;
 use perch_core::iterm_profile::TerminalProfile;
 use perch_core::protocol::SettingsData;
 use std::ops::Range;
@@ -1006,9 +1008,13 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// Bytes for the program that don't end a scroll back in history.
+    /// Bytes for the program that don't end a scroll back in history. The core takes input as
+    /// text, so a report that is not valid UTF-8 (an X10 mouse report past column 95, whose
+    /// coordinate bytes are 0x80 and up) is dropped: sending U+FFFD instead would put a wrong
+    /// position in the program's input. Programs that take the mouse nearly always ask for the
+    /// SGR format, which is plain text.
     fn send_unscrolled(&self, bytes: Vec<u8>) {
-        if !bytes.is_empty() {
+        if !bytes.is_empty() && std::str::from_utf8(&bytes).is_ok() {
             self.send(ToCore::Input(bytes));
         }
     }
@@ -1088,7 +1094,6 @@ impl TerminalView {
         true
     }
 
-    /// Hand the keyboard to the terminal.
     /// Tell the view whether its pane is on screen. A pane taken off screen is no longer
     /// focused (the program is told, if it asked), drops any composition, and stops blinking.
     pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
@@ -1105,6 +1110,7 @@ impl TerminalView {
         cx.notify();
     }
 
+    /// Hand the keyboard to the terminal.
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
         self.focus.focus(window, cx);
     }
@@ -1215,18 +1221,92 @@ impl TerminalView {
         }
     }
 
-    /// What the pane says about the session when it is not simply showing the shell.
-    fn note(&self) -> Option<String> {
+    /// What the pane says about the session when it is not simply showing the shell, in the
+    /// words the web's agent chip uses.
+    pub fn note(&self) -> Option<String> {
+        let sleeping = self.agent.is_some_and(|a| a.state == AgentState::Sleeping);
         match &self.status {
             Status::Detached => Some("Not connected".into()),
             Status::Connecting => Some("Connecting".into()),
-            Status::Live if !self.input_lease => {
-                Some("View only: another view controls this terminal".into())
+            Status::Live => {
+                let Some(agent) = self.agent else {
+                    return (!self.input_lease).then(|| "Viewing agent".into());
+                };
+                if agent.state == AgentState::Reconnecting {
+                    Some("Reconnecting\u{2026}".into())
+                } else if agent.resize_on_device && !agent.resize {
+                    Some("A phone sets this terminal's size".into())
+                } else if self.input_lease {
+                    None
+                } else if agent.input_elsewhere {
+                    Some("Another view is typing in this agent".into())
+                } else {
+                    Some("Viewing agent".into())
+                }
             }
-            Status::Live => None,
             Status::Disconnected(_) => Some("Disconnected".into()),
             Status::Failed(reason) => Some(format!("Could not open the terminal: {reason}")),
+            // A hibernated agent closes its terminal like an exit, but its conversation is kept.
+            Status::Exited(_) if sleeping => {
+                Some("Sleeping to save memory \u{2014} its conversation is kept".into())
+            }
             Status::Exited(code) => Some(format!("Shell exited (code {code})")),
+        }
+    }
+
+    /// Whether this view may take the input and the size from another view or a phone.
+    pub fn can_take_control(&self) -> bool {
+        self.to_core.is_some()
+            && self.status == Status::Live
+            && (!self.input_lease || !self.resize_lease)
+    }
+
+    /// Do one of the named actions. False when it did nothing: no selection to copy, nothing to
+    /// paste, a view that cannot type, or no terminal to act on.
+    pub fn perform(&mut self, action: Action, cx: &mut Context<Self>) -> bool {
+        match action {
+            Action::Scroll(scroll) => {
+                let (_, rows) = self.vt.size();
+                match scroll {
+                    Scroll::Top => self.vt.scroll_to_top(),
+                    Scroll::Bottom => self.vt.scroll_to_bottom(),
+                    _ => self
+                        .vt
+                        .scroll_viewport(scroll.lines(rows).unwrap_or_default()),
+                }
+                cx.notify();
+                true
+            }
+            Action::Copy => self.copy(cx),
+            Action::Paste => self.paste_clipboard(cx),
+            Action::SelectAll => {
+                self.select_all(cx);
+                true
+            }
+            Action::Clear => {
+                // Only this view's history: the program is never told.
+                self.vt.write(b"\x1b[3J");
+                cx.notify();
+                true
+            }
+            Action::Find => {
+                self.open_find(cx);
+                true
+            }
+            Action::TakeControl => {
+                if !self.can_take_control() {
+                    return false;
+                }
+                self.send(ToCore::TakeControl);
+                true
+            }
+            Action::Kill => {
+                if !self.can_type() {
+                    return false;
+                }
+                self.send(ToCore::Kill);
+                true
+            }
         }
     }
 }
@@ -1649,6 +1729,7 @@ impl gpui::Render for TerminalView {
         let mut bg = color(self.vt.background());
         bg.a = self.settings.opacity;
         let note = self.note();
+        let take_control = self.can_take_control() && self.status == Status::Live;
         let mut pane = div()
             .id("terminal")
             .track_focus(&self.focus)
@@ -1721,16 +1802,35 @@ impl gpui::Render for TerminalView {
                     .absolute()
                     .bottom_2()
                     .right_3()
+                    .flex()
+                    .items_center()
+                    .gap_2()
                     .text_xs()
                     .text_color(rgb(NOTE_COLOR))
-                    .child(note),
+                    .child(note)
+                    .when(take_control, |row| {
+                        row.child(
+                            div()
+                                .id("take-control")
+                                .px_2()
+                                .rounded_sm()
+                                .cursor_pointer()
+                                .border_1()
+                                .border_color(rgb(NOTE_COLOR))
+                                .child("Take control")
+                                .on_mouse_down(GpuiButton::Left, |_, _, cx| cx.stop_propagation())
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.perform(Action::TakeControl, cx);
+                                })),
+                        )
+                    }),
             )
         })
     }
 }
 
 /// Text from the system's input (dead keys, AltGr, input methods) that no key press produced.
-/// Composition is not drawn yet; what is committed goes to the program as typed.
+/// Composition is drawn at the cursor; what is committed goes to the program as typed.
 impl EntityInputHandler for TerminalView {
     fn text_for_range(
         &mut self,

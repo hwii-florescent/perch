@@ -182,6 +182,11 @@ impl Harness {
             .unwrap()
     }
 
+    fn cell_width(&mut self) -> f32 {
+        self.view(|v, _| v.cell_size())
+            .map_or(8.0, |c| f32::from(c.width))
+    }
+
     fn focus(&mut self) {
         self.window
             .update(&mut self.cx, |view, window, cx| view.focus(window, cx))
@@ -330,6 +335,11 @@ fn main() {
     run("find_in_the_pane", find_in_the_pane);
     run("links_in_the_pane", links_in_the_pane);
     run("input_method_composition", input_method_composition);
+    run("ownership_and_named_actions", ownership_and_named_actions);
+    run(
+        "x10_mouse_reports_past_the_text_range",
+        x10_mouse_reports_past_the_text_range,
+    );
     println!("terminal_render: ok");
 }
 
@@ -1374,4 +1384,199 @@ fn input_method_composition() {
             .any(|m| matches!(m, ToCore::Input(b) if b == b"\x1b[O")),
         "focus-out reaches the program"
     );
+}
+
+/// Who owns the terminal shows in the pane's note, the named actions do their one thing, and
+/// the ones that need a lease refuse without it.
+fn ownership_and_named_actions() {
+    use perch_core::agent_fleet::AgentState;
+    use perch_native::terminal::actions::{Action, Scroll};
+    use perch_native::terminal::attach::AgentInfo;
+    let info = |state, input, resize, input_elsewhere, resize_on_device| AgentInfo {
+        state,
+        input,
+        resize,
+        input_elsewhere,
+        resize_on_device,
+    };
+    let mut h = Harness::open(900., 420.);
+    h.attach(100, 24, "");
+    h.focus();
+    h.draw();
+    assert_eq!(h.view(|v, _| v.note()), None, "the owner is told nothing");
+    assert!(
+        !h.view(|v, cx| v.perform(Action::TakeControl, cx)),
+        "nothing to take"
+    );
+
+    // Another view takes the leases after attaching: this one is read-only and says who.
+    h.say(FromCore::Agent(info(
+        AgentState::Idle,
+        false,
+        false,
+        true,
+        false,
+    )));
+    assert_eq!(
+        h.view(|v, _| v.note()).as_deref(),
+        Some("Another view is typing in this agent")
+    );
+    assert!(!h.view(|v, _| v.can_type()));
+    h.sent();
+    h.view(|v, cx| v.key_down(&key("x", Some("x")), cx));
+    assert_eq!(h.sent(), vec![], "a view without the lease types nothing");
+    assert!(
+        !h.view(|v, cx| v.perform(Action::Kill, cx)),
+        "kill needs the input lease"
+    );
+    assert!(
+        !h.view(|v, cx| v.perform(Action::Paste, cx)),
+        "paste needs the input lease"
+    );
+    assert!(h.view(|v, cx| v.perform(Action::TakeControl, cx)));
+    assert_eq!(h.sent(), vec![ToCore::TakeControl]);
+
+    h.say(FromCore::Agent(info(
+        AgentState::Idle,
+        false,
+        false,
+        false,
+        false,
+    )));
+    assert_eq!(h.view(|v, _| v.note()).as_deref(), Some("Viewing agent"));
+    h.say(FromCore::Agent(info(
+        AgentState::Idle,
+        true,
+        false,
+        false,
+        true,
+    )));
+    assert_eq!(
+        h.view(|v, _| v.note()).as_deref(),
+        Some("A phone sets this terminal's size")
+    );
+    h.say(FromCore::Agent(info(
+        AgentState::Reconnecting,
+        true,
+        true,
+        false,
+        false,
+    )));
+    assert_eq!(
+        h.view(|v, _| v.note()).as_deref(),
+        Some("Reconnecting\u{2026}")
+    );
+
+    // The lease comes back: typing works and the size is told again.
+    h.say(FromCore::Agent(info(
+        AgentState::Idle,
+        true,
+        true,
+        false,
+        false,
+    )));
+    assert_eq!(h.view(|v, _| v.note()), None);
+    h.draw();
+    assert!(
+        h.sent().iter().any(|m| matches!(m, ToCore::Resize(..))),
+        "size told again"
+    );
+    type_keys(&mut h, "x");
+    assert_eq!(h.sent(), vec![ToCore::Input(b"x".to_vec())]);
+
+    // Scrolling moves the view and tells nobody; clear empties the history and tells nobody.
+    for line in 0..80 {
+        h.output(&format!("history {line}\r\n"));
+    }
+    h.draw();
+    h.sent();
+    let live = h.view(|v, _| v.frame().row_text(0));
+    let top = |h: &mut Harness| h.view(|v, _| v.frame().row_text(0));
+    let n = |text: String| -> usize { text.trim_start_matches("history ").parse().unwrap() };
+    assert!(h.view(|v, cx| v.perform(Action::Scroll(Scroll::Pages(-1.0)), cx)));
+    assert_eq!(
+        n(top(&mut h)),
+        n(live.clone()) - 24,
+        "a page is the row count"
+    );
+    h.view(|v, cx| v.perform(Action::Scroll(Scroll::Lines(5)), cx));
+    assert_eq!(n(top(&mut h)), n(live.clone()) - 19);
+    h.view(|v, cx| v.perform(Action::Scroll(Scroll::Top), cx));
+    assert_eq!(top(&mut h), "history 0", "the oldest line");
+    h.view(|v, cx| v.perform(Action::Scroll(Scroll::Bottom), cx));
+    assert_eq!(top(&mut h), live, "back at the live screen");
+    assert_eq!(
+        h.sent(),
+        vec![],
+        "moving the view tells the program nothing"
+    );
+    h.view(|v, cx| v.perform(Action::Clear, cx));
+    h.view(|v, cx| v.perform(Action::Scroll(Scroll::Top), cx));
+    assert_eq!(top(&mut h), live, "no history is left above the screen");
+    assert_eq!(h.sent(), vec![], "clearing tells the program nothing");
+
+    // Select all, copy and paste through the named actions, and find.
+    let clipboard = std::rc::Rc::new(MemoryClipboard::new(None));
+    h.view(|v, _| v.set_clipboard(clipboard.clone()));
+    assert!(
+        !h.view(|v, cx| v.perform(Action::Copy, cx)),
+        "nothing selected"
+    );
+    h.view(|v, cx| v.perform(Action::SelectAll, cx));
+    assert!(h.view(|v, cx| v.perform(Action::Copy, cx)));
+    assert!(clipboard.text().is_some_and(|t| t.contains("history 79")));
+    clipboard.write_text_for_test("pasted");
+    assert!(h.view(|v, cx| v.perform(Action::Paste, cx)));
+    assert!(h
+        .sent()
+        .iter()
+        .any(|m| matches!(m, ToCore::Input(b) if b == b"pasted")));
+    h.view(|v, cx| v.perform(Action::Find, cx));
+    assert!(h.view(|v, _| v.find_open()));
+
+    // Kill with the lease asks the core to end the shell.
+    assert!(h.view(|v, cx| v.perform(Action::Kill, cx)));
+    assert_eq!(h.sent(), vec![ToCore::Kill]);
+
+    // A hibernated agent exits its terminal but is not lost.
+    h.say(FromCore::Agent(info(
+        AgentState::Sleeping,
+        true,
+        true,
+        false,
+        false,
+    )));
+    h.say(FromCore::Exited(0));
+    assert!(h
+        .view(|v, _| v.note())
+        .is_some_and(|n| n.starts_with("Sleeping to save memory")));
+}
+
+/// A mouse report in the old X10 format whose coordinate is past column 95 is not text, which is
+/// all the core takes, so it is dropped rather than sent with the wrong position.
+fn x10_mouse_reports_past_the_text_range() {
+    let mut h = Harness::open(1900., 420.);
+    h.attach(200, 24, "\x1b[?1000h");
+    h.focus();
+    h.draw();
+    h.sent();
+    let cw = h.cell_width();
+    h.press(
+        MouseButton::Left,
+        1.0 + 10.0 * cw,
+        5.0,
+        Modifiers::default(),
+    );
+    let near_origin = h.sent();
+    assert!(
+        matches!(&near_origin[..], [ToCore::Input(b)] if b.starts_with(b"\x1b[M") && b.len() == 6),
+        "{near_origin:?}"
+    );
+    h.press(
+        MouseButton::Left,
+        1.0 + 150.0 * cw,
+        5.0,
+        Modifiers::default(),
+    );
+    assert_eq!(h.sent(), vec![], "a report that is not text is not sent");
 }

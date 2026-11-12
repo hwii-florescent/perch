@@ -13,6 +13,7 @@ use gpui::{
 };
 use perch_core::server::CliArgs;
 use perch_native::client::Core;
+use perch_native::terminal::actions::Action;
 use perch_native::terminal::{Status, TerminalView};
 use perch_native::ui::OpenSession;
 use perchd::proto::SessionInfo;
@@ -192,6 +193,7 @@ fn view(core_process: &mut Child, scratch: &Path) {
         .build()
         .unwrap();
     let core = setup.block_on(Core::login(&base, code)).expect("sign in");
+    let other_core = core.clone();
     let session_id = setup.block_on(async {
         let mut connection = core.connect().await.expect("connect");
         let session_id = connection.create_session(None, None).await.expect("create");
@@ -300,6 +302,44 @@ fn view(core_process: &mut Child, scratch: &Path) {
     h.type_text("echo back-at-the-bottom");
     h.wait("the live screen", |h| {
         h.rows().iter().any(|row| row == "back-at-the-bottom")
+    });
+
+    // Another view takes control after this one attached: this one finds out, says who has it,
+    // and takes it back when asked.
+    let (mut other, other_terminal) = setup.block_on(async {
+        let mut connection = other_core.connect().await.expect("connect");
+        let mut terminal = connection
+            .open_terminal(&session_id, 80, 24)
+            .await
+            .expect("open terminal");
+        assert!(
+            !terminal.owns_input(),
+            "the first view still holds the leases"
+        );
+        connection
+            .take_control(&mut terminal)
+            .await
+            .expect("take control");
+        (connection, terminal)
+    });
+    h.wait("the lease to be lost", |h| !h.can_type());
+    assert_eq!(
+        h.view(|v, _| v.note()).as_deref(),
+        Some("Another view is typing in this agent")
+    );
+    assert!(
+        h.view(|v, cx| !v.key_down(&key_event("x"), cx)),
+        "a view without the lease does not take keys"
+    );
+    assert!(h.view(|v, cx| v.perform(Action::TakeControl, cx)));
+    h.wait("control to come back", |h| h.can_type());
+    assert_eq!(h.view(|v, _| v.note()), None);
+    h.type_text("echo mine-again");
+    h.wait("the shell to answer the view that took control back", |h| {
+        h.rows().iter().any(|row| row == "mine-again")
+    });
+    setup.block_on(async {
+        let _ = other.release_terminal(&other_terminal).await;
     });
 
     // Dropping the view lets go of the shell without ending it.
@@ -451,6 +491,18 @@ impl Harness {
         .unwrap();
         cx.run_until_parked();
         drop(cx);
+    }
+}
+
+fn key_event(c: &str) -> KeyDownEvent {
+    KeyDownEvent {
+        keystroke: Keystroke {
+            modifiers: Modifiers::default(),
+            key: c.to_owned(),
+            key_char: Some(c.to_owned()),
+        },
+        is_held: false,
+        prefer_character_input: false,
     }
 }
 

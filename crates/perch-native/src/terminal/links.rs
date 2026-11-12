@@ -16,8 +16,20 @@ use std::path::{Path, PathBuf};
 
 /// Schemes a link may start with, as Ghostty's link pattern lists them.
 const SCHEMES: [&str; 14] = [
-    "https://", "http://", "mailto:", "ftp://", "file:", "ssh:", "git://", "ssh://", "tel:",
-    "magnet:", "ipfs://", "ipns://", "gemini://", "gopher://",
+    "https://",
+    "http://",
+    "mailto:",
+    "ftp://",
+    "file:",
+    "ssh:",
+    "git://",
+    "ssh://",
+    "tel:",
+    "magnet:",
+    "ipfs://",
+    "ipns://",
+    "gemini://",
+    "gopher://",
 ];
 
 /// Characters a link is made of.
@@ -25,8 +37,23 @@ fn link_char(c: char) -> bool {
     c.is_alphanumeric()
         || matches!(
             c,
-            '_' | '-' | '.' | '~' | ':' | '/' | '?' | '#' | '@' | '!' | '$' | '&' | '*' | '+' | ','
-                | ';' | '=' | '%'
+            '_' | '-'
+                | '.'
+                | '~'
+                | ':'
+                | '/'
+                | '?'
+                | '#'
+                | '@'
+                | '!'
+                | '$'
+                | '&'
+                | '*'
+                | '+'
+                | ','
+                | ';'
+                | '='
+                | '%'
         )
 }
 
@@ -61,7 +88,12 @@ pub fn find(text: &str, at: usize) -> Option<Range<usize>> {
         .or_else(|| path_start(run))?;
     let mut to = run.len();
     // A sentence's end: no trailing period, comma, colon or semicolon.
-    while to > from && matches!(run.as_bytes()[to - 1], b'.' | b',' | b':' | b';' | b'!' | b'?') {
+    while to > from
+        && matches!(
+            run.as_bytes()[to - 1],
+            b'.' | b',' | b':' | b';' | b'!' | b'?'
+        )
+    {
         to -= 1;
     }
     let range = start + from..start + to;
@@ -75,13 +107,16 @@ fn path_start(run: &str) -> Option<usize> {
         || run.starts_with("~/")
         || (run.starts_with('/') && !run.starts_with("//") && run.len() > 1)
         || run.strip_prefix('$').is_some_and(|rest| {
-            rest.split_once('/')
-                .is_some_and(|(name, _)| !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_'))
+            rest.split_once('/').is_some_and(|(name, _)| {
+                !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+            })
         });
     let bare = run.split_once('/').is_some_and(|(head, tail)| {
         !tail.is_empty()
             && head.starts_with(|c: char| c.is_alphanumeric() || c == '_' || c == '.')
-            && head.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'))
+            && head
+                .chars()
+                .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'))
     });
     (rooted || bare).then_some(0)
 }
@@ -101,7 +136,8 @@ pub fn resolve(link: &str, cwd: Option<&Path>) -> Option<Target> {
         !rest.starts_with(|c: char| c.is_ascii_digit())
             && s.len() > 1
             && s.starts_with(|c: char| c.is_ascii_alphabetic())
-            && s.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
     });
     if scheme {
         if let Some(path) = file_url_path(link).filter(|p| p.exists()) {
@@ -136,11 +172,15 @@ pub fn resolve(link: &str, cwd: Option<&Path>) -> Option<Target> {
     let mut bare = text.strip_suffix('.').unwrap_or(text);
     for _ in 0..2 {
         match bare.rsplit_once(':') {
-            Some((head, n)) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => bare = head,
+            Some((head, n)) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => {
+                bare = head
+            }
             _ => break,
         }
     }
-    Path::new(bare).exists().then(|| Target::File(PathBuf::from(bare)))
+    Path::new(bare)
+        .exists()
+        .then(|| Target::File(PathBuf::from(bare)))
 }
 
 /// The path a `file:` URL names on this computer, percent-decoded.
@@ -310,7 +350,12 @@ impl Vt {
             let mut len = 0usize;
             // SAFETY: the buffer and its length are valid.
             unsafe {
-                g::ghostty_grid_ref_graphemes(&r, codepoints.as_mut_ptr(), codepoints.len(), &mut len)
+                g::ghostty_grid_ref_graphemes(
+                    &r,
+                    codepoints.as_mut_ptr(),
+                    codepoints.len(),
+                    &mut len,
+                )
             };
             text.extend(
                 codepoints[..len.min(codepoints.len())]
@@ -323,7 +368,11 @@ impl Vt {
             spots.push(Spot {
                 y,
                 x,
-                width: if wide == g::GHOSTTY_CELL_WIDE_WIDE { 2 } else { 1 },
+                width: if wide == g::GHOSTTY_CELL_WIDE_WIDE {
+                    2
+                } else {
+                    1
+                },
                 byte,
                 uri: linked.then(|| hyperlink_uri(&r)).flatten(),
             });
@@ -349,10 +398,7 @@ impl Vt {
             first -= 1;
         }
         let mut last = hovered;
-        while last - hovered < REACH
-            && self.wraps(last)
-            && self.screen_ref(0, last + 1).is_some()
-        {
+        while last - hovered < REACH && self.wraps(last) && self.screen_ref(0, last + 1).is_some() {
             last += 1;
         }
         let (mut text, mut spots) = (String::new(), Vec::new());
@@ -365,8 +411,14 @@ impl Vt {
         let (target, marked, chosen): (String, bool, Vec<&Spot>) = match spots[at].uri.clone() {
             Some(uri) => {
                 let same = |s: &&Spot| s.uri.as_deref() == Some(uri.as_str());
-                let start = spots[..at].iter().rposition(|s| !same(&s)).map_or(0, |i| i + 1);
-                let end = spots[at..].iter().position(|s| !same(&s)).map_or(spots.len(), |i| at + i);
+                let start = spots[..at]
+                    .iter()
+                    .rposition(|s| !same(&s))
+                    .map_or(0, |i| i + 1);
+                let end = spots[at..]
+                    .iter()
+                    .position(|s| !same(&s))
+                    .map_or(spots.len(), |i| at + i);
                 (uri, true, spots[start..end].iter().collect())
             }
             None => {
@@ -450,12 +502,30 @@ mod tests {
             found("see https://example.com/a/b?x=1#top.", "example").as_deref(),
             Some("https://example.com/a/b?x=1#top")
         );
-        assert_eq!(found("(https://a.dev/x), then", "a.dev").as_deref(), Some("https://a.dev/x"));
-        assert_eq!(found("mail mailto:me@a.dev now", "me@").as_deref(), Some("mailto:me@a.dev"));
-        assert_eq!(found("edit ./src/main.rs:42: here", "main").as_deref(), Some("./src/main.rs:42"));
-        assert_eq!(found("open ~/notes/todo.md.", "notes").as_deref(), Some("~/notes/todo.md"));
-        assert_eq!(found("at /usr/local/bin ok", "local").as_deref(), Some("/usr/local/bin"));
-        assert_eq!(found("crates/perch-native/src/lib.rs", "native").as_deref(), Some("crates/perch-native/src/lib.rs"));
+        assert_eq!(
+            found("(https://a.dev/x), then", "a.dev").as_deref(),
+            Some("https://a.dev/x")
+        );
+        assert_eq!(
+            found("mail mailto:me@a.dev now", "me@").as_deref(),
+            Some("mailto:me@a.dev")
+        );
+        assert_eq!(
+            found("edit ./src/main.rs:42: here", "main").as_deref(),
+            Some("./src/main.rs:42")
+        );
+        assert_eq!(
+            found("open ~/notes/todo.md.", "notes").as_deref(),
+            Some("~/notes/todo.md")
+        );
+        assert_eq!(
+            found("at /usr/local/bin ok", "local").as_deref(),
+            Some("/usr/local/bin")
+        );
+        assert_eq!(
+            found("crates/perch-native/src/lib.rs", "native").as_deref(),
+            Some("crates/perch-native/src/lib.rs")
+        );
         assert_eq!(found("plain words only", "words"), None);
         assert_eq!(found("a // b", "//"), None);
         assert_eq!(found("see https://a.dev", "see"), None, "only on the link");
@@ -463,19 +533,38 @@ mod tests {
 
     #[test]
     fn resolving_follows_the_scheme_the_file_and_the_line_suffix() {
-        assert_eq!(resolve("https://a.dev/x", None), Some(Target::Url("https://a.dev/x".into())));
+        assert_eq!(
+            resolve("https://a.dev/x", None),
+            Some(Target::Url("https://a.dev/x".into()))
+        );
         let dir = std::env::temp_dir().join(format!("perch-links-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("code.rs"), "").unwrap();
-        assert_eq!(resolve("code.rs", Some(&dir)), Some(Target::File(dir.join("code.rs"))));
-        assert_eq!(resolve("code.rs:12:3", Some(&dir)), Some(Target::File(dir.join("code.rs"))));
-        assert_eq!(resolve("code.rs.", Some(&dir)), Some(Target::File(dir.join("code.rs"))));
+        assert_eq!(
+            resolve("code.rs", Some(&dir)),
+            Some(Target::File(dir.join("code.rs")))
+        );
+        assert_eq!(
+            resolve("code.rs:12:3", Some(&dir)),
+            Some(Target::File(dir.join("code.rs")))
+        );
+        assert_eq!(
+            resolve("code.rs.", Some(&dir)),
+            Some(Target::File(dir.join("code.rs")))
+        );
         assert_eq!(resolve("missing.rs", Some(&dir)), None);
-        assert_eq!(resolve("code.rs", None), None, "a relative path needs a folder");
+        assert_eq!(
+            resolve("code.rs", None),
+            None,
+            "a relative path needs a folder"
+        );
         let url = format!("file://{}/code.rs", dir.display());
         assert_eq!(resolve(&url, None), Some(Target::File(dir.join("code.rs"))));
         std::fs::remove_dir_all(&dir).unwrap();
-        assert_eq!(pwd_path("file://host.local/Users/a%20b"), Some(PathBuf::from("/Users/a b")));
+        assert_eq!(
+            pwd_path("file://host.local/Users/a%20b"),
+            Some(PathBuf::from("/Users/a b"))
+        );
         assert_eq!(pwd_path("/Users/x"), Some(PathBuf::from("/Users/x")));
     }
 

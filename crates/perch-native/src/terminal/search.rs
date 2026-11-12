@@ -82,8 +82,7 @@ impl Vt {
         };
         // SAFETY: the needle option takes a string, or null to clear; `needle` outlives the call
         // (Ghostty copies it).
-        let result =
-            unsafe { g::ghostty_search_set(handle, g::GHOSTTY_SEARCH_OPT_NEEDLE, value) };
+        let result = unsafe { g::ghostty_search_set(handle, g::GHOSTTY_SEARCH_OPT_NEEDLE, value) };
         if result != g::GHOSTTY_SUCCESS {
             return;
         }
@@ -237,12 +236,7 @@ impl Vt {
             if have_current {
                 // SAFETY: both selections are fresh snapshots of this terminal.
                 unsafe {
-                    g::ghostty_terminal_selection_equal(
-                        self.term(),
-                        found,
-                        &current,
-                        &mut equal,
-                    );
+                    g::ghostty_terminal_selection_equal(self.term(), found, &current, &mut equal);
                 }
             }
             let point = |r: &g::GhosttyGridRef| {
@@ -336,7 +330,11 @@ mod tests {
         let progress = indexed(&mut vt);
         assert_eq!(progress.total, 3, "{progress:?}");
         // The viewport shows the two newest; the oldest is only in history.
-        let spans: Vec<_> = vt.search_spans().iter().map(|s| (s.row, s.start, s.end)).collect();
+        let spans: Vec<_> = vt
+            .search_spans()
+            .iter()
+            .map(|s| (s.row, s.start, s.end))
+            .collect();
         assert!(spans.contains(&(3, 5, 10)), "{spans:?}");
         // Navigation scrolls to the oldest match.
         assert!(vt.search_navigate(false));
@@ -350,7 +348,10 @@ mod tests {
         );
         let selected = vt.search_progress().selected;
         assert!(selected.is_some());
-        assert!(vt.search_spans().iter().any(|s| s.selected), "a selected match is in view");
+        assert!(
+            vt.search_spans().iter().any(|s| s.selected),
+            "a selected match is in view"
+        );
     }
 
     #[test]
@@ -361,7 +362,10 @@ mod tests {
         vt.search("beta");
         indexed(&mut vt);
         vt.search_navigate(false);
-        assert_eq!(vt.selection_text().as_deref(), Some("alpha beta\nbeta gamma"));
+        assert_eq!(
+            vt.selection_text().as_deref(),
+            Some("alpha beta\nbeta gamma")
+        );
         vt.search("");
         assert_eq!(vt.search_progress(), Progress::default());
         assert!(vt.search_spans().is_empty());

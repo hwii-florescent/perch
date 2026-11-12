@@ -193,9 +193,8 @@ async fn run(
                     // The view is gone: stop watching.
                     None => break None,
                     Some(ToCore::Input(bytes)) => {
-                        // ponytail: the core takes input as a JSON string, so a byte that is not
-                        // UTF-8 (an X10 mouse report past column 95) becomes U+FFFD. Programs
-                        // that ask for the mouse nearly always ask for SGR coordinates.
+                        // The core takes input as a JSON string, so the view sends only what is
+                        // UTF-8 (it drops an X10 mouse report whose bytes are not).
                         connection
                             .terminal_input(&terminal, &String::from_utf8_lossy(&bytes))
                             .await
