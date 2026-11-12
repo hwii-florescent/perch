@@ -165,6 +165,8 @@ pub struct Workspace {
     tick: u64,
     menu: Option<PaneMenu>,
     toast: Option<Toast>,
+    /// The window's height as last drawn, which keeps an overlay inside it.
+    viewport_height: f32,
     /// The session whose terminal is over the window for a moment (`terminal.peek`), with no tab
     /// of its own unless it is kept.
     peek: Option<String>,
@@ -208,6 +210,7 @@ impl Workspace {
             tick: 0,
             menu: None,
             toast: None,
+            viewport_height: 0.0,
             peek: None,
             leader: None,
             notice: None,
@@ -2081,6 +2084,12 @@ impl Workspace {
         close: impl Fn(&mut Self, &mut Context<Self>) + 'static + Clone,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        // Room above (48) and below (24) it, up to what a box of lists needs.
+        let room = if self.viewport_height > 0.0 {
+            (self.viewport_height - 72.).clamp(120., 560.)
+        } else {
+            560.
+        };
         div()
             .id(id)
             .absolute()
@@ -2096,7 +2105,7 @@ impl Workspace {
                 div()
                     .w(px(width))
                     .h_auto()
-                    .max_h(px(560.))
+                    .max_h(px(room))
                     .overflow_hidden()
                     .rounded_md()
                     .border_1()
@@ -2106,7 +2115,7 @@ impl Workspace {
                     .child(
                         div()
                             .id(SharedString::from(format!("{id}-body")))
-                            .max_h(px(558.))
+                            .max_h(px(room - 2.))
                             .overflow_y_scroll()
                             .child(body),
                     ),
@@ -2126,6 +2135,9 @@ fn setting_row(title: &str, note: &str, control: AnyElement) -> gpui::Div {
             div()
                 .flex()
                 .flex_col()
+                // The words give way to the control, which keeps its size.
+                .flex_1()
+                .min_w_0()
                 .child(
                     div()
                         .text_sm()
@@ -2139,11 +2151,12 @@ fn setting_row(title: &str, note: &str, control: AnyElement) -> gpui::Div {
                         .child(note.to_string()),
                 ),
         )
-        .child(control)
+        .child(div().flex_none().child(control))
 }
 
 impl gpui::Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.viewport_height = f32::from(window.viewport_size().height);
         // A terminal that attaches takes the keyboard when it first draws; the tab that has it in
         // the layout keeps it.
         if self.palette.is_none() && self.settings.is_none() {

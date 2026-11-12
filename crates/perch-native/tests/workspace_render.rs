@@ -339,6 +339,7 @@ fn two_tabs() {
         both.bright(area.start, area.end, bar.0, bar.1) > 20,
         "the active tab's title is drawn in the strip"
     );
+    both.save("two-tabs");
 
     // The keys of the web's table switch tabs, and the window takes them before the terminal.
     assert!(h.press("cmd-1"), "tabs.jump1 is taken");
@@ -398,7 +399,9 @@ fn attention_on_a_tab() {
         tab_bar_dot(&mut h, Attention::NeedsYou) > 10,
         "the tab of a session that needs you has the red dot"
     );
-    let fill = h.draw().count(
+    let marked = h.draw();
+    marked.save("attention");
+    let fill = marked.count(
         tint(Attention::NeedsYou).1,
         SIDEBAR_WIDTH,
         WIDTH,
@@ -453,6 +456,7 @@ fn a_split_shows_each_pane() {
     h.show(0, &filled(200, 0, 0));
     h.show(1, &filled(0, 170, 0));
     let shot = h.draw();
+    shot.save("split");
     let mid = SIDEBAR_WIDTH + (WIDTH - SIDEBAR_WIDTH) / 2.0;
     let (below_bar, bottom) = (TAB_BAR_HEIGHT + 20.0, HEIGHT - 20.0);
     let red = |x0, x1| shot.count(0xc80000, x0, x1, below_bar, bottom);
@@ -517,6 +521,7 @@ fn the_palette_lists_and_runs_commands() {
     assert!(h.press("cmd-p"), "global.navigator is taken");
     assert!(h.ws(|ws| ws.palette_open()));
     let open = h.draw();
+    open.save("palette");
     assert!(
         overlay(&open) > overlay(&before) + 20_000,
         "the palette is drawn over the main area"
@@ -576,6 +581,7 @@ fn terminal_settings_show_what_the_core_sent() {
         })
         .unwrap();
     let shown = h.draw();
+    shown.save("settings");
     assert_ne!(waiting.raw, shown.raw);
     // Login shell is on: its switch text is green; double quotes is off: dim.
     assert!(shown.count(0x4caf6a, SIDEBAR_WIDTH, WIDTH, 0.0, HEIGHT) > 20);
