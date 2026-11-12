@@ -5,6 +5,7 @@ pub mod attach;
 pub mod keys;
 pub mod layout;
 pub mod scroll;
+pub mod settings;
 pub mod view;
 pub mod vt;
 

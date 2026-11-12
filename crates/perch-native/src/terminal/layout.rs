@@ -4,26 +4,18 @@
 //! width agent CLIs treat as the minimum sane one, by shrinking the font, never below
 //! [`MIN_FONT_PX`], rather than handing the program fewer columns.
 
-use gpui::{font, px, Font, FontStyle, FontWeight, Pixels, Size, Window};
+use gpui::{font, px, Font, FontStyle, FontWeight, Pixels, SharedString, Size, Window};
 
 /// Columns a pane is kept at by scaling the font down.
 pub const MIN_COLS: u16 = 80;
 /// Past this, shrinking further is unreadable: a very narrow pane reflows instead.
 pub const MIN_FONT_PX: f32 = 7.0;
-/// The size the web terminal uses when the computer has no terminal profile to read.
-pub const DEFAULT_FONT_PX: f32 = 13.0;
-/// The first family of the web terminal's generic stack; a computer without it falls back to
-/// GPUI's default fonts.
-pub const FONT_FAMILY: &str = "Menlo";
-/// Space around the grid, in logical pixels.
-pub const PAD_X: f32 = 8.0;
-pub const PAD_Y: f32 = 6.0;
 
 /// Slack for a pane whose width is cols x cell exactly, which float layout can land a hair under.
 const EPSILON: f32 = 0.01;
 
-pub fn cell_font(bold: bool, italic: bool) -> Font {
-    let mut f = font(FONT_FAMILY);
+pub fn cell_font(family: &str, bold: bool, italic: bool) -> Font {
+    let mut f = font(SharedString::from(family.to_owned()));
     if bold {
         f.weight = FontWeight::BOLD;
     }
@@ -44,10 +36,10 @@ pub struct Metrics {
     pub descent: Pixels,
 }
 
-pub fn metrics(window: &Window, font_px: f32) -> Metrics {
+pub fn metrics(window: &Window, family: &str, font_px: f32) -> Metrics {
     let text = window.text_system();
     let scale = window.scale_factor();
-    let id = text.resolve_font(&cell_font(false, false));
+    let id = text.resolve_font(&cell_font(family, false, false));
     let size = px(font_px);
     let device =
         |v: Pixels, round: fn(f32) -> f32| px(round(f32::from(v) * scale).max(1.0) / scale);
@@ -76,23 +68,23 @@ pub struct Fit {
 /// The grid inside `available` (the pane less its padding) at `base_px`, shrinking the font to
 /// keep [`MIN_COLS`] columns. The size is computed, then corrected from the measured column
 /// count at most twice, always downward, so the grid never passes through a wider shape.
-pub fn fit(window: &Window, available: Size<Pixels>, base_px: f32) -> Fit {
+pub fn fit(window: &Window, available: Size<Pixels>, family: &str, base_px: f32) -> Fit {
     let width = f32::from(available.width);
     let columns = |m: &Metrics| ((width / f32::from(m.width) + EPSILON).floor()).max(0.0) as u32;
-    let mut m = metrics(window, base_px);
+    let mut m = metrics(window, family, base_px);
     let target = u32::from(MIN_COLS);
     if width > 0.0 && columns(&m) < target {
         let per_column = width / MIN_COLS as f32;
         let tenth = |v: f32| (v * 10.0).floor() / 10.0;
         let mut size = tenth(base_px * per_column / f32::from(m.width)).max(MIN_FONT_PX);
-        m = metrics(window, size);
+        m = metrics(window, family, size);
         for _ in 0..2 {
             let cols = columns(&m);
             if cols >= target || size <= MIN_FONT_PX || cols == 0 {
                 break;
             }
             size = tenth(size * cols as f32 / MIN_COLS as f32).max(MIN_FONT_PX);
-            m = metrics(window, size);
+            m = metrics(window, family, size);
         }
     }
     let rows = (f32::from(available.height) / f32::from(m.height) + EPSILON).floor();

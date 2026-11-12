@@ -18,7 +18,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures::{SinkExt, StreamExt};
 use perch_core::agent_fleet::TERMINAL_PROVIDER;
-use perch_core::protocol::{ProjectSummary, ServerMessage, SessionSummary};
+use perch_core::protocol::{AgentLifecycleStatus, ProjectSummary, ServerMessage, SessionSummary};
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -169,9 +169,36 @@ pub struct Terminal {
     /// typing and resizing only from the holder; `None` means another view holds it.
     input: Option<u64>,
     resize: Option<u64>,
+    workspace_id: String,
+    /// The agent's lifecycle as of the last broadcast this terminal followed.
+    pub status: AgentLifecycleStatus,
 }
 
 impl Terminal {
+    /// Follow a lifecycle status the core broadcast: a lease whose generation the status no
+    /// longer names was taken by another view, and this connection no longer holds it. Returns
+    /// whether either lease was lost.
+    pub fn follow_owners(&mut self, status: &AgentLifecycleStatus) -> bool {
+        let key = &status.key;
+        if key.session_id != self.session_id || key.agent_id != self.provider {
+            return false;
+        }
+        if status.revision >= self.status.revision {
+            self.status = status.clone();
+        }
+        let mut lost = false;
+        for (mine, owner) in [
+            (&mut self.input, &status.input_owner),
+            (&mut self.resize, &status.resize_owner),
+        ] {
+            if mine.is_some() && *mine != owner.as_ref().map(|o| o.generation) {
+                *mine = None;
+                lost = true;
+            }
+        }
+        lost
+    }
+
     /// This connection holds the lease that lets it type.
     pub fn owns_input(&self) -> bool {
         self.input.is_some()
@@ -288,26 +315,25 @@ impl Connection {
         let id = self.request_id();
         self.send(open_frame(&id, session_id, provider, cols, rows))
             .await?;
-        let (terminal_id, replay, workspace_id) = self
+        let (terminal_id, replay, status) = self
             .reply(Some(&id), |m| match m {
                 ServerMessage::AgentTerminalOpened {
                     request_id,
                     terminal_id,
                     status,
                     replay,
-                } if *request_id == id => Some((
-                    terminal_id.clone(),
-                    replay.clone(),
-                    status.key.workspace_id.clone(),
-                )),
+                } if *request_id == id => {
+                    Some((terminal_id.clone(), replay.clone(), status.clone()))
+                }
                 _ => None,
             })
             .await?;
+        let workspace_id = status.key.workspace_id.clone();
         let input = self
-            .acquire(session_id, provider, &workspace_id, "input")
+            .acquire(session_id, provider, &workspace_id, "input", true)
             .await?;
         let resize = self
-            .acquire(session_id, provider, &workspace_id, "resize")
+            .acquire(session_id, provider, &workspace_id, "resize", true)
             .await?;
         Ok(Terminal {
             id: terminal_id,
@@ -317,7 +343,42 @@ impl Connection {
             view_id: id,
             input,
             resize,
+            workspace_id,
+            status,
         })
+    }
+
+    /// Take the input and size of a terminal another view holds, as the web's "Take control"
+    /// does: the input first, then the size.
+    pub async fn take_control(&mut self, terminal: &mut Terminal) -> Result<()> {
+        terminal.input = self
+            .acquire(
+                &terminal.session_id,
+                &terminal.provider,
+                &terminal.workspace_id,
+                "input",
+                false,
+            )
+            .await?;
+        terminal.resize = self
+            .acquire(
+                &terminal.session_id,
+                &terminal.provider,
+                &terminal.workspace_id,
+                "resize",
+                false,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// End the shell. Only the view holding the input lease may.
+    pub async fn terminal_kill(&mut self, terminal: &Terminal) -> Result<()> {
+        if terminal.input.is_none() {
+            bail!("another view controls this terminal's input");
+        }
+        self.send(json!({"type": "terminal.kill", "terminalId": terminal.id}))
+            .await
     }
 
     async fn acquire(
@@ -326,6 +387,7 @@ impl Connection {
         provider: &str,
         workspace_id: &str,
         channel: &str,
+        if_unowned: bool,
     ) -> Result<Option<u64>> {
         let id = self.request_id();
         self.send(acquire_frame_as(
@@ -334,6 +396,7 @@ impl Connection {
             provider,
             workspace_id,
             channel,
+            if_unowned,
         ))
         .await?;
         self.reply(Some(&id), |m| match m {
@@ -611,6 +674,7 @@ fn acquire_frame(request_id: &str, session_id: &str, workspace_id: &str, channel
         TERMINAL_PROVIDER,
         workspace_id,
         channel,
+        true,
     )
 }
 
@@ -620,10 +684,11 @@ fn acquire_frame_as(
     provider: &str,
     workspace_id: &str,
     channel: &str,
+    if_unowned: bool,
 ) -> Value {
     json!({"type": "agent.control.acquire", "requestId": request_id, "sessionId": session_id,
            "workspaceId": workspace_id, "agentId": provider, "channel": channel,
-           "ifUnowned": true})
+           "ifUnowned": if_unowned})
 }
 
 fn input_frame(terminal_id: &str, generation: u64, data: &str) -> Value {

@@ -13,7 +13,11 @@ use gpui::{
 };
 use perch_native::terminal::attach::{FromCore, ToCore};
 use perch_native::terminal::keys::key_bytes;
-use perch_native::terminal::layout::{MIN_COLS, MIN_FONT_PX, PAD_X, PAD_Y};
+use perch_native::terminal::layout::{MIN_COLS, MIN_FONT_PX};
+
+/// The web terminal's default padding: none.
+const PAD_X: f32 = 0.0;
+const PAD_Y: f32 = 0.0;
 use perch_native::terminal::vt::Theme;
 use perch_native::terminal::{Status, TerminalEvent, TerminalView};
 use std::sync::Arc;
@@ -21,6 +25,17 @@ use std::sync::Arc;
 /// Default colours of the terminal, as pixels.
 fn rgb(hex: u32) -> [u8; 3] {
     [(hex >> 16) as u8, (hex >> 8) as u8, hex as u8]
+}
+
+thread_local! {
+    /// The test being run, which names its frame in `PERCH_NATIVE_SHOT_DIR`.
+    static SHOT_NAME: std::cell::Cell<&'static str> = const { std::cell::Cell::new("frame") };
+}
+
+/// Run one test, naming the frames it dumps.
+fn run(name: &'static str, test: impl FnOnce()) {
+    SHOT_NAME.with(|n| n.set(name));
+    test();
 }
 
 struct Shot {
@@ -139,6 +154,7 @@ impl Harness {
             replay: format!("\x1b[8;{rows};{cols}t{screen}"),
             input,
             resize,
+            agent: None,
         });
     }
 
@@ -181,6 +197,14 @@ impl Harness {
                 )
             })
             .unwrap();
+        // Off unless asked: the last frame of each test, to look at.
+        if let Some(dir) = std::env::var_os("PERCH_NATIVE_SHOT_DIR") {
+            let name = SHOT_NAME.with(|n| n.get());
+            std::fs::create_dir_all(&dir).expect("shot dir");
+            image
+                .save(std::path::Path::new(&dir).join(format!("{name}.png")))
+                .expect("write the frame");
+        }
         let cell = self.view(|view, _| view.cell_size()).expect("laid out");
         Shot {
             width: image.width() as usize,
@@ -226,15 +250,89 @@ fn main() {
         rgb(0xffffff),
     );
 
-    colours_and_cursor(bg, fg);
-    attributes(bg, fg);
-    wide_and_emoji(bg);
-    resize_authority();
-    narrow_panes_shrink_the_font();
-    input_and_scrolling();
-    disconnect_keeps_the_screen();
-    workspace_attaches_the_open_session();
+    run("colours_and_cursor", || colours_and_cursor(bg, fg));
+    run("attributes", || attributes(bg, fg));
+    run("wide_and_emoji", || wide_and_emoji(bg));
+    run("resize_authority", resize_authority);
+    run("narrow_panes_shrink_the_font", narrow_panes_shrink_the_font);
+    run("input_and_scrolling", input_and_scrolling);
+    run("disconnect_keeps_the_screen", disconnect_keeps_the_screen);
+    run(
+        "workspace_attaches_the_open_session",
+        workspace_attaches_the_open_session,
+    );
+    run("profile_and_settings", profile_and_settings);
     println!("terminal_render: ok");
+}
+
+/// The user's terminal profile and the settings change what is drawn: colours, cursor, padding,
+/// opacity and Option as Alt, live, and the dark and light palettes follow the window.
+fn profile_and_settings() {
+    use perch_core::iterm_profile::TerminalProfile;
+    use perch_core::protocol::SettingsData;
+    use std::collections::BTreeMap;
+    let palette = |bg: &str, fg: &str| {
+        BTreeMap::from([
+            ("background".to_owned(), bg.to_owned()),
+            ("foreground".to_owned(), fg.to_owned()),
+            ("red".to_owned(), "#cc3333".to_owned()),
+            ("cursor".to_owned(), "#00ff00".to_owned()),
+        ])
+    };
+    let profile = TerminalProfile {
+        font_family: Some("Monaco".into()),
+        font_size: Some(15.0),
+        theme: BTreeMap::new(),
+        theme_light: palette("#f0f0e0", "#202020"),
+        theme_dark: palette("#102030", "#d0d0d0"),
+        cursor_style: Some("bar".into()),
+        cursor_blink: None,
+    };
+    let mut h = Harness::open(900., 420.);
+    h.view(|v, cx| {
+        v.set_dark(Some(true), cx);
+        v.apply_core(Some(Some(profile.clone())), None, cx);
+    });
+    h.attach(100, 24, "\x1b[41m  \x1b[0mhi");
+    h.focus();
+    let shot = h.draw();
+    assert!(
+        near(shot.at(450., 300.), rgb(0x102030)),
+        "the dark palette's background"
+    );
+    assert!(near(shot.center(0, 0), rgb(0xcc3333)), "the profile's red");
+    assert_eq!(h.view(|v, _| v.font_px()), Some(15.0), "the profile's size");
+    // The profile's cursor: a bar, in its colour, after "hi" at column 4.
+    let (x, y) = shot.cell_origin(4, 0);
+    assert!(
+        near(shot.at(x + 0.5, y + shot.cell.1 / 2.0), rgb(0x00ff00)),
+        "profile cursor colour and bar shape"
+    );
+    h.view(|v, cx| v.set_dark(Some(false), cx));
+    let shot = h.draw();
+    assert!(
+        near(shot.at(450., 300.), rgb(0xf0f0e0)),
+        "the light palette follows the window"
+    );
+
+    // Settings: padding moves the grid, opacity lets the window show through.
+    let mut data: SettingsData = serde_json::from_str(r#"{"theme":"x"}"#).unwrap();
+    data.terminal_padding = [20.0, 10.0];
+    data.terminal_opacity = 0.5;
+    h.view(|v, cx| v.apply_core(None, Some(data), cx));
+    let shot = h.draw();
+    let (x, y) = (20.0 + 0.5 * shot.cell.0, 10.0 + 0.5 * shot.cell.1);
+    // The red cells now start at the padding; opacity blends them with the window behind.
+    let p = shot.at(x, y);
+    assert!(p[0] > p[1] && p[0] < 0xcc, "half-transparent red {p:?}");
+    assert!(
+        shot.at(5., 5.) != shot.at(x, y),
+        "the padding is outside the grid"
+    );
+    assert_eq!(
+        h.view(|v, _| v.fitted_size()).map(|s| s.0),
+        Some(((900.0f32 - 40.0) / shot.cell.0 + 0.01).floor() as u16)
+    );
 }
 
 /// Backgrounds, foregrounds, inverse and the cursor in each shape and focus.

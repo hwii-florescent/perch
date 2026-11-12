@@ -62,7 +62,70 @@ pub struct Theme {
     pub fg: Rgb,
     pub bg: Rgb,
     pub cursor: Rgb,
+    /// The glyph under a block cursor; the background when the profile names none.
+    pub cursor_text: Option<Rgb>,
+    /// Selected cells' background; the foreground mixed 30 percent into the background when the
+    /// profile names none, as xterm.js does.
+    pub selection_bg: Option<Rgb>,
+    /// Selected cells' text; their own colour when the profile names none.
+    pub selection_fg: Option<Rgb>,
     pub ansi: [Rgb; 16],
+    /// 1 leaves a program's colours alone; above it, text is pushed toward black or white until
+    /// it reaches this contrast ratio against its background (1 to 21).
+    pub minimum_contrast: f32,
+}
+
+impl Theme {
+    fn selection_background(&self) -> Rgb {
+        self.selection_bg
+            .unwrap_or_else(|| mix(self.bg, self.fg, 0.3))
+    }
+}
+
+/// `a` with `amount` of `b` mixed in.
+fn mix(a: Rgb, b: Rgb, amount: f32) -> Rgb {
+    let m = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * amount).round() as u8;
+    Rgb(m(a.0, b.0), m(a.1, b.1), m(a.2, b.2))
+}
+
+/// WCAG relative luminance.
+fn luminance(c: Rgb) -> f32 {
+    let lin = |v: u8| {
+        let v = f32::from(v) / 255.0;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * lin(c.0) + 0.7152 * lin(c.1) + 0.0722 * lin(c.2)
+}
+
+/// WCAG contrast ratio, 1 to 21.
+pub fn contrast(a: Rgb, b: Rgb) -> f32 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// `fg`, or near-white or near-black when it would vanish into `bg`.
+fn readable(fg: Rgb, bg: Rgb, minimum: f32) -> Rgb {
+    if minimum <= 1.0 || contrast(fg, bg) >= minimum {
+        return fg;
+    }
+    let (light, dark) = (Rgb(0xf2, 0xf2, 0xf4), Rgb(0x1b, 0x1b, 0x1e));
+    if contrast(light, bg) >= contrast(dark, bg) {
+        light
+    } else {
+        dark
+    }
+}
+
+/// Glyphs drawn as shapes keep the colours the program gave them under minimum contrast: box
+/// drawing, block elements, Powerline separators and the legacy computing blocks.
+fn keeps_program_colour(text: &str) -> bool {
+    text.chars().next().is_some_and(|c| {
+        matches!(c as u32, 0x2500..=0x259f | 0xe0b0..=0xe0d7 | 0x1fb00..=0x1fbff | 0x1cc00..=0x1cebf)
+    })
 }
 
 impl Default for Theme {
@@ -72,6 +135,10 @@ impl Default for Theme {
             fg: hex(0xffffff),
             bg: hex(0x000000),
             cursor: hex(0xffffff),
+            cursor_text: None,
+            selection_bg: None,
+            selection_fg: None,
+            minimum_contrast: 1.0,
             ansi: [
                 0x2e3436, 0xcc0000, 0x4e9a06, 0xc4a000, 0x3465a4, 0x75507b, 0x06989a, 0xd3d7cf,
                 0x555753, 0xef2929, 0x8ae234, 0xfce94f, 0x729fcf, 0xad7fa8, 0x34e2e2, 0xeeeeec,
@@ -94,9 +161,26 @@ pub struct Cell {
     pub italic: bool,
     pub faint: bool,
     pub underline: bool,
+    /// How the underline is drawn, when there is one.
+    pub underline_style: Underline,
+    /// The underline's own colour (SGR 58); the text's when `None`.
+    pub underline_color: Option<Rgb>,
     pub strike: bool,
     /// The head of a two-cell character; the next cell is its tail.
     pub wide: bool,
+    /// The cell is part of the selection; `bg` and `fg` already show it.
+    pub selected: bool,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub enum Underline {
+    #[default]
+    None,
+    Single,
+    Double,
+    Curly,
+    Dotted,
+    Dashed,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -113,6 +197,12 @@ pub struct Cursor {
     pub y: u16,
     pub shape: CursorShape,
     pub color: Rgb,
+    /// The glyph under a block cursor is drawn in this colour.
+    pub text: Rgb,
+    /// The cursor is on a two-cell character and covers both cells.
+    pub wide: bool,
+    /// The program asked for a blinking cursor (DECSCUSR 0, 1, 3, 5).
+    pub blink: bool,
 }
 
 /// The visible rows, read once.
@@ -494,6 +584,42 @@ impl Vt {
         self.theme.bg
     }
 
+    /// Lines of history kept (Ghostty still caps the bytes too).
+    pub fn set_scrollback_lines(&mut self, lines: usize) {
+        // SAFETY: the option takes a usize.
+        unsafe {
+            g::ghostty_terminal_set(
+                self.term,
+                g::GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES,
+                (&lines as *const usize).cast(),
+            );
+        }
+    }
+
+    /// The cursor shape and blink a program that has not chosen its own gets (DECSCUSR 0).
+    pub fn set_default_cursor(&mut self, shape: CursorShape, blink: bool) {
+        let style: g::GhosttyTerminalCursorStyle = match shape {
+            CursorShape::Bar => g::GHOSTTY_TERMINAL_CURSOR_STYLE_BAR,
+            CursorShape::Underline => g::GHOSTTY_TERMINAL_CURSOR_STYLE_UNDERLINE,
+            _ => g::GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK,
+        };
+        // SAFETY: the options take a cursor style and a bool.
+        unsafe {
+            g::ghostty_terminal_set(
+                self.term,
+                g::GHOSTTY_TERMINAL_OPT_DEFAULT_CURSOR_STYLE,
+                (&style as *const g::GhosttyTerminalCursorStyle).cast(),
+            );
+            g::ghostty_terminal_set(
+                self.term,
+                g::GHOSTTY_TERMINAL_OPT_DEFAULT_CURSOR_BLINK,
+                (&blink as *const bool).cast(),
+            );
+        }
+        // Becomes the cursor now, unless the program has picked its own since.
+        self.write(b"\x1b[0 q");
+    }
+
     pub fn set_theme(&mut self, theme: Theme) {
         if self.theme != theme {
             self.theme = theme;
@@ -812,7 +938,7 @@ impl Vt {
                 );
                 let mut row = Vec::with_capacity(self.cols as usize);
                 while g::ghostty_render_state_row_cells_next(self.cells) {
-                    row.push(self.read_cell(fg_default, bg_default));
+                    row.push(self.read_cell(&colors));
                 }
                 rows.push(row);
             }
@@ -846,6 +972,13 @@ impl Vt {
                 } else {
                     fg_default
                 },
+                text: self.theme.cursor_text.unwrap_or(bg_default),
+                wide: cur.wide_tail
+                    || rows
+                        .get(usize::from(cur.viewport_y))
+                        .and_then(|r| r.get(usize::from(x)))
+                        .is_some_and(|c| c.wide),
+                blink: cur.blinking,
             });
             g::ghostty_render_state_clean(state);
             Frame {
@@ -861,7 +994,8 @@ impl Vt {
     /// The cell the row-cells iterator is on.
     ///
     /// SAFETY: the caller has just advanced `self.cells` to a cell.
-    unsafe fn read_cell(&self, fg_default: Rgb, bg_default: Rgb) -> Cell {
+    unsafe fn read_cell(&self, colors: &g::GhosttyRenderStateColors) -> Cell {
+        let (fg_default, bg_default) = (Rgb::from(colors.foreground), Rgb::from(colors.background));
         let c = self.cells;
         // SAFETY: each getter below writes the type its key documents.
         unsafe {
@@ -909,6 +1043,26 @@ impl Vt {
                 bg = Some(fg);
                 fg = new_fg;
             }
+            let mut selected = false;
+            g::ghostty_render_state_row_cells_get(
+                c,
+                g::GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_SELECTED,
+                (&mut selected as *mut bool).cast(),
+            );
+            if selected {
+                bg = Some(self.theme.selection_background());
+                if let Some(selection_fg) = self.theme.selection_fg {
+                    fg = selection_fg;
+                }
+            }
+            let underline_color = match style.underline_color.tag {
+                g::GHOSTTY_STYLE_COLOR_RGB => Some(Rgb::from(style.underline_color.value.rgb)),
+                g::GHOSTTY_STYLE_COLOR_PALETTE => colors
+                    .palette
+                    .get(usize::from(style.underline_color.value.palette))
+                    .map(|c| Rgb::from(*c)),
+                _ => None,
+            };
             let mut text = String::new();
             if wide != g::GHOSTTY_CELL_WIDE_SPACER_TAIL
                 && wide != g::GHOSTTY_CELL_WIDE_SPACER_HEAD
@@ -930,6 +1084,10 @@ impl Vt {
                     text = codepoints.into_iter().filter_map(char::from_u32).collect();
                 }
             }
+            // Unicode placeholders and the like keep the colours they were given.
+            if self.theme.minimum_contrast > 1.0 && !keeps_program_colour(&text) {
+                fg = readable(fg, bg.unwrap_or(bg_default), self.theme.minimum_contrast);
+            }
             Cell {
                 text,
                 fg,
@@ -938,8 +1096,18 @@ impl Vt {
                 italic: style.italic,
                 faint: style.faint,
                 underline: style.underline != 0,
+                underline_style: match style.underline {
+                    g::GHOSTTY_SGR_UNDERLINE_SINGLE => Underline::Single,
+                    g::GHOSTTY_SGR_UNDERLINE_DOUBLE => Underline::Double,
+                    g::GHOSTTY_SGR_UNDERLINE_CURLY => Underline::Curly,
+                    g::GHOSTTY_SGR_UNDERLINE_DOTTED => Underline::Dotted,
+                    g::GHOSTTY_SGR_UNDERLINE_DASHED => Underline::Dashed,
+                    _ => Underline::None,
+                },
+                underline_color,
                 strike: style.strikethrough,
                 wide: wide == g::GHOSTTY_CELL_WIDE_WIDE,
+                selected,
             }
         }
     }

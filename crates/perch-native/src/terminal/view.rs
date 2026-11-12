@@ -13,14 +13,16 @@
 //! - A dropped connection leaves the screen as it was and says so. It is never taken for the end
 //!   of the shell, and nothing here reattaches, which would start the session again.
 //!
-//! Selection, search, links, IME composition, acting on OSC 52 and the colours of the user's
-//! terminal profile are not here yet; [`TerminalEvent`] and [`Appearance`] are where they join.
+//!
 
-use super::attach::{self, FromCore, Piece, ToCore};
-use super::keys::key_bytes;
+use super::attach::{self, AgentInfo, FromCore, Piece, ToCore};
+use super::keys::key_bytes_with;
 use super::layout::{self, Fit, Metrics};
 use super::scroll;
-use super::vt::{Cell, Event, Frame, KeyInput, MouseAction, MouseButton, MouseInput, Rgb, Vt};
+use super::settings::Settings;
+use super::vt::{
+    Cell, Event, Frame, KeyInput, MouseAction, MouseButton, MouseInput, Rgb, Underline, Vt,
+};
 use crate::client::Core;
 use crate::ui::OpenSession;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -31,26 +33,17 @@ use gpui::{
     Context, ElementInputHandler, EntityInputHandler, EventEmitter, FocusHandle, Focusable, Hsla,
     KeyDownEvent, Keystroke, Modifiers, MouseButton as GpuiButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Pixels, Point, ScrollWheelEvent, SharedString, Size, Task, TextAlign, TextRun,
-    UTF16Selection, Window,
+    UTF16Selection, Window, WindowAppearance,
 };
+use perch_core::iterm_profile::TerminalProfile;
+use perch_core::protocol::SettingsData;
 use std::ops::Range;
+
+/// How long a blinking cursor stays on, and then off.
+const BLINK_HALF_PERIOD: std::time::Duration = std::time::Duration::from_millis(530);
 
 /// Dim text for what the terminal says about itself.
 const NOTE_COLOR: u32 = 0x8a8a90;
-
-/// Look of the terminal. The user's terminal profile (font, size, colours) is applied here.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Appearance {
-    pub font_px: f32,
-}
-
-impl Default for Appearance {
-    fn default() -> Self {
-        Self {
-            font_px: layout::DEFAULT_FONT_PX,
-        }
-    }
-}
 
 /// Where the terminal is with its session.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -94,12 +87,23 @@ struct Painted {
     origin: Point<Pixels>,
     scale: f32,
     focused: bool,
+    family: String,
+    opacity: f32,
+    blink_on: bool,
 }
 
 pub struct TerminalView {
     vt: Vt,
     focus: FocusHandle,
-    appearance: Appearance,
+    settings: Settings,
+    /// What the core last sent; the settings are made from these, the window's appearance and
+    /// the fonts the machine has.
+    profile: Option<TerminalProfile>,
+    core_settings: Option<SettingsData>,
+    /// Set by tests: the appearance the window is taken to have.
+    dark_override: Option<bool>,
+    applied_dark: Option<bool>,
+    agent: Option<AgentInfo>,
     status: Status,
     title: String,
     pending: Option<Pending>,
@@ -115,6 +119,12 @@ pub struct TerminalView {
     /// The size last asked of the core. `None`: ask at the next layout.
     requested: Option<(u16, u16)>,
     scrolled: Point<f32>,
+    /// The blinking cursor is in its visible half.
+    blink_on: bool,
+    cursor_blinks: bool,
+    _blink: Task<()>,
+    /// Lay the pane out afresh once, whatever holds the size: the font changed.
+    refit: bool,
     /// Where the cursor was at the last frame, hidden or not.
     cursor_cell: Option<(u16, u16)>,
     buttons_down: Vec<GpuiButton>,
@@ -128,7 +138,12 @@ impl TerminalView {
         Self {
             vt: Vt::new(80, 24),
             focus: cx.focus_handle(),
-            appearance: Appearance::default(),
+            settings: Settings::default(),
+            profile: None,
+            core_settings: None,
+            dark_override: None,
+            applied_dark: None,
+            agent: None,
             status: Status::Detached,
             title: String::new(),
             pending: None,
@@ -141,6 +156,15 @@ impl TerminalView {
             scale: 1.0,
             requested: None,
             scrolled: Point::default(),
+            refit: false,
+            blink_on: true,
+            cursor_blinks: false,
+            _blink: cx.spawn(async move |this, cx| loop {
+                cx.background_executor().timer(BLINK_HALF_PERIOD).await;
+                if this.update(cx, |this, cx| this.blink_tick(cx)).is_err() {
+                    return;
+                }
+            }),
             cursor_cell: None,
             buttons_down: Vec::new(),
             was_focused: false,
@@ -193,6 +217,70 @@ impl TerminalView {
 
     pub fn title(&self) -> &str {
         &self.title
+    }
+
+    pub fn settings(&self) -> &Settings {
+        &self.settings
+    }
+
+    /// Use `profile` and `settings` (what the core sent) from now on.
+    pub fn apply_core(
+        &mut self,
+        profile: Option<Option<TerminalProfile>>,
+        settings: Option<SettingsData>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(profile) = profile {
+            self.profile = profile;
+        }
+        if let Some(settings) = settings {
+            self.core_settings = Some(settings);
+        }
+        self.apply_settings(cx);
+    }
+
+    /// Take the window to be dark or light whatever the system says (tests).
+    pub fn set_dark(&mut self, dark: Option<bool>, cx: &mut Context<Self>) {
+        self.dark_override = dark;
+        self.apply_settings(cx);
+    }
+
+    fn apply_settings(&mut self, cx: &mut Context<Self>) {
+        let dark = self.dark_override.unwrap_or_else(|| {
+            matches!(
+                cx.window_appearance(),
+                WindowAppearance::Dark | WindowAppearance::VibrantDark
+            )
+        });
+        self.applied_dark = Some(dark);
+        let installed = cx.text_system().all_font_names();
+        let settings = Settings::from_core(
+            self.profile.as_ref(),
+            self.core_settings.as_ref(),
+            dark,
+            &installed,
+        );
+        if settings == self.settings {
+            return;
+        }
+        self.vt.set_theme(settings.theme.clone());
+        self.vt.set_scrollback_lines(settings.scrollback);
+        self.vt
+            .set_default_cursor(settings.cursor_shape, settings.cursor_blink);
+        self.settings = settings;
+        self.refit = true;
+        cx.notify();
+    }
+
+    /// Flip a blinking cursor to its other half. A cursor that does not blink stays on.
+    pub fn blink_tick(&mut self, cx: &mut Context<Self>) {
+        if self.cursor_blinks && self.was_focused {
+            self.blink_on = !self.blink_on;
+            cx.notify();
+        } else if !self.blink_on {
+            self.blink_on = true;
+            cx.notify();
+        }
     }
 
     /// The grid the screen is at: the size the core last gave it.
@@ -251,9 +339,11 @@ impl TerminalView {
                 replay,
                 input,
                 resize,
+                agent,
             } => {
                 self.input_lease = input;
                 self.resize_lease = resize;
+                self.agent = agent;
                 // The size is told once after attaching, as the web terminal does, whatever
                 // the fit looks like.
                 self.requested = None;
@@ -263,12 +353,26 @@ impl TerminalView {
                 self.set_status(Status::Live, cx);
             }
             FromCore::Output(data) => self.output(&data, cx),
+            FromCore::Profile(profile) => self.apply_core(Some(profile), None, cx),
+            FromCore::Settings(settings) => self.apply_core(None, Some(*settings), cx),
+            FromCore::Agent(agent) => {
+                // A lease taken from this view ends its typing; one it took starts it, and the
+                // size is told again.
+                if agent.resize && !self.resize_lease {
+                    self.requested = None;
+                }
+                self.input_lease = agent.input;
+                self.resize_lease = agent.resize;
+                self.agent = Some(agent);
+                cx.notify();
+            }
             FromCore::Exited(code) => self.set_status(Status::Exited(code), cx),
             FromCore::Failed(reason) => self.set_status(Status::Failed(reason), cx),
             FromCore::Disconnected(reason) => {
                 // The screen stays; the shell is not known to have ended.
                 self.input_lease = false;
                 self.resize_lease = false;
+                self.agent = None;
                 self.set_status(Status::Disconnected(reason), cx);
             }
         }
@@ -316,6 +420,7 @@ impl TerminalView {
             return;
         }
         self.vt.scroll_to_bottom();
+        self.blink_on = true;
         self.send(ToCore::Input(bytes));
         cx.notify();
     }
@@ -342,7 +447,7 @@ impl TerminalView {
             }
             return true;
         }
-        match key_bytes(&mut self.vt, keystroke, repeat) {
+        match key_bytes_with(&mut self.vt, keystroke, repeat, self.settings.option_as_alt) {
             Some(bytes) => {
                 self.type_bytes(bytes, cx);
                 true
@@ -518,25 +623,37 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) -> Painted {
         self.scale = window.scale_factor();
+        let dark = self.dark_override.unwrap_or(matches!(
+            window.appearance(),
+            WindowAppearance::Dark | WindowAppearance::VibrantDark
+        ));
+        if self.applied_dark != Some(dark) {
+            self.apply_settings(cx);
+        }
+        let (pad_x, pad_y) = self.settings.padding;
+        let family = self.settings.font_family.clone();
         let available = size(
-            (bounds.size.width - px(2. * layout::PAD_X)).max(px(0.)),
-            (bounds.size.height - px(2. * layout::PAD_Y)).max(px(0.)),
+            (bounds.size.width - px(2. * pad_x)).max(px(0.)),
+            (bounds.size.height - px(2. * pad_y)).max(px(0.)),
         );
         // A view that doesn't hold the resize lease takes the core's size and draws it at the
         // size it was last laid out at.
-        let sizes_itself = self.to_core.is_none() || self.resize_lease || self.pending.is_some();
+        let sizes_itself = self.to_core.is_none()
+            || self.resize_lease
+            || self.pending.is_some()
+            || std::mem::take(&mut self.refit);
         let fit = match self.fitted {
             Some(fit) if !sizes_itself => Fit {
-                metrics: layout::metrics(window, fit.metrics.font_px),
+                metrics: layout::metrics(window, &family, fit.metrics.font_px),
                 ..fit
             },
-            _ => layout::fit(window, available, self.appearance.font_px),
+            _ => layout::fit(window, available, &family, self.settings.font_px),
         };
         self.fitted = Some(fit);
         let snap = |v: Pixels| px((f32::from(v) * self.scale).round() / self.scale);
         self.origin = point(
-            snap(bounds.origin.x + px(layout::PAD_X)),
-            snap(bounds.origin.y + px(layout::PAD_Y)),
+            snap(bounds.origin.x + px(pad_x)),
+            snap(bounds.origin.y + px(pad_y)),
         );
         if let Some(pending) = self.pending.take() {
             // The shell starts at the size of the pane it opens in.
@@ -576,12 +693,16 @@ impl TerminalView {
         }
         let frame = self.vt.frame();
         self.cursor_cell = frame.cursor_cell;
+        self.cursor_blinks = frame.cursor.is_some_and(|c| c.blink);
         Painted {
             frame,
             metrics: fit.metrics,
             origin: self.origin,
             scale: self.scale,
             focused,
+            family,
+            opacity: self.settings.opacity,
+            blink_on: self.blink_on,
         }
     }
 
@@ -620,7 +741,59 @@ fn same_run(a: &Cell, b: &Cell) -> bool {
         && a.italic == b.italic
         && a.faint == b.faint
         && a.underline == b.underline
+        && a.underline_style == b.underline_style
+        && a.underline_color == b.underline_color
         && a.strike == b.strike
+}
+
+/// An underline of `style` from `from` for `width`, `cell` being one cell's width: straight,
+/// two lines, a wave, dots or dashes. A run shares one colour, so the pattern restarts with it.
+#[allow(clippy::too_many_arguments)]
+fn paint_underline(
+    window: &mut Window,
+    style: Underline,
+    color: Hsla,
+    from: Point<Pixels>,
+    width: Pixels,
+    cell: Pixels,
+    thickness: Pixels,
+    snap_box: &dyn Fn(Bounds<Pixels>) -> Bounds<Pixels>,
+) {
+    let mut quad = |x: Pixels, y: Pixels, w: Pixels| {
+        let b = Bounds::new(from + point(x, y), size(w, thickness));
+        window.paint_quad(fill(snap_box(b), color));
+    };
+    match style {
+        Underline::Double => {
+            quad(px(0.), -thickness * 1.5, width);
+            quad(px(0.), thickness * 0.5, width);
+        }
+        Underline::Curly => {
+            // A stair-step wave, four steps to the cell.
+            let step = cell / 4.0;
+            let mut x = px(0.);
+            let mut n = 0;
+            while x < width {
+                let up = [1.0, 0.0, -1.0, 0.0][n % 4];
+                quad(x, thickness * up, step.min(width - x));
+                x += step;
+                n += 1;
+            }
+        }
+        Underline::Dotted | Underline::Dashed => {
+            let (on, off) = if style == Underline::Dotted {
+                (cell / 4.0, cell / 4.0)
+            } else {
+                (cell * 0.6, cell * 0.4)
+            };
+            let mut x = px(0.);
+            while x < width {
+                quad(x, px(0.), on.min(width - x));
+                x += on + off;
+            }
+        }
+        _ => quad(px(0.), px(0.), width),
+    }
 }
 
 fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx: &mut App) {
@@ -630,7 +803,17 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
         origin,
         scale,
         focused,
+        family,
+        opacity,
+        blink_on,
     } = painted;
+    // ponytail: opacity is applied per colour, not to the pane as a group like the web's CSS
+    // opacity, so text over a cell background shows the background through it twice.
+    let col = |c: Rgb| {
+        let mut h = color(c);
+        h.a *= opacity;
+        h
+    };
     let snap = |v: Pixels| px((f32::from(v) * scale).round() / scale);
     let snap_box = |b: Bounds<Pixels>| {
         let (x0, x1) = (snap(b.origin.x), snap(b.origin.x + b.size.width));
@@ -645,7 +828,7 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
     let underline = baseline + thickness;
     let strike = baseline - metrics.ascent * 0.35;
 
-    window.paint_quad(fill(bounds, color(frame.bg)));
+    window.paint_quad(fill(bounds, col(frame.bg)));
 
     // Backgrounds first, a run of one colour as one quad so neighbours meet without a seam.
     for (y, row) in frame.rows.iter().enumerate() {
@@ -660,7 +843,7 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
                 x += 1;
             }
             let run = Bounds::new(at(start, y), size(cw * (x - start) as f32, ch));
-            window.paint_quad(fill(snap_box(run), color(bg)));
+            window.paint_quad(fill(snap_box(run), col(bg)));
         }
     }
 
@@ -704,7 +887,7 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
                 }
             }
             let end = x.min(row.len());
-            let mut fg = color(first.fg);
+            let mut fg = col(first.fg);
             if first.faint {
                 fg.a = 0.6;
             }
@@ -715,7 +898,7 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
                 if !text.is_empty() {
                     let run = TextRun {
                         len: text.len(),
-                        font: layout::cell_font(first.bold, first.italic),
+                        font: layout::cell_font(&family, first.bold, first.italic),
                         color: fg,
                         background_color: None,
                         underline: None,
@@ -730,30 +913,36 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
                     let _ = line.paint(at(start, y), ch, TextAlign::Left, None, window, cx);
                 }
             }
-            for (on, offset) in [(first.underline, underline), (first.strike, strike)] {
-                if on {
-                    let rule = Bounds::new(
-                        at(start, y) + point(px(0.), offset),
-                        size(cw * (end - start) as f32, thickness),
-                    );
-                    window.paint_quad(fill(snap_box(rule), fg));
-                }
+            if first.underline {
+                let line = first.underline_color.map_or(fg, color);
+                paint_underline(
+                    window,
+                    first.underline_style,
+                    line,
+                    at(start, y) + point(px(0.), underline),
+                    cw * (end - start) as f32,
+                    cw,
+                    thickness,
+                    &snap_box,
+                );
+            }
+            if first.strike {
+                let rule = Bounds::new(
+                    at(start, y) + point(px(0.), strike),
+                    size(cw * (end - start) as f32, thickness),
+                );
+                window.paint_quad(fill(snap_box(rule), fg));
             }
         }
     }
 
-    // The cursor, over the glyph it covers.
-    if let Some(cursor) = frame.cursor {
+    // The cursor, over the glyph it covers. A blinking one is off half the time while focused.
+    if let Some(cursor) = frame.cursor.filter(|c| blink_on || !focused || !c.blink) {
         let (x, y) = (cursor.x as usize, cursor.y as usize);
         let under = frame.rows.get(y).and_then(|r| r.get(x));
-        let width = cw
-            * if under.is_some_and(|c| c.wide) {
-                2.0
-            } else {
-                1.0
-            };
+        let width = cw * if cursor.wide { 2.0 } else { 1.0 };
         let cell = Bounds::new(at(x, y), size(width, ch));
-        let c = color(cursor.color);
+        let c = col(cursor.color);
         use super::vt::CursorShape::*;
         match (focused, cursor.shape) {
             (true, Block) => {
@@ -761,8 +950,8 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
                 if let Some(glyph) = under.filter(|c| !c.text.is_empty()) {
                     let run = TextRun {
                         len: glyph.text.len(),
-                        font: layout::cell_font(glyph.bold, glyph.italic),
-                        color: color(frame.bg),
+                        font: layout::cell_font(&family, glyph.bold, glyph.italic),
+                        color: col(cursor.text),
                         background_color: None,
                         underline: None,
                         strikethrough: None,
@@ -795,7 +984,8 @@ impl gpui::Render for TerminalView {
         let view = cx.entity();
         let paint_view = view.clone();
         let focused = self.focus.is_focused(window);
-        let bg = color(self.vt.background());
+        let mut bg = color(self.vt.background());
+        bg.a = self.settings.opacity;
         let note = self.note();
         let mut pane = div()
             .id("terminal")

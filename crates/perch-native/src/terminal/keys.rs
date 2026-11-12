@@ -10,6 +10,7 @@
 //! What a GPUI key press sends the program: the key described to the encoder in
 //! [`super::vt`], which encodes it once, in the mode the program asked for.
 
+use super::settings::OptionAsAlt;
 use super::vt::{KeyInput, Vt};
 use ghostty_sys as g;
 use gpui::Keystroke;
@@ -17,7 +18,21 @@ use gpui::Keystroke;
 /// The bytes for `keystroke`, or `None` when the terminal has nothing to say for it (a key with
 /// no meaning here, or a Command chord, which belongs to the app).
 pub fn key_bytes(vt: &mut Vt, keystroke: &Keystroke, repeat: bool) -> Option<Vec<u8>> {
-    let m = keystroke.modifiers;
+    key_bytes_with(vt, keystroke, repeat, OptionAsAlt::Auto)
+}
+
+/// [`key_bytes`] under the `optionAsAlt` setting: with it off, Option types the keyboard
+/// layout's character instead of an Alt sequence.
+pub fn key_bytes_with(
+    vt: &mut Vt,
+    keystroke: &Keystroke,
+    repeat: bool,
+    option: OptionAsAlt,
+) -> Option<Vec<u8>> {
+    let mut m = keystroke.modifiers;
+    if option == OptionAsAlt::Off {
+        m.alt = false;
+    }
     if m.platform {
         return None;
     }
@@ -235,6 +250,21 @@ mod tests {
 
     fn sent(vt: &mut Vt, text: &str) -> Vec<u8> {
         key_bytes(vt, &stroke(text), false).unwrap_or_default()
+    }
+
+    #[test]
+    fn option_as_alt_off_types_the_layouts_character() {
+        let mut vt = Vt::new(80, 24);
+        let mut option_s = stroke("alt-s");
+        option_s.key_char = Some("ß".into());
+        assert_eq!(
+            key_bytes_with(&mut vt, &option_s, false, OptionAsAlt::Off).unwrap(),
+            "ß".as_bytes()
+        );
+        assert_eq!(
+            key_bytes_with(&mut vt, &option_s, false, OptionAsAlt::Auto).unwrap(),
+            b"\x1bs"
+        );
     }
 
     #[test]

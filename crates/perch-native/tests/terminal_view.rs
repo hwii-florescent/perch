@@ -72,6 +72,11 @@ fn run_core(scratch: &Path) {
     std::fs::create_dir_all(&home).unwrap();
     // An empty startup file keeps zsh from offering its first-run setup menu.
     std::fs::write(home.join(".zshrc"), "").unwrap();
+    // The user's terminal, as the core reads it: an iTerm2 profile with separate light and dark
+    // colours, a bar cursor, and a font and size.
+    let prefs = home.join("Library/Preferences");
+    std::fs::create_dir_all(&prefs).unwrap();
+    std::fs::write(prefs.join("com.googlecode.iterm2.plist"), iterm_plist()).unwrap();
     std::env::set_var("HOME", &home);
     std::env::set_var("PERCH_SETTINGS", scratch.join("settings.json"));
     std::env::set_var("PERCHD_DIR", scratch.join("daemon"));
@@ -111,6 +116,46 @@ fn run_core(scratch: &Path) {
         }
         let _ = boot.await;
     });
+}
+
+/// The colour iTerm2 stores: sRGB components from 0 to 1.
+fn iterm_color(key: &str, rgb: (u8, u8, u8)) -> String {
+    let c = |v: u8| f64::from(v) / 255.0;
+    format!(
+        "<key>{key}</key><dict><key>Red Component</key><real>{}</real>\
+         <key>Green Component</key><real>{}</real><key>Blue Component</key><real>{}</real></dict>",
+        c(rgb.0),
+        c(rgb.1),
+        c(rgb.2)
+    )
+}
+
+pub const DARK_BG: (u8, u8, u8) = (0x10, 0x20, 0x30);
+pub const LIGHT_BG: (u8, u8, u8) = (0xf0, 0xf0, 0xe0);
+
+fn iterm_plist() -> String {
+    let mut colours = String::new();
+    for (suffix, bg, fg) in [
+        (" (Dark)", DARK_BG, (0xd0, 0xd0, 0xd0)),
+        (" (Light)", LIGHT_BG, (0x20, 0x20, 0x20)),
+        ("", DARK_BG, (0xd0, 0xd0, 0xd0)),
+    ] {
+        colours += &iterm_color(&format!("Background Color{suffix}"), bg);
+        colours += &iterm_color(&format!("Foreground Color{suffix}"), fg);
+        colours += &iterm_color(&format!("Ansi 1 Color{suffix}"), (0xcc, 0x33, 0x33));
+        colours += &iterm_color(&format!("Cursor Color{suffix}"), (0, 0xff, 0));
+    }
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>New Bookmarks</key><array><dict>
+<key>Normal Font</key><string>Monaco 12</string>
+<key>Use Separate Colors for Light and Dark Mode</key><true/>
+<key>Cursor Type</key><integer>1</integer>
+<key>Blinking Cursor</key><true/>
+{colours}
+</dict></array></dict></plist>"#
+    )
 }
 
 fn scratch_dir() -> PathBuf {
@@ -179,6 +224,34 @@ fn view(core_process: &mut Child, scratch: &Path) {
     });
 
     let mut h = Harness::open(core, &session_id, 900., 420.);
+
+    // The user's own terminal, as the core read it from the profile in the scratch HOME.
+    h.wait("the profile", |h| {
+        h.view(|v, _| v.settings().font_px == 12.0)
+    });
+    h.view(|v, cx| v.set_dark(Some(true), cx));
+    let look = h.view(|v, _| v.settings().clone());
+    let rgb = |c: (u8, u8, u8)| perch_native::terminal::vt::Rgb(c.0, c.1, c.2);
+    assert_eq!(look.theme.bg, rgb(DARK_BG), "the dark palette");
+    assert_eq!(look.theme.cursor, rgb((0, 0xff, 0)));
+    assert_eq!(look.theme.ansi[1], rgb((0xcc, 0x33, 0x33)));
+    assert_eq!(look.font_family, "Monaco");
+    assert_eq!(
+        look.cursor_shape,
+        perch_native::terminal::vt::CursorShape::Bar
+    );
+    assert!(look.cursor_blink);
+    assert_eq!(
+        (look.padding, look.opacity, look.clipboard_write),
+        ((0.0, 0.0), 1.0, true)
+    );
+    h.view(|v, cx| v.set_dark(Some(false), cx));
+    assert_eq!(
+        h.view(|v, _| v.settings().theme.bg),
+        rgb(LIGHT_BG),
+        "the light palette"
+    );
+    h.view(|v, cx| v.set_dark(None, cx));
 
     // The screen the shell already had is repainted when the view attaches.
     h.wait("the printed line to be repainted", |h| {

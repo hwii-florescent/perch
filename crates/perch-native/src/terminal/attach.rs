@@ -5,10 +5,13 @@
 //! the session again if the core had lost it, and a view cannot tell a dropped socket from a
 //! dead shell. Dropping the view's sender detaches (the shell keeps running in the core).
 
-use crate::client::Core;
+use crate::client::{Core, Terminal};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::StreamExt;
+use perch_core::agent_fleet::AgentState;
+use perch_core::iterm_profile::TerminalProfile;
 use perch_core::protocol::ServerMessage;
+use perch_core::protocol::SettingsData;
 
 /// What the view asks of the core.
 #[derive(Debug, PartialEq, Eq)]
@@ -17,10 +20,14 @@ pub enum ToCore {
     Input(Vec<u8>),
     /// Size the shell's terminal. Only the holder of the resize lease changes it.
     Resize(u16, u16),
+    /// Take the input and the size from whichever view holds them.
+    TakeControl,
+    /// End the shell. Needs the input lease.
+    Kill,
 }
 
 /// What the core says about the terminal.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum FromCore {
     /// Attached. `replay` repaints the screen and its history; `input` and `resize` say whether
     /// this connection holds the leases that let it type and size the shell.
@@ -28,7 +35,14 @@ pub enum FromCore {
         replay: String,
         input: bool,
         resize: bool,
+        agent: Option<AgentInfo>,
     },
+    /// The user's terminal profile, as the core sent it on connecting (`server.info`).
+    Profile(Option<TerminalProfile>),
+    /// The settings, as the core sent them on connecting and sends them again when they change.
+    Settings(Box<SettingsData>),
+    /// The agent's lifecycle changed, or another view took a lease this one held.
+    Agent(AgentInfo),
     /// Live output, in order after the replay.
     Output(String),
     /// The shell ended; the core said so.
@@ -37,6 +51,38 @@ pub enum FromCore {
     Failed(String),
     /// The connection to the core dropped after attaching. The shell is not known to have ended.
     Disconnected(String),
+}
+
+/// What the core says about the agent in this terminal and who may type and size it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AgentInfo {
+    pub state: AgentState,
+    /// This connection holds the lease that lets it type.
+    pub input: bool,
+    /// This connection holds the lease that lets it size the shell.
+    pub resize: bool,
+    /// Another view holds the input lease.
+    pub input_elsewhere: bool,
+    /// A paired device (a phone), not this computer, holds the size.
+    pub resize_on_device: bool,
+}
+
+impl AgentInfo {
+    fn of(terminal: &Terminal) -> Self {
+        let status = &terminal.status;
+        Self {
+            state: status.state,
+            input: terminal.owns_input(),
+            resize: terminal.owns_resize(),
+            input_elsewhere: !terminal.owns_input() && status.input_owner.is_some(),
+            // "local" is the device id of this computer's own windows.
+            resize_on_device: !terminal.owns_resize()
+                && status
+                    .resize_owner
+                    .as_ref()
+                    .is_some_and(|o| o.device_id != "local"),
+        }
+    }
 }
 
 /// Attach `session_id`'s terminal of `provider` at `cols` x `rows` (the size a new shell
@@ -93,7 +139,7 @@ async fn run(
         anyhow::Ok((connection, terminal))
     }
     .await;
-    let (mut connection, terminal) = match attached {
+    let (mut connection, mut terminal) = match attached {
         Ok(attached) => attached,
         Err(error) => {
             let _ = events.unbounded_send(FromCore::Failed(format!("{error:#}")));
@@ -104,6 +150,7 @@ async fn run(
         replay: terminal.replay.clone(),
         input: terminal.owns_input(),
         resize: terminal.owns_resize(),
+        agent: Some(AgentInfo::of(&terminal)),
     };
     if events.unbounded_send(attached).is_err() {
         let _ = connection.release_terminal(&terminal).await;
@@ -119,6 +166,22 @@ async fn run(
                 }
                 Ok(ServerMessage::TerminalExit { terminal_id, code }) if terminal_id == terminal.id => {
                     if events.unbounded_send(FromCore::Exited(code)).is_err() {
+                        break None;
+                    }
+                }
+                Ok(ServerMessage::ServerInfo { terminal_profile, .. }) => {
+                    if events.unbounded_send(FromCore::Profile(terminal_profile)).is_err() {
+                        break None;
+                    }
+                }
+                Ok(ServerMessage::SettingsCurrent { settings }) => {
+                    if events.unbounded_send(FromCore::Settings(Box::new(settings))).is_err() {
+                        break None;
+                    }
+                }
+                Ok(ServerMessage::AgentLifecycleChanged { host_id, status }) if host_id == "local" => {
+                    terminal.follow_owners(&status);
+                    if events.unbounded_send(FromCore::Agent(AgentInfo::of(&terminal))).is_err() {
                         break None;
                     }
                 }
@@ -140,6 +203,16 @@ async fn run(
                     Some(ToCore::Resize(cols, rows)) => {
                         connection.terminal_resize(&terminal, cols, rows).await
                     }
+                    Some(ToCore::TakeControl) => {
+                        let taken = connection.take_control(&mut terminal).await;
+                        if taken.is_ok()
+                            && events.unbounded_send(FromCore::Agent(AgentInfo::of(&terminal))).is_err()
+                        {
+                            break None;
+                        }
+                        taken
+                    }
+                    Some(ToCore::Kill) => connection.terminal_kill(&terminal).await,
                 };
                 if let Err(error) = sent {
                     break Some(format!("{error:#}"));
