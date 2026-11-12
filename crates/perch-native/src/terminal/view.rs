@@ -1169,13 +1169,15 @@ impl TerminalView {
         position: Point<Pixels>,
         modifiers: Modifiers,
     ) -> bool {
+        let takes = self.can_type() && self.vt.mouse_tracking() && !modifiers.shift;
         match (action, button) {
-            (MouseAction::Press, Some(b)) => {
+            // Only a press the program was told of is remembered, so only its release is
+            // reported: the program never sees the end of a click it did not see begin.
+            (MouseAction::Press, Some(b)) if takes => {
                 if !self.buttons_down.contains(&b) {
                     self.buttons_down.push(b);
                 }
             }
-            // A release goes only to the program that was told of the press.
             (MouseAction::Release, Some(b)) => {
                 let Some(at) = self.buttons_down.iter().position(|d| *d == b) else {
                     return false;
@@ -1184,8 +1186,11 @@ impl TerminalView {
             }
             _ => {}
         }
-        if !self.can_type() || !self.vt.mouse_tracking() || modifiers.shift {
+        if !takes && !matches!(action, MouseAction::Release) {
             return false;
+        }
+        if !self.can_type() {
+            return true;
         }
         let raw = button.map(|b| match b {
             GpuiButton::Left => MouseButton::Left,

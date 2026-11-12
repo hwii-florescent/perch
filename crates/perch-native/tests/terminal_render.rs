@@ -1201,6 +1201,17 @@ fn input_and_scrolling() {
     });
     assert!(!shifted, "shift keeps the mouse for the terminal");
     assert_eq!(h.sent(), vec![]);
+    // The release of a press the program never saw is not reported to it either.
+    let unseen = h.view(|v, _| {
+        v.mouse(
+            perch_native::terminal::vt::MouseAction::Release,
+            Some(gpui::MouseButton::Left),
+            point(px(30.), px(30.)),
+            Modifiers::default(),
+        )
+    });
+    assert!(!unseen, "the release is the terminal's own too");
+    assert_eq!(h.sent(), vec![]);
 
     // Without the input lease nothing is typed.
     let mut watcher = Harness::open(900., 420.);
