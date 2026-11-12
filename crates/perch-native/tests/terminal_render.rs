@@ -347,6 +347,10 @@ fn main() {
         "dropped_files_type_their_paths",
         dropped_files_type_their_paths,
     );
+    run(
+        "a_pane_with_no_room_tells_nobody_its_size",
+        a_pane_with_no_room_tells_nobody_its_size,
+    );
     run("ownership_and_named_actions", ownership_and_named_actions);
     run(
         "x10_mouse_reports_past_the_text_range",

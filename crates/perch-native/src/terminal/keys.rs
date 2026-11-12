@@ -4,8 +4,8 @@
 // 4c8c622d7965a6f6787f55b1896b70795fc68918), licensed under the Apache License,
 // Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0). Modified for Perch:
 // no Windows input mode and no per-side Option setting (GPUI 0.3 does not report
-// the side); Option always types Alt sequences, as in the web terminal. See
-// THIRD_PARTY_NOTICES.md.
+// the side): Option types Alt sequences unless the `optionAsAlt` setting is off, as in
+// the web terminal. See THIRD_PARTY_NOTICES.md.
 
 //! What a GPUI key press sends the program: the key described to the encoder in
 //! [`super::vt`], which encodes it once, in the mode the program asked for.

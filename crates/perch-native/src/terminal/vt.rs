@@ -3,9 +3,9 @@
 // herdr (https://github.com/herdrdev/herdr-app, commit
 // 4c8c622d7965a6f6787f55b1896b70795fc68918), licensed under the Apache License,
 // Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0). Modified for Perch:
-// no theme file, search, links, selection or kitty graphics; the paste encoder,
-// replay muting and the scroll-position reads are Perch's own. See
-// THIRD_PARTY_NOTICES.md.
+// no theme file (the theme comes from the core's profile); search, selection, links and
+// kitty graphics live in their own modules; the paste encoder, replay muting and the
+// scroll-position reads are Perch's own. See THIRD_PARTY_NOTICES.md.
 
 //! A client-side terminal on libghostty-vt: fed the bytes a session's shell wrote, read back
 //! as the frame to draw, and asked to encode what the person types, clicks and pastes for the
