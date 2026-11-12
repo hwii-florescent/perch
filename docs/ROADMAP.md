@@ -605,6 +605,13 @@ estimated 231 MB for the Tauri app, whose idle figure of 146 MB was the only one
   drag, tab menu and closed-tab history; the terminal rows still open in the parity checklist; then the
   Tauri-only list above, starting with the editor (a spike showed `gpui-component` can draw and edit a
   highlighted file).
+- **End goal for files and Git:** at least what VS Code does, in the native window. Until that is built
+  they stay in the Tauri app and the native client hands off to it.
+- **Decided 2026-11-12:** graphemes cluster from the start (the phone's browser view, on xterm.js, can
+  differ on emoji sequences until the phone has its own app); closing a tab ends its session, asking
+  first for an agent when the warning is on; copy on select is a setting, on by default; the grid is
+  centred vertically; Command with Left, Right and Backspace edit the line; Option as Alt honours Left
+  and Right (not yet tried on a real keyboard); the size is taken back from a phone for one tab or all.
 - Linux and Windows builds of the native client are untried.
 
 ## Later, bounded additions
