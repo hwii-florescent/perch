@@ -102,6 +102,15 @@ fn cases() -> Vec<Value> {
             4096,
             json!({ "logical": ["123456789世界abc", "after"] }),
         ),
+        // Combining marks and a text symbol with VS16 stay in one cell each.
+        case(
+            "grapheme_clusters",
+            10,
+            4,
+            "e\u{301}x \u{270d}\u{fe0f}y\r\n123456\u{270d}\u{fe0f}z",
+            4096,
+            json!({}),
+        ),
         case(
             "soft_wrapped_lines",
             20,

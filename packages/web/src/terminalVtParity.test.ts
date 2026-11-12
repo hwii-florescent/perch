@@ -201,21 +201,22 @@ const tally = (found: Difference[]): Record<string, number> => {
 
 /**
  * What differs, per "<comparison>/<case>"; absent means identical. Each entry is a real difference:
- * - cjk_and_emoji, text: a flag (two regional indicators) is two wide cells in Ghostty and two narrow ones
- *   in xterm.js; with the stream (not the repaint) a keycap keeps U+FE0F in xterm.js and loses it in Ghostty.
+ * - cjk_and_emoji, text: Ghostty clusters graphemes from the start and xterm.js does not, so an emoji sequence (a flag, an
+ *   emoji followed by U+FE0F) is one wide cell in Ghostty and its pieces in
+ *   xterm.js, and the rest of the row shifts. Accepted until the xterm.js clients cluster too.
  * - colours_and_styles, text: hidden text (SGR 8) is blank in Ghostty and kept, flagged invisible, by xterm.js.
  * - colours_and_styles, flags: blink (SGR 5) and overline (SGR 53) exist in xterm.js and not in the native cell.
  * - kitty_image, images: the native client holds the image placement; the repaint carries none and xterm.js
  *   here has no image support.
  */
 const KNOWN: Record<string, Record<string, number>> = {
-  "attach/cjk_and_emoji": { text: 12 },
+  "attach/cjk_and_emoji": { text: 35 },
   "attach/colours_and_styles": { flags: 13, text: 6 },
   "attach/kitty_image": { images: 1 },
   "repaint/kitty_image": { images: 1 },
-  "replayed/cjk_and_emoji": { text: 12 },
+  "replayed/cjk_and_emoji": { text: 35 },
   "replayed/colours_and_styles": { flags: 13, text: 6 },
-  "stream/cjk_and_emoji": { text: 14 },
+  "stream/cjk_and_emoji": { text: 35 },
   "stream/colours_and_styles": { flags: 13, text: 6 },
   "stream/kitty_image": { images: 1 },
 };
