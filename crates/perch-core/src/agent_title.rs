@@ -210,7 +210,8 @@ fn blocked() -> ProviderSignal {
 /// and OSC look-alikes inside other sequences are handled for free. The
 /// screen is a standard 24x80 without scrollback: only the title matters.
 pub struct TitleTracker {
-    screen: perchd::screen::Screen,
+    /// `None` when the engine could not allocate one: no title is followed.
+    screen: Option<perchd::screen::Screen>,
     status: Option<TitleStatus>,
 }
 
@@ -228,8 +229,9 @@ impl TitleTracker {
     /// changed. A title that says nothing keeps the last status: process
     /// exit, not a shell title, is what ends a session here.
     pub fn feed(&mut self, text: &str) -> Option<(Option<TitleStatus>, TitleStatus)> {
-        self.screen.process(text.as_bytes());
-        let next = classify(&self.screen.title())?;
+        let screen = self.screen.as_mut()?;
+        screen.process(text.as_bytes());
+        let next = classify(&screen.title())?;
         let previous = self.status.replace(next);
         (previous != Some(next)).then_some((previous, next))
     }
@@ -238,6 +240,15 @@ impl TitleTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tracker_without_a_screen_reports_nothing() {
+        let mut tracker = TitleTracker {
+            screen: None,
+            status: None,
+        };
+        assert_eq!(tracker.feed("\x1b]0;✳ Claude Code\x07"), None);
+    }
 
     #[test]
     fn titles_classify_like_orca() {

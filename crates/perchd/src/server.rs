@@ -11,6 +11,7 @@
 //! restart (or a reboot) reloads every session as exited-but-replayable.
 
 use crate::proto::{self, *};
+use crate::screen::{clamp_dimension, Screen};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
@@ -182,7 +183,9 @@ struct Inner {
     log_start: u64,
     log: Option<File>,
     history_error: Option<String>,
-    screen: crate::screen::Screen,
+    /// `None` when the terminal engine could not allocate one: the session
+    /// runs and keeps its log, and an attach replays the log's tail.
+    screen: Option<crate::screen::Screen>,
     cols: u16,
     rows: u16,
     alive: bool,
@@ -337,6 +340,11 @@ fn load_sessions(dir: &Path) -> HashMap<String, Arc<Session>> {
         } else {
             fs::metadata(&log).map(|m| m.len()).unwrap_or(0)
         };
+        let (cols, rows) = (clamp_dimension(meta.cols), clamp_dimension(meta.rows));
+        let screen = Screen::new(cols, rows);
+        if screen.is_none() {
+            eprintln!("perchd: {}: no screen; replay is the log's tail", meta.id);
+        }
         let session = Session {
             id: meta.id.clone(),
             argv: meta.argv,
@@ -349,9 +357,9 @@ fn load_sessions(dir: &Path) -> HashMap<String, Arc<Session>> {
                 log_start: meta.log_start,
                 log: None,
                 history_error: meta.history_error,
-                screen: crate::screen::Screen::new(meta.cols, meta.rows),
-                cols: meta.cols,
-                rows: meta.rows,
+                screen,
+                cols,
+                rows,
                 alive: false,
                 // No recorded code means the process was lost with its daemon.
                 exit_code: Some(meta.exit_code.unwrap_or(-1)),
@@ -511,6 +519,7 @@ fn handle(state: &Arc<State>, conn: u64, out: &Outbox, msg: ClientMsg) {
         }
         Request::Resize { id, cols, rows } => match state.get(&id) {
             Some(s) => {
+                let (cols, rows) = (clamp_dimension(cols), clamp_dimension(rows));
                 let mut inner = s.inner.lock().unwrap();
                 if inner.cleanup.stopping {
                     reply(Err("cleanup in progress".into()));
@@ -528,7 +537,9 @@ fn handle(state: &Arc<State>, conn: u64, out: &Outbox, msg: ClientMsg) {
                 }
                 inner.cols = cols;
                 inner.rows = rows;
-                inner.screen.set_size(cols, rows);
+                if let Some(screen) = inner.screen.as_mut() {
+                    screen.set_size(cols, rows);
+                }
                 reply(Ok(serde_json::Value::Null))
             }
             None => reply(not_found()),
@@ -577,7 +588,10 @@ fn handle(state: &Arc<State>, conn: u64, out: &Outbox, msg: ClientMsg) {
         Request::Snapshot { id } => match state.get(&id) {
             Some(s) => {
                 let inner = s.inner.lock().unwrap();
-                let screen = &inner.screen;
+                let Some(screen) = inner.screen.as_ref() else {
+                    reply(Err("screen unavailable".into()));
+                    return;
+                };
                 let (cursor_row, cursor_col) = screen.cursor_position();
                 reply(Ok(serde_json::to_value(Snapshot {
                     text: screen.contents(),
@@ -824,6 +838,13 @@ fn create(
         return Err("invalid id".into());
     }
     let program = argv.first().ok_or("empty argv")?.clone();
+    let (cols, rows) = (clamp_dimension(cols), clamp_dimension(rows));
+    // Built before the map lock and the child: nothing between here and the
+    // registration can fail on it. Without one the session still runs.
+    let screen = Screen::new(cols, rows);
+    if screen.is_none() {
+        eprintln!("perchd: {id}: no screen; replay is the log's tail");
+    }
     // The whole create runs under the map lock, so two creates for one id
     // cannot both spawn.
     let mut sessions = state.sessions.lock().unwrap();
@@ -836,7 +857,6 @@ fn create(
             return Err(ERR_EXISTS.into());
         }
     }
-    let (cols, rows) = (cols.max(1), rows.max(1));
     let pair = native_pty_system()
         .openpty(PtySize {
             rows,
@@ -883,7 +903,7 @@ fn create(
             log_start: 0,
             log: Some(log),
             history_error: None,
-            screen: crate::screen::Screen::new(cols, rows),
+            screen,
             cols,
             rows,
             alive: true,
@@ -1012,7 +1032,9 @@ fn pump_output(dir: &Path, s: &Session, mut reader: Box<dyn Read + Send>) {
             // Mark the newly truncated file valid before a daemon restart.
             write_meta(dir, s, &inner);
         }
-        inner.screen.process(bytes);
+        if let Some(screen) = inner.screen.as_mut() {
+            screen.process(bytes);
+        }
         if inner.seq - inner.log_start > LOG_CAP {
             compact(dir, s, &mut inner);
         }
@@ -1160,9 +1182,9 @@ fn attach(state: &State, s: &Session, conn: u64, out: &Outbox, rid: u64, since: 
     let restore = if since.is_none() && end > 0 {
         // The frame carries a kind byte, the seq and the id's length and bytes.
         let room = MAX_FRAME - 1 - 8 - 2 - s.id.len();
-        inner
-            .screen
-            .restore_bytes_within(room.min(DEFAULT_REPLAY as usize))
+        inner.screen.as_ref().map_or_else(Vec::new, |screen| {
+            screen.restore_bytes_within(room.min(DEFAULT_REPLAY as usize))
+        })
     } else {
         Vec::new()
     };
@@ -1203,6 +1225,7 @@ fn attach(state: &State, s: &Session, conn: u64, out: &Outbox, rid: u64, since: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::screen::MAX_DIMENSION;
 
     fn fixture(name: &str) -> State {
         let dir =
@@ -1265,7 +1288,7 @@ mod tests {
                 // A real failing write, portable to macOS without /dev/full.
                 log: Some(File::open(&path).unwrap()),
                 history_error: None,
-                screen: crate::screen::Screen::new(80, 24),
+                screen: Screen::new(80, 24),
                 cols: 80,
                 rows: 24,
                 alive: true,
@@ -1288,7 +1311,12 @@ mod tests {
             .as_ref()
             .unwrap()
             .contains("Execution continues"));
-        assert!(inner.screen.contents().contains("still running"));
+        assert!(inner
+            .screen
+            .as_ref()
+            .unwrap()
+            .contents()
+            .contains("still running"));
         drop(inner);
         // Even if truncating the old log also failed, daemon restart cannot
         // reinterpret old bytes under a new offset.
@@ -1311,6 +1339,133 @@ mod tests {
         drop(inner);
         let restored = load_sessions(&state.dir);
         assert_eq!(restored["shell"].inner.lock().unwrap().seq, 25);
+        fs::remove_dir_all(&state.dir).unwrap();
+    }
+
+    #[test]
+    fn an_oversized_grid_is_clamped_for_the_pty_and_the_screen() {
+        let state = Arc::new(fixture("clamp"));
+        create(
+            &state,
+            "shell".into(),
+            vec!["/bin/sh".into(), "-c".into(), "true".into()],
+            None,
+            vec![],
+            u16::MAX,
+            u16::MAX,
+            None,
+        )
+        .unwrap();
+        let session = state.get("shell").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let inner = session.inner.lock().unwrap();
+            if !inner.alive {
+                assert_eq!((inner.cols, inner.rows), (MAX_DIMENSION, MAX_DIMENSION));
+                assert!(inner.screen.is_some());
+                break;
+            }
+            drop(inner);
+            assert!(Instant::now() < deadline, "the child never exited");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        fs::remove_dir_all(&state.dir).unwrap();
+    }
+
+    /// A session whose terminal engine could not allocate a screen keeps
+    /// running: output is logged, requests are answered, and an attach replays
+    /// the log's tail.
+    #[test]
+    fn a_session_without_a_screen_still_answers_requests() {
+        let state = Arc::new(fixture("no-screen"));
+        let path = log_path(&state.dir, "shell");
+        let session = Arc::new(Session {
+            id: "shell".into(),
+            argv: vec![],
+            cwd: None,
+            pid: None,
+            created_ms: now_ms(),
+            reap: Mutex::new(()),
+            writer: Mutex::new(None),
+            master: Mutex::new(None),
+            inner: Mutex::new(Inner {
+                seq: 0,
+                log_start: 0,
+                log: Some(File::create(&path).unwrap()),
+                history_error: None,
+                screen: None,
+                cols: 80,
+                rows: 24,
+                alive: true,
+                exit_code: None,
+                cleanup: CleanupState::default(),
+                subscribers: HashMap::new(),
+            }),
+        });
+        state
+            .sessions
+            .lock()
+            .unwrap()
+            .insert("shell".into(), session.clone());
+        pump_output(
+            &state.dir,
+            &session,
+            Box::new(io::Cursor::new(b"still running")),
+        );
+        assert_eq!(session.inner.lock().unwrap().seq, 13);
+
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(64);
+        let (socket, _peer) = UnixStream::pair().unwrap();
+        let out = Outbox {
+            tx,
+            queued: Arc::new(AtomicUsize::new(0)),
+            socket: Arc::new(socket),
+        };
+        let send = |rid, req| handle(&state, 1, &out, ClientMsg { rid, req });
+        send(
+            1,
+            Request::Resize {
+                id: "shell".into(),
+                cols: u16::MAX,
+                rows: 0,
+            },
+        );
+        send(2, Request::Snapshot { id: "shell".into() });
+        send(
+            3,
+            Request::Attach {
+                id: "shell".into(),
+                since: None,
+            },
+        );
+        send(4, Request::List);
+
+        let bytes: Vec<u8> = rx.try_iter().flatten().collect();
+        let mut frames = io::Cursor::new(bytes);
+        let mut replies = Vec::new();
+        let mut replayed = Vec::new();
+        while let Some(frame) = proto::read_frame(&mut frames).unwrap() {
+            match frame {
+                Frame::Json(json) => {
+                    replies.push(serde_json::from_slice::<ServerMsg>(&json).unwrap())
+                }
+                Frame::Data { bytes, .. } => replayed.extend(bytes),
+            }
+        }
+        let error = |msg: &ServerMsg| match msg {
+            ServerMsg::Reply { error, .. } => error.clone(),
+            other => panic!("unexpected {other:?}"),
+        };
+        assert_eq!(replies.len(), 4);
+        assert_eq!(error(&replies[0]), None, "resize");
+        assert_eq!(error(&replies[1]).as_deref(), Some("screen unavailable"));
+        assert_eq!(error(&replies[2]), None, "attach");
+        assert_eq!(error(&replies[3]), None, "list: the map is not poisoned");
+        assert_eq!(replayed, b"still running");
+        let inner = session.inner.lock().unwrap();
+        assert_eq!((inner.cols, inner.rows), (MAX_DIMENSION, 1));
+        assert!(inner.subscribers.contains_key(&1));
+        drop(inner);
         fs::remove_dir_all(&state.dir).unwrap();
     }
 

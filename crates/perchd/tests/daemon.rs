@@ -304,7 +304,7 @@ fn a_default_attach_ends_with_the_exact_screen() {
     assert!(attached.start > 0, "the window must start past the paint");
     let mut seen = Vec::new();
     wait_for(&collector(reader), &mut seen, "TUI_DONE\u{1b}");
-    let mut view = perchd::screen::Screen::new(100, 30);
+    let mut view = perchd::screen::Screen::new(100, 30).unwrap();
     view.process(&seen);
     assert!(view.alternate_screen());
     assert!(
@@ -359,7 +359,7 @@ fn a_repaint_larger_than_a_frame_still_attaches() {
         repaint.len()
     );
     assert!(attached.start > 0);
-    let mut view = perchd::screen::Screen::new(500, 24);
+    let mut view = perchd::screen::Screen::new(500, 24).unwrap();
     view.process(&seen);
     assert!(
         view.contents().contains("HEAVY_DONE"),
@@ -404,7 +404,7 @@ fn an_exited_session_with_a_small_stream_and_a_big_screen_replays_its_whole_repa
             "round {round}: {} bytes",
             seen.len()
         );
-        let mut view = perchd::screen::Screen::new(500, 200);
+        let mut view = perchd::screen::Screen::new(500, 200).unwrap();
         view.process(&seen);
         assert!(
             view.contents().starts_with("EXITED_MARK"),

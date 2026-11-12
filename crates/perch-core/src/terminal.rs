@@ -40,7 +40,8 @@ pub const MAX_TERMINAL_REPLAY_BYTES: usize = perchd::proto::DEFAULT_REPLAY as us
 pub(crate) struct TerminalReplay {
     chunks: VecDeque<String>,
     bytes: usize,
-    screen: perchd::screen::Screen,
+    /// `None` when the engine could not allocate one: the tail is replayed.
+    screen: Option<perchd::screen::Screen>,
     /// The PTY's size as the last in-band size marker set it.
     size: Option<(u16, u16)>,
 }
@@ -78,10 +79,16 @@ impl TerminalReplay {
         }
         match parse_size_marker(data) {
             Some((cols, rows)) => {
-                self.screen.set_size(cols, rows);
+                if let Some(screen) = self.screen.as_mut() {
+                    screen.set_size(cols, rows);
+                }
                 self.size = Some((cols, rows));
             }
-            None => self.screen.process(data.as_bytes()),
+            None => {
+                if let Some(screen) = self.screen.as_mut() {
+                    screen.process(data.as_bytes());
+                }
+            }
         }
         let mut start = data.len().saturating_sub(MAX_TERMINAL_REPLAY_BYTES);
         while !data.is_char_boundary(start) {
@@ -108,7 +115,10 @@ impl TerminalReplay {
         // A repaint too big for the bound carries fewer of its oldest
         // scrollback rows, never a cut sequence.
         let room = MAX_TERMINAL_REPLAY_BYTES - marker.len().min(MAX_TERMINAL_REPLAY_BYTES);
-        let repaint = self.screen.restore_bytes_within(room);
+        let repaint = self
+            .screen
+            .as_ref()
+            .map_or_else(Vec::new, |screen| screen.restore_bytes_within(room));
         if repaint.is_empty() {
             return self.chunks.iter().map(String::as_str).collect();
         }
@@ -1531,7 +1541,7 @@ mod tests {
         }
         let text = replay.text();
         assert!(text.len() <= MAX_TERMINAL_REPLAY_BYTES);
-        let mut view = perchd::screen::Screen::new(100, 30);
+        let mut view = perchd::screen::Screen::new(100, 30).unwrap();
         view.process(text.as_bytes());
         let screen = view.contents();
         assert!(view.alternate_screen());
@@ -1563,9 +1573,24 @@ mod tests {
         assert!(text.starts_with(&format!("{}\x1bc", pty_size_marker(100, 30))));
         assert!(!text.contains("old output"));
         assert_eq!(text.matches("\x1b[8;").count(), 1);
-        let mut view = perchd::screen::Screen::new(100, 30);
+        let mut view = perchd::screen::Screen::new(100, 30).unwrap();
         view.process(text.as_bytes());
         assert_eq!(view.contents(), "new output");
+    }
+
+    /// Without a screen (the engine could not allocate one) the tail is
+    /// replayed and nothing else breaks.
+    #[test]
+    fn replay_without_a_screen_replays_the_tail() {
+        let mut replay = TerminalReplay::new(80, 24);
+        replay.screen = None;
+        replay.push("hello\r\n");
+        replay.push(&pty_size_marker(100, 30));
+        replay.push("world");
+        assert_eq!(
+            replay.text(),
+            format!("hello\r\n{}world", pty_size_marker(100, 30))
+        );
     }
 
     /// Nothing to repaint (only a size has arrived): the tail is all there is.
@@ -1597,7 +1622,7 @@ mod tests {
             text.len()
         );
         assert!(text.starts_with("\x1bc"));
-        let mut view = perchd::screen::Screen::new(500, 24);
+        let mut view = perchd::screen::Screen::new(500, 24).unwrap();
         view.process(text.as_bytes());
         assert!(view.contents().ends_with("$"), "{}", view.contents());
         assert!(view.dec_mode(2004));
