@@ -15,6 +15,10 @@
 //! arms, the second ends. A tab that only watches a session another view controls, and one this
 //! window is not attached to, just close: the session keeps running.
 //!
+//! `terminal.takeBack` and `terminal.takeBackAll` take the size back from a phone for the terminal on
+//! screen or for every terminal this window is attached to whose size a phone holds; none is
+//! attached for it.
+//!
 //! A tab for a blank session (listed, nothing ever launched in it) lists the launch choices of its
 //! computer; the one picked attaches that session, after the row is checked to be still blank.
 
@@ -447,6 +451,12 @@ impl Workspace {
             TerminalEvent::OpenLink(target) => crate::terminal::links::open_in_system(target),
             TerminalEvent::MenuAsked(at) => self.open_menu(id, *at, cx),
             TerminalEvent::Chose(provider) => self.start_chosen(id, provider, cx),
+            TerminalEvent::TakeBackAll => {
+                if let Err(error) = self.take_back_all(cx) {
+                    self.notice = Some(error);
+                    cx.notify();
+                }
+            }
             TerminalEvent::Status(Status::Live) => {
                 if let Some(pane) = self.panes.get_mut(id) {
                     pane.attempts = 0;
@@ -978,6 +988,7 @@ impl Workspace {
                 self.tabs.swap_next();
                 cx.notify();
             }
+            "terminal.takeBackAll" => self.take_back_all(cx)?,
             _ if name.starts_with("terminal.") => self.terminal_command(name, args, cx)?,
             _ if name.starts_with("tabs.jump") => {
                 let n = name["tabs.jump".len()..].parse().ok();
@@ -1545,6 +1556,22 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Take the size back from a phone for every terminal this window is attached to whose size a
+    /// phone holds, as the web's `takeBackAllSizes` does: each is asked for its size alone, and a
+    /// terminal this window already sizes is not asked at all. Nothing is attached for it.
+    fn take_back_all(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
+        let asked = self
+            .panes
+            .values()
+            .filter_map(|pane| pane.view.as_ref())
+            .filter(|view| view.update(cx, |view, cx| view.perform(Action::TakeSize, cx)))
+            .count();
+        if asked == 0 {
+            return Err("No phone holds the size of a terminal in this window.".into());
+        }
+        Ok(())
+    }
+
     /// A terminal's named action (`terminal.find`, `terminal.scroll {pages: -1}`, ...) on the tab
     /// on screen. The key dispatcher and the palette both end here.
     fn terminal_command(
@@ -1591,6 +1618,10 @@ impl Workspace {
             "terminal.takeControl" => (
                 Action::TakeControl,
                 "Nothing to take: this view already controls the terminal, or it is not attached.",
+            ),
+            "terminal.takeBack" => (
+                Action::TakeBack,
+                "No phone holds this terminal's size, or it is not attached.",
             ),
             "terminal.kill" => (
                 Action::Kill,

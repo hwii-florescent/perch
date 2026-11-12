@@ -160,7 +160,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     // The terminal's own commands. The web runs these in the terminal (`terminalSearch.ts`); here
     // the window's keymap runs them, so a person's choice of key applies and a key bound here
-    // never reaches the program. Page up and down, stop and take control have no default key.
+    // never reaches the program. Page up and down, stop, take control and take back have no default key.
     terminal("terminal.find", "Find in the terminal", &["mod+f"]),
     terminal(
         "terminal.clear",
@@ -204,6 +204,18 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "terminal.takeControl",
         "Take this terminal's input and size from the view that holds them",
         &[""],
+    ),
+    // The phone-size notice's two choices (`stock:phone-size`); the web gives them no key.
+    terminal(
+        "terminal.takeBack",
+        "Take back this tab's size from a phone",
+        &[""],
+    ),
+    scoped(
+        "terminal.takeBackAll",
+        "Take back all tabs' sizes from a phone",
+        &[""],
+        Scope::Any,
     ),
     terminal("terminal.kill", "Stop the terminal's process", &[""]),
     scoped(
@@ -384,6 +396,8 @@ pub const TYPED: &[(&str, Option<&str>)] = &[
     ("terminal.prevCommand", None),
     ("terminal.nextCommand", None),
     ("terminal.takeControl", None),
+    ("terminal.takeBack", None),
+    ("terminal.takeBackAll", None),
     ("terminal.kill", None),
     ("terminal.show", Some("id")),
     ("terminal.peek", Some("id")),
@@ -1065,6 +1079,20 @@ mod tests {
         assert_eq!(
             run(m.resolve(&press("cmd-left"), IN_TERMINAL)),
             "terminal.scrollTop"
+        );
+    }
+
+    #[test]
+    fn the_two_take_back_choices_are_commands_a_person_can_bind() {
+        for id in ["terminal.takeBack", "terminal.takeBackAll"] {
+            let shortcut = all_shortcuts().find(|s| s.id == id).expect(id);
+            assert_eq!(effective_spec(&shortcut, &BTreeMap::new(), true), None);
+            assert!(TYPED.iter().any(|(typed, _)| *typed == id), "{id}");
+        }
+        let m = keymap(&[("terminal.takeBackAll", "cmd+alt+t")], None);
+        assert_eq!(
+            run(m.resolve(&press("cmd-alt-t"), IN_TERMINAL)),
+            "terminal.takeBackAll"
         );
     }
 

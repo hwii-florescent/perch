@@ -796,6 +796,135 @@ fn terminal_commands_run_from_keys_and_the_palette() {
     println!("workspace_render: terminal commands ok");
 }
 
+/// A phone holds the size of two of three attached terminals: the pane offers the web's two
+/// choices only when typing is shared, "this" takes one terminal's input and size, "all" takes
+/// the size alone of each terminal a phone holds, and a terminal this window sizes is never asked.
+fn the_size_is_taken_back_from_a_phone_for_one_terminal_or_all() {
+    use perch_core::agent_fleet::AgentState;
+    use perch_native::terminal::attach::{AgentInfo, SHARED_INPUT};
+    let info = |resize: bool, resize_on_device: bool| {
+        FromCore::Agent(AgentInfo {
+            state: AgentState::Idle,
+            input: resize,
+            resize,
+            input_elsewhere: false,
+            resize_on_device,
+        })
+    };
+    // What was asked of the core, but for the size a view that sizes its terminal tells it.
+    let taken = |rx: &mut UnboundedReceiver<ToCore>| -> Vec<ToCore> {
+        asked(rx)
+            .into_iter()
+            .filter(|m| !matches!(m, ToCore::Resize(..)))
+            .collect()
+    };
+    let mut h = Harness::new(model(&[
+        ("a", json!({"cliProviderId": "terminal"})),
+        ("b", json!({"cliProviderId": "terminal"})),
+        ("c", json!({"cliProviderId": "terminal"})),
+    ]));
+    let (mut rxs, mut txs) = (Vec::new(), Vec::new());
+    for id in ["a", "b", "c"] {
+        h.open_as(id, Some("terminal"));
+        h.draw();
+        let (rx, tx) = h.live();
+        rxs.push(rx);
+        txs.push(tx);
+    }
+    let say = |h: &mut Harness, which: usize, message: FromCore| {
+        txs[which].unbounded_send(message).unwrap();
+        h.cx.run_until_parked();
+    };
+    // Nothing is held by a phone yet: there is nothing to take back.
+    assert_eq!(
+        h.run("terminal.takeBackAll", json!({})),
+        Err("No phone holds the size of a terminal in this window.".into())
+    );
+    assert_eq!(
+        h.run("terminal.takeBack", json!({})),
+        Err("No phone holds this terminal's size, or it is not attached.".into())
+    );
+    for rx in &mut rxs {
+        assert_eq!(taken(rx), vec![]);
+    }
+
+    // A phone sizes a and c; this window sizes b, which is on screen and has the keyboard.
+    say(&mut h, 0, info(false, true));
+    say(&mut h, 1, info(true, false));
+    say(&mut h, 2, info(false, true));
+    // Without shared typing the web offers Take control, not the choices.
+    assert!(h.ws(|ws| ws.terminal().is_some()));
+    h.open_as("c", Some("terminal"));
+    assert!(h.view(|v| v.size_held_by_phone() && !v.offers_take_back()));
+    assert_eq!(
+        h.view(|v| v.note()).as_deref(),
+        Some("A phone sets this terminal's size")
+    );
+    for which in 0..3 {
+        say(
+            &mut h,
+            which,
+            FromCore::Capabilities(vec![SHARED_INPUT.into()]),
+        );
+    }
+    assert!(h.view(|v| v.offers_take_back()));
+    assert_eq!(
+        h.view(|v| v.note()).as_deref(),
+        Some("Your phone is sizing this terminal")
+    );
+    // The window sizes b: no choices, and neither command has anything to do there.
+    h.open_as("b", Some("terminal"));
+    assert!(!h.view(|v| v.size_held_by_phone() || v.offers_take_back()));
+    assert!(h.run("terminal.takeBack", json!({})).is_err());
+    assert_eq!(taken(&mut rxs[1]), vec![]);
+
+    // This one: a single take of the input and the size, for the terminal on screen.
+    h.open_as("a", Some("terminal"));
+    assert_eq!(h.run("terminal.takeBack", json!({})), Ok(()));
+    assert_eq!(taken(&mut rxs[0]), vec![ToCore::TakeControl]);
+    assert_eq!(taken(&mut rxs[1]), vec![]);
+    assert_eq!(taken(&mut rxs[2]), vec![]);
+
+    // All: the size alone, once for each terminal a phone holds, wherever it is shown, and
+    // none for b.
+    assert_eq!(h.run("terminal.takeBackAll", json!({})), Ok(()));
+    assert_eq!(taken(&mut rxs[0]), vec![ToCore::TakeSize]);
+    assert_eq!(taken(&mut rxs[1]), vec![]);
+    assert_eq!(taken(&mut rxs[2]), vec![ToCore::TakeSize]);
+
+    // The grant for c, which is not on screen, arrives: it tells the size it last fitted at
+    // once, not when its tab comes back.
+    say(&mut h, 2, info(true, false));
+    assert_eq!(asked(&mut rxs[2]), vec![ToCore::Resize(94, 31)]);
+    say(&mut h, 2, info(false, true));
+
+    // The pane's own buttons: the second of the two asks the window to take back all.
+    h.open_as("a", Some("terminal"));
+    h.draw();
+    h.click(
+        WIDTH - 12. - 30.,
+        HEIGHT - 8. - 9.,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    assert_eq!(taken(&mut rxs[0]), vec![ToCore::TakeSize]);
+    assert_eq!(taken(&mut rxs[2]), vec![ToCore::TakeSize]);
+    assert_eq!(taken(&mut rxs[1]), vec![]);
+    h.click(
+        WIDTH - 12. - 140.,
+        HEIGHT - 8. - 9.,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    assert_eq!(taken(&mut rxs[0]), vec![ToCore::TakeControl]);
+
+    // Once the core says this window has the size, the choices go and the commands refuse.
+    say(&mut h, 0, info(true, false));
+    assert!(!h.view(|v| v.offers_take_back()));
+    assert_eq!(h.view(|v| v.note()), None, "the owner is told nothing");
+    println!("workspace_render: take back ok");
+}
+
 /// A tab that is not on screen stays attached and keeps what it drew: its terminal is told it is
 /// hidden and shown again with its kitty image still there.
 fn kept_tabs_are_hidden_not_dropped() {
@@ -1480,6 +1609,7 @@ fn main() {
     keys_json_and_chosen_keys_rule();
     editing_keys_reach_the_shell_through_the_window();
     terminal_commands_run_from_keys_and_the_palette();
+    the_size_is_taken_back_from_a_phone_for_one_terminal_or_all();
     kept_tabs_are_hidden_not_dropped();
     println!("workspace_render: ok");
 }

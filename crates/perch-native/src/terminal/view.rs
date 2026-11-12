@@ -10,6 +10,10 @@
 //!   it, so it always matches what the program draws for.
 //! - Typing, and anything else the program is told (the mouse, answers to its queries, focus),
 //!   needs the input lease.
+//! - A phone can hold the size. Where typing is shared the pane's note then offers the web's two
+//!   choices, "Take back this tab" (the input and the size) and "Take back all tabs" (the window
+//!   takes the size alone of each terminal a phone holds, see [`TerminalEvent::TakeBackAll`]);
+//!   without shared typing it offers Take control.
 //! - A dropped connection leaves the screen as it was and says so. It is never taken for the end
 //!   of the shell, and nothing here reattaches, which would start the session again.
 //! - A session the core lists as blank (no provider, nothing ever started in it) has no shell to
@@ -111,6 +115,9 @@ pub enum TerminalEvent {
     /// window, which sees the session's row, says it is still blank ([`TerminalView::start_with`])
     /// or not ([`TerminalView::refuse_choice`]).
     Chose(String),
+    /// A person chose "Take back all tabs" in the pane's note: the window takes back the size of
+    /// every terminal a phone holds ([`TerminalView::perform`] with [`Action::TakeSize`], on each).
+    TakeBackAll,
 }
 
 impl EventEmitter<TerminalEvent> for TerminalView {}
@@ -772,6 +779,15 @@ impl TerminalView {
                 // size is told again.
                 if agent.resize && !self.resize_lease {
                     self.requested = None;
+                    // A pane that is off screen is not laid out, so it tells the grid it last
+                    // fitted now, as the web's kept terminal does, rather than when its tab
+                    // comes back.
+                    if let (true, Some(fit)) =
+                        (self.hidden && self.status == Status::Live, self.fitted)
+                    {
+                        self.requested = Some((fit.cols, fit.rows));
+                        self.send(ToCore::Resize(fit.cols, fit.rows));
+                    }
                 }
                 self.input_lease = agent.input;
                 self.resize_lease = agent.resize;
@@ -2176,7 +2192,13 @@ impl TerminalView {
                 if agent.state == AgentState::Reconnecting {
                     Some("Reconnecting\u{2026}".into())
                 } else if agent.resize_on_device && !agent.resize {
-                    Some("A phone sets this terminal's size".into())
+                    // The web's notice, whose choices ([`Self::offers_take_back`]) stand in for
+                    // Take control.
+                    Some(if self.shared_input() {
+                        "Your phone is sizing this terminal".into()
+                    } else {
+                        "A phone sets this terminal's size".into()
+                    })
                 } else if self.can_type() {
                     None
                 } else if agent.input_elsewhere {
@@ -2196,6 +2218,22 @@ impl TerminalView {
             }
             Status::Exited(code) => Some(format!("Shell exited (code {code})")),
         }
+    }
+
+    /// Whether a paired device (a phone) holds this terminal's size, and this view is attached to
+    /// take it back: the web's `sizedByOtherDevice` with no lease of this view's own.
+    pub fn size_held_by_phone(&self) -> bool {
+        self.to_core.is_some()
+            && self.status == Status::Live
+            && !self.resize_lease
+            && self.agent.is_some_and(|a| a.resize_on_device)
+    }
+
+    /// Whether the pane offers to take the size back from a phone, for this tab or for all: as
+    /// the web's phone-size notice, when the core lets typing be shared, so the phone sizing the
+    /// terminal costs this window nothing but its size. Without shared typing, Take control it is.
+    pub fn offers_take_back(&self) -> bool {
+        self.size_held_by_phone() && self.shared_input()
     }
 
     /// Whether this view may take the input and the size from another view or a phone.
@@ -2252,6 +2290,20 @@ impl TerminalView {
                     return false;
                 }
                 self.send(ToCore::TakeControl);
+                true
+            }
+            Action::TakeBack => {
+                if !self.size_held_by_phone() {
+                    return false;
+                }
+                self.send(ToCore::TakeControl);
+                true
+            }
+            Action::TakeSize => {
+                if !self.size_held_by_phone() {
+                    return false;
+                }
+                self.send(ToCore::TakeSize);
                 true
             }
             Action::Kill => {
@@ -2792,7 +2844,8 @@ impl gpui::Render for TerminalView {
         let mut bg = color(self.vt.background());
         bg.a = self.settings.opacity;
         let note = self.note();
-        let take_control = self.can_take_control() && self.status == Status::Live;
+        let take_back = self.offers_take_back();
+        let take_control = self.can_take_control() && self.status == Status::Live && !take_back;
         let mut pane = div()
             .id("terminal")
             .track_focus(&self.focus)
@@ -2905,24 +2958,42 @@ impl gpui::Render for TerminalView {
                     .text_color(rgb(NOTE_COLOR))
                     .child(note)
                     .when(take_control, |row| {
+                        row.child(note_button("take-control", "Take control").on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.perform(Action::TakeControl, cx);
+                            }),
+                        ))
+                    })
+                    .when(take_back, |row| {
                         row.child(
-                            div()
-                                .id("take-control")
-                                .px_2()
-                                .rounded_sm()
-                                .cursor_pointer()
-                                .border_1()
-                                .border_color(rgb(NOTE_COLOR))
-                                .child("Take control")
-                                .on_mouse_down(GpuiButton::Left, |_, _, cx| cx.stop_propagation())
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.perform(Action::TakeControl, cx);
-                                })),
+                            note_button("take-back-this", "Take back this tab").on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    this.perform(Action::TakeBack, cx);
+                                }),
+                            ),
+                        )
+                        .child(
+                            note_button("take-back-all", "Take back all tabs").on_click(
+                                cx.listener(|_, _, _, cx| cx.emit(TerminalEvent::TakeBackAll)),
+                            ),
                         )
                     }),
             )
         })
     }
+}
+
+/// A button in the pane's note row.
+fn note_button(id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .px_2()
+        .rounded_sm()
+        .cursor_pointer()
+        .border_1()
+        .border_color(rgb(NOTE_COLOR))
+        .child(label)
+        .on_mouse_down(GpuiButton::Left, |_, _, cx| cx.stop_propagation())
 }
 
 /// Text from the system's input (dead keys, AltGr, input methods) that no key press produced.

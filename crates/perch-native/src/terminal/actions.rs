@@ -74,6 +74,12 @@ pub enum Action {
     Command(isize),
     /// Take the input and the size from whichever view holds them.
     TakeControl,
+    /// Take them back from a phone that holds the size: the web's "Take back this tab". Refused
+    /// when no phone holds it.
+    TakeBack,
+    /// Take only the size back from a phone: what "Take back all tabs" asks of each terminal a
+    /// phone holds. Refused when no phone holds it.
+    TakeSize,
     /// End the shell. Needs the input lease.
     Kill,
 }

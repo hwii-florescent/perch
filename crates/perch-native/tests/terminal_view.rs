@@ -360,6 +360,33 @@ fn view(core_process: &mut Child, scratch: &Path) {
         let _ = other.release_terminal(&other_terminal).await;
     });
 
+    // Taking only the size, which is what "Take back all tabs" asks of each terminal a phone
+    // holds: the view keeps typing and stopping, loses the size, and takes both back.
+    let (mut third, third_terminal) = setup.block_on(async {
+        let mut connection = other_core.connect().await.expect("connect");
+        let mut terminal = connection
+            .open_terminal(&session_id, 80, 24)
+            .await
+            .expect("open terminal");
+        connection
+            .take_resize(&mut terminal)
+            .await
+            .expect("take the size");
+        assert!(terminal.owns_resize() && !terminal.owns_input());
+        (connection, terminal)
+    });
+    h.wait("the size to be lost", |h| {
+        h.view(|v, _| v.can_take_control())
+    });
+    assert!(h.view(|v, _| v.can_stop()), "the input was not taken");
+    assert!(h.view(|v, cx| v.perform(Action::TakeControl, cx)));
+    h.wait("both to come back", |h| {
+        !h.view(|v, _| v.can_take_control())
+    });
+    setup.block_on(async {
+        let _ = third.release_terminal(&third_terminal).await;
+    });
+
     // The Context Bridge, against the real core: a selection previews as a packet that says it
     // is output and not a command; previewing sends the shell nothing; a send to something that
     // is not an agent is refused by the core, and a capture sends at most once.

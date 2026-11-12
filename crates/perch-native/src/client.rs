@@ -569,6 +569,12 @@ impl Connection {
                 false,
             )
             .await?;
+        self.take_resize(terminal).await
+    }
+
+    /// Take only the size of a terminal another view or a phone holds, as the web's "Take back
+    /// all tabs" does for each terminal a phone holds.
+    pub async fn take_resize(&mut self, terminal: &mut Terminal) -> Result<()> {
         terminal.resize = self
             .acquire(
                 &terminal.session_id,
