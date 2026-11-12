@@ -206,13 +206,26 @@ sources), each under its own licence, which travels with that source:
   (Unicode License v3) and Bjoern Hoehrmann's UTF-8 decoder (MIT).
 - Zig's compiler runtime (`compiler_rt`): MIT.
 
-## herdr build configuration for libghostty-vt
+## herdr: libghostty-vt build configuration and terminal code
 
-The Zig invocation flags and the bindgen configuration in
-`crates/ghostty-sys/build.rs` (header allow-lists, enum naming, the macOS SDK
-sysroot) and the lint allowances in `crates/ghostty-sys/src/lib.rs` follow
-`crates/ghostty-sys/` of [herdr](https://github.com/herdrdev/herdr-app), commit
-`4c8c622d7965a6f6787f55b1896b70795fc68918`, licensed under the Apache License,
-Version 2.0 (<http://www.apache.org/licenses/LICENSE-2.0>). Perch's copies are
-modified: the Zig version check, the Rust-to-Zig target mapping and the
-submodule path are Perch's own. No other herdr code is included.
+Licensed under the Apache License, Version 2.0
+(<http://www.apache.org/licenses/LICENSE-2.0>); source
+<https://github.com/herdrdev/herdr-app>, commit
+`4c8c622d7965a6f6787f55b1896b70795fc68918`. Perch's copies are modified, and the
+modified files carry a header saying so.
+
+- `crates/ghostty-sys/build.rs` and `crates/ghostty-sys/src/lib.rs`: the Zig
+  invocation flags and the bindgen configuration (header allow-lists, enum
+  naming, the macOS SDK sysroot) and the lint allowances for the generated
+  bindings. The Zig version check, the Rust-to-Zig target mapping and the
+  submodule path are Perch's own.
+- `crates/perch-native/src/terminal/vt.rs` (from `src/vt.rs`): the render-state
+  frame read, the render-hold, OSC 52 and size-report callbacks, and the key and
+  mouse encoder calls. Perch's version has no theme file, search, links,
+  selection or kitty graphics; its paste encoding, replay muting and scroll
+  reads are Perch's own.
+- `crates/perch-native/src/terminal/keys.rs` (from `src/terminal.rs`): the table
+  that maps GPUI key names to Ghostty keys, the shifted-punctuation table and the
+  legacy control aliases.
+- `crates/perch-native/src/terminal/scroll.rs` (from `src/terminal.rs`): the
+  wheel and trackpad step accumulation.

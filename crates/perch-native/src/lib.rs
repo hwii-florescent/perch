@@ -7,4 +7,5 @@ pub mod client;
 pub mod handoff;
 pub mod sidebar;
 pub mod sound;
+pub mod terminal;
 pub mod ui;

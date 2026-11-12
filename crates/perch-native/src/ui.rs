@@ -4,16 +4,18 @@
 //! what the person did: it emits [`OpenSession`] when a row is picked and sends a
 //! [`Command`] when a session is started. What the person has chosen to look at (the picked
 //! session, folded projects, By status) is the [`Nav`] of `actions.rs`, and every key action
-//! runs through [`Sidebar::run_action`]. The main area is a placeholder naming the open session;
-//! the terminal view replaces it there.
+//! runs through [`Sidebar::run_action`]. The main area names the open session above its
+//! terminal ([`TerminalView`]); without a core to attach to it is that name alone.
 
 use crate::actions::{launch_command, startable, Nav, NewSession, Organize, Outcome};
-use crate::client::{Command, Update};
+use crate::client::{Command, Core, Update};
 use crate::handoff::{open_in_perch, perch_url, Place};
 use crate::sidebar::{
     Attention, HostView, Model, ProjectView, SessionView, StatusCluster, StatusSection,
     WorkspaceView,
 };
+use crate::terminal::attach::FromCore;
+use crate::terminal::TerminalView;
 use futures::channel::mpsc::UnboundedSender;
 use gpui::{
     div, prelude::*, px, rgb, Context, Entity, EventEmitter, IntoElement, Subscription, Window,
@@ -788,9 +790,16 @@ impl gpui::Render for Sidebar {
     }
 }
 
+/// Finds the core to attach a terminal to, each time one is opened: the core may have
+/// restarted, and a restart changes its address and credential.
+type Locate = Box<dyn Fn() -> anyhow::Result<Core>>;
+
 pub struct Workspace {
     sidebar: Entity<Sidebar>,
     open: Option<OpenSession>,
+    locate: Option<Locate>,
+    /// The terminal of the open session, with the session it belongs to.
+    terminal: Option<(String, Entity<TerminalView>)>,
     /// Why the last hand-off to Perch did not go.
     handoff_error: Option<String>,
     _open_session: Subscription,
@@ -806,6 +815,7 @@ impl Workspace {
         let subscription = cx.subscribe(&sidebar, |this, _, event: &OpenSession, cx| {
             this.open = Some(event.clone());
             this.handoff_error = None;
+            this.show_terminal(event, cx);
             cx.notify();
         });
         // The sidebar's own changes (hiding it, a count) redraw the window around it.
@@ -813,13 +823,46 @@ impl Workspace {
         Self {
             sidebar,
             open: None,
+            locate: None,
+            terminal: None,
             handoff_error: None,
             _open_session: subscription,
         }
     }
 
+    /// Attach the terminals of opened sessions to the core `locate` finds. Without it the main
+    /// area never touches the network.
+    pub fn with_core(mut self, locate: impl Fn() -> anyhow::Result<Core> + 'static) -> Self {
+        self.locate = Some(Box::new(locate));
+        self
+    }
+
     pub fn sidebar(&self) -> &Entity<Sidebar> {
         &self.sidebar
+    }
+
+    /// The terminal of the open session, if one was attached.
+    pub fn terminal(&self) -> Option<&Entity<TerminalView>> {
+        self.terminal.as_ref().map(|(_, view)| view)
+    }
+
+    /// Replace the terminal when another session is picked; picking the same one keeps it, and
+    /// dropping the old view detaches it (its shell keeps running in the core).
+    fn show_terminal(&mut self, open: &OpenSession, cx: &mut Context<Self>) {
+        let Some(locate) = &self.locate else { return };
+        if matches!(&self.terminal, Some((id, _)) if *id == open.session_id) {
+            return;
+        }
+        let located = locate();
+        let view = cx.new(|cx| match located {
+            Ok(core) => TerminalView::attach(core, open, cx),
+            Err(error) => {
+                let mut view = TerminalView::new(cx);
+                view.core_said(FromCore::Failed(format!("{error:#}")), cx);
+                view
+            }
+        });
+        self.terminal = Some((open.session_id.clone(), view));
     }
 
     /// The session the main area shows.
@@ -830,7 +873,6 @@ impl Workspace {
 
 impl gpui::Render for Workspace {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Placeholder for the terminal view: it takes this slot and the session named here.
         let mut main = div().flex().flex_col().items_center().gap_3().text_sm();
         match &self.open {
             Some(open) => {
@@ -896,19 +938,21 @@ impl gpui::Render for Workspace {
                 })
                 .into_any_element()
         };
+        let area = div().flex().flex_1().min_w_0();
+        let area = match self.terminal() {
+            // The name and links stay above the terminal, which takes the rest.
+            Some(terminal) => area
+                .flex_col()
+                .child(div().flex().justify_center().py_2().child(main))
+                .child(div().flex_1().min_h_0().child(terminal.clone())),
+            None => area.items_center().justify_center().child(main),
+        };
         div()
             .flex()
             .size_full()
             .bg(rgb(MAIN_BG))
             .child(sidebar)
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .items_center()
-                    .justify_center()
-                    .child(main),
-            )
+            .child(area)
     }
 }
 

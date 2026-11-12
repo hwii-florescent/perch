@@ -5383,6 +5383,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "futures",
+ "ghostty-sys",
  "gpui-pre",
  "gpui-pre-platform",
  "libc",
