@@ -420,6 +420,26 @@ Claude normally bypasses permissions here: use `AskUserQuestion` to exercise
 Needs You. Bracketed paste wraps the prompt in `<pasted_content …>`; hook
 assertions match with `contains`, not equality.
 
+## Native client (`crates/perch-native`)
+
+```sh
+cargo test -p perch-native            # everything below
+cargo test -p perch-native --lib      # state reduction, frames, reconnect against a stand-in core, hand-off URL
+cargo test -p perch-native --test sidebar_render    # headless GPUI render of the sidebar; no window opens
+cargo test -p perch-native --test terminal_session  # a real core as a child process
+```
+
+- Nothing opens a window, takes focus or calls `open`. The render test draws through GPUI's test
+  platform into a texture; the hand-off test checks the URL and never runs the opener.
+- `terminal_session` boots a core in a scratch directory (database, hosts, settings, daemon and
+  `HOME` all private) and starts only plain shells: a shell is signed in, then watched appearing, changing
+  state and being started from the sidebar's follower. It stops the core, shells and daemon and checks each by
+  PID; on failure it keeps the scratch directory and says so. Agent providers are covered by unit tests of the
+  frames built, never by a real turn.
+- A plain shell inside a project has no sidebar row (Show terminals off), so the test starts shells in Chats.
+- Remote computers go through the core's hub on the same socket, so they are tested as messages in
+  `sidebar.rs` and not against a real remote.
+
 ## Released-only cleanup and fixture teardown
 
 Build the developer CLI (not an installed app update):

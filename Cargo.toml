@@ -1,8 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/ghostty-sys", "crates/perch-core", "crates/perch-desktop", "crates/perchd"]
+members = ["crates/ghostty-sys", "crates/perch-core", "crates/perch-desktop", "crates/perchd", "crates/perch-native"]
 # `cargo build`/`cargo run` without `-p` only touch perch-core: perch-desktop
 # depends on webkit2gtk (via tauri) which isn't installable on this devpod.
+# perch-native is left out too, so a plain build or test never compiles GPUI; use `-p perch-native`.
 default-members = ["crates/perch-core", "crates/perchd"]
 
 [workspace.package]
