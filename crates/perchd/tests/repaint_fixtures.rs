@@ -26,7 +26,7 @@ fn tail_of(stream: &[u8], len: usize) -> String {
 }
 
 fn case(name: &str, cols: u16, rows: u16, stream: &str, tail_len: usize, extra: Value) -> Value {
-    let mut screen = Screen::new(cols, rows);
+    let mut screen = Screen::new(cols, rows).unwrap();
     screen.process(stream.as_bytes());
     let repaint =
         String::from_utf8(screen.restore_bytes_within(perchd::proto::DEFAULT_REPLAY as usize))

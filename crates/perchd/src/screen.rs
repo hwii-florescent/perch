@@ -106,6 +106,17 @@ const SCROLLBACK_BYTES: usize = 10 * 1024 * 1024;
 /// sequence's start to a client whose live stream resumes mid-way.
 const CONTINUATION_BYTES: usize = 256 * 1024;
 
+/// The most columns or rows a terminal is given. A size comes from a client or
+/// from the output itself (`CSI 8 ; rows ; cols t`), and the grid is allocated
+/// up front, so an unbounded one would exhaust memory. It matches the limit the
+/// core puts on terminals it creates.
+pub const MAX_DIMENSION: u16 = 1000;
+
+/// `n` held to `1..=`[`MAX_DIMENSION`].
+pub fn clamp_dimension(n: u16) -> u16 {
+    n.clamp(1, MAX_DIMENSION)
+}
+
 /// An owned native terminal.
 struct Term(g::GhosttyTerminal);
 
@@ -956,18 +967,20 @@ pub struct Screen {
 unsafe impl Send for Screen {}
 
 impl Screen {
-    pub fn new(cols: u16, rows: u16) -> Self {
+    /// `None` if the engine could not allocate a terminal. The size is held
+    /// to `1..=`[`MAX_DIMENSION`] on each axis.
+    pub fn new(cols: u16, rows: u16) -> Option<Self> {
         Self::with_scrollback(cols, rows, SCROLLBACK_LINES, SCROLLBACK_BYTES)
     }
 
     /// For readers that only follow titles or modes: no history to hold.
-    pub fn without_scrollback(cols: u16, rows: u16) -> Self {
+    pub fn without_scrollback(cols: u16, rows: u16) -> Option<Self> {
         Self::with_scrollback(cols, rows, 0, 0)
     }
 
-    fn with_scrollback(cols: u16, rows: u16, lines: usize, bytes: usize) -> Self {
-        let (cols, rows) = (cols.max(1), rows.max(1));
-        let term = Term::new(cols, rows).expect("libghostty-vt could not allocate a terminal");
+    fn with_scrollback(cols: u16, rows: u16, lines: usize, bytes: usize) -> Option<Self> {
+        let (cols, rows) = (clamp_dimension(cols), clamp_dimension(rows));
+        let term = Term::new(cols, rows)?;
         term.set(g::GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES, &lines);
         term.set(g::GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, &bytes);
         term.set(
@@ -976,13 +989,13 @@ impl Screen {
         );
         // A daemon screen never draws images, and a repaint can't carry them.
         term.set(g::GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &0u64);
-        Self {
+        Some(Self {
             term,
             cols,
             rows,
             fed: false,
             held: Vec::new(),
-        }
+        })
     }
 
     pub fn process(&mut self, bytes: &[u8]) {
@@ -1000,7 +1013,7 @@ impl Screen {
     }
 
     pub fn set_size(&mut self, cols: u16, rows: u16) {
-        let (cols, rows) = (cols.max(1), rows.max(1));
+        let (cols, rows) = (clamp_dimension(cols), clamp_dimension(rows));
         // The daemon doesn't know the cell size in pixels; only terminal size
         // reports use it, and nothing answers those.
         // SAFETY: plain call on the owned handle.
@@ -1364,7 +1377,7 @@ mod tests {
     use super::*;
 
     fn fed(cols: u16, rows: u16, bytes: &[u8]) -> Screen {
-        let mut screen = Screen::new(cols, rows);
+        let mut screen = Screen::new(cols, rows).unwrap();
         screen.process(bytes);
         screen
     }
@@ -1510,6 +1523,16 @@ mod tests {
     }
 
     #[test]
+    fn an_oversized_size_is_clamped() {
+        let mut screen = Screen::new(u16::MAX, u16::MAX).unwrap();
+        assert_eq!((screen.cols, screen.rows), (MAX_DIMENSION, MAX_DIMENSION));
+        screen.set_size(0, u16::MAX);
+        assert_eq!((screen.cols, screen.rows), (1, MAX_DIMENSION));
+        screen.process(b"still works");
+        assert!(screen.contents().contains("still"));
+    }
+
+    #[test]
     fn a_gap_after_painted_cells_stays_unpainted_on_the_visible_rows() {
         for style in [
             "\x1b[48;5;238m",
@@ -1517,7 +1540,7 @@ mod tests {
             "\x1b[4m",
             "\x1b[48;2;10;20;30m",
         ] {
-            let mut source = Screen::new(40, 8);
+            let mut source = Screen::new(40, 8).unwrap();
             source.process(format!("top\r\n{}$ ", gap_row(style, "gap-marker")).as_bytes());
             assert_eq!(source.scrollback_rows(), 0);
             assert_gap_stays_unpainted(&source, "gap-marker");
@@ -1527,7 +1550,7 @@ mod tests {
     #[test]
     fn a_gap_after_painted_cells_stays_unpainted_in_scrollback() {
         for style in ["\x1b[48;5;238m", "\x1b[7m", "\x1b[4m"] {
-            let mut source = Screen::new(40, 6);
+            let mut source = Screen::new(40, 6).unwrap();
             source.process(gap_row(style, "gap-marker").as_bytes());
             for line in 0..20 {
                 source.process(format!("line {line}\r\n").as_bytes());
@@ -1540,7 +1563,7 @@ mod tests {
     #[test]
     fn a_gap_after_painted_cells_stays_unpainted_on_the_alternate_screen() {
         for style in ["\x1b[48;5;238m", "\x1b[7m", "\x1b[4m"] {
-            let mut source = Screen::new(40, 8);
+            let mut source = Screen::new(40, 8).unwrap();
             source.process(b"shell\r\n\x1b[?1049h\x1b[H");
             source.process(format!("{}$ ", gap_row(style, "gap-marker")).as_bytes());
             assert!(source.alternate_screen());
@@ -1550,7 +1573,7 @@ mod tests {
 
     #[test]
     fn gaps_in_a_trimmed_repaint_stay_unpainted_and_count_toward_the_limit() {
-        let mut source = Screen::new(40, 6);
+        let mut source = Screen::new(40, 6).unwrap();
         for line in 0..400 {
             let style = ["\x1b[48;5;238m", "\x1b[7m", "\x1b[4m"][line % 3];
             source.process(gap_row(style, &format!("gap-marker {line}")).as_bytes());
@@ -1571,7 +1594,7 @@ mod tests {
     #[test]
     fn a_gap_inside_a_wrapped_line_keeps_the_wrap() {
         // Inverse text wraps; on the second row a gap follows it, then text.
-        let mut source = Screen::new(12, 5);
+        let mut source = Screen::new(12, 5).unwrap();
         source.process(b"\x1b[7mabcdefghijklxy\x1b[4C\x1b[0mzz");
         let plan = source.term.plan_rows(12, 5, true).unwrap();
         assert_eq!(plan.cuts, [(1, 2)]);
@@ -1586,7 +1609,7 @@ mod tests {
     fn a_gap_that_crosses_a_soft_wrap_stays_unpainted() {
         // Inverse text wraps onto the second row; the cells at the start of
         // that row are erased to the default style and text follows them.
-        let mut source = Screen::new(12, 5);
+        let mut source = Screen::new(12, 5).unwrap();
         source.process(b"\x1b[7mabcdefghijkl123456\x1b[2;1H\x1b[0m\x1b[2X\x1b[2;4H\x1b[7mxy");
         assert_eq!(wrap_flags(&source)[..2], [(true, false), (false, true)]);
         let view = reattached(&source);
@@ -1622,7 +1645,7 @@ mod tests {
             "\x1b[48;2;10;20;30m\x1b[2K",
             "\x1b[44m\x1b[40X",
         ] {
-            let mut source = Screen::new(40, 8);
+            let mut source = Screen::new(40, 8).unwrap();
             source.process(
                 format!("top\r\n{erase}\r\n{erase}\r\n\r\n{erase}\x1b[0m\r\n$ ").as_bytes(),
             );
@@ -1633,7 +1656,7 @@ mod tests {
 
     #[test]
     fn rows_of_erased_cells_keep_their_background_in_scrollback() {
-        let mut source = Screen::new(40, 6);
+        let mut source = Screen::new(40, 6).unwrap();
         for line in 0..20 {
             let erase = if line % 2 == 0 {
                 "\x1b[48;5;238m\x1b[K"
@@ -1651,7 +1674,7 @@ mod tests {
     fn rows_of_erased_cells_keep_their_background_on_the_alternate_screen() {
         // An editor with a themed background: erase the screen in a colour,
         // then write a little text over it.
-        let mut source = Screen::new(40, 8);
+        let mut source = Screen::new(40, 8).unwrap();
         source.process(b"shell\r\n\x1b[?1049h\x1b[48;5;238m\x1b[2J\x1b[H\x1b[0;7mfile.rs\x1b[48;5;238m\x1b[K\x1b[3;3H\x1b[0;48;5;238mfn main() {}\x1b[5;1H~");
         assert!(source.alternate_screen());
         assert!(painted_cells(&source) > 5 * 40, "the premise");
@@ -1713,7 +1736,7 @@ mod tests {
 
     #[test]
     fn erased_rows_in_a_trimmed_repaint_keep_their_background_and_count_toward_the_limit() {
-        let mut source = Screen::new(40, 6);
+        let mut source = Screen::new(40, 6).unwrap();
         for line in 0..400 {
             let erase = ["\x1b[48;5;238m\x1b[K", "\x1b[44m\x1b[3X", "\x1b[7m "][line % 3];
             source.process(
@@ -1790,7 +1813,7 @@ mod tests {
 
     #[test]
     fn soft_wrapped_lines_rejoin_when_the_view_widens() {
-        let mut source = Screen::new(20, 5);
+        let mut source = Screen::new(20, 5).unwrap();
         let long: String = (0..70).map(|i| char::from(b'a' + (i % 26) as u8)).collect();
         // The first line wraps into scrollback, the rest on the visible rows.
         source.process(format!("{long}\r\n").as_bytes());
@@ -1809,7 +1832,7 @@ mod tests {
     #[test]
     fn a_line_wrapping_across_the_scrollback_boundary_stays_one_line() {
         // The long line starts in scrollback and ends on the first visible rows.
-        let mut source = Screen::new(10, 4);
+        let mut source = Screen::new(10, 4).unwrap();
         source.process(b"top\r\n");
         source.process("0123456789".repeat(5).as_bytes());
         source.process(b"\r\nb\r\nc\r\nd");
@@ -1876,7 +1899,7 @@ mod tests {
         for (index, (case, expect_wraps)) in cases.iter().enumerate() {
             for lead in [0, 12] {
                 // `lead` lines of history push the case into scrollback.
-                let mut source = Screen::new(10, 4);
+                let mut source = Screen::new(10, 4).unwrap();
                 for line in 0..lead {
                     source.process(format!("old {line}\r\n").as_bytes());
                 }
@@ -1904,7 +1927,7 @@ mod tests {
             state ^= state << 17;
             state % bound
         };
-        let mut source = Screen::new(12, 6);
+        let mut source = Screen::new(12, 6).unwrap();
         for _ in 0..400 {
             let piece: String = match next(if hostile { 12 } else { 8 }) {
                 0 => "\r\n".into(),
@@ -1930,7 +1953,7 @@ mod tests {
     #[test]
     fn wraps_survive_across_many_pages_of_scrollback() {
         // Ghostty stores history in pages; a wrapped line can straddle two.
-        let mut source = Screen::new(80, 24);
+        let mut source = Screen::new(80, 24).unwrap();
         for line in 0..3_000 {
             let text = format!(
                 "{line:05} \x1b[3{}m{}\x1b[0m",
@@ -1967,7 +1990,7 @@ mod tests {
     /// 10,000 rows of 500 columns with a style change on every cell: the
     /// heaviest history a daemon screen can hold.
     fn heavy_history() -> Screen {
-        let mut source = Screen::new(500, 24);
+        let mut source = Screen::new(500, 24).unwrap();
         for line in 0..10_000 {
             let styled: String = (0..250)
                 .map(|cell| format!("\x1b[3{};4{}mx", (cell + line) % 8, (cell + line / 3) % 8))
@@ -2010,7 +2033,7 @@ mod tests {
 
     #[test]
     fn a_limit_below_the_visible_screen_still_repaints_the_visible_screen() {
-        let mut source = Screen::new(80, 24);
+        let mut source = Screen::new(80, 24).unwrap();
         for line in 0..200 {
             source.process(format!("line {line}\r\n").as_bytes());
         }
@@ -2023,7 +2046,7 @@ mod tests {
 
     #[test]
     fn restore_clears_stale_input_modes_and_alternate_screen() {
-        let mut view = Screen::new(80, 24);
+        let mut view = Screen::new(80, 24).unwrap();
         view.process(b"\x1b[?1049h\x1b[?1003h\x1b[?1006h\x1b[?1004h\x1b[>31u\x1b[?7l");
         let shell = fed(80, 24, b"shell prompt");
         view.process(shell.restore().as_bytes());
@@ -2041,9 +2064,9 @@ mod tests {
 
     #[test]
     fn restore_keeps_keyboard_stacks_for_later_pops() {
-        let mut source = Screen::new(80, 24);
+        let mut source = Screen::new(80, 24).unwrap();
         source.process(b"\x1b[>1u\x1b[>3u\x1b[?1049h\x1b[>5u\x1b[>7u");
-        let mut view = Screen::new(80, 24);
+        let mut view = Screen::new(80, 24).unwrap();
         view.process(b"\x1b[>31u\x1b[?1049h\x1b[>31u");
         // A daemon repaint can be replayed and repainted again by the core.
         for _ in 0..2 {
@@ -2068,7 +2091,7 @@ mod tests {
         // A program that crashed on the alternate screen without popping
         // what it pushed; the next program to enter it finds the stack.
         // The shell is mid-line with a pending wrap and a style.
-        let mut source = Screen::new(10, 4);
+        let mut source = Screen::new(10, 4).unwrap();
         source.process(b"\x1b[?1049h\x1b[>5u\x1b[>7u\x1b[?1049l\x1b[1;32m0123456789");
         let mut view = reattached(&source);
         assert_same(&source, &view);
@@ -2092,7 +2115,7 @@ mod tests {
         // keyboard protocol pushes one or two); nothing deeper exists to
         // restore, and what does exist pops the same in the view.
         for alternate in [false, true] {
-            let mut source = Screen::new(80, 24);
+            let mut source = Screen::new(80, 24).unwrap();
             source.process(if alternate { b"\x1b[?1049h" } else { b"" });
             for level in 1..=12u8 {
                 source.process(format!("\x1b[>{level}u").as_bytes());
@@ -2124,7 +2147,7 @@ mod tests {
             ("47", "1049"),
             ("1047", "1049"),
         ] {
-            let mut source = Screen::new(20, 6);
+            let mut source = Screen::new(20, 6).unwrap();
             source.process(
                 format!("\x1b[1;31mshell\x1b[3;4H\x1b[?{enter}h\x1b[5;9Hfull screen app")
                     .as_bytes(),
@@ -2152,7 +2175,7 @@ mod tests {
     fn kitty_images_are_not_stored_and_the_repaint_carries_none() {
         // Graphics storage is off on daemon screens: a repaint can't carry
         // an image, and holding the pixels would cost memory for nothing.
-        let mut source = Screen::new(40, 10);
+        let mut source = Screen::new(40, 10).unwrap();
         source.process(b"before \x1b_Ga=T,f=24,s=1,v=1;/wAA\x1b\\ after");
         let bytes = source.restore_bytes();
         assert!(!bytes.windows(3).any(|w| w == b"\x1b_G"));
@@ -2165,12 +2188,12 @@ mod tests {
     #[test]
     fn mode_tracking_is_independent_of_read_boundaries() {
         let bytes = b"\x1b[?7;1004h\x1b[>1u\x1b[?1049h\x1b[>3u\x1b[=4;2u";
-        let mut whole = Screen::new(80, 24);
+        let mut whole = Screen::new(80, 24).unwrap();
         whole.process(bytes);
         assert!(whole.dec_mode(1004));
         assert_eq!(whole.keyboard_flags(), 7);
         for split in 0..=bytes.len() {
-            let mut split_view = Screen::new(80, 24);
+            let mut split_view = Screen::new(80, 24).unwrap();
             split_view.process(&bytes[..split]);
             split_view.process(&bytes[split..]);
             assert_eq!(split_view.restore(), whole.restore(), "split at {split}");
@@ -2199,7 +2222,7 @@ mod tests {
 
     #[test]
     fn scrollback_beyond_one_screen_survives_restore() {
-        let mut source = Screen::new(80, 24);
+        let mut source = Screen::new(80, 24).unwrap();
         for line in 0..500 {
             source.process(format!("line {line} \x1b[3{}mcolour\x1b[0m\r\n", line % 8).as_bytes());
         }
@@ -2231,7 +2254,7 @@ mod tests {
     fn autowrap_off_applies_after_wrapped_history() {
         // Lines wrap while autowrap is on, then an app turns it off. The
         // wrapped rows must come back as they were, and the setting too.
-        let mut source = Screen::new(20, 5);
+        let mut source = Screen::new(20, 5).unwrap();
         source.process("x".repeat(70).as_bytes());
         source.process(b"\r\n\xe4\xb8\x96\xe7\x95\x8c\xe4\xb8\x96\xe7\x95\x8c\xe4\xb8\x96\xe7\x95\x8c\xe4\xb8\x96\xe7\x95\x8c\xe4\xb8\x96\xe7\x95\x8c\xe4\xb8\x96\r\nend\x1b[?7l");
         let view = reattached(&source);
@@ -2243,7 +2266,7 @@ mod tests {
     #[test]
     fn blank_rows_below_the_cursor_keep_the_viewport_aligned() {
         // Ctrl-L in a shell: lots of history, a prompt on the first row.
-        let mut source = Screen::new(80, 24);
+        let mut source = Screen::new(80, 24).unwrap();
         for line in 0..100 {
             source.process(format!("old {line}\r\n").as_bytes());
         }
@@ -2275,12 +2298,12 @@ mod tests {
 
     #[test]
     fn an_unfed_screen_has_nothing_to_restore() {
-        assert_eq!(Screen::new(80, 24).restore(), "");
+        assert_eq!(Screen::new(80, 24).unwrap().restore(), "");
     }
 
     #[test]
     fn scrollback_is_capped_in_lines() {
-        let mut source = Screen::new(80, 24);
+        let mut source = Screen::new(80, 24).unwrap();
         for line in 0..30_000 {
             source.process(format!("line {line}\r\n").as_bytes());
         }
@@ -2295,7 +2318,7 @@ mod tests {
     #[test]
     fn scrollback_is_capped_in_bytes_when_rows_are_heavy() {
         // 500 columns of styled text cost far more than the average row.
-        let mut source = Screen::new(500, 24);
+        let mut source = Screen::new(500, 24).unwrap();
         for line in 0..10_000 {
             let styled: String = (0..250)
                 .map(|cell| format!("\x1b[3{}mx", (cell + line) % 8))
@@ -2312,7 +2335,7 @@ mod tests {
 
     #[test]
     fn resizing_keeps_history_and_the_repaint_matches() {
-        let mut source = Screen::new(80, 24);
+        let mut source = Screen::new(80, 24).unwrap();
         for line in 0..200 {
             source.process(format!("row {line}\r\n").as_bytes());
         }
@@ -2353,7 +2376,7 @@ mod tests {
         let bytes = "a\u{e9}\u{4e16}\u{1f600}b".as_bytes();
         let mut whole = fed(20, 3, bytes);
         for split in 0..=bytes.len() {
-            let mut halves = Screen::new(20, 3);
+            let mut halves = Screen::new(20, 3).unwrap();
             halves.process(&bytes[..split]);
             halves.process(&bytes[split..]);
             assert_eq!(halves.contents(), whole.contents(), "split at {split}");
