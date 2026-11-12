@@ -211,7 +211,7 @@ fn window(rig: &mut Rig) {
     let third = h.active().expect("the new tab has the keyboard");
     assert_ne!(third, second);
     h.wait("the new shell", |h| h.ready(&third));
-    assert_eq!(h.shown(), [third.clone()]);
+    assert_eq!(h.shown(), std::slice::from_ref(&third));
     assert_eq!(h.view(&second, |v| v.is_hidden()), Some(true));
     assert!(h.press("cmd-b"), "global.sidebar is taken");
     h.wait("the hidden shell to follow the wider room", |h| {
@@ -223,7 +223,7 @@ fn window(rig: &mut Rig) {
         Some(true),
         "still unseen"
     );
-    assert_eq!(h.shown(), [third.clone()]);
+    assert_eq!(h.shown(), std::slice::from_ref(&third));
 
     // Stopping a shell from the palette: its process ends and the view says so.
     h.press("cmd-p");

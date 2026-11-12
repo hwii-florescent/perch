@@ -2,6 +2,9 @@
 //! perch-core: a shell that ended before anyone attached, and a core that drops and returns while
 //! the shell keeps running in the terminal daemon.
 //!
+//! Closing a tab ends a plain terminal only when the core confirms it, and says so when it does
+//! not.
+//!
 //! The core and the teardown are in `common`. Plain shells only; no agent runs.
 
 mod common;
@@ -14,6 +17,37 @@ use std::time::{Duration, Instant};
 
 fn main() {
     common::run("workspace_lifecycle", scenario);
+}
+
+/// `count` new plain shells in the core, started and let go again. The first ends at once when
+/// `first_exits`, with nobody attached to see it.
+fn new_shells(
+    runtime: &tokio::runtime::Runtime,
+    core: &Core,
+    count: usize,
+    first_exits: bool,
+) -> Vec<String> {
+    runtime.block_on(async {
+        let mut connection = core.connect().await.expect("connect");
+        let mut ids = Vec::new();
+        for n in 0..count {
+            let id = connection.create_session(None, None).await.expect("create");
+            let terminal = connection.open_terminal(&id, 80, 24).await.expect("open");
+            if first_exits && n == 0 {
+                connection
+                    .terminal_input(&terminal, "exit\r")
+                    .await
+                    .unwrap();
+            }
+            connection.release_terminal(&terminal).await.unwrap();
+            ids.push(id);
+        }
+        ids
+    })
+}
+
+fn has_tab(h: &mut Harness, id: &str) -> bool {
+    h.ws(|ws, _| ws.tabs().contains(id))
 }
 
 /// The shells the daemon has, as `(pid, alive)`.
@@ -41,17 +75,12 @@ fn scenario(rig: &mut Rig) {
     let (_, core) = rig.start_core(&runtime);
     // The core the window and the follower look for, each time they need one.
     let current = Arc::new(Mutex::new(core.clone()));
-    let (ended, kept) = runtime.block_on(async {
-        let mut connection = core.connect().await.expect("connect");
-        let mut ids = Vec::new();
-        for _ in 0..2 {
-            let id = connection.create_session(None, None).await.expect("create");
-            let terminal = connection.open_terminal(&id, 80, 24).await.expect("open");
-            connection.release_terminal(&terminal).await.unwrap();
-            ids.push(id);
-        }
-        (ids[0].clone(), ids[1].clone())
-    });
+    let ids = new_shells(&runtime, &core, 2, true);
+    let (ended, kept) = (ids[0].clone(), ids[1].clone());
+    common::wait_until("the first shell to end", || {
+        shells(rig).iter().filter(|s| s.1).count() == 1
+    })
+    .unwrap();
     let (commands, command_rx) = futures::channel::mpsc::unbounded();
     let (update_tx, updates) = futures::channel::mpsc::unbounded();
     let for_follower = current.clone();
@@ -73,6 +102,7 @@ fn scenario(rig: &mut Rig) {
 
     a_shell_that_ended_before_attach(rig, &mut h, &ended);
     a_core_that_drops_and_returns(rig, &runtime, &current, &mut h, &kept);
+    closing_waits_for_the_core(rig, &runtime, &current, &mut h);
 
     h.close();
     follower.abort();
@@ -83,17 +113,7 @@ fn scenario(rig: &mut Rig) {
 /// with the core's reason. It does not call that an exit (the core does not say the shell
 /// exited) and nothing starts a new shell in its place.
 fn a_shell_that_ended_before_attach(rig: &Rig, h: &mut Harness, id: &str) {
-    h.show_tab(id);
-    h.wait("the shell", |h| h.ready(id));
-    h.type_text("exit");
-    h.wait("the exit", |h| {
-        h.view(id, |v| matches!(v.status(), Status::Exited(0)))
-            .unwrap_or(false)
-    });
     let alive_before = shells(rig).iter().filter(|s| s.1).count();
-    assert!(h.press("cmd-w"), "the tab closes");
-    h.wait("the tab to go", |h| h.shown().is_empty());
-
     h.show_tab(id);
     h.wait("the refusal", |h| {
         h.view(id, |v| matches!(v.status(), Status::Failed(_)))
@@ -117,8 +137,14 @@ fn a_shell_that_ended_before_attach(rig: &Rig, h: &mut Harness, id: &str) {
         alive_before,
         "no shell was started in its place"
     );
+    // A tab the core never attached has nothing to end: closing it only puts the terminal away,
+    // and says it keeps running.
     assert!(h.press("cmd-w"));
     h.wait("the tab to go", |h| h.shown().is_empty());
+    let note = h
+        .ws(|ws, _| ws.notice().map(str::to_owned))
+        .unwrap_or_default();
+    assert!(note.contains("keeps running"), "{note}");
 }
 
 /// The core goes away and comes back at another address. The pane keeps its screen and says it is
@@ -221,4 +247,61 @@ fn a_core_that_drops_and_returns(
     assert_eq!(h.view(id, |v| v.find_query().to_string()).unwrap(), "pid-");
     h.view_cx(id, |v, cx| v.open_find(cx));
     h.wait("the search to find the repainted line", found);
+}
+
+/// Closing a plain terminal's tab asks the core over the terminal's own connection and keeps the
+/// tab until the core says the session ended. A core that does not answer leaves the tab open,
+/// saying the terminal is still running; the shell is never taken for ended on a guess.
+fn closing_waits_for_the_core(
+    rig: &mut Rig,
+    runtime: &tokio::runtime::Runtime,
+    current: &Arc<Mutex<Core>>,
+    h: &mut Harness,
+) {
+    let core = current.lock().unwrap().clone();
+    let ids = new_shells(runtime, &core, 2, false);
+    let (confirmed, silent) = (ids[0].clone(), ids[1].clone());
+    let alive = |rig: &Rig| shells(rig).iter().filter(|s| s.1).count();
+
+    // The core answers: the shell ends, the session is gone, and then the tab goes.
+    h.wait("the sessions to be listed", |h| {
+        h.attention(&confirmed).is_some() && h.attention(&silent).is_some()
+    });
+    h.show_tab(&confirmed);
+    h.wait("the shell", |h| h.ready(&confirmed));
+    let before = alive(rig);
+    assert!(h.press("cmd-w"));
+    h.wait("the tab to go", |h| !has_tab(h, &confirmed));
+    h.wait("the session to be gone", |h| {
+        h.attention(&confirmed).is_none()
+    });
+    assert_eq!(alive(rig), before - 1, "the shell ended");
+
+    // The core does not answer: frozen, it reads nothing.
+    h.show_tab(&silent);
+    h.wait("the shell", |h| h.ready(&silent));
+    let before = alive(rig);
+    let core_pid = rig.core_pid().unwrap() as i32;
+    // SAFETY: stops, then resumes, the core process this test started.
+    unsafe { libc::kill(core_pid, libc::SIGSTOP) };
+    assert!(h.press("cmd-w"));
+    h.settle();
+    assert!(has_tab(h, &silent), "the tab waits for the core");
+    let note = h
+        .ws(|ws, _| ws.notice().map(str::to_owned))
+        .unwrap_or_default();
+    assert!(note.contains("Ending"), "{note}");
+    h.cx.advance_clock(Duration::from_secs(6));
+    h.settle();
+    assert!(has_tab(h, &silent), "the tab stays");
+    assert_eq!(alive(rig), before, "nothing was stopped on a guess");
+    let note = h
+        .ws(|ws, _| ws.notice().map(str::to_owned))
+        .unwrap_or_default();
+    assert!(
+        note.contains("still running") && note.contains("did not answer"),
+        "{note}"
+    );
+    // SAFETY: as above.
+    unsafe { libc::kill(core_pid, libc::SIGCONT) };
 }

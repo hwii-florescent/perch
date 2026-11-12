@@ -40,9 +40,8 @@ use std::time::{Duration, Instant};
 
 /// How long a follow-up key after the leader chord is awaited.
 const LEADER_TIMEOUT: Duration = Duration::from_millis(1500);
-/// How long after a tab closes its session is asked to end, and how much later it is asked again.
-const END_WAIT: Duration = Duration::from_millis(400);
-const END_RETRY: Duration = Duration::from_millis(1100);
+/// How long the core has to confirm that a session ended before the tab says it is still running.
+const END_WAIT: Duration = Duration::from_secs(5);
 /// How long to wait before attaching a dropped terminal to the core again: it doubles from the
 /// first wait to the last, and stays there for as long as the core is away.
 const REATTACH_FIRST: Duration = Duration::from_millis(250);
@@ -76,6 +75,9 @@ struct Pane {
     /// Attaches the terminal again after its connection dropped, and how many tries in a row.
     retry: Option<Task<()>>,
     attempts: u32,
+    /// The tab was asked to close and the core has not yet said the session ended; the task
+    /// gives up waiting.
+    closing: Option<Task<()>>,
 }
 
 /// Waits for a size to hold still before a hidden pane is given it: a window being dragged or a
@@ -256,6 +258,7 @@ impl Workspace {
                     settle: Settle::default(),
                     retry: None,
                     attempts: 0,
+                    closing: None,
                 },
             );
         }
@@ -308,7 +311,27 @@ impl Workspace {
                     pane.retry = None;
                 }
             }
-            TerminalEvent::Status(Status::Disconnected(_)) => self.schedule_reattach(id, cx),
+            TerminalEvent::Status(Status::Disconnected(_)) => {
+                if self.panes.get(id).is_some_and(|p| p.closing.is_some()) {
+                    self.close_unconfirmed(
+                        id,
+                        "the connection to the core dropped before it answered",
+                        cx,
+                    );
+                }
+                self.schedule_reattach(id, cx);
+            }
+            TerminalEvent::Ended => {
+                if self.panes.get(id).is_some_and(|p| p.closing.is_some()) {
+                    self.tabs.close(id);
+                    self.panes.remove(id);
+                    self.notice = None;
+                    self.after_change(cx);
+                }
+            }
+            TerminalEvent::EndRefused(reason) => {
+                self.close_unconfirmed(id, &format!("the core refused: {reason}"), cx)
+            }
             _ => {}
         }
     }
@@ -855,51 +878,73 @@ impl Workspace {
 
     /// Close a tab. A plain terminal this window types for ends with its tab, as in the web (the
     /// core reports a shell that was used as working for good, so its state says nothing about
-    /// whether a job runs).
+    /// whether a job runs), and the tab goes only when the core confirms that it ended. The
+    /// request goes over the terminal's own connection, the one that holds the keyboard, because
+    /// the core refuses to end a session another connection controls. If the core refuses, does
+    /// not answer in time, or the connection drops, the tab stays and says the terminal is still
+    /// running: an unconfirmed stop is never taken for an end.
     /// Anything else, an agent above all, is put away and keeps running; ending it is a choice
     /// made where it can be confirmed.
     fn close(&mut self, id: &str, cx: &mut Context<Self>) {
-        let ends = self.panes.get(id).is_some_and(|pane| {
-            let plain = pane
-                .open
-                .provider_id
-                .as_deref()
-                .is_none_or(|p| p == perch_core::agent_fleet::TERMINAL_PROVIDER);
-            let holds = pane.view.as_ref().is_some_and(|v| v.read(cx).can_type());
-            plain && holds && pane.open.host_id == LOCAL
-        });
+        let Some(pane) = self.panes.get(id) else {
+            return;
+        };
+        if pane.closing.is_some() {
+            return;
+        }
+        let plain = pane
+            .open
+            .provider_id
+            .as_deref()
+            .is_none_or(|p| p == perch_core::agent_fleet::TERMINAL_PROVIDER);
+        let asked = plain
+            && pane.open.host_id == LOCAL
+            && pane
+                .view
+                .as_ref()
+                .is_some_and(|view| view.update(cx, |view, _| view.end()));
+        if asked {
+            let id = id.to_string();
+            let task = cx.spawn({
+                let id = id.clone();
+                async move |this, cx| {
+                    cx.background_executor().timer(END_WAIT).await;
+                    let _ = this.update(cx, |this, cx| {
+                        this.close_unconfirmed(&id, "the core did not answer in time", cx)
+                    });
+                }
+            });
+            if let Some(pane) = self.panes.get_mut(&id) {
+                pane.closing = Some(task);
+            }
+            self.notice = Some("Ending the terminal…".into());
+            cx.notify();
+            return;
+        }
         self.tabs.close(id);
         self.panes.remove(id);
-        if ends {
-            self.end_session(id.to_string(), cx);
+        self.notice = Some(if plain {
+            "Closed the tab. The terminal keeps running; turn on Show terminals in the sidebar to open it again."
         } else {
-            self.notice = Some(
-                "Closed the tab. The session keeps running; it is still in the sidebar.".into(),
-            );
+            "Closed the tab. The session keeps running; it is still in the sidebar."
         }
+        .into());
         self.after_change(cx);
     }
 
-    /// Ask the core to end a session whose tab was just closed. The core refuses to end a session
-    /// another connection controls, and the dropped terminal's own connection keeps the shell's
-    /// keyboard until it has let go, so the request waits for that, in real time, and is made
-    /// once more in case the release was slow. If both are refused the shell keeps running: an
-    /// agent stays listed in the sidebar, but a plain terminal has no row there and would run
-    /// unseen until the core is asked about it again.
-    // ponytail: two fixed waits, not a signal from the terminal's release; upgrade path is the
-    // terminal reporting when its connection has let go.
-    fn end_session(&self, id: String, cx: &mut Context<Self>) {
-        let Some(commands) = self.sidebar.read(cx).commands() else {
+    /// The core did not confirm that a closing tab's session ended. The tab stays open, and says
+    /// the terminal is not known to have stopped.
+    fn close_unconfirmed(&mut self, id: &str, why: &str, cx: &mut Context<Self>) {
+        let Some(pane) = self.panes.get_mut(id) else {
             return;
         };
-        std::thread::spawn(move || {
-            for wait in [END_WAIT, END_RETRY] {
-                std::thread::sleep(wait);
-                if commands.unbounded_send(Command::Close(id.clone())).is_err() {
-                    return;
-                }
-            }
-        });
+        if pane.closing.take().is_none() {
+            return;
+        }
+        self.notice = Some(format!(
+            "The terminal is still running: {why}. The tab stays open; close it again to retry."
+        ));
+        cx.notify();
     }
 
     /// A terminal's named action (`terminal.find`, `terminal.scroll {pages: -1}`, ...) on the tab

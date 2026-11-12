@@ -89,6 +89,10 @@ pub enum TerminalEvent {
     /// The program asks to set the system clipboard. Nothing has been written.
     ClipboardWrite(String),
     Status(Status),
+    /// The core confirmed that the session this terminal shows ended (see [`TerminalView::end`]).
+    Ended,
+    /// The core would not end the session; it keeps running. The reason is the core's.
+    EndRefused(String),
     /// A person clicked a link with the link key held. Opening it is the window's: it runs the
     /// system's handler, which the terminal never does itself.
     OpenLink(Target),
@@ -469,6 +473,26 @@ impl TerminalView {
         self.fitted.map(|f| f.metrics.font_px)
     }
 
+    /// Whether this view can ask the core to end its session: it is attached and holds the input
+    /// lease, even if the shell has already exited. The core refuses otherwise.
+    pub fn can_end(&self) -> bool {
+        self.to_core.is_some()
+            && matches!(self.status, Status::Live | Status::Exited(_))
+            && self.input_lease
+    }
+
+    /// Ask the core to end the session and delete it, over this view's own connection, which
+    /// holds the keyboard. Nothing happens here until the core answers with
+    /// [`TerminalEvent::Ended`] or [`TerminalEvent::EndRefused`]. False, asking nothing, when the
+    /// view cannot ask ([`Self::can_end`]).
+    pub fn end(&self) -> bool {
+        let can = self.can_end();
+        if can {
+            self.send(ToCore::End);
+        }
+        can
+    }
+
     /// Whether this connection may type: attached, holding the input lease.
     pub fn can_type(&self) -> bool {
         self.to_core.is_some() && self.status == Status::Live && self.input_lease
@@ -540,6 +564,8 @@ impl TerminalView {
                 cx.notify();
             }
             FromCore::Exited(code) => self.set_status(Status::Exited(code), cx),
+            FromCore::Ended => cx.emit(TerminalEvent::Ended),
+            FromCore::EndRefused(reason) => cx.emit(TerminalEvent::EndRefused(reason)),
             FromCore::Failed(reason) => self.set_status(Status::Failed(reason), cx),
             FromCore::Disconnected(reason) => {
                 // The screen stays; the shell is not known to have ended.

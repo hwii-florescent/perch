@@ -445,6 +445,13 @@ impl Connection {
             .await
     }
 
+    /// Ask the core to end a session and delete it. The core answers every connection with
+    /// `session.deleted`, or this one with an error (it refuses while another view controls the
+    /// session), so the caller waits for one of the two.
+    pub async fn delete_session(&mut self, session_id: &str) -> Result<()> {
+        self.send(delete_frame(session_id)).await
+    }
+
     async fn acquire(
         &mut self,
         session_id: &str,
@@ -605,8 +612,6 @@ pub enum Command {
     SetHostEnabled { host_id: String, enabled: bool },
     /// Give a session a new title, as the sidebar's rename does.
     Rename { session_id: String, title: String },
-    /// End a session, as closing its tab does for a shell that is idle.
-    Close(String),
     /// Change settings: the `settings.update` patch, with only the fields that changed.
     UpdateSettings(Value),
 }
@@ -853,9 +858,6 @@ async fn live(
                 }
                 Some(Command::Rename { session_id, title }) => {
                     connection.send(rename_frame(&session_id, &title)).await?;
-                }
-                Some(Command::Close(session_id)) => {
-                    connection.send(delete_frame(&session_id)).await?;
                 }
                 Some(Command::UpdateSettings(patch)) => {
                     connection.send(settings_frame(patch)).await?;

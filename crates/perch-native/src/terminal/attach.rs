@@ -26,6 +26,10 @@ pub enum ToCore {
     TakeControl,
     /// End the shell. Needs the input lease.
     Kill,
+    /// End the session, from this connection, which holds the keyboard: the core refuses to end
+    /// a session another connection controls. It answers with [`FromCore::Ended`] or
+    /// [`FromCore::EndRefused`].
+    End,
 }
 
 /// What the core says about the terminal.
@@ -57,6 +61,10 @@ pub enum FromCore {
     Output(String),
     /// The shell ended; the core said so.
     Exited(i32),
+    /// The core confirmed that the session ended.
+    Ended,
+    /// The core would not end the session; it keeps running.
+    EndRefused(String),
     /// Could not attach.
     Failed(String),
     /// The connection to the core dropped after attaching. The shell is not known to have ended.
@@ -207,6 +215,8 @@ async fn run(
         let _ = connection.release_terminal(&terminal).await;
         return;
     }
+    // The session this connection asked the core to end, until the core answers.
+    let mut ending = false;
     let dropped = loop {
         tokio::select! {
             message = connection.next() => match message {
@@ -238,6 +248,17 @@ async fn run(
                         break None;
                     }
                 }
+                Ok(ServerMessage::SessionDeleted { session_id: gone }) if ending && gone == session_id => {
+                    let _ = events.unbounded_send(FromCore::Ended);
+                    break None;
+                }
+                // The refusal carries no request id; this is the only request in flight.
+                Ok(ServerMessage::Error { message, .. }) if ending => {
+                    ending = false;
+                    if events.unbounded_send(FromCore::EndRefused(message)).is_err() {
+                        break None;
+                    }
+                }
                 Ok(_) => {}
                 Err(error) => break Some(format!("{error:#}")),
             },
@@ -265,6 +286,10 @@ async fn run(
                         taken
                     }
                     Some(ToCore::Kill) => connection.terminal_kill(&terminal).await,
+                    Some(ToCore::End) => {
+                        ending = true;
+                        connection.delete_session(&session_id).await
+                    }
                 };
                 if let Err(error) = sent {
                     break Some(format!("{error:#}"));
