@@ -1358,6 +1358,11 @@ fn input_and_scrolling() {
     assert!(!watcher.view(|v, cx| v.key_down(&key("a", Some("a")), cx)));
     watcher.view(|v, cx| v.paste("x", cx));
     assert_eq!(watcher.sent(), vec![]);
+    // Only the view that owns the input and the size answers the program's queries.
+    watcher.output("\x1b[5n");
+    assert_eq!(watcher.sent(), vec![], "a watching view does not answer");
+    h.output("\x1b[5n");
+    assert_eq!(h.sent(), vec![ToCore::Input(b"\x1b[0n".to_vec())]);
     // The key encoder is not involved at all for a key that types nothing.
     let mut vt = perch_native::terminal::vt::Vt::new(80, 24);
     assert_eq!(
@@ -1485,7 +1490,12 @@ fn input_method_composition() {
     h.focus();
     let before = h.draw();
     let bg = before.at(450., 300.);
-    h.sent();
+    assert!(
+        h.sent()
+            .iter()
+            .any(|m| matches!(m, ToCore::Input(b) if b == b"\x1b[I")),
+        "focus-in reaches a program that asked"
+    );
     fn ime<R>(
         h: &mut Harness,
         f: impl FnOnce(&mut TerminalView, &mut Window, &mut gpui::Context<TerminalView>) -> R,
