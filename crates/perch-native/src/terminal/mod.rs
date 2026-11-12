@@ -4,6 +4,7 @@
 pub mod actions;
 pub mod attach;
 pub mod clipboard;
+pub mod context;
 pub mod graphics;
 pub mod keys;
 pub mod layout;

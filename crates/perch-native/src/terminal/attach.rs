@@ -39,6 +39,14 @@ pub enum FromCore {
     },
     /// The user's terminal profile, as the core sent it on connecting (`server.info`).
     Profile(Option<TerminalProfile>),
+    /// What the core can do, as it advertised on connecting (`server.info`).
+    Capabilities(Vec<String>),
+    /// The session this terminal is in and the workspace that session belongs to, said before
+    /// the repaint.
+    Place {
+        session_id: String,
+        workspace_id: String,
+    },
     /// The settings, as the core sent them on connecting and sends them again when they change.
     Settings(Box<SettingsData>),
     /// The agent's lifecycle changed, or another view took a lease this one held.
@@ -146,6 +154,14 @@ async fn run(
             return;
         }
     };
+    let place = FromCore::Place {
+        session_id: session_id.clone(),
+        workspace_id: terminal.workspace_id.clone(),
+    };
+    if events.unbounded_send(place).is_err() {
+        let _ = connection.release_terminal(&terminal).await;
+        return;
+    }
     let attached = FromCore::Attached {
         replay: terminal.replay.clone(),
         input: terminal.owns_input(),
@@ -169,8 +185,10 @@ async fn run(
                         break None;
                     }
                 }
-                Ok(ServerMessage::ServerInfo { terminal_profile, .. }) => {
-                    if events.unbounded_send(FromCore::Profile(terminal_profile)).is_err() {
+                Ok(ServerMessage::ServerInfo { terminal_profile, capabilities, .. }) => {
+                    if events.unbounded_send(FromCore::Profile(terminal_profile)).is_err()
+                        || events.unbounded_send(FromCore::Capabilities(capabilities)).is_err()
+                    {
                         break None;
                     }
                 }

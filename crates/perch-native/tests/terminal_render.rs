@@ -338,6 +338,7 @@ fn main() {
     run("stress_screen", || stress_screen(bg, fg));
     run("scrollbar_in_the_pane", scrollbar_in_the_pane);
     run("kitty_images", kitty_images);
+    run("context_bridge_offer", context_bridge_offer);
     run("ownership_and_named_actions", ownership_and_named_actions);
     run(
         "x10_mouse_reports_past_the_text_range",
@@ -1947,4 +1948,102 @@ fn kitty_images() {
         "the image scrolled away"
     );
     assert_eq!(h.view(|v, _| v.uploaded_images()), 0, "and was let go");
+}
+
+/// The Context Bridge is offered for a selection only where the core can do it and the
+/// workspace is a local one; offering and capturing send nothing.
+fn context_bridge_offer() {
+    use perch_native::terminal::context::CAPABILITY;
+    let mut h = Harness::open(900., 420.);
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let seen = events.clone();
+    let _subscription = h
+        .window
+        .update(&mut h.cx, |_, _, cx| {
+            let view = cx.entity();
+            cx.subscribe(&view, move |_, _, event: &TerminalEvent, _| {
+                seen.borrow_mut().push(event.clone())
+            })
+        })
+        .unwrap();
+    h.attach(100, 24, "error: the build failed\r\nsecond line\r\n");
+    h.focus();
+    h.draw();
+    h.sent();
+    let offers = |events: &std::rc::Rc<std::cell::RefCell<Vec<TerminalEvent>>>| {
+        events
+            .borrow()
+            .iter()
+            .filter(|e| matches!(e, TerminalEvent::AskAgentOffered(_)))
+            .count()
+    };
+    let right_click = |h: &mut Harness, modifiers: Modifiers| {
+        let (x, y) = h.pos((3, 0, 0.5));
+        h.press(MouseButton::Right, x, y, modifiers);
+        h.release(MouseButton::Right, x, y, modifiers);
+    };
+    // A selection, but the core has said nothing about the bridge: nothing is offered.
+    h.view(|v, cx| v.select_all(cx));
+    right_click(&mut h, Modifiers::default());
+    assert_eq!(offers(&events), 0, "no capability, no offer");
+    assert!(h.view(|v, _| v.context_capture()).is_err());
+
+    h.say(FromCore::Capabilities(vec![CAPABILITY.into()]));
+    h.say(FromCore::Place {
+        session_id: "s1".into(),
+        workspace_id: "w1".into(),
+    });
+    right_click(&mut h, Modifiers::default());
+    assert_eq!(
+        offers(&events),
+        0,
+        "a workspace that is not known to be local is not offered"
+    );
+    h.view(|v, _| v.set_local(true));
+    right_click(&mut h, Modifiers::default());
+    assert_eq!(
+        offers(&events),
+        1,
+        "a selection in a local workspace is offered"
+    );
+    let capture = h.view(|v, _| v.context_capture()).unwrap();
+    assert_eq!(
+        (capture.workspace_id.as_str(), capture.session_id.as_str()),
+        ("w1", "s1")
+    );
+    assert!(capture.text.starts_with("error: the build failed"));
+    // Another capture has an operation of its own.
+    let mut one = h.view(|v, _| v.context_capture()).unwrap();
+    let mut two = h.view(|v, _| v.context_capture()).unwrap();
+    let id = |c: &mut perch_native::terminal::context::Capture| {
+        c.send_request("r", "", "d", "a").unwrap()["operationId"].clone()
+    };
+    assert_ne!(id(&mut one), id(&mut two));
+
+    // No selection: no offer. A program that takes the mouse gets the click; the Shift gesture
+    // is the way past it.
+    h.view(|v, cx| v.clear_selection(cx));
+    right_click(&mut h, Modifiers::default());
+    assert_eq!(offers(&events), 1);
+    assert!(h.view(|v, _| v.context_capture()).is_err());
+    h.view(|v, cx| v.select_all(cx));
+    h.output("\x1b[?1000h\x1b[?1006h");
+    h.sent();
+    right_click(&mut h, Modifiers::default());
+    assert_eq!(offers(&events), 1, "the program took the right click");
+    assert!(!h.sent().is_empty());
+    // The click the program took ended the selection, as it does for any click it takes.
+    assert!(h.view(|v, _| v.context_capture()).is_err());
+    h.view(|v, cx| v.select_all(cx));
+    let shift = Modifiers {
+        shift: true,
+        ..Default::default()
+    };
+    right_click(&mut h, shift);
+    assert_eq!(
+        offers(&events),
+        2,
+        "Shift-right-click reaches the terminal's own menu"
+    );
+    assert_eq!(h.sent(), vec![], "offering and capturing sent nothing");
 }

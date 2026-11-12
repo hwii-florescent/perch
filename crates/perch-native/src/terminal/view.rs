@@ -18,6 +18,7 @@
 use super::actions::{Action, Scroll};
 use super::attach::{self, AgentInfo, FromCore, Piece, ToCore};
 use super::clipboard::{Clipboard, MemoryClipboard};
+use super::context::{self, Capture};
 use super::graphics::Layer;
 use super::keys::key_bytes_with;
 use super::layout::{self, Fit, Metrics};
@@ -90,6 +91,9 @@ pub enum TerminalEvent {
     /// A person clicked a link with the link key held. Opening it is the window's: it runs the
     /// system's handler, which the terminal never does itself.
     OpenLink(Target),
+    /// A person right-clicked a selection where the Context Bridge is available: the window may
+    /// offer "Ask agent about selection…" at this point. Nothing is captured or sent.
+    AskAgentOffered(Point<Pixels>),
 }
 
 impl EventEmitter<TerminalEvent> for TerminalView {}
@@ -175,6 +179,11 @@ pub struct TerminalView {
     last_pointer: Option<Point<Pixels>>,
     /// The terminal's folder when the shell has not said (OSC 7), for relative file links.
     cwd: Option<std::path::PathBuf>,
+    /// Where the terminal is, for deciding to offer the Context Bridge, and the core that would
+    /// prepare and send a packet.
+    place: context::Place,
+    session_id: String,
+    core: Option<Core>,
     /// Uploaded images, kept while some placement on the screen still draws them.
     images: HashMap<ImageKey, Arc<RenderImage>>,
     /// The scrollbar as last drawn, and where in its thumb a drag holds it.
@@ -234,6 +243,9 @@ impl TerminalView {
             hover_link: None,
             last_pointer: None,
             cwd: None,
+            place: context::Place::default(),
+            session_id: String::new(),
+            core: None,
             images: HashMap::new(),
             bar: None,
             bar_grab: None,
@@ -265,6 +277,8 @@ impl TerminalView {
     /// the keyboard focus then. Without a provider the session's own terminal is attached.
     pub fn attach(core: Core, open: &OpenSession, cx: &mut Context<Self>) -> Self {
         let mut view = Self::new(cx);
+        view.place.local = open.host_id == "local";
+        view.core = Some(core.clone());
         view.status = Status::Connecting;
         view.take_focus = true;
         view.pending = Some(Pending {
@@ -443,6 +457,14 @@ impl TerminalView {
             }
             FromCore::Output(data) => self.output(&data, cx),
             FromCore::Profile(profile) => self.apply_core(Some(profile), None, cx),
+            FromCore::Capabilities(capabilities) => self.place.capabilities = capabilities,
+            FromCore::Place {
+                session_id,
+                workspace_id,
+            } => {
+                self.session_id = session_id;
+                self.place.workspace_id = Some(workspace_id).filter(|w| !w.is_empty());
+            }
             FromCore::Settings(settings) => self.apply_core(None, Some(*settings), cx),
             FromCore::Agent(agent) => {
                 // A lease taken from this view ends its typing; one it took starts it, and the
@@ -577,6 +599,40 @@ impl TerminalView {
         true
     }
 
+    /// The selected output as a Context Bridge capture, when the bridge is available here.
+    /// Nothing is sent: the capture is plain data for the window's dialog, which previews it with
+    /// [`Self::core`] and sends only when the person says so.
+    pub fn context_capture(&self) -> Result<Capture, String> {
+        let text = self
+            .vt
+            .selection_text()
+            .ok_or_else(|| "Select some text to ask about".to_string())?;
+        // One operation per capture: the core refuses a replayed id.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let operation = format!("native-{}-{stamp}-{n}", std::process::id());
+        Capture::new(&self.place, &self.session_id, &text, operation)
+    }
+
+    /// A view joined with [`Self::link`] says whether its session is on this computer; one made
+    /// with [`Self::attach`] knows from the session it opens.
+    pub fn set_local(&mut self, local: bool) {
+        self.place.local = local;
+    }
+
+    /// Whether the Context Bridge is offered for this terminal's selection.
+    pub fn can_ask_agent(&self) -> bool {
+        self.place.available() && self.vt.has_selection()
+    }
+
+    /// The core this terminal is attached to, for preparing and sending a context packet.
+    pub fn core(&self) -> Option<&Core> {
+        self.core.as_ref()
+    }
+
     /// The text selected, if any.
     pub fn selection_text(&self) -> Option<String> {
         self.vt.selection_text()
@@ -675,6 +731,11 @@ impl TerminalView {
             }
             GpuiButton::Middle => {
                 self.paste_clipboard(cx);
+            }
+            // The program has not taken the click (a mouse-reporting program is given the
+            // Shift gesture instead): offer the bridge for what is selected.
+            GpuiButton::Right if self.can_ask_agent() => {
+                cx.emit(TerminalEvent::AskAgentOffered(event.position));
             }
             _ => {}
         }

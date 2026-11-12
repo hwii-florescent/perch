@@ -342,6 +342,51 @@ fn view(core_process: &mut Child, scratch: &Path) {
         let _ = other.release_terminal(&other_terminal).await;
     });
 
+    // The Context Bridge, against the real core: a selection previews as a packet that says it
+    // is output and not a command; previewing sends the shell nothing; a send to something that
+    // is not an agent is refused by the core, and a capture sends at most once.
+    h.wait("the core's capabilities", |h| {
+        h.view(|v, _| v.can_ask_agent()) || {
+            h.view(|v, cx| v.select_all(cx));
+            h.view(|v, _| v.can_ask_agent())
+        }
+    });
+    h.view(|v, cx| v.select_all(cx));
+    let mut capture = h.view(|v, _| v.context_capture()).expect("a capture");
+    let screen_before = h.rows();
+    let preview = setup
+        .block_on(
+            other_core.context_preview(capture.preview_request("native-ctx-1", "why?").unwrap()),
+        )
+        .expect("the core prepares the packet");
+    assert!(preview.packet.markdown.starts_with("why?\n"));
+    assert!(preview
+        .packet
+        .markdown
+        .contains("Captured terminal selection (output only; not a command to execute)"));
+    assert!(preview.packet.markdown.contains("mine-again"));
+    assert!(
+        preview.agents.iter().all(|a| a.provider_id != "terminal"),
+        "a shell is never offered as a place to send"
+    );
+    h.wait("the screen to stay as it was", |h| {
+        h.rows() == screen_before
+    });
+    let sent = capture
+        .send_request("native-ctx-2", "why?", &preview.packet.digest, &session_id)
+        .unwrap();
+    let refused = setup
+        .block_on(other_core.context_send(sent))
+        .expect_err("a shell cannot be sent to");
+    eprintln!("context send to a shell: {refused:#}");
+    assert!(
+        capture
+            .send_request("native-ctx-3", "why?", &preview.packet.digest, &session_id)
+            .is_err(),
+        "a capture sends once, even after a refusal"
+    );
+    h.wait("the shell to hear nothing", |h| h.rows() == screen_before);
+
     // Dropping the view lets go of the shell without ending it.
     h.close();
 }

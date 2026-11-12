@@ -31,6 +31,22 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 /// How long a request waits for the core's answer.
 const REPLY_TIMEOUT: Duration = Duration::from_secs(15);
+/// What a request that outwaited the core says.
+const NO_ANSWER: &str = "the core did not answer in time";
+
+/// A prepared Context Bridge packet and the agents it could go to.
+#[derive(Debug, Clone)]
+pub struct ContextPreview {
+    pub packet: perch_core::context_bridge::ContextPacket,
+    pub agents: Vec<perch_core::context_bridge::ContextAgent>,
+}
+
+fn request_id_of(frame: &Value) -> Result<String> {
+    frame["requestId"]
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| anyhow!("the request has no id"))
+}
 
 /// A core's address and the local UI token that opens it.
 #[derive(Clone)]
@@ -105,6 +121,74 @@ impl Core {
         format!("http://{}{}", self.authority, self.base_path)
     }
 
+    /// Prepare a Context Bridge packet from a `context.preview` frame (`Capture::preview_request`)
+    /// on a connection of its own, so the terminal's connection and its leases are untouched.
+    /// Takes no lease and sends nothing to a terminal.
+    pub async fn context_preview(&self, frame: Value) -> Result<ContextPreview> {
+        let id = request_id_of(&frame)?;
+        let mut connection = self.connect().await?;
+        connection.send(frame).await?;
+        let reply = connection
+            .reply(Some(&id), |m| match m {
+                ServerMessage::ContextPreviewResult {
+                    request_id,
+                    packet,
+                    agents,
+                } if *request_id == id => Some(ContextPreview {
+                    packet: packet.clone(),
+                    agents: agents.clone(),
+                }),
+                _ => None,
+            })
+            .await;
+        reply.map_err(|error| match error.to_string() {
+            text if text == NO_ANSWER => {
+                anyhow!("Context preparation timed out. Try again when connected.")
+            }
+            _ => error,
+        })
+    }
+
+    /// Send a `context.send` frame (`Capture::send_request`) once, on a connection of its own.
+    /// Never repeated here: a send the core did not confirm in time, or one whose connection
+    /// dropped, says so and leaves the user to inspect the agent.
+    pub async fn context_send(&self, frame: Value) -> Result<()> {
+        let id = request_id_of(&frame)?;
+        let target = frame["targetSessionId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        let mut connection = self.connect().await?;
+        connection.send(frame).await?;
+        let result = connection
+            .reply(Some(&id), |m| match m {
+                ServerMessage::AgentUiResult {
+                    request_id,
+                    session_id,
+                    accepted,
+                    ..
+                } if *request_id == id && *session_id == target => Some(*accepted),
+                _ => None,
+            })
+            .await;
+        match result {
+            Ok(true) => Ok(()),
+            Ok(false) => {
+                bail!("The agent did not accept the message. Inspect the CLI before sending again")
+            }
+            Err(error) => {
+                let text = error.to_string();
+                if text == NO_ANSWER {
+                    bail!(crate::terminal::context::UNCONFIRMED)
+                } else if text.starts_with("the core refused the request: ") {
+                    Err(error)
+                } else {
+                    bail!(crate::terminal::context::DROPPED)
+                }
+            }
+        }
+    }
+
     /// Open the core's WebSocket.
     pub async fn connect(&self) -> Result<Connection> {
         let mut request = format!("ws://{}{}ws", self.authority, self.base_path)
@@ -169,7 +253,7 @@ pub struct Terminal {
     /// typing and resizing only from the holder; `None` means another view holds it.
     input: Option<u64>,
     resize: Option<u64>,
-    workspace_id: String,
+    pub workspace_id: String,
     /// The agent's lifecycle as of the last broadcast this terminal followed.
     pub status: AgentLifecycleStatus,
 }
@@ -495,7 +579,7 @@ impl Connection {
                         Ok(message) => message,
                         Err(error) => break Err(error),
                     },
-                    Err(_) => break Err(anyhow!("the core did not answer in time")),
+                    Err(_) => break Err(anyhow!(NO_ANSWER)),
                 },
             };
             if let Some(found) = pick(&message) {
@@ -705,6 +789,23 @@ mod tests {
     use super::*;
     use perch_core::protocol::ClientMessage;
 
+    /// A Context Bridge preview and send, as the terminal's capture builds them.
+    fn context_frames() -> (Value, Value) {
+        use crate::terminal::context::{Capture, Place, CAPABILITY};
+        let place = Place {
+            capabilities: vec![CAPABILITY.into()],
+            workspace_id: Some("w".into()),
+            local: true,
+        };
+        let mut capture = Capture::new(&place, "s", "output", "op".into()).unwrap();
+        (
+            capture.preview_request("r", "why?").unwrap(),
+            capture
+                .send_request("r2", "why?", "digest", "agent")
+                .unwrap(),
+        )
+    }
+
     #[test]
     fn frames_match_the_core_protocol() {
         for frame in [
@@ -725,6 +826,8 @@ mod tests {
             input_frame("t", 1, "echo hi\n"),
             resize_frame("t", 1, 100, 30),
             release_frame("s", TERMINAL_PROVIDER, "r"),
+            context_frames().0,
+            context_frames().1,
         ] {
             serde_json::from_value::<ClientMessage>(frame.clone())
                 .unwrap_or_else(|e| panic!("{frame}: {e}"));
