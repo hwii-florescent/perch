@@ -1619,6 +1619,9 @@ fn stress_screen(bg: [u8; 3], fg: [u8; 3]) {
     screen.push_str(
         "\x1b[17;1H\x1b_Ga=T,f=32,s=2,v=2,i=1,c=4,r=2,C=1,q=2;/wAA/wD/AP8AAP///////w==\x1b\\\x1b[15;1H",
     );
+    // Icons the font does not have (a branch and a folder, as a prompt draws them) come from the
+    // bundled symbols font, and a lone one has room for two cells.
+    screen.push_str("\x1b[19;1H\u{e0a0} \u{f07b}x\u{f07b}\x1b[15;1H");
     screen.push_str("\u{65e5}\u{672c}\u{8a9e} \u{1f600}x");
     h.attach(100, 30, &screen);
     h.focus();
@@ -1760,6 +1763,19 @@ fn stress_screen(bg: [u8; 3], fg: [u8; 3]) {
         }) > 0,
         "the emoji has colour"
     );
+    // Icons: the branch has room for the cell after it, the folder before the x sits in its own,
+    // and a last one has room again.
+    assert!(shot.ink(0, 18, 2, bg) > 0, "the branch icon is drawn");
+    assert!(shot.ink(2, 18, 1, bg) > 0, "the folder icon is drawn");
+    assert!(shot.ink(3, 18, 1, bg) > 0, "the text after it is drawn");
+    assert!(shot.ink(4, 18, 2, bg) > 0, "the icon at the end is drawn");
+    let (x, y) = shot.cell_origin(0, 19);
+    assert_eq!(
+        shot.ink(0, 19, 6, bg),
+        0,
+        "the icons do not spill into the row below"
+    );
+    let _ = (x, y);
     // The image sits over its cells, its quadrants in their own colours.
     let (r, g, b, w) = (
         shot.center(0, 16),

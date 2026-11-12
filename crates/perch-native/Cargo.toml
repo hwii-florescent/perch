@@ -18,6 +18,8 @@ perch-core = { path = "../perch-core" }
 perchd = { path = "../perchd" }
 ghostty-sys = { path = "../ghostty-sys" }
 anyhow = "1"
+# Reads the bundled symbols font's glyph outlines, the version GPUI's text system uses.
+ttf-parser = "0.25"
 # The version GPUI uses, for the frames it draws and the PNG images kitty graphics send.
 image = { version = "0.25", default-features = false, features = ["png"] }
 futures = "0.3"

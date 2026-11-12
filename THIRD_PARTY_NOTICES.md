@@ -232,6 +232,9 @@ modified files carry a header saying so.
   `src/vt.rs` and `src/links.rs`): the selection gesture model, the on-screen and
   scrollback search, and link detection. Perch's versions take the click time from
   the caller, report search progress, and find links with a scanner of their own.
+- `crates/perch-native/src/terminal/fallback.rs` (from `src/terminal.rs`): the
+  bundled-font icon lookup, the test for characters the configured font lacks, and
+  the fitting of icons and oversize fallback glyphs to their cells.
 - `crates/perch-native/src/terminal/graphics.rs` (from `src/vt.rs`): the kitty
   graphics placement read, the Unicode-placeholder resolution and its geometry,
   the PNG decode hook and the BGRA conversion. Perch decodes PNGs with the `image`
@@ -242,3 +245,15 @@ modified files carry a header saying so.
 - `crates/perch-native/src/terminal/sprites.rs` (from `src/sprites.rs`): box
   drawing, block, braille and powerline characters drawn as shapes that fit their
   cell. Only the formatting and the module path differ.
+
+## Symbols Nerd Font
+
+`crates/perch-native/assets/fonts/SymbolsNerdFont-Regular.ttf` is the symbols-only
+font from [Nerd Fonts](https://github.com/ryanoasis/nerd-fonts), bundled by the native
+terminal to draw the private-use icons a program prints (prompts, file trees) when the
+configured font has none. Its license, which covers the Nerd Fonts patcher and the
+collection, is MIT (Copyright (c) 2014 Ryan L McIntyre); the glyphs come from the
+projects listed in the Nerd Fonts repository, each under its own license (mostly
+SIL OFL 1.1, MIT and Apache-2.0). The license text is next to the font, in
+`crates/perch-native/assets/fonts/LICENSE-SymbolsNerdFont.txt`. The file was copied
+from herdr (commit `4c8c622d7965a6f6787f55b1896b70795fc68918`).

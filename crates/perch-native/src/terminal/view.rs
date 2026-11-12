@@ -19,6 +19,7 @@ use super::actions::{Action, Scroll};
 use super::attach::{self, AgentInfo, FromCore, Piece, ToCore};
 use super::clipboard::{Clipboard, MemoryClipboard};
 use super::context::{self, Capture};
+use super::fallback;
 use super::graphics::Layer;
 use super::keys::key_bytes_with;
 use super::layout::{self, Fit, Metrics};
@@ -218,6 +219,7 @@ pub struct TerminalView {
 impl TerminalView {
     /// A view attached to nothing: a quiet pane that draws what is fed to it.
     pub fn new(cx: &mut Context<Self>) -> Self {
+        fallback::install(cx);
         Self {
             vt: Vt::new(80, 24),
             focus: cx.focus_handle(),
@@ -1650,6 +1652,7 @@ fn color(c: Rgb) -> Hsla {
 fn same_run(a: &Cell, b: &Cell) -> bool {
     !b.wide
         && b.text.chars().count() <= 1
+        && b.text.is_ascii()
         && !sprites::is_sprite(&b.text)
         && a.fg == b.fg
         && a.bold == b.bold
@@ -1808,13 +1811,32 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
                 });
             };
             let sprite = sprites::is_sprite(&first.text);
-            if sprite {
-                // Shapes that fit the cell, not glyphs from the font.
+            let first_font = layout::cell_font(&family, first.bold, first.italic);
+            let font_px = px(metrics.font_px);
+            // An icon the font lacks comes from the bundled symbols font, fitted to its cell.
+            let icon = (!sprite && !first.wide)
+                .then(|| {
+                    fallback::fallback_icon(&first.text, &first_font, window.text_system(), font_px)
+                })
+                .flatten();
+            let mut fitted = font_px;
+            if sprite || icon.is_some() {
+                // Shapes and icons that fit the cell, not glyphs from the font.
                 x += 1;
-            } else if first.wide || first.text.chars().count() > 1 {
+            } else if first.wide || first.text.chars().count() > 1 || !first.text.is_ascii() {
                 push(first, &mut text);
                 glyphs = 1;
                 x += 1 + usize::from(first.wide);
+                // A fallback glyph wider than its cell is scaled to it.
+                fitted = fallback::fallback_size(
+                    &first.text,
+                    first.wide,
+                    &first_font,
+                    cw,
+                    font_px,
+                    window.text_system(),
+                )
+                .unwrap_or(font_px);
             } else {
                 push(first, &mut text);
                 x += 1;
@@ -1842,6 +1864,26 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
                     window,
                 );
             }
+            if let Some(icon) = icon {
+                // Two cells of room when a blank follows (a prompt, a file tree), else one.
+                let room = if row.get(start + 1).is_none_or(|d| d.text.trim().is_empty()) {
+                    2.0
+                } else {
+                    1.0
+                };
+                let (offset, icon_px) =
+                    fallback::fit_icon(icon, (f32::from(cw), f32::from(ch)), room);
+                let symbols = window
+                    .text_system()
+                    .resolve_font(&gpui::font(fallback::SYMBOLS_FONT));
+                let _ = window.paint_glyph(
+                    at(start, y) + offset,
+                    symbols,
+                    gpui::GlyphId(icon.id),
+                    icon_px,
+                    fg,
+                );
+            }
             if glyphs > 0 {
                 // Trailing blanks carry no ink.
                 let kept = text.trim_end_matches(' ').len();
@@ -1857,7 +1899,7 @@ fn paint_frame(bounds: Bounds<Pixels>, painted: Painted, window: &mut Window, cx
                     };
                     let line = window.text_system().shape_line(
                         SharedString::from(text),
-                        px(metrics.font_px),
+                        fitted,
                         &[run],
                         Some(cw),
                     );
