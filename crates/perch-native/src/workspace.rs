@@ -1962,6 +1962,14 @@ impl Workspace {
                 cx,
             ))
             .child(self.switch(
+                "copy-on-select",
+                "Copy on select",
+                "Releasing a mouse selection in a terminal copies it.",
+                terminal.copy_on_select,
+                Change::CopyOnSelect(!terminal.copy_on_select),
+                cx,
+            ))
+            .child(self.switch(
                 "scrollbars",
                 "Scrollbars",
                 "A strip over the text edge while there is history to scroll.",

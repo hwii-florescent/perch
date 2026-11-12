@@ -63,8 +63,7 @@ pub struct Settings {
     pub clipboard_write: bool,
     pub option_as_alt: OptionAsAlt,
     pub scrollback: usize,
-    /// Releasing a mouse selection copies it, as iTerm2 does by default. The core has no setting
-    /// for this, so it is the native terminal's own.
+    /// Releasing a mouse selection copies it, as iTerm2 does by default (`copyOnSelect`).
     pub copy_on_select: bool,
     /// Dropped paths are double-quoted rather than single-quoted (`droppedPathDoubleQuotes`).
     pub dropped_path_double_quotes: bool,
@@ -202,6 +201,7 @@ impl Settings {
                 1.0
             };
             settings.clipboard_write = data.clipboard_write;
+            settings.copy_on_select = data.copy_on_select;
             settings.dropped_path_double_quotes = data.dropped_path_double_quotes;
             settings.scrollbar = data.pane_scrollbars;
             let pad = |v: f64| {
@@ -321,6 +321,7 @@ mod tests {
         data.terminal_scrollback = 5;
         data.option_as_alt = "off".into();
         data.clipboard_write = false;
+        data.copy_on_select = false;
         data.pane_scrollbars = false;
         let s = Settings::from_core(None, Some(&data), true, &[]);
         assert_eq!(s.theme.minimum_contrast, 21.0);
@@ -328,6 +329,6 @@ mod tests {
         assert_eq!(s.opacity, 0.1);
         assert_eq!(s.scrollback, 100);
         assert_eq!(s.option_as_alt, OptionAsAlt::Off);
-        assert!(!s.clipboard_write && !s.scrollbar);
+        assert!(!s.clipboard_write && !s.copy_on_select && !s.scrollbar);
     }
 }

@@ -1,8 +1,8 @@
 //! The terminal section of Settings: the three things the web's Settings > Terminal offers
 //! (`stock-ui/settings-terminal`) and the other terminal fields the core's `settings.current`
-//! carries (colour contrast, clipboard writes, scrollbars, padding, opacity, Option as Alt, the
-//! alert sounds and toasts), read from the core and changed with a `settings.update` that carries
-//! only the field that changed.
+//! carries (colour contrast, clipboard writes, copy on select, scrollbars, padding, opacity,
+//! Option as Alt, the alert sounds and toasts), read from the core and changed with a
+//! `settings.update` that carries only the field that changed.
 //!
 //! Scrollback is saved only when it is in range, as the web does, so typing `5000` never stores
 //! `5` on the way. The core applies the login shell to terminals it starts afterwards. Line
@@ -37,6 +37,8 @@ pub struct TerminalSettings {
     pub minimum_contrast: f64,
     /// A program may write the clipboard (OSC 52).
     pub clipboard_write: bool,
+    /// A selection made with the mouse is copied when it is released.
+    pub copy_on_select: bool,
     pub pane_scrollbars: bool,
     /// Space around the text, across and down, in pixels.
     pub padding: [f64; 2],
@@ -62,6 +64,7 @@ impl TerminalSettings {
             dropped_path_double_quotes: settings.dropped_path_double_quotes,
             minimum_contrast: settings.minimum_contrast,
             clipboard_write: settings.clipboard_write,
+            copy_on_select: settings.copy_on_select,
             pane_scrollbars: settings.pane_scrollbars,
             padding: settings.terminal_padding,
             opacity: settings.terminal_opacity,
@@ -83,6 +86,7 @@ pub enum Change {
     DroppedPathDoubleQuotes(bool),
     MinimumContrast(f64),
     ClipboardWrite(bool),
+    CopyOnSelect(bool),
     PaneScrollbars(bool),
     Padding([f64; 2]),
     Opacity(f64),
@@ -101,6 +105,7 @@ impl Change {
             Self::DroppedPathDoubleQuotes(on) => json!({ "droppedPathDoubleQuotes": on }),
             Self::MinimumContrast(ratio) => json!({ "minimumContrast": ratio }),
             Self::ClipboardWrite(on) => json!({ "clipboardWrite": on }),
+            Self::CopyOnSelect(on) => json!({ "copyOnSelect": on }),
             Self::PaneScrollbars(on) => json!({ "paneScrollbars": on }),
             Self::Padding(pad) => json!({ "terminalPadding": pad }),
             Self::Opacity(opacity) => json!({ "terminalOpacity": opacity }),
@@ -179,6 +184,10 @@ mod tests {
         assert_eq!(
             Change::DroppedPathDoubleQuotes(false).patch(),
             json!({"droppedPathDoubleQuotes": false})
+        );
+        assert_eq!(
+            Change::CopyOnSelect(false).patch(),
+            json!({"copyOnSelect": false})
         );
         assert_eq!(
             Change::Padding([2.0, 4.0]).patch(),

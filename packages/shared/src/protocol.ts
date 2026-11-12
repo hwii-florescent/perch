@@ -495,6 +495,8 @@ export interface SettingsData {
   minimumContrast?: number;
   /** A terminal program may write the clipboard (OSC 52). Absent = true. */
   clipboardWrite?: boolean;
+  /** A selection made in a terminal is copied at once (the native terminal's mouse selection). Absent = true. */
+  copyOnSelect?: boolean;
   /** A terminal pane shows its scroll position thumb. Absent = true. */
   paneScrollbars?: boolean;
   /** Space between a terminal's edge and its text in px, `[x, y]`; a layout's own `terminalPadding` wins. */
@@ -569,6 +571,7 @@ export interface SettingsPatch {
   tabShape?: "square" | "round";
   minimumContrast?: number;
   clipboardWrite?: boolean;
+  copyOnSelect?: boolean;
   paneScrollbars?: boolean;
   /** Space between a terminal's edge and its text in px, `[x, y]`; a layout's own `terminalPadding` wins. */
   terminalPadding?: [number, number];

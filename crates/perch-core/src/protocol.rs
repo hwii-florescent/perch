@@ -93,6 +93,9 @@ pub struct SettingsData {
     /// A terminal program may write the clipboard (OSC 52). Defaults to `true`.
     #[serde(default = "default_true")]
     pub clipboard_write: bool,
+    /// A selection made in a terminal is copied at once. Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub copy_on_select: bool,
     /// A terminal pane shows its scroll position thumb. Defaults to `true`.
     #[serde(default = "default_true")]
     pub pane_scrollbars: bool,
@@ -251,6 +254,8 @@ pub struct SettingsPatch {
     pub minimum_contrast: Option<f64>,
     #[serde(default)]
     pub clipboard_write: Option<bool>,
+    #[serde(default)]
+    pub copy_on_select: Option<bool>,
     #[serde(default)]
     pub pane_scrollbars: Option<bool>,
     #[serde(default)]

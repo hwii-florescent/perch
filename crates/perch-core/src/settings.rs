@@ -82,6 +82,9 @@ pub struct Settings {
     /// A terminal program may write the clipboard (OSC 52). Defaults to `true`.
     #[serde(default = "default_true")]
     pub clipboard_write: bool,
+    /// A selection made in a terminal is copied at once. Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub copy_on_select: bool,
     /// A terminal pane shows its scroll position thumb. Defaults to `true`.
     #[serde(default = "default_true")]
     pub pane_scrollbars: bool,
@@ -175,6 +178,7 @@ impl Default for Settings {
             tab_shape: default_tab_shape(),
             minimum_contrast: default_minimum_contrast(),
             clipboard_write: true,
+            copy_on_select: true,
             pane_scrollbars: true,
             terminal_padding: [0.0, 0.0],
             terminal_opacity: default_terminal_opacity(),
@@ -302,6 +306,8 @@ pub struct SettingsPatch {
     pub minimum_contrast: Option<f64>,
     #[serde(default)]
     pub clipboard_write: Option<bool>,
+    #[serde(default)]
+    pub copy_on_select: Option<bool>,
     #[serde(default)]
     pub pane_scrollbars: Option<bool>,
     #[serde(default)]
@@ -551,6 +557,9 @@ impl SettingsStore {
         }
         if let Some(allowed) = patch.clipboard_write {
             guard.clipboard_write = allowed;
+        }
+        if let Some(copy) = patch.copy_on_select {
+            guard.copy_on_select = copy;
         }
         if let Some(shown) = patch.pane_scrollbars {
             guard.pane_scrollbars = shown;
@@ -809,6 +818,28 @@ mod keybinding_tests {
             SettingsStore::load(&path).get().run_limits,
             crate::sub_sessions::RunLimits::default()
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn copy_on_select_is_on_unless_changed_and_the_change_is_kept() {
+        let dir =
+            std::env::temp_dir().join(format!("perch-copy-on-select-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        // A file written before the setting existed, and a missing file, both read as on.
+        std::fs::write(&path, r#"{"theme":"light"}"#).unwrap();
+        let store = SettingsStore::load(&path);
+        assert!(store.get().copy_on_select);
+        assert!(
+            SettingsStore::load(dir.join("absent.json"))
+                .get()
+                .copy_on_select
+        );
+        let patch: SettingsPatch =
+            serde_json::from_value(serde_json::json!({"copyOnSelect": false})).unwrap();
+        store.update(patch).unwrap();
+        assert!(!SettingsStore::load(&path).get().copy_on_select);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
