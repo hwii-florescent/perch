@@ -1060,11 +1060,12 @@ impl AgentRuntimeAdapter {
                     return Err(RuntimeAdapterError::NoRuntime(key.clone()));
                 }
             };
-            let mut snapshot = self.size_marker(&key);
+            let marker = self.size_marker(&key);
+            let mut snapshot = String::new();
             if let Err(error) =
                 self.terminals
                     .observe(&existing.terminal, &client.id, on_data, on_exit, || {
-                        snapshot += &replay.lock().unwrap().text();
+                        snapshot = replay_with_size(marker, replay.lock().unwrap().text());
                         on_ready(&existing, &snapshot);
                     })
             {
@@ -1404,11 +1405,12 @@ impl AgentRuntimeAdapter {
             );
         }
 
-        let mut snapshot = self.size_marker(&key);
+        let marker = self.size_marker(&key);
+        let mut snapshot = String::new();
         if let Err(error) = self
             .terminals
             .observe(&identity, &client.id, on_data, on_exit, || {
-                snapshot += &replay.lock().unwrap().text();
+                snapshot = replay_with_size(marker, replay.lock().unwrap().text());
                 on_ready(&handle, &snapshot);
             })
         {
@@ -1995,6 +1997,17 @@ impl AgentRuntimeAdapter {
 /// PTY reads. Retain at most the longest marker minus one byte, never a transcript.
 /// ponytail: configured markers can be spoofed by provider output; native
 /// structured status takes precedence and is the upgrade path for TUIs.
+/// A replay opens at the PTY's size, `marker`. One that already opens with a
+/// size (the repaint of a screen resized in-band) says it itself, so the
+/// marker is not sent a second time in front of it.
+fn replay_with_size(marker: String, replay: String) -> String {
+    if replay.starts_with("\x1b[8;") {
+        replay
+    } else {
+        marker + &replay
+    }
+}
+
 fn output_status_signal(
     detection: &crate::agent_fleet::StatusDetection,
     tail: &mut String,
@@ -2181,6 +2194,31 @@ fn foreground_provider(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_replay_carries_the_size_once() {
+        use crate::terminal::{pty_size_marker, TerminalReplay};
+        let marker = pty_size_marker(100, 30);
+        let matches = |text: &str| text.matches("\x1b[8;").count();
+
+        let mut resized = TerminalReplay::new(80, 24);
+        resized.push("output\r\n");
+        resized.push(&marker);
+        resized.push("more");
+        let text = super::replay_with_size(marker.clone(), resized.text());
+        assert!(text.starts_with(&marker));
+        assert_eq!(matches(&text), 1);
+
+        // Never resized in-band: the PTY's size is the only one there is.
+        let mut plain = TerminalReplay::new(100, 30);
+        plain.push("output");
+        let text = super::replay_with_size(marker.clone(), plain.text());
+        assert!(text.starts_with(&marker));
+        assert_eq!(matches(&text), 1);
+
+        let text = super::replay_with_size(marker.clone(), TerminalReplay::new(100, 30).text());
+        assert_eq!(text, marker);
+    }
+
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn process_cwd_reads_a_live_process_directory() {
