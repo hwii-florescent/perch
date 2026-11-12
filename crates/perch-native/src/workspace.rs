@@ -470,6 +470,8 @@ impl Workspace {
 
     /// Tell the sidebar which tab is shown, so it is marked read and highlighted.
     fn after_change(&mut self, cx: &mut Context<Self>) {
+        // A pane menu acts on the active pane, so it must not outlive a change of what is active.
+        self.menu = None;
         self.keep_in_bounds(cx);
         let target = self.tabs.active().and_then(|id| {
             let open = &self.panes.get(id)?.open;
