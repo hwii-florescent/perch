@@ -16,9 +16,11 @@
 //! files every [`POLL`] and reloads it in place when they change; when the user adds or removes an
 //! override folder it switches source. A new version that throws while loading never replaces
 //! the one on screen ([`ModView::load_error`]); one that throws in `render()` leaves the last good
-//! render drawn under the shell's error banner ([`ModView::render_error`]). A mod is trusted code,
-//! as web mods are; it may read the home folder, write only the native mods folder, and keep
-//! `localStorage` in `<user dir>/.data/<id>/`.
+//! render drawn under the shell's error banner ([`ModView::render_error`]). A mod gets no more
+//! than a web mod ([`ModHost::policy_for`]): it reads its own folder, writes and keeps
+//! `localStorage` only in `<user dir>/.data/<id>/`, may write the clipboard but not read it, and
+//! runs nothing and reaches no network. A folder with a `gpui-shell.json` is refused, as the
+//! engine would clone its git dependencies while loading.
 //!
 //! The data a mod can import comes from host modules: [`ModHost::register_module`] takes a
 //! factory that builds one [`HostModule`] (for example `perch`: data, commands, theme tokens) for
@@ -426,18 +428,21 @@ impl ModHost {
         self.0.user_dir.join(".stock")
     }
 
-    /// The policy the next load runs under: what a mod may touch and the modules it imports.
-    fn policy_for(&self, id: &str, key: &str) -> Result<Policy> {
+    /// The policy the next load of mod `id` from `dir` runs under: what it may touch and the
+    /// modules it imports. No more than a web mod gets: it reads its own folder, writes only its
+    /// data folder, and may put text on the clipboard but not read it. No process, no network.
+    fn policy_for(&self, id: &str, key: &str, dir: &Path) -> Result<Policy> {
+        let data = self.0.user_dir.join(".data").join(id);
         let capabilities = Capabilities::new()
-            .read_roots(std::env::var_os("HOME").map(PathBuf::from))
-            .write_roots([self.0.user_dir.clone()])
+            .read_roots([dir.to_path_buf()])
+            .write_roots([data.clone()])
             .storage(true)
-            .clipboard_read(true)
+            .clipboard_read(false)
             .clipboard_write(true);
         let mut policy = Policy::new()
             .with_application(id)
             .with_capabilities(capabilities)
-            .with_storage_path(self.0.user_dir.join(".data").join(id).join("store.json"));
+            .with_storage_path(data.join("store.json"));
         for factory in self.0.modules.borrow().iter() {
             policy = policy
                 .with_host_module(factory(key))
@@ -522,6 +527,12 @@ impl ModView {
         }
         self.tried = current;
         let outcome = match &self.shown {
+            // The engine would clone the manifest's git dependencies while loading, outside any
+            // grant Perch gives: a Perch mod is its own files.
+            _ if info.dir.join(gpui_shell::plugin::MANIFEST_FILE).is_file() => Err(anyhow!(
+                "{} in a mod folder is not allowed: a Perch mod imports only its own files",
+                gpui_shell::plugin::MANIFEST_FILE
+            )),
             Some(shown) if shown.dir == info.dir => {
                 let root = shown.root.clone();
                 self.host.0.runtime.reload_now(&root, window, cx)
@@ -541,7 +552,7 @@ impl ModView {
     }
 
     fn load(&mut self, info: &ModInfo, window: &mut Window, cx: &mut App) -> Result<()> {
-        gpui_shell::policy::set_default(self.host.policy_for(&info.id, &self.key)?);
+        gpui_shell::policy::set_default(self.host.policy_for(&info.id, &self.key, &info.dir)?);
         let root = self.host.0.runtime.try_load(&info.dir, window, cx);
         gpui_shell::policy::set_default(Policy::new());
         let root = root?;
