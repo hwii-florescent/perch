@@ -63,6 +63,18 @@ export default class extends View {
 }
 "#;
 
+/// Draws a box as wide as ten device pixels' worth of logical pixels: `10 * perch.scale()`.
+const SCALE: &str = r#"
+import { View, div } from "gpui-kit";
+import * as perch from "perch";
+export default class extends View {
+  render() {
+    return div().id("root").size_full()
+      .child(div().id("scale").w(10 * perch.scale()).h(10));
+  }
+}
+"#;
+
 fn session(id: &str) -> Value {
     json!({
         "id": id, "title": id, "cwd": "/tmp", "createdAt": 1, "status": "idle", "hostId": "local",
@@ -119,6 +131,7 @@ fn main() {
     write_mod(&user, "count", COUNT);
     write_mod(&user, "bystander", BYSTANDER);
     write_mod(&user, "runner", RUNNER);
+    write_mod(&user, "scale", SCALE);
 
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
@@ -147,6 +160,21 @@ fn main() {
     let dark = theme::resolve("perch");
     assert_eq!(first.background.map(hex).as_deref(), dark.token("accent"));
     let renders = draw(&mut cx, bystander, "renders").bounds.size.width;
+
+    // `perch.scale()` is the scale factor of the window the mod is drawn in.
+    let scale = open(&mut cx, &host, "scale");
+    let factor = cx
+        .update_window(scale.into(), |_, window: &mut Window, _| {
+            window.scale_factor()
+        })
+        .unwrap();
+    assert_eq!(
+        draw(&mut cx, scale, "scale").bounds.size.width,
+        px(10. * factor),
+        "perch.scale() is the window's scale factor"
+    );
+    cx.update_window(scale.into(), |_, window, _| window.remove_window())
+        .unwrap();
 
     // A change the window sees re-renders the mod that read it, and not the one that did not.
     cx.update(|cx| {

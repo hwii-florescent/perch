@@ -366,6 +366,8 @@ declare module "perch" {
   export function sidebarSettings(): SidebarSettings;
   /** Changes the named settings; a wrong value throws and changes nothing. */
   export function setSidebarSettings(patch: Partial<SidebarSettings>): SidebarSettings;
+  /** The scale factor of the window this mod is drawn in: device pixels per logical pixel. */
+  export function scale(): number;
   /** The theme on screen, as its 18 tokens. */
   export function theme(): ThemeTokens;
   export function themeName(): string;
