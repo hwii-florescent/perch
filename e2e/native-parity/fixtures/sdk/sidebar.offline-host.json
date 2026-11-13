@@ -1,0 +1,585 @@
+{
+  "navigation": {
+    "hostId": "buildbox",
+    "reachable": false,
+    "loading": false,
+    "reorderable": false,
+    "projects": [
+      {
+        "id": "p-infra",
+        "hostId": "buildbox",
+        "name": "infra",
+        "path": "/srv/infra",
+        "repoPath": "/srv/infra",
+        "favorite": false,
+        "quickchat": false,
+        "workspaces": [
+          {
+            "id": "w-infra-main",
+            "projectId": "p-infra",
+            "name": "infra",
+            "path": "/srv/infra",
+            "branch": "main",
+            "dirty": false,
+            "pinned": false,
+            "sleeping": false,
+            "linked": false,
+            "active": false,
+            "sessions": [
+              {
+                "id": "s-infra-2",
+                "title": "Audit open ports",
+                "hostId": "buildbox",
+                "cwd": "/srv/infra",
+                "createdAt": 1767265200000,
+                "status": "idle",
+                "branch": "main",
+                "projectId": "p-infra",
+                "projectName": "infra",
+                "workspaceId": "w-infra-main",
+                "provider": "codex",
+                "state": "idle",
+                "section": "idle",
+                "blocked": false,
+                "unseen": false,
+                "active": false
+              },
+              {
+                "id": "s-infra-1",
+                "title": "Rotate the CI runners",
+                "hostId": "buildbox",
+                "cwd": "/srv/infra",
+                "createdAt": 1767268800000,
+                "status": "running",
+                "branch": "main",
+                "projectId": "p-infra",
+                "projectName": "infra",
+                "workspaceId": "w-infra-main",
+                "provider": "claude",
+                "state": "working",
+                "section": "working",
+                "blocked": false,
+                "unseen": false,
+                "active": false
+              }
+            ],
+            "children": []
+          }
+        ],
+        "hidden": [],
+        "jobs": [],
+        "sessions": [
+          {
+            "id": "s-infra-2",
+            "title": "Audit open ports",
+            "hostId": "buildbox",
+            "cwd": "/srv/infra",
+            "createdAt": 1767265200000,
+            "status": "idle",
+            "branch": "main",
+            "projectId": "p-infra",
+            "projectName": "infra",
+            "workspaceId": "w-infra-main",
+            "provider": "codex",
+            "state": "idle",
+            "section": "idle",
+            "blocked": false,
+            "unseen": false,
+            "active": false
+          },
+          {
+            "id": "s-infra-1",
+            "title": "Rotate the CI runners",
+            "hostId": "buildbox",
+            "cwd": "/srv/infra",
+            "createdAt": 1767268800000,
+            "status": "running",
+            "branch": "main",
+            "projectId": "p-infra",
+            "projectName": "infra",
+            "workspaceId": "w-infra-main",
+            "provider": "claude",
+            "state": "working",
+            "section": "working",
+            "blocked": false,
+            "unseen": false,
+            "active": false
+          }
+        ],
+        "hasChats": true,
+        "top": null,
+        "instructions": false,
+        "memory": false
+      },
+      {
+        "id": "p-jobs",
+        "hostId": "buildbox",
+        "name": "nightly-jobs",
+        "path": "/srv/nightly-jobs",
+        "favorite": false,
+        "quickchat": false,
+        "workspaces": [
+          {
+            "id": "w-jobs-main",
+            "projectId": "p-jobs",
+            "name": "nightly-jobs",
+            "path": "/srv/nightly-jobs",
+            "dirty": false,
+            "pinned": false,
+            "sleeping": false,
+            "linked": false,
+            "active": false,
+            "sessions": [
+              {
+                "id": "s-jobs-1",
+                "title": "Why did the export fail",
+                "hostId": "buildbox",
+                "cwd": "/srv/nightly-jobs",
+                "createdAt": 1767261600000,
+                "status": "idle",
+                "projectId": "p-jobs",
+                "projectName": "nightly-jobs",
+                "workspaceId": "w-jobs-main",
+                "provider": "claude",
+                "state": "done",
+                "section": "done",
+                "blocked": false,
+                "unseen": true,
+                "active": false
+              }
+            ],
+            "children": []
+          }
+        ],
+        "hidden": [],
+        "jobs": [],
+        "sessions": [
+          {
+            "id": "s-jobs-1",
+            "title": "Why did the export fail",
+            "hostId": "buildbox",
+            "cwd": "/srv/nightly-jobs",
+            "createdAt": 1767261600000,
+            "status": "idle",
+            "projectId": "p-jobs",
+            "projectName": "nightly-jobs",
+            "workspaceId": "w-jobs-main",
+            "provider": "claude",
+            "state": "done",
+            "section": "done",
+            "blocked": false,
+            "unseen": true,
+            "active": false
+          }
+        ],
+        "hasChats": true,
+        "top": null,
+        "instructions": false,
+        "memory": false
+      }
+    ],
+    "quickchat": null,
+    "sessions": [
+      {
+        "id": "s-infra-1",
+        "title": "Rotate the CI runners",
+        "hostId": "buildbox",
+        "cwd": "/srv/infra",
+        "createdAt": 1767268800000,
+        "status": "running",
+        "branch": "main",
+        "projectId": "p-infra",
+        "projectName": "infra",
+        "workspaceId": "w-infra-main",
+        "provider": "claude",
+        "state": "working",
+        "section": "working",
+        "blocked": false,
+        "unseen": false,
+        "active": false
+      },
+      {
+        "id": "s-infra-2",
+        "title": "Audit open ports",
+        "hostId": "buildbox",
+        "cwd": "/srv/infra",
+        "createdAt": 1767265200000,
+        "status": "idle",
+        "branch": "main",
+        "projectId": "p-infra",
+        "projectName": "infra",
+        "workspaceId": "w-infra-main",
+        "provider": "codex",
+        "state": "idle",
+        "section": "idle",
+        "blocked": false,
+        "unseen": false,
+        "active": false
+      },
+      {
+        "id": "s-jobs-1",
+        "title": "Why did the export fail",
+        "hostId": "buildbox",
+        "cwd": "/srv/nightly-jobs",
+        "createdAt": 1767261600000,
+        "status": "idle",
+        "projectId": "p-jobs",
+        "projectName": "nightly-jobs",
+        "workspaceId": "w-jobs-main",
+        "provider": "claude",
+        "state": "done",
+        "section": "done",
+        "blocked": false,
+        "unseen": true,
+        "active": false
+      }
+    ],
+    "status": [
+      {
+        "key": "offline",
+        "title": "Offline: last known",
+        "note": "buildbox: error",
+        "sessions": [
+          {
+            "id": "s-infra-1",
+            "title": "Rotate the CI runners",
+            "hostId": "buildbox",
+            "cwd": "/srv/infra",
+            "createdAt": 1767268800000,
+            "status": "running",
+            "branch": "main",
+            "projectId": "p-infra",
+            "projectName": "infra",
+            "workspaceId": "w-infra-main",
+            "provider": "claude",
+            "state": "working",
+            "section": "working",
+            "blocked": false,
+            "unseen": false,
+            "active": false
+          },
+          {
+            "id": "s-infra-2",
+            "title": "Audit open ports",
+            "hostId": "buildbox",
+            "cwd": "/srv/infra",
+            "createdAt": 1767265200000,
+            "status": "idle",
+            "branch": "main",
+            "projectId": "p-infra",
+            "projectName": "infra",
+            "workspaceId": "w-infra-main",
+            "provider": "codex",
+            "state": "idle",
+            "section": "idle",
+            "blocked": false,
+            "unseen": false,
+            "active": false
+          },
+          {
+            "id": "s-jobs-1",
+            "title": "Why did the export fail",
+            "hostId": "buildbox",
+            "cwd": "/srv/nightly-jobs",
+            "createdAt": 1767261600000,
+            "status": "idle",
+            "projectId": "p-jobs",
+            "projectName": "nightly-jobs",
+            "workspaceId": "w-jobs-main",
+            "provider": "claude",
+            "state": "done",
+            "section": "done",
+            "blocked": false,
+            "unseen": true,
+            "active": false
+          }
+        ],
+        "projects": [
+          {
+            "id": "p-infra",
+            "name": "infra",
+            "project": {
+              "id": "p-infra",
+              "hostId": "buildbox",
+              "name": "infra",
+              "path": "/srv/infra",
+              "repoPath": "/srv/infra",
+              "favorite": false,
+              "quickchat": false,
+              "workspaces": [
+                {
+                  "id": "w-infra-main",
+                  "projectId": "p-infra",
+                  "name": "infra",
+                  "path": "/srv/infra",
+                  "branch": "main",
+                  "dirty": false,
+                  "pinned": false,
+                  "sleeping": false,
+                  "linked": false,
+                  "active": false,
+                  "sessions": [
+                    {
+                      "id": "s-infra-2",
+                      "title": "Audit open ports",
+                      "hostId": "buildbox",
+                      "cwd": "/srv/infra",
+                      "createdAt": 1767265200000,
+                      "status": "idle",
+                      "branch": "main",
+                      "projectId": "p-infra",
+                      "projectName": "infra",
+                      "workspaceId": "w-infra-main",
+                      "provider": "codex",
+                      "state": "idle",
+                      "section": "idle",
+                      "blocked": false,
+                      "unseen": false,
+                      "active": false
+                    },
+                    {
+                      "id": "s-infra-1",
+                      "title": "Rotate the CI runners",
+                      "hostId": "buildbox",
+                      "cwd": "/srv/infra",
+                      "createdAt": 1767268800000,
+                      "status": "running",
+                      "branch": "main",
+                      "projectId": "p-infra",
+                      "projectName": "infra",
+                      "workspaceId": "w-infra-main",
+                      "provider": "claude",
+                      "state": "working",
+                      "section": "working",
+                      "blocked": false,
+                      "unseen": false,
+                      "active": false
+                    }
+                  ],
+                  "children": []
+                }
+              ],
+              "hidden": [],
+              "jobs": [],
+              "sessions": [
+                {
+                  "id": "s-infra-2",
+                  "title": "Audit open ports",
+                  "hostId": "buildbox",
+                  "cwd": "/srv/infra",
+                  "createdAt": 1767265200000,
+                  "status": "idle",
+                  "branch": "main",
+                  "projectId": "p-infra",
+                  "projectName": "infra",
+                  "workspaceId": "w-infra-main",
+                  "provider": "codex",
+                  "state": "idle",
+                  "section": "idle",
+                  "blocked": false,
+                  "unseen": false,
+                  "active": false
+                },
+                {
+                  "id": "s-infra-1",
+                  "title": "Rotate the CI runners",
+                  "hostId": "buildbox",
+                  "cwd": "/srv/infra",
+                  "createdAt": 1767268800000,
+                  "status": "running",
+                  "branch": "main",
+                  "projectId": "p-infra",
+                  "projectName": "infra",
+                  "workspaceId": "w-infra-main",
+                  "provider": "claude",
+                  "state": "working",
+                  "section": "working",
+                  "blocked": false,
+                  "unseen": false,
+                  "active": false
+                }
+              ],
+              "hasChats": true,
+              "top": null,
+              "instructions": false,
+              "memory": false
+            },
+            "sessions": [
+              {
+                "id": "s-infra-1",
+                "title": "Rotate the CI runners",
+                "hostId": "buildbox",
+                "cwd": "/srv/infra",
+                "createdAt": 1767268800000,
+                "status": "running",
+                "branch": "main",
+                "projectId": "p-infra",
+                "projectName": "infra",
+                "workspaceId": "w-infra-main",
+                "provider": "claude",
+                "state": "working",
+                "section": "working",
+                "blocked": false,
+                "unseen": false,
+                "active": false
+              },
+              {
+                "id": "s-infra-2",
+                "title": "Audit open ports",
+                "hostId": "buildbox",
+                "cwd": "/srv/infra",
+                "createdAt": 1767265200000,
+                "status": "idle",
+                "branch": "main",
+                "projectId": "p-infra",
+                "projectName": "infra",
+                "workspaceId": "w-infra-main",
+                "provider": "codex",
+                "state": "idle",
+                "section": "idle",
+                "blocked": false,
+                "unseen": false,
+                "active": false
+              }
+            ]
+          },
+          {
+            "id": "p-jobs",
+            "name": "nightly-jobs",
+            "project": {
+              "id": "p-jobs",
+              "hostId": "buildbox",
+              "name": "nightly-jobs",
+              "path": "/srv/nightly-jobs",
+              "favorite": false,
+              "quickchat": false,
+              "workspaces": [
+                {
+                  "id": "w-jobs-main",
+                  "projectId": "p-jobs",
+                  "name": "nightly-jobs",
+                  "path": "/srv/nightly-jobs",
+                  "dirty": false,
+                  "pinned": false,
+                  "sleeping": false,
+                  "linked": false,
+                  "active": false,
+                  "sessions": [
+                    {
+                      "id": "s-jobs-1",
+                      "title": "Why did the export fail",
+                      "hostId": "buildbox",
+                      "cwd": "/srv/nightly-jobs",
+                      "createdAt": 1767261600000,
+                      "status": "idle",
+                      "projectId": "p-jobs",
+                      "projectName": "nightly-jobs",
+                      "workspaceId": "w-jobs-main",
+                      "provider": "claude",
+                      "state": "done",
+                      "section": "done",
+                      "blocked": false,
+                      "unseen": true,
+                      "active": false
+                    }
+                  ],
+                  "children": []
+                }
+              ],
+              "hidden": [],
+              "jobs": [],
+              "sessions": [
+                {
+                  "id": "s-jobs-1",
+                  "title": "Why did the export fail",
+                  "hostId": "buildbox",
+                  "cwd": "/srv/nightly-jobs",
+                  "createdAt": 1767261600000,
+                  "status": "idle",
+                  "projectId": "p-jobs",
+                  "projectName": "nightly-jobs",
+                  "workspaceId": "w-jobs-main",
+                  "provider": "claude",
+                  "state": "done",
+                  "section": "done",
+                  "blocked": false,
+                  "unseen": true,
+                  "active": false
+                }
+              ],
+              "hasChats": true,
+              "top": null,
+              "instructions": false,
+              "memory": false
+            },
+            "sessions": [
+              {
+                "id": "s-jobs-1",
+                "title": "Why did the export fail",
+                "hostId": "buildbox",
+                "cwd": "/srv/nightly-jobs",
+                "createdAt": 1767261600000,
+                "status": "idle",
+                "projectId": "p-jobs",
+                "projectName": "nightly-jobs",
+                "workspaceId": "w-jobs-main",
+                "provider": "claude",
+                "state": "done",
+                "section": "done",
+                "blocked": false,
+                "unseen": true,
+                "active": false
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "needsYou": 0,
+    "activeWorkspaceId": null,
+    "activeSessionId": null,
+    "shortcuts": false
+  },
+  "hosts": {
+    "activeId": "buildbox",
+    "active": {
+      "id": "buildbox",
+      "name": "buildbox",
+      "state": "error",
+      "error": "ssh: connect to host buildbox.lan port 22: Operation timed out",
+      "detail": "buildbox.lan:7788",
+      "address": "buildbox.lan:7788",
+      "direct": false,
+      "enabled": true
+    },
+    "list": [
+      {
+        "id": "local",
+        "name": "local (studio)",
+        "state": "connected",
+        "detail": "macOS",
+        "direct": false
+      },
+      {
+        "id": "buildbox",
+        "name": "buildbox",
+        "state": "error",
+        "error": "ssh: connect to host buildbox.lan port 22: Operation timed out",
+        "detail": "buildbox.lan:7788",
+        "address": "buildbox.lan:7788",
+        "direct": false,
+        "enabled": true
+      }
+    ],
+    "connected": true,
+    "local": {
+      "hostname": "studio",
+      "platform": "macOS",
+      "isSsh": false,
+      "cwd": "/Users/dev/code/perch",
+      "branch": "main"
+    },
+    "canCreate": false,
+    "workspaces": true
+  }
+}

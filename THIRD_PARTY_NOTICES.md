@@ -261,3 +261,32 @@ projects listed in the Nerd Fonts repository, each under its own license (mostly
 SIL OFL 1.1, MIT and Apache-2.0). The license text is next to the font, in
 `crates/perch-native/assets/fonts/LICENSE-SymbolsNerdFont.txt`. The file was copied
 from herdr (commit `4c8c622d7965a6f6787f55b1896b70795fc68918`).
+
+## Native mod engine: gpui-kit's shell, quickjs-jit-runtime and two GPUI crates
+
+`vendor/` holds the native client's JavaScript mod engine, copied from herdr
+(`https://github.com/herdrdev/herdr-app`, commit `4c8c622`, Apache-2.0), which vendors
+it from its upstreams. Each copy keeps its upstream licence file and herdr's
+`Vendored from ...` header; herdr's changes are marked `HERDR:` and Perch's `PERCH:`.
+
+- `vendor/gpui-kit/` (`Cargo.toml`, `LICENSE-APACHE`, `crates/base`, `crates/fps`,
+  `crates/shell` with `rquickjs-compat`): [longbridge/gpui-kit](https://github.com/longbridge/gpui-kit)
+  at `1ccf011`, version 0.7.1, Apache-2.0 (Copyright 2024 - 2026 Longbridge); the
+  `rquickjs-compat` facade is MIT. Perch adds `src/probe.rs` and its hook in
+  `src/materialize.rs` (test builds only: the box, colours and font of each named element).
+- `vendor/quickjs-jit-runtime/`: the `jit` crate of
+  [longbridge/quickjs-jit](https://github.com/longbridge/quickjs-jit) at `96593cd` with
+  herdr's fix for longbridge/quickjs-jit#38, MIT (Copyright (c) 2020 Mees Delzenne,
+  (c) 2025 Rquickjs Contributors). Perch only quiets its unused-code warnings.
+- `vendor/gpui-pre/` and `vendor/gpui-pre-macos/`: the crates.io `gpui-pre` and
+  `gpui-pre-macos` 0.3.8 (Zed's GPUI, Apache-2.0, Copyright 2022 - 2025 Zed Industries,
+  Inc.), unchanged except for three of herdr's additions the shell names, each marked
+  `PERCH:`: `AssetSource::image_resource` (a default method; nothing in this copy calls
+  it), `Application::with_activation_policy` and `ActivationPolicy::Prohibited` (with its
+  AppKit mapping in `gpui-pre-macos`). Herdr's other GPUI patches (idle wake, frame
+  capture, terminal metrics, image cache) are not taken.
+
+The shell also pulls `quickjs-jit` (MIT, with QuickJS-ng's MIT C sources) and
+[LLRT](https://github.com/awslabs/llrt) modules (Apache-2.0) from git at the revisions
+`vendor/gpui-kit/crates/shell/Cargo.toml` pins. Apache-2.0 and MIT code may be combined
+into a GPL-3.0-only program; the licence texts stay beside each copy.

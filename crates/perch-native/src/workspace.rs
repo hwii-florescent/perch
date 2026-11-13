@@ -35,6 +35,7 @@ use crate::tabs::{Dir, Node, Side, Tabs};
 use crate::terminal::actions::{Action, Scroll};
 use crate::terminal::attach::FromCore;
 use crate::terminal::clipboard::{Clipboard, SystemClipboard};
+use crate::terminal::links::{open_in_system, Target};
 use crate::terminal::{Status, TerminalEvent, TerminalView};
 use crate::ui::{
     hint, label, tint, LaunchFailed, OpenSession, Sidebar, DIM_COLOR, MAIN_BG, SELECTED_BG,
@@ -207,6 +208,8 @@ pub struct Workspace {
     room: Rc<Cell<Option<Size<Pixels>>>>,
     /// Where the terminals copy to and paste from: the system's, unless a test says otherwise.
     clipboard: Rc<dyn Clipboard>,
+    /// What runs when a link is clicked: the system's handler, unless a test says otherwise.
+    opener: Rc<dyn Fn(&Target)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -245,6 +248,7 @@ impl Workspace {
             armed_close: None,
             room: Rc::new(Cell::new(None)),
             clipboard: Rc::new(SystemClipboard),
+            opener: Rc::new(open_in_system),
             _subscriptions: vec![opened, failed, observed],
         }
     }
@@ -259,6 +263,12 @@ impl Workspace {
     /// Copy and paste through `clipboard` instead of the system's.
     pub fn with_clipboard(mut self, clipboard: Rc<dyn Clipboard>) -> Self {
         self.clipboard = clipboard;
+        self
+    }
+
+    /// Open clicked links with `opener` instead of the system's handler.
+    pub fn with_opener(mut self, opener: Rc<dyn Fn(&Target)>) -> Self {
+        self.opener = opener;
         self
     }
 
@@ -448,7 +458,7 @@ impl Workspace {
     fn on_terminal(&mut self, id: &str, event: &TerminalEvent, cx: &mut Context<Self>) {
         match event {
             // A click on a link is a person's: the window runs the system's handler for it.
-            TerminalEvent::OpenLink(target) => crate::terminal::links::open_in_system(target),
+            TerminalEvent::OpenLink(target) => (self.opener)(target),
             TerminalEvent::MenuAsked(at) => self.open_menu(id, *at, cx),
             TerminalEvent::Chose(provider) => self.start_chosen(id, provider, cx),
             TerminalEvent::TakeBackAll => {
