@@ -1,0 +1,116 @@
+{
+  "props": {
+    "value": "one-dark",
+    "options": [
+      {
+        "value": "perch",
+        "label": "Perch"
+      },
+      {
+        "value": "catppuccin-mocha",
+        "label": "Catppuccin Mocha"
+      },
+      {
+        "value": "catppuccin-macchiato",
+        "label": "Catppuccin Macchiato"
+      },
+      {
+        "value": "catppuccin-frappe",
+        "label": "Catppuccin Frappé"
+      },
+      {
+        "value": "catppuccin-latte",
+        "label": "Catppuccin Latte"
+      },
+      {
+        "value": "tokyo-night",
+        "label": "Tokyo Night"
+      },
+      {
+        "value": "gruvbox-dark",
+        "label": "Gruvbox Dark"
+      },
+      {
+        "value": "nord",
+        "label": "Nord"
+      },
+      {
+        "value": "one-dark",
+        "label": "One Dark"
+      },
+      {
+        "value": "solarized-dark",
+        "label": "Solarized Dark"
+      },
+      {
+        "value": "solarized-light",
+        "label": "Solarized Light"
+      },
+      {
+        "value": "dracula",
+        "label": "Dracula"
+      },
+      {
+        "value": "rose-pine",
+        "label": "Rosé Pine"
+      },
+      {
+        "value": "everforest",
+        "label": "Everforest"
+      },
+      {
+        "value": "kanagawa",
+        "label": "Kanagawa"
+      },
+      {
+        "value": "github-dark",
+        "label": "GitHub Dark"
+      },
+      {
+        "value": "github-light",
+        "label": "GitHub Light"
+      },
+      {
+        "value": "monokai",
+        "label": "Monokai"
+      },
+      {
+        "value": "ayu-dark",
+        "label": "Ayu Dark"
+      },
+      {
+        "value": "ayu-light",
+        "label": "Ayu Light"
+      },
+      {
+        "value": "night-owl",
+        "label": "Night Owl"
+      },
+      {
+        "value": "palenight",
+        "label": "Palenight"
+      },
+      {
+        "value": "synthwave",
+        "label": "Synthwave '84"
+      },
+      {
+        "value": "zenburn",
+        "label": "Zenburn"
+      }
+    ],
+    "ariaLabel": "Theme",
+    "testId": "select-demo",
+    "className": "rounded-ui bg-surface-1 text-fg [font-family:inherit] px-2 py-[0.3rem] text-[0.8rem] max-[700px]:min-h-11 focus:[outline:1px_solid_var(--accent)] w-full",
+    "at": {
+      "x": 520,
+      "y": 200,
+      "width": 224
+    }
+  },
+  "steps": [
+    {
+      "click": "[data-testid=\"select-demo\"]"
+    }
+  ]
+}

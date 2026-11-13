@@ -1,0 +1,32 @@
+{
+  "props": {
+    "value": "c",
+    "options": [
+      {
+        "value": "a",
+        "label": "Catppuccin Macchiato with a long name"
+      },
+      {
+        "value": "b",
+        "label": "Tokyo Night Storm"
+      },
+      {
+        "value": "c",
+        "label": "Perch"
+      }
+    ],
+    "ariaLabel": "Theme",
+    "testId": "select-demo",
+    "className": "rounded-ui bg-surface-1 text-fg [font-family:inherit] px-2 py-[0.3rem] text-[0.8rem] max-[700px]:min-h-11 focus:[outline:1px_solid_var(--accent)] w-full",
+    "at": {
+      "x": 1180,
+      "y": 200,
+      "width": 92
+    }
+  },
+  "steps": [
+    {
+      "click": "[data-testid=\"select-demo\"]"
+    }
+  ]
+}

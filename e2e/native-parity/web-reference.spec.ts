@@ -9,7 +9,7 @@ import * as path from "node:path";
 const here = __dirname;
 const OUT = path.resolve(here, "../artifacts-native-parity/web");
 /** Every screen with a reference; `PARITY_SCREENS=tabs,status` renders only those while one is being worked on. */
-const SCREENS = (process.env.PARITY_SCREENS ?? "sidebar,tabs,status,navigator,pane-header,pane-menu,confirm,dialog,toast,new-session,tab-menu").split(",");
+const SCREENS = (process.env.PARITY_SCREENS ?? "sidebar,tabs,status,navigator,pane-header,pane-menu,confirm,dialog,toast,new-session,tab-menu,select").split(",");
 const THEMES = ["light", "dark"] as const;
 /** The semantic colour tokens (`--<name>` on `<html>`): `themes.ts` `TOKEN_CSS_VARS`, plus the two derived ones. */
 const TOKENS = ["accent", "panel-bg", "surface-0", "surface-1", "surface-dim", "overlay-0", "overlay-1", "text", "subtext-0", "mauve", "green", "yellow", "red", "blue", "teal", "peach", "backdrop", "card-bg"];

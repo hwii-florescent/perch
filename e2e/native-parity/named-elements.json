@@ -1572,6 +1572,67 @@
           "textSized": true
         }
       ]
+    },
+    "select": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 1,
+      "elements": [
+        {
+          "name": "select-field",
+          "selector": "[data-testid=\"select-demo\"]",
+          "description": "The field: a button (or, with freeText, a text input) in the caller's class; the SDK default is the surface fill, 0.8rem text, soft corners.",
+          "text": true
+        },
+        {
+          "name": "select-field-label",
+          "selector": "[data-testid=\"select-demo\"] > span.truncate",
+          "description": "The chosen option's label (or the placeholder).",
+          "text": true
+        },
+        {
+          "name": "select-chevron",
+          "selector": "[data-testid=\"select-demo\"] > svg",
+          "description": "The chevron at the field's right end."
+        },
+        {
+          "name": "select-list",
+          "selector": "[role=\"listbox\"]",
+          "description": "The open list: lighter surface fill, shadow, scrolls when taller than its limit."
+        },
+        {
+          "name": "select-option",
+          "selector": "[role=\"listbox\"] > [role=\"option\"]",
+          "description": "One option; the highlighted one is on the lighter fill, a disabled one is 40% opacity.",
+          "key": {
+            "self": true,
+            "attr": "data-value"
+          }
+        },
+        {
+          "name": "select-option-label",
+          "selector": "[role=\"listbox\"] > [role=\"option\"] > span.truncate",
+          "description": "The option's label.",
+          "key": {
+            "closest": "[role=\"option\"]",
+            "attr": "data-value"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "select-option-check",
+          "selector": "[role=\"listbox\"] > [role=\"option\"] > span[aria-hidden]",
+          "description": "The tick on the chosen option, in the accent colour.",
+          "key": {
+            "closest": "[role=\"option\"]",
+            "attr": "data-value"
+          },
+          "text": true,
+          "textSized": true
+        }
+      ]
     }
   }
 }

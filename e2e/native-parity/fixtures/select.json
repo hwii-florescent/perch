@@ -1,0 +1,360 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "select",
+  "note": "Floating screen: it is drawn through a portal into the page body and placed against the window, so the reference is the whole default 1280x800 window on the app's backdrop and every box is in window coordinates. Perch's one dropdown (stock-ui/select): a field (here a button) that keeps focus and a `role=listbox` drawn through a portal, fixed under the field (4 px gap, left aligned to it, as wide as its longest label and at least as wide as the field, at most 320 px high; it flips above the field when there is less than 160 px below and more above; it slides back inside the window when it would pass the right edge, 8 px margin). The harness holds the value as a caller does and places the field at `props.at` (window coordinates, width in px), with the SDK's default field class and `w-full`, so the field is as wide as `at.width`. Opening it is a click on the field (`steps`); the keyboard is key events on the field.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1280,
+    "height": 800
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "props": {
+    "value": "perch",
+    "options": [
+      {
+        "value": "perch",
+        "label": "Perch"
+      },
+      {
+        "value": "catppuccin-mocha",
+        "label": "Catppuccin Mocha"
+      },
+      {
+        "value": "catppuccin-macchiato",
+        "label": "Catppuccin Macchiato"
+      },
+      {
+        "value": "catppuccin-frappe",
+        "label": "Catppuccin Frappé"
+      },
+      {
+        "value": "catppuccin-latte",
+        "label": "Catppuccin Latte"
+      }
+    ],
+    "ariaLabel": "Theme",
+    "testId": "select-demo",
+    "className": "rounded-ui bg-surface-1 text-fg [font-family:inherit] px-2 py-[0.3rem] text-[0.8rem] max-[700px]:min-h-11 focus:[outline:1px_solid_var(--accent)] w-full",
+    "at": {
+      "x": 520,
+      "y": 200,
+      "width": 224
+    }
+  },
+  "states": [
+    {
+      "id": "closed",
+      "title": "The field alone, showing the chosen option's label and the chevron"
+    },
+    {
+      "id": "open",
+      "title": "Opened by a click: the list under the field with the chosen option ticked and highlighted",
+      "steps": [
+        {
+          "click": "[data-testid=\"select-demo\"]"
+        }
+      ]
+    },
+    {
+      "id": "open-keyboard",
+      "title": "Opened, then ArrowDown pressed twice on the field: the highlight moved to the third option",
+      "steps": [
+        {
+          "click": "[data-testid=\"select-demo\"]"
+        },
+        {
+          "key": {
+            "selector": "[data-testid=\"select-demo\"]",
+            "key": "ArrowDown"
+          }
+        },
+        {
+          "key": {
+            "selector": "[data-testid=\"select-demo\"]",
+            "key": "ArrowDown"
+          }
+        }
+      ]
+    },
+    {
+      "id": "long-list",
+      "title": "Twenty-four options: the list is cut at 320 px and scrolls; the chosen one is the 9th, so the list starts scrolled to it",
+      "props": {
+        "value": "one-dark",
+        "options": [
+          {
+            "value": "perch",
+            "label": "Perch"
+          },
+          {
+            "value": "catppuccin-mocha",
+            "label": "Catppuccin Mocha"
+          },
+          {
+            "value": "catppuccin-macchiato",
+            "label": "Catppuccin Macchiato"
+          },
+          {
+            "value": "catppuccin-frappe",
+            "label": "Catppuccin Frappé"
+          },
+          {
+            "value": "catppuccin-latte",
+            "label": "Catppuccin Latte"
+          },
+          {
+            "value": "tokyo-night",
+            "label": "Tokyo Night"
+          },
+          {
+            "value": "gruvbox-dark",
+            "label": "Gruvbox Dark"
+          },
+          {
+            "value": "nord",
+            "label": "Nord"
+          },
+          {
+            "value": "one-dark",
+            "label": "One Dark"
+          },
+          {
+            "value": "solarized-dark",
+            "label": "Solarized Dark"
+          },
+          {
+            "value": "solarized-light",
+            "label": "Solarized Light"
+          },
+          {
+            "value": "dracula",
+            "label": "Dracula"
+          },
+          {
+            "value": "rose-pine",
+            "label": "Rosé Pine"
+          },
+          {
+            "value": "everforest",
+            "label": "Everforest"
+          },
+          {
+            "value": "kanagawa",
+            "label": "Kanagawa"
+          },
+          {
+            "value": "github-dark",
+            "label": "GitHub Dark"
+          },
+          {
+            "value": "github-light",
+            "label": "GitHub Light"
+          },
+          {
+            "value": "monokai",
+            "label": "Monokai"
+          },
+          {
+            "value": "ayu-dark",
+            "label": "Ayu Dark"
+          },
+          {
+            "value": "ayu-light",
+            "label": "Ayu Light"
+          },
+          {
+            "value": "night-owl",
+            "label": "Night Owl"
+          },
+          {
+            "value": "palenight",
+            "label": "Palenight"
+          },
+          {
+            "value": "synthwave",
+            "label": "Synthwave '84"
+          },
+          {
+            "value": "zenburn",
+            "label": "Zenburn"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"select-demo\"]"
+        }
+      ]
+    },
+    {
+      "id": "disabled-option",
+      "title": "One option is disabled (40% opacity, never highlighted)",
+      "props": {
+        "options": [
+          {
+            "value": "perch",
+            "label": "Perch"
+          },
+          {
+            "value": "catppuccin-mocha",
+            "label": "Catppuccin Mocha"
+          },
+          {
+            "value": "catppuccin-macchiato",
+            "label": "Catppuccin Macchiato",
+            "disabled": true
+          },
+          {
+            "value": "catppuccin-frappe",
+            "label": "Catppuccin Frappé"
+          },
+          {
+            "value": "catppuccin-latte",
+            "label": "Catppuccin Latte"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"select-demo\"]"
+        }
+      ]
+    },
+    {
+      "id": "flip-above",
+      "title": "The field low in the window: with less than 160 px below, the list opens above it",
+      "props": {
+        "at": {
+          "x": 520,
+          "y": 700,
+          "width": 224
+        },
+        "options": [
+          {
+            "value": "perch",
+            "label": "Perch"
+          },
+          {
+            "value": "catppuccin-mocha",
+            "label": "Catppuccin Mocha"
+          },
+          {
+            "value": "catppuccin-macchiato",
+            "label": "Catppuccin Macchiato"
+          },
+          {
+            "value": "catppuccin-frappe",
+            "label": "Catppuccin Frappé"
+          },
+          {
+            "value": "catppuccin-latte",
+            "label": "Catppuccin Latte"
+          },
+          {
+            "value": "tokyo-night",
+            "label": "Tokyo Night"
+          },
+          {
+            "value": "gruvbox-dark",
+            "label": "Gruvbox Dark"
+          },
+          {
+            "value": "nord",
+            "label": "Nord"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"select-demo\"]"
+        }
+      ]
+    },
+    {
+      "id": "right-edge",
+      "title": "A narrow field at the right edge with long labels: the list is wider than the field and slides back to 8 px from the window edge",
+      "props": {
+        "at": {
+          "x": 1180,
+          "y": 200,
+          "width": 92
+        },
+        "options": [
+          {
+            "value": "a",
+            "label": "Catppuccin Macchiato with a long name"
+          },
+          {
+            "value": "b",
+            "label": "Tokyo Night Storm"
+          },
+          {
+            "value": "c",
+            "label": "Perch"
+          }
+        ],
+        "value": "c"
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"select-demo\"]"
+        }
+      ]
+    },
+    {
+      "id": "free-text-filter",
+      "title": "A text-input form (`freeText`): 'cat' typed, so the options narrow to the suggestions that contain it",
+      "props": {
+        "freeText": true,
+        "value": "",
+        "placeholder": "Theme",
+        "options": [
+          {
+            "value": "perch",
+            "label": "Perch"
+          },
+          {
+            "value": "catppuccin-mocha",
+            "label": "Catppuccin Mocha"
+          },
+          {
+            "value": "catppuccin-macchiato",
+            "label": "Catppuccin Macchiato"
+          },
+          {
+            "value": "catppuccin-frappe",
+            "label": "Catppuccin Frappé"
+          },
+          {
+            "value": "catppuccin-latte",
+            "label": "Catppuccin Latte"
+          },
+          {
+            "value": "tokyo-night",
+            "label": "Tokyo Night"
+          },
+          {
+            "value": "gruvbox-dark",
+            "label": "Gruvbox Dark"
+          },
+          {
+            "value": "nord",
+            "label": "Nord"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"select-demo\"]",
+            "text": "cat"
+          }
+        }
+      ]
+    }
+  ]
+}
