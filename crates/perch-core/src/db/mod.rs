@@ -226,6 +226,10 @@ impl HistoryDb {
                 active_workspace_id TEXT,
                 updated_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS terminal_scope_grants (
+                scope_id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS file_buffers (
                 workspace_id TEXT NOT NULL,
                 path TEXT NOT NULL,

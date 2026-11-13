@@ -953,6 +953,60 @@ mod tests {
         (row.state, row.reason)
     }
 
+    #[test]
+    fn a_legacy_leads_first_conversation_cannot_receive_old_reports_or_messages() {
+        let run = run();
+        assert_eq!(run.db.run_of("lead").unwrap().as_deref(), Some("lead"));
+        let note = run
+            .db
+            .enqueue_note(
+                ("child", "codex", "old child"),
+                ("lead", "claude"),
+                "old report",
+            )
+            .unwrap()
+            .unwrap();
+        let message = send(&run.db, "child", "lead", "old message", "old-key");
+        // The process and its credential survive the upgrade; only the provider conversation
+        // proves that this is a different family. Use the same incarnation for delivery below.
+        run.db.observe_conversation("lead", "pi", "new-pi").unwrap();
+        let world = Fake::idle(Live::Known(Some(run.lead_incarnation.clone())), true);
+        assert!(matches!(pass(&run.db, &world, "lead", 0), Pass::Idle));
+        assert!(world.written.borrow().is_empty());
+        for id in [&note.id, &message.id] {
+            assert_eq!(
+                state_of(&run.db, id),
+                (MailState::Undelivered, "its run ended".into())
+            );
+        }
+        assert!(run
+            .db
+            .enqueue_note(
+                ("child", "codex", "old child"),
+                ("lead", "claude"),
+                "late report",
+            )
+            .unwrap()
+            .is_none());
+        assert!(matches!(
+            run.db
+                .enqueue_message(&NewMail {
+                    sender_session_id: "child",
+                    sender_provider: "codex",
+                    sender_label: "old child",
+                    target_session_id: "lead",
+                    target_provider: "pi",
+                    target_is_agent: true,
+                    body: "late message",
+                    key: "late-key",
+                })
+                .unwrap(),
+            Enqueued::Refused(agent_mail::SendRefusal::OtherRun)
+        ));
+        assert!(run.db.run_exists("lead").unwrap());
+        assert!(run.db.sub_session("child").unwrap().is_some());
+    }
+
     #[tokio::test]
     async fn an_idle_receiver_gets_one_message_and_the_receipt_waits_for_its_confirmation() {
         let run = run();

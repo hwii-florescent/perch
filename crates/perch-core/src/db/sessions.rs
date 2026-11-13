@@ -397,6 +397,30 @@ impl HistoryDb {
         Ok(())
     }
 
+    /// Remember that terminal scope `scope_id` was verified against `workspace_id`, so
+    /// files opened through it keep resolving after its terminal (and session row) is gone.
+    pub fn grant_terminal_scope(&self, scope_id: &str, workspace_id: &str) -> anyhow::Result<()> {
+        self.conn.lock().unwrap().execute(
+            "INSERT OR IGNORE INTO terminal_scope_grants (scope_id, workspace_id) VALUES (?1, ?2)",
+            params![scope_id, workspace_id],
+        )?;
+        Ok(())
+    }
+
+    /// The workspace a verified terminal scope was granted under, if any.
+    pub fn terminal_scope_grant(&self, scope_id: &str) -> anyhow::Result<Option<String>> {
+        Ok(self
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT workspace_id FROM terminal_scope_grants WHERE scope_id = ?1",
+                params![scope_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     /// Permanently remove a session and all of its persisted messages. Callers
     /// are responsible for tearing down any in-memory runtime/PTY state first.
     pub fn delete_session(&self, id: &str) -> anyhow::Result<()> {

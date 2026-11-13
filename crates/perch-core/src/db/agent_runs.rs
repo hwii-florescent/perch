@@ -148,6 +148,8 @@ impl HistoryDb {
     /// confirmed it, and move the session's run if that is a boundary: the session's first
     /// conversation since its launch joins that launch's run, a conversation not seen before in
     /// a session that already had one begins a fresh run, and a known one restores its own run.
+    /// An unrecognized conversation of a legacy tab (no recorded launch) starts a fresh run:
+    /// there is no evidence that it owns the tab's earlier family. Known resumes are unchanged.
     /// A child's run never changes; only its conversation is counted.
     pub fn observe_conversation(
         &self,
@@ -202,7 +204,9 @@ impl HistoryDb {
                 }
             }
             None => {
-                let fresh = !child && ordinal > 0;
+                // Only a recorded launch may bind its first conversation to an unobserved run.
+                // The legacy tab-id fallback is not evidence of this conversation's ownership.
+                let fresh = !child && (ordinal > 0 || current == session_id);
                 let run = if fresh {
                     begin_run_locked(&tx, session_id)?.unwrap_or(current)
                 } else {
@@ -345,6 +349,45 @@ mod tests {
     }
 
     #[test]
+    fn a_legacy_leads_first_conversation_does_not_adopt_its_old_children() {
+        let (db, workspace) = db_with(&["lead"]);
+        child(&db, &workspace, "old", "k");
+        assert_eq!(db.run_of("lead").unwrap().as_deref(), Some("lead"));
+        // No provider identity is not evidence of a new conversation.
+        assert_eq!(
+            db.observe_conversation("lead", "pi", "").unwrap(),
+            Observed::Unchanged
+        );
+        let observed = db.observe_conversation("lead", "pi", "new-pi").unwrap();
+        let Observed::Fresh(run) = observed else {
+            panic!("an unrecognized conversation must not inherit a legacy family: {observed:?}");
+        };
+        assert_ne!(run, "lead");
+        assert!(!db.owns_child("lead", "old").unwrap());
+        assert!(db.sub_sessions_in_run(&run).unwrap().is_empty());
+        assert_eq!(db.sub_sessions_in_run("lead").unwrap().len(), 1);
+        assert_eq!(db.run_of("old").unwrap().as_deref(), Some("lead"));
+        assert_eq!(
+            db.sub_session("old").unwrap().unwrap().state,
+            crate::sub_sessions::SubState::Starting
+        );
+        // Reconnects and explicit resumes of the newly recorded conversation keep its own family.
+        child(&db, &workspace, "new", "k");
+        assert_eq!(
+            db.observe_conversation("lead", "pi", "new-pi").unwrap(),
+            Observed::Unchanged
+        );
+        assert!(db.owns_child("lead", "new").unwrap());
+        launch(&db, &workspace, "lead");
+        assert_eq!(
+            db.observe_conversation("lead", "pi", "new-pi").unwrap(),
+            Observed::Resumed(run)
+        );
+        assert!(db.owns_child("lead", "new").unwrap());
+        assert!(!db.owns_child("lead", "old").unwrap());
+    }
+
+    #[test]
     fn a_launch_begins_a_fresh_run_and_a_child_stays_in_the_run_that_started_it() {
         let (db, workspace) = db_with(&["lead"]);
         launch(&db, &workspace, "lead");
@@ -382,11 +425,14 @@ mod tests {
         let (db, workspace) = db_with(&["lead"]);
         launch(&db, &workspace, "lead");
         let r1 = db.run_of("lead").unwrap().unwrap();
+        // A launch-created run may already have children before its first native snapshot.
+        child(&db, &workspace, "old", "k");
         assert_eq!(
             db.observe_conversation("lead", "claude", "c-1").unwrap(),
             Observed::Bound
         );
         assert_eq!(db.run_of("lead").unwrap().unwrap(), r1);
+        assert!(db.owns_child("lead", "old").unwrap());
         // Seen again (a repaint, a duplicate snapshot, a reconnect): nothing moves.
         for _ in 0..3 {
             assert_eq!(
@@ -394,7 +440,6 @@ mod tests {
                 Observed::Unchanged
             );
         }
-        child(&db, &workspace, "old", "k");
         let Observed::Fresh(r2) = db.observe_conversation("lead", "claude", "c-2").unwrap() else {
             panic!("a new conversation is a boundary");
         };
@@ -536,6 +581,14 @@ mod tests {
             !backup.exists(),
             "an already migrated database is not copied again"
         );
+        // The first native snapshot after this upgrade has no recorded conversation ownership.
+        assert!(matches!(
+            again.observe_conversation("lead", "pi", "new-pi").unwrap(),
+            Observed::Fresh(_)
+        ));
+        assert!(!again.owns_child("lead", "kid").unwrap());
+        assert_eq!(again.run_of("kid").unwrap().as_deref(), Some("lead"));
+        assert_eq!(again.sub_session("kid").unwrap().unwrap().task, "task");
     }
 
     #[test]

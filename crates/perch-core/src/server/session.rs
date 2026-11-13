@@ -413,7 +413,9 @@ fn is_chats_workspace(workspace: &crate::db::WorkspaceRow) -> bool {
 /// directory its shell has actually been in (the client uses it only once the
 /// shell has left the workspace's own folder). The client never picks a root:
 /// anything the terminal has not visited is refused. Other ids are plain
-/// workspaces.
+/// workspaces. `dir:<workspace id>:<base64url directory>` is the one scope the
+/// client does pick: an absolute local directory it chose on purpose (the New
+/// file prompt's editable path), filed under that workspace.
 pub(super) fn resolve_tool_workspace(
     app: &AppState,
     id: &str,
@@ -429,29 +431,74 @@ fn resolve_scoped_workspace(
     cwd_seen: impl Fn(&str, &str) -> bool,
 ) -> anyhow::Result<crate::db::WorkspaceRow> {
     use base64::Engine;
+    let decode = |encoded: &str| {
+        base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(encoded)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .ok_or_else(|| anyhow::anyhow!("malformed scope"))
+    };
+    if let Some((workspace_id, encoded)) = id
+        .strip_prefix("dir:")
+        .and_then(|rest| rest.split_once(':'))
+    {
+        let path = decode(encoded)?;
+        anyhow::ensure!(
+            std::path::Path::new(&path)
+                .components()
+                .all(|part| matches!(
+                    part,
+                    std::path::Component::RootDir | std::path::Component::Normal(_)
+                ))
+                && path.starts_with('/'),
+            "{path} is not a normalized absolute path"
+        );
+        let workspace = db.resolve_workspace(workspace_id)?;
+        anyhow::ensure!(
+            workspace.host_id == "local",
+            "directory scopes are local only"
+        );
+        return scoped_row(id, path, workspace);
+    }
     let Some((session_id, encoded)) = id
         .strip_prefix("term:")
         .and_then(|rest| rest.split_once(':'))
     else {
         return db.resolve_workspace(id);
     };
-    let path = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(encoded)
-        .ok()
-        .and_then(|bytes| String::from_utf8(bytes).ok())
-        .ok_or_else(|| anyhow::anyhow!("malformed terminal scope"))?;
-    let session = db
-        .get_session(session_id)?
-        .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
-    let workspace = db.resolve_workspace(session.workspace_id.as_deref().unwrap_or_default())?;
-    anyhow::ensure!(
-        workspace.host_id == "local" && session.host_id == "local",
-        "terminal Files and Git are local only"
-    );
-    anyhow::ensure!(
-        path == session.cwd || cwd_seen(session_id, &path),
-        "the terminal has not been in {path}"
-    );
+    let path = decode(encoded)?;
+    let session = db.get_session(session_id)?;
+    let granted = db.terminal_scope_grant(id)?;
+    let live = session
+        .as_ref()
+        .filter(|session| path == session.cwd || cwd_seen(session_id, &path));
+    // A scope verified once outlives its terminal: tabs opened through it keep reading and saving.
+    let workspace = match (live, granted) {
+        (Some(session), granted) => {
+            let workspace =
+                db.resolve_workspace(session.workspace_id.as_deref().unwrap_or_default())?;
+            anyhow::ensure!(
+                workspace.host_id == "local" && session.host_id == "local",
+                "terminal Files and Git are local only"
+            );
+            if granted.is_none() {
+                db.grant_terminal_scope(id, &workspace.id)?;
+            }
+            workspace
+        }
+        (None, Some(workspace_id)) => db.resolve_workspace(&workspace_id)?,
+        (None, None) if session.is_none() => anyhow::bail!("session not found: {session_id}"),
+        (None, None) => anyhow::bail!("the terminal has not been in {path}"),
+    };
+    scoped_row(id, path, workspace)
+}
+
+/// `workspace` re-rooted at directory `path`, under the scope id `id`.
+fn scoped_row(
+    id: &str,
+    path: String,
+    workspace: crate::db::WorkspaceRow,
+) -> anyhow::Result<crate::db::WorkspaceRow> {
     anyhow::ensure!(
         std::path::Path::new(&path).is_dir(),
         "{path} is not a directory"
@@ -1020,12 +1067,28 @@ mod scratchpad_tests {
         std::fs::create_dir_all(&sub).unwrap();
         resolve_scoped_workspace(&db, &scope("proj", &sub), |s, p| s == "proj" && p == sub)
             .unwrap();
-        resolve_scoped_workspace(&db, &scope("proj", &sub), |_, _| false).unwrap_err();
+        // Once verified, the scope survives its terminal (closed: session row deleted); an unvisited one never resolves.
+        db.delete_session("proj").unwrap();
+        resolve_scoped_workspace(&db, &scope("proj", &sub), |_, _| false).unwrap();
+        resolve_scoped_workspace(&db, &scope("proj", &dir), |_, _| false).unwrap_err();
         std::fs::remove_dir(&sub).unwrap();
         assert_eq!(
             resolve_scoped_workspace(&db, &project.id, seen).unwrap().id,
             project.id
         );
+        // A chosen directory scope needs no terminal, only an existing normalized absolute local directory.
+        let chosen = |dir: &str| {
+            let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(dir);
+            format!("dir:{}:{encoded}", project.id)
+        };
+        let row = resolve_scoped_workspace(&db, &chosen(&dir), |_, _| false).unwrap();
+        assert_eq!(
+            (row.path.as_str(), row.project_id.as_str()),
+            (dir.as_str(), project.project_id.as_str())
+        );
+        resolve_scoped_workspace(&db, &chosen(&format!("{dir}/nope")), |_, _| false).unwrap_err();
+        resolve_scoped_workspace(&db, &chosen(&format!("{dir}/../etc")), |_, _| false).unwrap_err();
+        resolve_scoped_workspace(&db, &chosen("relative"), |_, _| false).unwrap_err();
         drop(db);
         std::fs::remove_file(path).unwrap();
     }
