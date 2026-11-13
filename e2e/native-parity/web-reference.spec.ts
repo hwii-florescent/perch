@@ -55,6 +55,12 @@ function measure({ rootSelector, defs, tokens }: { rootSelector: string; defs: E
     }
     return false;
   };
+  /** The element's own opacity times its ancestors' (a disabled row is 0.4); colours below are as computed, without it. */
+  const opacityOf = (el: Element): number => {
+    let product = 1;
+    for (let n: Element | null = el; n && n !== root.parentElement; n = n.parentElement) product *= parseFloat(getComputedStyle(n).opacity);
+    return round(product);
+  };
   const keyOf = (el: Element, spec: ElementDef["key"]): string | null => {
     if (!spec) return null;
     const at = spec.self ? el : spec.closest ? el.closest(spec.closest) : spec.find ? el.querySelector(spec.find) : null;
@@ -154,6 +160,7 @@ function measure({ rootSelector, defs, tokens }: { rootSelector: string; defs: E
       index,
       box: { x: round(box.left - rootBox.left), y: round(box.top - rootBox.top), width: round(box.width), height: round(box.height) },
       textSized: !!def.textSized,
+      ...(opacityOf(el) < 1 ? { opacity: opacityOf(el) } : {}),
       ...(text !== undefined ? { text } : {}),
       colors,
       ...(withText ? { font: { family: cs.fontFamily, size: parseFloat(cs.fontSize), weight: parseInt(cs.fontWeight, 10), lineHeight: round(lineHeight.value), lineHeightNormal: lineHeight.normal } } : {}),
