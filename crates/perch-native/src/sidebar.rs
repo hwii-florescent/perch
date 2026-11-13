@@ -304,6 +304,8 @@ pub struct State {
     needs: HashSet<String>,
     needs_events: Vec<AttentionEvent>,
     providers: HashMap<String, Vec<Provider>>,
+    /// Per computer, the agents its manifests mark as the default pick or not (`isDefault`).
+    provider_defaults: HashMap<String, HashMap<String, bool>>,
     /// The session the window shows, and the one kept in Done while it is read.
     viewing: Option<String>,
     viewed_dot: Option<(String, Option<Dot>)>,
@@ -315,6 +317,8 @@ pub struct State {
     sounds_in: Option<std::path::PathBuf>,
     keybindings: BTreeMap<String, String>,
     keys_file: Option<Value>,
+    /// `programs.json` as the core checked it, while there is one.
+    programs: Option<Value>,
     terminal: Option<Box<TerminalSettings>>,
     /// This computer as `server.info` names it: hostname, platform, reached over SSH.
     server: Option<(String, String, bool)>,
@@ -597,8 +601,14 @@ impl State {
                 self.keybindings.clone_from(&settings.keybindings);
                 self.terminal = Some(Box::new(TerminalSettings::from_wire(settings)));
             }
-            ServerMessage::ModsState { keys, folder, .. } => {
+            ServerMessage::ModsState {
+                keys,
+                programs,
+                folder,
+                ..
+            } => {
                 self.keys_file.clone_from(keys);
+                self.programs.clone_from(programs);
                 self.sounds_in = std::path::Path::new(folder).parent().map(Into::into);
             }
             ServerMessage::ModsChanged {} => asks.push(Request::Mods),
@@ -619,8 +629,13 @@ impl State {
                         name: m.display_name.clone(),
                     })
                     .collect();
-                self.providers
-                    .insert(host_id.clone().unwrap_or_else(|| LOCAL.into()), choices);
+                let host = host_id.clone().unwrap_or_else(|| LOCAL.into());
+                let defaults = manifests
+                    .iter()
+                    .filter_map(|m| m.is_default.map(|d| (m.id.clone(), d)))
+                    .collect();
+                self.provider_defaults.insert(host.clone(), defaults);
+                self.providers.insert(host, choices);
             }
             _ => return asks,
         }
@@ -788,6 +803,8 @@ impl State {
             held: self.held.clone(),
             theme: self.theme.clone(),
             providers: self.providers.clone(),
+            provider_defaults: self.provider_defaults.clone(),
+            programs: self.programs.clone(),
         }
     }
 

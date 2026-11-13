@@ -926,10 +926,12 @@ impl Perch {
         json!(list)
     }
 
-    /// `useStatusLine`: the focused session's place, else the shown computer's.
+    /// `useStatusLine`: what the core's `status.update` says about the focused session, else the
+    /// session's folder, else the shown workspace's (folder and branch).
     fn status_line(&self) -> Value {
         let host_id = self.host_id();
         let store = self.store();
+        let view = self.view(None);
         let data = self.0.data.borrow();
         let session = data
             .session_id
@@ -937,14 +939,21 @@ impl Perch {
             .and_then(|id| store.sessions.iter().find(|s| s.id == *id));
         let host = session.map_or(host_id.as_str(), |s| s.host_id.as_str());
         let entry = store.host_entries.iter().find(|h| h.id == host);
-        let workspace = data
+        let workspace = view
             .workspace_id
             .as_ref()
             .and_then(|id| store.workspaces.iter().find(|w| w.id == *id));
-        let cwd = session
-            .map(|s| s.current_cwd.clone().unwrap_or_else(|| s.cwd.clone()))
-            .or_else(|| workspace.map(|w| w.path.clone()))
+        let status = store.status.as_ref();
+        let some = |text: &str| (!text.is_empty()).then(|| text.to_string());
+        let cwd = status
+            .and_then(|(cwd, _)| some(cwd))
+            .or_else(|| session.and_then(|s| some(&s.cwd)))
+            .or_else(|| workspace.and_then(|w| some(&w.path)))
             .unwrap_or_default();
+        let branch = match status {
+            Some((_, branch)) => Some(branch.clone()),
+            None => workspace.and_then(|w| w.branch.clone()),
+        };
         let mut line = json!({
             "connected": store.connected,
             "hostId": host,
@@ -957,7 +966,7 @@ impl Perch {
         if let Some(state) = store.host_states.get(host) {
             line["hostState"] = json!(state.state);
         }
-        if let Some(branch) = session.and_then(|s| s.current_branch.clone()) {
+        if let Some(branch) = branch {
             line["branch"] = json!(branch);
         }
         if let Some(tokens) = store.context_tokens {
@@ -1008,17 +1017,16 @@ impl Perch {
                     "path": session.map(|s| s.cwd.clone()).unwrap_or_default(),
                 });
                 if let Some(s) = session {
-                    tab["provider"] = json!(s
+                    if let Some(provider) = s
                         .current_provider_id
-                        .clone()
-                        .or(s.cli_provider_id.clone())
-                        .unwrap_or_else(|| "terminal".into()));
+                        .as_ref()
+                        .or(s.cli_provider_id.as_ref())
+                    {
+                        tab["provider"] = json!(provider);
+                    }
                     tab["activity"] = json!(session_state(s));
                     tab["blocked"] = json!(s.blocked);
                     tab["unseen"] = json!(s.unseen);
-                    if let Some(w) = &s.workspace_id {
-                        tab["workspaceId"] = json!(w);
-                    }
                 }
                 tab
             })
@@ -1117,33 +1125,51 @@ impl Perch {
         json!(list)
     }
 
-    /// `useAgentChoices` without its functions: what `host_id` can start.
+    /// `useAgentChoices` without its functions: what `host_id` can start. A computer that lists
+    /// its agents (`agent.manifest.list`) offers its enabled, installed ones and is loading until
+    /// it has answered; an older one offers the two agents every Perch knows.
     fn agent_choices(&self, host_id: &str) -> Value {
         let store = self.store();
-        let listed = store.providers.get(host_id);
-        let reachable = if host_id == LOCAL {
-            store.connected
+        let capabilities = if host_id == LOCAL {
+            Some(&store.local_capabilities)
         } else {
-            store
-                .host_states
-                .get(host_id)
-                .is_some_and(|f| f.state == "connected")
+            store.host_capabilities.get(host_id)
         };
-        let choices: Vec<Value> = listed
-            .map(|list| {
-                list.iter()
-                    .map(|p| json!({ "id": p.id, "label": p.name }))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let discovery = capabilities.is_some_and(|c| c.iter().any(|c| c == MANIFEST_CAPABILITY));
+        let listed = store.providers.get(host_id);
+        let defaults = store.provider_defaults.get(host_id);
+        let choices: Vec<Value> = if discovery {
+            listed
+                .into_iter()
+                .flatten()
+                .map(|p| {
+                    let mut choice = json!({ "id": p.id, "label": p.name });
+                    if let Some(default) = defaults.and_then(|d| d.get(&p.id)) {
+                        choice["isDefault"] = json!(default);
+                    }
+                    choice
+                })
+                .collect()
+        } else {
+            KNOWN_AGENTS
+                .iter()
+                .map(|(id, label)| json!({ "id": id, "label": label }))
+                .collect()
+        };
         json!({
-            "connected": reachable,
-            "discovery": listed.is_some(),
-            "state": if listed.is_some() { "ready" } else if reachable { "loading" } else { "idle" },
+            "connected": store.connected,
+            "discovery": discovery,
+            "state": if discovery && listed.is_none() { "loading" } else { "ready" },
             "choices": choices,
         })
     }
 }
+
+/// The capability of a computer that lists the agents it can start.
+const MANIFEST_CAPABILITY: &str = "agent.manifest.list";
+
+/// What a computer without that capability can start (the web's `AGENTS`).
+const KNOWN_AGENTS: [(&str, &str); 2] = [("claude", "Claude"), ("codex", "Codex")];
 
 /// The commands this module answers for, with their titles and arguments. `session.open` and
 /// `app.theme` also reach the window (the sidebar opens the session, the core keeps the theme);
@@ -1227,15 +1253,7 @@ pub fn notification_json(note: &crate::workspace::Notification, model: &Model) -
         session.and_then(|s| s.current_provider_id.clone().or(s.cli_provider_id.clone()));
     let program = provider
         .filter(|p| p != perch_core::agent_fleet::TERMINAL_PROVIDER)
-        .and_then(|p| {
-            model
-                .store
-                .providers
-                .values()
-                .flatten()
-                .find(|known| known.id == p)
-                .map(|known| known.name.clone())
-        });
+        .and_then(|p| program_name(&p, model.store.programs.as_ref()));
     let heading = if blocked {
         "Needs your attention".to_string()
     } else {
@@ -1260,6 +1278,45 @@ pub fn notification_json(note: &crate::workspace::Notification, model: &Model) -
     }
     item
 }
+
+/// The name the program table gives agent `id` (`programFor`): `programs.json`'s, else the
+/// built-in one; None for a program the table does not know.
+fn program_name(id: &str, programs: Option<&Value>) -> Option<String> {
+    let entry = programs.map(|file| &file["programs"][id]);
+    entry
+        .and_then(|e| e["name"].as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            AGENT_PROGRAMS
+                .iter()
+                .find(|(known, _)| *known == id)
+                .map(|(_, name)| name.to_string())
+        })
+        .or_else(|| entry.is_some_and(Value::is_object).then(|| id.to_string()))
+}
+
+/// The agents of the web's built-in program table (`programs.ts`), by id and name.
+// ponytail: only the agents, since a session's provider is always one; the editors, runtimes and
+// tools the web table also names would matter only for naming a pane's foreground program.
+const AGENT_PROGRAMS: [(&str, &str); 17] = [
+    ("claude", "Claude"),
+    ("codex", "Codex"),
+    ("pi", "Pi"),
+    ("omp", "Oh My Pi"),
+    ("opencode", "OpenCode"),
+    ("gemini", "Gemini"),
+    ("aider", "Aider"),
+    ("amp", "Amp"),
+    ("kiro", "Kiro"),
+    ("cursor-agent", "Cursor"),
+    ("droid", "Droid"),
+    ("copilot", "Copilot"),
+    ("goose", "Goose"),
+    ("crush", "Crush"),
+    ("qwen", "Qwen"),
+    ("cline", "Cline"),
+    ("kilo", "Kilo"),
+];
 
 /// A typed command's title, from the shortcut it stands for where there is one.
 fn typed_title(id: &str) -> &'static str {
@@ -1469,6 +1526,26 @@ mod tests {
         assert_eq!(
             session_label(&"x".repeat(30)),
             format!("{}…", "x".repeat(23))
+        );
+    }
+
+    #[test]
+    fn agents_are_named_by_the_program_table() {
+        assert_eq!(program_name("codex", None).as_deref(), Some("Codex"));
+        assert_eq!(program_name("mystery", None), None);
+        let file = json!({ "programs": {
+            "codex": { "name": "Codex CLI" }, "mystery": { "tile": "#000" } } });
+        assert_eq!(
+            program_name("codex", Some(&file)).as_deref(),
+            Some("Codex CLI")
+        );
+        assert_eq!(
+            program_name("claude", Some(&file)).as_deref(),
+            Some("Claude")
+        );
+        assert_eq!(
+            program_name("mystery", Some(&file)).as_deref(),
+            Some("mystery")
         );
     }
 }

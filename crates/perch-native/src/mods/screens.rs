@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 /// How a pane header is laid out (`usePaneLook`). The native window has no layouts to change it.
-pub const PANE_HEADER_HEIGHT: f32 = 24.;
+pub const PANE_HEADER_HEIGHT: f32 = 28.;
 
 /// Where a screen goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,6 +133,44 @@ pub fn screen(id: &str) -> Option<&'static Screen> {
     SCREENS.iter().find(|s| s.id == id)
 }
 
+/// Screen `id`'s box as `host` has its mod: the mod's `"screen"` in `mod.json`, else the default.
+pub fn size_in(host: &ModHost, id: &str) -> (f32, f32) {
+    let screen = screen(id).expect("a known screen");
+    let manifest = host
+        .find(id)
+        .map(|info| info.manifest["screen"].clone())
+        .unwrap_or_default();
+    let side = |key: &str, default: f32| {
+        manifest[key]
+            .as_f64()
+            .filter(|v| *v > 0.)
+            .map_or(default, |v| v as f32)
+    };
+    (side("width", screen.width), side("height", screen.height))
+}
+
+/// Where the window puts floating screen `id`'s `size` box in a `viewport`, as its top-left
+/// corner: an anchored one at `at`, moved in to stay inside; a notification under the tab strip
+/// at the right; the others centred, near the top.
+pub fn origin(
+    id: &str,
+    at: Option<Point<Pixels>>,
+    (width, height): (f32, f32),
+    (vw, vh): (f32, f32),
+) -> (f32, f32) {
+    let place = screen(id).map(|s| s.place);
+    match (place, at) {
+        (Some(Place::Floating { anchored: true, .. }), Some(at)) => (
+            f32::from(at.x).min(vw - width).max(0.),
+            f32::from(at.y).min(vh - height).max(0.),
+        ),
+        (Some(Place::Floating { modal: false, .. }), _) => {
+            (vw - width - 12., crate::workspace::TAB_BAR_HEIGHT + 12.)
+        }
+        _ => (((vw - width) / 2.).max(0.), 48.),
+    }
+}
+
 /// What runs when a floating screen closes, with its result (`null` when it was dismissed).
 pub type OnResult = Box<dyn FnOnce(&mut Workspace, Value, &mut Window, &mut Context<Workspace>)>;
 
@@ -199,17 +237,9 @@ impl Screens {
     /// Screen `id`'s box: the mod's `"screen"` in `mod.json`, else the default.
     pub fn size(&self, id: &str, cx: &App) -> (f32, f32) {
         let screen = screen(id).expect("a known screen");
-        let manifest = mods(cx)
-            .and_then(|(host, _)| host.find(id))
-            .map(|info| info.manifest["screen"].clone())
-            .unwrap_or_default();
-        let side = |key: &str, default: f32| {
-            manifest[key]
-                .as_f64()
-                .filter(|v| *v > 0.)
-                .map_or(default, |v| v as f32)
-        };
-        (side("width", screen.width), side("height", screen.height))
+        mods(cx).map_or((screen.width, screen.height), |(host, _)| {
+            size_in(&host, id)
+        })
     }
 
     /// The in-flow copy `key` on screen, when there is one.

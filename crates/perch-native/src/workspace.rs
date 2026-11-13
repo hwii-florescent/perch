@@ -767,17 +767,8 @@ impl Workspace {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
             .child(view);
-        let anchored = matches!(
-            screens::screen(open.id).map(|s| s.place),
-            Some(screens::Place::Floating { anchored: true, .. })
-        );
-        let panel = match open.at {
-            Some(at) if anchored => panel
-                .left(px(f32::from(at.x).min(vw - w).max(0.)))
-                .top(px(f32::from(at.y).min(vh - h).max(0.))),
-            _ if !open.modal() => panel.top(px(TAB_BAR_HEIGHT + 12.)).right(px(12.)),
-            _ => panel.left(px(((vw - w) / 2.).max(0.))).top(px(48.)),
-        };
+        let (left, top) = screens::origin(open.id, open.at, (w, h), (vw, vh));
+        let panel = panel.left(px(left)).top(px(top));
         if !open.modal() {
             return Some(panel.into_any_element());
         }

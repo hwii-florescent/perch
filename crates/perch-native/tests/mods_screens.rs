@@ -403,7 +403,7 @@ fn main() {
     );
     // The agents a host can start (a plain terminal is not one).
     assert_eq!(line.1, json!([{"id": "claude", "name": "Claude"}]));
-    assert_eq!(line.2["headerHeight"], json!(24));
+    assert_eq!(line.2["headerHeight"], json!(28));
 
     // Floating: a confirmation gets its props, re-renders when they change, and closes itself
     // with a result; the keyboard goes back to the terminal.

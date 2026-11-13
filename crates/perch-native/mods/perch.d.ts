@@ -263,7 +263,6 @@ declare module "perch" {
     activity?: AgentState;
     blocked?: boolean;
     unseen?: boolean;
-    workspaceId?: string;
   }
 
   export interface WorkspaceTabs {
@@ -307,8 +306,10 @@ declare module "perch" {
   export interface AgentChoices {
     connected: boolean;
     discovery: boolean;
-    state: "ready" | "loading" | "idle";
-    choices: { id: string; label: string }[];
+    /** Loading until a computer that lists its agents has answered; ready otherwise. */
+    state: "ready" | "loading";
+    /** `isDefault` where the computer's list says. */
+    choices: { id: string; label: string; isDefault?: boolean }[];
   }
 
   export interface Command {

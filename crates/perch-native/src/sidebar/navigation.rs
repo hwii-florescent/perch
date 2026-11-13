@@ -58,6 +58,10 @@ pub struct Store {
     pub theme: Option<String>,
     /// The agents each computer can start (`agent.manifest.list`), by host id.
     pub providers: HashMap<String, Vec<super::Provider>>,
+    /// Per computer, `isDefault` of each agent whose manifest says.
+    pub provider_defaults: HashMap<String, HashMap<String, bool>>,
+    /// `programs.json` as the core checked it (`mods.state`), while there is one.
+    pub programs: Option<serde_json::Value>,
 }
 
 impl PartialEq for Store {
