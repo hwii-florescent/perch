@@ -16,6 +16,7 @@ use perch_native::mods::perch::Perch;
 use perch_native::mods::{self, theme, ModHost, ModView};
 use perch_native::ui::Workspace;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// Draws `window` afresh and returns it; `name` is read from the records of that draw.
 fn draw(cx: &mut HeadlessAppContext, window: WindowHandle<ModView>) {
@@ -226,6 +227,110 @@ fn behaviour(cx: &mut HeadlessAppContext, user: &std::path::Path) {
     cx.run_until_parked();
 }
 
+const RUNS: usize = 9;
+
+fn median(mut times: Vec<Duration>) -> f64 {
+    times.sort();
+    times[times.len() / 2].as_secs_f64() * 1000.
+}
+
+/// How long the sidebar takes: the first draw of a freshly loaded mod, the draw after a session's
+/// state changes in the model, and a fold click through to the redrawn frame. Each is the median of
+/// `RUNS` runs, in milliseconds; a draw is layout and paint of the offscreen window, not the image
+/// read back. Printed, not asserted.
+fn timings(cx: &mut HeadlessAppContext, user: &std::path::Path) {
+    let fixture = parity::Fixture::load(&parity::fixture_path("sidebar"));
+    let host = ModHost::new(user.to_path_buf()).expect("the mod host starts");
+    let perch = Perch::new();
+    perch.register(&host);
+    parity::publish(&perch, &fixture, "by-project");
+    perch.set_theme("perch");
+    cx.update(|cx| perch.flush(cx));
+    let open = |cx: &mut HeadlessAppContext| {
+        cx.open_window(size(px(240.), px(800.)), |window, cx| {
+            host.view("sidebar-builders", window, cx)
+        })
+        .unwrap()
+    };
+
+    // The first render after the mod loads: opening the window loads the mod and draws it.
+    let mut first = Vec::new();
+    for _ in 0..RUNS {
+        let started = Instant::now();
+        let window = open(cx);
+        draw(cx, window);
+        first.push(started.elapsed());
+        cx.update_window(window.into(), |_, window, _| window.remove_window())
+            .unwrap();
+        cx.run_until_parked();
+    }
+
+    // A re-render after the data changes: the model of By project, then the same with the
+    // sessions' states of the needs-you state, then back.
+    let window = open(cx);
+    draw(cx, window);
+    let models =
+        ["needs-you", "by-project"].map(|state| parity::state_from(&fixture.data(state)).model());
+    let mut change = Vec::new();
+    for run in 0..RUNS {
+        let model = models[run % 2].clone();
+        let started = Instant::now();
+        perch.set_model(model);
+        cx.update(|cx| perch.flush(cx));
+        draw(cx, window);
+        change.push(started.elapsed());
+    }
+
+    // A fold click through to the redrawn frame (pointer already over the header).
+    hover(cx, window, "project-toggle:p-perch");
+    let mut fold = Vec::new();
+    for _ in 0..RUNS {
+        let position = record("project-toggle:p-perch").bounds.center();
+        let started = Instant::now();
+        for input in [
+            PlatformInput::MouseDown(MouseDownEvent {
+                button: MouseButton::Left,
+                position,
+                modifiers: Modifiers::default(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            PlatformInput::MouseUp(MouseUpEvent {
+                button: MouseButton::Left,
+                position,
+                modifiers: Modifiers::default(),
+                click_count: 1,
+            }),
+        ] {
+            event(cx, window, input);
+        }
+        cx.run_until_parked();
+        cx.update(|cx| perch.flush(cx));
+        draw(cx, window);
+        fold.push(started.elapsed());
+    }
+    cx.update_window(window.into(), |_, window, _| window.remove_window())
+        .unwrap();
+    cx.run_until_parked();
+
+    let build = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    let bytes: usize = mods::STOCK
+        .iter()
+        .filter(|(path, _)| path.starts_with("sidebar-builders/"))
+        .map(|(_, text)| text.len())
+        .sum();
+    println!(
+        "timings ({build}, median of {RUNS}, ms): first render {:.1}, data change {:.1}, fold click {:.1}; mod {bytes} bytes of JS",
+        median(first),
+        median(change),
+        median(fold)
+    );
+}
+
 fn main() {
     let scratch =
         std::env::temp_dir().join(format!("perch-sidebar-builders-{}", std::process::id()));
@@ -258,6 +363,7 @@ fn main() {
         }
     }
     behaviour(&mut cx, &scratch.join("behaviour-mods"));
+    timings(&mut cx, &scratch.join("timing-mods"));
     let _ = std::fs::remove_dir_all(&scratch);
     println!("mods_sidebar_builders: ok");
 }
