@@ -148,6 +148,106 @@ declare module "perch" {
     sessionId: string | null;
     cwd: string;
     branch?: string;
+    /** The agent's context window use, in tokens, when the core reports one. */
+    contextTokens?: number;
+    /** The agent's cost so far, in US dollars, when the core reports one. */
+    costUsd?: number;
+  }
+
+  /** One notification (`useNotifications`' item): what happened (`heading`) and to what (`detail`). */
+  export interface NotificationItem {
+    id: string;
+    kind: "done" | "blocked";
+    title: string;
+    heading: string;
+    detail: string;
+    sessionId: string;
+    sessionTitle?: string;
+    /** The notification is about a session this window knows. */
+    hasSession: boolean;
+    /** How long it stays, ms: the screen dismisses it (`run("notification.dismiss", {id})`). */
+    timeout: number;
+  }
+
+  /** `usePaneLook`: how pane headers are drawn. */
+  export interface PaneLook {
+    headerAt: "top" | "bottom";
+    headerReveal: "always" | "hover";
+    headerHeight: number;
+  }
+
+  // Screens: what the window passes a mod it opens as a screen (`props()`). The web's callbacks
+  // are results: `onClose()` is `close()`, `actions.x(a, b)` is `close({ action: "x", args: [a, b] })`.
+
+  /** `navigator`. Close with an action (`switchTo`, `newTerminal`, `startAgent`) or `{ command, args? }`. */
+  export interface NavigatorScreenProps {
+    open: boolean;
+    sessions: { id: string; title: string; cwd: string; hostId?: string; createdAt: number; state: AgentState }[];
+    currentSessionId: string | null;
+    connected: boolean;
+    workspace: { id: string; path: string } | null;
+    supportsSearch: boolean;
+    supportsRun: boolean;
+    agents: { id: string; label: string }[];
+    agentCwd: string | null;
+    terminalCwd: string | null;
+  }
+
+  /** `pane-menu`. Close with an action (`splitNew`, `toggleZoom`, `rename`, `stopAgent`, `close`) or
+   * `{ command }` of one of `items` (the native menu's entries). */
+  export interface PaneMenuScreenProps {
+    panelId: string;
+    title: string;
+    x: number;
+    y: number;
+    sessionId?: string;
+    canClose: boolean;
+    maximized: boolean;
+    canStopAgent: boolean;
+    items: { label: string; command: string }[];
+  }
+
+  /** `tab-menu`. Close with an action (`rename`, `splitNew`, `showFull`, `stopAgent`, `close`). */
+  export interface TabMenuScreenProps {
+    id: string;
+    x: number;
+    y: number;
+    self: { id: string; kind: "session"; label: string; title?: string };
+    canSplitNew: boolean;
+    canSplitMore: boolean;
+    offered: { id: string; label: string }[];
+    inSplit: boolean;
+    canStopAgent: boolean;
+    extraItems: never[];
+  }
+
+  /** `confirm`. Close with `{ confirmed: true }` (`onConfirm`) or `{ confirmed: false }` (`onCancel`). */
+  export interface ConfirmProps {
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    busy?: boolean;
+  }
+
+  /** `dialog`: the opener's title and fields. Close with `{ value }`. */
+  export interface DialogProps {
+    title: string;
+    testId?: string;
+    [field: string]: unknown;
+  }
+
+  /** `new-session`. Close with `{ cwd, agent }` (`onSelect`; no `cwd`: a Quickchat). */
+  export interface NewSessionScreenProps {
+    hostId: string;
+    projectCwds: string[];
+    fixedCwd?: string;
+    anchorRect: { x: number; y: number; width: number; height: number };
+  }
+
+  /** `pane-header`, one copy per pane while the area is split. */
+  export interface PaneHeaderProps {
+    id: string;
+    corner: boolean;
   }
 
   export interface WorkspaceTab {
@@ -278,6 +378,20 @@ declare module "perch" {
   export function keybindings(): Keybinding[];
   /** `shortcutFor`: the key that runs a command, or null. */
   export function shortcutLabel(command: string): string | null;
+  /** What the window opened this screen with (`{}` for none); a change re-renders the mod. */
+  export function props<T = Record<string, unknown>>(): T;
+  /** Closes this floating screen with `result`, which the window acts on; no result is a dismissal. */
+  export function close(result?: unknown): void;
+  /** `useNotifications`: the notifications, oldest first. Open and dismiss them with `run`. */
+  export function notifications(): { items: NotificationItem[] };
+  /** `useZoom`: the terminals' zoom factor (1 is 100%). */
+  export function zoom(): number;
+  /** `usePaneLook`. */
+  export function paneLook(): PaneLook;
+  /** A host's agents (default `local`), by id and display name, to tell them apart and draw their icons. */
+  export function providers(hostId?: string): { id: string; name: string }[];
+  /** `startSession`: starts `agent` in `cwd` on `hostId` (no `cwd`: a Quickchat). Rejects with why not. */
+  export function startSession(hostId: string, cwd: string | undefined, agent: string): Promise<true>;
   /** `runCommand`: runs a command as its key would. Rejects with why it could not. */
   export function run(id: string, args?: Record<string, unknown>): Promise<true>;
 }

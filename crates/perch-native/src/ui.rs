@@ -253,6 +253,11 @@ impl Sidebar {
         Ok(())
     }
 
+    /// Takes the New session panel's target, for a screen drawn in the panel's place.
+    pub fn take_new_session(&mut self) -> Option<crate::actions::NewSession> {
+        self.nav.new_session.take()
+    }
+
     /// Nothing is picked: the last tab was closed.
     pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
         self.nav.selected = None;

@@ -36,6 +36,9 @@ pub struct Store {
     pub is_ssh: Option<bool>,
     /// The focused folder and branch (`status.update`).
     pub status: Option<(String, String)>,
+    /// The agent's context window use and cost, from `status.update`.
+    pub context_tokens: Option<u64>,
+    pub cost_usd: Option<f64>,
     pub local_capabilities: Vec<String>,
     pub host_capabilities: HashMap<String, Vec<String>>,
     pub host_entries: Vec<SshHostEntry>,

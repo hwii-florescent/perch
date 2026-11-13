@@ -351,6 +351,8 @@ pub struct State {
     server: Option<(String, String, bool)>,
     /// The focused folder and branch (`status.update`).
     status: Option<(String, String)>,
+    /// What the last `status.update` said of the agent's context window and cost.
+    usage: (Option<u64>, Option<f64>),
     /// What each remote computer's `host.info` said it can do.
     host_capabilities: HashMap<String, Vec<String>>,
     snapshots: HashMap<String, SnapshotState>,
@@ -511,8 +513,14 @@ impl State {
                     asks.push(Request::Workspaces(LOCAL.into()));
                 }
             }
-            ServerMessage::StatusUpdate { cwd, branch, .. } => {
+            ServerMessage::StatusUpdate {
+                cwd,
+                branch,
+                context_tokens,
+                cost_usd,
+            } => {
                 self.status = Some((cwd.clone(), branch.clone()));
+                self.usage = (*context_tokens, *cost_usd);
             }
             ServerMessage::SessionList { sessions } => {
                 self.sessions = sessions.clone();
@@ -795,6 +803,8 @@ impl State {
             platform: server.as_ref().map(|s| s.1.clone()),
             is_ssh: server.map(|s| s.2),
             status: self.status.clone(),
+            context_tokens: self.usage.0,
+            cost_usd: self.usage.1,
             local_capabilities: self.local_capabilities.clone(),
             host_capabilities: self.host_capabilities.clone(),
             host_entries: self.host_entries.clone(),
