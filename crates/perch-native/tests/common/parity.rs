@@ -359,7 +359,9 @@ pub fn elements(
                     "family": web_family(&r.font_family),
                     "size": round(r.font_size),
                     "weight": r.font_weight.0,
-                    "lineHeight": round(r.line_height),
+                    // What the style asks for, and what GPUI draws (it rounds to whole pixels).
+                    "lineHeight": round(r.line_height_requested),
+                    "lineHeightDrawn": round(r.line_height),
                     "lineHeightNormal": false,
                 },
             });
