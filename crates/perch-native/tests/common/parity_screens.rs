@@ -919,6 +919,9 @@ fn text_sized_names(screen: &str) -> Vec<String> {
 fn drawn_by(screen: &str) -> &str {
     match screen {
         "session-menu" => "tab-menu",
+        // The SDK's dropdown is no screen of the window's: a test-only mod draws it in a floating
+        // screen's slot (`tests/mods/select-demo`, from a user mods folder).
+        "select" => "tab-drag",
         other => other,
     }
 }
@@ -965,10 +968,116 @@ fn session_menu_props(data: &Value, menu: &Value) -> Value {
     tab_menu_props(&tabs, &mates, id, at, &title, false, extra)
 }
 
+/// The ghost of tab `tab` held `grab` (`{dx, dy}`) in from its corner, as a press on it hands the
+/// window (`tab.beginDrag`'s `look`), the way the web harness takes it: the stock tab strip drawn
+/// out of sight, 976 px wide at the height its tabs take, with the state's data, and the tab
+/// pressed there. The strip is a copy of the stock `tabs` mod whose box has no height, as the
+/// harness's hidden strip; its press is answered here instead of by a window.
+fn ghost_look(
+    cx: &mut HeadlessAppContext,
+    fixture: &ScreenFixture,
+    state: &str,
+    tab: &str,
+    grab: &Value,
+) -> Value {
+    let dir = std::env::temp_dir().join(format!("perch-parity-ghost-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch mods folder");
+    ModHost::new(dir.clone()).expect("the stock mods are written");
+    let copy = |from: &Path, to: &Path| {
+        let status = std::process::Command::new("cp")
+            .arg("-R")
+            .arg(from)
+            .arg(to)
+            .status()
+            .expect("cp runs");
+        assert!(status.success(), "the stock tabs are copied");
+    };
+    copy(&dir.join(".stock/tabs"), &dir.join("tabs"));
+    // The strip in a box with no height, as the harness's hidden one: an absolute box sized by
+    // what is in it.
+    std::fs::write(
+        dir.join("tabs/main.js"),
+        r#"import { screen } from "./screen.js";
+import { jsx } from "react/jsx-runtime";
+import TabBar from "./tabs/main.js";
+const Hidden = (props) => jsx("div", { style: { position: "absolute", left: 0, top: 0, width: 976 }, children: jsx(TabBar, props) });
+export default screen("tabs", Hidden, { container: { position: "relative", width: "100%", height: "100%" }, props: (raw) => raw });
+"#,
+    )
+    .unwrap();
+
+    let host = ModHost::new(dir.clone()).expect("the mod host starts");
+    let perch = Perch::new();
+    publish(&perch, fixture, state);
+    let pressed: std::rc::Rc<std::cell::RefCell<Option<Value>>> = Default::default();
+    {
+        let (perch, pressed) = (perch.clone(), pressed.clone());
+        host.register_module(move |id| {
+            let pressed = pressed.clone();
+            perch.module(id).async_function("run", move |args| {
+                if args.string(0)? == "tab.beginDrag" {
+                    *pressed.borrow_mut() = args.get(1).map(from_host);
+                }
+                Ok(async { Ok(gpui_shell::HostValue::Bool(true)) })
+            })
+        });
+    }
+    cx.update(|cx| perch.flush(cx));
+    let window = cx
+        .open_window(size(px(976.), px(800.)), |window, cx| {
+            let view = host.view_keyed("tabs", "tabs", window, cx);
+            cx.new(|_| Stage {
+                view,
+                backdrop: None,
+            })
+        })
+        .expect("an offscreen window");
+    let handle: gpui::AnyWindowHandle = window.into();
+    draw(cx, handle);
+    let name = format!("tab-slot:{tab}");
+    let at = probe::record(&name)
+        .unwrap_or_else(|| panic!("{name} is drawn on the strip"))
+        .bounds;
+    let offset = |key: &str| px(grab[key].as_f64().unwrap_or(0.) as f32);
+    let position = point(at.origin.x + offset("dx"), at.origin.y + offset("dy"));
+    cx.update_window(handle, |_, window: &mut Window, cx| {
+        window.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                button: MouseButton::Left,
+                position,
+                modifiers: Modifiers::default(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        window.dispatch_event(
+            PlatformInput::MouseUp(MouseUpEvent {
+                button: MouseButton::Left,
+                position,
+                modifiers: Modifiers::default(),
+                click_count: 1,
+            }),
+            cx,
+        );
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, _| window.remove_window())
+        .unwrap();
+    cx.run_until_parked();
+    let _ = std::fs::remove_dir_all(&dir);
+    let args = pressed.borrow_mut().take().expect("the press began a drag");
+    let look = perch_native::tab_drag::look_from(&args["look"]);
+    assert!(look.is_object(), "the press copied the tab: {args}");
+    look
+}
+
 /// The window's `tab-drag` props for the fixture's drag (the pointer, the pane under it and its
 /// zone, the tab its ghost copies), as `TabDrag::props` makes them: the drop with the half a split
-/// takes (`zone_box`), and no ghost, which is the tab's own markup in the web.
-fn tab_drag_props(fixture: &Value) -> Value {
+/// takes (`zone_box`), and the ghost `look`.
+fn tab_drag_props(fixture: &Value, look: Value) -> Value {
     use perch_native::tab_drag::{Drop, TabDrag};
     let drag = &fixture["drag"];
     let number = |v: &Value| v.as_f64().unwrap_or(0.) as f32;
@@ -998,6 +1107,7 @@ fn tab_drag_props(fixture: &Value) -> Value {
     } else {
         Drop::None
     };
+    native.look = look;
     native.props()
 }
 
@@ -1005,6 +1115,26 @@ fn tab_drag_props(fixture: &Value) -> Value {
 /// screen alone at the state's size, a floating one over the whole of the state's window on the
 /// backdrop, with `viewport` in its props. The state's `steps` are done as events. Writes
 /// `<screen>.<state>.<theme>.png` and `.json` into `out`, in the web reference's schema.
+/// A user mods folder in which the test-only `select-demo` mod draws the `select` fixture
+/// screen in its slot (`drawn_by`), with the runtime files a stock folder has.
+pub fn select_demo_mods() -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("perch-parity-select-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch mods folder");
+    ModHost::new(dir.clone()).expect("the stock mods are written");
+    let slot = drawn_by("select");
+    let status = std::process::Command::new("cp")
+        .arg("-R")
+        .arg(dir.join(".stock").join(slot))
+        .arg(dir.join(slot))
+        .status()
+        .expect("cp runs");
+    assert!(status.success(), "the slot's runtime files are copied");
+    let demo = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/mods/select-demo/main.js");
+    std::fs::copy(demo, dir.join(slot).join("main.js")).expect("the demo is copied");
+    dir
+}
+
 pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
     let fixture = capture.fixture;
     let screen_id = fixture.screen.as_str();
@@ -1043,11 +1173,18 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
     }
     let floating = matches!(screen.place, Place::Floating { .. });
     let mut props = fixture.props(capture.state);
-    if drawn != screen_id {
+    if screen_id == "session-menu" {
         let menu = props.take().unwrap_or_else(|| json!({}));
         props = Some(session_menu_props(&fixture.data(capture.state), &menu));
     } else if screen_id == "tab-drag" {
-        props = props.map(|p| tab_drag_props(&p));
+        props = props.map(|p| {
+            let drag = &p["drag"];
+            let tab = drag["tab"]
+                .as_str()
+                .expect("a drag names the tab it copies");
+            let look = ghost_look(cx, fixture, capture.state, tab, &drag["grab"]);
+            tab_drag_props(&p, look)
+        });
     }
     if floating {
         // As the window gives every floating screen: its size.
@@ -1102,7 +1239,7 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
         );
     })
     .unwrap();
-    run_steps(cx, handle, screen.id, &fixture.steps(capture.state));
+    run_steps(cx, handle, screen_id, &fixture.steps(capture.state));
     cx.update_window(handle, |_, window: &mut Window, cx| {
         window.dispatch_event(
             PlatformInput::MouseMove(MouseMoveEvent {

@@ -663,6 +663,13 @@ fn tab_drag(rig: &mut Rig) {
     // On the strip the drop is a slot in it: past bravo's middle, alpha goes after it. The layer
     // is up while the tab is dragged, with no split to show; Escape ends it with nothing changed.
     let past = (rig.center("tab:bravo").0 + 20., tab.1);
+    let left = |rig: &mut Rig, name: &str| {
+        let record = rig
+            .record(name)
+            .unwrap_or_else(|| panic!("{name} is drawn"));
+        f32::from(record.bounds.origin.x)
+    };
+    let (alpha_x, bravo_x) = (left(rig, "tab:alpha"), left(rig, "tab:bravo"));
     rig.down(tab);
     rig.held_to((tab.0 + 10., tab.1));
     rig.held_to(past);
@@ -672,6 +679,22 @@ fn tab_drag(rig: &mut Rig) {
         rig.record("tab-drop-zone").is_none(),
         "over the strip, no split"
     );
+    assert!(
+        rig.record("tab-drag-ghost").is_none(),
+        "over the strip the tab itself follows the pointer"
+    );
+    // The strip slides: bravo, passed, moves into alpha's place, and alpha follows the pointer
+    // as far as the strip's end, which is bravo's place.
+    let near = |a: f32, b: f32| (a - b).abs() < 1.;
+    let (alpha_now, bravo_now) = (left(rig, "tab:alpha"), left(rig, "tab:bravo"));
+    assert!(
+        near(bravo_now, alpha_x),
+        "bravo slid aside: {bravo_now} vs {alpha_x}"
+    );
+    assert!(
+        near(alpha_now, bravo_x),
+        "alpha follows: {alpha_now} vs {bravo_x}"
+    );
     rig.press("escape");
     assert!(rig.open_screens().is_empty(), "Escape took the layer away");
     rig.up(past);
@@ -679,6 +702,12 @@ fn tab_drag(rig: &mut Rig) {
         layout(rig),
         (ids(&["alpha", "bravo"]), ids(&["alpha"])),
         "and changed nothing"
+    );
+    rig.draw();
+    assert_eq!(
+        (left(rig, "tab:alpha"), left(rig, "tab:bravo")),
+        (alpha_x, bravo_x),
+        "no tab is left moved"
     );
     rig.down(tab);
     rig.held_to((tab.0 + 10., tab.1));
@@ -704,6 +733,23 @@ fn tab_drag(rig: &mut Rig) {
         .expect("the right half a split takes");
     let middle = f32::from(zone.bounds.origin.x + zone.bounds.size.width / 2.);
     assert!(middle > WIDTH / 2., "the right half: {:?}", zone.bounds);
+    // Off the strip a ghost of the tab follows the pointer, held where it was pressed.
+    let ghost = rig.record("tab-drag-ghost").expect("the ghost is drawn");
+    let slot = rig.record("tab-slot:alpha").expect("alpha's slot");
+    assert_eq!(
+        ghost.bounds.size, slot.bounds.size,
+        "the ghost is the tab's size"
+    );
+    let held = (
+        tab.0 - f32::from(slot.bounds.origin.x),
+        tab.1 - f32::from(slot.bounds.origin.y),
+    );
+    assert!(
+        near(f32::from(ghost.bounds.origin.x), right.0 - held.0)
+            && near(f32::from(ghost.bounds.origin.y), right.1 - held.1),
+        "the ghost is held where it was pressed: {:?}",
+        ghost.bounds
+    );
     rig.up(right);
     assert_eq!(
         layout(rig),

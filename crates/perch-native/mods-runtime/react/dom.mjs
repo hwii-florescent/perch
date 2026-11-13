@@ -162,6 +162,92 @@ export class HostElement extends Target {
   /** Asks the scroll area around this element to show it (`toGpui`, on the next frame: the engine scrolls by the
    * fewest pixels, as `{ inline: "nearest", block: "nearest" }`, whatever the options). */
   scrollIntoView() { if (this.ownerDocument) this.ownerDocument.scrollTarget = this; }
+  /** `element.style`: a write (`el.style.transform = ...`, `setProperty`) is kept on the element over its props'
+   * `style` until the source writes that property again, and the next frame draws it, as in a page; a read is the
+   * written value, else the props'. */
+  get style() {
+    if (this.styleView) return this.styleView;
+    const element = this;
+    const name = (prop) => (String(prop).startsWith("--") ? String(prop) : String(prop).replace(/-([a-z])/g, (_, c) => c.toUpperCase()));
+    const own = (key) => {
+      const value = element.props.style?.[key];
+      if (value === undefined || value === null || typeof value === "boolean") return "";
+      return typeof value === "number" && value !== 0 ? `${value}px` : String(value);
+    };
+    const read = (key) => (element.inline && key in element.inline ? element.inline[key] : own(key));
+    const write = (key, value) => {
+      const text = value === undefined || value === null ? "" : String(value);
+      if (read(key) === text) return;
+      element.inline ??= {};
+      if (text === own(key)) delete element.inline[key];
+      else element.inline[key] = text;
+      element.touch();
+      element.ownerDocument?.restyled();
+    };
+    this.styleView = new Proxy({}, {
+      get: (_, key) => {
+        if (typeof key !== "string") return undefined;
+        if (key === "setProperty") return (prop, value) => write(name(prop), value);
+        if (key === "removeProperty") return (prop) => { const was = read(name(prop)); write(name(prop), ""); return was; };
+        if (key === "getPropertyValue") return (prop) => read(name(prop));
+        return read(key);
+      },
+      set: (_, key, value) => { if (typeof key === "string") write(key, value); return true; },
+    });
+    return this.styleView;
+  }
+  /** What the cascade reads as this element's inline style: its props' `style` under what was written to `style`. */
+  get inlineStyle() { return this.inline ? { ...this.props.style, ...this.inline } : this.props.style; }
+  /** This element and what is in it, as this shim's own markup (`markup`), which `dangerouslySetInnerHTML` takes. */
+  get outerHTML() { return markup(this); }
+  /** `outerHTML` without the attributes named in `omit` (by their DOM names), as the web's drag strips its copy. */
+  copyMarkup(omit = []) { return markup(this, omit); }
+}
+
+/** What this shim's markup begins with. There is no HTML parser: markup is a copy of a subtree that only the shim
+ * writes (`markup`, an element's `outerHTML`) and reads back (`fromMarkup`, an element's `dangerouslySetInnerHTML`);
+ * any other HTML is not drawn. */
+export const MARKUP = "\u0001perch-dom:";
+/** Props that are React's, not attributes, and so are not copied. */
+const NOT_ATTRIBUTES = new Set(["children", "key", "ref", "dangerouslySetInnerHTML"]);
+/** An attribute's name as the prop that holds it. */
+const PROP_OF = { class: "className", for: "htmlFor", tabindex: "tabIndex" };
+
+/** `node` and its subtree as markup: each element its tag, its attribute props (no handlers, no `omit`ted attributes,
+ * by their DOM names: `id`, `style`, `data-testid`) and its children, each text its text. */
+export function markup(node, omit = []) {
+  const skip = new Set(omit.map((name) => PROP_OF[name] ?? name));
+  const copy = (n) => {
+    if (!(n instanceof HostElement)) return { x: n.data, ...(n.hidden ? { h: 1 } : {}) };
+    const p = {};
+    for (const [key, value] of Object.entries(n.props)) {
+      if (NOT_ATTRIBUTES.has(key) || skip.has(key) || value == null || typeof value === "function" || typeof value === "symbol") continue;
+      p[key] = value;
+    }
+    return { t: n.tagName, p, c: n.childNodes.map(copy), ...(n.hidden ? { h: 1 } : {}) };
+  };
+  return MARKUP + JSON.stringify(copy(node));
+}
+
+/** The nodes `html` copies, made afresh in `document`; null when `html` is not this shim's markup. */
+export function fromMarkup(html, document) {
+  if (typeof html !== "string" || !html.startsWith(MARKUP)) return null;
+  let tree;
+  try { tree = JSON.parse(html.slice(MARKUP.length)); } catch { return null; }
+  const plain = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  const build = (n) => {
+    if (!plain(n)) throw new Error("not a node");
+    let node;
+    if (typeof n.x === "string") node = new HostText(n.x);
+    else {
+      if (typeof n.t !== "string" || !/^[a-z][a-z0-9-]*$/i.test(n.t) || !plain(n.p) || !Array.isArray(n.c)) throw new Error("not an element");
+      node = new HostElement(n.t, n.p, document);
+      for (const child of n.c) node.appendChild(build(child));
+    }
+    node.hidden = n.h === 1;
+    return node;
+  };
+  try { return [build(tree)]; } catch { return null; }
 }
 
 /** `ResizeObserver`: the engine tells the description of no resizes, so an observer is never called back (its
@@ -198,10 +284,17 @@ export class HostDocument extends Target {
     this.activeElement = this.body;
   }
   createElement(tag) { return new HostElement(tag, {}, this); }
+  /** An element's `style` was written: the tree is described again once the writing script is done. */
+  restyled() {
+    if (this.restyling) return;
+    this.restyling = true;
+    queueMicrotask(() => { this.restyling = false; this.afterCommit?.(); });
+  }
   focus(element) {
     if (this.activeElement && this.activeElement !== element) this.blur(this.activeElement);
     this.activeElement = element;
     element.state.focus = true;
+    element.state.pointerFocus = false;
     touchChain(element);
     // The engine moves the keyboard onto the screen when the source focuses one of its elements.
     this.perch?.focused?.(element);

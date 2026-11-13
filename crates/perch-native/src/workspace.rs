@@ -863,6 +863,11 @@ impl Workspace {
 
     /// The pointer moved during a press on a tab: once it is a drag, where a drop would land,
     /// drawn by the `tab-drag` screen.
+    /// The tab drag in flight as the strip slides its tabs for it (`TabDrag::slide`).
+    pub fn tab_slide(&self) -> Value {
+        self.drag.as_ref().map_or(Value::Null, TabDrag::slide)
+    }
+
     fn drag_moved(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
         let Some(drag) = self.drag.as_mut() else {
             return;
@@ -2078,7 +2083,9 @@ impl Workspace {
                     let spans =
                         tab_drag::spans_from(&args.map_or(Value::Null, |a| a["entries"].clone()));
                     let label = text("label").unwrap_or_default().to_string();
-                    self.drag = Some(TabDrag::new(id, label, start, spans));
+                    let mut drag = TabDrag::new(id, label, start, spans);
+                    drag.look = tab_drag::look_from(args.map_or(&Value::Null, |a| &a["look"]));
+                    self.drag = Some(drag);
                     cx.notify();
                 }
             }

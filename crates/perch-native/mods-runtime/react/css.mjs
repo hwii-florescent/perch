@@ -634,7 +634,7 @@ export class Cascade {
         return !!active && active !== el.ownerDocument.body && typeof el.contains === "function" && el.contains(active);
       }
       if (isSubject) return assume.has(name);
-      if (name === "focus-visible") return !!el.state?.focus;
+      if (name === "focus-visible") return !!el.state?.focus && !el.state?.pointerFocus;
       return !!el.state?.[name];
     };
     return this.sheet.candidates(element).filter((rule) => (!rule.media || rule.media.every((query) => mediaMatches(query, this.viewport))) && matchesComplex(element, rule.steps, { state }));
@@ -647,7 +647,7 @@ export class Cascade {
       for (const [prop, value, important] of rule.decls) declared.push({ prop, value, important: important ? 1 : 0, origin: rule.origin === 0 ? 0 : 2, layer: rule.layer, specificity: rule.specificity, order: rule.order, source: rule.source });
     }
     for (const [prop, value] of presentational(element)) declared.push({ prop, value, important: 0, origin: 1, layer: 0, specificity: [0, 0, 0], order: 0, source: `attr:${prop}` });
-    for (const [prop, value] of inlineDeclarations(element.props?.style)) declared.push({ prop, value, important: 0, origin: 3, layer: 0, specificity: [1, 0, 0], order: 0, source: "style" });
+    for (const [prop, value] of inlineDeclarations(element.inlineStyle ?? element.props?.style)) declared.push({ prop, value, important: 0, origin: 3, layer: 0, specificity: [1, 0, 0], order: 0, source: "style" });
     declared.sort(compareRank);
 
     // Custom properties. Inheriting ones chain to the parent's (a prototype chain, so nothing is copied); a

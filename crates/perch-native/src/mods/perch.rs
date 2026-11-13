@@ -128,6 +128,8 @@ pub struct WindowState {
     pub new_tab: u64,
     /// The open tabs whose terminal is known to be `running` or `exited`; any other is unknown.
     pub terminals: HashMap<String, &'static str>,
+    /// A tab drag in flight (`tabSlide()`, `TabDrag::slide`); null when none.
+    pub slide: Value,
     /// The last Add project request (`useAddProject`), null before any.
     pub add_project: Value,
     /// How many times the window asked the sidebar for its Add project form, and when last.
@@ -248,6 +250,7 @@ impl Perch {
                 add_project_asks: ws.add_project_asks().0,
                 add_project_at: ws.add_project_asks().1,
                 terminals: ws.terminal_states(cx),
+                slide: ws.tab_slide(),
                 notifications: ws
                     .notifications()
                     .iter()
@@ -843,6 +846,12 @@ impl Perch {
                     }
                 }),
             )
+            .function(
+                "tabSlide",
+                reader(WINDOW, |perch, _| {
+                    perch.0.data.borrow().window.slide.clone()
+                }),
+            )
             .function("workspaceTabs", both(|perch, _| perch.workspace_tabs()))
             .function("focus", both(|perch, _| perch.focus()))
             // `useSessionFolders`: the shown computer's sessions by folder.
@@ -1366,7 +1375,11 @@ impl Perch {
             "activeId": data.window.active,
             "tabs": tabs,
             "tabShape": "square",
-            "draggingId": Value::Null,
+            // Off the strip the dragged tab dims (its ghost follows the pointer), as the web's.
+            "draggingId": match &data.window.slide {
+                slide if slide["overStrip"] == false => slide["id"].clone(),
+                _ => Value::Null,
+            },
         })
     }
 

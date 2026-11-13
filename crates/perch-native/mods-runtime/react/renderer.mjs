@@ -11,7 +11,7 @@
 import Reconciler from "react-reconciler";
 import { ConcurrentRoot, DefaultEventPriority, DiscreteEventPriority, NoEventPriority } from "react-reconciler/constants";
 import { createElement } from "react";
-import { HostElement, HostText, installGlobals, isTextField, submits } from "./dom.mjs";
+import { HostElement, HostText, fromMarkup, installGlobals, isTextField, submits } from "./dom.mjs";
 import { describe } from "./describe.mjs";
 import { styleSheet } from "./sheet.mjs";
 
@@ -32,6 +32,18 @@ function styleRelevantChange(before, after) {
     return true;
   }
   return false;
+}
+
+/** Whether a press or a key may focus `element`, as a browser's: a field, a button or link, or anything with a
+ * `tabIndex`, when it is not disabled. */
+const focusable = (element) =>
+  !element.props.disabled && (/^(button|input|select|textarea)$/.test(element.tagName) || (element.tagName === "a" && element.props.href != null) || element.props.tabIndex != null);
+
+/** `element` holding the nodes its `dangerouslySetInnerHTML` copies, when that is the shim's own markup (an element's
+ * `outerHTML`, `dom.mjs`); other HTML is not drawn. */
+function withMarkup(element, props) {
+  for (const node of fromMarkup(props.dangerouslySetInnerHTML?.__html, element.ownerDocument) ?? []) element.appendChild(node);
+  return element;
 }
 
 const hostConfig = {
@@ -59,7 +71,7 @@ const hostConfig = {
   prepareForCommit: (container) => { container.ownerDocument?.perch?.enter?.(); return null; },
   resetAfterCommit: (container) => container.ownerDocument?.afterCommit?.(),
   preparePortalMount: () => {},
-  createInstance: (type, props, root) => new HostElement(type, props, root.ownerDocument),
+  createInstance: (type, props, root) => withMarkup(new HostElement(type, props, root.ownerDocument), props),
   createTextInstance: (text, root) => new HostText(text),
   appendInitialChild: (parent, child) => { parent.appendChild(child); },
   // `autoFocus` focuses the element once it is in the tree, as React DOM does.
@@ -74,6 +86,12 @@ const hostConfig = {
   clearContainer: (container) => { for (const child of [...container.childNodes]) container.removeChild(child); },
   commitUpdate: (instance, type, oldProps, newProps) => {
     instance.props = newProps;
+    // A property the source sets again replaces what was written to `element.style`, as React DOM's write does.
+    if (instance.inline) for (const key of Object.keys(instance.inline)) if (oldProps.style?.[key] !== newProps.style?.[key]) delete instance.inline[key];
+    if (oldProps.dangerouslySetInnerHTML?.__html !== newProps.dangerouslySetInnerHTML?.__html) {
+      for (const child of [...instance.childNodes]) instance.removeChild(child);
+      withMarkup(instance, newProps);
+    }
     if (styleRelevantChange(oldProps, newProps)) instance.touch();
   },
   commitTextUpdate: (text, oldText, newText) => { text.data = String(newText); },
@@ -310,6 +328,21 @@ export function mount(perch, Component, options = {}) {
         document.focus(node);
         handle.dispatch(node, "focus");
       });
+      render();
+    },
+    /** A press at node `id` that nothing prevented: the browser's default focuses the element pressed. Only an element
+     * that listens for keys (`onKeyDown`) is focused, so a press elsewhere leaves the keyboard where it was; the focus
+     * is not `:focus-visible`, as after a pointer press in a browser. */
+    // ponytail: a browser focuses every focusable element pressed; here only one with its own key handler, so a
+    // screen's ordinary buttons do not take the keyboard from a terminal.
+    pressFocus(id) {
+      const pressed = typeof id === "string" ? byId(id) : id;
+      let node = pressed;
+      while (node && !(node instanceof HostElement && typeof node.props.onKeyDown === "function" && focusable(node))) node = node.parentNode;
+      if (!node || node === document.activeElement) return;
+      handle.focus(node.id);
+      node.state.pointerFocus = true;
+      node.touch();
       render();
     },
     /** Runs effects React has scheduled (the engine calls it after a frame). */

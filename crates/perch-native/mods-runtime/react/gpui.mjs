@@ -156,8 +156,14 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
     }
   }
 
-  // A press on a text field puts the keyboard in it, as a browser does.
-  if (node.kind === "input" && !node.disabled) el = el.on_mouse_down("left", (_event, cx) => { handle.focus(node.id); cx.notify(); });
+  // A press on a text field puts the keyboard in it, as a browser does, and keeps its box (a list anchored to it).
+  if (node.kind === "input" && !node.disabled) {
+    el = el.on_mouse_down("left", (event, cx) => {
+      if (event.bounds) handle.setBounds(node.id, event.bounds);
+      handle.focus(node.id);
+      cx.notify();
+    });
+  }
   // A click on a check box or radio button ticks it, as a browser does, and so does a click on the label around one.
   const box = node.kind === "input" ? node : node.meta?.tag === "label" ? tickBox(node) : null;
   if (box && !box.disabled && /^(checkbox|radio)$/.test(box.input_type)) el = el.on_click((_event, cx) => { cx.stop_propagation?.(); handle.toggle(box.id); cx.notify(); });
@@ -171,7 +177,7 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
       const target = pressTarget(handle, node.id, event);
       handle.pressed = null;
       handle.dispatch(target, "pointerdown", { ...at, pointerType: "mouse" });
-      handle.dispatch(target, "mousedown", at);
+      if (handle.dispatch(target, "mousedown", at)) handle.pressFocus?.(target);
       cx.notify();
     });
     el = el.on_mouse_down("right", (event, cx) => {
@@ -268,8 +274,9 @@ function halfAlpha(color) {
   return `${hex.slice(0, 7)}${Math.round(alpha / 2).toString(16).padStart(2, "0")}`;
 }
 
-/** Text with no place a line may break: one word of ASCII letters, digits and punctuation other than a hyphen. */
-const UNBREAKABLE = /^[!-,.-~]+$/;
+/** Text with no place a line may break: one word of ASCII letters, digits and punctuation other than a hyphen, or a
+ * single character (a mark such as ✓). */
+const UNBREAKABLE = /^(?:[!-,.-~]+|\S)$/u;
 
 /** The first check box or radio button under a label. */
 const tickBox = (node) => {
