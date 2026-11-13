@@ -1,0 +1,15 @@
+{
+  "props": {
+    "scope": "workspace",
+    "id": "w-perch-sidebar",
+    "name": "sidebar-port",
+    "loaded": {
+      "scope": "workspace",
+      "id": "w-perch-sidebar",
+      "text": "Answer in short sentences.\nRun cargo test -p perch-core before saying a change is done.\nNever push; commit each verified slice locally.",
+      "folders": [],
+      "revision": 3,
+      "maxChars": 16000
+    }
+  }
+}

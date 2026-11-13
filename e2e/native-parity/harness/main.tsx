@@ -48,6 +48,8 @@ interface Screen {
   props?: (fixed: Json) => Json;
   /** A selector that matches once the screen has what its host answered (a listing), waited for before the first step so a step does not act on a screen still loading. */
   listed?: (props: Json) => string | null;
+  /** The time the screen sees as now (a screen that writes "5m ago" would otherwise change from run to run). */
+  clock?: number;
   /** What the screen worked out for itself that only its drawing shows (read from the page once it has settled), added to `sdk`. */
   after?: () => Json;
   /** Data hooks of the screen, called beside it so the derived shapes can be written to the reference output. */
@@ -232,6 +234,34 @@ const SCREENS: Record<string, Screen> = {
     storage: (view) => (view.lastPath ? { "perch.dirBrowser.lastPath.local": String(view.lastPath) } : {}),
     Probe: PropsProbe,
   },
+  instructions: {
+    // The core answers `load` and `save`: the fixture's `loaded` and `saved` are those answers (null: no answer); `loading` never answers.
+    load: () => import("../../../packages/web/src/stock-ui/instructions/main"),
+    mount: "stage",
+    listed: (props) => (props.loading || !props.loaded ? null : '[data-testid="instructions-text"]:not(:disabled)'),
+    props: ({ loaded, saved, loading, ...fixed }) => ({
+      ...fixed, onClose: noop,
+      load: () => (loading ? new Promise(() => {}) : Promise.resolve(loaded ?? null)),
+      save: () => Promise.resolve(saved ?? null),
+    }),
+    Probe: PropsProbe,
+  },
+  memory: {
+    clock: 1_800_000_000_000,
+    // The core answers `list`, `get`, `save` and `remove` with the fixture's `files` (the index, as `MemoryState`) and `texts` (a file's text by name);
+    // `saved` and `removed` are what a write answers, `loading` never answers the list.
+    load: () => import("../../../packages/web/src/stock-ui/memory/main"),
+    mount: "stage",
+    props: ({ index, texts, saved, removed, loading, noToggle, ...fixed }) => ({
+      ...fixed, onClose: noop,
+      list: () => (loading ? new Promise(() => {}) : Promise.resolve(index ?? null)),
+      get: (file: string) => Promise.resolve((texts as Record<string, { entry: unknown; text: string }>)?.[file] ? { file: (texts as Record<string, unknown>)[file] } : { error: "That file is gone." }),
+      save: () => Promise.resolve(saved ?? null),
+      remove: () => Promise.resolve(removed ?? null),
+      ...(noToggle ? {} : { setEnabled: () => Promise.resolve(index ?? null) }),
+    }),
+    Probe: PropsProbe,
+  },
   "pane-menu": {
     load: () => import("../../../packages/web/src/stock-ui/pane-menu/main"),
     mount: "stage",
@@ -314,6 +344,7 @@ useBrowserPages.setState({ pages: browserPages ?? {} });
 
 // A state's `null` unsets a prop its fixture sets (an absent prop is not the same as a null one to a component).
 const props = Object.fromEntries(Object.entries({ ...(fixture.props ?? {}), ...(state.props ?? {}) }).filter(([, value]) => value !== null));
+if (screen.clock !== undefined) { const now = screen.clock; Date.now = () => now; }
 const { default: Component } = await screen.load(state.via);
 const { Probe } = screen;
 const { width, height } = state.size ?? fixture.size;

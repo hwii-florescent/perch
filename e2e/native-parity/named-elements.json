@@ -2103,6 +2103,85 @@
           "text": true
         }
       ]
+    },
+    "instructions": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 4,
+      "elements": [
+        {
+          "name": "instructions-scrim",
+          "selector": "body > div.fixed.inset-0",
+          "description": "The dimming layer over the whole window; a press on it closes the dialog."
+        },
+        {
+          "name": "instructions-panel",
+          "selector": "[data-testid=\"instructions-dialog\"]",
+          "description": "The dialog panel: 30 rem wide at most, the panel fill, soft corners, a shadow, 16 px of padding, 9.6 px between its rows."
+        },
+        {
+          "name": "instructions-title",
+          "selector": "[data-testid=\"instructions-dialog\"] > h2",
+          "description": "'Instructions for <name>'.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-intro",
+          "selector": "[data-testid=\"instructions-dialog\"] > p",
+          "description": "What the dialog is for: 0.75rem, muted.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-label",
+          "selector": "[data-testid=\"instructions-dialog\"] > label > span:first-child",
+          "description": "The caption of a field: 'Instructions' with the count, 'Reference files and folders' with its hint.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-count",
+          "selector": "[data-testid=\"instructions-count\"]",
+          "description": "The length of the text over the cap.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-text",
+          "selector": "[data-testid=\"instructions-text\"]",
+          "description": "The instructions field (9 rows, the darker fill, 0.5rem 0.4rem padding); `text` is what is in it, 40% opacity while disabled.",
+          "text": true
+        },
+        {
+          "name": "instructions-folders",
+          "selector": "[data-testid=\"instructions-folders\"]",
+          "description": "The reference paths, one per line, in the monospace font (4 rows); `text` is what is in it.",
+          "text": true
+        },
+        {
+          "name": "instructions-error",
+          "selector": "[data-testid=\"instructions-error\"]",
+          "description": "The red line under the fields.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-cancel",
+          "selector": "[data-testid=\"instructions-dialog\"] > div.flex.justify-end > button:first-child",
+          "description": "Cancel.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-save",
+          "selector": "[data-testid=\"instructions-save\"]",
+          "description": "Save, the primary button; 40% opacity while disabled.",
+          "text": true,
+          "textSized": true
+        }
+      ]
     }
   }
 }

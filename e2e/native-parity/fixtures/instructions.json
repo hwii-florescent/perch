@@ -1,0 +1,161 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "instructions",
+  "note": "Floating screen: it is drawn through a portal into the page body and placed against the window, so the reference is the whole default 1280x800 window on the app's backdrop and every box is in window coordinates. The dialog that edits a Project's or Workspace's Instructions (stock-ui/instructions), opened from a project's or workspace's menu in the sidebar. Props are `InstructionsScreenProps`: `scope` (project or workspace), `id`, `name`, and `load()` and `save(text, folders)` which the core answers. The harness answers them from the fixture: `loaded` is what `load` resolves (null: the core did not answer), `saved` what `save` resolves (an `error` is the core's refusal; null: no answer), and `loading` makes `load` never answer. The dialog shell is the stock `Dialog` shell (a dimmed backdrop and one panel, 30 rem wide at most 92% of the window, 16 px of padding, the title, then the form; the `dialog` screen), which the screen draws through @perch/sdk's `Dialog`. The two fields are text areas of 9 and 4 rows; the second is one absolute path per line, in the monospace font. The counter next to Instructions is the text's length over the core's cap. Save closes the dialog on success (a no-op here), so no state shows a saved dialog; Cancel closes it. Each output's sdk.props has the props the screen was given, without the core's answers (the fixture's `loaded` and `saved`).",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1280,
+    "height": 800
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "props": {
+    "scope": "project",
+    "id": "p-perch",
+    "name": "perch",
+    "loaded": {
+      "scope": "project",
+      "id": "p-perch",
+      "text": "",
+      "folders": [],
+      "revision": 3,
+      "maxChars": 16000
+    }
+  },
+  "states": [
+    {
+      "id": "empty",
+      "title": "A project with no Instructions yet: 'Instructions for perch', the explanation, an empty 9-row field with the count 0 / 16000, an empty folders field, Cancel and Save (enabled)",
+      "props": {
+        "loaded": {
+          "scope": "project",
+          "id": "p-perch",
+          "text": "",
+          "folders": [],
+          "revision": 3,
+          "maxChars": 16000
+        }
+      }
+    },
+    {
+      "id": "filled",
+      "title": "Instructions and two reference paths saved: the text in the field, the count of its characters, the paths one per line",
+      "props": {
+        "loaded": {
+          "scope": "project",
+          "id": "p-perch",
+          "text": "Answer in short sentences.\nRun cargo test -p perch-core before saying a change is done.\nNever push; commit each verified slice locally.",
+          "folders": [
+            "/Users/dev/code/perch/docs",
+            "/Users/dev/notes/perch-decisions.md"
+          ],
+          "revision": 3,
+          "maxChars": 16000
+        }
+      }
+    },
+    {
+      "id": "loading",
+      "title": "The core has not answered yet: both fields disabled (40%) and empty, Save disabled",
+      "props": {
+        "loading": true
+      }
+    },
+    {
+      "id": "unavailable",
+      "title": "The core cannot store Instructions (it did not answer): the fields stay disabled and the red line says so",
+      "props": {
+        "loaded": null
+      }
+    },
+    {
+      "id": "too-long",
+      "title": "The text is longer than the core's cap (200 here): the count reads past it and Save is disabled (40%)",
+      "props": {
+        "loaded": {
+          "scope": "project",
+          "id": "p-perch",
+          "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx and some more words after it so it wraps.",
+          "folders": [],
+          "revision": 3,
+          "maxChars": 200
+        }
+      }
+    },
+    {
+      "id": "save-refused",
+      "title": "Save pressed and the core refuses a reference that is not an absolute path: the red line under the fields, the dialog stays open",
+      "props": {
+        "loaded": {
+          "scope": "project",
+          "id": "p-perch",
+          "text": "Answer in short sentences.\nRun cargo test -p perch-core before saying a change is done.\nNever push; commit each verified slice locally.",
+          "folders": [
+            "docs/not-absolute"
+          ],
+          "revision": 3,
+          "maxChars": 16000
+        },
+        "saved": {
+          "scope": "project",
+          "id": "p-perch",
+          "text": "Answer in short sentences.\nRun cargo test -p perch-core before saying a change is done.\nNever push; commit each verified slice locally.",
+          "folders": [
+            "docs/not-absolute"
+          ],
+          "revision": 3,
+          "maxChars": 16000,
+          "error": "Reference folders must be absolute paths: docs/not-absolute"
+        }
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"instructions-save\"]"
+        }
+      ]
+    },
+    {
+      "id": "save-no-answer",
+      "title": "Save pressed and the core does not answer: 'No answer from Perch. Try again.'",
+      "props": {
+        "loaded": {
+          "scope": "project",
+          "id": "p-perch",
+          "text": "Answer in short sentences.\nRun cargo test -p perch-core before saying a change is done.\nNever push; commit each verified slice locally.",
+          "folders": [
+            "/Users/dev/code/perch/docs",
+            "/Users/dev/notes/perch-decisions.md"
+          ],
+          "revision": 3,
+          "maxChars": 16000
+        },
+        "saved": null
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"instructions-save\"]"
+        }
+      ]
+    },
+    {
+      "id": "workspace",
+      "title": "A workspace's Instructions: 'Instructions for sidebar-port' and 'New sessions in this workspace start with these.'",
+      "props": {
+        "scope": "workspace",
+        "id": "w-perch-sidebar",
+        "name": "sidebar-port",
+        "loaded": {
+          "scope": "workspace",
+          "id": "w-perch-sidebar",
+          "text": "Answer in short sentences.\nRun cargo test -p perch-core before saying a change is done.\nNever push; commit each verified slice locally.",
+          "folders": [],
+          "revision": 3,
+          "maxChars": 16000
+        }
+      }
+    }
+  ]
+}

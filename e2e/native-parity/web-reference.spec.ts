@@ -9,7 +9,7 @@ import * as path from "node:path";
 const here = __dirname;
 const OUT = path.resolve(here, "../artifacts-native-parity/web");
 /** Every screen with a reference; `PARITY_SCREENS=tabs,status` renders only those while one is being worked on. */
-const SCREENS = (process.env.PARITY_SCREENS ?? "sidebar,tabs,status,navigator,pane-header,pane-menu,confirm,dialog,toast,new-session,tab-menu,select,keybind-help,launcher,session-menu,tab-drag,start,folder-browser").split(",");
+const SCREENS = (process.env.PARITY_SCREENS ?? "sidebar,tabs,status,navigator,pane-header,pane-menu,confirm,dialog,toast,new-session,tab-menu,select,keybind-help,launcher,session-menu,tab-drag,start,folder-browser,instructions").split(",");
 const THEMES = ["light", "dark"] as const;
 /** The semantic colour tokens (`--<name>` on `<html>`): `themes.ts` `TOKEN_CSS_VARS`, plus the two derived ones. */
 const TOKENS = ["accent", "panel-bg", "surface-0", "surface-1", "surface-dim", "overlay-0", "overlay-1", "text", "subtext-0", "mauve", "green", "yellow", "red", "blue", "teal", "peach", "backdrop", "card-bg"];
@@ -168,7 +168,8 @@ function measure({ rootSelector, scopeSelector, overflowSelectors, defs, tokens 
     } else {
       box = el.getBoundingClientRect();
       // A field's words are its value, not its (empty) content.
-      if (def.text || def.textSized) text = collapse(el instanceof HTMLInputElement ? el.value : el.textContent ?? "");
+      // A multi-line field keeps its line breaks (one folder per line).
+      if (def.text || def.textSized) text = el instanceof HTMLTextAreaElement ? el.value : collapse(el instanceof HTMLInputElement ? el.value : el.textContent ?? "");
     }
     const cs = getComputedStyle(el);
     const colors: Record<string, { value: string; token: string | null }> = {};
@@ -183,7 +184,7 @@ function measure({ rootSelector, scopeSelector, overflowSelectors, defs, tokens 
       textSized: !!def.textSized,
       ...(opacityOf(el) < 1 ? { opacity: opacityOf(el) } : {}),
       ...(text !== undefined ? { text } : {}),
-      ...(el instanceof HTMLInputElement && el.placeholder ? { placeholder: el.placeholder } : {}),
+      ...((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && el.placeholder ? { placeholder: el.placeholder } : {}),
       colors,
       ...(withText ? { font: { family: cs.fontFamily, size: parseFloat(cs.fontSize), weight: parseInt(cs.fontWeight, 10), lineHeight: round(lineHeight.value), lineHeightNormal: lineHeight.normal } } : {}),
     };
