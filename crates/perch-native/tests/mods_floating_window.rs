@@ -787,6 +787,32 @@ fn toast(rig: &mut Rig) {
     assert_eq!(rig.shown().as_deref(), Some("alpha"), "its action ran");
     assert!(rig.ws(|ws, _, _| ws.notifications().is_empty()));
 
+    // Any command a mod can run is an action: Go to a session, and Choose a theme, which the
+    // core keeps.
+    let notify = |rig: &mut Rig, command: &str, args: Value| {
+        rig.ws(|ws, _, cx| {
+            let notice = Notice {
+                level: None,
+                icon: None,
+                action: Some((command.to_string(), Some(args))),
+                timeout: None,
+            };
+            ws.notify_for_mod("deploy", "Deployed".into(), None, notice, cx)
+        });
+        rig.draw();
+        rig.click("toast-open");
+        assert!(rig.ws(|ws, _, _| ws.notifications().is_empty()));
+        assert_eq!(rig.ws(|ws, _, _| ws.notice().map(str::to_string)), None);
+    };
+    notify(rig, "session.open", json!({"id": "bravo"}));
+    assert_eq!(rig.shown().as_deref(), Some("bravo"), "the session opened");
+    rig.asked();
+    notify(rig, "app.theme", json!({"name": "catppuccin-latte"}));
+    let saved = rig.asked().into_iter().any(
+        |c| matches!(c, Command::UpdateSettings(v) if v == json!({"theme": "catppuccin-latte"})),
+    );
+    assert!(saved, "the theme is the core's to keep");
+
     // Left alone, a card goes by itself (6 s for a finished session).
     rig.ws(|ws, _, cx| ws.toast(heard(Alert::Done, "alpha", "alpha", None), cx));
     rig.draw();

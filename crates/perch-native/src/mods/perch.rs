@@ -20,7 +20,6 @@
 use super::theme::{self, Theme};
 use super::ModHost;
 use crate::actions::ACTIONS;
-use crate::client::Command;
 use crate::keymap::{all_shortcuts, Keymap, Scope, TYPED};
 use crate::sidebar::navigation::{self, AgentList, Store, View};
 use crate::sidebar::{Model, KNOWN_AGENTS, LOCAL, MANIFEST_CAPABILITY};
@@ -594,36 +593,6 @@ impl Perch {
             (attached.handle, attached.workspace.clone())
         };
         let workspace = workspace.upgrade().ok_or("The window is gone.")?;
-        if id == "app.theme" {
-            // The core keeps the choice, for every screen.
-            let name = args.and_then(|a| a.get("name")).cloned();
-            if let Some(name) = name {
-                let sidebar = workspace.read(cx).sidebar().clone();
-                sidebar
-                    .read(cx)
-                    .send(Command::UpdateSettings(json!({ "theme": name })));
-            }
-            return Ok(());
-        }
-        if id == "session.open" {
-            let session = args
-                .and_then(|a| a.get("id"))
-                .and_then(Value::as_str)
-                .ok_or("This command needs {id}.")?
-                .to_string();
-            let found = self
-                .store()
-                .sessions
-                .iter()
-                .find(|s| s.id == session)
-                .map(|s| (s.host_id.clone(), s.cli_provider_id.clone()))
-                .ok_or_else(|| format!("No session {session}."))?;
-            let sidebar = workspace.read(cx).sidebar().clone();
-            sidebar.update(cx, |sidebar, cx| {
-                sidebar.open(found.0, session, found.1, cx)
-            });
-            return Ok(());
-        }
         handle
             .update(cx, |_, window, cx| {
                 workspace.update(cx, |ws, cx| ws.run_command(id, args, window, cx))

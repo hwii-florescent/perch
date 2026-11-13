@@ -1285,6 +1285,21 @@ impl Workspace {
                     return Err("Nothing is open to close.".into());
                 }
             }
+            "session.open" => {
+                let session = text("id").ok_or("This command needs {id}.")?.to_string();
+                let (host, provider) = self
+                    .sidebar
+                    .read(cx)
+                    .model()
+                    .store
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == session)
+                    .map(|s| (s.host_id.clone(), s.cli_provider_id.clone()))
+                    .ok_or_else(|| format!("No session {session}."))?;
+                self.sidebar
+                    .update(cx, |sidebar, cx| sidebar.open(host, session, provider, cx));
+            }
             "notification.open" | "notification.dismiss" => {
                 let id = text("id").ok_or("This command needs {id}.")?;
                 let at = self
@@ -1479,7 +1494,14 @@ impl Workspace {
                     Some(result)
                 });
                 match own {
-                    Some(result) => result?,
+                    Some(result) => {
+                        result?;
+                        // The core keeps the theme, for every screen.
+                        if name == "app.theme" {
+                            let theme = json!({ "theme": text("name") });
+                            self.sidebar.read(cx).send(Command::UpdateSettings(theme));
+                        }
+                    }
                     None => {
                         let handled = self
                             .sidebar
