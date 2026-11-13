@@ -575,6 +575,8 @@ pub(crate) fn reload(
             .as_ref()
             .is_none_or(|replacement| !Rc::ptr_eq(&previous, replacement))
     {
+        // PERCH: the replaced build gets its final call before it is released.
+        runtime.close_replaced(view, window, cx);
         runtime.release_application_generation(&previous, cx);
     }
 

@@ -290,6 +290,9 @@ it from its upstreams. Each copy keeps its upstream licence file and herdr's
     `vendor/gpui-kit/crates/shell/src/engine/quickjs/entity_api.rs` and
     `vendor/gpui-kit/crates/shell/src/typings.rs`: a scroll handle's `item_bounds`, where a
     child was last laid out, for a script that anchors something to it.
+  - `vendor/gpui-kit/crates/shell/src/watch.rs` and
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/lifecycle.rs`: a build that a reload
+    replaces gets its final call (`View.close`) before it is released.
 - `vendor/quickjs-jit-runtime/`: the `jit` crate of
   [longbridge/quickjs-jit](https://github.com/longbridge/quickjs-jit) at `96593cd` with
   herdr's fix for longbridge/quickjs-jit#38, MIT (Copyright (c) 2020 Mees Delzenne,

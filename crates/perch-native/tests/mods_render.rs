@@ -18,12 +18,15 @@ const WIDTH: f32 = 400.;
 const HEIGHT: f32 = 240.;
 
 /// A mod whose one named box has every property the probe reads. `{bg}`, `{width}` and `{text}`
-/// vary between versions.
+/// vary between versions. Each version's final call (`close`) records its text, and the box names
+/// the versions closed so far (`closed:Hello,...`).
 const BOX: &str = r##"
 import { View, div } from "gpui-kit";
 export default class extends View {
+  close() { globalThis.closed = [...(globalThis.closed ?? []), "{text}"]; }
   render() {
     return div().id("root").size_full().bg("#202020").p(10).flex().flex_col().justify_end()
+      .child(div().id(`closed:${(globalThis.closed ?? []).join(",")}`).w(1).h(1))
       .child(div().id("box").w({width}).h(40).bg("{bg}").border(2).border_color("#00ff00")
         .rounded(6).font_family("Menlo").text_size(14).font_weight(700).line_height("20px")
         .text_color("#ffffff").child("{text}"));
@@ -149,6 +152,14 @@ fn until(
     panic!("timed out waiting for {what}");
 }
 
+/// The versions of the probe mod that got their final call, as the box last named them.
+fn closed() -> String {
+    probe::records()
+        .into_keys()
+        .find_map(|name| name.strip_prefix("closed:").map(str::to_string))
+        .expect("the closed list is drawn")
+}
+
 fn write(dir: &Path, text: &str) {
     std::fs::write(dir.join("main.js"), text).unwrap();
 }
@@ -249,6 +260,11 @@ fn main() {
         cx.update(|cx| view.read(cx).source().map(Path::to_path_buf)),
         Some(dir.clone())
     );
+    assert_eq!(
+        closed(),
+        "Hello",
+        "the version the reload replaced got its final call"
+    );
 
     // A version that throws while loading keeps the last good one drawn and reports why.
     write(&dir, "throw new Error(\"broken at load\");\n");
@@ -259,6 +275,7 @@ fn main() {
     assert!(error.contains("broken at load"), "{error}");
     assert_eq!(kept, second, "the last working version is still laid out");
     assert_eq!(frame.at(10. + 190., HEIGHT - 50. + 30.), 0x0000ff);
+    assert_eq!(closed(), "Hello", "and it was not closed");
 
     // One that throws in render() keeps the last good render, under the shell's banner.
     write(
@@ -287,6 +304,11 @@ export default class extends View {
     until(&mut cx, window, "the fix", |view, cx, record| {
         view.error(cx).is_none() && record.bounds.size.width == px(120.)
     });
+    assert_eq!(
+        closed(),
+        "Hello,Hello again",
+        "the working version went when the one throwing in render() replaced it"
+    );
 
     // A user folder made while a stock mod is shown takes its place, and removing it gives the
     // stock one back.

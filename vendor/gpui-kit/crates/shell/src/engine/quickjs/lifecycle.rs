@@ -77,6 +77,40 @@ impl ShellRuntime {
         Some(Closing { root: root.clone(), view, policy, application, promise: promise.ok().flatten() })
     }
 
+    /// PERCH: the final call (`View.close`) of the build a reload replaces, run at once and
+    /// before the reload releases it. A host that reloads a copy in place has no root to close,
+    /// so without this the old build never learns it went. A promise it returns is not awaited:
+    /// the old build's tasks end with its release.
+    pub(crate) fn close_replaced(
+        self: &Rc<Self>, view: &Entity<ScriptView>, window: &mut Window, cx: &mut App,
+    ) {
+        let object = view.read(cx).object().clone();
+        let policy = view.read(cx).policy();
+        let Some(application) = object.application_generation() else { return };
+        if application.close_deadline.get().is_some() || !application.is_active() {
+            return;
+        }
+        let (_scope, _) = scope::enter_with_application(
+            self, window, cx, ScopePhase::Task, Some(view.clone()),
+            policy, Some(application.clone()),
+        );
+        let called = self.with_js(|ctx| {
+            let instance = object.restore(ctx)?;
+            let close: Value = instance.get("close")?;
+            let Some(close) = close.into_function() else { return Ok(()) };
+            let binding = ContextBinding::Task(Rc::new(TaskBinding {
+                owner: Some(view.downgrade()),
+                application: Some(Rc::downgrade(&application)),
+            }));
+            let _: Value = close.call((This(instance), context_object(ctx, binding)?))?;
+            Ok(())
+        });
+        if let Err(error) = called {
+            tracing::warn!("error in View.close: {error}");
+        }
+        scheduler::drain_runtime_jobs(self, window, cx);
+    }
+
     /// Gives this copy its optional final call, once. Detach or await the task.
     /// The copy is retained until its returned promise settles or time expires.
     pub fn close(

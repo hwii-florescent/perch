@@ -42,7 +42,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 /// How often a shown mod's files are looked at. A save shows within this.
 pub const POLL: Duration = Duration::from_millis(250);
@@ -556,10 +556,24 @@ impl ModView {
         let root = self.host.0.runtime.try_load(&info.dir, window, cx);
         gpui_shell::policy::set_default(Policy::new());
         let root = root?;
-        self.shown = Some(Shown {
+        let replaced = self.shown.replace(Shown {
             dir: info.dir.clone(),
             root,
         });
+        // The copy it replaced (a person's folder taking over from the stock one, or giving it
+        // back) gets its final call, as one that leaves the window does (`screens::close_copy`).
+        if let Some(old) = replaced {
+            self.host
+                .0
+                .runtime
+                .close(
+                    &old.root,
+                    Instant::now() + screens::CLOSE_DEADLINE,
+                    window,
+                    cx,
+                )
+                .detach();
+        }
         Ok(())
     }
 }

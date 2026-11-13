@@ -208,7 +208,7 @@ pub struct Screens {
 }
 
 /// How long a copy that leaves the window has for its final call (`View.close`).
-const CLOSE_DEADLINE: Duration = Duration::from_millis(250);
+pub(super) const CLOSE_DEADLINE: Duration = Duration::from_millis(250);
 
 /// Gives a copy that left the window its final call and lets the engine release it, as gpui-kit's
 /// own hosts do (`ShellRuntime::close`). Dropping the view alone releases it without that call, so

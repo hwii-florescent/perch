@@ -8,12 +8,11 @@
 // `localStorage`, `setTimeout`) are those of the copy the engine last called into (`copy.enter()`, on every entry:
 // `init`, `render`, an event, a timer, the answer to a request it made, React working on its tree). When a copy leaves
 // the window (`copy.close()`, the view's final call) its tree is unmounted, so its effects clean up, and its listeners
-// and timers go. A copy whose build is reloaded gets no final call from the engine (`ShellRuntime::reload_now`
-// releases it): it stays listed, its tree mounted, until the window closes.
+// and timers go; a build replaced by a save, or by a person's folder taking over from the stock one, gets the same
+// final call.
 // ponytail: the engine ends a timer with the screen whose call set it (`scope::current_application_generation` in
 // `scheduler.rs`), whatever `cx` set it, so a timer set for one copy while another's call runs (React's scheduler
-// working for a tree that call touched) ends if that screen closes first; the host closing a reloaded root
-// (`ShellRuntime::close` in `ModView::check`) would end a reloaded copy as a screen that leaves the window.
+// working for a tree that call touched) ends if that screen closes first.
 //
 // Data: the SDK's hooks read snapshots (`navigation(options)`, `hosts()`) that stay the same object until the data
 // changes. `refresh()` (each `render()`, which the engine runs again exactly when something the mod read moved)

@@ -47,6 +47,19 @@ export default class extends View {
 const WIDTH: f32 = 1100.;
 const HEIGHT: f32 = 600.;
 
+/// Copies folder `from` to `to`, as a person copies a stock mod to edit it.
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap().flatten() {
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
 /// A session's notification, as the window hears one.
 fn heard(alert: Alert, session_id: &str) -> Heard {
     Heard {
@@ -257,7 +270,7 @@ fn main() {
         })
         .unwrap();
     let workspace = window.entity(&cx).unwrap();
-    cx.update(|cx| mods::start_in(user, &workspace, window.into(), cx));
+    cx.update(|cx| mods::start_in(user.clone(), &workspace, window.into(), cx));
     let mut rig = Rig { cx, window };
 
     // Nothing open: no strip; the status line is there.
@@ -569,6 +582,34 @@ fn main() {
         palette(&mut rig);
     }
     assert_eq!(held(&mut rig), before, "nothing left behind");
+
+    // A person's copy of a screen takes over from the stock one and reloads on each save, and
+    // removing it gives the stock one back: each time the copy it replaced goes, so one status
+    // bar is one live copy.
+    let status_copies = |rig: &mut Rig| {
+        let held = held(rig);
+        held.iter()
+            .find_map(|h| h.strip_prefix("copies:status=").map(str::to_string))
+            .unwrap_or_default()
+    };
+    let mine = user.join("status");
+    copy_dir(&user.join(".stock/status"), &mine);
+    rig.draw();
+    assert_eq!(status_copies(&mut rig), "1", "the person's copy took over");
+    let main = std::fs::read_to_string(mine.join("main.js")).unwrap();
+    for edit in 1..=2 {
+        std::fs::write(mine.join("main.js"), format!("{main}\n// edit {edit}\n")).unwrap();
+        rig.draw();
+        assert!(
+            rig.record("status-bar").is_some(),
+            "the edited bar is drawn"
+        );
+        assert_eq!(status_copies(&mut rig), "1", "save {edit} left one copy");
+    }
+    std::fs::remove_dir_all(&mine).unwrap();
+    rig.draw();
+    assert!(rig.record("status-bar").is_some(), "the stock bar is back");
+    assert_eq!(status_copies(&mut rig), "1", "the stock one is back alone");
     // Each copy's timers are its own: with every screen opened after the status bar closed again,
     // the bar's 3-minute usage loop still takes its turns.
     let usage_asks = |asked: &mut futures::channel::mpsc::UnboundedReceiver<Command>| {
