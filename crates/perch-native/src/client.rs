@@ -797,6 +797,34 @@ pub enum Command {
         name: Option<String>,
         reply: Answer,
     },
+    /// End a session and delete it (`session.delete`). Its tab goes when the core says it is
+    /// deleted, not on this request.
+    DeleteSession { session_id: String },
+    /// Replace the core's order of projects or sessions on a computer (`workspace.order.set`);
+    /// a list left out is untouched.
+    SetOrder {
+        host_id: String,
+        projects: Option<Vec<String>>,
+        sessions: Option<Vec<String>>,
+    },
+    /// Rename a project (`project.rename`).
+    RenameProject { project_id: String, name: String },
+    /// Delete a project and end its sessions; the folder stays (`project.remove`).
+    RemoveProject { project_id: String },
+    /// Add a folder as a project on a computer (`project.create`).
+    CreateProject {
+        host_id: String,
+        path: String,
+        name: Option<String>,
+    },
+    /// Rename a workspace (`workspace.rename`).
+    RenameWorkspace { workspace_id: String, name: String },
+    /// Hide a linked worktree from the sidebar or show it again (`workspace.visibility`).
+    HideWorkspace { workspace_id: String, hidden: bool },
+    /// Wake a sleeping workspace (`workspace.restore`).
+    RestoreWorkspace { workspace_id: String },
+    /// Ask a computer for its projects and workspaces again (`workspace.snapshot`).
+    RefreshHost(String),
 }
 
 /// Where the answer to one request goes.
@@ -1212,6 +1240,45 @@ async fn live(
                     let id = connection.request_id();
                     connection.send(inbound_mode_frame(&id, &session_id, &mode)).await?;
                 }
+                Some(Command::DeleteSession { session_id }) => {
+                    connection.send(delete_frame(&session_id)).await?;
+                }
+                Some(Command::SetOrder { host_id, projects, sessions }) => {
+                    let id = connection.request_id();
+                    connection.send(order_frame(&id, &host_id, projects, sessions)).await?;
+                }
+                Some(Command::RenameProject { project_id, name }) => {
+                    let id = connection.request_id();
+                    let name = json!({ "name": name });
+                    connection.send(id_frame("project.rename", &id, "projectId", &project_id, name)).await?;
+                }
+                Some(Command::RemoveProject { project_id }) => {
+                    let id = connection.request_id();
+                    connection.send(id_frame("project.remove", &id, "projectId", &project_id, json!({}))).await?;
+                }
+                Some(Command::CreateProject { host_id, path, name }) => {
+                    let id = connection.request_id();
+                    connection.send(create_project_frame(&id, &host_id, &path, name.as_deref())).await?;
+                }
+                Some(Command::RenameWorkspace { workspace_id, name }) => {
+                    let id = connection.request_id();
+                    let name = json!({ "name": name });
+                    connection.send(id_frame("workspace.rename", &id, "workspaceId", &workspace_id, name)).await?;
+                }
+                Some(Command::HideWorkspace { workspace_id, hidden }) => {
+                    let id = connection.request_id();
+                    let hidden = json!({ "hidden": hidden });
+                    connection.send(id_frame("workspace.visibility", &id, "workspaceId", &workspace_id, hidden)).await?;
+                }
+                Some(Command::RestoreWorkspace { workspace_id }) => {
+                    let id = connection.request_id();
+                    connection.send(id_frame("workspace.restore", &id, "workspaceId", &workspace_id, json!({}))).await?;
+                }
+                Some(Command::RefreshHost(host_id)) => {
+                    let ask = Request::Workspaces(host_id);
+                    let id = connection.request(&ask).await?;
+                    state.asked(&ask, &id);
+                }
                 Some(Command::UsageGet { force }) => {
                     connection.send(json!({"type": "usage.get", "force": force})).await?;
                 }
@@ -1224,7 +1291,7 @@ async fn live(
                 Some(Command::AddProject { host_id, path, name, reply }) => {
                     let id = connection.request_id();
                     connection
-                        .send(project_create_frame(&id, &host_id, &path, name.as_deref()))
+                        .send(create_project_frame(&id, &host_id, &path, name.as_deref()))
                         .await?;
                     pending.insert(id, reply);
                 }
@@ -1289,18 +1356,53 @@ fn inbound_mode_frame(request_id: &str, session_id: &str, mode: &str) -> Value {
            "action": "set_mode", "mode": mode})
 }
 
+/// `hostId` is left out for the core's own computer, as the web client does.
+fn order_frame(
+    request_id: &str,
+    host_id: &str,
+    projects: Option<Vec<String>>,
+    sessions: Option<Vec<String>>,
+) -> Value {
+    let mut frame = json!({"type": "workspace.order.set", "requestId": request_id});
+    if host_id != LOCAL {
+        frame["hostId"] = json!(host_id);
+    }
+    if let Some(projects) = projects {
+        frame["projects"] = json!(projects);
+    }
+    if let Some(sessions) = sessions {
+        frame["sessions"] = json!(sessions);
+    }
+    frame
+}
+
+/// A `kind` request about one project or workspace (`key`: `projectId`, `workspaceId`), with the
+/// fields of `extra`.
+fn id_frame(kind: &str, request_id: &str, key: &str, id: &str, extra: Value) -> Value {
+    let mut frame = json!({"type": kind, "requestId": request_id, key: id});
+    if let (Some(frame), Value::Object(extra)) = (frame.as_object_mut(), extra) {
+        frame.extend(extra);
+    }
+    frame
+}
+
+fn create_project_frame(request_id: &str, host_id: &str, path: &str, name: Option<&str>) -> Value {
+    let mut frame = json!({"type": "project.create", "requestId": request_id, "path": path});
+    if host_id != LOCAL {
+        frame["hostId"] = json!(host_id);
+    }
+    if let Some(name) = name {
+        frame["name"] = json!(name);
+    }
+    frame
+}
+
 fn delete_frame(session_id: &str) -> Value {
     json!({"type": "session.delete", "sessionId": session_id})
 }
 
 fn settings_frame(patch: Value) -> Value {
     json!({"type": "settings.update", "patch": patch})
-}
-
-fn project_create_frame(request_id: &str, host_id: &str, path: &str, name: Option<&str>) -> Value {
-    let host = (host_id != LOCAL).then_some(host_id);
-    json!({"type": "project.create", "requestId": request_id, "hostId": host, "path": path,
-           "name": name})
 }
 
 fn create_frame(cwd: Option<&str>, host_id: Option<&str>) -> Value {
@@ -1508,6 +1610,33 @@ mod tests {
             pin_frame("r", "w", true),
             inbound_mode_frame("r", "s", "hold"),
             delete_frame("s"),
+            order_frame("r", LOCAL, Some(vec!["p".into()]), None),
+            order_frame("r", "build-box", None, Some(vec!["s".into(), "t".into()])),
+            create_project_frame("r", LOCAL, "/work", None),
+            create_project_frame("r", "build-box", "/work", Some("Work")),
+            id_frame(
+                "project.rename",
+                "r",
+                "projectId",
+                "p",
+                json!({"name": "n"}),
+            ),
+            id_frame("project.remove", "r", "projectId", "p", json!({})),
+            id_frame(
+                "workspace.rename",
+                "r",
+                "workspaceId",
+                "w",
+                json!({"name": "n"}),
+            ),
+            id_frame(
+                "workspace.visibility",
+                "r",
+                "workspaceId",
+                "w",
+                json!({"hidden": true}),
+            ),
+            id_frame("workspace.restore", "r", "workspaceId", "w", json!({})),
             settings_frame(json!({"terminalScrollback": 5000})),
             settings_frame(json!({"terminalLoginShell": true, "droppedPathDoubleQuotes": false})),
             request_frame("r", &Request::Projects(LOCAL.into())),
@@ -1516,8 +1645,6 @@ mod tests {
             request_frame("r", &Request::Workspaces(LOCAL.into())),
             request_frame("r", &Request::Workspaces("build-box".into())),
             subscribe_frame("s"),
-            project_create_frame("r", LOCAL, "/tmp", None),
-            project_create_frame("r", LOCAL, "/tmp", Some("tmp")),
             acquire_frame("r", "s", "w", "input"),
             acquire_frame("r", "s", "w", "resize"),
             input_frame("t", 1, "echo hi\n"),

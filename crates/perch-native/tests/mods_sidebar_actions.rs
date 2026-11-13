@@ -329,6 +329,114 @@ fn session_menu(rig: &mut Rig) {
     println!("session-menu: ok");
 }
 
+/// The sidebar's actions on what the core keeps: each asks the core, names its target and is
+/// refused for one the core does not have; the ones that end something ask first where the web
+/// does.
+fn sidebar_commands(rig: &mut Rig) {
+    let run = |rig: &mut Rig, name: &str, args: Value| {
+        rig.asked();
+        let result = rig.ws(|ws, window, cx| ws.run_command(name, Some(&args), window, cx));
+        rig.draw();
+        (result, rig.asked())
+    };
+
+    // A session row's Move down puts it after the next one, in the order the core keeps.
+    rig.right_click("session-button:bravo");
+    rig.asked();
+    rig.click("tab-menu-item:workspace-session-move-down-bravo");
+    assert!(rig.open_screens().is_empty());
+    let order = rig.asked().into_iter().find_map(|c| match c {
+        Command::SetOrder {
+            host_id,
+            sessions,
+            projects: None,
+        } => Some((host_id, sessions)),
+        _ => None,
+    });
+    assert_eq!(
+        order,
+        Some((
+            "local".into(),
+            Some(strings(&["alpha", "charlie", "bravo"]))
+        )),
+        "bravo goes after charlie"
+    );
+    let (refused, asked) = run(
+        rig,
+        "session.move",
+        json!({"id": "nope", "target": "alpha", "siblings": []}),
+    );
+    assert!(
+        refused.is_err() && asked.is_empty(),
+        "an unknown session is refused"
+    );
+
+    // Deleting a session asks the core; its tab stays until the core says it is gone.
+    let (result, asked) = run(rig, "session.close", json!({"id": "bravo"}));
+    assert_eq!(result, Ok(()));
+    assert!(matches!(&asked[..], [Command::DeleteSession { session_id }] if session_id == "bravo"));
+    assert!(
+        rig.tabs().0.contains(&"bravo".to_string()),
+        "the tab waits for the core"
+    );
+
+    // Closing a project ends its sessions: only with the answer to the sidebar's question.
+    let (result, asked) = run(rig, "project.close", json!({"id": "p"}));
+    assert!(result.unwrap_err().contains("confirmed"));
+    assert!(asked.is_empty(), "nothing is asked without the answer");
+    let (_, asked) = run(rig, "project.close", json!({"id": "p", "confirmed": true}));
+    assert!(matches!(&asked[..], [Command::RemoveProject { project_id }] if project_id == "p"));
+    let (refused, _) = run(
+        rig,
+        "project.close",
+        json!({"id": "nope", "confirmed": true}),
+    );
+    assert!(refused.is_err());
+
+    let (_, asked) = run(rig, "project.rename", json!({"id": "p", "name": " Play "}));
+    assert!(matches!(&asked[..], [Command::RenameProject { name, .. }] if name == "Play"));
+    let (_, asked) = run(
+        rig,
+        "project.move",
+        json!({"id": "p", "target": "p", "after": true}),
+    );
+    assert!(
+        matches!(&asked[..], [Command::SetOrder { projects: Some(p), .. }] if *p == strings(&["p"]))
+    );
+    let (_, asked) = run(rig, "project.new", json!({"folder": "/play"}));
+    assert!(matches!(&asked[..], [Command::CreateProject { path, .. }] if path == "/play"));
+    let (_, asked) = run(rig, "workspace.rename", json!({"id": "w1", "name": "main"}));
+    assert!(
+        matches!(&asked[..], [Command::RenameWorkspace { workspace_id, name }] if workspace_id == "w1" && name == "main")
+    );
+    let (_, asked) = run(rig, "workspace.hide", json!({"id": "w1", "hidden": false}));
+    assert!(matches!(
+        &asked[..],
+        [Command::HideWorkspace { hidden: false, .. }]
+    ));
+    let (_, asked) = run(rig, "workspace.restore", json!({"id": "w1"}));
+    assert!(matches!(&asked[..], [Command::RestoreWorkspace { .. }]));
+    let (refused, _) = run(rig, "workspace.restore", json!({"id": "nope"}));
+    assert!(refused.is_err());
+    let (_, asked) = run(rig, "host.refresh", json!({"id": "local"}));
+    assert!(matches!(&asked[..], [Command::RefreshHost(h)] if h == "local"));
+
+    // The view's own: a project by position, and a workspace shown with its session last shown.
+    let (result, _) = run(rig, "project.select", json!({"index": 1}));
+    assert_eq!(result, Ok(()));
+    let (result, _) = run(rig, "project.select", json!({"index": 2}));
+    assert_eq!(result, Err("There is no project 2.".into()));
+    rig.ws(|ws, window, cx| {
+        ws.run_command("tab.select", Some(&json!({"id": "alpha"})), window, cx)
+    })
+    .unwrap();
+    let (result, _) = run(rig, "workspace.open", json!({"id": "w1"}));
+    assert_eq!(result, Ok(()));
+    let last = rig.tabs().0.last().cloned();
+    assert_eq!(rig.tabs().2, last, "its last tab is shown");
+    println!("sidebar-commands: ok");
+}
+
 fn main() {
     let scratch: PathBuf =
         std::env::temp_dir().join(format!("perch-sidebar-actions-{}", std::process::id()));
@@ -371,6 +479,7 @@ fn main() {
     rig.cx.update(|cx| perch.flush(cx));
     rig.draw();
     session_menu(&mut rig);
+    sidebar_commands(&mut rig);
 
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())
