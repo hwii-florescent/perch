@@ -33,6 +33,8 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = 
 # The JavaScript mod engine, vendored from herdr-app (see THIRD_PARTY_NOTICES.md).
 gpui-shell = { path = "../../vendor/gpui-kit/crates/shell" }
 gpui-base = { path = "../../vendor/gpui-kit/crates/base" }
+# The version GPUI rasterises SVGs with: an icon's size is read before it is drawn.
+usvg = { version = "0.46", default-features = false }
 
 [dev-dependencies]
 libc = "0.2"
