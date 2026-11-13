@@ -1,0 +1,307 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "start",
+  "note": "The main area while nothing is open in it (stock-ui/start), drawn in the box the app gives the main area below the tab strip: here the 1016x716 canvas of the main card on the card fill. Props are `StartScreenProps` as components/StartScreen.tsx works them out (`kind` picks the page); the logo is the app's perch-logo-texture-medium.webp (80x80, drawn by the harness from the real asset); the actions are no-ops, so clicking Add project or an agent does nothing here. The page is a column at most 24 rem (384 px) wide, centred, on the panel fill, scrolling when the box is too short. The agents on the buttons come from the host's agent manifest list (the host's default first). The `home` page's New session button and the `workspace` page's folder picker open Perch's own menus (the `new-session` and `select` screens), reached with `steps`; their placement is the anchor's, not this screen's. Each output's sdk.props is the props and sdk.agentChoices what @perch/sdk `useAgentChoices` returned for the host.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1016,
+    "height": 716
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {
+    "serverInfo": {
+      "type": "server.info",
+      "hostname": "studio",
+      "isSsh": false,
+      "platform": "macOS",
+      "capabilities": [
+        "workspace.snapshot",
+        "agent.manifest.list"
+      ]
+    },
+    "agentManifestsByHost": {
+      "local": {
+        "state": "ready",
+        "manifests": [
+          {
+            "id": "claude",
+            "displayName": "Claude",
+            "supportedModes": [
+              "cli"
+            ],
+            "resumability": "none",
+            "capabilities": [
+              "interactiveTerminal"
+            ],
+            "statusDetection": "hooks",
+            "available": true,
+            "enabled": true,
+            "isDefault": true
+          },
+          {
+            "id": "codex",
+            "displayName": "Codex",
+            "supportedModes": [
+              "cli"
+            ],
+            "resumability": "none",
+            "capabilities": [
+              "interactiveTerminal"
+            ],
+            "statusDetection": "hooks",
+            "available": true,
+            "enabled": true
+          },
+          {
+            "id": "pi",
+            "displayName": "Pi",
+            "supportedModes": [
+              "cli"
+            ],
+            "resumability": "none",
+            "capabilities": [
+              "interactiveTerminal"
+            ],
+            "statusDetection": "hooks",
+            "available": true,
+            "enabled": true
+          }
+        ]
+      }
+    },
+    "activeWorkspaceId": null
+  },
+  "props": {
+    "kind": "workspace",
+    "hostId": "local",
+    "projectCwds": [],
+    "targets": [
+      {
+        "key": "/Users/dev/code/perch",
+        "label": "perch (current folder)",
+        "name": "perch",
+        "path": "/Users/dev/code/perch"
+      },
+      {
+        "key": "/Users/dev/code/api-server",
+        "label": "api-server",
+        "name": "api-server",
+        "path": "/Users/dev/code/api-server"
+      },
+      {
+        "key": "/Users/dev/notes",
+        "label": "notes",
+        "name": "notes",
+        "path": "/Users/dev/notes"
+      },
+      {
+        "key": "/Users/dev/code/scratch-site",
+        "label": "scratch-site",
+        "name": "scratch-site",
+        "path": "/Users/dev/code/scratch-site"
+      },
+      {
+        "key": "/Users/dev/.perch/scratch",
+        "label": "Quickchat",
+        "name": "Quickchat",
+        "path": "/Users/dev/.perch/scratch"
+      },
+      {
+        "key": "~",
+        "label": "No project (Quickchat)",
+        "name": "Quickchat",
+        "path": "~"
+      }
+    ],
+    "targetKey": "/Users/dev/code/perch",
+    "choices": [
+      {
+        "id": "claude",
+        "label": "Claude"
+      },
+      {
+        "id": "codex",
+        "label": "Codex"
+      },
+      {
+        "id": "pi",
+        "label": "Pi"
+      }
+    ],
+    "discovery": null,
+    "disabled": false,
+    "canManageAgents": false
+  },
+  "states": [
+    {
+      "id": "home",
+      "title": "Nothing focused: the logo, 'perch', 'Select a workspace from the sidebar to begin.', Add project and New session, and the four keys worth knowing",
+      "props": {
+        "kind": "home",
+        "projectCwds": [
+          "/Users/dev/code/perch"
+        ]
+      }
+    },
+    {
+      "id": "home-new-session",
+      "title": "New session pressed: the new-session menu (the `new-session` screen) opens under the button with the host's agents",
+      "props": {
+        "kind": "home",
+        "projectCwds": [
+          "/Users/dev/code/perch"
+        ]
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"no-session-create\"]"
+        }
+      ]
+    },
+    {
+      "id": "connecting",
+      "title": "The connection is down: 'Connecting...' and one line, left aligned, nothing to press",
+      "props": {
+        "kind": "connecting",
+        "disabled": true
+      }
+    },
+    {
+      "id": "workspace",
+      "title": "A focused workspace with no session: its name and path, the 'Where to open' picker on the current folder, 'What do you want to open?', one button per agent, and the link to the setting that skips this page"
+    },
+    {
+      "id": "workspace-picker",
+      "title": "The 'Where to open' picker pressed: the select list (the `select` screen) under the field with the current folder, the host's projects, No project (Quickchat) and Add project",
+      "steps": [
+        {
+          "click": "[data-testid=\"workspace-start-target\"]"
+        }
+      ]
+    },
+    {
+      "id": "workspace-quickchat",
+      "title": "No project chosen: the name is Quickchat and the path '~'",
+      "props": {
+        "targetKey": "~"
+      }
+    },
+    {
+      "id": "workspace-long-name",
+      "title": "A long folder name and path: the name is cut with an ellipsis on one line, the path is cut with an ellipsis, the card stays 384 px wide",
+      "props": {
+        "targets": [
+          {
+            "key": "/Users/dev/code/a-very-long-folder-name-for-the-project/packages/the-nested-workspace-checkout-of-the-feature",
+            "label": "the-nested-workspace-checkout-of-the-feature-branch (current folder)",
+            "name": "the-nested-workspace-checkout-of-the-feature-branch",
+            "path": "/Users/dev/code/a-very-long-folder-name-for-the-project/packages/the-nested-workspace-checkout-of-the-feature"
+          },
+          {
+            "key": "/Users/dev/code/api-server",
+            "label": "api-server",
+            "name": "api-server",
+            "path": "/Users/dev/code/api-server"
+          },
+          {
+            "key": "/Users/dev/notes",
+            "label": "notes",
+            "name": "notes",
+            "path": "/Users/dev/notes"
+          },
+          {
+            "key": "/Users/dev/code/scratch-site",
+            "label": "scratch-site",
+            "name": "scratch-site",
+            "path": "/Users/dev/code/scratch-site"
+          },
+          {
+            "key": "/Users/dev/.perch/scratch",
+            "label": "Quickchat",
+            "name": "Quickchat",
+            "path": "/Users/dev/.perch/scratch"
+          },
+          {
+            "key": "~",
+            "label": "No project (Quickchat)",
+            "name": "Quickchat",
+            "path": "~"
+          }
+        ],
+        "targetKey": "/Users/dev/code/a-very-long-folder-name-for-the-project/packages/the-nested-workspace-checkout-of-the-feature"
+      }
+    },
+    {
+      "id": "cli-error",
+      "title": "The web's CLI mode, before a place is chosen, with the host's agent list failed: the red line with Retry over the disabled (40%) agent buttons and a Manage agents link. NOT PRODUCIBLE BY THE NATIVE CLIENT UNLESS IT HAS A CLI MODE; kept so the layout is on record",
+      "props": {
+        "kind": "cli",
+        "hostId": "local",
+        "projectCwds": [],
+        "targets": [
+          {
+            "key": "here",
+            "label": "perch (this session)",
+            "name": "perch",
+            "path": "/Users/dev/code/perch"
+          },
+          {
+            "key": "/Users/dev/code/api-server",
+            "label": "api-server",
+            "name": "api-server",
+            "path": "/Users/dev/code/api-server"
+          },
+          {
+            "key": "/Users/dev/notes",
+            "label": "notes",
+            "name": "notes",
+            "path": "/Users/dev/notes"
+          },
+          {
+            "key": "/Users/dev/code/scratch-site",
+            "label": "scratch-site",
+            "name": "scratch-site",
+            "path": "/Users/dev/code/scratch-site"
+          },
+          {
+            "key": "/Users/dev/.perch/scratch",
+            "label": "Quickchat",
+            "name": "Quickchat",
+            "path": "/Users/dev/.perch/scratch"
+          },
+          {
+            "key": "~",
+            "label": "No project (Quickchat)",
+            "name": "Quickchat",
+            "path": "~"
+          }
+        ],
+        "targetKey": "here",
+        "choices": [
+          {
+            "id": "claude",
+            "label": "Claude"
+          },
+          {
+            "id": "codex",
+            "label": "Codex"
+          },
+          {
+            "id": "pi",
+            "label": "Pi"
+          }
+        ],
+        "discovery": {
+          "state": "error",
+          "error": "The host did not answer the agent list.",
+          "hostLabel": "this host"
+        },
+        "disabled": true,
+        "canManageAgents": true
+      }
+    }
+  ]
+}

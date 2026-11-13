@@ -1868,6 +1868,896 @@
           "description": "A hairline between groups of rows."
         }
       ]
+    },
+    "tab-drag": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 1,
+      "elements": [
+        {
+          "name": "tab-drag-layer",
+          "selector": "[data-testid=\"tab-drag-layer\"]",
+          "description": "The transparent sheet over the whole window (no fill: the page shows through); it grabs the pointer so nothing under it reacts, with the grabbing cursor."
+        },
+        {
+          "name": "tab-drag-pane",
+          "selector": "[data-testid=\"tab-drag-layer\"] > div.bg-surface-1\\/30",
+          "description": "The pane under the pointer, dimmed with a translucent fill (30% of the lighter surface)."
+        },
+        {
+          "name": "tab-drop-zone",
+          "selector": "[data-testid=\"tab-drop-zone\"]",
+          "description": "The half a split would take (`data-zone`: left, right, up, down, or blocked): the accent at 35% with an inner glow, or the muted fill at 60% when blocked.",
+          "key": {
+            "self": true,
+            "attr": "data-zone"
+          }
+        },
+        {
+          "name": "tab-drop-label",
+          "selector": "[data-testid=\"tab-drop-zone\"] > span",
+          "description": "The label centred in the highlight: Split left / right / above / below, or the reason a split cannot take the tab; on the window's own fill, 0.75rem, with a shadow.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-drag-ghost",
+          "selector": "[data-testid=\"tab-drag-ghost\"]",
+          "description": "The copy of the dragged tab, at the pointer less the grab offset, the tab's own size, with a drop shadow."
+        }
+      ]
+    },
+    "start": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "start-panel",
+          "selector": "[data-testid=\"no-session-panel\"], [data-testid=\"cli-start-panel\"]",
+          "description": "The page: fills the box on the panel fill, its content centred and scrolling when too tall (16 px side padding, 32 px top)."
+        },
+        {
+          "name": "start-column",
+          "selector": "[data-testid$=\"-panel\"] > div",
+          "description": "The column holding everything, at most 24 rem wide (26 rem on the connecting page), centred, 16 px between its rows."
+        },
+        {
+          "name": "start-logo",
+          "selector": "[data-testid=\"no-session-panel\"] img",
+          "description": "The perch mark on the home page: 80x80, soft corners."
+        },
+        {
+          "name": "start-name",
+          "selector": "[data-testid$=\"-panel\"] h1, [data-testid=\"no-session-panel\"] h1, [data-testid=\"no-session-panel\"] h2",
+          "description": "The page's name: 'perch' on the home page (2.4rem, bold), the workspace's name (1.6rem, bold, cut with an ellipsis) or the connecting title (1rem, semibold).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-hint",
+          "selector": "[data-testid$=\"-panel\"] p",
+          "description": "A muted line: the path, 'What do you want to open?', the home hint, or the connecting line; 0.85rem.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-target",
+          "selector": "[data-testid=\"workspace-start-target\"], [data-testid=\"cli-start-target\"]",
+          "description": "The 'Where to open' picker (a select field on the darker fill): the chosen place and a chevron.",
+          "text": true
+        },
+        {
+          "name": "start-action",
+          "selector": "[data-testid=\"home-add-project\"], [data-testid=\"no-session-create\"], [data-testid^=\"workspace-start-\"]:not([data-testid=\"workspace-start-target\"]), [data-testid^=\"cli-start-agent-\"]",
+          "description": "A start button: Add project, New session, or one agent; soft, large, 40% opacity when disabled.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-status",
+          "selector": "[role=\"status\"], [role=\"alert\"]",
+          "description": "The agent list's note in the CLI page: Checking providers, no providers, or the error (red), with a Retry link.",
+          "text": true
+        },
+        {
+          "name": "start-status-action",
+          "selector": "[role=\"status\"] > button, [role=\"alert\"] > button",
+          "description": "Retry: underlined, in the accent colour.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-link",
+          "selector": "[data-testid$=\"-panel\"] button.text-subtext-0",
+          "description": "A small muted link under the buttons: 'Open one automatically: Settings → Empty workspace opens' (and Manage agents in the CLI page); underlined on hover.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-shortcut-row",
+          "selector": "[data-testid=\"no-session-panel\"] dl > div",
+          "description": "One line of the home page's keys: the action at the left, its keys at the right."
+        },
+        {
+          "name": "start-shortcut-label",
+          "selector": "[data-testid=\"no-session-panel\"] dl dt",
+          "description": "The action's name (0.8rem, muted).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-shortcut-key",
+          "selector": "[data-testid=\"no-session-panel\"] dl kbd",
+          "description": "One key in a chip on the darker fill, at least 1.5rem wide.",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "folder-browser": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 3,
+      "elements": [
+        {
+          "name": "folder-browser",
+          "selector": "[data-testid=\"dir-browser\"]",
+          "description": "The browser: fills its panel, at least 13 rem high."
+        },
+        {
+          "name": "folder-browser-mode-toggle",
+          "selector": "[data-testid=\"dir-browser-mode-toggle\"]",
+          "description": "The Type path / Browse button at the top right (small, plain).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-up",
+          "selector": "[data-testid=\"dir-browser-up\"]",
+          "description": "The up-one-level arrow at the left of the breadcrumb; 40% opacity at the root."
+        },
+        {
+          "name": "folder-browser-crumbs",
+          "selector": "[data-testid=\"dir-browser\"] span.min-w-0.flex-1",
+          "description": "The path as buttons for each folder; the last is the text colour, the others muted; cut with an ellipsis.",
+          "text": true
+        },
+        {
+          "name": "folder-browser-crumb",
+          "selector": "[data-testid=\"dir-browser\"] span.min-w-0.flex-1 button",
+          "description": "One folder of the path (a click goes there; the last one is disabled).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-filter",
+          "selector": "[data-testid=\"dir-browser-filter\"]",
+          "description": "The filter field (lighter surface fill, 0.78rem); `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        },
+        {
+          "name": "folder-browser-list",
+          "selector": "[data-testid=\"dir-browser\"] div.overflow-y-auto",
+          "description": "The scrolling list of subfolders: 60 to 260 px high."
+        },
+        {
+          "name": "folder-browser-entry",
+          "selector": "[data-testid^=\"dir-browser-entry-\"]",
+          "description": "One subfolder row: the name and, for a repository, a git badge at the right; the row takes the lighter fill on hover.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "dir-browser-entry-"
+          }
+        },
+        {
+          "name": "folder-browser-entry-name",
+          "selector": "[data-testid^=\"dir-browser-entry-\"] > span:first-child",
+          "description": "The folder's name, cut with an ellipsis.",
+          "key": {
+            "closest": "[data-testid^=\"dir-browser-entry-\"]",
+            "attr": "data-testid",
+            "strip": "dir-browser-entry-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-git",
+          "selector": "[data-testid^=\"dir-browser-entry-\"] > span:last-child:not(:first-child)",
+          "description": "The 'git' badge: lighter fill, 0.62rem, in the accent colour.",
+          "key": {
+            "closest": "[data-testid^=\"dir-browser-entry-\"]",
+            "attr": "data-testid",
+            "strip": "dir-browser-entry-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-note",
+          "selector": "[data-testid=\"dir-browser\"] div.overflow-y-auto > div",
+          "description": "Loading... or No subfolders (muted, 0.76rem).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-use",
+          "selector": "[data-testid=\"dir-browser-use\"]",
+          "description": "Use this folder / Use this path: the primary button at the right, 40% opacity while disabled.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-path-input",
+          "selector": "[data-testid=\"project-path-input\"]",
+          "description": "The typed path field in Type path mode; `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        }
+      ]
+    },
+    "instructions": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 4,
+      "elements": [
+        {
+          "name": "instructions-scrim",
+          "selector": "body > div.fixed.inset-0",
+          "description": "The dimming layer over the whole window; a press on it closes the dialog."
+        },
+        {
+          "name": "instructions-panel",
+          "selector": "[data-testid=\"instructions-dialog\"]",
+          "description": "The dialog panel: 30 rem wide at most, the panel fill, soft corners, a shadow, 16 px of padding, 9.6 px between its rows."
+        },
+        {
+          "name": "instructions-title",
+          "selector": "[data-testid=\"instructions-dialog\"] > h2",
+          "description": "'Instructions for <name>'.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-intro",
+          "selector": "[data-testid=\"instructions-dialog\"] > p",
+          "description": "What the dialog is for: 0.75rem, muted.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-label",
+          "selector": "[data-testid=\"instructions-dialog\"] > label > span:first-child",
+          "description": "The caption of a field: 'Instructions' with the count, 'Reference files and folders' with its hint.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-count",
+          "selector": "[data-testid=\"instructions-count\"]",
+          "description": "The length of the text over the cap.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-text",
+          "selector": "[data-testid=\"instructions-text\"]",
+          "description": "The instructions field (9 rows, the darker fill, 0.5rem 0.4rem padding); `text` is what is in it, 40% opacity while disabled.",
+          "text": true
+        },
+        {
+          "name": "instructions-folders",
+          "selector": "[data-testid=\"instructions-folders\"]",
+          "description": "The reference paths, one per line, in the monospace font (4 rows); `text` is what is in it.",
+          "text": true
+        },
+        {
+          "name": "instructions-error",
+          "selector": "[data-testid=\"instructions-error\"]",
+          "description": "The red line under the fields.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-cancel",
+          "selector": "[data-testid=\"instructions-dialog\"] > div.flex.justify-end > button:first-child",
+          "description": "Cancel.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-save",
+          "selector": "[data-testid=\"instructions-save\"]",
+          "description": "Save, the primary button; 40% opacity while disabled.",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "memory": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 4,
+      "elements": [
+        {
+          "name": "memory-scrim",
+          "selector": "body > div.fixed.inset-0",
+          "description": "A dimming layer over the whole window: the dialog's, and, while a delete is asked, the confirmation's over it.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "memory-panel",
+          "selector": "[data-testid=\"memory-dialog\"]",
+          "description": "The dialog panel: 30 rem wide at most, the panel fill, a shadow, 16 px of padding, 9.6 px between rows."
+        },
+        {
+          "name": "memory-title",
+          "selector": "[data-testid=\"memory-dialog\"] > h2",
+          "description": "'Memory for <name>'.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-intro",
+          "selector": "[data-testid=\"memory-dialog\"] > p",
+          "description": "What the notes are (0.75rem, muted).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-caps",
+          "selector": "[data-testid=\"memory-caps\"]",
+          "description": "'n / 64 files, up to 16000 characters each' at the left of the toolbar.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-new",
+          "selector": "[data-testid=\"memory-new\"]",
+          "description": "New file at the right of the toolbar; 40% opacity while disabled.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-enabled",
+          "selector": "[data-testid=\"memory-enabled\"]",
+          "description": "The box that lets the project's agents use memory."
+        },
+        {
+          "name": "memory-enabled-label",
+          "selector": "[data-testid=\"memory-dialog\"] > label.flex > span",
+          "description": "The box's line (its '(off: ...)' note when unticked).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-note",
+          "selector": "[data-testid=\"memory-dialog\"] > span.text-subtext-0",
+          "description": "'Loading...' or 'No memory files yet.'",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-row",
+          "selector": "[data-testid^=\"memory-row-\"]",
+          "description": "One file: the row button on the darker fill and its Delete button, 8 px apart.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "memory-row-"
+          }
+        },
+        {
+          "name": "memory-open",
+          "selector": "[data-testid^=\"memory-open-\"]",
+          "description": "The file's row button: three lines, on the darker fill.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "memory-open-"
+          }
+        },
+        {
+          "name": "memory-file-title",
+          "selector": "[data-testid^=\"memory-row-\"] button > span:first-child",
+          "description": "The file's name, monospace 0.8rem.",
+          "key": {
+            "closest": "[data-testid^=\"memory-row-\"]",
+            "attr": "data-testid",
+            "strip": "memory-row-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-file-summary",
+          "selector": "[data-testid^=\"memory-row-\"] button > span.truncate",
+          "description": "The summary, one line cut with an ellipsis (0.75rem, muted).",
+          "key": {
+            "closest": "[data-testid^=\"memory-row-\"]",
+            "attr": "data-testid",
+            "strip": "memory-row-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-file-meta",
+          "selector": "[data-testid^=\"memory-row-\"] button > span:last-child",
+          "description": "'who - how long ago - n chars' (0.68rem, the dimmer colour).",
+          "key": {
+            "closest": "[data-testid^=\"memory-row-\"]",
+            "attr": "data-testid",
+            "strip": "memory-row-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-delete",
+          "selector": "[data-testid^=\"memory-delete-\"]",
+          "description": "A row's Delete button.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "memory-delete-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-error",
+          "selector": "[data-testid=\"memory-error\"]",
+          "description": "The red line above the buttons.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-close",
+          "selector": "[data-testid=\"memory-dialog\"] > div.flex.justify-end > button",
+          "description": "Close, at the bottom right of the list page.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-file-name",
+          "selector": "[data-testid=\"memory-file-name\"]",
+          "description": "The open file's name (monospace 0.8rem).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-name",
+          "selector": "[data-testid=\"memory-name\"]",
+          "description": "The name field of a new file (monospace); `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        },
+        {
+          "name": "memory-count",
+          "selector": "[data-testid=\"memory-count\"]",
+          "description": "The text's length over the cap.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-text",
+          "selector": "[data-testid=\"memory-text\"]",
+          "description": "The file's text (12 rows, monospace); `text` is what is in it.",
+          "text": true
+        },
+        {
+          "name": "memory-conflict",
+          "selector": "[data-testid=\"memory-conflict\"]",
+          "description": "The stale-edit notice, in red: two lines.",
+          "text": true
+        },
+        {
+          "name": "memory-reload",
+          "selector": "[data-testid=\"memory-reload\"]",
+          "description": "Load their version.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-back",
+          "selector": "[data-testid=\"memory-back\"]",
+          "description": "Back.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-save",
+          "selector": "[data-testid=\"memory-save\"]",
+          "description": "Save, the primary button; 40% opacity while disabled.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-confirm",
+          "selector": "[data-testid=\"confirm-dialog\"]",
+          "description": "The delete question's panel (the stock confirmation, the `confirm` screen), over the dialog."
+        },
+        {
+          "name": "memory-confirm-message",
+          "selector": ".confirm-dialog__message",
+          "description": "The question: 'Delete <file>? Agents and people lose this note.'",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "worktree": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "worktree-plus",
+          "selector": "[data-testid^=\"worktree-menu-\"]",
+          "description": "The + button the popover hangs from (an icon button, here shown; the sidebar shows it on hover)."
+        },
+        {
+          "name": "worktree-popover",
+          "selector": "[role=\"dialog\"][aria-label=\"Git worktrees\"]",
+          "description": "The popover: 420 px wide at most, the lighter surface fill, soft corners, a shadow; under the button, or over it when there is more room above."
+        },
+        {
+          "name": "worktree-heading",
+          "selector": "[role=\"dialog\"][aria-label=\"Git worktrees\"] > div:first-child > span:first-child",
+          "description": "'Worktrees' or 'New workspace', small uppercase, semibold, muted, spaced.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-project",
+          "selector": "[role=\"dialog\"][aria-label=\"Git worktrees\"] > div:first-child > span:last-child",
+          "description": "The project's folder name at the right of the heading, in the accent colour, cut with an ellipsis.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-list",
+          "selector": "[role=\"dialog\"][aria-label=\"Git worktrees\"] > div.overflow-y-auto",
+          "description": "The scrolling list of entries, 240 px high at most."
+        },
+        {
+          "name": "worktree-note",
+          "selector": "[role=\"dialog\"][aria-label=\"Git worktrees\"] > div.overflow-y-auto > div:not(.worktree-menu__entry)",
+          "description": "'Loading...' or 'No worktrees' (muted, 0.76rem).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-entry",
+          "selector": "[data-testid^=\"worktree-entry-\"]",
+          "description": "One worktree: branch and path at the left, Open and Delete at the right; the row takes the lighter fill on hover.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "worktree-entry-"
+          }
+        },
+        {
+          "name": "worktree-entry-branch",
+          "selector": ".worktree-menu__entry-branch",
+          "description": "The branch (0.8rem, semibold, cut with an ellipsis), or '(detached <short commit>)', with its badges.",
+          "key": {
+            "closest": "[data-testid^=\"worktree-entry-\"]",
+            "attr": "data-testid",
+            "strip": "worktree-entry-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-badge",
+          "selector": "[data-testid^=\"worktree-entry-\"] .worktree-menu__entry-branch > span",
+          "description": "The 'primary' badge (accent) or the 'dirty' badge (yellow): 0.6rem, on the darker fill.",
+          "key": {
+            "closest": "[data-testid^=\"worktree-entry-\"]",
+            "attr": "data-testid",
+            "strip": "worktree-entry-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-entry-path",
+          "selector": ".worktree-menu__entry-path",
+          "description": "The checkout path (0.68rem, muted), cut with an ellipsis.",
+          "key": {
+            "closest": "[data-testid^=\"worktree-entry-\"]",
+            "attr": "data-testid",
+            "strip": "worktree-entry-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-open",
+          "selector": "[data-testid^=\"worktree-open-\"]",
+          "description": "Open: a small plain button.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "worktree-open-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-remove",
+          "selector": "[data-testid^=\"worktree-remove-\"]",
+          "description": "Delete (or Remove on a host that cannot delete the branch); red on hover; never on the primary checkout.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "worktree-remove-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-error",
+          "selector": "[data-testid=\"worktree-error\"]",
+          "description": "The core's refusal, in red, with its line breaks.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-new",
+          "selector": "[data-testid=\"worktree-new\"]",
+          "description": "'+ New worktree...': a menu row at the bottom of the list page.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-name-input",
+          "selector": "[data-testid=\"worktree-name-input\"]",
+          "description": "The task name field; `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        },
+        {
+          "name": "worktree-start-input",
+          "selector": "[data-testid=\"worktree-start-input\"]",
+          "description": "The start-from field (a free-text select); `text` is what was typed.",
+          "text": true
+        },
+        {
+          "name": "worktree-branch-input",
+          "selector": "[data-testid=\"worktree-branch-input\"]",
+          "description": "The branch field; its placeholder follows the task name.",
+          "text": true
+        },
+        {
+          "name": "worktree-parent-select",
+          "selector": "[data-testid=\"worktree-parent-select\"]",
+          "description": "The parent workspace select.",
+          "text": true
+        },
+        {
+          "name": "worktree-new-branch",
+          "selector": "[data-testid=\"worktree-new-branch\"]",
+          "description": "The 'new branch' box of an older host."
+        },
+        {
+          "name": "worktree-path-input",
+          "selector": "[data-testid=\"worktree-path-input\"]",
+          "description": "The checkout path field, previewing the default path once a branch is known.",
+          "text": true
+        },
+        {
+          "name": "worktree-agent-select",
+          "selector": "[data-testid=\"worktree-agent-select\"]",
+          "description": "The starting pane select.",
+          "text": true
+        },
+        {
+          "name": "worktree-create-cancel",
+          "selector": "[data-testid=\"worktree-create-cancel\"]",
+          "description": "Cancel.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-create-submit",
+          "selector": "[data-testid=\"worktree-create-submit\"]",
+          "description": "Create (primary); 40% opacity while disabled.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-confirm",
+          "selector": "[data-testid=\"confirm-dialog\"]",
+          "description": "A question over the page (a removal, the force question or the kept-branch review): the stock confirmation panel."
+        },
+        {
+          "name": "worktree-confirm-message",
+          "selector": ".confirm-dialog__message",
+          "description": "The question with its line breaks.",
+          "text": true
+        },
+        {
+          "name": "worktree-confirm-accept",
+          "selector": "[data-testid=\"confirm-accept\"]",
+          "description": "The accepting button (Delete, Force remove, Delete branch).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-confirm-cancel",
+          "selector": "[data-testid=\"confirm-cancel\"]",
+          "description": "The refusing button (Cancel, Keep branch).",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "terminal-search": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 3,
+      "elements": [
+        {
+          "name": "terminal-frame",
+          "selector": "[data-testid=\"persistent-agent-terminal\"]",
+          "description": "The terminal pane the bar floats over (the card fill here; the terminal's own picture is not drawn)."
+        },
+        {
+          "name": "term-search",
+          "selector": "[data-testid=\"term-search\"]",
+          "description": "The bar: the lighter surface fill, soft corners, a shadow, 8 px down and 12 px from the right edge of the pane; 0.3rem between its parts."
+        },
+        {
+          "name": "term-search-input",
+          "selector": "[data-testid=\"term-search-input\"]",
+          "description": "The field (11 rem wide, the darker fill, 0.8rem); `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        },
+        {
+          "name": "term-search-button",
+          "selector": "[data-testid=\"term-search\"] > button",
+          "description": "Previous (up arrow), Next (down arrow) and Close (cross): 1.4 rem squares on the lighter fill, muted; the cross is larger.",
+          "key": {
+            "self": true,
+            "attr": "title"
+          },
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "agent-control": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "terminal-frame",
+          "selector": "[data-testid=\"persistent-agent-terminal\"]",
+          "description": "The terminal pane the controls float over."
+        },
+        {
+          "name": "agent-control-chip",
+          "selector": "[data-testid=\"agent-control-chip\"]",
+          "description": "The chip: the glass surface (translucent, blurred), 8 px down and 12 px from the right; its text then its buttons."
+        },
+        {
+          "name": "agent-control-label",
+          "selector": "[data-testid=\"agent-control-chip\"] > span",
+          "description": "How this view stands.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "agent-control-button",
+          "selector": "[data-testid=\"agent-control-chip\"] > button",
+          "description": "Retry CLI or Take control (soft, medium); 40% opacity while pending or disabled.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "agent-control-error",
+          "selector": ".terminal__cli-error",
+          "description": "The red notice: centred, 12 px above the bottom, at most 90% wide, on a reddish fill.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "agent-control-ended",
+          "selector": ".terminal__exited",
+          "description": "The banner: centred in the pane, the lighter panel fill with a shadow, a column of its text then its buttons.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "agent-control-ended-text",
+          "selector": ".terminal__exited-text",
+          "description": "What happened to the agent.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "agent-control-ended-button",
+          "selector": ".terminal__exited-actions > button",
+          "description": "Restart CLI / Resume agent (primary) and Close session (soft).",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "phone-size": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "terminal-frame",
+          "selector": "[data-testid=\"persistent-agent-terminal\"]",
+          "description": "The terminal pane the notice floats over."
+        },
+        {
+          "name": "phone-size-notice",
+          "selector": "[data-testid=\"phone-size-notice\"]",
+          "description": "The open notice: a glass panel (translucent, blurred, pane-rounded corners, a shadow), 12 px padding, 8 px between its rows."
+        },
+        {
+          "name": "phone-size-chip",
+          "selector": "[data-testid=\"phone-size-chip\"]",
+          "description": "The folded chip at the same corner."
+        },
+        {
+          "name": "phone-size-heading",
+          "selector": "[data-testid=\"phone-size-notice\"] span.font-semibold",
+          "description": "'Your phone is sizing this terminal' (semibold, the text colour).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "phone-size-text",
+          "selector": "[data-testid=\"phone-size-notice\"] span:not(.font-semibold)",
+          "description": "The explanation (0.8rem, muted).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "phone-size-fold",
+          "selector": "[aria-label=\"Keep phone size and hide this\"]",
+          "description": "The cross that folds the notice.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "phone-size-button",
+          "selector": "[data-testid=\"phone-size-notice\"] div.flex.flex-wrap > button, [data-testid=\"phone-size-chip\"] > button",
+          "description": "Take back this tab (primary), Take back all tabs (soft), or the folded chip's 'Phone size'; 40% opacity while pending.",
+          "text": true,
+          "textSized": true
+        }
+      ]
     }
   }
 }

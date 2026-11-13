@@ -1,0 +1,60 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "terminal-search",
+  "note": "The box is one terminal pane of the shown workspace (the main card's canvas less the 28 px pane header: 1016x688; half of it, 505 wide, when split), on the card fill: the terminal's own picture (xterm) is not drawn, the chrome floats over `.terminal` (position: relative). The find bar over a terminal (stock-ui/terminal-search), opened by the terminal's find key and drawn at the top right of the pane (8 px down, 12 px in). Props are `TerminalSearchProps`: the `query` the terminal holds, and `setQuery`, `findNext`, `findPrevious` and `close`; the harness holds the query as the terminal does and the other callbacks are no-ops, so typing (a `steps` entry) changes the field. Finding is the terminal's own search over its buffer, not drawn. The field is focused when the bar opens.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1016,
+    "height": 688
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "props": {
+    "query": ""
+  },
+  "states": [
+    {
+      "id": "empty",
+      "title": "Just opened: the empty field focused with its 'Find...' placeholder, then Up, Down and Close buttons, on the lighter fill with a shadow",
+      "props": {
+        "query": ""
+      }
+    },
+    {
+      "id": "typed",
+      "title": "A word typed ('connection refused'): the field holds it",
+      "props": {
+        "query": ""
+      },
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"term-search-input\"]",
+            "text": "connection refused"
+          }
+        }
+      ]
+    },
+    {
+      "id": "long-query",
+      "title": "A query longer than the 11 rem field (it scrolls inside the field; the bar does not grow)",
+      "props": {
+        "query": "error: could not compile `perch-core` due to previous error"
+      }
+    },
+    {
+      "id": "split-pane",
+      "title": "The same bar in one of two side-by-side panes (505 px wide): still the pane's top right corner",
+      "props": {
+        "query": "todo"
+      },
+      "size": {
+        "width": 505,
+        "height": 688
+      }
+    }
+  ]
+}

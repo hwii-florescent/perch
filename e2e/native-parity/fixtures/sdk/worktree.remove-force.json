@@ -1,0 +1,98 @@
+{
+  "props": {
+    "hostId": "local",
+    "cwd": "/Users/dev/code/perch",
+    "projectKey": "local:/Users/dev/code/perch",
+    "at": {
+      "x": 220,
+      "y": 130
+    },
+    "worktrees": {
+      "worktrees": [
+        {
+          "path": "/Users/dev/code/perch",
+          "branch": "main",
+          "head": "9f2c1ab07d",
+          "isPrimary": true,
+          "isDirty": false
+        },
+        {
+          "path": "/Users/dev/code/perch-wt/sidebar-port",
+          "branch": "nm/sidebar-port-with-a-long-branch-name-that-is-cut",
+          "head": "41be0d9a12",
+          "isPrimary": false,
+          "isDirty": false
+        },
+        {
+          "path": "/Users/dev/code/perch-wt/ghostty-spike",
+          "branch": "spike/ghostty",
+          "head": "c7a85e3f60",
+          "isPrimary": false,
+          "isDirty": true
+        },
+        {
+          "path": "/Users/dev/code/perch-wt/bisect",
+          "head": "abc1234def5",
+          "isPrimary": false,
+          "isDirty": false
+        }
+      ],
+      "defaultRoot": "/Users/dev/code/perch-wt",
+      "baseRef": "main",
+      "refs": [
+        "main",
+        "nm/sidebar-port",
+        "origin/main",
+        "origin/nm/web-reference",
+        "v0.9.0"
+      ]
+    },
+    "background": true,
+    "startFromSupported": true,
+    "deleteSupported": true,
+    "parentChoices": [
+      {
+        "id": "w-perch-sidebar",
+        "name": "sidebar-port",
+        "path": "/Users/dev/code/perch-wt/sidebar-port"
+      }
+    ],
+    "emptyAgent": "claude",
+    "request": {
+      "remove": {
+        "path": "/Users/dev/code/perch-wt/ghostty-spike",
+        "branch": "spike/ghostty"
+      }
+    },
+    "removePlain": {
+      "error": "fatal: '/Users/dev/code/perch-wt/ghostty-spike' contains modified or untracked files, use --force to delete it",
+      "dirty": true
+    }
+  },
+  "agentChoices": {
+    "connected": true,
+    "discovery": true,
+    "choices": [
+      {
+        "id": "claude",
+        "label": "Claude",
+        "isDefault": true
+      },
+      {
+        "id": "codex",
+        "label": "Codex"
+      },
+      {
+        "id": "pi",
+        "label": "Pi"
+      }
+    ],
+    "lastChoice": "claude",
+    "state": "ready"
+  },
+  "steps": [
+    {
+      "click": "[data-testid=\"confirm-accept\"]"
+    }
+  ]
+}

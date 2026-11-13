@@ -1,0 +1,263 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "worktree",
+  "note": "Floating screen: it is drawn through a portal into the page body and placed against the window, so the reference is the whole default 1280x800 window on the app's backdrop and every box is in window coordinates. A git project's \"+\" and its worktree list (stock-ui/worktree), placed by the sidebar's project row: the screen is a small icon button (`aria-label` New workspace) and a popover drawn through a portal against it. In the sidebar the button is the end of the project row and shown only on hover (the sidebar passes `className`); here it is shown, at `at` (window coordinates), as a caller places it. The popover is fixed at the button's left (kept 8 px inside the right edge) and 4 px under it, 420 px wide at most (`100vw - 16px`), opening above the button when there is more room there, and cut to the room it has, scrolling. Props are `WorktreeScreenProps` as components/WorktreeMenu.tsx works them out (the project's worktrees from the store's cache, what the host supports, the nesting choices, Settings' empty-workspace agent); `request` is how Perch's own keys ask the menu to open (an empty request opens the list; `remove` opens a removal's question), and a press on the button opens it on the create form. The harness answers the core: `listAnswer` is what `list` resolves (an `error` is the core's refusal; `listLoading` never answers), `createAnswer`, `removePlain` and `removeForce` what `remove` resolves without and with `force` (`dirty` and `error` make the force question; `preservedBranch` makes the kept-branch review), `deleteBranchAnswer`. The agents on the last select are the host's agent list (@perch/sdk `useAgentChoices`, in sdk.agentChoices). The removal and kept-branch questions are the stock `ConfirmDialog` (the `confirm` screen) drawn over the page; the dropdowns are the stock `select`. Which form is shown, what was typed and which question is asked are the screen's own state, reached with `steps`.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1280,
+    "height": 800
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {
+    "serverInfo": {
+      "type": "server.info",
+      "hostname": "studio",
+      "isSsh": false,
+      "platform": "macOS",
+      "capabilities": [
+        "workspace.snapshot",
+        "agent.manifest.list"
+      ]
+    },
+    "agentManifestsByHost": {
+      "local": {
+        "state": "ready",
+        "manifests": [
+          {
+            "id": "claude",
+            "displayName": "Claude",
+            "supportedModes": [
+              "cli"
+            ],
+            "resumability": "none",
+            "capabilities": [
+              "interactiveTerminal"
+            ],
+            "statusDetection": "hooks",
+            "available": true,
+            "enabled": true,
+            "isDefault": true
+          },
+          {
+            "id": "codex",
+            "displayName": "Codex",
+            "supportedModes": [
+              "cli"
+            ],
+            "resumability": "none",
+            "capabilities": [
+              "interactiveTerminal"
+            ],
+            "statusDetection": "hooks",
+            "available": true,
+            "enabled": true
+          },
+          {
+            "id": "pi",
+            "displayName": "Pi",
+            "supportedModes": [
+              "cli"
+            ],
+            "resumability": "none",
+            "capabilities": [
+              "interactiveTerminal"
+            ],
+            "statusDetection": "hooks",
+            "available": true,
+            "enabled": true
+          }
+        ]
+      }
+    }
+  },
+  "props": {
+    "hostId": "local",
+    "cwd": "/Users/dev/code/perch",
+    "projectKey": "local:/Users/dev/code/perch",
+    "at": {
+      "x": 220,
+      "y": 130
+    },
+    "worktrees": {
+      "worktrees": [
+        {
+          "path": "/Users/dev/code/perch",
+          "branch": "main",
+          "head": "9f2c1ab07d",
+          "isPrimary": true,
+          "isDirty": false
+        },
+        {
+          "path": "/Users/dev/code/perch-wt/sidebar-port",
+          "branch": "nm/sidebar-port-with-a-long-branch-name-that-is-cut",
+          "head": "41be0d9a12",
+          "isPrimary": false,
+          "isDirty": false
+        },
+        {
+          "path": "/Users/dev/code/perch-wt/ghostty-spike",
+          "branch": "spike/ghostty",
+          "head": "c7a85e3f60",
+          "isPrimary": false,
+          "isDirty": true
+        },
+        {
+          "path": "/Users/dev/code/perch-wt/bisect",
+          "head": "abc1234def5",
+          "isPrimary": false,
+          "isDirty": false
+        }
+      ],
+      "defaultRoot": "/Users/dev/code/perch-wt",
+      "baseRef": "main",
+      "refs": [
+        "main",
+        "nm/sidebar-port",
+        "origin/main",
+        "origin/nm/web-reference",
+        "v0.9.0"
+      ]
+    },
+    "background": true,
+    "startFromSupported": true,
+    "deleteSupported": true,
+    "parentChoices": [
+      {
+        "id": "w-perch-sidebar",
+        "name": "sidebar-port",
+        "path": "/Users/dev/code/perch-wt/sidebar-port"
+      }
+    ],
+    "emptyAgent": "claude",
+    "request": {}
+  },
+  "states": [
+    {
+      "id": "list",
+      "title": "Opened by a key on the list: header 'WORKTREES' and the project name, four entries (the primary checkout with its 'primary' badge and no Delete, two linked ones (one with a branch name too long, cut without an ellipsis, the row's own width), one 'dirty', one detached at its short commit), each with Open and Delete, and '+ New worktree...'"
+    },
+    {
+      "id": "loading",
+      "title": "Opened before the core has listed anything: 'Loading...' in place of the entries",
+      "props": {
+        "worktrees": null,
+        "listLoading": true
+      }
+    },
+    {
+      "id": "empty",
+      "title": "A project with no worktree listed: 'No worktrees'",
+      "props": {
+        "worktrees": {
+          "worktrees": [],
+          "defaultRoot": "/Users/dev/code/perch-wt",
+          "baseRef": "main",
+          "refs": []
+        }
+      }
+    },
+    {
+      "id": "create-form",
+      "title": "The + pressed (the real path): the header reads 'NEW WORKSPACE', the entries stay above the form: a task name, a start-from field with its placeholder, an optional branch with its placeholder, a parent workspace select, the checkout path, the starting pane select (Claude, from Settings), Cancel and Create (enabled)",
+      "props": {
+        "request": null
+      },
+      "steps": [
+        {
+          "click": "[data-testid^=\"worktree-menu-\"]"
+        }
+      ]
+    },
+    {
+      "id": "create-error",
+      "title": "A task name typed ('Fix flaky terminal test') and Create pressed: the branch placeholder follows the task name, the path preview is filled, and the core's refusal shows in red between the entries and the form",
+      "props": {
+        "request": null,
+        "createAnswer": {
+          "error": "A branch named fix-flaky-terminal-test already exists."
+        }
+      },
+      "steps": [
+        {
+          "click": "[data-testid^=\"worktree-menu-\"]"
+        },
+        {
+          "type": {
+            "selector": "[data-testid=\"worktree-name-input\"]",
+            "text": "Fix flaky terminal test"
+          }
+        },
+        {
+          "click": "[data-testid=\"worktree-create-submit\"]"
+        }
+      ]
+    },
+    {
+      "id": "create-legacy",
+      "title": "A host without task names (older core): a branch name field, a 'new branch' box (ticked), the path and the starting pane; no task name, start-from or parent; Remove (not Delete) on the entries",
+      "props": {
+        "request": null,
+        "startFromSupported": false,
+        "deleteSupported": false,
+        "parentChoices": []
+      },
+      "steps": [
+        {
+          "click": "[data-testid^=\"worktree-menu-\"]"
+        }
+      ]
+    },
+    {
+      "id": "remove-force",
+      "title": "A removal asked for the dirty checkout (by a key) and confirmed; git refuses it as dirty, so the force question follows: git's own message, 'Force remove <path>?' and Force remove / Cancel",
+      "props": {
+        "request": {
+          "remove": {
+            "path": "/Users/dev/code/perch-wt/ghostty-spike",
+            "branch": "spike/ghostty"
+          }
+        },
+        "removePlain": {
+          "error": "fatal: '/Users/dev/code/perch-wt/ghostty-spike' contains modified or untracked files, use --force to delete it",
+          "dirty": true
+        }
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"confirm-accept\"]"
+        }
+      ]
+    },
+    {
+      "id": "branch-review",
+      "title": "A removal confirmed and the core kept the branch because 3 commits are on no other branch: the review lists them (the first two, then an ellipsis) with Delete branch / Keep branch",
+      "props": {
+        "request": {
+          "remove": {
+            "path": "/Users/dev/code/perch-wt/ghostty-spike",
+            "branch": "spike/ghostty"
+          }
+        },
+        "removePlain": {
+          "preservedBranch": {
+            "name": "spike/ghostty",
+            "head": "c7a85e3f60",
+            "unmerged": 3,
+            "commits": [
+              "c7a85e3 spike: draw a glyph run with the GPU",
+              "5b21d90 spike: load the terminal font"
+            ]
+          }
+        }
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"confirm-accept\"]"
+        }
+      ]
+    }
+  ]
+}

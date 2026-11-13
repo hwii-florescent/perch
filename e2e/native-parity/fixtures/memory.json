@@ -1,0 +1,954 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "memory",
+  "note": "Floating screen: it is drawn through a portal into the page body and placed against the window, so the reference is the whole default 1280x800 window on the app's backdrop and every box is in window coordinates. A Project's memory files (stock-ui/memory): the notes agents write for each other and for the person, listed, opened, edited, created and deleted; opened from the project's menu in the sidebar. Props are `MemoryScreenProps`: `projectId`, `name`, `onClose`, and `list()`, `get(file)`, `save(file, text, baseRevision?)`, `remove(file, revision)` and `setEnabled?(enabled)` which the core answers. The harness answers from the fixture: `index` is the `MemoryState` that `list` resolves (null: no answer), `texts` is each file's `{entry, text}` for `get`, `saved` and `removed` are what a write resolves (`conflict: true` is the core refusing a stale revision), `loading` makes the list never answer, and `noToggle` leaves out `setEnabled` (a core that cannot turn memory off). The times are written 'now', '5m ago', '3h ago', '2d ago' from the clock, which the harness holds at the fixed instant 1800000000000 ms so the picture does not change with the day; each file's `updatedAt` is that instant less its age. The shell is the stock `Dialog` (30 rem wide at most 92% of the window, 16 px of padding, the `dialog` screen); a delete asks first through the stock `ConfirmDialog` drawn over it (the `confirm` screen). Opening a file, New file, Back and Delete are the screen's own state, reached with `steps`.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1280,
+    "height": 800
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "props": {
+    "projectId": "p-perch",
+    "name": "perch",
+    "index": {
+      "projectId": "p-perch",
+      "files": [
+        {
+          "name": "decisions.md",
+          "size": 1840,
+          "revision": "r-101",
+          "author": {
+            "kind": "agent",
+            "label": "Fix terminal slash input",
+            "session": "s-perch-2"
+          },
+          "updatedAt": 1799999700000,
+          "summary": "Why the sidebar sorts by attention first, and what was ruled out."
+        },
+        {
+          "name": "terminal-notes.md",
+          "size": 960,
+          "revision": "r-102",
+          "author": {
+            "kind": "person",
+            "label": "You"
+          },
+          "updatedAt": 1799989200000,
+          "summary": "The IME composition quirks seen in the terminal; what each fix changed."
+        },
+        {
+          "name": "release-checklist.md",
+          "size": 412,
+          "revision": "r-103",
+          "author": {
+            "kind": "outside",
+            "label": ""
+          },
+          "updatedAt": 1799827200000,
+          "summary": ""
+        },
+        {
+          "name": "open-questions.md",
+          "size": 233,
+          "revision": "r-104",
+          "author": {
+            "kind": "agent",
+            "label": "Review agent mail",
+            "session": "s-perch-2"
+          },
+          "updatedAt": 1799999980000,
+          "summary": "Does the phone keep the desktop's order after a restart?"
+        }
+      ],
+      "maxFiles": 64,
+      "maxChars": 16000,
+      "name": "perch"
+    },
+    "texts": {
+      "decisions.md": {
+        "entry": {
+          "name": "decisions.md",
+          "size": 1840,
+          "revision": "r-101",
+          "author": {
+            "kind": "agent",
+            "label": "Fix terminal slash input",
+            "session": "s-perch-2"
+          },
+          "updatedAt": 1799999700000,
+          "summary": "Why the sidebar sorts by attention first, and what was ruled out."
+        },
+        "text": "# Decisions\n\n- The sidebar sorts by attention first, then by recency.\n- A chat held in Done stays there while it is read.\n- Not done: sorting by project colour (no one asked).\n"
+      },
+      "terminal-notes.md": {
+        "entry": {
+          "name": "terminal-notes.md",
+          "size": 960,
+          "revision": "r-102",
+          "author": {
+            "kind": "person",
+            "label": "You"
+          },
+          "updatedAt": 1799989200000,
+          "summary": "The IME composition quirks seen in the terminal; what each fix changed."
+        },
+        "text": "# Terminal notes\n\nThe IME sends a composition end before the key; the fix keeps the order.\n"
+      },
+      "release-checklist.md": {
+        "entry": {
+          "name": "release-checklist.md",
+          "size": 412,
+          "revision": "r-103",
+          "author": {
+            "kind": "outside",
+            "label": ""
+          },
+          "updatedAt": 1799827200000,
+          "summary": ""
+        },
+        "text": "# Release checklist\n\n1. Build the desktop app.\n2. Run the alpha gates.\n"
+      },
+      "open-questions.md": {
+        "entry": {
+          "name": "open-questions.md",
+          "size": 233,
+          "revision": "r-104",
+          "author": {
+            "kind": "agent",
+            "label": "Review agent mail",
+            "session": "s-perch-2"
+          },
+          "updatedAt": 1799999980000,
+          "summary": "Does the phone keep the desktop's order after a restart?"
+        },
+        "text": "# Open questions\n\n- Does the phone keep the desktop's order after a restart?\n"
+      }
+    }
+  },
+  "states": [
+    {
+      "id": "list",
+      "title": "Four files: the count and caps line, New file, the 'Agents in this project use memory' box ticked, then a row per file (name in monospace, one-line summary cut with an ellipsis, 'who - how long ago - size') with its Delete button, and Close. The third was edited outside Perch and has no summary",
+      "props": {
+        "index": {
+          "projectId": "p-perch",
+          "files": [
+            {
+              "name": "decisions.md",
+              "size": 1840,
+              "revision": "r-101",
+              "author": {
+                "kind": "agent",
+                "label": "Fix terminal slash input",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999700000,
+              "summary": "Why the sidebar sorts by attention first, and what was ruled out."
+            },
+            {
+              "name": "terminal-notes.md",
+              "size": 960,
+              "revision": "r-102",
+              "author": {
+                "kind": "person",
+                "label": "You"
+              },
+              "updatedAt": 1799989200000,
+              "summary": "The IME composition quirks seen in the terminal; what each fix changed."
+            },
+            {
+              "name": "release-checklist.md",
+              "size": 412,
+              "revision": "r-103",
+              "author": {
+                "kind": "outside",
+                "label": ""
+              },
+              "updatedAt": 1799827200000,
+              "summary": ""
+            },
+            {
+              "name": "open-questions.md",
+              "size": 233,
+              "revision": "r-104",
+              "author": {
+                "kind": "agent",
+                "label": "Review agent mail",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999980000,
+              "summary": "Does the phone keep the desktop's order after a restart?"
+            }
+          ],
+          "maxFiles": 64,
+          "maxChars": 16000,
+          "name": "perch"
+        },
+        "texts": {
+          "decisions.md": {
+            "entry": {
+              "name": "decisions.md",
+              "size": 1840,
+              "revision": "r-101",
+              "author": {
+                "kind": "agent",
+                "label": "Fix terminal slash input",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999700000,
+              "summary": "Why the sidebar sorts by attention first, and what was ruled out."
+            },
+            "text": "# Decisions\n\n- The sidebar sorts by attention first, then by recency.\n- A chat held in Done stays there while it is read.\n- Not done: sorting by project colour (no one asked).\n"
+          },
+          "terminal-notes.md": {
+            "entry": {
+              "name": "terminal-notes.md",
+              "size": 960,
+              "revision": "r-102",
+              "author": {
+                "kind": "person",
+                "label": "You"
+              },
+              "updatedAt": 1799989200000,
+              "summary": "The IME composition quirks seen in the terminal; what each fix changed."
+            },
+            "text": "# Terminal notes\n\nThe IME sends a composition end before the key; the fix keeps the order.\n"
+          },
+          "release-checklist.md": {
+            "entry": {
+              "name": "release-checklist.md",
+              "size": 412,
+              "revision": "r-103",
+              "author": {
+                "kind": "outside",
+                "label": ""
+              },
+              "updatedAt": 1799827200000,
+              "summary": ""
+            },
+            "text": "# Release checklist\n\n1. Build the desktop app.\n2. Run the alpha gates.\n"
+          },
+          "open-questions.md": {
+            "entry": {
+              "name": "open-questions.md",
+              "size": 233,
+              "revision": "r-104",
+              "author": {
+                "kind": "agent",
+                "label": "Review agent mail",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999980000,
+              "summary": "Does the phone keep the desktop's order after a restart?"
+            },
+            "text": "# Open questions\n\n- Does the phone keep the desktop's order after a restart?\n"
+          }
+        }
+      }
+    },
+    {
+      "id": "empty",
+      "title": "No file yet: '0 / 64 files, up to 16000 characters each' and 'No memory files yet.'",
+      "props": {
+        "index": {
+          "projectId": "p-perch",
+          "files": [],
+          "maxFiles": 64,
+          "maxChars": 16000,
+          "name": "perch"
+        }
+      }
+    },
+    {
+      "id": "loading",
+      "title": "The core has not answered: 'Loading...', New file disabled (40%), no memory box",
+      "props": {
+        "loading": true
+      }
+    },
+    {
+      "id": "memory-off",
+      "title": "The person turned memory off for the project: the box is unticked and its line explains that agents are refused but the files stay",
+      "props": {
+        "index": {
+          "projectId": "p-perch",
+          "files": [
+            {
+              "name": "decisions.md",
+              "size": 1840,
+              "revision": "r-101",
+              "author": {
+                "kind": "agent",
+                "label": "Fix terminal slash input",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999700000,
+              "summary": "Why the sidebar sorts by attention first, and what was ruled out."
+            },
+            {
+              "name": "terminal-notes.md",
+              "size": 960,
+              "revision": "r-102",
+              "author": {
+                "kind": "person",
+                "label": "You"
+              },
+              "updatedAt": 1799989200000,
+              "summary": "The IME composition quirks seen in the terminal; what each fix changed."
+            },
+            {
+              "name": "release-checklist.md",
+              "size": 412,
+              "revision": "r-103",
+              "author": {
+                "kind": "outside",
+                "label": ""
+              },
+              "updatedAt": 1799827200000,
+              "summary": ""
+            },
+            {
+              "name": "open-questions.md",
+              "size": 233,
+              "revision": "r-104",
+              "author": {
+                "kind": "agent",
+                "label": "Review agent mail",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999980000,
+              "summary": "Does the phone keep the desktop's order after a restart?"
+            }
+          ],
+          "maxFiles": 64,
+          "maxChars": 16000,
+          "name": "perch",
+          "off": true
+        },
+        "texts": {
+          "decisions.md": {
+            "entry": {
+              "name": "decisions.md",
+              "size": 1840,
+              "revision": "r-101",
+              "author": {
+                "kind": "agent",
+                "label": "Fix terminal slash input",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999700000,
+              "summary": "Why the sidebar sorts by attention first, and what was ruled out."
+            },
+            "text": "# Decisions\n\n- The sidebar sorts by attention first, then by recency.\n- A chat held in Done stays there while it is read.\n- Not done: sorting by project colour (no one asked).\n"
+          },
+          "terminal-notes.md": {
+            "entry": {
+              "name": "terminal-notes.md",
+              "size": 960,
+              "revision": "r-102",
+              "author": {
+                "kind": "person",
+                "label": "You"
+              },
+              "updatedAt": 1799989200000,
+              "summary": "The IME composition quirks seen in the terminal; what each fix changed."
+            },
+            "text": "# Terminal notes\n\nThe IME sends a composition end before the key; the fix keeps the order.\n"
+          },
+          "release-checklist.md": {
+            "entry": {
+              "name": "release-checklist.md",
+              "size": 412,
+              "revision": "r-103",
+              "author": {
+                "kind": "outside",
+                "label": ""
+              },
+              "updatedAt": 1799827200000,
+              "summary": ""
+            },
+            "text": "# Release checklist\n\n1. Build the desktop app.\n2. Run the alpha gates.\n"
+          },
+          "open-questions.md": {
+            "entry": {
+              "name": "open-questions.md",
+              "size": 233,
+              "revision": "r-104",
+              "author": {
+                "kind": "agent",
+                "label": "Review agent mail",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999980000,
+              "summary": "Does the phone keep the desktop's order after a restart?"
+            },
+            "text": "# Open questions\n\n- Does the phone keep the desktop's order after a restart?\n"
+          }
+        }
+      }
+    },
+    {
+      "id": "open-file",
+      "title": "A file opened (the row pressed): its name in monospace, the Text field with its length over the cap, Back and Save",
+      "props": {
+        "index": {
+          "projectId": "p-perch",
+          "files": [
+            {
+              "name": "decisions.md",
+              "size": 1840,
+              "revision": "r-101",
+              "author": {
+                "kind": "agent",
+                "label": "Fix terminal slash input",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999700000,
+              "summary": "Why the sidebar sorts by attention first, and what was ruled out."
+            },
+            {
+              "name": "terminal-notes.md",
+              "size": 960,
+              "revision": "r-102",
+              "author": {
+                "kind": "person",
+                "label": "You"
+              },
+              "updatedAt": 1799989200000,
+              "summary": "The IME composition quirks seen in the terminal; what each fix changed."
+            },
+            {
+              "name": "release-checklist.md",
+              "size": 412,
+              "revision": "r-103",
+              "author": {
+                "kind": "outside",
+                "label": ""
+              },
+              "updatedAt": 1799827200000,
+              "summary": ""
+            },
+            {
+              "name": "open-questions.md",
+              "size": 233,
+              "revision": "r-104",
+              "author": {
+                "kind": "agent",
+                "label": "Review agent mail",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999980000,
+              "summary": "Does the phone keep the desktop's order after a restart?"
+            }
+          ],
+          "maxFiles": 64,
+          "maxChars": 16000,
+          "name": "perch"
+        },
+        "texts": {
+          "decisions.md": {
+            "entry": {
+              "name": "decisions.md",
+              "size": 1840,
+              "revision": "r-101",
+              "author": {
+                "kind": "agent",
+                "label": "Fix terminal slash input",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999700000,
+              "summary": "Why the sidebar sorts by attention first, and what was ruled out."
+            },
+            "text": "# Decisions\n\n- The sidebar sorts by attention first, then by recency.\n- A chat held in Done stays there while it is read.\n- Not done: sorting by project colour (no one asked).\n"
+          },
+          "terminal-notes.md": {
+            "entry": {
+              "name": "terminal-notes.md",
+              "size": 960,
+              "revision": "r-102",
+              "author": {
+                "kind": "person",
+                "label": "You"
+              },
+              "updatedAt": 1799989200000,
+              "summary": "The IME composition quirks seen in the terminal; what each fix changed."
+            },
+            "text": "# Terminal notes\n\nThe IME sends a composition end before the key; the fix keeps the order.\n"
+          },
+          "release-checklist.md": {
+            "entry": {
+              "name": "release-checklist.md",
+              "size": 412,
+              "revision": "r-103",
+              "author": {
+                "kind": "outside",
+                "label": ""
+              },
+              "updatedAt": 1799827200000,
+              "summary": ""
+            },
+            "text": "# Release checklist\n\n1. Build the desktop app.\n2. Run the alpha gates.\n"
+          },
+          "open-questions.md": {
+            "entry": {
+              "name": "open-questions.md",
+              "size": 233,
+              "revision": "r-104",
+              "author": {
+                "kind": "agent",
+                "label": "Review agent mail",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999980000,
+              "summary": "Does the phone keep the desktop's order after a restart?"
+            },
+            "text": "# Open questions\n\n- Does the phone keep the desktop's order after a restart?\n"
+          }
+        }
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"memory-open-decisions.md\"]"
+        }
+      ]
+    },
+    {
+      "id": "new-file",
+      "title": "New file pressed: a name field (placeholder 'name.md') in place of the file's name, an empty text field with 0 / 16000, and Save disabled while the name is empty",
+      "props": {
+        "index": {
+          "projectId": "p-perch",
+          "files": [
+            {
+              "name": "decisions.md",
+              "size": 1840,
+              "revision": "r-101",
+              "author": {
+                "kind": "agent",
+                "label": "Fix terminal slash input",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999700000,
+              "summary": "Why the sidebar sorts by attention first, and what was ruled out."
+            },
+            {
+              "name": "terminal-notes.md",
+              "size": 960,
+              "revision": "r-102",
+              "author": {
+                "kind": "person",
+                "label": "You"
+              },
+              "updatedAt": 1799989200000,
+              "summary": "The IME composition quirks seen in the terminal; what each fix changed."
+            },
+            {
+              "name": "release-checklist.md",
+              "size": 412,
+              "revision": "r-103",
+              "author": {
+                "kind": "outside",
+                "label": ""
+              },
+              "updatedAt": 1799827200000,
+              "summary": ""
+            },
+            {
+              "name": "open-questions.md",
+              "size": 233,
+              "revision": "r-104",
+              "author": {
+                "kind": "agent",
+                "label": "Review agent mail",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999980000,
+              "summary": "Does the phone keep the desktop's order after a restart?"
+            }
+          ],
+          "maxFiles": 64,
+          "maxChars": 16000,
+          "name": "perch"
+        },
+        "texts": {
+          "decisions.md": {
+            "entry": {
+              "name": "decisions.md",
+              "size": 1840,
+              "revision": "r-101",
+              "author": {
+                "kind": "agent",
+                "label": "Fix terminal slash input",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999700000,
+              "summary": "Why the sidebar sorts by attention first, and what was ruled out."
+            },
+            "text": "# Decisions\n\n- The sidebar sorts by attention first, then by recency.\n- A chat held in Done stays there while it is read.\n- Not done: sorting by project colour (no one asked).\n"
+          },
+          "terminal-notes.md": {
+            "entry": {
+              "name": "terminal-notes.md",
+              "size": 960,
+              "revision": "r-102",
+              "author": {
+                "kind": "person",
+                "label": "You"
+              },
+              "updatedAt": 1799989200000,
+              "summary": "The IME composition quirks seen in the terminal; what each fix changed."
+            },
+            "text": "# Terminal notes\n\nThe IME sends a composition end before the key; the fix keeps the order.\n"
+          },
+          "release-checklist.md": {
+            "entry": {
+              "name": "release-checklist.md",
+              "size": 412,
+              "revision": "r-103",
+              "author": {
+                "kind": "outside",
+                "label": ""
+              },
+              "updatedAt": 1799827200000,
+              "summary": ""
+            },
+            "text": "# Release checklist\n\n1. Build the desktop app.\n2. Run the alpha gates.\n"
+          },
+          "open-questions.md": {
+            "entry": {
+              "name": "open-questions.md",
+              "size": 233,
+              "revision": "r-104",
+              "author": {
+                "kind": "agent",
+                "label": "Review agent mail",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999980000,
+              "summary": "Does the phone keep the desktop's order after a restart?"
+            },
+            "text": "# Open questions\n\n- Does the phone keep the desktop's order after a restart?\n"
+          }
+        }
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"memory-new\"]"
+        }
+      ]
+    },
+    {
+      "id": "conflict",
+      "title": "Save pressed on a file someone else changed meanwhile: the red notice with 'Load their version', the edit kept in the field, Save disabled",
+      "props": {
+        "index": {
+          "projectId": "p-perch",
+          "files": [
+            {
+              "name": "decisions.md",
+              "size": 1840,
+              "revision": "r-101",
+              "author": {
+                "kind": "agent",
+                "label": "Fix terminal slash input",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999700000,
+              "summary": "Why the sidebar sorts by attention first, and what was ruled out."
+            },
+            {
+              "name": "terminal-notes.md",
+              "size": 960,
+              "revision": "r-102",
+              "author": {
+                "kind": "person",
+                "label": "You"
+              },
+              "updatedAt": 1799989200000,
+              "summary": "The IME composition quirks seen in the terminal; what each fix changed."
+            },
+            {
+              "name": "release-checklist.md",
+              "size": 412,
+              "revision": "r-103",
+              "author": {
+                "kind": "outside",
+                "label": ""
+              },
+              "updatedAt": 1799827200000,
+              "summary": ""
+            },
+            {
+              "name": "open-questions.md",
+              "size": 233,
+              "revision": "r-104",
+              "author": {
+                "kind": "agent",
+                "label": "Review agent mail",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999980000,
+              "summary": "Does the phone keep the desktop's order after a restart?"
+            }
+          ],
+          "maxFiles": 64,
+          "maxChars": 16000,
+          "name": "perch"
+        },
+        "texts": {
+          "decisions.md": {
+            "entry": {
+              "name": "decisions.md",
+              "size": 1840,
+              "revision": "r-101",
+              "author": {
+                "kind": "agent",
+                "label": "Fix terminal slash input",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999700000,
+              "summary": "Why the sidebar sorts by attention first, and what was ruled out."
+            },
+            "text": "# Decisions\n\n- The sidebar sorts by attention first, then by recency.\n- A chat held in Done stays there while it is read.\n- Not done: sorting by project colour (no one asked).\n"
+          },
+          "terminal-notes.md": {
+            "entry": {
+              "name": "terminal-notes.md",
+              "size": 960,
+              "revision": "r-102",
+              "author": {
+                "kind": "person",
+                "label": "You"
+              },
+              "updatedAt": 1799989200000,
+              "summary": "The IME composition quirks seen in the terminal; what each fix changed."
+            },
+            "text": "# Terminal notes\n\nThe IME sends a composition end before the key; the fix keeps the order.\n"
+          },
+          "release-checklist.md": {
+            "entry": {
+              "name": "release-checklist.md",
+              "size": 412,
+              "revision": "r-103",
+              "author": {
+                "kind": "outside",
+                "label": ""
+              },
+              "updatedAt": 1799827200000,
+              "summary": ""
+            },
+            "text": "# Release checklist\n\n1. Build the desktop app.\n2. Run the alpha gates.\n"
+          },
+          "open-questions.md": {
+            "entry": {
+              "name": "open-questions.md",
+              "size": 233,
+              "revision": "r-104",
+              "author": {
+                "kind": "agent",
+                "label": "Review agent mail",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999980000,
+              "summary": "Does the phone keep the desktop's order after a restart?"
+            },
+            "text": "# Open questions\n\n- Does the phone keep the desktop's order after a restart?\n"
+          }
+        },
+        "saved": {
+          "projectId": "p-perch",
+          "files": [
+            {
+              "name": "decisions.md",
+              "size": 1840,
+              "revision": "r-101",
+              "author": {
+                "kind": "agent",
+                "label": "Fix terminal slash input",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999700000,
+              "summary": "Why the sidebar sorts by attention first, and what was ruled out."
+            },
+            {
+              "name": "terminal-notes.md",
+              "size": 960,
+              "revision": "r-102",
+              "author": {
+                "kind": "person",
+                "label": "You"
+              },
+              "updatedAt": 1799989200000,
+              "summary": "The IME composition quirks seen in the terminal; what each fix changed."
+            },
+            {
+              "name": "release-checklist.md",
+              "size": 412,
+              "revision": "r-103",
+              "author": {
+                "kind": "outside",
+                "label": ""
+              },
+              "updatedAt": 1799827200000,
+              "summary": ""
+            },
+            {
+              "name": "open-questions.md",
+              "size": 233,
+              "revision": "r-104",
+              "author": {
+                "kind": "agent",
+                "label": "Review agent mail",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999980000,
+              "summary": "Does the phone keep the desktop's order after a restart?"
+            }
+          ],
+          "maxFiles": 64,
+          "maxChars": 16000,
+          "name": "perch",
+          "conflict": true
+        }
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"memory-open-decisions.md\"]"
+        },
+        {
+          "click": "[data-testid=\"memory-save\"]"
+        }
+      ]
+    },
+    {
+      "id": "delete-ask",
+      "title": "Delete pressed on a row: the confirmation 'Delete decisions.md? Agents and people lose this note.' over the dialog (both scrims stacked)",
+      "props": {
+        "index": {
+          "projectId": "p-perch",
+          "files": [
+            {
+              "name": "decisions.md",
+              "size": 1840,
+              "revision": "r-101",
+              "author": {
+                "kind": "agent",
+                "label": "Fix terminal slash input",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999700000,
+              "summary": "Why the sidebar sorts by attention first, and what was ruled out."
+            },
+            {
+              "name": "terminal-notes.md",
+              "size": 960,
+              "revision": "r-102",
+              "author": {
+                "kind": "person",
+                "label": "You"
+              },
+              "updatedAt": 1799989200000,
+              "summary": "The IME composition quirks seen in the terminal; what each fix changed."
+            },
+            {
+              "name": "release-checklist.md",
+              "size": 412,
+              "revision": "r-103",
+              "author": {
+                "kind": "outside",
+                "label": ""
+              },
+              "updatedAt": 1799827200000,
+              "summary": ""
+            },
+            {
+              "name": "open-questions.md",
+              "size": 233,
+              "revision": "r-104",
+              "author": {
+                "kind": "agent",
+                "label": "Review agent mail",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999980000,
+              "summary": "Does the phone keep the desktop's order after a restart?"
+            }
+          ],
+          "maxFiles": 64,
+          "maxChars": 16000,
+          "name": "perch"
+        },
+        "texts": {
+          "decisions.md": {
+            "entry": {
+              "name": "decisions.md",
+              "size": 1840,
+              "revision": "r-101",
+              "author": {
+                "kind": "agent",
+                "label": "Fix terminal slash input",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999700000,
+              "summary": "Why the sidebar sorts by attention first, and what was ruled out."
+            },
+            "text": "# Decisions\n\n- The sidebar sorts by attention first, then by recency.\n- A chat held in Done stays there while it is read.\n- Not done: sorting by project colour (no one asked).\n"
+          },
+          "terminal-notes.md": {
+            "entry": {
+              "name": "terminal-notes.md",
+              "size": 960,
+              "revision": "r-102",
+              "author": {
+                "kind": "person",
+                "label": "You"
+              },
+              "updatedAt": 1799989200000,
+              "summary": "The IME composition quirks seen in the terminal; what each fix changed."
+            },
+            "text": "# Terminal notes\n\nThe IME sends a composition end before the key; the fix keeps the order.\n"
+          },
+          "release-checklist.md": {
+            "entry": {
+              "name": "release-checklist.md",
+              "size": 412,
+              "revision": "r-103",
+              "author": {
+                "kind": "outside",
+                "label": ""
+              },
+              "updatedAt": 1799827200000,
+              "summary": ""
+            },
+            "text": "# Release checklist\n\n1. Build the desktop app.\n2. Run the alpha gates.\n"
+          },
+          "open-questions.md": {
+            "entry": {
+              "name": "open-questions.md",
+              "size": 233,
+              "revision": "r-104",
+              "author": {
+                "kind": "agent",
+                "label": "Review agent mail",
+                "session": "s-perch-2"
+              },
+              "updatedAt": 1799999980000,
+              "summary": "Does the phone keep the desktop's order after a restart?"
+            },
+            "text": "# Open questions\n\n- Does the phone keep the desktop's order after a restart?\n"
+          }
+        }
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"memory-delete-decisions.md\"]"
+        }
+      ]
+    }
+  ]
+}

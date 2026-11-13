@@ -1,0 +1,13 @@
+{
+  "props": {
+    "query": ""
+  },
+  "steps": [
+    {
+      "type": {
+        "selector": "[data-testid=\"term-search-input\"]",
+        "text": "connection refused"
+      }
+    }
+  ]
+}
