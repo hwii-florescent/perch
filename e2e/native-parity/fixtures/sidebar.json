@@ -1,0 +1,95 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "sidebar",
+  "note": "What the app's store holds (core protocol shapes: SessionSummary, ProjectSummary, WorkspaceSummary, SshHostEntry, HostInfoMessage, server.info) when a core has sent it. The stock sidebar derives its Navigation and Hosts (the @perch/sdk shapes) from it with the app's own rules. Times are fixed epoch milliseconds, ids are fixed.",
+  "size": { "width": 240, "height": 800 },
+  "window": { "width": 1000, "height": 800 },
+  "data": {
+    "connected": true,
+    "serverInfo": { "type": "server.info", "hostname": "studio", "isSsh": false, "platform": "macOS", "capabilities": ["workspace.snapshot"] },
+    "status": { "cwd": "/Users/dev/code/perch", "branch": "main" },
+    "workspaceCapabilities": ["workspace.snapshot"],
+    "workspaceCapabilitiesByHost": { "buildbox": ["workspace.snapshot"] },
+    "workspaceSnapshotByHost": { "local": { "state": "ready" }, "buildbox": { "state": "ready" } },
+    "hosts": [
+      { "id": "buildbox", "name": "buildbox", "sshHost": "buildbox.lan", "remotePort": 7788, "enabled": true, "mode": "perch" }
+    ],
+    "hostStates": {
+      "buildbox": { "type": "host.info", "hostId": "buildbox", "name": "buildbox", "state": "connected", "hostname": "buildbox", "platform": "linux", "isSsh": true }
+    },
+    "activeHostId": "local",
+    "sessionId": "s-perch-1",
+    "activeWorkspaceId": "w-perch-main",
+    "workspaceProjects": [
+      { "id": "p-perch", "hostId": "local", "name": "perch", "path": "/Users/dev/code/perch", "repoPath": "/Users/dev/code/perch", "favorite": true, "createdAt": 1767225600000, "updatedAt": 1767312000000 },
+      { "id": "p-api", "hostId": "local", "name": "api-server", "path": "/Users/dev/code/api-server", "repoPath": "/Users/dev/code/api-server", "favorite": false, "createdAt": 1767225600000, "updatedAt": 1767308400000 },
+      { "id": "p-notes", "hostId": "local", "name": "notes", "path": "/Users/dev/notes", "favorite": false, "createdAt": 1767225600000, "updatedAt": 1767304800000 },
+      { "id": "p-site", "hostId": "local", "name": "scratch-site", "path": "/Users/dev/code/scratch-site", "repoPath": "/Users/dev/code/scratch-site", "favorite": false, "createdAt": 1767225600000, "updatedAt": 1767301200000 },
+      { "id": "p-chats", "hostId": "local", "name": "Quickchat", "path": "/Users/dev/.perch/scratch", "favorite": false, "createdAt": 1767225600000, "updatedAt": 1767225600000 },
+      { "id": "p-infra", "hostId": "buildbox", "name": "infra", "path": "/srv/infra", "repoPath": "/srv/infra", "favorite": false, "createdAt": 1767225600000, "updatedAt": 1767312000000 },
+      { "id": "p-jobs", "hostId": "buildbox", "name": "nightly-jobs", "path": "/srv/nightly-jobs", "favorite": false, "createdAt": 1767225600000, "updatedAt": 1767308400000 }
+    ],
+    "workspaces": [
+      { "id": "w-perch-main", "projectId": "p-perch", "hostId": "local", "path": "/Users/dev/code/perch", "name": "perch", "branch": "main", "dirty": true, "state": "active", "createdAt": 1767225600000, "updatedAt": 1767312000000 },
+      { "id": "w-perch-sidebar", "projectId": "p-perch", "hostId": "local", "path": "/Users/dev/code/perch-wt/sidebar-port", "name": "sidebar-port", "branch": "feat/native-sidebar", "dirty": false, "parentWorkspaceId": "w-perch-main", "pinned": true, "state": "active", "createdAt": 1767229200000, "updatedAt": 1767312000000 },
+      { "id": "w-perch-spike", "projectId": "p-perch", "hostId": "local", "path": "/Users/dev/code/perch-wt/ghostty-spike", "name": "ghostty-spike", "branch": "spike/ghostty", "dirty": false, "parentWorkspaceId": "w-perch-main", "hidden": true, "state": "active", "createdAt": 1767232800000, "updatedAt": 1767232800000 },
+      { "id": "w-api-main", "projectId": "p-api", "hostId": "local", "path": "/Users/dev/code/api-server", "name": "api-server", "branch": "main", "dirty": false, "state": "active", "createdAt": 1767225600000, "updatedAt": 1767308400000 },
+      { "id": "w-api-rate", "projectId": "p-api", "hostId": "local", "path": "/Users/dev/code/api-server-wt/rate-limit", "name": "rate-limit", "branch": "feat/rate-limit", "dirty": true, "parentWorkspaceId": "w-api-main", "state": "active", "createdAt": 1767229200000, "updatedAt": 1767308400000 },
+      { "id": "w-notes", "projectId": "p-notes", "hostId": "local", "path": "/Users/dev/notes", "name": "notes", "dirty": false, "state": "active", "createdAt": 1767225600000, "updatedAt": 1767304800000 },
+      { "id": "w-site", "projectId": "p-site", "hostId": "local", "path": "/Users/dev/code/scratch-site", "name": "scratch-site", "branch": "main", "dirty": false, "state": "active", "createdAt": 1767225600000, "updatedAt": 1767301200000 },
+      { "id": "w-chats", "projectId": "p-chats", "hostId": "local", "path": "/Users/dev/.perch/scratch", "name": "Quickchat", "dirty": false, "state": "active", "createdAt": 1767225600000, "updatedAt": 1767225600000 },
+      { "id": "w-infra-main", "projectId": "p-infra", "hostId": "buildbox", "path": "/srv/infra", "name": "infra", "branch": "main", "dirty": false, "state": "active", "createdAt": 1767225600000, "updatedAt": 1767312000000 },
+      { "id": "w-jobs-main", "projectId": "p-jobs", "hostId": "buildbox", "path": "/srv/nightly-jobs", "name": "nightly-jobs", "dirty": false, "state": "active", "createdAt": 1767225600000, "updatedAt": 1767308400000 }
+    ],
+    "sessions": [
+      { "id": "s-perch-1", "title": "Port the sidebar to GPUI", "cwd": "/Users/dev/code/perch", "createdAt": 1767268800000, "status": "running", "hostId": "local", "cliProviderId": "claude", "currentBranch": "main", "projectId": "p-perch", "workspaceId": "w-perch-main" },
+      { "id": "s-perch-2", "title": "Fix terminal slash input", "cwd": "/Users/dev/code/perch", "createdAt": 1767265200000, "status": "idle", "hostId": "local", "unseen": true, "cliProviderId": "codex", "currentBranch": "main", "projectId": "p-perch", "workspaceId": "w-perch-main" },
+      { "id": "s-perch-3", "title": "Review agent mail", "cwd": "/Users/dev/code/perch", "createdAt": 1767261600000, "status": "idle", "hostId": "local", "cliProviderId": "claude", "currentBranch": "main", "projectId": "p-perch", "workspaceId": "w-perch-main" },
+      { "id": "s-api-1", "title": "Add rate limiting", "cwd": "/Users/dev/code/api-server-wt/rate-limit", "createdAt": 1767254400000, "status": "running", "hostId": "local", "cliProviderId": "claude", "currentBranch": "feat/rate-limit", "projectId": "p-api", "workspaceId": "w-api-rate" },
+      { "id": "s-api-2", "title": "Load test the gateway", "cwd": "/Users/dev/code/api-server", "createdAt": 1767250800000, "status": "running", "hostId": "local", "cliProviderId": "codex", "currentBranch": "main", "projectId": "p-api", "workspaceId": "w-api-main" },
+      { "id": "s-notes-1", "title": "Trip planning", "cwd": "/Users/dev/notes", "createdAt": 1767247200000, "status": "idle", "hostId": "local", "cliProviderId": "claude", "projectId": "p-notes", "workspaceId": "w-notes" },
+      { "id": "s-chat-1", "title": "Explain git rebase", "cwd": "/Users/dev/.perch/scratch", "createdAt": 1767243600000, "status": "idle", "hostId": "local", "cliProviderId": "claude", "projectId": "p-chats", "workspaceId": "w-chats" },
+      { "id": "s-chat-2", "title": "Regex for ISO dates", "cwd": "/Users/dev/.perch/scratch", "createdAt": 1767240000000, "status": "idle", "hostId": "local", "unseen": true, "cliProviderId": "codex", "projectId": "p-chats", "workspaceId": "w-chats" },
+      { "id": "s-infra-1", "title": "Rotate the CI runners", "cwd": "/srv/infra", "createdAt": 1767268800000, "status": "running", "hostId": "buildbox", "cliProviderId": "claude", "currentBranch": "main", "projectId": "p-infra", "workspaceId": "w-infra-main" },
+      { "id": "s-infra-2", "title": "Audit open ports", "cwd": "/srv/infra", "createdAt": 1767265200000, "status": "idle", "hostId": "buildbox", "cliProviderId": "codex", "currentBranch": "main", "projectId": "p-infra", "workspaceId": "w-infra-main" },
+      { "id": "s-jobs-1", "title": "Why did the export fail", "cwd": "/srv/nightly-jobs", "createdAt": 1767261600000, "status": "idle", "hostId": "buildbox", "unseen": true, "cliProviderId": "claude", "projectId": "p-jobs", "workspaceId": "w-jobs-main" }
+    ]
+  },
+  "states": [
+    {
+      "id": "by-project",
+      "title": "Projects and their workspaces and sessions, every project open",
+      "view": { "organize": "project", "sortByAttention": true, "showTerminals": false, "collapsedProjects": [] },
+      "patch": {}
+    },
+    {
+      "id": "by-status",
+      "title": "Sessions grouped by what each asks of you, each group split by project",
+      "view": { "organize": "status", "sortByAttention": true, "showTerminals": false, "collapsedProjects": [] },
+      "patch": {}
+    },
+    {
+      "id": "folded-rollup",
+      "title": "Two projects folded, each showing its most urgent state as a rollup badge",
+      "view": { "organize": "project", "sortByAttention": true, "showTerminals": false, "collapsedProjects": ["p-perch", "p-api"] },
+      "patch": {}
+    },
+    {
+      "id": "needs-you",
+      "title": "One session is blocked on the person: its row and the header count say so",
+      "view": { "organize": "project", "sortByAttention": true, "showTerminals": false, "collapsedProjects": [] },
+      "patch": { "sessions": { "s-perch-3": { "blocked": true } } }
+    },
+    {
+      "id": "offline-host",
+      "title": "The shown host is unreachable: its sessions are listed once, as last known",
+      "view": { "organize": "status", "sortByAttention": true, "showTerminals": false, "collapsedProjects": [] },
+      "patch": {
+        "activeHostId": "buildbox",
+        "sessionId": null,
+        "activeWorkspaceId": null,
+        "hostStates": { "buildbox": { "type": "host.info", "hostId": "buildbox", "name": "buildbox", "state": "error", "error": "ssh: connect to host buildbox.lan port 22: Operation timed out" } }
+      }
+    }
+  ]
+}
