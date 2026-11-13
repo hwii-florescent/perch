@@ -5,17 +5,21 @@
 //! - Navigator: the Navigator's key opens it over the whole window; typing narrows it; Enter or a
 //!   click on a row shows that session; Escape, the key again, or a press on the dim backdrop closes
 //!   it without anything beneath taking the press.
+//! - Pane menu: a right-click in a pane opens it at the press; Rename pane turns it into a field
+//!   that has the keyboard, and Enter or OK renames that pane's session; Escape and a press outside
+//!   close it without anything beneath taking the press.
 //!
 //! Offscreen, as the other render tests: no window is shown or focused, no core runs, and every
 //! event goes through the window's own dispatch.
 
-use futures::channel::mpsc::unbounded;
+use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 use gpui::{
     point, px, size, AppContext as _, Focusable as _, HeadlessAppContext, Keystroke, Modifiers,
     MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput, Window, WindowHandle,
 };
 use gpui_shell::probe::{self, ProbeRecord};
 use perch_core::protocol::ServerMessage;
+use perch_native::client::Command;
 use perch_native::mods::{self, POLL};
 use perch_native::sidebar::State;
 use perch_native::ui::{OpenSession, Workspace};
@@ -62,6 +66,7 @@ struct Rig {
     cx: HeadlessAppContext,
     window: WindowHandle<Workspace>,
     opened: Rc<RefCell<Vec<OpenSession>>>,
+    asked: UnboundedReceiver<Command>,
 }
 
 impl Rig {
@@ -112,12 +117,16 @@ impl Rig {
 
     /// A left press and release at `(x, y)`, through the window's dispatch.
     fn mouse(&mut self, x: f32, y: f32) {
+        self.mouse_with(MouseButton::Left, x, y);
+    }
+
+    fn mouse_with(&mut self, button: MouseButton, x: f32, y: f32) {
         let position = point(px(x), px(y));
         self.cx
             .update_window(self.window.into(), |_, window: &mut Window, cx| {
                 window.dispatch_event(
                     PlatformInput::MouseDown(MouseDownEvent {
-                        button: MouseButton::Left,
+                        button,
                         position,
                         modifiers: Modifiers::default(),
                         click_count: 1,
@@ -127,7 +136,7 @@ impl Rig {
                 );
                 window.dispatch_event(
                     PlatformInput::MouseUp(MouseUpEvent {
-                        button: MouseButton::Left,
+                        button,
                         position,
                         modifiers: Modifiers::default(),
                         click_count: 1,
@@ -198,6 +207,11 @@ impl Rig {
                 .focus_handle(cx)
                 .is_focused(window)
         })
+    }
+
+    /// What the window asked the core for since the last call.
+    fn asked(&mut self) -> Vec<Command> {
+        std::iter::from_fn(|| self.asked.try_recv().ok()).collect()
     }
 
     fn shown(&mut self) -> Option<String> {
@@ -287,6 +301,75 @@ fn navigator(rig: &mut Rig) {
     println!("navigator: ok");
 }
 
+fn pane_menu(rig: &mut Rig) {
+    // A right-click in the pane opens the stock menu at the press, with the keyboard.
+    let (x, y) = (600., 300.);
+    rig.mouse_with(MouseButton::Right, x, y);
+    assert_eq!(rig.open_screens(), ["pane-menu"]);
+    let panel = rig.record("pane-menu").expect("the menu is drawn");
+    assert_eq!(panel.bounds.origin, point(px(x), px(y)), "at the press");
+    let rows = rig.keys("pane-menu-item");
+    assert_eq!(
+        rows,
+        [
+            "split-right",
+            "split-down",
+            "split-session",
+            "zoom",
+            "rename",
+            "close"
+        ],
+        "no Show beside (the native split cannot) and no Stop agent (nothing to stop)"
+    );
+
+    // Escape closes it and the terminal has the keyboard again.
+    rig.press("escape");
+    assert!(rig.open_screens().is_empty(), "Escape closed it");
+    assert!(rig.terminal_focused());
+
+    // A press outside closes it, and nothing beneath takes that press (the sidebar's first row
+    // sits under this corner).
+    let before = rig.opened.borrow().len();
+    rig.mouse_with(MouseButton::Right, x, y);
+    rig.mouse(20., HEIGHT - 20.);
+    assert!(rig.open_screens().is_empty(), "the press outside closed it");
+    assert_eq!(
+        rig.opened.borrow().len(),
+        before,
+        "nothing beneath was pressed"
+    );
+    assert!(rig.terminal_focused());
+
+    // Rename pane: the rows become a field holding the title, with the keyboard; Enter renames
+    // the pane's session.
+    rig.mouse_with(MouseButton::Right, x, y);
+    rig.asked();
+    rig.click("pane-menu-item:rename");
+    assert_eq!(rig.open_screens(), ["pane-menu"], "a press inside keeps it");
+    assert!(rig.record("pane-menu-rename-input").is_some());
+    assert!(!rig.terminal_focused(), "the field has the keyboard");
+    rig.type_text(" two");
+    rig.press("enter");
+    assert!(rig.open_screens().is_empty(), "Enter closed it");
+    let renamed = rig.asked().into_iter().any(|c| {
+        matches!(c, Command::Rename { session_id, title } if session_id == "alpha" && title == "alpha two")
+    });
+    assert!(renamed, "the rename reached the window and its core");
+    assert!(rig.terminal_focused());
+
+    // OK renames too.
+    rig.mouse_with(MouseButton::Right, x, y);
+    rig.click("pane-menu-item:rename");
+    rig.type_text("3");
+    rig.click("pane-menu-rename-confirm");
+    assert!(rig.open_screens().is_empty());
+    let renamed = rig.asked().into_iter().any(|c| {
+        matches!(c, Command::Rename { session_id, title } if session_id == "alpha" && title == "alpha3")
+    });
+    assert!(renamed, "OK renamed it");
+    println!("pane-menu: ok");
+}
+
 fn main() {
     let scratch: PathBuf =
         std::env::temp_dir().join(format!("perch-floating-window-{}", std::process::id()));
@@ -300,7 +383,7 @@ fn main() {
         Arc::new(()),
         gpui_platform::current_headless_renderer,
     );
-    let (tx, _asked) = unbounded();
+    let (tx, asked) = unbounded();
     let model = state().model();
     let window = cx
         .open_window(size(px(WIDTH), px(HEIGHT)), |_, cx| {
@@ -320,7 +403,12 @@ fn main() {
             opened.borrow_mut().push(event.clone())
         })
     });
-    let mut rig = Rig { cx, window, opened };
+    let mut rig = Rig {
+        cx,
+        window,
+        opened,
+        asked,
+    };
     rig.ws(|ws, _, cx| {
         ws.sidebar().update(cx, |s, cx| {
             s.open("local".into(), "alpha".into(), Some("claude".into()), cx)
@@ -333,6 +421,7 @@ fn main() {
     );
 
     navigator(&mut rig);
+    pane_menu(&mut rig);
 
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())

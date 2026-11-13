@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fixture, mountSidebar, THEMES } from "./support.mjs";
-import { scrollGutters, snapColumns, snapRows } from "../gpui.mjs";
+import { scrollGutters, shrinkWrapBases, snapColumns, snapRows } from "../gpui.mjs";
 
 /** A gpui-kit stand-in that records each call, and keeps the handlers. */
 function recordingKit() {
@@ -193,4 +193,33 @@ test("a scroller whose known content overflows its room makes room for the scrol
   const fits = Object.assign(new Map(), { heights });
   scrollGutters([roomy], fits);
   assert.equal(fits.get(short), undefined, "content that fits takes no room");
+});
+
+test("boxes of wrapping text in whole-pixel lines keep the column's running total", () => {
+  const box = (style, children = []) => ({ kind: "div", style, children });
+  const items = Array.from({ length: 8 }, () => box({ pt: 7.2, pb: 7.2, line_height: "16px", text_size: 13.12 }, [{ kind: "text", text: "may wrap here" }]));
+  const root = box({ pt: 4.8 }, items);
+  const snapped = snapColumns([root], 2);
+  let laid = snapped.get(root).pt;
+  items.forEach((item, i) => {
+    const s = snapped.get(item);
+    laid += s.pt + 16 + s.pb;
+    const exact = 4.8 + (i + 1) * 30.4;
+    assert.ok(Math.abs(laid - exact) <= 0.25, `item ${i}: laid ${laid}, exact ${exact}`);
+    assert.equal(s.h, undefined, "its height stays GPUI's");
+  });
+});
+
+test("a row in a box sized by its content sizes a growing item by its content", () => {
+  const box = (style, children = []) => ({ kind: "div", style, children });
+  const field = { kind: "input", style: { flex_grow: 1, flex_basis: 0, min_w: 0 }, children: [] };
+  const row = box({ display: "flex" }, [field, box({})]);
+  const menu = box({ position: "absolute", left: 10, top: 10 }, [row]);
+  const overrides = new Map();
+  shrinkWrapBases([menu], overrides);
+  assert.equal(overrides.get(field)?.flex_basis, "auto");
+  const sized = box({ position: "absolute", left: 10, top: 10, w: 200 }, [box({ display: "flex" }, [{ ...field }])]);
+  const kept = new Map();
+  shrinkWrapBases([sized], kept);
+  assert.equal(kept.size, 0, "a box with a width of its own leaves the basis alone");
 });
