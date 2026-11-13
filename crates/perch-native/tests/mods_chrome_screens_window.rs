@@ -5,6 +5,9 @@
 //! - Keybind help: Cmd+/, a plain `?` outside a terminal and the leader chord then `?` open it;
 //!   it lists every binding the window answers, with a person's choice of key and the bindings in
 //!   `keys.json`; typing narrows it; Escape and a press on the dim backdrop close it.
+//! - Launcher: Cmd+Shift+T opens it on the computer's projects; a project then an agent starts
+//!   it there, No project a Quickchat; Backspace goes back; the browser and new file rows are
+//!   refused with the reason; Escape and a press on the backdrop close it.
 //!
 //! Offscreen, as the other render tests: no window is shown or focused, no core runs, and every
 //! event goes through the window's own dispatch.
@@ -46,6 +49,11 @@ fn state() -> State {
     state.apply(&message(json!({
         "type": "project.list", "requestId": "r", "hostId": "local", "snapshotEpoch": "e",
         "snapshotRevision": 1, "projects": [project]})));
+    state.apply(&message(json!({
+        "type": "workspace.snapshot", "requestId": "r", "hostId": "local", "snapshotEpoch": "e",
+        "snapshotRevision": 1, "projects": [project], "workspaces": [{"id": "w1", "projectId": "p",
+        "hostId": "local", "path": "/work", "name": "main", "dirty": false, "state": "active",
+        "createdAt": 0, "updatedAt": 0, "pinned": false}]})));
     let sessions: Vec<Value> = ["alpha", "bravo"]
         .iter()
         .enumerate()
@@ -303,6 +311,116 @@ fn keybind_help(rig: &mut Rig) {
     println!("keybind-help: ok");
 }
 
+const LAUNCHER_KEY: &str = if cfg!(target_os = "macos") {
+    "cmd-shift-t"
+} else {
+    "alt-shift-t"
+};
+
+fn launched(rig: &mut Rig) -> Vec<(String, Option<String>, String)> {
+    rig.asked()
+        .into_iter()
+        .filter_map(|c| match c {
+            Command::Launch {
+                host_id,
+                cwd,
+                provider,
+            } => Some((host_id, cwd, provider)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn launcher(rig: &mut Rig) {
+    // Cmd+Shift+T opens it over the whole window with the keyboard: the computer's project (the
+    // one shown highlighted), Add project and No project.
+    rig.press(LAUNCHER_KEY);
+    assert_eq!(rig.open_screens(), ["launcher"]);
+    assert!(!rig.terminal_focused(), "the launcher has the keyboard");
+    assert_eq!(rig.keys("launcher-row"), ["p", "add", "none"]);
+    let props = rig
+        .ws(|ws, _, _| ws.screen_props("launcher").cloned())
+        .unwrap();
+    assert_eq!(props["activeProjectId"], "p", "the shown session's project");
+    assert_eq!(
+        props["projects"][0]["workspace"],
+        json!({"id": "w1", "path": "/work"}),
+        "with the workspace a tab lands in"
+    );
+    // Typing filters; Escape closes it and the terminal has the keyboard again.
+    rig.type_text("zzq");
+    assert!(rig.keys("launcher-row").is_empty(), "nothing matches");
+    rig.press("escape");
+    assert!(rig.open_screens().is_empty(), "Escape closed it");
+    assert!(rig.terminal_focused(), "the terminal has the keyboard back");
+
+    // A press on the backdrop closes it, and nothing beneath takes that press.
+    let before = rig.opened.borrow().len();
+    rig.press(LAUNCHER_KEY);
+    rig.mouse(20., HEIGHT - 20.);
+    assert!(rig.open_screens().is_empty(), "the backdrop closed it");
+    assert_eq!(
+        rig.opened.borrow().len(),
+        before,
+        "nothing beneath was pressed"
+    );
+    assert!(rig.terminal_focused());
+
+    // Enter on the project lists its agents, the browser and file rows; 1 starts the first agent
+    // in the project's workspace.
+    rig.asked();
+    rig.press(LAUNCHER_KEY);
+    rig.press("enter");
+    let rows = rig.keys("launcher-row");
+    assert_eq!(&rows[rows.len() - 2..], ["browser", "file"], "{rows:?}");
+    let first = rows[0].clone();
+    rig.press("1");
+    assert!(rig.open_screens().is_empty(), "the pick closed it");
+    assert_eq!(
+        launched(rig),
+        [("local".into(), Some("/work".into()), first.clone())]
+    );
+    assert!(rig.terminal_focused());
+
+    // No project starts a Quickchat; Backspace on an empty filter goes back to the projects.
+    rig.press(LAUNCHER_KEY);
+    rig.click("launcher-row:none");
+    assert_eq!(rig.keys("launcher-row").first(), Some(&first), "its agents");
+    rig.press("backspace");
+    assert_eq!(
+        rig.keys("launcher-row"),
+        ["p", "add", "none"],
+        "back to the projects"
+    );
+    rig.click("launcher-row:none");
+    rig.click(&format!("launcher-row:{first}"));
+    assert_eq!(launched(rig), [("local".into(), None, first)]);
+
+    // What this window cannot open is listed and refused with the reason.
+    for (row, reason) in [
+        (
+            "browser",
+            "A browser tab does not open in the native window yet.",
+        ),
+        (
+            "file",
+            "A new file needs the files view, which the native window does not have yet.",
+        ),
+    ] {
+        rig.press(LAUNCHER_KEY);
+        rig.press("enter");
+        rig.click(&format!("launcher-row:{row}"));
+        assert!(rig.open_screens().is_empty(), "{row} closed it");
+        assert_eq!(
+            rig.ws(|ws, _, _| ws.notice().map(str::to_string))
+                .as_deref(),
+            Some(reason)
+        );
+    }
+    assert!(launched(rig).is_empty(), "nothing started");
+    println!("launcher: ok");
+}
+
 fn main() {
     let scratch: PathBuf = std::env::temp_dir().join(format!(
         "perch-chrome-screens-window-{}",
@@ -356,6 +474,7 @@ fn main() {
     );
 
     keybind_help(&mut rig);
+    launcher(&mut rig);
 
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())

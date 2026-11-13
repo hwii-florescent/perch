@@ -7,7 +7,7 @@
 //! - in flow, a region of the layout: `sidebar`, `tabs`, `status`, `pane-header` (one copy per
 //!   pane, keyed `pane-header#<tab id>`, while the area is split);
 //! - floating, opened by the window over the whole of it, as the web's take the whole page:
-//!   `navigator`, `pane-menu`, `tab-menu`, `confirm`, `dialog`, `new-session`, `keybind-help` (modal) and `toast`
+//!   `navigator`, `pane-menu`, `tab-menu`, `confirm`, `dialog`, `new-session`, `keybind-help`, `launcher` (modal) and `toast`
 //!   (not modal: shown while there are notifications).
 //!
 //! A screen gets its arguments from `perch.props()` (the web's prop names, with each callback
@@ -133,6 +133,12 @@ pub const SCREENS: &[Screen] = &[
     },
     Screen {
         id: "keybind-help",
+        place: MODAL,
+        width: 0.,
+        height: 0.,
+    },
+    Screen {
+        id: "launcher",
         place: MODAL,
         width: 0.,
         height: 0.,

@@ -15,7 +15,7 @@ use parity_screens::{Difference, Exception, ScreenFixture};
 use perch_native::mods::perch::Perch;
 use serde_json::{json, Value};
 
-const SCREENS: [&str; 10] = [
+const SCREENS: [&str; 11] = [
     "tabs",
     "status",
     "navigator",
@@ -26,6 +26,7 @@ const SCREENS: [&str; 10] = [
     "toast",
     "new-session",
     "keybind-help",
+    "launcher",
 ];
 
 /// The states whose web strip also holds file, review and browser tabs. The native strip holds
@@ -84,6 +85,12 @@ const EXCEPTIONS: &[Exception] = &[
     },
     Exception {
         screen: "new-session",
+        states: &["*"],
+        path: "agentChoices.lastChoice",
+        reason: "the native client remembers no last agent pick",
+    },
+    Exception {
+        screen: "launcher",
         states: &["*"],
         path: "agentChoices.lastChoice",
         reason: "the native client remembers no last agent pick",

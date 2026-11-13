@@ -708,9 +708,10 @@ fn main() {
     rig.press("cmd-p");
     assert!(rig.ws(|ws, _, _| ws.screens_open()).is_empty());
 
-    // New session opens as a screen in place of the sidebar's panel; what it picks is launched.
+    // New quickchat opens New session as a screen in place of the sidebar's panel; what it
+    // picks is launched.
     rig.write("new-session", NEW_SESSION);
-    rig.ws(|ws, window, cx| ws.run_command("sessions.new", None, window, cx))
+    rig.ws(|ws, window, cx| ws.run_command("nests.scratchpad", None, window, cx))
         .unwrap();
     rig.draw();
     let props = rig

@@ -1,0 +1,5 @@
+{
+  "name": "Launcher",
+  "description": "The web app's stock New session launcher (a project, then an agent or terminal), unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}
