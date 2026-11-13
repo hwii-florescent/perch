@@ -2182,6 +2182,222 @@
           "textSized": true
         }
       ]
+    },
+    "memory": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 4,
+      "elements": [
+        {
+          "name": "memory-scrim",
+          "selector": "body > div.fixed.inset-0",
+          "description": "A dimming layer over the whole window: the dialog's, and, while a delete is asked, the confirmation's over it.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "memory-panel",
+          "selector": "[data-testid=\"memory-dialog\"]",
+          "description": "The dialog panel: 30 rem wide at most, the panel fill, a shadow, 16 px of padding, 9.6 px between rows."
+        },
+        {
+          "name": "memory-title",
+          "selector": "[data-testid=\"memory-dialog\"] > h2",
+          "description": "'Memory for <name>'.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-intro",
+          "selector": "[data-testid=\"memory-dialog\"] > p",
+          "description": "What the notes are (0.75rem, muted).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-caps",
+          "selector": "[data-testid=\"memory-caps\"]",
+          "description": "'n / 64 files, up to 16000 characters each' at the left of the toolbar.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-new",
+          "selector": "[data-testid=\"memory-new\"]",
+          "description": "New file at the right of the toolbar; 40% opacity while disabled.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-enabled",
+          "selector": "[data-testid=\"memory-enabled\"]",
+          "description": "The box that lets the project's agents use memory."
+        },
+        {
+          "name": "memory-enabled-label",
+          "selector": "[data-testid=\"memory-dialog\"] > label.flex > span",
+          "description": "The box's line (its '(off: ...)' note when unticked).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-note",
+          "selector": "[data-testid=\"memory-dialog\"] > span.text-subtext-0",
+          "description": "'Loading...' or 'No memory files yet.'",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-row",
+          "selector": "[data-testid^=\"memory-row-\"]",
+          "description": "One file: the row button on the darker fill and its Delete button, 8 px apart.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "memory-row-"
+          }
+        },
+        {
+          "name": "memory-open",
+          "selector": "[data-testid^=\"memory-open-\"]",
+          "description": "The file's row button: three lines, on the darker fill.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "memory-open-"
+          }
+        },
+        {
+          "name": "memory-file-title",
+          "selector": "[data-testid^=\"memory-row-\"] button > span:first-child",
+          "description": "The file's name, monospace 0.8rem.",
+          "key": {
+            "closest": "[data-testid^=\"memory-row-\"]",
+            "attr": "data-testid",
+            "strip": "memory-row-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-file-summary",
+          "selector": "[data-testid^=\"memory-row-\"] button > span.truncate",
+          "description": "The summary, one line cut with an ellipsis (0.75rem, muted).",
+          "key": {
+            "closest": "[data-testid^=\"memory-row-\"]",
+            "attr": "data-testid",
+            "strip": "memory-row-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-file-meta",
+          "selector": "[data-testid^=\"memory-row-\"] button > span:last-child",
+          "description": "'who - how long ago - n chars' (0.68rem, the dimmer colour).",
+          "key": {
+            "closest": "[data-testid^=\"memory-row-\"]",
+            "attr": "data-testid",
+            "strip": "memory-row-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-delete",
+          "selector": "[data-testid^=\"memory-delete-\"]",
+          "description": "A row's Delete button.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "memory-delete-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-error",
+          "selector": "[data-testid=\"memory-error\"]",
+          "description": "The red line above the buttons.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-close",
+          "selector": "[data-testid=\"memory-dialog\"] > div.flex.justify-end > button",
+          "description": "Close, at the bottom right of the list page.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-file-name",
+          "selector": "[data-testid=\"memory-file-name\"]",
+          "description": "The open file's name (monospace 0.8rem).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-name",
+          "selector": "[data-testid=\"memory-name\"]",
+          "description": "The name field of a new file (monospace); `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        },
+        {
+          "name": "memory-count",
+          "selector": "[data-testid=\"memory-count\"]",
+          "description": "The text's length over the cap.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-text",
+          "selector": "[data-testid=\"memory-text\"]",
+          "description": "The file's text (12 rows, monospace); `text` is what is in it.",
+          "text": true
+        },
+        {
+          "name": "memory-conflict",
+          "selector": "[data-testid=\"memory-conflict\"]",
+          "description": "The stale-edit notice, in red: two lines.",
+          "text": true
+        },
+        {
+          "name": "memory-reload",
+          "selector": "[data-testid=\"memory-reload\"]",
+          "description": "Load their version.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-back",
+          "selector": "[data-testid=\"memory-back\"]",
+          "description": "Back.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-save",
+          "selector": "[data-testid=\"memory-save\"]",
+          "description": "Save, the primary button; 40% opacity while disabled.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-confirm",
+          "selector": "[data-testid=\"confirm-dialog\"]",
+          "description": "The delete question's panel (the stock confirmation, the `confirm` screen), over the dialog."
+        },
+        {
+          "name": "memory-confirm-message",
+          "selector": ".confirm-dialog__message",
+          "description": "The question: 'Delete <file>? Agents and people lose this note.'",
+          "text": true,
+          "textSized": true
+        }
+      ]
     }
   }
 }

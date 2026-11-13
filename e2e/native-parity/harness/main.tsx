@@ -248,6 +248,7 @@ const SCREENS: Record<string, Screen> = {
   },
   memory: {
     clock: 1_800_000_000_000,
+    listed: (props) => (props.loading ? null : '[data-testid="memory-new"]:not(:disabled)'),
     // The core answers `list`, `get`, `save` and `remove` with the fixture's `files` (the index, as `MemoryState`) and `texts` (a file's text by name);
     // `saved` and `removed` are what a write answers, `loading` never answers the list.
     load: () => import("../../../packages/web/src/stock-ui/memory/main"),
