@@ -2398,6 +2398,214 @@
           "textSized": true
         }
       ]
+    },
+    "worktree": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "worktree-plus",
+          "selector": "[data-testid^=\"worktree-menu-\"]",
+          "description": "The + button the popover hangs from (an icon button, here shown; the sidebar shows it on hover)."
+        },
+        {
+          "name": "worktree-popover",
+          "selector": "[role=\"dialog\"][aria-label=\"Git worktrees\"]",
+          "description": "The popover: 420 px wide at most, the lighter surface fill, soft corners, a shadow; under the button, or over it when there is more room above."
+        },
+        {
+          "name": "worktree-heading",
+          "selector": "[role=\"dialog\"][aria-label=\"Git worktrees\"] > div:first-child > span:first-child",
+          "description": "'Worktrees' or 'New workspace', small uppercase, semibold, muted, spaced.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-project",
+          "selector": "[role=\"dialog\"][aria-label=\"Git worktrees\"] > div:first-child > span:last-child",
+          "description": "The project's folder name at the right of the heading, in the accent colour, cut with an ellipsis.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-list",
+          "selector": "[role=\"dialog\"][aria-label=\"Git worktrees\"] > div.overflow-y-auto",
+          "description": "The scrolling list of entries, 240 px high at most."
+        },
+        {
+          "name": "worktree-note",
+          "selector": "[role=\"dialog\"][aria-label=\"Git worktrees\"] > div.overflow-y-auto > div:not(.worktree-menu__entry)",
+          "description": "'Loading...' or 'No worktrees' (muted, 0.76rem).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-entry",
+          "selector": "[data-testid^=\"worktree-entry-\"]",
+          "description": "One worktree: branch and path at the left, Open and Delete at the right; the row takes the lighter fill on hover.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "worktree-entry-"
+          }
+        },
+        {
+          "name": "worktree-entry-branch",
+          "selector": ".worktree-menu__entry-branch",
+          "description": "The branch (0.8rem, semibold, cut with an ellipsis), or '(detached <short commit>)', with its badges.",
+          "key": {
+            "closest": "[data-testid^=\"worktree-entry-\"]",
+            "attr": "data-testid",
+            "strip": "worktree-entry-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-badge",
+          "selector": "[data-testid^=\"worktree-entry-\"] .worktree-menu__entry-branch > span",
+          "description": "The 'primary' badge (accent) or the 'dirty' badge (yellow): 0.6rem, on the darker fill.",
+          "key": {
+            "closest": "[data-testid^=\"worktree-entry-\"]",
+            "attr": "data-testid",
+            "strip": "worktree-entry-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-entry-path",
+          "selector": ".worktree-menu__entry-path",
+          "description": "The checkout path (0.68rem, muted), cut with an ellipsis.",
+          "key": {
+            "closest": "[data-testid^=\"worktree-entry-\"]",
+            "attr": "data-testid",
+            "strip": "worktree-entry-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-open",
+          "selector": "[data-testid^=\"worktree-open-\"]",
+          "description": "Open: a small plain button.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "worktree-open-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-remove",
+          "selector": "[data-testid^=\"worktree-remove-\"]",
+          "description": "Delete (or Remove on a host that cannot delete the branch); red on hover; never on the primary checkout.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "worktree-remove-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-error",
+          "selector": "[data-testid=\"worktree-error\"]",
+          "description": "The core's refusal, in red, with its line breaks.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-new",
+          "selector": "[data-testid=\"worktree-new\"]",
+          "description": "'+ New worktree...': a menu row at the bottom of the list page.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-name-input",
+          "selector": "[data-testid=\"worktree-name-input\"]",
+          "description": "The task name field; `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        },
+        {
+          "name": "worktree-start-input",
+          "selector": "[data-testid=\"worktree-start-input\"]",
+          "description": "The start-from field (a free-text select); `text` is what was typed.",
+          "text": true
+        },
+        {
+          "name": "worktree-branch-input",
+          "selector": "[data-testid=\"worktree-branch-input\"]",
+          "description": "The branch field; its placeholder follows the task name.",
+          "text": true
+        },
+        {
+          "name": "worktree-parent-select",
+          "selector": "[data-testid=\"worktree-parent-select\"]",
+          "description": "The parent workspace select.",
+          "text": true
+        },
+        {
+          "name": "worktree-new-branch",
+          "selector": "[data-testid=\"worktree-new-branch\"]",
+          "description": "The 'new branch' box of an older host."
+        },
+        {
+          "name": "worktree-path-input",
+          "selector": "[data-testid=\"worktree-path-input\"]",
+          "description": "The checkout path field, previewing the default path once a branch is known.",
+          "text": true
+        },
+        {
+          "name": "worktree-agent-select",
+          "selector": "[data-testid=\"worktree-agent-select\"]",
+          "description": "The starting pane select.",
+          "text": true
+        },
+        {
+          "name": "worktree-create-cancel",
+          "selector": "[data-testid=\"worktree-create-cancel\"]",
+          "description": "Cancel.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-create-submit",
+          "selector": "[data-testid=\"worktree-create-submit\"]",
+          "description": "Create (primary); 40% opacity while disabled.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-confirm",
+          "selector": "[data-testid=\"confirm-dialog\"]",
+          "description": "A question over the page (a removal, the force question or the kept-branch review): the stock confirmation panel."
+        },
+        {
+          "name": "worktree-confirm-message",
+          "selector": ".confirm-dialog__message",
+          "description": "The question with its line breaks.",
+          "text": true
+        },
+        {
+          "name": "worktree-confirm-accept",
+          "selector": "[data-testid=\"confirm-accept\"]",
+          "description": "The accepting button (Delete, Force remove, Delete branch).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-confirm-cancel",
+          "selector": "[data-testid=\"confirm-cancel\"]",
+          "description": "The refusing button (Cancel, Keep branch).",
+          "text": true,
+          "textSized": true
+        }
+      ]
     }
   }
 }

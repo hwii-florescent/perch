@@ -140,6 +140,26 @@ function FolderBrowserHost({ Browser, home, loading, tree, ...rest }: { Browser:
   };
   return <div className="flex min-h-0 flex-1 flex-col bg-panel-bg p-4"><Browser {...rest} browse={browse} onUseFolder={noop} /></div>;
 }
+/**
+ * The worktree menu the way the sidebar places it: its "+" button sits at `at` in the window (in the sidebar it is the end
+ * of a project row, shown on hover) and the popover is placed against that button. The core's answers are the fixture's:
+ * `listAnswer` (what `list` resolves; `listLoading` never answers), `createAnswer`, `removePlain` and `removeForce` (what
+ * `remove` resolves without and with `force`) and `deleteBranchAnswer`. Perch's own asks (`request`) reach the screen as the key
+ * that sends them does.
+ */
+type Answer = Record<string, unknown>;
+function WorktreeHost({ Menu, at, listAnswer, listLoading, createAnswer, removePlain, removeForce, deleteBranchAnswer, ...rest }: { Menu: ComponentType<Json>; at: { x: number; y: number } } & { listAnswer?: Answer; listLoading?: boolean; createAnswer?: Answer; removePlain?: Answer; removeForce?: Answer; deleteBranchAnswer?: Answer } & Json) {
+  // One object for the life of the page: the screen takes a request again whenever `actions` changes.
+  const actions = useRef({
+    list: () => (listLoading ? new Promise<Answer>(() => {}) : Promise.resolve(listAnswer ?? {})),
+    create: () => Promise.resolve(createAnswer ?? {}),
+    remove: (_path: string, force: boolean) => Promise.resolve((force ? removeForce : removePlain) ?? {}),
+    deleteBranch: () => Promise.resolve(deleteBranchAnswer ?? {}),
+    open: noop,
+    takeRequest: noop,
+  }).current;
+  return <div style={{ position: "absolute", left: at.x, top: at.y }}><Menu {...rest} actions={actions} /></div>;
+}
 /** A screen that is given everything as props and reads nothing else: the props are the whole story. */
 function PropsProbe({ props }: { props: Json }) {
   record({ props });
@@ -262,6 +282,14 @@ const SCREENS: Record<string, Screen> = {
       ...(noToggle ? {} : { setEnabled: () => Promise.resolve(index ?? null) }),
     }),
     Probe: PropsProbe,
+  },
+  worktree: {
+    load: async () => {
+      const { default: Menu } = await import("../../../packages/web/src/stock-ui/worktree/main");
+      return { default: ((props: Json) => <WorktreeHost Menu={Menu as unknown as ComponentType<Json>} {...(props as { at: { x: number; y: number } })} />) as unknown as ComponentType<never> };
+    },
+    mount: "stage",
+    Probe: NewSessionProbe,
   },
   "pane-menu": {
     load: () => import("../../../packages/web/src/stock-ui/pane-menu/main"),

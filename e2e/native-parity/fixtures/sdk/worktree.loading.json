@@ -1,0 +1,45 @@
+{
+  "props": {
+    "hostId": "local",
+    "cwd": "/Users/dev/code/perch",
+    "projectKey": "local:/Users/dev/code/perch",
+    "at": {
+      "x": 220,
+      "y": 130
+    },
+    "background": true,
+    "startFromSupported": true,
+    "deleteSupported": true,
+    "parentChoices": [
+      {
+        "id": "w-perch-sidebar",
+        "name": "sidebar-port",
+        "path": "/Users/dev/code/perch-wt/sidebar-port"
+      }
+    ],
+    "emptyAgent": "claude",
+    "request": {},
+    "listLoading": true
+  },
+  "agentChoices": {
+    "connected": true,
+    "discovery": true,
+    "choices": [
+      {
+        "id": "claude",
+        "label": "Claude",
+        "isDefault": true
+      },
+      {
+        "id": "codex",
+        "label": "Codex"
+      },
+      {
+        "id": "pi",
+        "label": "Pi"
+      }
+    ],
+    "lastChoice": "claude",
+    "state": "ready"
+  }
+}
