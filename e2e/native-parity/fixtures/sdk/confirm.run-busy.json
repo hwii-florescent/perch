@@ -1,0 +1,7 @@
+{
+  "props": {
+    "message": "Run in a new terminal?\n\nHost: This computer\nFolder: /Users/dev/code/perch\n\nnpm test",
+    "confirmLabel": "Run",
+    "busy": true
+  }
+}

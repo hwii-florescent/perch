@@ -1,0 +1,73 @@
+{
+  "props": {
+    "id": "w-perch-main\npackages/web/src/sdk.ts",
+    "corner": true
+  },
+  "workspaceTabs": {
+    "hostId": "local",
+    "cwd": "/Users/dev/code/perch",
+    "workspace": {
+      "id": "w-perch-main",
+      "path": "/Users/dev/code/perch"
+    },
+    "activeId": "w-perch-main\npackages/web/src/sdk.ts",
+    "tabs": [
+      {
+        "id": "s-perch-3",
+        "kind": "session",
+        "label": "Review agent mail",
+        "title": "Review agent mail",
+        "state": "hidden",
+        "provider": "claude",
+        "activity": "idle",
+        "dirty": false,
+        "preview": false,
+        "path": "/Users/dev/code/perch"
+      },
+      {
+        "id": "s-perch-2",
+        "kind": "session",
+        "label": "Fix terminal slash input",
+        "title": "Fix terminal slash input",
+        "state": "hidden",
+        "provider": "codex",
+        "activity": "done",
+        "unseen": true,
+        "dirty": false,
+        "preview": false,
+        "path": "/Users/dev/code/perch"
+      },
+      {
+        "id": "s-perch-1",
+        "kind": "session",
+        "label": "Port the sidebar to GPUI",
+        "title": "Port the sidebar to GPUI",
+        "state": "hidden",
+        "provider": "claude",
+        "activity": "working",
+        "dirty": false,
+        "preview": false,
+        "path": "/Users/dev/code/perch"
+      },
+      {
+        "id": "w-perch-main\npackages/web/src/sdk.ts",
+        "kind": "file",
+        "label": "sdk.ts",
+        "title": "packages/web/src/sdk.ts",
+        "state": "focused",
+        "dirty": false,
+        "preview": false,
+        "path": "packages/web/src/sdk.ts",
+        "workspaceId": "w-perch-main",
+        "blank": false
+      }
+    ],
+    "tabShape": "square",
+    "draggingId": null
+  },
+  "paneLook": {
+    "headerAt": "top",
+    "headerReveal": "always",
+    "headerHeight": 28
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "workspaceTabs": {
+    "hostId": "local",
+    "cwd": "/Users/dev/code/perch",
+    "workspace": {
+      "id": "w-perch-main",
+      "path": "/Users/dev/code/perch"
+    },
+    "activeId": "s-perch-1",
+    "tabs": [
+      {
+        "id": "s-perch-1",
+        "kind": "session",
+        "label": "Port the sidebar to GPUI",
+        "title": "Port the sidebar to GPUI",
+        "state": "focused",
+        "provider": "claude",
+        "activity": "working",
+        "dirty": false,
+        "preview": false,
+        "path": "/Users/dev/code/perch"
+      }
+    ],
+    "tabShape": "square",
+    "draggingId": null
+  }
+}

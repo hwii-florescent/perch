@@ -1,0 +1,136 @@
+{
+  "workspaceTabs": {
+    "hostId": "local",
+    "cwd": "/Users/dev/code/perch",
+    "workspace": {
+      "id": "w-perch-main",
+      "path": "/Users/dev/code/perch"
+    },
+    "activeId": "s-perch-1",
+    "tabs": [
+      {
+        "id": "s-perch-3",
+        "kind": "session",
+        "label": "Review agent mail",
+        "title": "Review agent mail",
+        "state": "hidden",
+        "provider": "claude",
+        "activity": "idle",
+        "dirty": false,
+        "preview": false,
+        "path": "/Users/dev/code/perch"
+      },
+      {
+        "id": "s-perch-2",
+        "kind": "session",
+        "label": "Fix terminal slash input",
+        "title": "Fix terminal slash input",
+        "state": "hidden",
+        "provider": "codex",
+        "activity": "done",
+        "unseen": true,
+        "dirty": false,
+        "preview": false,
+        "path": "/Users/dev/code/perch"
+      },
+      {
+        "id": "s-perch-x10",
+        "kind": "session",
+        "label": "Summarise the week",
+        "title": "Summarise the week",
+        "state": "hidden",
+        "provider": "claude",
+        "activity": "idle",
+        "dirty": false,
+        "preview": false,
+        "path": "/Users/dev/code/perch"
+      },
+      {
+        "id": "s-perch-x9",
+        "kind": "session",
+        "label": "Trace the resize race",
+        "title": "Trace the resize race",
+        "state": "hidden",
+        "provider": "codex",
+        "activity": "idle",
+        "dirty": false,
+        "preview": false,
+        "path": "/Users/dev/code/perch"
+      },
+      {
+        "id": "s-perch-x8",
+        "kind": "session",
+        "label": "Rework the tab drag ord…",
+        "title": "Rework the tab drag order",
+        "state": "hidden",
+        "provider": "claude",
+        "activity": "idle",
+        "dirty": false,
+        "preview": false,
+        "path": "/Users/dev/code/perch"
+      },
+      {
+        "id": "s-perch-x7",
+        "kind": "session",
+        "label": "Audit open handles",
+        "title": "Audit open handles",
+        "state": "hidden",
+        "provider": "codex",
+        "activity": "idle",
+        "dirty": false,
+        "preview": false,
+        "path": "/Users/dev/code/perch"
+      },
+      {
+        "id": "s-perch-x6",
+        "kind": "session",
+        "label": "Profile the terminal re…",
+        "title": "Profile the terminal redraw",
+        "state": "hidden",
+        "provider": "claude",
+        "activity": "idle",
+        "dirty": false,
+        "preview": false,
+        "path": "/Users/dev/code/perch"
+      },
+      {
+        "id": "s-perch-x5",
+        "kind": "session",
+        "label": "Draft the release notes",
+        "title": "Draft the release notes",
+        "state": "hidden",
+        "provider": "codex",
+        "activity": "idle",
+        "dirty": false,
+        "preview": false,
+        "path": "/Users/dev/code/perch"
+      },
+      {
+        "id": "s-perch-x4",
+        "kind": "session",
+        "label": "Wire the status bar",
+        "title": "Wire the status bar",
+        "state": "hidden",
+        "provider": "claude",
+        "activity": "idle",
+        "dirty": false,
+        "preview": false,
+        "path": "/Users/dev/code/perch"
+      },
+      {
+        "id": "s-perch-1",
+        "kind": "session",
+        "label": "Port the sidebar to GPUI",
+        "title": "Port the sidebar to GPUI",
+        "state": "focused",
+        "provider": "claude",
+        "activity": "working",
+        "dirty": false,
+        "preview": false,
+        "path": "/Users/dev/code/perch"
+      }
+    ],
+    "tabShape": "square",
+    "draggingId": null
+  }
+}

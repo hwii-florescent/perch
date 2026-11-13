@@ -1,0 +1,16 @@
+{
+  "notifications": [
+    {
+      "id": "t3",
+      "kind": "usage",
+      "level": "warning",
+      "title": "Codex 5h limit at 93%",
+      "body": "Resets in 42 minutes",
+      "heading": "Codex 5h limit at 93%",
+      "detail": "Resets in 42 minutes",
+      "sessionId": "usage",
+      "hasSession": false,
+      "timeout": 600000
+    }
+  ]
+}

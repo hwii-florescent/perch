@@ -1,0 +1,16 @@
+{
+  "statusLine": {
+    "connected": false,
+    "hostId": "local",
+    "sessionId": "s-perch-1",
+    "cwd": "/Users/dev/code/perch",
+    "branch": "main"
+  },
+  "planUsage": {
+    "usage": [],
+    "updatedAt": 0,
+    "spend": null,
+    "redeemResult": null
+  },
+  "zoom": 1
+}

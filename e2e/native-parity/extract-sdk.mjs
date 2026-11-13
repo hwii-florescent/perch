@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 //! extract-sdk.mjs: copies what the web's `@perch/sdk` derived for each parity state (the `sdk` section of the web
-//! reference JSON: `navigation` and `hosts`) into `fixtures/sdk/<screen>.<state>.json`, where the native client's
-//! `perch` module is checked against it (`crates/perch-native/tests/mods_navigation_parity.rs`).
+//! reference JSON) into `fixtures/sdk/<screen>.<state>.json`, where the native client's `perch` module is checked
+//! against it (`crates/perch-native/tests/mods_navigation_parity.rs`). What a section holds depends on the screen: the
+//! sidebar's `navigation` and `hosts`; `workspaceTabs` (tabs, pane-header), `statusLine`, `planUsage` and `zoom`
+//! (status), `notifications` (toast), `agentChoices` (new-session), `paneLook` (pane-header). A screen that takes
+//! props (navigator, pane-menu, confirm, dialog, new-session, pane-header) also has them under `props`, and a state
+//! that types or presses something on the way (`steps` in its fixture) lists those under `steps`.
 //!
 //!   node native-parity/extract-sdk.mjs [--web <dir>]     (default: artifacts-native-parity/web, after `npm run parity:web`)
 //!
