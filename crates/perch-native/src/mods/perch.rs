@@ -885,11 +885,17 @@ impl Perch {
         Ok(HostValue::Null)
     }
 
+    /// A mod opens screen `id` with `props`. `busy` (a confirmation whose action is running,
+    /// which Escape and its buttons cannot end) is the window's to set: dropped here, so a mod
+    /// cannot open a screen nothing closes.
     fn open_screen(
         &self,
         id: &str,
-        props: Value,
+        mut props: Value,
     ) -> Result<futures::channel::oneshot::Receiver<Result<Value, String>>, HostError> {
+        if let Some(fields) = props.as_object_mut() {
+            fields.remove("busy");
+        }
         let (tx, rx) = futures::channel::oneshot::channel();
         let attached = self.0.attached.borrow();
         let attached = attached

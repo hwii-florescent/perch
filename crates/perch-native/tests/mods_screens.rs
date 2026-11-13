@@ -84,6 +84,21 @@ export default class extends View {
 }
 "##;
 
+/// A status line that, once, asks for a confirmation that says it is busy.
+const OPENER: &str = r##"
+import { View, div } from "gpui-kit";
+import * as perch from "perch";
+export default class extends View {
+  render() {
+    if (!this.asked) {
+      this.asked = true;
+      perch.openScreen("confirm", { message: "locked", busy: true }).catch(() => {});
+    }
+    return div().id("opener").size_full();
+  }
+}
+"##;
+
 const PANE_MENU: &str = r##"
 import { View, div } from "gpui-kit";
 import { v_flex } from "gpui-base";
@@ -721,6 +736,47 @@ fn main() {
         ws.run_command("session.start", Some(&json!({"agent": "kiro"})), window, cx)
     });
     assert!(refused.is_err_and(|e| e.contains("kiro")));
+
+    // A busy confirmation the window opened keeps Escape from it; one a mod opened cannot be
+    // busy, so Escape always closes it.
+    rig.ws(|ws, _, cx| {
+        ws.open_screen(
+            "confirm",
+            json!({"message": "x", "busy": true}),
+            None,
+            None,
+            cx,
+        )
+    });
+    rig.draw();
+    rig.press("escape");
+    rig.draw();
+    assert_eq!(
+        rig.ws(|ws, _, _| ws.screens_open()),
+        ["confirm"],
+        "the window's busy one stays"
+    );
+    rig.ws(|ws, _, cx| ws.update_screen("confirm", json!({"busy": false}), cx));
+    rig.press("escape");
+    rig.draw();
+    assert!(rig.ws(|ws, _, _| ws.screens_open()).is_empty());
+    rig.write("status", OPENER);
+    rig.draw();
+    assert_eq!(
+        rig.ws(|ws, _, _| ws.screens_open()),
+        ["confirm"],
+        "the mod opened it"
+    );
+    let props = rig
+        .ws(|ws, _, _| ws.screen_props("confirm").cloned())
+        .unwrap();
+    assert_eq!(props.get("busy"), None, "a mod's busy is dropped");
+    rig.press("escape");
+    rig.draw();
+    assert!(
+        rig.ws(|ws, _, _| ws.screens_open()).is_empty(),
+        "Escape closed it"
+    );
 
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())
