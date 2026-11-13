@@ -45,6 +45,13 @@ const FILE_FOCUSED: &str = "a file tab has the focus on the web; the native stri
 /// Every difference the native client cannot remove, and why.
 const EXCEPTIONS: &[Exception] = &[
     Exception {
+        screen: "worktree",
+        states: &["*"],
+        path: "agentChoices.lastChoice",
+        reason: "the last agent picked is the screen's own storage (`perch.lastAgentChoice`), not \
+                 the window's data, and the worktree menu does not read it",
+    },
+    Exception {
         screen: "tabs",
         states: &["files-and-pages"],
         path: "workspaceTabs.activeId",
