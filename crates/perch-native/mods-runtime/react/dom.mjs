@@ -6,7 +6,8 @@
 //!
 //! `installGlobals(perch)` puts `window`, `document`, `localStorage`, `HTMLElement`, `DOMRect` and (where the engine
 //! has none) `setTimeout`/`clearTimeout`/`queueMicrotask` on `globalThis`, so a module that names them as globals
-//! runs unchanged.
+//! runs unchanged. `window`, `document` and `localStorage` read the record at `globalThis[GLOBALS]`, which each
+//! mount sets to its own and a host running several screens in one script context sets to the running screen's.
 import { closest as closestBy, matches as matchesBy, querySelectorAll as queryBy } from "./selector.mjs";
 
 let nextId = 1;
@@ -237,12 +238,17 @@ export function hostTimers(perch) {
   };
 }
 
+/** Where `window`, `document` and `localStorage` are read from: `{ window, document, localStorage }`. */
+export const GLOBALS = Symbol.for("perch.react.globals");
+
 function define(target, name, value) {
   Object.defineProperty(target, name, { value, configurable: true, writable: true, enumerable: false });
 }
 
 /** The browser globals a stock screen names, on `target` (default `globalThis`), bound to `perch`. Returns the
- * document and window it installed. Timers and `queueMicrotask` are installed only where the engine lacks them. */
+ * document and window it made and `globals`, the record `window`, `document` and `localStorage` read now (put it at
+ * `target[GLOBALS]` again before running code for this mount). Timers and `queueMicrotask` are installed only where
+ * the engine lacks them. */
 export function installGlobals(perch, target = globalThis) {
   const document = new HostDocument(perch);
   const window = new HostWindow(perch, document);
@@ -258,9 +264,11 @@ export function installGlobals(perch, target = globalThis) {
   // A frame is the next turn of the host's clock (the engine draws after each).
   define(target, "requestAnimationFrame", (fn) => target.setTimeout(() => fn(Date.now()), 0));
   define(target, "cancelAnimationFrame", (id) => target.clearTimeout(id));
-  define(target, "document", document);
-  define(target, "window", window);
-  define(target, "localStorage", storage);
+  const globals = { document, window, localStorage: storage };
+  for (const name of Object.keys(globals)) {
+    Object.defineProperty(target, name, { get: () => target[GLOBALS]?.[name], configurable: true, enumerable: false });
+  }
+  target[GLOBALS] = globals;
   define(target, "HTMLElement", HostElement);
   define(target, "Element", HostElement);
   define(target, "DOMRect", DOMRect);
@@ -270,5 +278,5 @@ export function installGlobals(perch, target = globalThis) {
     try { define(navigator, "clipboard", perch.clipboard); } catch { /* a frozen navigator keeps its own */ }
   }
   if (!target.navigator) define(target, "navigator", navigator);
-  return { document, window };
+  return { document, window, globals };
 }

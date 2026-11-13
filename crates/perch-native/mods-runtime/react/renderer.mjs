@@ -52,10 +52,11 @@ const hostConfig = {
   cancelTimeout: (id) => clearTimeout(id),
   scheduleMicrotask: (fn) => queueMicrotask(fn),
 
-  getRootHostContext: () => null,
+  // React works on one root at a time, whichever screen's call it runs in: the host runs it as that root's screen.
+  getRootHostContext: (container) => { container.ownerDocument?.perch?.enter?.(); return null; },
   getChildHostContext: (parent) => parent,
   getPublicInstance: (instance) => instance,
-  prepareForCommit: () => null,
+  prepareForCommit: (container) => { container.ownerDocument?.perch?.enter?.(); return null; },
   resetAfterCommit: (container) => container.ownerDocument?.afterCommit?.(),
   preparePortalMount: () => {},
   createInstance: (type, props, root) => new HostElement(type, props, root.ownerDocument),
@@ -159,7 +160,7 @@ const isTextField = (element) =>
  * of the box the engine gives the screen (the card it sits on); `options.props` the component's props.
  */
 export function mount(perch, Component, options = {}) {
-  const { document, window } = installGlobals(perch);
+  const { document, window, globals } = installGlobals(perch);
   const container = new HostElement("div", { id: "root", style: options.container ?? {} }, document);
   document.body.appendChild(container);
   const errors = [];
@@ -207,6 +208,8 @@ export function mount(perch, Component, options = {}) {
   const handle = {
     document,
     window,
+    /** What `window`, `document` and `localStorage` read while this screen runs (`dom.mjs`'s `GLOBALS`). */
+    globals,
     container,
     errors,
     /** The latest description (after the last commit or state change). */

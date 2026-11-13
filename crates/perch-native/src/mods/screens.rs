@@ -26,6 +26,10 @@
 //!
 //! An in-flow screen's box is its default size here, or `"screen": {"width", "height"}` in its
 //! `mod.json`.
+//!
+//! A copy that leaves the window (a floating screen closed or opened again, a pane's header when
+//! its split ends) gets its final call, `View.close`, at the next draw, and the engine then
+//! releases it (`ShellRuntime::close`, as gpui-kit's own hosts do).
 
 use super::perch::Perch;
 use super::{ModHost, ModView, WindowMods, POLL};
@@ -34,7 +38,7 @@ use gpui::{App, Context, Entity, FocusHandle, Pixels, Point, Window};
 use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// How a pane header is laid out (`usePaneLook`). The native window has no layouts to change it.
 pub const PANE_HEADER_HEIGHT: f32 = 28.;
@@ -197,8 +201,28 @@ pub struct Screens {
     present: RefCell<HashMap<&'static str, (bool, Instant)>>,
     inflow: HashMap<String, Entity<ModView>>,
     pub floating: Vec<Floating>,
+    /// Copies that left the window since the last draw, closed at the next (closing needs the window).
+    leaving: Vec<Entity<ModView>>,
     /// The window's size at the last draw, in every floating screen's props.
     viewport: (f32, f32),
+}
+
+/// How long a copy that leaves the window has for its final call (`View.close`).
+const CLOSE_DEADLINE: Duration = Duration::from_millis(250);
+
+/// Gives a copy that left the window its final call and lets the engine release it, as gpui-kit's
+/// own hosts do (`ShellRuntime::close`). Dropping the view alone releases it without that call, so
+/// the script never learns the copy went and keeps what it made for it (a mounted React tree, its
+/// listeners) for as long as the window lives.
+fn close_copy(view: &Entity<ModView>, window: &mut Window, cx: &mut App) {
+    let view = view.read(cx);
+    let Some(root) = view.shown.as_ref().map(|shown| shown.root.clone()) else {
+        return;
+    };
+    let runtime = view.host.0.runtime.clone();
+    runtime
+        .close(&root, Instant::now() + CLOSE_DEADLINE, window, cx)
+        .detach();
 }
 
 /// The window's mod host and `perch` module, when the engine was started for it.
@@ -247,13 +271,18 @@ impl Screens {
         let Some((host, perch)) = mods(cx) else {
             return;
         };
-        self.inflow.retain(|key, _| {
+        let leaving = &mut self.leaving;
+        self.inflow.retain(|key, view| {
             let keep = wanted.iter().any(|(_, k, _)| k == key);
             if !keep {
                 perch.clear_props(key);
+                leaving.push(view.clone());
             }
             keep
         });
+        for view in std::mem::take(&mut self.leaving) {
+            close_copy(&view, window, cx);
+        }
         for (id, key, props) in wanted {
             perch.set_props(&key, props);
             if let std::collections::hash_map::Entry::Vacant(slot) = self.inflow.entry(key) {
@@ -284,7 +313,11 @@ impl Screens {
             .floating
             .iter()
             .position(|f| f.id == screen.id)
-            .and_then(|at| self.floating.remove(at).focus_back);
+            .and_then(|at| {
+                let replaced = self.floating.remove(at);
+                self.leaving.extend(replaced.view);
+                replaced.focus_back
+            });
         if let Some((_, perch)) = mods(cx) {
             perch.set_props(screen.id, props.clone());
             perch.flush(cx);
@@ -326,6 +359,9 @@ impl Screens {
         let Some((host, perch)) = mods(cx) else {
             return;
         };
+        for view in std::mem::take(&mut self.leaving) {
+            close_copy(&view, window, cx);
+        }
         let size = window.viewport_size();
         let viewport = (f32::from(size.width), f32::from(size.height));
         if viewport != self.viewport {
@@ -354,7 +390,9 @@ impl Screens {
         if let Some((_, perch)) = mods(cx) {
             perch.clear_props(id);
         }
-        Some(self.floating.remove(at))
+        let mut open = self.floating.remove(at);
+        self.leaving.extend(open.view.take());
+        Some(open)
     }
 
     /// Whether Escape may dismiss open screen `id` now.

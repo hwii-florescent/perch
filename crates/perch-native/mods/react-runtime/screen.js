@@ -24,16 +24,20 @@
 // The web reads its per-viewer settings (`localStorage`, here the window's sidebar settings) once, when it mounts;
 // when they change anywhere but in the screen (a key such as `sidebar.organize`), the screen is mounted again.
 //
+// Copies: each `init` is a copy of the screen with its own host, data and timers (`copyFor` in `host.js`), entered
+// whenever the engine calls into it (`init`, `render`, its events and timers), and closed by the view's final call
+// (`close`), which unmounts the tree.
+//
 // This file is written by hand and shared by every React screen (`mods/react-runtime/`, which the mod host writes into
 // each screen's folder); `build.mjs` leaves it alone.
-import { asRender, files, host, onFocus, refresh, setContext, settingsMoved } from "./host.js";
+import { copyFor, files, runningHost } from "./host.js";
 import { View, div, image } from "gpui-kit";
 import { ScrollHandle } from "gpui-base";
 import { close, props as screenProps, scale } from "perch";
 import { describeToGpui, mount, NAMED_ELEMENTS, sdk } from "./runtime.mjs";
 
-// This folder's `@perch/sdk` calls this folder's host, whichever screen loads after it.
-sdk.bindHost(host);
+// This folder's `@perch/sdk` calls the host of this folder's running copy, whichever screen loads after it.
+sdk.bindHost(runningHost);
 
 const KIT = { div, image };
 
@@ -74,40 +78,61 @@ export function resultProps(raw) {
   };
 }
 
+/** `handle` with each of its methods run as `copy`: the engine's events reach the tree through it. */
+function entered(copy, handle) {
+  return new Proxy(handle, {
+    get(target, key) {
+      const value = target[key];
+      return typeof value === "function" ? (...args) => { copy.enter(); return value.apply(target, args); } : value;
+    },
+  });
+}
+
 /** The mod class for stock screen `id` drawn by `Component`. `options.container`: the style of the box the screen
  * fills (as the web's layout gives it); `options.props`: props from `perch.props()` (default `resultProps`). */
 export function screen(id, Component, options = {}) {
   const toProps = options.props ?? resultProps;
   return class Screen extends View {
     init(_props, cx) {
-      setContext(cx);
+      const copy = (this.copy = copyFor(cx, id));
+      copy.enter();
       if (options.keyboard) {
         this.keys = cx.focus_handle();
         // The source focused an element: the keyboard comes to the screen (after this turn: focus needs the window).
-        onFocus(() => cx.timer.after(0, () => { if (!this.keys.is_focused()) this.keys.focus(); }));
+        copy.onFocus(() => cx.timer.after(0, () => { if (!this.keys.is_focused()) this.keys.focus(); }));
       }
       this.raw = JSON.stringify(screenProps());
       this.mounts = 0;
       const props = { ...toProps(JSON.parse(this.raw)), key: this.mounts };
-      this.handle = mount(host, Component, { container: options.container, names: NAMED_ELEMENTS[id], props });
+      const handle = mount(copy.host, Component, { container: options.container, names: NAMED_ELEMENTS[id], props });
+      copy.attach(handle);
+      this.handle = entered(copy, handle);
       // Where `scrollIntoView()` leaves its request (a handle can only be made here, not while drawing).
       this.kit = { ...KIT, scroll: ScrollHandle.new() };
     }
 
+    /** The window let this copy go: its tree unmounts and its listeners and timers go with it. */
+    close() {
+      this.copy.close();
+    }
+
     render(cx) {
-      return asRender(() => {
+      const { copy } = this;
+      return copy.asRender(() => {
         // `render()` has a 50 ms script budget per frame (an event or a timer has 500 ms), so catching up with new
         // data or props, which re-renders React and describes the tree again, runs in a timer, and this frame draws
         // the last description. The engine runs `render()` again when something the screen read changed.
         const raw = JSON.stringify(screenProps());
-        if (refresh(false) || raw !== this.raw || settingsMoved()) {
+        if (copy.refresh(false) || raw !== this.raw || copy.settingsMoved()) {
           cx.timer.after(0, (task) => {
-            const size = JSON.stringify(host.viewport());
-            refresh(true);
+            if (copy.closed) return;
+            copy.enter();
+            const size = JSON.stringify(copy.host.viewport());
+            copy.refresh(true);
             // A new window size changes media rules and `vw`, which no component re-renders for: describe again.
-            if (JSON.stringify(host.viewport()) !== size) this.handle.describe();
+            if (JSON.stringify(copy.host.viewport()) !== size) this.handle.describe();
             // The web reads its view settings when it mounts: settings changed elsewhere mount it again.
-            const moved = settingsMoved();
+            const moved = copy.settingsMoved();
             if (moved) this.mounts += 1;
             if (raw !== this.raw || moved) {
               this.raw = raw;

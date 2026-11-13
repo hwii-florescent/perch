@@ -1,6 +1,19 @@
-// The host the React runtime and `@perch/sdk` call (`globalThis.perch`), made of the engine's real `perch`
-// module, its timers, clipboard and `localStorage`, and `perch-react` (icons). Shared by every React screen
-// (`mods/react-runtime/`); imported first (through `screen.js`): the runtime reads timers from it when it loads.
+// The host the React runtime and `@perch/sdk` call, made of the engine's real `perch` module, its timers, clipboard
+// and `localStorage`, and `perch-react` (icons). Shared by every React screen (`mods/react-runtime/`); imported first
+// (through `screen.js`): the runtime reads timers from it when it loads.
+//
+// Copies: every mod shares one script context, and the engine evaluates a folder's files once for all its copies (each
+// pane's header, each time a floating screen opens). So each copy (`copyFor(cx, screen)`, one per `init`) has its own
+// host, data snapshots, listeners and timers, and the browser globals a stock screen names (`window`, `document`,
+// `localStorage`, `setTimeout`) are those of the copy the engine last called into (`copy.enter()`, on every entry:
+// `init`, `render`, an event, a timer, the answer to a request it made, React working on its tree). When a copy leaves
+// the window (`copy.close()`, the view's final call) its tree is unmounted, so its effects clean up, and its listeners
+// and timers go. A copy whose build is reloaded gets no final call from the engine (`ShellRuntime::reload_now`
+// releases it): it stays listed, its tree mounted, until the window closes.
+// ponytail: the engine ends a timer with the screen whose call set it (`scope::current_application_generation` in
+// `scheduler.rs`), whatever `cx` set it, so a timer set for one copy while another's call runs (React's scheduler
+// working for a tree that call touched) ends if that screen closes first; the host closing a reloaded root
+// (`ShellRuntime::close` in `ModView::check`) would end a reloaded copy as a screen that leaves the window.
 //
 // Data: the SDK's hooks read snapshots (`navigation(options)`, `hosts()`) that stay the same object until the data
 // changes. `refresh()` (each `render()`, which the engine runs again exactly when something the mod read moved)
@@ -59,32 +72,48 @@ function dismiss(kind, props, why) {
   else props.onClose?.();
 }
 
-// The ambient `cx` `init` is handed: usable during any later host call (render, an event, a timer), which is when
-// React schedules work.
-let ambient = null;
-let rendering = false;
-export const setContext = (cx) => { ambient = cx; };
+// Every live copy of every React screen and the browser globals of the running one, on `globalThis`: each screen's
+// folder has its own copy of this file, and they share one script context.
+const COPIES = (globalThis[Symbol.for("perch.react.copies")] ??= new Set());
+const RUNNING = Symbol.for("perch.react.running");
+// Where the runtime's `window`, `document` and `localStorage` globals read (`installGlobals` in `dom.mjs`).
+const GLOBALS = Symbol.for("perch.react.globals");
+const TIMERS = (globalThis[Symbol.for("perch.react.timers")] ??= { next: 1, all: new Map() });
 
-// Timers for React's scheduler and the screen, on the engine's clock (`cx.timer.after`); each fire redraws.
-let nextTimer = 1;
-const timers = new Map();
+/** A copy that stays, other than `gone`: the running one, else the newest. */
+function heir(gone) {
+  const now = globalThis[RUNNING];
+  if (COPIES.has(now) && now !== gone) return now;
+  return [...COPIES].reverse().find((copy) => copy !== gone) ?? null;
+}
+
+// Timers for React's scheduler and the screens, on the engine's clock (`cx.timer.after`); each fire runs as the copy
+// that set it and redraws. One table for every copy, so `clearTimeout` finds a timer whichever folder's file set it.
 function setTimeout(fn, ms = 0, ...args) {
-  const id = nextTimer++;
-  const handle = ambient.timer.after(Math.max(0, Number(ms) || 0), (cx) => {
-    timers.delete(id);
+  const copy = COPIES.has(globalThis[RUNNING]) ? globalThis[RUNNING] : heir(null);
+  if (!copy) throw new Error("react-runtime: setTimeout with no screen running");
+  const id = TIMERS.next++;
+  const handle = copy.cx.timer.after(Math.max(0, Number(ms) || 0), (task) => {
+    TIMERS.all.delete(id);
+    copy.enter();
     fn(...args);
-    cx.notify();
+    task.notify();
   });
-  timers.set(id, handle);
+  TIMERS.all.set(id, { copy, handle });
   return id;
 }
 function clearTimeout(id) {
-  timers.get(id)?.cancel();
-  timers.delete(id);
+  const timer = TIMERS.all.get(id);
+  if (!timer) return;
+  TIMERS.all.delete(id);
+  try { timer.handle.cancel(); } catch { /* its copy is gone, and the timer with it */ }
 }
 for (const [name, value] of Object.entries({ setTimeout, clearTimeout })) {
   Object.defineProperty(globalThis, name, { value, configurable: true, writable: true, enumerable: false });
 }
+// `globalThis.perch`: the running copy's host (a script reading it while this file loads gets the platform's facts).
+const BASE = { isMac: true, hostname: "localhost" };
+Object.defineProperty(globalThis, "perch", { get: () => globalThis[RUNNING]?.host ?? BASE, configurable: true, enumerable: false });
 
 // Per-viewer view settings the sidebar keeps in `localStorage` are the window's sidebar settings in the `perch`
 // module, so they follow the window (and the fixture a test publishes); every other key is the mod's own storage.
@@ -103,53 +132,6 @@ function parseList(text) {
     return [];
   }
 }
-// The settings as the screen last read or wrote them. The web reads them once, when it mounts, so a change made
-// elsewhere (a key, another screen) is seen by mounting the screen again (`settingsMoved`).
-let seen = null;
-const settings = () => {
-  const now = perch.sidebarSettings();
-  seen = JSON.stringify(now);
-  return now;
-};
-/** Whether the window's sidebar settings changed since the screen last read or wrote them. */
-export const settingsMoved = () => seen !== null && JSON.stringify(perch.sidebarSettings()) !== seen;
-const storage = {
-  getItem: (key) => (SETTINGS[key] ? SETTINGS[key][0](settings()) : (own?.getItem(key) ?? null)),
-  setItem: (key, value) => {
-    if (!SETTINGS[key]) return own?.setItem(key, String(value));
-    seen = JSON.stringify(perch.setSidebarSettings(SETTINGS[key][1](String(value))));
-  },
-  removeItem: (key) => (SETTINGS[key] ? undefined : own?.removeItem(key)),
-  clear: () => own?.clear(),
-  key: (index) => own?.key(index) ?? null,
-  get length() { return own?.length ?? 0; },
-};
-
-// Snapshots by key, read again on `refresh()`.
-const snapshots = new Map();
-const listeners = new Set();
-function snapshot(key, read) {
-  let entry = snapshots.get(key);
-  if (!entry) {
-    const value = read();
-    snapshots.set(key, (entry = { read, value, text: JSON.stringify(value) }));
-  }
-  return entry.value;
-}
-/** Reads every snapshot again; returns whether one changed. With `tell`, keeps the new values and tells the
- * subscribers; without, only looks. */
-export function refresh(tell) {
-  let changed = false;
-  for (const entry of snapshots.values()) {
-    const value = entry.read();
-    const text = JSON.stringify(value);
-    if (text === entry.text) continue;
-    changed = true;
-    if (tell) Object.assign(entry, { value, text });
-  }
-  if (changed && tell) for (const listener of [...listeners]) listener();
-  return changed;
-}
 const sessionsOf = (nav) => {
   const out = new Map();
   const add = (list) => { for (const s of list ?? []) out.set(s.id, s); };
@@ -163,116 +145,219 @@ const sessionsOf = (nav) => {
 const NO_ADD = { status: "idle", error: null };
 const DESKTOP = { width: 1000, height: 800 };
 let nextOverlay = 1;
-const openOverlays = new Set();
 
-export const host = {
-  isMac: true,
-  hostname: "localhost",
-  storage,
-  clipboard: { writeText: async (text) => ambient?.write_to_clipboard(String(text)) },
-  theme: () => perch.theme(),
-  // The window's logical size (`window.innerWidth`/`innerHeight`, media rules, `vw`/`vh`); a resize re-renders. Before
-  // a window has drawn the mod there is none: a desktop window's size.
-  viewport: () => snapshot("viewport", () => perch.viewport() ?? DESKTOP),
-  /** The source focused `element`: the screen takes the keyboard (`screen.js`). */
-  focused: () => { for (const listener of [...focusListeners]) listener(); },
-  subscribe(listener) {
-    listeners.add(listener);
-    return () => listeners.delete(listener);
-  },
-  navigation: (options = {}) => {
-    const opts = { showTerminals: !!options.showTerminals, sortByAttention: !!options.sortByAttention };
-    return snapshot(`navigation:${JSON.stringify(opts)}`, () => perch.navigation(opts));
-  },
-  hosts: () => snapshot("hosts", () => perch.hosts()),
-  workspaceTabs: () => snapshot("workspaceTabs", () => perch.workspaceTabs()),
-  statusLine: () => snapshot("statusLine", () => perch.statusLine()),
-  zoom: () => snapshot("zoom", () => perch.zoom()),
-  paneLook: () => snapshot("paneLook", () => perch.paneLook()),
-  planUsage: () => snapshot("planUsage", () => perch.planUsage()),
-  notifications: () => snapshot("notifications", () => perch.notifications()),
-  // The window's requests (`perch.requests()`: a count per kind, one more per request), as the web's window events:
-  // `listener` runs once for each request made after it subscribed.
-  onRequest(kind, listener) {
-    const count = () => snapshot("requests", () => perch.requests())[kind] ?? 0;
-    let seen = count();
-    const check = () => {
-      const now = count();
-      if (now === seen) return;
-      seen = now;
-      listener();
-    };
-    listeners.add(check);
-    return () => listeners.delete(check);
-  },
-  agentChoices: (hostId) => snapshot(`agentChoices:${hostId}`, () => perch.agentChoices(hostId)),
-  // A session on any computer (the web's store has them all): the shown computer's first, then the others'.
-  session: (id) => {
-    const shown = sessionsOf(host.navigation({})).get(id);
-    if (shown) return shown;
-    for (const other of host.hosts().list ?? []) {
-      const found = sessionsOf(snapshot(`navigation:host:${other.id}`, () => perch.navigation({ hostId: other.id }))).get(id);
-      if (found) return found;
+
+/** The running copy of this folder's screen, which this folder's `@perch/sdk` calls (`screen.js` binds it). */
+let mine = null;
+export const runningHost = () => mine?.host ?? BASE;
+
+/**
+ * A new copy of screen `screen` for the view `init` handed `cx`. `copy.enter()` before running anything for it;
+ * `copy.attach(handle)` with its mounted tree; `copy.close()` once, when it leaves the window.
+ */
+export function copyFor(cx, screen) {
+  // The settings as this copy last read or wrote them. The web reads them once, when it mounts, so a change made
+  // elsewhere (a key, another screen) is seen by mounting the screen again (`settingsMoved`).
+  let seen = null;
+  const settings = () => {
+    const now = perch.sidebarSettings();
+    seen = JSON.stringify(now);
+    return now;
+  };
+  const storage = {
+    getItem: (key) => (SETTINGS[key] ? SETTINGS[key][0](settings()) : (own?.getItem(key) ?? null)),
+    setItem: (key, value) => {
+      if (!SETTINGS[key]) return own?.setItem(key, String(value));
+      seen = JSON.stringify(perch.setSidebarSettings(SETTINGS[key][1](String(value))));
+    },
+    removeItem: (key) => (SETTINGS[key] ? undefined : own?.removeItem(key)),
+    clear: () => own?.clear(),
+    key: (index) => own?.key(index) ?? null,
+    get length() { return own?.length ?? 0; },
+  };
+
+  // Snapshots by key, read again on `refresh()`.
+  const snapshots = new Map();
+  const listeners = new Set();
+  const focusListeners = new Set();
+  const openOverlays = new Set();
+  function snapshot(key, read) {
+    let entry = snapshots.get(key);
+    if (!entry) {
+      const value = read();
+      snapshots.set(key, (entry = { read, value, text: JSON.stringify(value) }));
     }
-    return null;
-  },
-  sessionFolders: () => snapshot("sessionFolders", () => ({ hostId: perch.navigation().hostId, folders: [] })),
-  addProject: () => NO_ADD,
-  addProjectFolder: () => {},
-  clearAddProject: () => {},
-  startSession: (hostId, cwd, agent) => {
-    perch.startSession(hostId, cwd ?? undefined, agent).catch((error) => console.error(`perch.startSession: ${error?.message ?? error}`));
-  },
-  command(name, args) {
-    const id = STAND_IN[name] ?? name;
-    perch.run(id, args && Object.keys(args).length ? args : undefined).catch((error) => console.error(`perch.run ${name}: ${error?.message ?? error}`));
-    return true;
-  },
-  // The web's own marks (`agent-icons.js`, rendered from its `AgentIcon`); a provider without one gets the letter
-  // tile, with the letter the web picks (a built-in program's name, else the provider's first letter). A person's
-  // own icon from `programs.json` is not drawn: the module gives a mod neither that file nor the icon files.
-  agentIcon(provider) {
-    if (ICONS[provider]) return ICONS[provider];
-    const letter = LETTERS[provider] ?? (provider?.[0]?.toUpperCase() || "?");
-    const escaped = letter.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
-    return { markup: LETTER.replace("{letter}", escaped), tint: true };
-  },
-  openOverlay(kind, props = {}) {
-    const id = nextOverlay++;
-    const known = OVERLAY_SCREENS[kind];
-    if (!known) {
-      dismiss(kind, props, "no screen draws it yet");
+    return entry.value;
+  }
+  let rendering = false;
+  let handle = null;
+
+  const host = {
+    isMac: true,
+    hostname: "localhost",
+    storage,
+    clipboard: { writeText: async (text) => cx.write_to_clipboard(String(text)) },
+    theme: () => perch.theme(),
+    // The window's logical size (`window.innerWidth`/`innerHeight`, media rules, `vw`/`vh`); a resize re-renders.
+    // Before a window has drawn the mod there is none: a desktop window's size.
+    viewport: () => snapshot("viewport", () => perch.viewport() ?? DESKTOP),
+    /** The source focused `element`: the screen takes the keyboard (`screen.js`). */
+    focused: () => { for (const listener of [...focusListeners]) listener(); },
+    /** React is about to work on this copy's tree (render or commit it). */
+    enter: () => copy.enter(),
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    navigation: (options = {}) => {
+      const opts = { showTerminals: !!options.showTerminals, sortByAttention: !!options.sortByAttention };
+      return snapshot(`navigation:${JSON.stringify(opts)}`, () => perch.navigation(opts));
+    },
+    hosts: () => snapshot("hosts", () => perch.hosts()),
+    workspaceTabs: () => snapshot("workspaceTabs", () => perch.workspaceTabs()),
+    statusLine: () => snapshot("statusLine", () => perch.statusLine()),
+    zoom: () => snapshot("zoom", () => perch.zoom()),
+    paneLook: () => snapshot("paneLook", () => perch.paneLook()),
+    planUsage: () => snapshot("planUsage", () => perch.planUsage()),
+    notifications: () => snapshot("notifications", () => perch.notifications()),
+    // The window's requests (`perch.requests()`: a count per kind, one more per request), as the web's window events:
+    // `listener` runs once for each request made after it subscribed.
+    onRequest(kind, listener) {
+      const count = () => snapshot("requests", () => perch.requests())[kind] ?? 0;
+      let heard = count();
+      const check = () => {
+        const now = count();
+        if (now === heard) return;
+        heard = now;
+        listener();
+      };
+      listeners.add(check);
+      return () => listeners.delete(check);
+    },
+    agentChoices: (hostId) => snapshot(`agentChoices:${hostId}`, () => perch.agentChoices(hostId)),
+    // A session on any computer (the web's store has them all): the shown computer's first, then the others'.
+    session: (id) => {
+      const shown = sessionsOf(host.navigation({})).get(id);
+      if (shown) return shown;
+      for (const other of host.hosts().list ?? []) {
+        const found = sessionsOf(snapshot(`navigation:host:${other.id}`, () => perch.navigation({ hostId: other.id }))).get(id);
+        if (found) return found;
+      }
+      return null;
+    },
+    sessionFolders: () => snapshot("sessionFolders", () => ({ hostId: perch.navigation().hostId, folders: [] })),
+    addProject: () => NO_ADD,
+    addProjectFolder: () => {},
+    clearAddProject: () => {},
+    startSession: (hostId, cwd, agent) => {
+      perch.startSession(hostId, cwd ?? undefined, agent).catch(answer((error) => console.error(`perch.startSession: ${error?.message ?? error}`)));
+    },
+    command(name, args) {
+      const id = STAND_IN[name] ?? name;
+      perch.run(id, args && Object.keys(args).length ? args : undefined).catch(answer((error) => console.error(`perch.run ${name}: ${error?.message ?? error}`)));
+      return true;
+    },
+    // The web's own marks (`agent-icons.js`, rendered from its `AgentIcon`); a provider without one gets the letter
+    // tile, with the letter the web picks (a built-in program's name, else the provider's first letter). A person's
+    // own icon from `programs.json` is not drawn: the module gives a mod neither that file nor the icon files.
+    agentIcon(provider) {
+      if (ICONS[provider]) return ICONS[provider];
+      const letter = LETTERS[provider] ?? (provider?.[0]?.toUpperCase() || "?");
+      const escaped = letter.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+      return { markup: LETTER.replace("{letter}", escaped), tint: true };
+    },
+    openOverlay(kind, props = {}) {
+      const id = nextOverlay++;
+      const known = OVERLAY_SCREENS[kind];
+      if (!known) {
+        dismiss(kind, props, "no screen draws it yet");
+        return id;
+      }
+      openOverlays.add(id);
+      perch.openScreen(known.screen, known.props(props)).then(
+        answer((result) => {
+          if (openOverlays.delete(id)) known.result(props, result);
+        }),
+        answer((error) => {
+          if (openOverlays.delete(id)) dismiss(kind, props, error?.message ?? String(error));
+        }),
+      );
       return id;
-    }
-    openOverlays.add(id);
-    perch.openScreen(known.screen, known.props(props)).then(
-      (result) => {
-        if (openOverlays.delete(id)) known.result(props, result);
-      },
-      (error) => {
-        if (openOverlays.delete(id)) dismiss(kind, props, error?.message ?? String(error));
-      },
-    );
-    return id;
-  },
-  // The screen unmounted the overlay before it answered: close the window's screen (the top modal one).
-  closeOverlay(id) {
-    if (openOverlays.delete(id)) perch.run("overlay.close").catch(() => {});
-  },
-  // The native keymap has no `navigator.*` (or other in-screen) bindings: a screen's home-row keys are not matched.
-  shortcutFor: () => null,
-  render: () => { if (!rendering) ambient?.notify(); },
-  error: (error) => console.error(`react-runtime: ${error?.stack ?? error}`),
-};
+    },
+    // The screen unmounted the overlay before it answered: close the window's screen (the top modal one).
+    closeOverlay(id) {
+      if (openOverlays.delete(id)) perch.run("overlay.close").catch(() => {});
+    },
+    // The native keymap has no `navigator.*` (or other in-screen) bindings: a screen's home-row keys are not matched.
+    shortcutFor: () => null,
+    render: () => { if (!rendering && !copy.closed) cx.notify(); },
+    error: (error) => console.error(`react-runtime: ${error?.stack ?? error}`),
+  };
+  /** `fn` as the answer to a request this copy made: it runs as this copy (whichever screen's call settled it). */
+  const answer = (fn) => (value) => { if (copy.closed) return; copy.enter(); fn(value); };
 
-const focusListeners = new Set();
-/** Calls `listener` whenever the source focuses one of its elements. */
-export const onFocus = (listener) => { focusListeners.add(listener); return () => focusListeners.delete(listener); };
-
-/** Runs `fn` as the mod's `render()`: a commit inside it needs no extra frame. */
-export function asRender(fn) {
-  rendering = true;
-  try { return fn(); } finally { rendering = false; }
+  const copy = {
+    screen,
+    host,
+    closed: false,
+    cx,
+    /** How many listeners this copy has on the window's data and on its own focus. */
+    listening: () => listeners.size + focusListeners.size,
+    /** The engine is calling into this copy: the browser globals are its own until it calls into another. */
+    enter() {
+      globalThis[RUNNING] = copy;
+      if (handle) globalThis[GLOBALS] = handle.globals;
+      mine = copy;
+    },
+    attach(mounted) {
+      handle = mounted;
+      globalThis[GLOBALS] = handle.globals;
+    },
+    /** Reads every snapshot again; returns whether one changed. With `tell`, keeps the new values and tells the
+     * subscribers; without, only looks. */
+    refresh(tell) {
+      let changed = false;
+      for (const entry of snapshots.values()) {
+        const value = entry.read();
+        const text = JSON.stringify(value);
+        if (text === entry.text) continue;
+        changed = true;
+        if (tell) Object.assign(entry, { value, text });
+      }
+      if (changed && tell) for (const listener of [...listeners]) listener();
+      return changed;
+    },
+    /** Whether the window's sidebar settings changed since this copy last read or wrote them. */
+    settingsMoved: () => seen !== null && JSON.stringify(perch.sidebarSettings()) !== seen,
+    /** Calls `listener` whenever the source focuses one of its elements. */
+    onFocus: (listener) => { focusListeners.add(listener); return () => focusListeners.delete(listener); },
+    /** Runs `fn` as the mod's `render()`: a commit inside it needs no extra frame. */
+    asRender(fn) {
+      copy.enter();
+      rendering = true;
+      try { return fn(); } finally { rendering = false; }
+    },
+    /** The copy left the window: its tree is unmounted (its effects clean up) and it stops listening; the timers it
+     * still has go with it, as the engine ends them with its view. */
+    close() {
+      if (copy.closed) return;
+      copy.enter();
+      // Unmounting commits once more: that commit has nothing to draw (`render` above does nothing once closed).
+      copy.closed = true;
+      try { handle?.unmount(); } catch (error) { host.error(error); }
+      COPIES.delete(copy);
+      listeners.clear();
+      focusListeners.clear();
+      openOverlays.clear();
+      snapshots.clear();
+      for (const [id, timer] of TIMERS.all) if (timer.copy === copy) clearTimeout(id);
+      const next = heir(copy);
+      if (globalThis[RUNNING] === copy && next) next.enter();
+      if (mine === copy) mine = null;
+    },
+  };
+  COPIES.add(copy);
+  return copy;
 }
 
 /** Icons: `perch-react` draws an icon's markup (gpui-kit's `svg()` reads files this window does not serve), and
@@ -294,4 +379,3 @@ export const files = {
 };
 const widths = new Map();
 
-globalThis.perch = host;

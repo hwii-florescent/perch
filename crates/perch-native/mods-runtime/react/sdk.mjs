@@ -28,15 +28,16 @@ import { PageIcon } from "../../../../packages/web/src/components/PageIcon.tsx";
 export const version = "1.3.0";
 
 // The host this copy of the runtime serves (`bindHost`, from the screen's `screen.js`). Each screen's folder has its own
-// runtime and host, but the mods share one script context, so `globalThis.perch` is the host of whichever screen
-// loaded last: a screen that read data through it would stop hearing of changes once that screen closed.
+// runtime, and each copy of the screen (each pane's header, each time a floating screen opens) its own host, but the
+// mods share one script context: `globalThis.perch` is not this folder's.
 let bound = null;
-/** Binds this runtime's `@perch/sdk` to `perch`, its screen's own host. */
+/** Binds this runtime's `@perch/sdk` to `perch`, its screen's own host, or a function that returns the host of the
+ * copy of the screen running now. */
 export const bindHost = (perch) => { bound = perch; };
 
 /** The host object; a clear error when a screen runs without one. */
 function host() {
-  const perch = bound ?? globalThis.perch;
+  const perch = (typeof bound === "function" ? bound() : bound) ?? globalThis.perch;
   if (!perch) throw new Error("@perch/sdk: no perch host (globalThis.perch) is set");
   return perch;
 }
