@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 /// How a pane header is laid out (`usePaneLook`). The native window has no layouts to change it.
-pub const PANE_HEADER_HEIGHT: f32 = 24.;
+pub const PANE_HEADER_HEIGHT: f32 = 28.;
 
 /// Where a screen goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
