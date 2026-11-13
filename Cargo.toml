@@ -23,6 +23,12 @@ license = "GPL-3.0-only"
 lto = "thin"
 codegen-units = 1
 
+# A stripped macOS proc-macro loses what rustc loads from it ("can't find crate
+# for `rquickjs_macro`" in perch-native's release build), as herdr-app found.
+# Build-time code only; the shipped binaries are still stripped.
+[profile.release.build-override]
+strip = "none"
+
 # perch-native's mod engine (vendored gpui-shell): LLRT modules name `rquickjs`,
 # and must share the shell's quickjs-jit VM, as gpui-kit's own workspace does.
 [patch.crates-io]
