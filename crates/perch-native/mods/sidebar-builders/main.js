@@ -10,7 +10,10 @@
 // hovered, as the web's are drawn only on hover.
 import { View, div } from "gpui-kit";
 import * as perch from "perch";
-import { FONT, WORDS, baseline, baselineShift, body, col, line, lineRow, mix, named, row, run, spaced, stateColor, text } from "./kit.js";
+import {
+  FONT, WORDS, baseline, baselineShift, beginFlow, below, body, col, gapped, line, lineRow, mix, named, padded, restartFlow,
+  row, run, spaced, stack, stackLine, stackLineRow, stacks, stateColor, text,
+} from "./kit.js";
 import { agentMark, icon } from "./icons.js";
 
 /** `nestSessions`: each sub-session straight after its lead when both are listed. */
@@ -72,12 +75,14 @@ export default class SidebarBuilders extends View {
     const meta = remote ? active.state : local.platform;
     const place = remote ? (active.error ?? active.address ?? "") : local.cwd ? local.cwd + (local.branch ? ` (${local.branch})` : "") : "";
     const small = (el) => line(el, 11.2, 400, 13, sub);
-    return named(col(), "host-chip").min_w(0).flex_1().px(10.4).pt(9.6).pb(8)
+    // The badge is the tallest of the first line, so its padding and line are the column's lengths.
+    return named(col(), "host-chip").min_w(0).flex_1().px(10.4).pt(stack(9.6))
       .child(row().items_center().gap(6.4)
-        .child(lineRow(named(row(), "host-badge").flex_shrink(0).rounded(8).px(6.4).py(2.4).bg(mix(color, 15)).child(spaced(badge, 0.624, 10.4)), 10.4, 700, 12, color, 4.8))
+        .child(stackLineRow(named(row(), "host-badge").flex_shrink(0).rounded(8).px(6.4).bg(mix(color, 15)).child(spaced(badge, 0.624, 10.4)), 10.4, 700, 12, color, 2.4, 2.4))
         .when(name, (r) => r.child(line(named(div(), "host-name").min_w(0).truncate().child(name), 12, 500, 15, t.text)))
         .when(meta, (r) => r.child(small(named(div(), "host-meta").ml("auto").flex_shrink(0).child(meta)))))
-      .when(place, (el) => el.child(small(named(div(), "host-line").mt(4.8).truncate().child(place))));
+      .when(place, (el) => el.child(stackLine(named(div(), "host-line").mt(stack(4.8)).truncate().child(place), 11.2, 400, 13, sub)))
+      .pb(stack(8));
   }
 
   hostSwitcher(c) {
@@ -85,11 +90,13 @@ export default class SidebarBuilders extends View {
     // The button's own 6 px side and 2/3 px top and bottom padding are the browser's defaults.
     // Tracked by hand rather than with `.hover`: the window's idle pointer is at its corner, which
     // would show this (the first thing there) as hovered before anyone has moved.
-    return this.hoverable(named(row(), "host-switcher").flex_shrink(0).items_start().gap(4.8).px(6).pt(2).pb(3).cursor_pointer()
+    return this.hoverable(named(row(), "host-switcher").flex_shrink(0).items_start().gap(4.8).px(6).pt(stack(2)).cursor_pointer()
       .when(this.hover === "host", (r) => r.bg(t["surface-1"])), "host")
       .on_click((_e, cx) => { this.hostMenu = !this.hostMenu; cx.notify(); })
       .child(this.hostChip(c))
-      .child(line(named(div(), "host-caret").flex_shrink(0).pt(9.6).pr(8).child("▾"), 11.2, 400, 13, t["subtext-0"], 9.6));
+      // Beside the chip, not under it: not part of the column's total.
+      .child(line(named(div(), "host-caret").flex_shrink(0).pt(9.6).pr(8).child("▾"), 11.2, 400, 13, t["subtext-0"], 9.6))
+      .pb(stack(3));
   }
 
   /** The popover under the chip: the computers, the shown one marked, a click selects one. */
@@ -118,7 +125,7 @@ export default class SidebarBuilders extends View {
     const { t, hosts } = c;
     const sub = t["subtext-0"];
     const shortcut = perch.shortcutLabel("sessions.new");
-    const button = named(row(), "new-session-button", hosts.activeId).items_center().gap(8).h(32.6).px(12).rounded(8)
+    const button = padded(named(row(), "new-session-button", hosts.activeId).items_center().gap(8).px(12).rounded(8), 8.8, 15, 8.8)
       .text_color(t.text).hover((s) => s.bg(t["surface-0"]))
       .child(named(icon("plus", 14, sub), "new-session-icon"))
       .child(line(named(div(), "new-session-label"), 12.5, 500, 15, t.text).child("New session"))
@@ -138,7 +145,8 @@ export default class SidebarBuilders extends View {
     return lineRow(name ? named(el, name, key) : el, 11, 500, 16, c.t.text, 2);
   }
 
-  sessionRow(c, s, group, nested, variant, detail = "") {
+  /** One session row; `margin` is the gap above it, taken from the column's running total by the caller. */
+  sessionRow(c, s, group, nested, variant, detail = "", margin = 0) {
     const { t, nav } = c;
     const sub = t["subtext-0"];
     const active = s.id === nav.activeSessionId;
@@ -148,7 +156,7 @@ export default class SidebarBuilders extends View {
     const pl = status ? 30 : variant === "tree" && !chats ? 30.4 : 10.4;
     const ink = active ? t.text : sub;
     const button = text(named(row(), "session-button", s.id).flex_1().min_w(0).items_center().gap(8)
-      .min_h(status ? 24 : 32).pl(pl).pr(10.4).py(status ? 0 : 4).rounded(8).cursor_pointer()
+      .pl(pl).pr(10.4).rounded(8).cursor_pointer()
       .on_click(() => run(perch, "session.open", { id: s.id })), 12, 400, 15, ink);
     if (status) {
       button.child(agentMark(t, s.provider, 16, `session-mark:${s.id}`, `session-mark-icon:${s.id}`))
@@ -163,7 +171,8 @@ export default class SidebarBuilders extends View {
         .when(nav.reachable && s.provider !== "terminal" && s.section !== "idle", (b) => b.child(this.stateBadge(c, s.section, 1, "session-state-badge", s.id)));
     }
     const key = `row:${s.id}`;
-    const el = named(row(), "session-row", s.id).min_w(0).items_stretch().rounded(8)
+    // The row is 24 (By status) or 32 high whatever is in it; its button fills it.
+    const el = named(row(), "session-row", s.id).min_w(0).items_stretch().rounded(8).mt(margin).h(stack(status ? 24 : 32))
       .when(nested, (r) => r.ml(16).border_l(1).border_color(t["surface-1"]))
       .when(active, (r) => r.bg(t["surface-1"]))
       .hover((st) => st.bg(t["surface-1"]))
@@ -172,17 +181,19 @@ export default class SidebarBuilders extends View {
     return this.hoverable(el, key);
   }
 
-  sessionRows(c, list, group) {
-    return col().gap(2).pt(2).children(nestSessions(list).map(({ session, nested }) => this.sessionRow(c, session, group, nested, "tree")));
+  /** A list of session rows under a workspace or project: 2 px of padding, then the rows 2 px apart. */
+  sessionRows(c, list, group, margin = 0) {
+    return col().mt(margin).pt(stack(2)).children(gapped(nestSessions(list), 2, ({ session, nested }, g) =>
+      this.sessionRow(c, session, group, nested, "tree", "", g)));
   }
 
   // ---- By project --------------------------------------------------------------------------------
 
-  workspaceNode(c, project, ws) {
+  workspaceNode(c, project, ws, margin = 0) {
     const { t, nav } = c;
     const sub = t["subtext-0"];
     const active = ws.id === nav.activeWorkspaceId;
-    const button = text(named(row(), "workspace-button", ws.id).items_center().gap(7.2).min_h(32).py(3).pl(12).pr(48).rounded(8).cursor_pointer()
+    const button = text(named(row(), "workspace-button", ws.id).items_center().gap(7.2).h(stack(32)).pl(12).pr(48).rounded(8).cursor_pointer()
       .when(active && ws.sessions.length === 0, (r) => r.bg(t["surface-1"]))
       .hover((s) => s.bg(t["surface-1"]))
       .on_click(() => run(perch, "workspace.focus", { id: ws.id })), 12, 400, 15, t.text)
@@ -193,12 +204,12 @@ export default class SidebarBuilders extends View {
       .when(ws.dirty, (r) => r.child(line(named(div(), "workspace-dirty-mark", ws.id).flex_shrink(0).child("●"), 9.28, 400, 11, sub)))
       .when(ws.pinned || ws.sleeping, (r) => r.child(line(named(div(), "workspace-pinned-label", ws.id).flex_shrink(0)
         .child([ws.pinned && "pinned", ws.sleeping && "sleeping"].filter(Boolean).join(" · ")), 9.28, 400, 11, sub)));
-    return col().gap(2)
+    return col().mt(margin)
       .child(named(col(), "workspace", ws.id).child(button).when(ws.sessions.length > 0, (e) => e.child(this.sessionRows(c, ws.sessions, ws.id))))
-      .when(ws.children.length > 0, (e) => e.child(col().gap(2).ml(14.4).children(ws.children.map((child) => this.workspaceNode(c, project, child)))));
+      .when(ws.children.length > 0, (e) => e.child(col().mt(stack(2)).ml(14.4).children(gapped(ws.children, 2, (child, g) => this.workspaceNode(c, project, child, g)))));
   }
 
-  hiddenWorktrees(c, project) {
+  hiddenWorktrees(c, project, margin = 0) {
     const { t } = c;
     const sub = t["subtext-0"];
     const open = this.hiddenOpen.has(project.id);
@@ -206,21 +217,23 @@ export default class SidebarBuilders extends View {
     // The web's button is an inline box in a block of the page's 16 px / 1.3 text: it sits on that
     // line's baseline, so the line's taller strut puts it lower.
     const strut = Math.max(0, baseline(16, body(16)) - (4 + baseline(9.92, 12)));
-    const button = line(named(div(), "hidden-worktrees-button", project.id).pt(4).pr(7.2).pb(4).pl(23.2).cursor_pointer()
+    const block = col().mt(margin).pt(stack(strut));
+    const button = stackLine(named(div(), "hidden-worktrees-button", project.id).pr(7.2).pl(23.2).cursor_pointer()
       .on_click((_e, cx) => {
         if (open) this.hiddenOpen.delete(project.id); else this.hiddenOpen.add(project.id);
         cx.notify();
-      }).child(`${n} hidden worktree${n === 1 ? "" : "s"}`), 9.92, 400, 12, t["overlay-1"], 8);
-    return col().pt(strut).child(button).when(open, (e) => e.children(project.hidden.map((ws) =>
+      }).child(`${n} hidden worktree${n === 1 ? "" : "s"}`), 9.92, 400, 12, t["overlay-1"], 4, 4);
+    return block.child(button).when(open, (e) => e.children(project.hidden.map((ws) =>
       // Show (`workspace.hide` with hidden: false) is not a command of the perch module yet: drawn, not wired.
-      row().items_center().gap(5.6).py(3).pr(12).pl(23.2)
+      padded(row().items_center().gap(5.6).pr(12).pl(23.2), 3, 30, 3)
         .child(col().flex_1().min_w(0)
           .child(line(div().truncate().child(ws.branch || ws.name), 12, 500, 15, t.text))
           .child(line(div().truncate().child(ws.path), 12, 400, 15, sub)))
         .child(line(div().px(4.8).py(2.2).rounded(8).child("Show"), 9.6, 400, 11, sub, 4.4)))));
   }
 
-  project(c, p) {
+  /** One project; `margin` is the gap above it, taken from the column's running total by the caller. */
+  project(c, p, margin = 0) {
     const { t, nav, settings } = c;
     const sub = t["subtext-0"];
     const single = singleWorkspaceOf(p);
@@ -229,14 +242,15 @@ export default class SidebarBuilders extends View {
     const count = top && top !== "idle" ? p.sessions.filter((s) => s.section === top).length : 0;
     const key = `ph:${p.id}`;
     // With nothing to fold away, the header opens the checkout instead.
-    const toggle = text(named(row(), "project-toggle", p.id).flex_1().min_w(0).min_h(32).items_center().gap(7.2).py(3).px(12).rounded(8).cursor_pointer()
+    const toggle = text(named(row(), "project-toggle", p.id).flex_1().min_w(0).items_center().gap(7.2).px(12).rounded(8).cursor_pointer()
       .on_click(() => (single ? run(perch, "workspace.focus", { id: single.id }) : run(perch, "project.fold", { id: p.id }))), 12, 400, 15, t.text)
       .when(!single, (r) => r.child(named(icon(folded ? "chevronClosed" : "chevronOpen", 10, sub), "project-chevron", p.id).ml(-4)))
       .child(named(icon("folder", 12, sub, { filled: p.favorite }), "project-folder-icon", p.id))
       .child(line(named(div(), "project-name", p.id).min_w(0).truncate().child(p.name), 12.5, 500, 15, t.text))
       .when(single?.branch && single.branch !== p.name, (r) => r.child(line(named(div(), "project-branch", p.id).min_w(0).flex_shrink(3).truncate().child(single.branch), 12, 400, 15, sub)))
       .when(single?.dirty, (r) => r.child(line(named(div(), "project-dirty-mark", p.id).flex_shrink(0).child("●"), 9.28, 400, 11, sub)));
-    const header = named(row(), "project-header", p.id).items_stretch().rounded(8)
+    // The header is 32 high whatever is in it; its toggle fills it.
+    const header = named(row(), "project-header", p.id).items_stretch().rounded(8).h(stack(32))
       .when(single && single.id === nav.activeWorkspaceId && (folded || p.sessions.length === 0), (r) => r.bg(t["surface-1"]))
       .hover((s) => s.bg(t["surface-1"]))
       .child(toggle)
@@ -246,17 +260,23 @@ export default class SidebarBuilders extends View {
       .child(this.rowAction(c, key, "project-menu-button", p.id, icon("ellipsis", 14, sub), 24, null))
       .child(this.rowAction(c, key, "project-add-button", p.id, icon("plus", 14, sub), 24, null));
     const inside = (!folded || single) && (p.workspaces.length + p.hidden.length > 0 || p.jobs.length > 0);
-    return col().gap(2).flex_shrink(0).id(`project:${p.id}`)
+    // What the block under the header holds, each 2 px below the one before.
+    const parts = [];
+    if (single && !folded && single.sessions.length > 0) parts.push((g) => this.sessionRows(c, single.sessions, single.id, g));
+    if (!single) parts.push((g) => col().mt(g).children(gapped(p.workspaces, 2, (ws, gap) => this.workspaceNode(c, p, ws, gap))));
+    for (const job of p.jobs) {
+      parts.push((g) => padded(row().mt(g).items_center().gap(7.2).px(12), 3, body(12), 3)
+        .child(text(div().child(job.status === "failed" ? "✕" : "◌"), 12, 400, body(12), sub))
+        .child(text(div().child(job.status === "failed" ? `${job.branch}: create failed` : `${job.branch}: ${job.phase}…`), 12, 400, body(12), sub)));
+    }
+    if (p.hidden.length > 0) parts.push((g) => this.hiddenWorktrees(c, p, g));
+    return col().mt(margin).flex_shrink(0).id(`project:${p.id}`)
       .child(this.hoverable(header, key))
-      .when(inside, (e) => e.child(named(col(), "project-workspaces", p.id).gap(2)
-        .when(!!single && !folded && single.sessions.length > 0, (b) => b.child(this.sessionRows(c, single.sessions, single.id)))
-        .when(!single, (b) => b.child(col().gap(2).children(p.workspaces.map((ws) => this.workspaceNode(c, p, ws)))))
-        .children(p.jobs.map((job) => text(row().items_center().gap(7.2).px(12).py(3).child(div().child(job.status === "failed" ? "✕" : "◌"))
-          .child(div().child(job.status === "failed" ? `${job.branch}: create failed` : `${job.branch}: ${job.phase}…`)), 12, 400, body(12), sub)))
-        .when(p.hidden.length > 0, (b) => b.child(this.hiddenWorktrees(c, p)))));
+      .when(inside, (e) => e.child(named(col(), "project-workspaces", p.id).mt(stack(2))
+        .children(gapped(parts, 2, (part, g) => part(g)))));
   }
 
-  quickchat(c) {
+  quickchat(c, margin = 0) {
     const { t, nav, settings } = c;
     const sub = t["subtext-0"];
     const chat = nav.quickchat;
@@ -264,8 +284,8 @@ export default class SidebarBuilders extends View {
     const shown = [...chats].reverse();
     const folded = settings.collapsedProjects.includes(chat.id);
     const key = "ph:chats";
-    const header = named(row(), "chats-header").items_stretch().rounded(8).hover((s) => s.bg(t["surface-1"]))
-      .child(named(row(), "chats-toggle").flex_1().min_h(32).items_center().gap(5.6).py(4).pl(16).pr(8.8).rounded(8).cursor_pointer()
+    const header = named(row(), "chats-header").items_stretch().rounded(8).h(stack(32)).hover((s) => s.bg(t["surface-1"]))
+      .child(named(row(), "chats-toggle").flex_1().items_center().gap(5.6).pl(16).pr(8.8).rounded(8).cursor_pointer()
         .on_click(() => run(perch, "project.fold", { id: chat.id }))
         .child(lineRow(named(row(), "chats-label"), 9.92, 600, 12.9, sub).child(spaced("QUICKCHAT", 0.4464, 9.92)))
         .child(named(icon(folded ? "chevronClosed" : "chevronOpen", 12, sub), "chats-chevron")))
@@ -273,24 +293,34 @@ export default class SidebarBuilders extends View {
       // New chat is `quickchat.new` on the web; the perch module has no such command yet.
       .child(named(row(), "chats-new-button").w(24).h(24).mx(2).self_center().flex_shrink(0).items_center().justify_center().rounded(8).cursor_pointer()
         .hover((s) => s.bg(t["surface-1"])).child(named(icon("newChat", 16, sub), "chats-new-icon")));
-    return named(col(), "chats").gap(2)
+    return named(col(), "chats").mt(margin)
       .child(this.hoverable(header, key))
-      .when(!folded && chats.length > 0, (e) => e.child(col().gap(2).pt(2).pr(4.8).pl(6.4)
-        .children(nestSessions(shown).map(({ session, nested }) => this.sessionRow(c, session, "chats", nested, "tree")))));
+      .when(!folded && chats.length > 0, (e) => e.child(col().mt(stack(2)).pt(stack(2)).pr(4.8).pl(6.4)
+        .children(gapped(nestSessions(shown), 2, ({ session, nested }, g) => this.sessionRow(c, session, "chats", nested, "tree", "", g)))));
   }
 
   // ---- By status and In one list -------------------------------------------------------------
 
-  statusHeading(c, id, title, count, note, section) {
+  /** A section's heading: 12 px above it (and `margin`, the gap before it), 3 px of padding, 2 px below. */
+  statusHeading(c, id, title, count, note, section, margin = 0) {
     const { t } = c;
     const color = section && section !== "offline" ? stateColor(t, section) : null;
     const dot = named(div(), "status-heading-dot", id).w(8).h(8).flex_shrink(0).rounded(4);
     if (!color) dot.border(1.5).border_color(t["overlay-1"]);
     else if (section === "idle") dot.border(1.5).border_color(color);
     else dot.bg(color);
-    return text(named(row(), "status-heading", id).items_center().gap(8).px(12).py(3).mt(12).mb(2), 12, 600, 15.6, t.text)
+    const el = named(row(), "status-heading", id).items_center().gap(8).px(12).mt(margin + stack(12));
+    // With a note beside it the label may be squeezed and wrap onto a second line, so the heading is
+    // as high as its lines (counted as one for the running total); otherwise it is one line high.
+    if (note) {
+      const [top, , bottom] = stacks(3, 15.6, 3);
+      el.pt(top).pb(bottom);
+    } else {
+      padded(el, 3, 15.6, 3);
+    }
+    el.mb(stack(2));
+    return text(el, 12, 600, 15.6, t.text)
       .child(dot)
-      // With a note beside it the label may be squeezed and wrap onto a second line, so it is as high as its lines.
       .child(note ? named(div(), "status-heading-label", id).min_w(0).child(title) : line(named(div(), "status-heading-label", id).min_w(0).child(title), 12, 600, 15.6, t.text))
       .child(line(named(div(), "status-heading-count", id).child(String(count)), 12, 500, 15.6, t["subtext-0"]))
       .when(note, (r) => r.child(line(named(div(), "status-heading-note", id).min_w(0).truncate().child(note), 9.92, 400, 12.9, t["subtext-0"])));
@@ -300,44 +330,59 @@ export default class SidebarBuilders extends View {
     const { t, nav } = c;
     const sub = t["subtext-0"];
     const empty = nav.projects.filter((p) => !p.hasChats);
-    const sections = nav.status.map((section) => named(col(), "status-section", section.key).gap(2)
-      .child(this.statusHeading(c, `status-section-title-${section.key}`, section.title, section.sessions.length, section.note, section.key))
-      .children(section.projects.map((cluster) => {
-        const id = `${section.key}-${cluster.id}`;
-        const real = cluster.project && !cluster.project.quickchat;
-        const key = `status:${id}`;
-        const header = named(row(), "status-project-header", id).items_center().pr(4).pl(12)
-          .child(real ? named(icon("folder", 12, sub), "status-project-icon", id).mr(6) : div().w(12).mr(6).flex_shrink(0))
-          .child(line(named(div(), "status-project-title", id).flex_1().min_w(0).truncate().py(3).child(cluster.name), 12.5, 500, body(12.5), t.text, 6))
-          .when(real, (r) => r.child(this.rowAction(c, key, "status-project-add", cluster.id, icon("plus", 14, sub), 20, null)));
-        return named(col(), "status-project", id).gap(2)
-          .child(this.hoverable(header, key))
-          .children(nestSessions(cluster.sessions).map(({ session, nested }) => this.sessionRow(c, session, `status:${id}`, nested, "status",
-            [session.workspaceLabel, section.key === "needs" ? session.needReason : null].filter(Boolean).join(" · "))));
-      })));
-    return named(col(), "status-view").gap(2).py(3.2)
-      .when(nav.sessions.length === 0, (e) => e.child(line(div().px(4.8).py(8).child("No chats yet."), 11.2, 400, body(11.2), sub, 16)))
-      .children(sections)
-      .when(empty.length > 0, (e) => e.child(col()
+    const parts = [];
+    if (nav.sessions.length === 0) parts.push((g) => stackLine(div().mt(g).px(4.8).child("No chats yet."), 11.2, 400, body(11.2), sub, 8, 8));
+    for (const section of nav.status) parts.push((g) => this.statusSection(c, section, g));
+    if (empty.length > 0) {
+      parts.push((g) => col().mt(g)
         .child(this.statusHeading(c, "status-no-sessions-title", "No sessions", empty.length, null, null))
         .children(empty.map((p) => {
           const key = `empty:${p.id}`;
           const first = p.workspaces[0];
-          const el = named(row(), "status-empty-project", p.id).min_w(0).items_center().rounded(8).hover((s) => s.bg(t["surface-1"]))
-            .child(text(row().flex_1().min_w(0).items_center().min_h(24).pl(12).pr(10.4).rounded(8).cursor_pointer()
+          const el = named(row(), "status-empty-project", p.id).min_w(0).items_center().rounded(8).h(stack(24)).hover((s) => s.bg(t["surface-1"]))
+            .child(text(row().flex_1().min_w(0).items_center().pl(12).pr(10.4).rounded(8).cursor_pointer()
               .on_click(() => first && run(perch, "workspace.focus", { id: first.id })), 12, 400, 15, t.text)
               .child(named(icon("folder", 12, sub), "status-empty-project-icon", p.id).mr(6))
               .child(line(named(div(), "status-empty-project-title", p.id).flex_1().min_w(0).truncate().child(p.name), 12.5, 500, 15, t.text)))
             .child(this.rowAction(c, key, "status-empty-project-add", p.id, icon("plus", 14, sub), 20, null));
           return this.hoverable(el, key);
-        }))));
+        })));
+    }
+    return named(col(), "status-view").pt(stack(3.2))
+      .children(gapped(parts, 2, (part, g) => part(g)))
+      .pb(stack(3.2));
+  }
+
+  statusSection(c, section, margin) {
+    const { t } = c;
+    const sub = t["subtext-0"];
+    const parts = [(g) => this.statusHeading(c, `status-section-title-${section.key}`, section.title, section.sessions.length, section.note, section.key, g)];
+    for (const cluster of section.projects) {
+      parts.push((g) => {
+        const id = `${section.key}-${cluster.id}`;
+        const real = cluster.project && !cluster.project.quickchat;
+        const key = `status:${id}`;
+        // The title is the tallest of the header, so its padding and line are the column's lengths.
+        const header = named(row(), "status-project-header", id).items_center().pr(4).pl(12)
+          .child(real ? named(icon("folder", 12, sub), "status-project-icon", id).mr(6) : div().w(12).mr(6).flex_shrink(0))
+          .child(stackLine(named(div(), "status-project-title", id).flex_1().min_w(0).truncate().child(cluster.name), 12.5, 500, body(12.5), t.text, 3, 3))
+          .when(real, (r) => r.child(this.rowAction(c, key, "status-project-add", cluster.id, icon("plus", 14, sub), 20, null)));
+        const rows = nestSessions(cluster.sessions);
+        return named(col(), "status-project", id).mt(g)
+          .child(this.hoverable(header, key))
+          .children(below(rows, 2, ({ session, nested }, gap) => this.sessionRow(c, session, `status:${id}`, nested, "status",
+            [session.workspaceLabel, section.key === "needs" ? session.needReason : null].filter(Boolean).join(" · "), gap)));
+      });
+    }
+    return named(col(), "status-section", section.key).mt(margin).children(gapped(parts, 2, (part, g) => part(g)));
   }
 
   listView(c) {
     const { t, nav } = c;
-    return col().gap(2).py(3.2)
-      .when(nav.sessions.length === 0, (e) => e.child(line(div().px(4.8).py(8).child("No sessions yet."), 11.2, 400, body(11.2), t["subtext-0"], 16)))
-      .children(nav.sessions.map((s) => this.sessionRow(c, s, "list", false, "list")));
+    const parts = [];
+    if (nav.sessions.length === 0) parts.push((g) => stackLine(div().mt(g).px(4.8).child("No sessions yet."), 11.2, 400, body(11.2), t["subtext-0"], 8, 8));
+    for (const s of nav.sessions) parts.push((g) => this.sessionRow(c, s, "list", false, "list", "", g));
+    return col().pt(stack(3.2)).children(gapped(parts, 2, (part, g) => part(g))).pb(stack(3.2));
   }
 
   // ---- the overview and the whole sidebar ------------------------------------------------------
@@ -346,8 +391,11 @@ export default class SidebarBuilders extends View {
     const { t, nav, settings } = c;
     const sub = t["subtext-0"];
     const projectCount = nav.projects.length;
-    const header = named(row(), "overview-header").flex_shrink(0).items_stretch().justify_between().gap(7.2).pl(16).pr(3)
-      .child(row().min_w(0).items_center().gap(7.2).py(8.8)
+    // The title is the tallest of the header: its padding and line are the column's lengths; the
+    // buttons on the right stretch to the header's height.
+    const [above, , below_] = stacks(8.8, 12.9, 8.8);
+    const header = named(row(), "overview-header").flex_shrink(0).items_stretch().justify_between().gap(7.2).pl(16).pr(3).h(above + 12.9 + below_)
+      .child(row().min_w(0).items_center().gap(7.2).pt(above).pb(below_)
         .child(lineRow(named(row(), "overview-title"), 9.92, 600, 12.9, sub).child(spaced(settings.organize === "project" ? "PROJECTS" : "SESSIONS", 0.4464, 9.92))))
       .child(row().flex_shrink(0).items_stretch()
         .when(nav.needsYou > 0, (r) => r.child(line(named(div(), "needs-you-button").my(3).self_center().rounded(8).px(8).py(2.4).cursor_pointer()
@@ -364,20 +412,44 @@ export default class SidebarBuilders extends View {
           .hover((s) => s.bg(t["surface-0"]))
           .child(named(icon("plus", 12, sub), "add-project-icon"))
           .child(line(named(div(), "add-project-label"), 11.52, 500, 13, sub).child("Add")), 11.52, 500, 13, sub)));
-    const body = settings.organize !== "project" && !nav.shortcuts
-      ? (settings.organize === "list" ? this.listView(c) : this.statusView(c))
-      : col().gap(2).children(nav.projects.map((p) => this.project(c, p))).when(nav.quickchat, (e) => e.child(this.quickchat(c)));
-    return named(col(), "overview").flex_1().min_h(0).overflow_hidden()
-      .child(header)
-      .when(nav.loading, (e) => e.child(line(div().flex_shrink(0).px(10.4).py(8.8).child("Loading workspace…"), 11.2, 400, body(11.2), sub, 17.6)))
-      .when(!!nav.error, (e) => e.child(text(row().flex_shrink(0).items_center().gap(7.2).px(10.4).py(8.8).child(nav.error), 11.2, 400, body(11.2), t.red)))
-      .when(settings.organize === "project" && projectCount === 0 && !nav.loading, (e) => e.child(col().items_start().gap(5.12).px(12).py(17.6)
-        .child(line(div().child("＋"), 20.8, 400, 20.8, t.accent))
-        .child(line(div().child("Add a project"), 12.32, 700, body(12.32), t.text))
-        .child(line(div().child("A project keeps its workspaces, sessions and files together."), 10.88, 400, body(10.88), sub))))
-      .child(named(col(), "project-list").flex_1().min_h(0).gap(2).px(3).py(3).overflow_y_scroll()
-        // Children keep their size; the list scrolls instead.
-        .child(body.flex_shrink(0)));
+    const root = named(col(), "overview").flex_1().min_h(0).overflow_hidden().child(header);
+    if (nav.loading) root.child(stackLine(div().flex_shrink(0).px(10.4).child("Loading workspace…"), 11.2, 400, body(11.2), sub, 8.8, 8.8));
+    if (nav.error) {
+      root.child(padded(row().flex_shrink(0).items_center().gap(7.2).px(10.4), 8.8, body(11.2), 8.8)
+        .child(text(div().child(nav.error), 11.2, 400, body(11.2), t.red)));
+    }
+    if (settings.organize === "project" && projectCount === 0 && !nav.loading) {
+      // Three lines 5.12 px apart in 17.6 px of padding.
+      const pad = stack(17.6);
+      root.child(col().items_start().px(12).pt(pad)
+        .child(stackLine(div().child("＋"), 20.8, 400, 20.8, t.accent))
+        .child(stackLine(div().mt(stack(5.12)).child("Add a project"), 12.32, 700, body(12.32), t.text))
+        .child(stackLine(div().mt(stack(5.12)).child("A project keeps its workspaces, sessions and files together."), 10.88, 400, body(10.88), sub))
+        .pb(stack(17.6)));
+    }
+    // The list scrolls, so what is in it keeps its size.
+    const list = named(col(), "project-list").flex_1().min_h(0).px(3).pt(stack(3)).overflow_y_scroll();
+    if (settings.organize !== "project" || nav.shortcuts) {
+      list.child((settings.organize === "list" ? this.listView(c) : this.statusView(c)).flex_shrink(0));
+    } else {
+      const items = [...nav.projects.map((p) => (g) => this.project(c, p, g))];
+      if (nav.quickchat) items.push((g) => this.quickchat(c, g));
+      list.child(col().flex_shrink(0).children(gapped(items, 2, (item, g) => item(g))));
+    }
+    return root.child(list.pb(stack(3)));
+  }
+
+  /** The settings bar at the foot of the sidebar: 4 px of padding around a 30.8 px button. It is
+   * anchored to the bottom, not stacked under what is above, so it has a total of its own. */
+  settingsBar(c) {
+    const { t } = c;
+    restartFlow();
+    const [pad, above, icon18, below_, padEnd] = stacks(4, 6.4, 18, 6.4, 4);
+    const gear = text(named(row(), "settings-gear").w_full().items_center().justify_end().rounded(8).px(14.4).pt(above).pb(below_).h(above + icon18 + below_).cursor_pointer()
+      .hover((s) => s.bg(t["surface-0"]))
+      .on_click(() => run(perch, "app.settings"))
+      .child(named(icon("gear", 18, t["subtext-0"]), "settings-gear-icon")), 12, 400, 15, t["subtext-0"]);
+    return named(row(), "settings-bar").flex_shrink(0).items_stretch().px(4).pt(pad).pb(padEnd).child(gear);
   }
 
   render(_cx) {
@@ -386,10 +458,8 @@ export default class SidebarBuilders extends View {
     const nav = perch.navigation(settings);
     const hosts = perch.hosts();
     const c = { t, settings, nav, hosts };
-    const gear = text(named(row(), "settings-gear").w_full().items_center().justify_end().rounded(8).px(14.4).py(6.4).cursor_pointer()
-      .hover((s) => s.bg(t["surface-0"]))
-      .on_click(() => run(perch, "app.settings"))
-      .child(named(icon("gear", 18, t["subtext-0"]), "settings-gear-icon")), 12, 400, 15, t["subtext-0"]);
+    // The column's running total starts at the sidebar's top, in the window's own pixels.
+    beginFlow(perch.scale());
     return named(col(), "sidebar-root").relative().size_full().overflow_hidden().bg(t["card-bg"])
       .font_family(FONT).text_size(12).font_weight(400).line_height("15px").text_color(t.text)
       .child(named(col(), "sidebar-content").flex_1().min_h(0)
@@ -397,7 +467,7 @@ export default class SidebarBuilders extends View {
         .when(hosts.list.length > 1 || hosts.activeId !== "local", (e) => e.child(this.hostSwitcher(c)))
         .child(this.newSession(c))
         .child(this.overview(c)))
-      .child(named(row(), "settings-bar").flex_shrink(0).items_stretch().p(4).child(gear))
+      .child(this.settingsBar(c))
       .when(this.hostMenu, (e) => e.child(this.hostPopover(c)));
   }
 }
