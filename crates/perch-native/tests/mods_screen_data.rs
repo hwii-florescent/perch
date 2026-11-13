@@ -15,7 +15,7 @@ use parity_screens::{Difference, Exception, ScreenFixture};
 use perch_native::mods::perch::Perch;
 use serde_json::{json, Value};
 
-const SCREENS: [&str; 12] = [
+const SCREENS: [&str; 13] = [
     "tabs",
     "status",
     "navigator",
@@ -28,6 +28,7 @@ const SCREENS: [&str; 12] = [
     "keybind-help",
     "launcher",
     "start",
+    "folder-browser",
 ];
 
 /// The states whose web strip also holds file, review and browser tabs. The native strip holds
@@ -136,13 +137,11 @@ const WEB_ONLY_BINDINGS: &[&str] = &[
     "Next project's most recent session",
     "Back to where you were",
     "Forward",
-    // The Navigator moves with the arrows only; the folder browser's own keys.
+    // The Navigator moves with the arrows only.
     "Next Navigator result",
     "Next Navigator result (alternate)",
     "Previous Navigator result",
     "Previous Navigator result (alternate)",
-    "Use this folder",
-    "Use this folder (alternate)",
     // No key yet for adding a project or a worktree.
     "Add project",
     "New workspace (worktree)",

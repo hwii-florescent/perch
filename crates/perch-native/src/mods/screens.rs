@@ -6,7 +6,8 @@
 //!
 //! - in flow, a region of the layout: `sidebar`, `tabs`, `status`, `pane-header` (one copy per
 //!   pane, keyed `pane-header#<tab id>`, while the area is split), `start` (the main area while
-//!   nothing is open in it);
+//!   nothing is open in it), `folder-browser` (the sidebar draws its own copy in its Add project
+//!   dialog, so the window places this one nowhere yet);
 //! - floating, opened by the window over the whole of it, as the web's take the whole page:
 //!   `navigator`, `pane-menu`, `tab-menu`, `confirm`, `dialog`, `new-session`, `session-split`,
 //!   `keybind-help`, `launcher` (modal), `toast` and `tab-drag`
@@ -162,6 +163,12 @@ pub const SCREENS: &[Screen] = &[
         place: Place::InFlow,
         width: 0.,
         height: 0.,
+    },
+    Screen {
+        id: "folder-browser",
+        place: Place::InFlow,
+        width: 480.,
+        height: 416.,
     },
 ];
 

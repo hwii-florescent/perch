@@ -19,7 +19,9 @@
 // elements (an `autoFocus` field, `ref.focus()`, a press on a field), and every key it then gets goes to the focused
 // element as a DOM `keydown`, through the document's listeners, and types into a text field (`handle.key`). Escape is
 // the window's: it closes the screen before the mod sees it. A screen without the option never takes the keyboard (the
-// notifications, over a terminal that keeps it).
+// notifications, over a terminal that keeps it). An in-flow screen (`options.keyboard: "in-flow"`, the sidebar) holds
+// the keyboard only while one of its own elements has the focus: it tells the window so (`holdKeyboard`), which then
+// leaves the keyboard there and types into it, and lets go once nothing of its own is focused (a form closed).
 //
 // The web reads its per-viewer settings (`localStorage`, here the window's sidebar settings) once, when it mounts;
 // when they change anywhere but in the screen (a key such as `sidebar.organize`), the screen is mounted again.
@@ -33,7 +35,7 @@
 import { copyFor, files, runningHost } from "./host.js";
 import { View, div, image } from "gpui-kit";
 import { ScrollHandle } from "gpui-base";
-import { close, props as screenProps, scale } from "perch";
+import { close, inRegion as inRegionOf, props as screenProps, scale } from "perch";
 import { describeToGpui, mount, NAMED_ELEMENTS, sdk } from "./runtime.mjs";
 
 // This folder's `@perch/sdk` calls the host of this folder's running copy, whichever screen loads after it.
@@ -50,6 +52,19 @@ export function closeWith(result) {
   if (first) queueMicrotask(() => { const out = ending; ending = undefined; close(out ?? undefined); });
 }
 
+/** The parity names of screen `id`'s elements (`options.names` where the table has none), and those of the stock
+ * screens it draws inside it (`options.alsoNamed`: the sidebar's folder browser). */
+function namesOf(id, options) {
+  const own = NAMED_ELEMENTS[id] ?? options.names ?? [];
+  return [...own, ...(options.alsoNamed ?? []).flatMap((other) => NAMED_ELEMENTS[other] ?? [])];
+}
+/** Whether an element of `document` that is still in it has the focus. */
+function focusedHere(document) {
+  let node = document?.activeElement;
+  if (!node || node === document.body) return false;
+  while (node && node !== document.documentElement) node = node.parentNode;
+  return node === document.documentElement;
+}
 /** The web's DOM `key` for a GPUI key name. */
 const KEY_NAMES = {
   escape: "Escape", enter: "Enter", tab: "Tab", backspace: "Backspace", delete: "Delete", up: "ArrowUp", down: "ArrowDown",
@@ -64,6 +79,9 @@ export function domKey(event) {
 }
 
 /** The web's callback props for a screen opened with `raw`, each closing the screen with its result. */
+/** `value` as a result can carry it: a DOM event (an action given straight to `onClick`) is null. */
+const plain = (value) => (value && typeof value === "object" && "nativeEvent" in value ? null : value);
+
 export function resultProps(raw) {
   return {
     ...raw,
@@ -74,7 +92,8 @@ export function resultProps(raw) {
     onSubmit: (value) => closeWith({ value }),
     onStop: (never) => closeWith({ confirmed: true, never: !!never }),
     onKeepRunning: () => closeWith({ keepRunning: true }),
-    actions: new Proxy({}, { get: (_, action) => (...args) => closeWith({ action: String(action), args }) }),
+    // An action given straight to `onClick` gets the click's event, which is not a result: it goes as null.
+    actions: new Proxy({}, { get: (_, action) => (...args) => closeWith({ action: String(action), args: args.map(plain) }) }),
   };
 }
 
@@ -90,8 +109,10 @@ function entered(copy, handle) {
 
 /** The mod class for stock screen `id` drawn by `Component`. `options.container`: the style of the box the screen
  * fills (as the web's layout gives it); `options.props`: props from `perch.props()` (default `resultProps`);
- * `options.names`: the names of its elements, as the parity table's, for a screen the table has none for. */
+ * `options.names`: the names of its elements, as the parity table's, for a screen the table has none for;
+ * `options.alsoNamed`: stock screens drawn inside it whose table names its elements get too. */
 export function screen(id, Component, options = {}) {
+  const inRegion = inRegionOf(id) === true;
   const toProps = options.props ?? resultProps;
   return class Screen extends View {
     init(_props, cx) {
@@ -100,12 +121,20 @@ export function screen(id, Component, options = {}) {
       if (options.keyboard) {
         this.keys = cx.focus_handle();
         // The source focused an element: the keyboard comes to the screen (after this turn: focus needs the window).
-        copy.onFocus(() => cx.timer.after(0, () => { if (!this.keys.is_focused()) this.keys.focus(); }));
+        copy.onFocus(() => {
+          // Before the focus moves, so the window does not hand the keyboard straight back to a terminal.
+          if (options.keyboard === "in-flow") this.hold(true);
+          cx.timer.after(0, (task) => {
+            if (!this.keys.is_focused()) this.keys.focus();
+            this.armed = true;
+            task.notify();
+          });
+        });
       }
       this.raw = JSON.stringify(screenProps());
       this.mounts = 0;
       const props = { ...toProps(JSON.parse(this.raw)), key: this.mounts };
-      const handle = mount(copy.host, Component, { container: options.container, names: NAMED_ELEMENTS[id] ?? options.names, props });
+      const handle = mount(copy.host, Component, { container: options.container, names: namesOf(id, options), props });
       copy.attach(handle);
       this.handle = entered(copy, handle);
       // Where `scrollIntoView()` leaves its request (a handle can only be made here, not while drawing).
@@ -114,7 +143,16 @@ export function screen(id, Component, options = {}) {
 
     /** The window let this copy go: its tree unmounts and its listeners and timers go with it. */
     close() {
+      this.hold(false);
       this.copy.close();
+    }
+
+    /** An in-flow screen tells the window whether one of its own fields has the keyboard. */
+    hold(held) {
+      if (options.keyboard !== "in-flow" || !!this.held === held) return;
+      this.held = held;
+      this.armed = false;
+      this.copy.host.holdKeyboard(held);
     }
 
     render(cx) {
@@ -144,8 +182,13 @@ export function screen(id, Component, options = {}) {
           });
         }
         // Vertical lengths are laid on the window's device pixels (`snapColumns` in the runtime).
-        const drawn = describeToGpui(this.handle.description, this.kit, this.handle, files, scale());
+        // A screen in a region of the window (a sidebar, a status bar) portals into the window's layer.
+        const drawn = describeToGpui(this.handle.description, this.kit, this.handle, files, scale(), inRegion);
         if (!this.keys) return drawn;
+        // Nothing of its own is focused any more (its form closed), or the keyboard went elsewhere: it lets go.
+        if (this.held && (!focusedHere(this.handle.document) || (this.armed && !this.keys.is_focused()))) this.hold(false);
+        // Not holding it, an in-flow screen takes no keyboard: a press on it leaves the keyboard where it was.
+        if (options.keyboard === "in-flow" && !this.held) return drawn;
         return drawn.track_focus(this.keys).on_key_down((event, cx) => {
           if (this.handle.key(domKey(event))) cx.stop_propagation();
           cx.notify();

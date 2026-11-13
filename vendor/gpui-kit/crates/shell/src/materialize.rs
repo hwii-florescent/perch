@@ -390,6 +390,9 @@ struct Behavior {
     aria_level: Option<usize>,
     /// Whether a shut `AccordionPanel` stays in the tree.
     keep_mounted: bool,
+    /// PERCH: whether the element is painted above the rest of the window, over the whole window
+    /// from its top left wherever its parent sits (`window_layer`).
+    window_layer: bool,
     /// The key-binding context this element and its subtree sit in.
     ///
     /// What a keymap's `context` predicate is matched against, so a chord can
@@ -865,6 +868,8 @@ fn materialize_node(
     // PERCH: a named node records its box, colours and font for tests (`probe`).
     #[cfg(feature = "render-test-support")]
     let probe = behavior.key.clone().map(|name| (name, Box::new(refinement.clone())));
+    // PERCH: an element in a window layer is drawn over the whole window (`window_layer_of`).
+    let window_layer = behavior.window_layer;
     let element = match component {
         Component::Registered(component) => materialize_registered_component(
             runtime,
@@ -890,10 +895,27 @@ fn materialize_node(
         ),
     };
     #[cfg(feature = "render-test-support")]
-    if let Some((name, style)) = probe {
-        return crate::probe::wrap(name, *style, element);
+    let element = match probe {
+        Some((name, style)) => crate::probe::wrap(name, *style, element),
+        None => element,
+    };
+    if window_layer {
+        return window_layer_of(element, window);
     }
     element
+}
+
+/// PERCH: `element` painted after the rest of the window, in a box the window's size at its top
+/// left, so a region's `position: fixed` boxes (a dialog's backdrop) are the window's. It takes no
+/// press itself: what is under its empty parts still gets them.
+fn window_layer_of(element: AnyElement, window: &Window) -> AnyElement {
+    let size = window.viewport_size();
+    gpui::deferred(
+        gpui::anchored()
+            .position(gpui::point(gpui::px(0.), gpui::px(0.)))
+            .child(gpui::div().w(size.width).h(size.height).child(element)),
+    )
+    .into_any_element()
 }
 
 /// Dispatches an already-materialized node to its concrete component.
@@ -3418,6 +3440,8 @@ fn apply_behavior(behavior: &mut Behavior, name: &str, args: &[Bridged]) {
                 .map(|level| level.max(1.0) as usize);
         }
         "keep_mounted" => behavior.keep_mounted = flag.unwrap_or(true),
+        // PERCH: a window layer (`window_layer_of`).
+        "window_layer" => behavior.window_layer = flag.unwrap_or(true),
         "key_context" => {
             behavior.key_context = args
                 .first()

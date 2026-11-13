@@ -105,6 +105,22 @@ pub const STOCK: &[(&str, &str)] = &[
     ),
     ("start/mod.json", include_str!("../mods/start/mod.json")),
     (
+        "folder-browser/main.js",
+        include_str!("../mods/folder-browser/main.js"),
+    ),
+    (
+        "folder-browser/mod.json",
+        include_str!("../mods/folder-browser/mod.json"),
+    ),
+    (
+        "folder-browser/folder-browser/main.js",
+        include_str!("../mods/folder-browser/folder-browser/main.js"),
+    ),
+    (
+        "sidebar/folder-browser/main.js",
+        include_str!("../mods/sidebar/folder-browser/main.js"),
+    ),
+    (
         "launcher/launcher/main.js",
         include_str!("../mods/launcher/launcher/main.js"),
     ),

@@ -128,7 +128,21 @@ pub struct WindowState {
     pub new_tab: u64,
     /// The open tabs whose terminal is known to be `running` or `exited`; any other is unknown.
     pub terminals: HashMap<String, &'static str>,
+    /// The last Add project request (`useAddProject`), null before any.
+    pub add_project: Value,
+    /// How many times the window asked the sidebar for its Add project form, and when last.
+    pub add_project_asks: u64,
+    pub add_project_at: Option<std::time::Instant>,
 }
+
+/// Answers a screen's question for the core (`kind` and its `args`, as
+/// [`crate::client::ask_frame`] checks them): a folder listing, Instructions, Project memory.
+pub type Asker =
+    Rc<dyn Fn(&str, &Value) -> futures::channel::oneshot::Receiver<Result<Value, String>>>;
+
+/// How long after the window asked for the Add project form a sidebar that mounts takes the
+/// request (the sidebar shown by that same request): `ADD_PROJECT_LATE_MS` in the web.
+const ADD_PROJECT_LATE_MS: u128 = 3000;
 
 #[derive(Default)]
 struct Data {
@@ -162,6 +176,8 @@ struct Shared {
     /// Per mod id, the revision of each part it read when it last rendered.
     reads: RefCell<HashMap<String, HashMap<String, u64>>>,
     hosts: RefCell<Vec<ModHost>>,
+    /// Answers screens' questions in place of the window's core (`Self::set_asker`).
+    asker: RefCell<Option<Asker>>,
     attached: RefCell<Option<Attached>>,
     flush_queued: Cell<bool>,
 }
@@ -183,6 +199,7 @@ impl Perch {
             revisions: RefCell::default(),
             reads: RefCell::default(),
             hosts: RefCell::default(),
+            asker: RefCell::default(),
             attached: RefCell::default(),
             flush_queued: Cell::new(false),
         }))
@@ -224,6 +241,9 @@ impl Perch {
                 zoomed: tabs.zoomed(),
                 zoom: ws.zoom_factor(),
                 new_tab: ws.new_tab_asks(),
+                add_project: ws.add_project_state().clone(),
+                add_project_asks: ws.add_project_asks().0,
+                add_project_at: ws.add_project_asks().1,
                 terminals: ws.terminal_states(cx),
                 notifications: ws
                     .notifications()
@@ -676,10 +696,11 @@ impl Perch {
             // The window's requests to a screen, as counts that grow by one per request.
             .function(
                 "requests",
-                reader(
-                    WINDOW,
-                    |perch, _| json!({ "new-tab": perch.0.data.borrow().window.new_tab }),
-                ),
+                reader(WINDOW, |perch, _| {
+                    let data = perch.0.data.borrow();
+                    json!({ "new-tab": data.window.new_tab,
+                                "add-project": data.window.add_project_asks })
+                }),
             )
             // The scale factor of the window this mod is drawn in (physical pixels per logical
             // pixel), read where the script runs, so it is the window's own and a mod can lay out
@@ -757,6 +778,107 @@ impl Perch {
             )
             .function("workspaceTabs", both(|perch, _| perch.workspace_tabs()))
             .function("focus", both(|perch, _| perch.focus()))
+            // `useSessionFolders`: the shown computer's sessions by folder.
+            .function(
+                "sessionFolders",
+                both(|perch, _| {
+                    let view = perch.view(None);
+                    serde_json::to_value(navigation::session_folders(&perch.store(), &view))
+                        .unwrap_or(Value::Null)
+                }),
+            )
+            // `useAddProject`'s state: `{status, error?, hostId?}`.
+            .function(
+                "addProject",
+                reader(WINDOW, |perch, _| {
+                    match &perch.0.data.borrow().window.add_project {
+                        Value::Null => json!({ "status": "idle" }),
+                        state => state.clone(),
+                    }
+                }),
+            )
+            // Whether a request of `kind` the window made a moment ago is still for a screen that
+            // mounts now (the sidebar the Add project request showed).
+            .function("requestFresh", {
+                let perch = self.clone();
+                move |args| {
+                    let kind = args.string(0)?;
+                    let at = perch.0.data.borrow().window.add_project_at;
+                    let fresh = kind == "add-project"
+                        && at.is_some_and(|at| at.elapsed().as_millis() < ADD_PROJECT_LATE_MS);
+                    Ok(HostValue::Bool(fresh))
+                }
+            })
+            .function("addProjectFolder", {
+                let perch = self.clone();
+                move |args| {
+                    let path = args.string(0)?.to_string();
+                    let name = args.get(1).and_then(HostValue::as_str).map(str::to_string);
+                    let host = args
+                        .get(2)
+                        .and_then(HostValue::as_str)
+                        .map_or_else(|| perch.host_id(), str::to_string);
+                    perch.in_workspace(move |ws, cx| ws.add_project(&host, &path, name, cx))?;
+                    Ok(HostValue::Null)
+                }
+            })
+            .function("clearAddProject", {
+                let perch = self.clone();
+                move |_| {
+                    perch.in_workspace(|ws, cx| ws.clear_add_project(cx))?;
+                    Ok(HostValue::Null)
+                }
+            })
+            // A question for the core, `ask(kind, args)` (`client::ask_frame`'s list): the
+            // folder browser's listing (`fs.browse`, which the core routes to a remote host),
+            // Instructions and Project memory. Resolves with the core's answer, rejects with its
+            // refusal.
+            .async_function("ask", {
+                let perch = self.clone();
+                move |args| {
+                    let kind = args.string(0)?.to_string();
+                    let fields = args.get(1).map(from_host).unwrap_or(Value::Null);
+                    let answer = perch.ask(&kind, fields)?;
+                    Ok(async move {
+                        match answer.await {
+                            Ok(Ok(answer)) => Ok(to_host(&answer)),
+                            Ok(Err(error)) => Err(HostError::new(error)),
+                            Err(_) => Err(HostError::new("No core answered.")),
+                        }
+                    })
+                }
+            })
+            // A screen's own key (`shortcutFor(event, scope)`), for the scopes the window leaves
+            // to a screen: `{id, scope}` or null.
+            .function(
+                "shortcutFor",
+                reader(KEYS, |perch, args| {
+                    let event = args.get(0).map(from_host).unwrap_or(Value::Null);
+                    let scope = args.get(1).and_then(HostValue::as_str).unwrap_or("");
+                    match perch.keymap().screen_shortcut(&event, scope) {
+                        Some(id) => json!({ "id": id, "scope": scope }),
+                        None => Value::Null,
+                    }
+                }),
+            )
+            // An in-flow screen's own field has the keyboard (true) or let it go (false).
+            .function("holdKeyboard", {
+                let (perch, id) = (self.clone(), id.clone());
+                move |args| {
+                    let held = matches!(args.get(0), Some(HostValue::Bool(true)));
+                    let id = id.to_string();
+                    perch.in_workspace(move |ws, cx| ws.hold_keyboard(&id, held, cx))?;
+                    Ok(HostValue::Null)
+                }
+            })
+            // Whether a screen sits in a region of the window (a sidebar) rather than over all of it.
+            .function("inRegion", |args| {
+                let id = args.get(0).and_then(HostValue::as_str).unwrap_or("");
+                let place = super::screens::screen(id).map(|screen| screen.place);
+                Ok(HostValue::Bool(
+                    place == Some(super::screens::Place::InFlow),
+                ))
+            })
             .function("terminals", both(|perch, _| perch.terminals()))
             .function(
                 "agentChoices",
@@ -823,6 +945,56 @@ impl Perch {
                 }
                 Ok(settled(rx))
             })
+    }
+
+    /// Answers screens' questions with `asker` instead of the window's core (a test's fixture).
+    pub fn set_asker(&self, asker: Asker) {
+        *self.0.asker.borrow_mut() = Some(asker);
+    }
+
+    /// Puts question `kind` to the set asker, else the attached window's core; refused when
+    /// `args` are not what the core takes.
+    fn ask(
+        &self,
+        kind: &str,
+        args: Value,
+    ) -> Result<futures::channel::oneshot::Receiver<Result<Value, String>>, HostError> {
+        let frame = crate::client::ask_frame(kind, &args).map_err(HostError::new)?;
+        if let Some(asker) = self.0.asker.borrow().clone() {
+            return Ok(asker(kind, &args));
+        }
+        let (tx, rx) = futures::channel::oneshot::channel();
+        self.in_workspace(move |ws, cx| {
+            let answer = ws.ask(frame, cx);
+            cx.spawn(async move |_, _| {
+                let no_core = || Err("No core is connected.".to_string());
+                let _ = tx.send(answer.await.unwrap_or_else(|_| no_core()));
+            })
+            .detach();
+        })?;
+        Ok(rx)
+    }
+
+    /// Runs `f` on the attached window's workspace once the calling script has unwound.
+    fn in_workspace(
+        &self,
+        f: impl FnOnce(&mut Workspace, &mut gpui::Context<Workspace>) + 'static,
+    ) -> Result<(), HostError> {
+        let workspace = self
+            .0
+            .attached
+            .borrow()
+            .as_ref()
+            .map(|attached| attached.workspace.clone())
+            .ok_or_else(|| HostError::new("No window is attached to this mod."))?;
+        gpui_shell::with_current_app(|cx| {
+            cx.defer(move |cx| {
+                if let Some(workspace) = workspace.upgrade() {
+                    workspace.update(cx, f);
+                }
+            })
+        })
+        .ok_or_else(|| HostError::new("No app to reach the window in."))
     }
 
     /// Runs window command `id` once the calling script has unwound; the promise settles with it.

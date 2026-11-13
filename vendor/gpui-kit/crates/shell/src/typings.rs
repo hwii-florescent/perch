@@ -1500,6 +1500,12 @@ const ELEMENT_METHODS: &str = r#"    /**
      */
     keep_mounted<Self extends Element>(this: Self, value?: boolean): Self;
     /**
+     * PERCH: paints the element above the rest of the window, over the whole
+     * window from its top left wherever its parent sits — the layer a screen in a
+     * region of the window puts its `position: fixed` boxes in.
+     */
+    window_layer<Self extends Element>(this: Self, value?: boolean): Self;
+    /**
      * `handler(key, cx)` when a row of a virtual list is clicked, where `key`
      * is what the list's `get_key(index)` returned for that row.
      *
@@ -4012,6 +4018,7 @@ mod tests {
         "panel",
         "aria_level",
         "keep_mounted",
+        "window_layer", // PERCH: a window layer (`materialize::window_layer_of`).
         "on_item_click",
         "on_item_secondary_click",
         "on_change",

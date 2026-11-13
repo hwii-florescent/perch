@@ -1,0 +1,5 @@
+{
+  "name": "Folder browser",
+  "description": "The web app's stock folder browser (Add project's folder picker), unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

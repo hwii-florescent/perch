@@ -293,6 +293,11 @@ it from its upstreams. Each copy keeps its upstream licence file and herdr's
   - `vendor/gpui-kit/crates/shell/src/watch.rs` and
     `vendor/gpui-kit/crates/shell/src/engine/quickjs/lifecycle.rs`: a build that a reload
     replaces gets its final call (`View.close`) before it is released.
+  - `vendor/gpui-kit/crates/shell/src/materialize.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
+    `vendor/gpui-kit/crates/shell/src/typings.rs`: `window_layer`, an element painted over the
+    whole window from its top left wherever its parent sits, for what a screen in a region of the
+    window portals (CSS `position: fixed`).
 - `vendor/quickjs-jit-runtime/`: the `jit` crate of
   [longbridge/quickjs-jit](https://github.com/longbridge/quickjs-jit) at `96593cd` with
   herdr's fix for longbridge/quickjs-jit#38, MIT (Copyright (c) 2020 Mees Delzenne,

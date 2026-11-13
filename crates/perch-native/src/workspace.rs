@@ -226,6 +226,13 @@ pub struct Workspace {
     new_tab_asks: u64,
     /// The place the start page's picker chose, for the workspace it was chosen in.
     start_place: Option<(String, String)>,
+    /// The last Add project request (`useAddProject`): `{status, error?, hostId?}`.
+    add_project: Value,
+    /// How many times the sidebar was asked to open its Add project form, and when last.
+    add_project_asks: (u64, Option<Instant>),
+    /// The in-flow mod whose own field has the keyboard (the sidebar's Add project form): the
+    /// window leaves the keyboard there and types into it rather than running plain keys.
+    keyboard_held: Option<String>,
     /// A press on a tab of the strip, which may become a drag (`tab.beginDrag`).
     drag: Option<TabDrag>,
     /// Where the strip and each pane on screen were last drawn, for where a drag would drop.
@@ -294,6 +301,9 @@ impl Workspace {
             next_notification: 0,
             new_tab_asks: 0,
             start_place: None,
+            add_project: json!({ "status": "idle" }),
+            add_project_asks: (0, None),
+            keyboard_held: None,
             drag: None,
             drop_boxes: Rc::default(),
             activation: None,
@@ -398,6 +408,104 @@ impl Workspace {
     /// How many times the tab strip was asked for a new tab.
     pub fn new_tab_asks(&self) -> u64 {
         self.new_tab_asks
+    }
+
+    /// How many times the sidebar was asked for its Add project form, and when last.
+    pub fn add_project_asks(&self) -> (u64, Option<Instant>) {
+        self.add_project_asks
+    }
+
+    /// The last Add project request, as `useAddProject` reads it.
+    pub fn add_project_state(&self) -> &Value {
+        &self.add_project
+    }
+
+    /// Asks the sidebar to open its Add project form (the web's `ADD_PROJECT_EVENT`), showing a
+    /// hidden sidebar first. With no sidebar mod there is no form to open.
+    fn ask_add_project(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
+        if !self.screens.has("sidebar", cx) {
+            return Err("No mod draws the sidebar, whose form adds a project.".into());
+        }
+        if !self.sidebar.read(cx).visible() {
+            self.sidebar
+                .update(cx, |sidebar, cx| sidebar.run_action("global.sidebar", cx));
+        }
+        self.add_project_asks = (self.add_project_asks.0 + 1, Some(Instant::now()));
+        cx.notify();
+        Ok(())
+    }
+
+    /// Puts a screen's question `frame` ([`crate::client::ask_frame`]) to the core: a folder
+    /// listing, Instructions, Project memory. The receiver is dropped unanswered when no core is
+    /// followed.
+    pub fn ask(
+        &self,
+        frame: Value,
+        cx: &App,
+    ) -> futures::channel::oneshot::Receiver<Result<Value, String>> {
+        let (reply, answer) = futures::channel::oneshot::channel();
+        self.sidebar.read(cx).send(Command::Ask { frame, reply });
+        answer
+    }
+
+    /// Registers `path` on `host_id` as a project, as the sidebar's Add project form does
+    /// (`useAddProject().add`): pending until the core answers, then success or its error. Ignored
+    /// while one is pending.
+    pub fn add_project(
+        &mut self,
+        host_id: &str,
+        path: &str,
+        name: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let path = path.trim().to_string();
+        if path.is_empty() || self.add_project["status"] == "pending" {
+            return;
+        }
+        let host_id = host_id.to_string();
+        self.add_project = json!({ "status": "pending", "hostId": host_id });
+        let (reply, answer) = futures::channel::oneshot::channel();
+        self.sidebar.read(cx).send(Command::AddProject {
+            host_id: host_id.clone(),
+            path,
+            name: name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+            reply,
+        });
+        cx.spawn(async move |this, cx| {
+            let state = match answer.await {
+                Ok(Ok(_)) => json!({ "status": "success", "hostId": host_id }),
+                Ok(Err(error)) => json!({ "status": "error", "hostId": host_id, "error": error }),
+                Err(_) => json!({ "status": "error", "hostId": host_id,
+                    "error": "Connection lost. Check the server and retry." }),
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.add_project = state;
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Forgets the last Add project answer (`useAddProject().clear`).
+    pub fn clear_add_project(&mut self, cx: &mut Context<Self>) {
+        self.add_project = json!({ "status": "idle" });
+        cx.notify();
+    }
+
+    /// In-flow mod `id` says whether one of its own fields has the keyboard.
+    pub fn hold_keyboard(&mut self, id: &str, held: bool, cx: &mut Context<Self>) {
+        let now = if held {
+            Some(id.to_string())
+        } else if self.keyboard_held.as_deref() == Some(id) {
+            None
+        } else {
+            return;
+        };
+        if self.keyboard_held != now {
+            self.keyboard_held = now;
+            cx.notify();
+        }
     }
 
     /// The notifications not yet dismissed, oldest first.
@@ -1041,9 +1149,7 @@ impl Workspace {
             }
             Some("openSettings") => self.run_command("global.settings", None, window, cx),
             Some("manageAgents") => self.run_command("agents.manage", None, window, cx),
-            Some("addProject") => {
-                Err("Adding a project does not work in the native window yet.".into())
-            }
+            Some("addProject") => self.ask_add_project(cx),
             Some(other) => Err(format!("The native window cannot {other} yet.")),
         }
     }
@@ -1114,9 +1220,7 @@ impl Workspace {
                 "A new file needs the files view, which the native window does not have yet."
                     .into(),
             ),
-            Some("addProject") => {
-                Err("Adding a project does not work in the native window yet.".into())
-            }
+            Some("addProject") => self.ask_add_project(cx),
             Some(other) => Err(format!("The native window cannot {other} yet.")),
         }
     }
@@ -1550,7 +1654,7 @@ impl Workspace {
         }
         let context = KeyContext {
             in_terminal: self.focused_terminal(window, cx).is_some(),
-            typing: false,
+            typing: self.keyboard_held.is_some(),
             leader: self.leader.is_some(),
         };
         let Some(hit) = keymap.resolve(keystroke, context) else {
@@ -3178,7 +3282,10 @@ impl gpui::Render for Workspace {
         self.screens.place(wanted, window, cx);
         // A terminal that attaches takes the keyboard when it first draws; the tab that has it in
         // the layout keeps it. A modal screen has the keyboard while it is up.
-        if self.settings.is_none() && self.screens.top_modal().is_none() {
+        if self.settings.is_none()
+            && self.screens.top_modal().is_none()
+            && self.keyboard_held.is_none()
+        {
             let peeked = self
                 .peek
                 .as_ref()
