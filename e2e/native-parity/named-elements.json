@@ -1633,6 +1633,94 @@
           "textSized": true
         }
       ]
+    },
+    "keybind-help": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 5,
+      "elements": [
+        {
+          "name": "keybind-help-scrim",
+          "selector": "body > div.fixed.inset-0",
+          "description": "The dimming layer over the whole window (55% black); a press on it closes the help."
+        },
+        {
+          "name": "keybind-help-panel",
+          "selector": "[data-testid=\"keybind-help\"]",
+          "description": "The panel: 560 px wide at most, centred, on the panel fill with a shadow."
+        },
+        {
+          "name": "keybind-help-header",
+          "selector": "[data-testid=\"keybind-help\"] > div:first-child",
+          "description": "The title row: 16 px side padding."
+        },
+        {
+          "name": "keybind-help-title",
+          "selector": "[data-testid=\"keybind-help\"] h2",
+          "description": "Keybindings, 1rem semibold.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "keybind-help-close",
+          "selector": "[aria-label=\"Close keybind help\"]",
+          "description": "The close button at the right."
+        },
+        {
+          "name": "keybind-help-close-glyph",
+          "selector": "[aria-label=\"Close keybind help\"] > svg",
+          "description": "Its cross."
+        },
+        {
+          "name": "keybind-help-search",
+          "selector": "[data-testid=\"keybind-help-search\"]",
+          "description": "The search field (surface fill, 0.85rem); `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        },
+        {
+          "name": "keybind-help-list",
+          "selector": "[data-testid=\"keybind-help\"] > div:last-child",
+          "description": "The scrolling list of groups."
+        },
+        {
+          "name": "keybind-help-empty",
+          "selector": "[data-testid=\"keybind-help\"] div.text-center",
+          "description": "No matching keybindings.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "keybind-help-group",
+          "selector": "[data-testid=\"keybind-help\"] section",
+          "description": "One group: 16 px side padding."
+        },
+        {
+          "name": "keybind-help-group-title",
+          "selector": "[data-testid=\"keybind-help\"] section > h3",
+          "description": "The group's name in small capitals-style uppercase (0.78rem, muted, spaced).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "keybind-help-row",
+          "selector": "[data-testid=\"keybind-help\"] li",
+          "description": "One binding: its keys, then its description, 12 px apart."
+        },
+        {
+          "name": "keybind-help-keys",
+          "selector": "[data-testid=\"keybind-help\"] li > kbd",
+          "description": "The key label in a lighter chip, at least 9rem wide, centred, monospace 0.72rem, accent colour.",
+          "text": true
+        },
+        {
+          "name": "keybind-help-description",
+          "selector": "[data-testid=\"keybind-help\"] li > span",
+          "description": "What the binding does, 0.8rem.",
+          "text": true,
+          "textSized": true
+        }
+      ]
     }
   }
 }

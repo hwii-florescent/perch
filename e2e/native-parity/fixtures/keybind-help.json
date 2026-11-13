@@ -1,0 +1,92 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "keybind-help",
+  "note": "Floating screen: it is drawn through a portal into the page body and placed against the window, so the reference is the whole default 1280x800 window on the app's backdrop and every box is in window coordinates. The searchable key binding list (stock-ui/keybind-help, Cmd+/ or ?). It reads the app's binding table through @perch/sdk `useKeybindings()` (recorded in each output's sdk.keybindings, with the key labels as the Mac prints them, which is what the reference renders on), grouped in the screen's own order; the person's own bindings are the store's `settings.keybindings` (action id to combo, empty = none). The search text is the screen's own state, so states type it with `steps`. The panel is 560 px wide (`min(560px, 100vw - 2rem)`) and at most `100dvh - 4rem` high, centred; the list scrolls inside it.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1280,
+    "height": 800
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "props": {
+    "open": true
+  },
+  "states": [
+    {
+      "id": "all",
+      "title": "Opened: every group in order, the search field focused, the list scrolled to its top and clipped by the panel"
+    },
+    {
+      "id": "search-text",
+      "title": "'split' typed: only the bindings whose description or keys contain it, the empty groups gone",
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"keybind-help-search\"]",
+            "text": "split"
+          }
+        }
+      ]
+    },
+    {
+      "id": "search-keys",
+      "title": "A key typed (the Mac's command sign): matches on the keys column",
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"keybind-help-search\"]",
+            "text": "⌘W"
+          }
+        }
+      ]
+    },
+    {
+      "id": "no-match",
+      "title": "Nothing matches: 'No matching keybindings'",
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"keybind-help-search\"]",
+            "text": "zzzq"
+          }
+        }
+      ]
+    },
+    {
+      "id": "overridden",
+      "title": "The person has rebound Close tab and unbound the help key: the list shows their combo, and the unbound one is gone",
+      "patch": {
+        "settings": {
+          "keybindings": {
+            "tabs.close": "mod+shift+w",
+            "global.help": ""
+          }
+        }
+      },
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"keybind-help-search\"]",
+            "text": "close"
+          }
+        }
+      ]
+    },
+    {
+      "id": "short-window",
+      "title": "A window at the 800x600 minimum: the panel is cut to 536 px high (100dvh - 4rem)",
+      "window": {
+        "width": 800,
+        "height": 600
+      },
+      "size": {
+        "width": 800,
+        "height": 600
+      }
+    }
+  ]
+}
