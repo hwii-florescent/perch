@@ -823,6 +823,64 @@ fn posted_characters_type_as_they_are() {
     println!("workspace_render: posted characters ok");
 }
 
+/// A click lands where it is, with no pointer move before it and after typing: GPUI finds what is
+/// under the pointer from the click's own position. A tab, a pane of a split and a sidebar row.
+fn a_click_needs_no_move_before_it() {
+    let mut h = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
+    h.open("alpha");
+    h.open("bravo");
+    h.draw();
+    assert_eq!(h.active().as_deref(), Some("bravo"));
+    // The keyboard was the last thing used.
+    h.press("x");
+    h.click(
+        SIDEBAR_WIDTH + 30.,
+        TAB_BAR_HEIGHT / 2.,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    assert_eq!(h.active().as_deref(), Some("alpha"), "the first tab");
+    h.draw();
+
+    // A split: a click in the pane without the keyboard gives it the keyboard.
+    assert!(h.press("cmd-d"));
+    h.window
+        .update(&mut h.cx, |ws, _, cx| {
+            ws.sidebar().update(cx, |sidebar, cx| {
+                sidebar.apply(
+                    Update::Launched {
+                        host_id: "local".into(),
+                        session_id: "charlie".into(),
+                        provider: "terminal".into(),
+                    },
+                    cx,
+                )
+            })
+        })
+        .unwrap();
+    h.cx.run_until_parked();
+    h.draw();
+    assert_eq!(h.active().as_deref(), Some("charlie"));
+    h.press("x");
+    h.click(
+        SIDEBAR_WIDTH + 100.,
+        HEIGHT / 2.,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    assert_eq!(h.active().as_deref(), Some("alpha"), "the left pane");
+    h.draw();
+    let left = h.ws(|ws| ws.terminal().cloned()).unwrap();
+    let focused = h
+        .window
+        .update(&mut h.cx, |_, window, cx| {
+            gpui::Focusable::focus_handle(&left, cx).is_focused(window)
+        })
+        .unwrap();
+    assert!(focused, "and its terminal the keyboard");
+    println!("workspace_render: click without a move ok");
+}
+
 fn terminal_commands_run_from_keys_and_the_palette() {
     let mut keyed = model(&[("alpha", json!({}))]);
     keyed
@@ -1704,6 +1762,7 @@ fn a_blank_session_offers_the_launch_choices() {
 fn main() {
     a_slash_types_a_slash();
     posted_characters_type_as_they_are();
+    a_click_needs_no_move_before_it();
     a_blank_session_offers_the_launch_choices();
     closing_a_tab_ends_its_session();
     a_tab_that_cannot_end_its_session_is_put_away();
