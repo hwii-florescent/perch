@@ -28,7 +28,7 @@ use super::clipboard::{self, Clipboard, MemoryClipboard};
 use super::context::{self, Capture};
 use super::fallback;
 use super::graphics::Layer;
-use super::keys::{expects_real_chords, key_bytes_with, option_side_for};
+use super::keys::{expects_real_chords, key_bytes_with, option_side_for, types_only_its_text};
 use super::layout::{self, Fit, Metrics};
 use super::links::{self, Target};
 use super::scroll;
@@ -1005,8 +1005,19 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// A key press. Returns whether the terminal took it; the keyboard path of the window calls
-    /// this, and so do tests.
+    /// Whether the window leaves `event` to the system's text input ([`EntityInputHandler`]),
+    /// which types the characters the key event carries: a plain key that only types its text
+    /// ([`types_only_its_text`]), while nothing else here (the launch choices, the find field)
+    /// holds the keys.
+    pub fn leaves_to_text_input(&mut self, event: &KeyDownEvent) -> bool {
+        self.choice.is_none()
+            && !self.find.open
+            && types_only_its_text(&mut self.vt, &event.keystroke, event.is_held)
+    }
+
+    /// A key press, as the terminal encodes it. Returns whether the terminal took it. The window
+    /// asks [`Self::leaves_to_text_input`] first and calls this for every other key; tests call
+    /// it directly.
     pub fn key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
         self.keystroke(&event.keystroke, event.is_held, cx)
     }
@@ -2855,7 +2866,8 @@ impl gpui::Render for TerminalView {
             .overflow_hidden()
             .bg(bg)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                if this.key_down(event, cx) {
+                // Left unhandled, a plain text key reaches the text input below.
+                if !this.leaves_to_text_input(event) && this.key_down(event, cx) {
                     cx.stop_propagation();
                 }
             }))
@@ -2996,7 +3008,8 @@ fn note_button(id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Di
         .on_mouse_down(GpuiButton::Left, |_, _, cx| cx.stop_propagation())
 }
 
-/// Text from the system's input (dead keys, AltGr, input methods) that no key press produced.
+/// Text from the system's input: dead keys, AltGr, input methods, and every plain key that only
+/// types its text ([`TerminalView::leaves_to_text_input`]), with the characters its event carries.
 /// Composition is drawn at the cursor; what is committed goes to the program as typed.
 impl EntityInputHandler for TerminalView {
     fn text_for_range(
