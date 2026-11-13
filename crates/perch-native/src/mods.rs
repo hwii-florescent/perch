@@ -58,6 +58,30 @@ pub const STOCK: &[(&str, &str)] = &[
     ),
     ("confirm/main.js", include_str!("../mods/confirm/main.js")),
     ("confirm/mod.json", include_str!("../mods/confirm/mod.json")),
+    (
+        "new-session/main.js",
+        include_str!("../mods/new-session/main.js"),
+    ),
+    (
+        "new-session/mod.json",
+        include_str!("../mods/new-session/mod.json"),
+    ),
+    (
+        "new-session/new-session/agent-picker.js",
+        include_str!("../mods/new-session/new-session/agent-picker.js"),
+    ),
+    (
+        "new-session/new-session/main.js",
+        include_str!("../mods/new-session/new-session/main.js"),
+    ),
+    (
+        "new-session/tabs/icons.js",
+        include_str!("../mods/new-session/tabs/icons.js"),
+    ),
+    (
+        "new-session/tabs/main.js",
+        include_str!("../mods/new-session/tabs/main.js"),
+    ),
     ("example/main.js", include_str!("../mods/example/main.js")),
     ("example/mod.json", include_str!("../mods/example/mod.json")),
     (

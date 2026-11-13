@@ -1,0 +1,5 @@
+{
+  "name": "New session",
+  "description": "The web app's stock New session menu, unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

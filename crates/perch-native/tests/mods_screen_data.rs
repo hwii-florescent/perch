@@ -77,20 +77,6 @@ const EXCEPTIONS: &[Exception] = &[
         path: "agentChoices.lastChoice",
         reason: "the native client remembers no last agent pick",
     },
-    Exception {
-        screen: "new-session",
-        states: &["loading"],
-        path: "agentChoices.state",
-        reason: "the native client keeps no request state: a host that has answered once is \
-                 ready, not loading again",
-    },
-    Exception {
-        screen: "new-session",
-        states: &["list-error"],
-        path: "agentChoices",
-        reason: "the native client does not record a failed agent list (`state: error`, its \
-                 message)",
-    },
 ];
 
 /// The differences of `screen` in `state` that no exception covers, and the exceptions used.

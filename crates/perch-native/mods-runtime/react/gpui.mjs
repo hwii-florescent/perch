@@ -197,6 +197,9 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
     if (own || lineBox || lineWidth !== undefined) {
       let box = kit.div();
       if (own) box = box.id(node.range_name);
+      // A named run in a flex column is as wide as its glyphs, as the page's text range is, where its alignment puts
+      // it (the anonymous box around it stretches; the range does not).
+      if (own && !row && node.style.display === "flex") box = box[`self_${COLUMN_PLACE[text.text_align] ?? "start"}`]().max_w("100%");
       if (lineBox) box = box.h(lineBox);
       if (lineWidth !== undefined) box = box.w(lineWidth).flex_none().whitespace_nowrap();
       built = box.child(built);
@@ -206,6 +209,9 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   }
   return el;
 }
+
+/** Where a text alignment puts a run across a column. */
+const COLUMN_PLACE = { center: "center", right: "end", end: "end" };
 
 /** `#rrggbb(aa)` at half its alpha. */
 function halfAlpha(color) {

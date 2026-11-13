@@ -5,7 +5,7 @@
 //! (`perch.navigation(options)`, `perch.hosts()`, ...), which must return the same object until the data changes.
 //! Menus and dialogs Perch draws itself (session menu, new session menu, confirm, select, folder browser,
 //! instructions, memory) open through `perch.openOverlay(kind, props)`; their callbacks are plain functions.
-import { createElement, Fragment, useEffect, useRef, useSyncExternalStore } from "react";
+import { createElement, Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { cn } from "../../../../packages/web/src/lib/cn.ts";
 import { formatCombo } from "../../../../packages/web/src/keyCombo.ts";
 import { segment } from "../../../../packages/web/src/components/ui/segment.ts";
@@ -75,6 +75,30 @@ export function useAddProject() {
   };
 }
 const IDLE = Object.freeze({ status: "idle" });
+/** The web's own key for the last agent picked (`store/persistence.ts`); only the two built-in agents are kept. */
+const LAST_CHOICE = "perch.lastAgentChoice";
+const NO_CHOICES = Object.freeze({ connected: false, discovery: false, state: "ready", choices: [] });
+const lastChoiceStored = () => {
+  const raw = host().storage?.getItem(LAST_CHOICE);
+  return raw === "claude" || raw === "codex" ? raw : "claude";
+};
+/** What `hostId` can start (`perch.agentChoices(hostId)`), the last agent picked, and remembering a pick. Manage
+ * agents runs `agents.manage`, which a host without an agents page refuses. */
+export function useAgentChoices(hostId) {
+  const data = useHostSnapshot((perch) => perch.agentChoices?.(hostId) ?? NO_CHOICES);
+  const [lastChoice, setLastChoice] = useState(lastChoiceStored);
+  return useMemo(() => ({
+    connected: !!data.connected, discovery: !!data.discovery, choices: data.choices ?? [], lastChoice,
+    state: data.state ?? "ready",
+    error: data.state === "error" ? data.error : undefined,
+    rememberChoice: (id) => {
+      if (id !== "claude" && id !== "codex") return;
+      host().storage?.setItem(LAST_CHOICE, id);
+      setLastChoice(id);
+    },
+    manage: () => host().command("agents.manage", {}),
+  }), [data, lastChoice]);
+}
 /** The home screen's "Add project" asks the sidebar to open its form. */
 export function useAddProjectRequest(listener) {
   useEffect(() => host().onRequest?.("add-project", listener) ?? undefined, [listener]);

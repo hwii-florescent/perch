@@ -60,8 +60,19 @@ pub struct Store {
     pub providers: HashMap<String, Vec<super::Provider>>,
     /// Per computer, `isDefault` of each agent whose manifest says.
     pub provider_defaults: HashMap<String, HashMap<String, bool>>,
+    /// Per computer, an agent list asked for again or refused; absent once answered.
+    pub agent_lists: HashMap<String, AgentList>,
     /// `programs.json` as the core checked it (`mods.state`), while there is one.
     pub programs: Option<serde_json::Value>,
+}
+
+/// A computer's agent list while it is not simply answered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AgentList {
+    /// Asked for, not answered yet (the last answer, if any, is still shown).
+    Loading,
+    /// The core refused it, with its message.
+    Failed(String),
 }
 
 impl PartialEq for Store {

@@ -511,18 +511,13 @@ fn main() {
     rig.ws(|ws, window, cx| ws.run_command("overlay.close", None, window, cx))
         .unwrap();
 
-    // New session: with no mod drawing the New session screen, the window says so.
+    // New session: the stock New session screen opens for the sidebar's target.
     rig.ws(|ws, window, cx| ws.run_command("sessions.new", None, window, cx))
         .unwrap();
     rig.draw();
-    assert_eq!(
-        rig.ws(|ws, _, cx| ws.notice().map(str::to_string).or_else(|| ws
-            .sidebar()
-            .read(cx)
-            .notice()
-            .map(str::to_string))),
-        Some("No mod draws the New session screen.".into())
-    );
+    assert_eq!(rig.ws(|ws, _, _| ws.screens_open()), ["new-session"]);
+    rig.ws(|ws, window, cx| ws.run_command("overlay.close", None, window, cx))
+        .unwrap();
 
     // A user copy of the stock folder replaces it and reloads on save.
     let stock = rig.user.join(".stock/sidebar");

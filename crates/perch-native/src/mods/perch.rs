@@ -22,7 +22,7 @@ use super::ModHost;
 use crate::actions::ACTIONS;
 use crate::client::Command;
 use crate::keymap::{all_shortcuts, Keymap, Scope, TYPED};
-use crate::sidebar::navigation::{self, Store, View};
+use crate::sidebar::navigation::{self, AgentList, Store, View};
 use crate::sidebar::{Model, LOCAL};
 use crate::workspace::Workspace;
 use gpui::{AnyWindowHandle, App, Entity, Subscription, WeakEntity};
@@ -1130,8 +1130,9 @@ impl Perch {
     }
 
     /// `useAgentChoices` without its functions: what `host_id` can start. A computer that lists
-    /// its agents (`agent.manifest.list`) offers its enabled, installed ones and is loading until
-    /// it has answered; an older one offers the two agents every Perch knows.
+    /// its agents (`agent.manifest.list`) offers its enabled, installed ones, is loading while
+    /// asked (its last answer still offered) and says why when it refused; an older one offers
+    /// the two agents every Perch knows.
     fn agent_choices(&self, host_id: &str) -> Value {
         let store = self.store();
         let capabilities = if host_id == LOCAL {
@@ -1160,12 +1161,24 @@ impl Perch {
                 .map(|(id, label)| json!({ "id": id, "label": label }))
                 .collect()
         };
-        json!({
+        let mut answer = json!({
             "connected": store.connected,
             "discovery": discovery,
-            "state": if discovery && listed.is_none() { "loading" } else { "ready" },
+            "state": "ready",
             "choices": choices,
-        })
+        });
+        if discovery {
+            match store.agent_lists.get(host_id) {
+                Some(AgentList::Failed(error)) => {
+                    answer["state"] = json!("error");
+                    answer["error"] = json!(error);
+                }
+                Some(AgentList::Loading) => answer["state"] = json!("loading"),
+                None if listed.is_none() => answer["state"] = json!("loading"),
+                None => {}
+            }
+        }
+        answer
     }
 }
 

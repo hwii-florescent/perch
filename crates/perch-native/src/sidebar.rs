@@ -306,6 +306,10 @@ pub struct State {
     providers: HashMap<String, Vec<Provider>>,
     /// Per computer, the agents its manifests mark as the default pick or not (`isDefault`).
     provider_defaults: HashMap<String, HashMap<String, bool>>,
+    /// The agent lists asked for and not answered yet, by request id: the computer asked.
+    provider_asks: HashMap<String, String>,
+    /// Per computer, an agent list asked for again or refused; absent once answered.
+    agent_lists: HashMap<String, navigation::AgentList>,
     /// The session the window shows, and the one kept in Done while it is read.
     viewing: Option<String>,
     viewed_dot: Option<(String, Option<Dot>)>,
@@ -419,6 +423,9 @@ impl State {
         self.connected = true;
         self.offline_reason = None;
         self.host_facts.clear();
+        // Requests from before the drop are not answered on this connection.
+        self.provider_asks.clear();
+        self.agent_lists.clear();
         // A change seen against a list from before the drop would be a guess.
         self.listed = false;
         self.revision += 1;
@@ -460,6 +467,18 @@ impl State {
         let mut host = self.host_entries.iter().find(|h| h.id == host_id)?.clone();
         host.enabled = enabled;
         Some(json!({"type": "hosts.upsert", "host": host}))
+    }
+
+    /// The core was asked `request` under `request_id`: a computer's agent list is loading until
+    /// it answers (the web's `agentManifestsByHost[host].state`).
+    pub fn asked(&mut self, request: &Request, request_id: &str) {
+        if let Request::Providers(host) = request {
+            self.provider_asks
+                .insert(request_id.to_string(), host.clone());
+            self.agent_lists
+                .insert(host.clone(), navigation::AgentList::Loading);
+            self.revision += 1;
+        }
     }
 
     /// Fold one message from the core in. Returns what to ask for next.
@@ -612,9 +631,22 @@ impl State {
                 self.sounds_in = std::path::Path::new(folder).parent().map(Into::into);
             }
             ServerMessage::ModsChanged {} => asks.push(Request::Mods),
+            ServerMessage::Error {
+                message,
+                request_id: Some(id),
+                ..
+            } if self.provider_asks.contains_key(id) => {
+                let host = self.provider_asks.remove(id).unwrap_or_default();
+                self.agent_lists
+                    .insert(host, navigation::AgentList::Failed(message.clone()));
+            }
             ServerMessage::AgentManifestList {
-                host_id, manifests, ..
+                request_id,
+                host_id,
+                manifests,
+                ..
             } => {
+                self.provider_asks.remove(request_id);
                 let choices = manifests
                     .iter()
                     .filter(|m| {
@@ -635,6 +667,7 @@ impl State {
                     .filter_map(|m| m.is_default.map(|d| (m.id.clone(), d)))
                     .collect();
                 self.provider_defaults.insert(host.clone(), defaults);
+                self.agent_lists.remove(&host);
                 self.providers.insert(host, choices);
             }
             _ => return asks,
@@ -804,6 +837,7 @@ impl State {
             theme: self.theme.clone(),
             providers: self.providers.clone(),
             provider_defaults: self.provider_defaults.clone(),
+            agent_lists: self.agent_lists.clone(),
             programs: self.programs.clone(),
         }
     }
@@ -1577,6 +1611,32 @@ mod tests {
             (row.provider.as_str(), row.provider_id.as_deref()),
             ("CLAUDE", Some("claude"))
         );
+    }
+
+    #[test]
+    fn an_agent_list_is_loading_while_asked_and_says_why_it_was_refused() {
+        use navigation::AgentList;
+        let mut state = state();
+        let lists = |state: &State| state.store().agent_lists;
+        state.asked(&Request::Projects(LOCAL.into()), "p");
+        assert!(lists(&state).is_empty(), "only agent lists are tracked");
+        state.asked(&Request::Providers(LOCAL.into()), "a");
+        state.asked(&Request::Providers("box".into()), "b");
+        assert_eq!(lists(&state)[LOCAL], AgentList::Loading);
+        state.apply(&message(
+            json!({"type": "agent.manifest.list", "requestId": "a", "manifests": []}),
+        ));
+        state.apply(&message(
+            json!({"type": "error", "requestId": "x", "message": "not an agent list"}),
+        ));
+        state.apply(&message(
+            json!({"type": "error", "requestId": "b", "message": "box is unreachable"}),
+        ));
+        let now = lists(&state);
+        assert!(!now.contains_key(LOCAL), "answered");
+        assert_eq!(now["box"], AgentList::Failed("box is unreachable".into()));
+        state.connect();
+        assert!(lists(&state).is_empty(), "a new connection asks again");
     }
 
     fn workspace(id: &str, project: &str, extra: Value) -> Value {

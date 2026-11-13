@@ -32,7 +32,7 @@ const UA_RULES = [
   }],
   ["button", {
     padding: "2px 6px 3px 6px", "border-width": "2px", "border-style": "outset", "border-color": "buttonborder", "background-color": "buttonface",
-    color: "buttontext", "text-align": "center", "align-items": "flex-start", cursor: "default", "box-sizing": "border-box",
+    color: "buttontext", "text-align": "center", cursor: "default", "box-sizing": "border-box",
   }],
   ["input", { padding: "1px 2px", "border-width": "2px", "border-style": "inset", "border-color": "buttonborder", "background-color": "field", color: "fieldtext" }],
   ["svg", { overflow: "hidden" }],

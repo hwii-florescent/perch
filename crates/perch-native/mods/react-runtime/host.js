@@ -187,6 +187,7 @@ export const host = {
     return snapshot(`navigation:${JSON.stringify(opts)}`, () => perch.navigation(opts));
   },
   hosts: () => snapshot("hosts", () => perch.hosts()),
+  agentChoices: (hostId) => snapshot(`agentChoices:${hostId}`, () => perch.agentChoices(hostId)),
   // A session on any computer (the web's store has them all): the shown computer's first, then the others'.
   session: (id) => {
     const shown = sessionsOf(host.navigation({})).get(id);

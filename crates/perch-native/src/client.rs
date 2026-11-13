@@ -496,9 +496,10 @@ impl Connection {
     }
 
     /// Ask the core for something; the answer arrives through [`Connection::next`].
-    pub async fn request(&mut self, request: &Request) -> Result<()> {
+    pub async fn request(&mut self, request: &Request) -> Result<String> {
         let id = self.request_id();
-        self.send(request_frame(&id, request)).await
+        self.send(request_frame(&id, request)).await?;
+        Ok(id)
     }
 
     /// Attach the shell of a session (starting it if needed) and take control of its input
@@ -972,9 +973,9 @@ async fn live(
     state.connect();
     connection.send(json!({"type": "session.list"})).await?;
     connection.request(&Request::Projects(LOCAL.into())).await?;
-    connection
-        .request(&Request::Providers(LOCAL.into()))
-        .await?;
+    let providers = Request::Providers(LOCAL.into());
+    let id = connection.request(&providers).await?;
+    state.asked(&providers, &id);
     // `keys.json` rides on the mods state.
     connection.request(&Request::Mods).await?;
     // What the window was showing is viewed again, so the core still counts it as read.
@@ -1004,7 +1005,8 @@ async fn live(
                     }
                 }
                 for ask in state.apply(&message) {
-                    connection.request(&ask).await?;
+                    let id = connection.request(&ask).await?;
+                    state.asked(&ask, &id);
                 }
                 for alert in state.take_alerts() {
                     if updates.unbounded_send(Update::Alert(alert)).is_err() {

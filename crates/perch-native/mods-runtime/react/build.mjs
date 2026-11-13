@@ -41,10 +41,14 @@ export const SCREENS = [
   "navigator",
   "pane-menu",
   "confirm",
+  "new-session",
 ];
 /** Other stock screens a screen's folder carries, by the screen: they draw inside it (the close guard asks its question
- * through the confirmation, with its own rows in it). */
-export const ALSO = { confirm: ["close-guard"] };
+ * through the confirmation, with its own rows in it; the New session menu draws the tab strip's icons). */
+export const ALSO = {
+  confirm: ["close-guard"],
+  "new-session": ["tabs"],
+};
 /** Files under the folders the build writes that it does not write. */
 const HAND_WRITTEN = new Set([`${RUNTIME}/host.js`, `${RUNTIME}/screen.js`, ...SCREENS.flatMap((id) => [`${id}/main.js`, `${id}/mod.json`])]);
 const requireWeb = createRequire(path.join(web, "package.json"));

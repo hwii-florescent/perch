@@ -21,7 +21,7 @@
 //! Text styles follow GPUI's inheritance: a node carries a text style when it sets one itself (so an ancestor's
 //! hover colour does not reach it, as in CSS) or when the inherited value would differ (`line-height: normal`, a
 //! multiplier under a new size). `tokens` names the theme token each colour came from.
-import { Cascade, colorOut, familyOut, lineHeightPx, splitTop, THEME_TOKENS } from "./css.mjs";
+import { Cascade, colorOut, evalLength, familyOut, lineHeightPx, splitTop, THEME_TOKENS } from "./css.mjs";
 import { HostElement, HostText } from "./dom.mjs";
 import { closest as closestBy, matchesComplex, parseSelector, querySelectorAll as queryBy } from "./selector.mjs";
 
@@ -97,6 +97,14 @@ const length = (l) => {
 const TEXT_FIELD = /^(text|search|url|email|tel|password|number)$/;
 const FIELD_EMS = 162.13 / 12.8;
 
+/** Whether `value` is `calc(100% - m)` where `m` is the box's left and right margins together. */
+function fillsLessMargins(value, v) {
+  if (typeof value !== "object" || !value?.expr) return false;
+  const at = evalLength(value.expr, { fontSize: v["font-size"] });
+  const margins = (v["margin-left"]?.px ?? NaN) + (v["margin-right"]?.px ?? NaN);
+  return !!at && !at.num && at.pct === 100 && Math.abs(at.px + margins) < 0.01;
+}
+
 /** The non-text engine styles of one computed style, plus what could not be expressed. */
 function boxStyle(computed, report, viewport = null) {
   const v = computed.values;
@@ -148,6 +156,13 @@ function boxStyle(computed, report, viewport = null) {
   for (const [key, prop] of [["w", "width"], ["h", "height"], ["min_w", "min-width"], ["min_h", "min-height"], ["max_w", "max-width"], ["max_h", "max-height"]]) {
     const value = v[prop];
     const out = length(value);
+    if (out === undefined && prop === "width" && fillsLessMargins(value, v)) {
+      // `calc(100% - <the side margins>)` is the width a stretched box gets: the engine stretches it instead.
+      // ponytail: right in a column (a block's children are one); a row has no stretch along it.
+      s.self = "stretch";
+      report("approximated", prop, value.expr, src(prop), "stretched across its parent, inside its margins");
+      continue;
+    }
     if (out === undefined) {
       if (typeof value === "object" && value.expr) report("unsupported", prop, value.expr, src(prop), "no calc() in the engine");
       else if (typeof value === "string" && !["auto", "none"].includes(value)) report("unsupported", prop, value, src(prop));

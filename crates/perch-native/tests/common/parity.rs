@@ -387,11 +387,16 @@ pub fn elements(
 /// a native mod asks for the system font by that name and the web asks for it by this stack.
 const WEB_SYSTEM_FONT: &str = "-apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif";
 
+/// The web's monospace stack, which a native mod draws in Menlo: the first face of the stack the
+/// engine finds (`ui-monospace` and SF Mono are not fonts it can ask for by name).
+const WEB_MONO_FONT: &str =
+    "ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace";
+
 fn web_family(family: &str) -> String {
-    if family == ".SystemUIFont" {
-        WEB_SYSTEM_FONT.into()
-    } else {
-        family.into()
+    match family {
+        ".SystemUIFont" => WEB_SYSTEM_FONT.into(),
+        "Menlo" => WEB_MONO_FONT.into(),
+        _ => family.into(),
     }
 }
 

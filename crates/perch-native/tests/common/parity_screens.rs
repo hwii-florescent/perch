@@ -37,7 +37,7 @@ use gpui_shell::HostArguments;
 use perch_native::mods::perch::{from_host, notification_json, to_host, Perch, WindowState};
 use perch_native::mods::screens::{self, Place};
 use perch_native::mods::{theme, ModHost, ModView};
-use perch_native::sidebar::{Alert, Heard, Model, Toast};
+use perch_native::sidebar::{Alert, Heard, Model, Request, Toast};
 use perch_native::workspace::Notification;
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
@@ -211,8 +211,8 @@ pub fn model_from(data: &Value) -> Model {
         }
         state.apply(&message(update));
     }
-    // A host's agent list as the core answered it. A list still loading keeps the last answer;
-    // one that failed was never answered.
+    // A host's agent list as the core answered it. A list still loading keeps the last answer
+    // and has been asked for again; one that failed was refused when asked.
     for (host, catalog) in data["agentManifestsByHost"]
         .as_object()
         .into_iter()
@@ -227,6 +227,18 @@ pub fn model_from(data: &Value) -> Model {
                 reply["hostId"] = json!(host);
             }
             state.apply(&message(reply));
+        }
+        let ask = Request::Providers(host.clone());
+        match catalog["state"].as_str() {
+            Some("loading") => state.asked(&ask, "fixture-again"),
+            Some("error") => {
+                state.asked(&ask, "fixture-again");
+                state.apply(&message(json!({
+                    "type": "error", "requestId": "fixture-again",
+                    "message": catalog["error"].as_str().unwrap_or_default(),
+                })));
+            }
+            _ => {}
         }
     }
     state.model()
