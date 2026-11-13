@@ -469,8 +469,8 @@ function nameElements(document, defs, nodes) {
 
 /** The UI face's ascent and descent per px of font size (San Francisco: the page's glyph run box is 1.1777 x the
  * size high). */
-const ASCENT = 0.9521;
-const DESCENT = 0.2256;
+export const ASCENT = 0.9521;
+export const DESCENT = 0.2256;
 /** How far the baseline of a line in `values`' font sits below the line's top (half the leading, then the ascent). */
 const strutAscent = (values, measure) => (lineHeightPx(values, measure) - (ASCENT + DESCENT) * values["font-size"]) / 2 + ASCENT * values["font-size"];
 /** How far an inline box's first baseline sits below its top: its top padding and border, then its line's. */

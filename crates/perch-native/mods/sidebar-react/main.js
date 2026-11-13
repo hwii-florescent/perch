@@ -5,6 +5,7 @@
 // Generated files are written by `crates/perch-native/mods-runtime/react/build.mjs`; this file and `host.js` are not.
 import { asRender, files, host, refresh, setContext } from "./host.js";
 import { View, div, image } from "gpui-kit";
+import { scale } from "perch";
 import { describeToGpui, mount, NAMED_ELEMENTS } from "./runtime.mjs";
 import Sidebar from "./sidebar/main.js";
 
@@ -31,7 +32,8 @@ export default class SidebarReact extends View {
           task.notify();
         });
       }
-      return describeToGpui(this.handle.description, KIT, this.handle, files);
+      // Vertical lengths are laid on the window's device pixels (see `snapColumns` in the runtime).
+      return describeToGpui(this.handle.description, KIT, this.handle, files, scale());
     });
   }
 }

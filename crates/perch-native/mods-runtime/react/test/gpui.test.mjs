@@ -3,6 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fixture, mountSidebar, THEMES } from "./support.mjs";
+import { snapColumns } from "../gpui.mjs";
 
 /** A gpui-kit stand-in that records each call, and keeps the handlers. */
 function recordingKit() {
@@ -126,4 +127,24 @@ test("an icon takes its button's hover colour while the pointer is over it", asy
   } finally {
     handle.unmount();
   }
+});
+
+test("lengths stacked in a column follow the exact running total on device pixels; unknown heights restart it", () => {
+  const box = (style, children = []) => ({ kind: "div", style, children });
+  const line = (text) => box({ whitespace: "nowrap", text_size: 12.5, line_height: 1.3 }, [{ kind: "text", text }]);
+  const rows = Array.from({ length: 10 }, (_, i) => box({ pt: 3, pb: 3 }, [line(`row ${i}`)]));
+  const wrapping = box({}, [{ kind: "text", text: "may wrap" }]);
+  const root = box({ display: "flex", flex_direction: "col", gap_y: 2 }, [...rows, wrapping, ...rows.slice(0, 2).map((r) => ({ ...r }))]);
+  const snapped = snapColumns([root], 2);
+  let laid = 0;
+  rows.forEach((row, i) => {
+    const s = snapped.get(row);
+    laid += s.mt + s.h + s.mb;
+    const exact = (i + 1) * 22.25 + i * 2;
+    assert.ok(Math.abs(laid - exact) <= 0.25, `row ${i}: laid ${laid}, exact ${exact}`);
+    assert.equal((s.h * 2) % 1, 0, "on device pixels");
+  });
+  assert.equal(snapped.get(root).gap_y, 0, "the gap is carried in the margins");
+  assert.equal(snapped.get(wrapping)?.h, undefined, "wrapping text keeps its own height");
+  assert.equal(snapped.get(root.children[11]).h, 22.5, "the total restarts after it");
 });
