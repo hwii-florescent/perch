@@ -52,6 +52,22 @@ pub const STOCK: &[(&str, &str)] = &[
         "parity-probe/main.js",
         include_str!("../mods/parity-probe/main.js"),
     ),
+    (
+        "sidebar-builders/icons.js",
+        include_str!("../mods/sidebar-builders/icons.js"),
+    ),
+    (
+        "sidebar-builders/kit.js",
+        include_str!("../mods/sidebar-builders/kit.js"),
+    ),
+    (
+        "sidebar-builders/main.js",
+        include_str!("../mods/sidebar-builders/main.js"),
+    ),
+    (
+        "sidebar-builders/mod.json",
+        include_str!("../mods/sidebar-builders/mod.json"),
+    ),
     ("perch.d.ts", perch::DECLARATIONS),
 ];
 
