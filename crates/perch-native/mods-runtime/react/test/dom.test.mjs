@@ -95,3 +95,64 @@ test("a write to element.style is drawn on the next frame and a write back leave
     handle.unmount();
   }
 });
+
+test("a box comes from the last frame's layout, and an effect that measures waits for a fresh one", async () => {
+  const { runtime } = await loadSidebar();
+  const { React } = runtime;
+  const h = React.createElement;
+  const boxes = new Map();
+  const forgotten = [];
+  const perch = { isMac: true, render() {}, error: (e) => { throw e; }, bounds: (key) => boxes.get(key) ?? null, forgetBounds: (p) => forgotten.push(p) };
+  const seen = [];
+  function Probe() {
+    const ref = React.useRef(null);
+    const [width, setWidth] = React.useState(0);
+    React.useLayoutEffect(() => {
+      const box = ref.current.getBoundingClientRect();
+      seen.push(box.width);
+      if (box.width !== width) setWidth(box.width);
+    }, [width]);
+    return h("div", { ref, "data-testid": "m", style: { width: 40 } }, String(width));
+  }
+  const handle = runtime.mount(perch, Probe, { container: { width: 100, height: 20 } });
+  const find = (id) => {
+    const walk = (n) => (n.meta?.attrs?.["data-testid"] === id ? n : (n.children ?? []).map(walk).find(Boolean));
+    return walk(handle.description.root);
+  };
+  try {
+    assert.deepEqual(seen, [], "the effect waits for the element's first layout");
+    await settle();
+    const key = find("m").measure;
+    assert.match(key, /^m[a-z0-9]+:n\d+$/, "the element is measured from now on");
+    boxes.set(key, { x: 5, y: 6, width: 40, height: 10 });
+    // A frame lays the tree out; then the effect runs, measures and moves the state.
+    assert.equal(handle.drawing(), true);
+    handle.retry();
+    assert.deepEqual(seen, [40]);
+    await settle();
+    assert.deepEqual(seen, [40], "after its commit the box is stale again: the effect waits");
+    handle.drawing();
+    handle.retry();
+    assert.deepEqual(seen, [40, 40], "settled: no further move");
+    assert.equal(handle.drawing(), false, "nothing waits");
+    // Outside an effect a read answers at once from the last frame; the measurement properties follow it.
+    const element = handle.globals.document.querySelector('[data-testid="m"]');
+    assert.equal(element.getBoundingClientRect().x, 5);
+    assert.equal(element.offsetWidth, 40);
+  } finally {
+    handle.unmount();
+  }
+  // An element that is never laid out holds an effect off for three frames, then the effect runs with a zero box.
+  const runs = [];
+  function Never() {
+    const ref = React.useRef(null);
+    React.useLayoutEffect(() => { runs.push(ref.current.getBoundingClientRect().width); }, []);
+    return h("div", { ref });
+  }
+  const other = runtime.mount(perch, Never, { container: { width: 10, height: 10 } });
+  let frames = 0;
+  while (other.drawing() && frames < 10) { other.retry(); frames++; }
+  other.unmount();
+  assert.deepEqual([runs, frames], [[0], 3]);
+  assert.equal(forgotten.length, 2, "a tree's boxes are let go when it unmounts");
+});

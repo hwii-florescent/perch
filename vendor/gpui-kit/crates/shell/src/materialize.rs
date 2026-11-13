@@ -393,6 +393,8 @@ struct Behavior {
     /// PERCH: whether the element is painted above the rest of the window, over the whole window
     /// from its top left wherever its parent sits (`window_layer`).
     window_layer: bool,
+    /// PERCH: the key the element's laid-out box is kept under for the host (`measure`).
+    measure: Option<SharedString>,
     /// The key-binding context this element and its subtree sit in.
     ///
     /// What a keymap's `context` predicate is matched against, so a chord can
@@ -870,6 +872,8 @@ fn materialize_node(
     let probe = behavior.key.clone().map(|name| (name, Box::new(refinement.clone())));
     // PERCH: an element in a window layer is drawn over the whole window (`window_layer_of`).
     let window_layer = behavior.window_layer;
+    // PERCH: an element a script asked about keeps its box (`measure`).
+    let measure = behavior.measure.clone();
     let element = match component {
         Component::Registered(component) => materialize_registered_component(
             runtime,
@@ -897,6 +901,10 @@ fn materialize_node(
     #[cfg(feature = "render-test-support")]
     let element = match probe {
         Some((name, style)) => crate::probe::wrap(name, *style, element),
+        None => element,
+    };
+    let element = match measure {
+        Some(key) => crate::measure::wrap(key, element),
         None => element,
     };
     if window_layer {
@@ -3442,6 +3450,13 @@ fn apply_behavior(behavior: &mut Behavior, name: &str, args: &[Bridged]) {
         "keep_mounted" => behavior.keep_mounted = flag.unwrap_or(true),
         // PERCH: a window layer (`window_layer_of`).
         "window_layer" => behavior.window_layer = flag.unwrap_or(true),
+        // PERCH: an element's box for the host (`measure`).
+        "measure" => {
+            behavior.measure = args
+                .first()
+                .and_then(|value| value.as_str().ok())
+                .map(SharedString::from);
+        }
         "key_context" => {
             behavior.key_context = args
                 .first()

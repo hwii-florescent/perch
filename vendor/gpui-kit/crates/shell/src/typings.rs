@@ -1506,6 +1506,12 @@ const ELEMENT_METHODS: &str = r#"    /**
      */
     window_layer<Self extends Element>(this: Self, value?: boolean): Self;
     /**
+     * PERCH: keeps the box this element is laid out in under `key`, for the
+     * host to read after the frame (`measure::bounds`). Only elements given a
+     * key are measured.
+     */
+    measure<Self extends Element>(this: Self, key: string): Self;
+    /**
      * `handler(key, cx)` when a row of a virtual list is clicked, where `key`
      * is what the list's `get_key(index)` returned for that row.
      *
@@ -4019,6 +4025,7 @@ mod tests {
         "aria_level",
         "keep_mounted",
         "window_layer", // PERCH: a window layer (`materialize::window_layer_of`).
+        "measure",      // PERCH: an element's box for the host (`measure`).
         "on_item_click",
         "on_item_secondary_click",
         "on_change",

@@ -478,6 +478,8 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
   const style = { ...entry.part.style };
   const node = { kind: "div", id: element.id, style, tokens, meta: entry.part.meta, ...extra };
   Object.defineProperty(node, DISPLAY, { value: computed.values.display });
+  // An element the source measured keeps its laid-out box for it (`HostDocument.measure`).
+  if (element.measured && element.ownerDocument?.measureKey) node.measure = element.ownerDocument.measureKey(element);
 
   const tag = element.tagName;
   if (tag === "svg") {

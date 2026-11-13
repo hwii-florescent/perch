@@ -141,11 +141,23 @@ export class HostElement extends Target {
   closest(selector) { return closestBy(this, selector); }
   querySelectorAll(selector) { return queryBy(this, selector); }
   querySelector(selector) { return queryBy(this, selector)[0] ?? null; }
-  /** The engine's last box for this element; a zero box at the origin before it has been laid out. */
+  /** Where the engine last laid this element out (`HostDocument.measure`); else, before its first layout, a box the
+   * engine reported another way (the direct children of a scroll area, a pressed element); else a zero box. */
   getBoundingClientRect() {
-    const box = this.ownerDocument?.perch?.bounds?.(this.id) ?? this.ownerDocument?.itemBounds?.(this.id) ?? this.bounds;
+    const box = this.ownerDocument?.measure?.(this) ?? this.ownerDocument?.itemBounds?.(this.id) ?? this.bounds;
     return box ? new DOMRect(box.x, box.y, box.width, box.height) : new DOMRect();
   }
+  // The DOM's measurement properties, from the same boxes. An offset is from the parent's box (the nearest box the
+  // engine lays this one out in); a scroll size is the box's own, as nothing is measured inside a scroller.
+  get offsetWidth() { return this.getBoundingClientRect().width; }
+  get offsetHeight() { return this.getBoundingClientRect().height; }
+  get offsetLeft() { return this.getBoundingClientRect().x - (this.parentElement?.getBoundingClientRect().x ?? 0); }
+  get offsetTop() { return this.getBoundingClientRect().y - (this.parentElement?.getBoundingClientRect().y ?? 0); }
+  get offsetParent() { return this.parentElement; }
+  get clientWidth() { return this.getBoundingClientRect().width; }
+  get clientHeight() { return this.getBoundingClientRect().height; }
+  get scrollWidth() { return this.getBoundingClientRect().width; }
+  get scrollHeight() { return this.getBoundingClientRect().height; }
   getClientRects() { return [this.getBoundingClientRect()]; }
   focus() { this.ownerDocument?.focus(this); }
   blur() { this.ownerDocument?.blur(this); }
@@ -202,6 +214,43 @@ export class HostElement extends Target {
   get outerHTML() { return markup(this); }
   /** `outerHTML` without the attributes named in `omit` (by their DOM names), as the web's drag strips its copy. */
   copyMarkup(omit = []) { return markup(this, omit); }
+}
+
+/** Thrown by a measurement inside an effect when the box would be from a layout older than the tree (`measured`). */
+const STALE = Symbol("perch.stale-layout");
+/** How many times an effect is put off for a fresh layout before it runs with the boxes there are. */
+export const MEASURE_TRIES = 3;
+/** Whether a measurement now is inside an effect that may still be put off. */
+let strict = false;
+
+/** `effect` (a `useEffect` or `useLayoutEffect` body) as the runtime runs it. In a page an effect that measures reads
+ * the layout of the tree it was committed with; here the engine lays the tree out after the commit, in the next frame.
+ * So when the effect measures a box whose layout is older than the tree (`HostDocument.measure`), the effect stops
+ * where it measured and runs again after the next frame has laid the tree out, up to `MEASURE_TRIES` times; after that
+ * it runs with the boxes there are. Its cleanup is the run that finished. */
+export function measured(effect) {
+  return () => {
+    let cleanup;
+    let cancelled = false;
+    const attempt = (tries) => {
+      const outer = strict;
+      strict = tries < MEASURE_TRIES;
+      try {
+        cleanup = effect();
+      } catch (error) {
+        const document = error?.[STALE];
+        if (!document) throw error;
+        document.retries.push(() => { if (!cancelled) attempt(tries + 1); });
+      } finally {
+        strict = outer;
+      }
+    };
+    attempt(0);
+    return () => {
+      cancelled = true;
+      if (typeof cleanup === "function") cleanup();
+    };
+  };
 }
 
 /** What this shim's markup begins with. There is no HTML parser: markup is a copy of a subtree that only the shim
@@ -282,8 +331,25 @@ export class HostDocument extends Target {
     this.body = new HostElement("body", {}, this);
     this.documentElement.appendChild(this.body);
     this.activeElement = this.body;
+    /** Effects put off until the next frame's layout (`measured`). */
+    this.retries = [];
   }
   createElement(tag) { return new HostElement(tag, {}, this); }
+  /** `element`'s box as the engine last laid it out, or null before its first layout or without an engine that
+   * reports boxes (`perch.bounds`). The first ask marks the element to be measured from the next frame on. Inside an
+   * effect (`measured`) a box older than the tree, or none yet, puts the effect off until the next frame. */
+  measure(element) {
+    const read = this.perch?.bounds;
+    if (typeof read !== "function" || !this.measureKey) return null;
+    if (!element.measured) {
+      element.measured = true;
+      element.touch();
+      this.restyled();
+    }
+    const box = read(this.measureKey(element));
+    if (strict && (!box || this.stale?.())) throw { [STALE]: this };
+    return box ?? null;
+  }
   /** An element's `style` was written: the tree is described again once the writing script is done. */
   restyled() {
     if (this.restyling) return;

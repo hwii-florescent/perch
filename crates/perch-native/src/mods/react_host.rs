@@ -5,7 +5,10 @@
 //! when the frame asks for it. `textWidth(text, font)` is the exact width of a line of text, which the runtime lays
 //! rows out with: GPUI rounds a text element's width up to a whole pixel and every authored length to a device
 //! pixel, so a row of words (a strip of chips) would drift from the page's, which lays text at its exact width.
-//! Everything else the runtime needs (timers, jobs, boxes, storage) the engine already gives.
+//! `bounds(key)` is where an element the runtime marked `.measure(key)` was last laid out (`{x, y, width, height}`,
+//! logical pixels from the window's top left, or null before its first layout), for `getBoundingClientRect` and the
+//! DOM's measurement properties; `forgetBounds(prefix)` lets a tree's keys go when it unmounts.
+//! Everything else the runtime needs (timers, jobs, storage) the engine already gives.
 
 use super::ModHost;
 use gpui::{
@@ -19,7 +22,9 @@ use std::sync::Arc;
 
 /// The module's TypeScript face.
 const DECLARATIONS: &str = "export const Icon: { new(id: string, props: { markup: string; color?: string }): any };
-export function textWidth(text: string, font: { size: number; weight?: number; family?: string; italic?: boolean }): number;";
+export function textWidth(text: string, font: { size: number; weight?: number; family?: string; italic?: boolean }): number;
+export function bounds(key: string): { x: number; y: number; width: number; height: number } | null;
+export function forgetBounds(prefix: string): void;";
 
 /// The largest icon markup drawn.
 const MAX_MARKUP: usize = 256 * 1024;
@@ -60,6 +65,24 @@ fn module() -> HostModule {
             icon(args.props(), window.scale_factor(), cx)
         })
         .function("textWidth", text_width)
+        .function("bounds", |args| {
+            let key = args.string(0)?;
+            Ok(
+                gpui_shell::measure::bounds(key).map_or(HostValue::Null, |b| {
+                    let field = |v: gpui::Pixels| HostValue::Number(f64::from(f32::from(v)));
+                    HostValue::Object(vec![
+                        ("x".into(), field(b.origin.x)),
+                        ("y".into(), field(b.origin.y)),
+                        ("width".into(), field(b.size.width)),
+                        ("height".into(), field(b.size.height)),
+                    ])
+                }),
+            )
+        })
+        .function("forgetBounds", |args| {
+            gpui_shell::measure::forget(args.string(0)?);
+            Ok(HostValue::Null)
+        })
 }
 
 /// The icon `props` names, or an empty box when the markup is not one. Rasterised here, at the window's scale, so

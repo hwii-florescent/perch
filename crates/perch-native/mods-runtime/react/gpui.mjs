@@ -125,6 +125,8 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   if (node.markup) el = el.child(files.icon(`~icon-${node.id}`, node.markup, node.kind === "svg" ? color : ""));
   const id = engineId(node, events, overlay);
   if (id) el = el.id(id);
+  // Its laid-out box is kept for the source, which measured it (`HostDocument.measure`).
+  if (node.measure) el = el.measure(node.measure);
   el = applyStyle(el, { ...node.style, ...snapped.get(node) });
   // CSS gives a flex item an automatic minimum width of its min-content width, which for text that can wrap is its
   // longest word, so the item shrinks and its text wraps; GPUI's minimum for text is the whole line. A shrinkable

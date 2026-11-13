@@ -31,7 +31,7 @@
 // the pointer, draws the `tab-drag` screen and moves or splits the tab once it is let go. Commands the module and the
 // window lack are refused by it and logged.
 import * as perch from "perch";
-import { Icon, textWidth } from "perch-react";
+import { Icon, bounds, forgetBounds, textWidth } from "perch-react";
 import { ICONS, LETTERS, LETTER } from "./agent-icons.js";
 
 export const INERT = [
@@ -262,6 +262,9 @@ export function copyFor(cx, screen) {
     storage,
     clipboard: { writeText: async (text) => cx.write_to_clipboard(String(text)) },
     theme: () => perch.theme(),
+    // Where an element the runtime measures was last laid out, and letting a tree's boxes go (`HostDocument.measure`).
+    bounds: (key) => bounds(key),
+    forgetBounds: (prefix) => forgetBounds(prefix),
     // The window's logical size (`window.innerWidth`/`innerHeight`, media rules, `vw`/`vh`); a resize re-renders.
     // Before a window has drawn the mod there is none: a desktop window's size.
     viewport: () => snapshot("viewport", () => perch.viewport() ?? DESKTOP),

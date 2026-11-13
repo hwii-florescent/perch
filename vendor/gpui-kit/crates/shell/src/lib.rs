@@ -78,6 +78,8 @@ pub(crate) mod error;
 pub mod host;
 pub mod host_modules;
 pub(crate) mod materialize;
+// PERCH: where elements a script asked about were last laid out.
+pub mod measure;
 pub mod metrics;
 pub(crate) mod path;
 pub mod plugin;
