@@ -2000,6 +2000,109 @@
           "textSized": true
         }
       ]
+    },
+    "folder-browser": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 3,
+      "elements": [
+        {
+          "name": "folder-browser",
+          "selector": "[data-testid=\"dir-browser\"]",
+          "description": "The browser: fills its panel, at least 13 rem high."
+        },
+        {
+          "name": "folder-browser-mode-toggle",
+          "selector": "[data-testid=\"dir-browser-mode-toggle\"]",
+          "description": "The Type path / Browse button at the top right (small, plain).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-up",
+          "selector": "[data-testid=\"dir-browser-up\"]",
+          "description": "The up-one-level arrow at the left of the breadcrumb; 40% opacity at the root."
+        },
+        {
+          "name": "folder-browser-crumbs",
+          "selector": "[data-testid=\"dir-browser\"] span.min-w-0.flex-1",
+          "description": "The path as buttons for each folder; the last is the text colour, the others muted; cut with an ellipsis.",
+          "text": true
+        },
+        {
+          "name": "folder-browser-crumb",
+          "selector": "[data-testid=\"dir-browser\"] span.min-w-0.flex-1 button",
+          "description": "One folder of the path (a click goes there; the last one is disabled).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-filter",
+          "selector": "[data-testid=\"dir-browser-filter\"]",
+          "description": "The filter field (lighter surface fill, 0.78rem); `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        },
+        {
+          "name": "folder-browser-list",
+          "selector": "[data-testid=\"dir-browser\"] div.overflow-y-auto",
+          "description": "The scrolling list of subfolders: 60 to 260 px high."
+        },
+        {
+          "name": "folder-browser-entry",
+          "selector": "[data-testid^=\"dir-browser-entry-\"]",
+          "description": "One subfolder row: the name and, for a repository, a git badge at the right; the row takes the lighter fill on hover.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "dir-browser-entry-"
+          }
+        },
+        {
+          "name": "folder-browser-entry-name",
+          "selector": "[data-testid^=\"dir-browser-entry-\"] > span:first-child",
+          "description": "The folder's name, cut with an ellipsis.",
+          "key": {
+            "closest": "[data-testid^=\"dir-browser-entry-\"]",
+            "attr": "data-testid",
+            "strip": "dir-browser-entry-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-git",
+          "selector": "[data-testid^=\"dir-browser-entry-\"] > span:last-child:not(:first-child)",
+          "description": "The 'git' badge: lighter fill, 0.62rem, in the accent colour.",
+          "key": {
+            "closest": "[data-testid^=\"dir-browser-entry-\"]",
+            "attr": "data-testid",
+            "strip": "dir-browser-entry-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-note",
+          "selector": "[data-testid=\"dir-browser\"] div.overflow-y-auto > div",
+          "description": "Loading... or No subfolders (muted, 0.76rem).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-use",
+          "selector": "[data-testid=\"dir-browser-use\"]",
+          "description": "Use this folder / Use this path: the primary button at the right, 40% opacity while disabled.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-path-input",
+          "selector": "[data-testid=\"project-path-input\"]",
+          "description": "The typed path field in Type path mode; `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        }
+      ]
     }
   }
 }

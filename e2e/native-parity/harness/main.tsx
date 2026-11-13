@@ -46,6 +46,8 @@ interface Screen {
   storage?: (view: Json) => Record<string, string>;
   /** The props the host gives the screen: the fixture's, plus the callbacks (no-ops: nothing here acts). */
   props?: (fixed: Json) => Json;
+  /** A selector that matches once the screen has what its host answered (a listing), waited for before the first step so a step does not act on a screen still loading. */
+  listed?: (props: Json) => string | null;
   /** What the screen worked out for itself that only its drawing shows (read from the page once it has settled), added to `sdk`. */
   after?: () => Json;
   /** Data hooks of the screen, called beside it so the derived shapes can be written to the reference output. */
@@ -121,6 +123,20 @@ function TabDragDemo({ Layer, Tabs, drag: input }: { Layer: ComponentType<Json>;
       {drag && <Layer drag={drag} />}
     </>
   );
+}
+/**
+ * The folder browser the way the app places it: inside the Add project dialog, whose panel is the panel fill with 16 px of
+ * padding. `browse` answers from the fixture's folder tree (path to `{ parent, entries }`); `loading` never answers, so the
+ * list stays at its first load.
+ */
+interface FolderTree { home: string; loading?: boolean; tree: Record<string, { parent?: string; entries: { name: string; path: string; isGitRepo: boolean }[] }> }
+function FolderBrowserHost({ Browser, home, loading, tree, ...rest }: { Browser: ComponentType<Json> } & FolderTree & Json) {
+  const browse = (path?: string) => {
+    if (loading) return new Promise<never>(() => {});
+    const listing = tree[path ?? home];
+    return listing ? Promise.resolve({ path: path ?? home, ...listing }) : Promise.reject(new Error(`no folder ${path}`));
+  };
+  return <div className="flex min-h-0 flex-1 flex-col bg-panel-bg p-4"><Browser {...rest} browse={browse} onUseFolder={noop} /></div>;
 }
 /** A screen that is given everything as props and reads nothing else: the props are the whole story. */
 function PropsProbe({ props }: { props: Json }) {
@@ -204,6 +220,17 @@ const SCREENS: Record<string, Screen> = {
     mount: "card",
     props: (fixed) => ({ ...fixed, logo: perchLogo, actions: acts() }),
     Probe: NewSessionProbe,
+  },
+  "folder-browser": {
+    load: async () => {
+      const { default: Browser } = await import("../../../packages/web/src/stock-ui/folder-browser/main");
+      return { default: ((props: FolderTree & Json) => <FolderBrowserHost Browser={Browser as unknown as ComponentType<Json>} {...props} />) as unknown as ComponentType<never> };
+    },
+    mount: "card",
+    // The folder the browser opens at is the last one used on the host, kept by the browser in localStorage.
+    listed: (props) => (props.loading ? null : '[data-testid="dir-browser-use"]:not(:disabled)'),
+    storage: (view) => (view.lastPath ? { "perch.dirBrowser.lastPath.local": String(view.lastPath) } : {}),
+    Probe: PropsProbe,
   },
   "pane-menu": {
     load: () => import("../../../packages/web/src/stock-ui/pane-menu/main"),
@@ -308,20 +335,28 @@ await frames();
 
 // What a person does on the way to the state (type into the palette, move the highlight, press a chip), done inside
 // the page: events on the elements, never at the screen. A state that needs none has no `steps`.
+/** The element a step acts on: a screen that lists something from its host (the folder browser) has it a moment after it mounts. */
+const found = async <T extends Element>(selector: string | undefined, what: string): Promise<T | Document> => {
+  if (!selector) return document;
+  for (let tries = 0; tries < 120; tries++) {
+    const element = document.querySelector<T>(selector);
+    if (element) return element;
+    await frames();
+  }
+  throw new Error(`step: no ${selector} for ${what}`);
+};
+const listed = screen.listed?.(props);
+if (listed && state.steps?.length) await found(listed, "listing");
 for (const step of state.steps ?? []) {
   if (step.type) {
-    const input = document.querySelector<HTMLInputElement>(step.type.selector);
-    if (!input) throw new Error(`step: no ${step.type.selector}`);
+    const input = (await found<HTMLInputElement>(step.type.selector, "type")) as HTMLInputElement;
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, step.type.text);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   } else if (step.key) {
-    const target = step.key.selector ? document.querySelector(step.key.selector) : document;
-    if (!target) throw new Error(`step: no ${step.key.selector}`);
+    const target = await found(step.key.selector, "key");
     target.dispatchEvent(new KeyboardEvent("keydown", { key: step.key.key, bubbles: true, cancelable: true }));
   } else if (step.click) {
-    const button = document.querySelector<HTMLElement>(step.click);
-    if (!button) throw new Error(`step: no ${step.click}`);
-    button.click();
+    ((await found<HTMLElement>(step.click, "click")) as HTMLElement).click();
   }
   await frames();
 }
