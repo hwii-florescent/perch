@@ -1198,6 +1198,7 @@ impl Workspace {
             "global.navigator" | "global.navigatorAlt" | "app.palette" => {
                 self.toggle_palette(window, cx)
             }
+            "global.help" | "global.helpPlain" => self.open_keybind_help(cx),
             "session.start" => {
                 let host = text("hostId").unwrap_or(LOCAL).to_string();
                 let agent = text("agent")
@@ -1515,6 +1516,21 @@ impl Workspace {
         }
         let _ = window;
         Ok(())
+    }
+
+    /// The keybind help (`stock:keybind-help`), as the web opens it: once, until it is closed.
+    fn open_keybind_help(&mut self, cx: &mut Context<Self>) {
+        if self.screens.is_open("keybind-help") {
+            return;
+        }
+        if self.screens.has("keybind-help", cx) {
+            self.open_screen("keybind-help", json!({ "open": true }), None, None, cx);
+            return;
+        }
+        self.notice = Some(
+            "No mod draws the keybind help. The stock one is restored when the app starts.".into(),
+        );
+        cx.notify();
     }
 
     fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {

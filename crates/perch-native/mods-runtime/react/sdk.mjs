@@ -228,6 +228,8 @@ export const useWorkspaceTabs = () => useHostSnapshot((perch) => perch.workspace
 export const useStatusLine = () => useHostSnapshot((perch) => perch.statusLine());
 export const useZoom = () => useHostSnapshot((perch) => perch.zoom());
 export const usePaneLook = () => useHostSnapshot((perch) => perch.paneLook());
+/** Every key binding the window answers, with a person's choices (`perch.keybindings()`): `{keys, description, group}`. */
+export const useKeybindings = () => useHostSnapshot((perch) => perch.keybindings?.() ?? []);
 const NO_USAGE = Object.freeze({ usage: Object.freeze([]), updatedAt: 0, spend: null, redeemResult: null });
 /** Plan usage as the core last reported it (`perch.planUsage()`). With `keepFresh`, asks on connect and then every
  * 3 min (the core's cache) while the caller is mounted, as the web's does. */

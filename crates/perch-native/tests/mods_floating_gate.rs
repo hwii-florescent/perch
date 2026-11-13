@@ -27,6 +27,7 @@ const SCREENS: &[&str] = &[
     "new-session",
     "dialog",
     "toast",
+    "keybind-help",
 ];
 
 fn main() {

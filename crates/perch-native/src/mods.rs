@@ -94,6 +94,18 @@ pub const STOCK: &[(&str, &str)] = &[
         "new-session/tabs/main.js",
         include_str!("../mods/new-session/tabs/main.js"),
     ),
+    (
+        "keybind-help/keybind-help/main.js",
+        include_str!("../mods/keybind-help/keybind-help/main.js"),
+    ),
+    (
+        "keybind-help/main.js",
+        include_str!("../mods/keybind-help/main.js"),
+    ),
+    (
+        "keybind-help/mod.json",
+        include_str!("../mods/keybind-help/mod.json"),
+    ),
     ("example/main.js", include_str!("../mods/example/main.js")),
     ("example/mod.json", include_str!("../mods/example/mod.json")),
     (

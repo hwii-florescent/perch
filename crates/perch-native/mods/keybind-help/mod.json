@@ -1,0 +1,5 @@
+{
+  "name": "Keybind help",
+  "description": "The web app's stock keybind help (every key binding, searchable), unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

@@ -30,6 +30,8 @@ pub enum Scope {
     Any,
     /// In a terminal the key belongs to the program.
     OutsideTerminal,
+    /// Neither a terminal nor a text field has the keyboard (a plain key there is typing).
+    OutsideEditable,
     /// A follow-up key after the leader chord.
     Leader,
     /// A command on the terminal that has the keyboard (find, clear, copy, scroll). It applies only
@@ -95,6 +97,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Scope::OutsideTerminal,
     ),
     s("global.settings", "Open Settings", &["mod+,"]),
+    s("global.help", "Open this keybind help", &["mod+/"]),
+    scoped(
+        "global.helpPlain",
+        "Open keybind help (outside inputs)",
+        &["shift+/"],
+        Scope::OutsideEditable,
+    ),
     // VS Code's keys, as the web's: Command on a Mac, Control elsewhere.
     s("view.zoomIn", "Zoom in", &["cmd+=", "ctrl+="]),
     s(
@@ -226,6 +235,12 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     scoped("leader.navigator", "Open Navigator", &["g"], Scope::Leader),
     scoped("leader.settings", "Open Settings", &["s"], Scope::Leader),
+    scoped(
+        "leader.help",
+        "Open this keybind help",
+        &["shift+/"],
+        Scope::Leader,
+    ),
     scoped("leader.sidebar", "Toggle sidebar", &["b"], Scope::Leader),
     scoped("leader.nextTab", "Next tab", &["n"], Scope::Leader),
     scoped("leader.previousTab", "Previous tab", &["p"], Scope::Leader),
@@ -328,11 +343,37 @@ pub fn all_shortcuts() -> impl Iterator<Item = Shortcut> {
         .chain(SHORTCUTS.iter().copied())
 }
 
+/// The jump ranges the keybind help lists as one row: id prefix, what is jumped to, the span.
+const JUMP_RANGES: [(&str, &str, &str); 3] = [
+    ("tabs.jump", "tab", "1…8"),
+    ("nests.jump", "workspace", "1…9"),
+    ("leader.jump", "tab", "1…9"),
+];
+
+/// Whether `id` is one of range `range`'s commands (`tabs.jump3` of `tabs.jump`).
+fn range_member(id: &str, range: &str) -> bool {
+    id.strip_prefix(range)
+        .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// The keybind help's group of a command, as the web groups its table (`KeybindGroup`).
+fn help_group(id: &str) -> &'static str {
+    match id.split('.').next().unwrap_or("") {
+        "tabs" | "sessions" | "nav" => "tabs",
+        "nests" => "nests",
+        "panes" => "panes",
+        "terminal" => "terminal",
+        "leader" => "leader",
+        _ => "global",
+    }
+}
+
 /// The command a leader follow-up runs: `leader.splitRight` runs `panes.splitRight`.
 pub fn leader_target(id: &str) -> Option<&'static str> {
     Some(match id.strip_prefix("leader.")? {
         "navigator" => "global.navigator",
         "settings" => "global.settings",
+        "help" => "global.help",
         "sidebar" => "global.sidebar",
         "nextTab" => "tabs.next",
         "previousTab" => "tabs.prev",
@@ -678,6 +719,99 @@ impl Keymap {
         effective_spec(&shortcut, &self.chosen, self.mac).map(|c| self.format(&c))
     }
 
+    /// The keybind help's rows (`keybindEntries` in the web), in table order: every binding the
+    /// window answers with its key (a person's choice, else the default), what it does and its
+    /// group. A jump range (to tab 1 to 8) is one row while none of its keys is a person's
+    /// choice. The bindings in `keys.json` follow, by section, as the window reads them first.
+    pub fn help(&self) -> Vec<Value> {
+        let row = |keys: String, description: &str, group: &str| serde_json::json!({ "keys": keys, "description": description, "group": group });
+        let mut rows = Vec::new();
+        let mut ranges = Vec::new();
+        // Copy and paste are the fixed row below, as the web lists them.
+        let listed =
+            all_shortcuts().filter(|s| !matches!(s.id, "terminal.copy" | "terminal.paste"));
+        for shortcut in listed {
+            let Some(chord) = effective_spec(&shortcut, &self.chosen, self.mac) else {
+                continue;
+            };
+            let leader = shortcut.scope == Scope::Leader;
+            let prefix = if leader {
+                match self.label("leader.arm") {
+                    Some(arm) => format!("{arm}, "),
+                    None => continue,
+                }
+            } else {
+                String::new()
+            };
+            let label = format!("{prefix}{}", self.format(&chord));
+            let group = help_group(shortcut.id);
+            let range = JUMP_RANGES
+                .iter()
+                .find(|(id, ..)| range_member(shortcut.id, id))
+                .filter(|(id, ..)| !self.chosen.keys().any(|chosen| range_member(chosen, id)));
+            match range {
+                Some((id, noun, span)) => {
+                    if ranges.contains(id) {
+                        continue;
+                    }
+                    ranges.push(*id);
+                    let key = self.format(&Chord {
+                        key: chord.key.clone(),
+                        ..Chord::default()
+                    });
+                    let keys = format!("{}{span}", label.strip_suffix(&key).unwrap_or(&label));
+                    rows.push(row(keys, &format!("Jump to {noun} {span}"), group));
+                }
+                None => rows.push(row(label, shortcut.title, group)),
+            }
+        }
+        rows.push(row(
+            "Esc".into(),
+            "Close any open overlay or keyboard mode",
+            "global",
+        ));
+        rows.push(row(
+            "↑ / ↓".into(),
+            "Move selection in Navigator",
+            "navigator",
+        ));
+        let copy = if self.mac {
+            "⌘C / ⌘V"
+        } else {
+            "Ctrl+Shift+C / V"
+        };
+        rows.push(row(copy.into(), "Copy / paste", "terminal"));
+        let sections = self.file.as_ref().and_then(Value::as_object);
+        for name in ["global", "terminal"] {
+            let bindings = sections
+                .and_then(|s| s.get(name))
+                .and_then(Value::as_object);
+            for (spec, action) in bindings.into_iter().flatten() {
+                let Some(chord) = parse_chord(spec) else {
+                    continue;
+                };
+                let command = match action {
+                    Value::String(text) => text.split(':').next().unwrap_or(text).to_string(),
+                    Value::Object(map) => map
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    _ => continue,
+                };
+                let title = all_shortcuts()
+                    .find(|s| s.id == command)
+                    .map(|s| s.title.to_string())
+                    .unwrap_or_else(|| match action {
+                        Value::String(text) => text.clone(),
+                        _ => command.clone(),
+                    });
+                rows.push(row(self.format(&chord), &title, name));
+            }
+        }
+        rows
+    }
+
     /// `cmd+shift+]` as `⇧⌘]` on a Mac, `Ctrl+Shift+]` elsewhere.
     fn format(&self, c: &Chord) -> String {
         let key = match c.key.as_str() {
@@ -686,6 +820,12 @@ impl Keymap {
             "left" => "←".into(),
             "right" => "→".into(),
             "enter" => "Enter".into(),
+            "tab" => "Tab".into(),
+            "space" => "Space".into(),
+            "backspace" => "Backspace".into(),
+            "delete" => "Delete".into(),
+            "home" => "Home".into(),
+            "end" => "End".into(),
             "pageup" => "PgUp".into(),
             "pagedown" => "PgDn".into(),
             other => other.to_uppercase(),
@@ -743,6 +883,7 @@ impl Keymap {
                     .filter(|s| match s.scope {
                         Scope::Any => true,
                         Scope::OutsideTerminal => !context.in_terminal,
+                        Scope::OutsideEditable => !context.in_terminal && !context.typing,
                         Scope::Leader | Scope::Terminal => false,
                     })
                     .find(bound)
@@ -1265,5 +1406,77 @@ mod tests {
                 s.id
             );
         }
+    }
+
+    #[test]
+    fn help_lists_every_binding_with_ranges_choices_and_the_keys_file() {
+        let find = |rows: &[Value], description: &str| {
+            rows.iter()
+                .filter(|r| r["description"] == description)
+                .map(|r| {
+                    format!(
+                        "{} {}",
+                        r["group"].as_str().unwrap(),
+                        r["keys"].as_str().unwrap()
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let rows = keymap(&[], None).help();
+        assert_eq!(
+            find(&rows, "Open this keybind help"),
+            ["global ⌘/", "leader ⌃Space, ⇧/"]
+        );
+        assert_eq!(
+            find(&rows, "Open keybind help (outside inputs)"),
+            ["global ⇧/"]
+        );
+        assert_eq!(find(&rows, "Jump to tab 1…8"), ["tabs ⌘1…8"]);
+        assert_eq!(find(&rows, "Jump to tab 1…9"), ["leader ⌃Space, 1…9"]);
+        assert!(
+            find(&rows, "Jump to tab 3").is_empty(),
+            "in the range's row"
+        );
+        assert_eq!(find(&rows, "Copy / paste"), ["terminal ⌘C / ⌘V"]);
+        // A person's key for one jump lists the range's keys one by one; an unbound one goes.
+        let file = serde_json::json!({"global": {"ctrl-shift-t": "tabs.next", "cmd-j": "send:x"}});
+        let rows = keymap(
+            &[("tabs.jump3", "cmd+shift+3"), ("global.settings", "")],
+            Some(file),
+        )
+        .help();
+        assert_eq!(find(&rows, "Jump to tab 3"), ["tabs ⇧⌘3"]);
+        assert_eq!(find(&rows, "Jump to tab 1"), ["tabs ⌘1"]);
+        assert!(find(&rows, "Open Settings")
+            .iter()
+            .all(|r| r.starts_with("leader")));
+        assert_eq!(
+            find(&rows, "Next tab"),
+            ["tabs ⇧⌘]", "leader ⌃Space, N", "global ⌃⇧T"]
+        );
+        assert_eq!(find(&rows, "send:x"), ["global ⌘J"]);
+    }
+
+    #[test]
+    fn help_opens_on_its_keys_but_a_plain_question_mark_stays_typing() {
+        let map = keymap(&[], None);
+        let at = |spec: &str, context: Context| run(map.resolve(&press(spec), context));
+        assert_eq!(at("cmd-/", Context::default()), "global.help");
+        assert_eq!(at("shift-/", Context::default()), "global.helpPlain");
+        let typing = Context {
+            typing: true,
+            ..Context::default()
+        };
+        assert_ne!(at("shift-/", typing), "global.helpPlain");
+        let terminal = Context {
+            in_terminal: true,
+            ..Context::default()
+        };
+        assert_ne!(at("shift-/", terminal), "global.helpPlain");
+        let leader = Context {
+            leader: true,
+            ..Context::default()
+        };
+        assert_eq!(at("shift-/", leader), "global.help");
     }
 }
