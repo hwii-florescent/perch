@@ -523,8 +523,8 @@ impl Sidebar {
 
     fn project(&self, host: &HostView, project: &ProjectView, cx: &mut Context<Self>) -> gpui::Div {
         let key = Nav::project_key(&host.id, &project.id);
-        let folded = self.nav.collapsed.contains(&key);
-        let (toggle_host, toggle_project) = (host.id.clone(), project.id.clone());
+        let folded = self.nav.folded(&host.id, project);
+        let (pick_host, picked) = (host.id.clone(), project.clone());
         let mut head = div()
             .flex()
             .items_center()
@@ -537,19 +537,24 @@ impl Sidebar {
                     .flex_1()
                     .truncate()
                     .cursor_pointer()
-                    .child(format!(
-                        "{} {}",
-                        if folded { "▸" } else { "▾" },
-                        project.name
-                    ))
+                    .child(match (project.foldable(), folded) {
+                        (false, _) => project.name.clone(),
+                        (true, true) => format!("▸ {}", project.name),
+                        (true, false) => format!("▾ {}", project.name),
+                    })
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.nav.toggle_project(&toggle_host, &toggle_project);
-                        cx.notify();
+                        match this.nav.pick_project(&this.model, &pick_host, &picked) {
+                            Outcome::Open {
+                                host_id,
+                                session_id,
+                            } => this.open(host_id, session_id, None, cx),
+                            Outcome::Nothing => cx.notify(),
+                        }
                     })),
             );
         // Folded, a project still says what needs you, and how many.
-        if let (true, Some(top), true) = (folded, project.top, project.top_count > 0) {
-            head = head.child(badge(top, project.top_count));
+        if let (true, Some((top, count))) = (folded, project.rollup()) {
+            head = head.child(badge(top, count));
         }
         // A project the core does not list (the catch-all group) has nowhere to start a session.
         if self.commands.is_some() && startable(host, project) {

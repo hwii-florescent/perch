@@ -211,6 +211,26 @@ impl Nav {
         }
     }
 
+    /// Whether the rows of `project` are folded away. A project with one plain checkout has
+    /// nothing to fold, so a fold left over from before never hides its sessions.
+    pub fn folded(&self, host_id: &str, project: &ProjectView) -> bool {
+        project.foldable()
+            && self
+                .collapsed
+                .contains(&Self::project_key(host_id, &project.id))
+    }
+
+    /// A project's header was picked. A project with checkouts folds or unfolds; one plain
+    /// checkout has nothing to fold, so the header opens it, as the web's does.
+    pub fn pick_project(&mut self, model: &Model, host_id: &str, project: &ProjectView) -> Outcome {
+        if project.foldable() {
+            self.toggle_project(host_id, &project.id);
+            Outcome::Nothing
+        } else {
+            self.pick_workspace(model, &project.id)
+        }
+    }
+
     /// Run the action called `id`. `None`: this is not one of the sidebar's actions.
     pub fn run(&mut self, id: &str, model: &Model) -> Option<Outcome> {
         let outcome = match id {
@@ -780,6 +800,37 @@ mod tests {
         assert!(!nav.collapsed.contains("box/a"));
         nav.toggle_project("local", "a");
         assert!(nav.collapsed.is_empty());
+    }
+
+    /// The web folds only a project with checkouts to fold away. One plain checkout has no
+    /// row of its own, its header opens it, and its sessions are always listed, so a session
+    /// created there is never hidden by a fold.
+    #[test]
+    fn a_project_with_one_plain_checkout_is_never_folded_and_its_header_opens_it() {
+        let mut single = project("a", &["s1", "s2"]);
+        single.single_checkout = true;
+        let several = project("b", &["s3"]);
+        let model = model(vec![single.clone(), several.clone()], &[]);
+        let mut nav = Nav::default();
+
+        // A fold left over from before (a checkout was removed) does not hide it.
+        nav.collapsed.insert(Nav::project_key(LOCAL, "a"));
+        assert!(!nav.folded(LOCAL, &single));
+        // The header opens the checkout, and folds nothing.
+        assert_eq!(
+            nav.pick_project(&model, LOCAL, &single),
+            open("s1").unwrap()
+        );
+        assert_eq!(nav.workspace.as_deref(), Some("a"));
+        assert!(!nav.folded(LOCAL, &single));
+
+        // A project with checkouts folds and unfolds, per computer.
+        assert!(!nav.folded(LOCAL, &several));
+        assert_eq!(nav.pick_project(&model, LOCAL, &several), Outcome::Nothing);
+        assert!(nav.folded(LOCAL, &several));
+        assert!(!nav.folded("box", &several));
+        assert_eq!(nav.pick_project(&model, LOCAL, &several), Outcome::Nothing);
+        assert!(!nav.folded(LOCAL, &several));
     }
 
     #[test]
