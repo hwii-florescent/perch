@@ -21,10 +21,15 @@
 //!
 //! A tab for a blank session (listed, nothing ever launched in it) lists the launch choices of its
 //! computer; the one picked attaches that session, after the row is checked to be still blank.
+//!
+//! A mod may draw a screen in place of its Rust view (`mods::screens`): when one exists for a
+//! screen's id, the window places it there, hands it its props and runs what its result asks.
+//! With no screen mods, every Rust view is drawn as before.
 
 use crate::client::{Command, Core};
 use crate::handoff::{open_in_perch, perch_url, Place};
 use crate::keymap::{Context as KeyContext, Hit, Keymap};
+use crate::mods::screens::{self, OnResult, Screens, PANE_HEADER_HEIGHT};
 use crate::palette::{self, Entry, Kind, Outcome, Palette, SessionRef};
 use crate::settings::{
     next_choice, scrollback_from_text, stepped, Change, CONTRAST, MAX_SCROLLBACK, MIN_SCROLLBACK,
@@ -48,7 +53,7 @@ use gpui::{
     KeyDownEvent, Keystroke, MouseButton, Pixels, Point, SharedString, Size, Subscription, Task,
     Window,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -165,6 +170,17 @@ struct Toast {
     _timer: Task<()>,
 }
 
+/// The most notifications kept for a screen to show; the oldest go first.
+const MAX_NOTIFICATIONS: usize = 20;
+
+/// A session finished or needs the person: what a notifications screen lists until it is
+/// dismissed or opened (`useNotifications`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Notification {
+    pub id: String,
+    pub heard: Heard,
+}
+
 /// The pane menu's entry that stops the terminal's process, and what it reads once it asks to be
 /// confirmed.
 const STOP: &str = "Stop the terminal";
@@ -210,6 +226,13 @@ pub struct Workspace {
     clipboard: Rc<dyn Clipboard>,
     /// What runs when a link is clicked: the system's handler, unless a test says otherwise.
     opener: Rc<dyn Fn(&Target)>,
+    /// The screens mods draw in place of Rust views.
+    screens: Screens,
+    /// What has the keyboard while a modal screen is up, unless the mod gives it to a field of its
+    /// own: its layer, so keys pass the window on their way to the mod.
+    screen_focus: gpui::FocusHandle,
+    notifications: Vec<Notification>,
+    next_notification: u64,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -227,8 +250,17 @@ impl Workspace {
             this.pending_split = None;
             cx.notify();
         });
-        // The sidebar's own changes (hiding it, a count, a session's state) redraw the window.
-        let observed = cx.observe(&sidebar, |_, _, cx| cx.notify());
+        // The sidebar's own changes (hiding it, a count, a session's state) redraw the window. Its
+        // New session panel opens as a screen when a mod draws one.
+        let observed = cx.observe(&sidebar, |this, sidebar, cx| {
+            if this.screens.has("new-session", cx) {
+                let target = sidebar.update(cx, |sidebar, _| sidebar.take_new_session());
+                if let Some(target) = target {
+                    this.open_new_session(target, None, cx);
+                }
+            }
+            cx.notify()
+        });
         Self {
             sidebar,
             locate: None,
@@ -249,6 +281,10 @@ impl Workspace {
             room: Rc::new(Cell::new(None)),
             clipboard: Rc::new(SystemClipboard),
             opener: Rc::new(open_in_system),
+            screens: Screens::default(),
+            screen_focus: cx.focus_handle(),
+            notifications: Vec::new(),
+            next_notification: 0,
             _subscriptions: vec![opened, failed, observed],
         }
     }
@@ -339,6 +375,422 @@ impl Workspace {
     /// What the last command could not do, or did instead.
     pub fn notice(&self) -> Option<&str> {
         self.notice.as_deref()
+    }
+
+    /// The terminals' zoom factor (1 is 100%).
+    pub fn zoom_factor(&self) -> f32 {
+        self.zoom.factor()
+    }
+
+    /// The notifications not yet dismissed, oldest first.
+    pub fn notifications(&self) -> &[Notification] {
+        &self.notifications
+    }
+
+    /// The floating screens open, bottom first.
+    pub fn screens_open(&self) -> Vec<&'static str> {
+        self.screens.floating.iter().map(|f| f.id).collect()
+    }
+
+    /// The props an open floating screen was given.
+    pub fn screen_props(&self, id: &str) -> Option<&Value> {
+        self.screens.props(id)
+    }
+
+    /// Opens floating screen `id` (`dialog`, `confirm`, ...) with `props`, at `at` for a menu;
+    /// `on_result` gets what it closes with (`null` when dismissed). False when no mod draws it.
+    pub fn open_screen(
+        &mut self,
+        id: &str,
+        props: Value,
+        at: Option<Point<Pixels>>,
+        on_result: Option<OnResult>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let opened = self.screens.open(id, props, at, on_result, cx);
+        if opened {
+            self.menu = None;
+            cx.notify();
+        }
+        opened
+    }
+
+    /// Gives an open floating screen new props; it re-renders. False when it is not open.
+    pub fn update_screen(&mut self, id: &str, props: Value, cx: &mut Context<Self>) -> bool {
+        self.screens.update(id, props, cx)
+    }
+
+    /// A floating screen closed itself with `result`, or was dismissed (`null`): the keyboard
+    /// goes back to what had it, then what it was opened for runs.
+    pub fn screen_closed(
+        &mut self,
+        id: &str,
+        result: Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(open) = self.screens.take(id, cx) else {
+            return;
+        };
+        if let Some(handle) = open.focus_back {
+            handle.focus(window, cx);
+        }
+        if let Some(then) = open.on_result {
+            then(self, result, window, cx);
+        }
+        cx.notify();
+    }
+
+    // Screens a mod draws: their props, and what their results do.
+
+    /// `NavigatorScreenProps`, as far as this window has its data.
+    fn navigator_props(&self, cx: &App) -> Value {
+        let model = self.sidebar.read(cx).model();
+        let store = &model.store;
+        let current = self.tabs.active().map(str::to_string);
+        let session = current
+            .as_ref()
+            .and_then(|id| store.sessions.iter().find(|s| s.id == *id));
+        let workspace = session
+            .and_then(|s| s.workspace_id.as_ref())
+            .and_then(|id| store.workspaces.iter().find(|w| w.id == *id))
+            .map(|w| json!({ "id": w.id, "path": w.path }));
+        let cwd = session.map(|s| s.current_cwd.clone().unwrap_or_else(|| s.cwd.clone()));
+        let sessions: Vec<Value> = store
+            .sessions
+            .iter()
+            .map(|s| {
+                json!({
+                    "id": s.id, "title": s.title, "cwd": s.cwd, "hostId": s.host_id,
+                    "createdAt": s.created_at, "state": crate::mods::perch::session_state(s),
+                })
+            })
+            .collect();
+        let agents: Vec<Value> = self
+            .launch_choices(LOCAL, cx)
+            .iter()
+            .map(|p| json!({ "id": p.id, "label": p.name }))
+            .collect();
+        json!({
+            "open": true,
+            "sessions": sessions,
+            "currentSessionId": current,
+            "connected": model.connected,
+            "workspace": workspace,
+            "supportsSearch": false,
+            "supportsRun": false,
+            "agents": agents,
+            "agentCwd": cwd,
+            "terminalCwd": cwd,
+        })
+    }
+
+    /// What the Navigator closed with: one of its `actions`, or a command.
+    fn navigator_result(
+        &mut self,
+        result: &Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let (action, args) = action_of(result);
+        match action.as_deref() {
+            None => match result.get("command").and_then(Value::as_str) {
+                Some(command) => {
+                    let args = result.get("args").cloned();
+                    self.run_command(command, args.as_ref(), window, cx)
+                }
+                None => Ok(()),
+            },
+            Some("switchTo") => {
+                let id = word(&args, 0).ok_or("switchTo needs a session id.")?;
+                self.show_session(&id, cx)
+            }
+            Some("newTerminal") => self.split(Side::Right, cx),
+            Some("startAgent") => {
+                let agent = word(&args, 0).ok_or("startAgent needs an agent id.")?;
+                self.sidebar
+                    .update(cx, |sidebar, cx| sidebar.launch(&agent, cx))
+            }
+            Some(other) => Err(format!("The native window cannot {other} yet.")),
+        }
+    }
+
+    /// `PaneMenuScreenProps` for pane `id`, with the native menu's entries as `items`.
+    fn open_pane_menu(
+        &mut self,
+        id: &str,
+        at: Point<Pixels>,
+        can_stop: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let items: Vec<Value> = self
+            .menu_items(can_stop)
+            .into_iter()
+            .map(|(label, command)| json!({ "label": label, "command": command }))
+            .collect();
+        let props = json!({
+            "panelId": id,
+            "title": self.title_of(id, cx),
+            "x": f32::from(at.x),
+            "y": f32::from(at.y),
+            "sessionId": id,
+            "canClose": true,
+            "maximized": self.tabs.zoomed(),
+            "canStopAgent": can_stop,
+            "items": items,
+        });
+        let target = id.to_string();
+        self.open_screen(
+            "pane-menu",
+            props,
+            Some(at),
+            Some(Box::new(move |this, result, window, cx| {
+                let outcome = this.menu_result(&target, &result, window, cx);
+                this.finish(outcome, cx);
+            })),
+            cx,
+        );
+    }
+
+    /// Tab `id`'s menu at `at`: the tab menu screen when a mod draws one, else the pane menu.
+    fn open_tab_menu(&mut self, id: &str, at: Point<Pixels>, cx: &mut Context<Self>) {
+        if !self.screens.has("tab-menu", cx) {
+            self.open_menu(id, at, cx);
+            return;
+        }
+        let shown = self.tabs.shown();
+        let title = self.title_of(id, cx);
+        let can_stop = self
+            .panes
+            .get(id)
+            .and_then(|p| p.view.as_ref())
+            .is_some_and(|view| view.read(cx).can_stop());
+        let props = json!({
+            "id": id,
+            "x": f32::from(at.x),
+            "y": f32::from(at.y),
+            "self": { "id": id, "kind": "session", "label": title, "title": title },
+            "canSplitNew": self.tabs.has_room(),
+            "canSplitMore": self.tabs.has_room(),
+            // The native split takes only a new terminal beside a tab, not another open tab.
+            "offered": [],
+            "inSplit": shown.len() > 1 && shown.iter().any(|s| s == id),
+            "canStopAgent": can_stop,
+            "extraItems": [],
+        });
+        let target = id.to_string();
+        self.open_screen(
+            "tab-menu",
+            props,
+            Some(at),
+            Some(Box::new(move |this, result, window, cx| {
+                let outcome = this.menu_result(&target, &result, window, cx);
+                this.finish(outcome, cx);
+            })),
+            cx,
+        );
+    }
+
+    /// What a pane or tab menu closed with, run on tab `id`: one of the web's `actions`
+    /// (`{action, args}`), or one of its `items` (`{command}`).
+    fn menu_result(
+        &mut self,
+        id: &str,
+        result: &Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let (action, args) = action_of(result);
+        let command = result.get("command").and_then(Value::as_str);
+        if action.is_none() && command.is_none() {
+            return Ok(());
+        }
+        if !self.tabs.contains(id) {
+            return Err(format!("Tab {id} is gone."));
+        }
+        self.focus_pane(id, cx);
+        let tab = json!({ "id": id });
+        match (action.as_deref(), command) {
+            (None, Some(command)) => self.run_command(command, Some(&tab), window, cx),
+            (Some("splitNew"), _) => match word(&args, 0).as_deref() {
+                Some("right") => self.split(Side::Right, cx),
+                Some("below") => self.split(Side::Down, cx),
+                _ => Err(r#"splitNew takes "right" or "below"."#.into()),
+            },
+            (Some("toggleZoom"), _) => self.run_command("panes.zoom", None, window, cx),
+            (Some("rename"), _) => {
+                let name = word(&args, 0).ok_or("rename needs a name.")?;
+                self.run_command(
+                    "tab.rename",
+                    Some(&json!({ "id": id, "name": name })),
+                    window,
+                    cx,
+                )
+            }
+            (Some("stopAgent"), _) => self.run_command("terminal.kill", None, window, cx),
+            (Some("showFull"), _) => self.run_command("pane.unsplit", Some(&tab), window, cx),
+            (Some("close"), _) => self.run_command("tabs.close", Some(&tab), window, cx),
+            (Some(other), _) => Err(format!("The native window cannot {other} yet.")),
+            (None, None) => Ok(()),
+        }
+    }
+
+    /// The New session screen for `target` (`NewSessionScreenProps`), anchored at `at`.
+    fn open_new_session(
+        &mut self,
+        target: crate::actions::NewSession,
+        at: Option<Point<Pixels>>,
+        cx: &mut Context<Self>,
+    ) {
+        let model = self.sidebar.read(cx).model();
+        let cwds: Vec<String> = model
+            .hosts
+            .iter()
+            .find(|h| h.id == target.host_id)
+            .map(|host| {
+                host.projects
+                    .iter()
+                    .filter(|p| crate::actions::startable(host, p) && !p.quickchat)
+                    .map(|p| p.path.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let anchor = at.map_or(
+            json!({ "x": 0, "y": 0, "width": 0, "height": 0 }),
+            |at| json!({ "x": f32::from(at.x), "y": f32::from(at.y), "width": 0, "height": 0 }),
+        );
+        let host = target.host_id.clone();
+        self.open_screen(
+            "new-session",
+            json!({ "hostId": host, "projectCwds": cwds, "anchorRect": anchor }),
+            at,
+            Some(Box::new(move |this, result, _, cx| {
+                let Some(agent) = result.get("agent").and_then(Value::as_str) else {
+                    return;
+                };
+                let cwd = result
+                    .get("cwd")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let outcome = this.start_session(&host, cwd, agent, cx);
+                this.finish(outcome, cx);
+            })),
+            cx,
+        );
+    }
+
+    /// The web's `startSession`: `agent` in `cwd` on `host_id` (no folder: a Quickchat), over the
+    /// launch the New session panel sends.
+    fn start_session(
+        &mut self,
+        host_id: &str,
+        cwd: Option<String>,
+        agent: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let sidebar = self.sidebar.read(cx);
+        let host = sidebar
+            .model()
+            .hosts
+            .iter()
+            .find(|h| h.id == host_id)
+            .ok_or_else(|| format!("No host {host_id}."))?;
+        if !host.reachable {
+            return Err(format!("{} cannot be reached now.", host.name));
+        }
+        if !host.providers.iter().any(|p| p.id == agent) {
+            return Err(format!("{} cannot start {agent}.", host.name));
+        }
+        sidebar.send(Command::Launch {
+            host_id: host_id.to_string(),
+            cwd: cwd.filter(|c| !c.is_empty() && c != "~"),
+            provider: agent.to_string(),
+        });
+        Ok(())
+    }
+
+    /// The in-flow copies a mod draws now: `(screen id, key, props)`.
+    fn inflow_wanted(&self, cx: &App) -> Vec<(&'static str, String, Value)> {
+        let mut wanted = Vec::new();
+        let mut want = |id: &'static str, key: String, props: Value| {
+            if self.screens.has(id, cx) {
+                wanted.push((id, key, props));
+            }
+        };
+        if self.sidebar.read(cx).visible() {
+            want("sidebar", "sidebar".into(), json!({}));
+        }
+        if self.tabs.visible().is_some() {
+            want("tabs", "tabs".into(), json!({}));
+        }
+        want("status", "status".into(), json!({}));
+        let shown = self.tabs.shown();
+        if shown.len() > 1 {
+            for id in shown {
+                want(
+                    "pane-header",
+                    format!("pane-header#{id}"),
+                    json!({ "id": id, "corner": false }),
+                );
+            }
+        }
+        wanted
+    }
+
+    /// A floating screen over the window: a modal one on a layer whose press dismisses it.
+    fn floating_view(
+        &self,
+        open: &screens::Floating,
+        viewport: Size<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let view = open.view.clone()?;
+        let (w, h) = (open.width, open.height);
+        let (vw, vh) = (f32::from(viewport.width), f32::from(viewport.height));
+        let panel = div()
+            .id(SharedString::from(format!("screen-{}", open.id)))
+            .absolute()
+            .w(px(w))
+            .h(px(h))
+            .overflow_hidden()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .child(view);
+        let anchored = matches!(
+            screens::screen(open.id).map(|s| s.place),
+            Some(screens::Place::Floating { anchored: true, .. })
+        );
+        let panel = match open.at {
+            Some(at) if anchored => panel
+                .left(px(f32::from(at.x).min(vw - w).max(0.)))
+                .top(px(f32::from(at.y).min(vh - h).max(0.))),
+            _ if !open.modal() => panel.top(px(TAB_BAR_HEIGHT + 12.)).right(px(12.)),
+            _ => panel.left(px(((vw - w) / 2.).max(0.))).top(px(48.)),
+        };
+        if !open.modal() {
+            return Some(panel.into_any_element());
+        }
+        let id = open.id;
+        let dismiss = move |this: &mut Self, window: &mut Window, cx: &mut Context<Self>| {
+            this.screen_closed(id, Value::Null, window, cx)
+        };
+        Some(
+            div()
+                .id(SharedString::from(format!("screen-layer-{id}")))
+                .track_focus(&self.screen_focus)
+                .absolute()
+                .inset_0()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| dismiss(this, window, cx)),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, _, window, cx| dismiss(this, window, cx)),
+                )
+                .child(panel)
+                .into_any_element(),
+        )
     }
 
     /// A session was picked in the sidebar, launched, or a tab was chosen: show it.
@@ -579,6 +1031,21 @@ impl Workspace {
     /// One key press, before the focused terminal sees it. True when it was handled here.
     fn key(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let keymap = self.keymap(cx);
+        // A modal screen has the keyboard. Escape dismisses it, here and not in each mod, and so
+        // does the Navigator's own key while the Navigator is up; every other key is the mod's.
+        if let Some(top) = self.screens.top_modal() {
+            let toggles = top == "navigator"
+                && matches!(
+                    keymap.resolve(keystroke, KeyContext { typing: true, ..Default::default() }),
+                    Some(Hit::Run { name, .. })
+                        if matches!(name.as_str(), "global.navigator" | "global.navigatorAlt")
+                );
+            if keystroke.key == "escape" || toggles {
+                self.screen_closed(top, Value::Null, window, cx);
+                return true;
+            }
+            return false;
+        }
         if self.palette.is_some() {
             self.palette_key(keystroke, &keymap, window, cx);
             return true;
@@ -861,7 +1328,112 @@ impl Workspace {
             })
         };
         match name {
-            "global.navigator" | "global.navigatorAlt" | "app.palette" => self.toggle_palette(cx),
+            "global.navigator" | "global.navigatorAlt" | "app.palette" => {
+                self.toggle_palette(window, cx)
+            }
+            "session.start" => {
+                let host = text("hostId").unwrap_or(LOCAL).to_string();
+                let agent = text("agent")
+                    .ok_or("This command needs {agent}.")?
+                    .to_string();
+                self.start_session(&host, text("cwd").map(str::to_string), &agent, cx)?;
+            }
+            "session.rename" => {
+                let id = text("id").ok_or("This command needs {id}.")?;
+                let title = text("name").ok_or(r#"This command needs {name: "…"}."#)?;
+                self.sidebar.update(cx, |sidebar, _| {
+                    sidebar.send(Command::Rename {
+                        session_id: id.to_string(),
+                        title: title.trim().to_string(),
+                    })
+                });
+            }
+            "session.request_close" => {
+                let id = text("id").ok_or("This command needs {id}.")?.to_string();
+                if !self.tabs.contains(&id) {
+                    return Err(format!("Session {id} has no tab in this window."));
+                }
+                self.close(&id, cx);
+            }
+            "agent.focus" => {
+                let id = text("id")
+                    .or_else(|| text("terminal"))
+                    .ok_or("This command needs {id}.")?
+                    .to_string();
+                self.show_session(&id, cx)?;
+            }
+            "pane.unsplit" => {
+                let id = text("id")
+                    .map(str::to_string)
+                    .or_else(|| self.tabs.active().map(str::to_string))
+                    .ok_or("There is no tab to take out of a split.")?;
+                if !self.tabs.contains(&id) {
+                    return Err(format!("No tab {id}."));
+                }
+                self.tabs.unsplit(&id);
+                self.after_change(cx);
+            }
+            "tab.menu" => {
+                let id = text("id")
+                    .map(str::to_string)
+                    .or_else(|| self.tabs.active().map(str::to_string))
+                    .ok_or("There is no tab to open a menu for.")?;
+                if !self.tabs.contains(&id) {
+                    return Err(format!("No tab {id}."));
+                }
+                let coordinate = |key: &str| {
+                    args.and_then(|a| a.get(key))
+                        .and_then(Value::as_f64)
+                        .unwrap_or(0.) as f32
+                };
+                let at = gpui::point(px(coordinate("x")), px(coordinate("y")));
+                self.open_tab_menu(&id, at, cx);
+            }
+            "host.enable" => {
+                let id = text("id").ok_or("This command needs {id}.")?;
+                let enabled = args
+                    .and_then(|a| a.get("enabled"))
+                    .and_then(Value::as_bool)
+                    .ok_or("This command needs {enabled: true | false}.")?;
+                if id == LOCAL {
+                    return Err("This computer is always on.".into());
+                }
+                self.sidebar.update(cx, |sidebar, _| {
+                    sidebar.send(Command::SetHostEnabled {
+                        host_id: id.to_string(),
+                        enabled,
+                    })
+                });
+            }
+            "quickchat.new" => {
+                self.sidebar
+                    .update(cx, |sidebar, cx| sidebar.run_action("nests.scratchpad", cx));
+            }
+            "overlay.close" => {
+                if let Some(top) = self.screens.top_modal() {
+                    self.screen_closed(top, Value::Null, window, cx);
+                } else if self.palette.take().is_some()
+                    || self.menu.take().is_some()
+                    || self.settings.take().is_some()
+                {
+                    cx.notify();
+                } else {
+                    return Err("Nothing is open to close.".into());
+                }
+            }
+            "notification.open" | "notification.dismiss" => {
+                let id = text("id").ok_or("This command needs {id}.")?;
+                let at = self
+                    .notifications
+                    .iter()
+                    .position(|n| n.id == id)
+                    .ok_or_else(|| format!("No notification {id}."))?;
+                let note = self.notifications.remove(at);
+                cx.notify();
+                if name == "notification.open" {
+                    self.show_session(&note.heard.session_id, cx)?;
+                }
+            }
             "global.settings" | "app.settings" => {
                 self.settings = match self.settings {
                     Some(_) => None,
@@ -901,6 +1473,7 @@ impl Workspace {
             "view.zoomIn" | "view.zoomInShift" | "app.zoom_in" => self.zoom_to(self.zoom.in_(), cx),
             "view.zoomOut" | "app.zoom_out" => self.zoom_to(self.zoom.out(), cx),
             "view.zoomReset" | "app.zoom_reset" => self.zoom_to(self.zoom.reset(), cx),
+            // With a New session screen, the sidebar's target opens it instead of its panel.
             "tabs.new" | "tab.new" => {
                 self.sidebar
                     .update(cx, |sidebar, cx| sidebar.run_action("sessions.new", cx));
@@ -1017,9 +1590,27 @@ impl Workspace {
         Ok(())
     }
 
-    fn toggle_palette(&mut self, cx: &mut Context<Self>) {
+    fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.palette.take().is_some() {
             cx.notify();
+            return;
+        }
+        if self.screens.is_open("navigator") {
+            self.screen_closed("navigator", Value::Null, window, cx);
+            return;
+        }
+        if self.screens.has("navigator", cx) {
+            let props = self.navigator_props(cx);
+            self.open_screen(
+                "navigator",
+                props,
+                None,
+                Some(Box::new(|this, result, window, cx| {
+                    let outcome = this.navigator_result(&result, window, cx);
+                    this.finish(outcome, cx);
+                })),
+                cx,
+            );
             return;
         }
         let keymap = self.keymap(cx);
@@ -1134,6 +1725,27 @@ impl Workspace {
             .armed_close
             .take()
             .is_some_and(|(armed, _)| armed == id);
+        if !armed && self.warns_before_ending(&open, cx) && self.screens.has("confirm", cx) {
+            let target = id.to_string();
+            self.open_screen(
+                "confirm",
+                json!({
+                    "message": format!("{CLOSE_ASKS} {} and its agent.", open.title),
+                    "confirmLabel": "Close",
+                    "cancelLabel": "Cancel",
+                    "busy": false,
+                }),
+                None,
+                Some(Box::new(move |this, result, _, cx| {
+                    if result.get("confirmed").and_then(Value::as_bool) == Some(true) {
+                        this.armed_close = Some((target.clone(), Task::ready(())));
+                        this.close(&target, cx);
+                    }
+                })),
+                cx,
+            );
+            return;
+        }
         if !armed && self.warns_before_ending(&open, cx) {
             let timer = cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(CLOSE_CONFIRM_WITHIN).await;
@@ -1239,6 +1851,14 @@ impl Workspace {
     /// Show a toast for a session that finished or needs the person: it goes by itself, or when
     /// clicked, which also opens the session. Only the newest is kept.
     pub fn toast(&mut self, heard: Heard, cx: &mut Context<Self>) {
+        self.next_notification += 1;
+        self.notifications.push(Notification {
+            id: format!("n{}", self.next_notification),
+            heard: heard.clone(),
+        });
+        if self.notifications.len() > MAX_NOTIFICATIONS {
+            self.notifications.remove(0);
+        }
         let session_id = heard.session_id.clone();
         let mine = session_id.clone();
         let timer = cx.spawn(async move |this, cx| {
@@ -1264,6 +1884,9 @@ impl Workspace {
     }
 
     fn toast_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.screens.has("toast", cx) {
+            return None;
+        }
         let toast = self.toast.as_ref()?;
         let session = toast.session_id.clone();
         Some(
@@ -1300,6 +1923,17 @@ impl Workspace {
             return;
         };
         let can_stop = view.read(cx).can_stop();
+        if self.screens.has("pane-menu", cx) {
+            self.open_pane_menu(id, at, can_stop, cx);
+            return;
+        }
+        let items = self.menu_items(can_stop);
+        self.menu = Some(PaneMenu { at, items });
+        cx.notify();
+    }
+
+    /// The pane menu's entries: their labels and the commands they run.
+    fn menu_items(&self, can_stop: bool) -> Vec<(&'static str, &'static str)> {
         let mut items = vec![
             ("Copy", "terminal.copy"),
             ("Paste", "terminal.paste"),
@@ -1318,8 +1952,7 @@ impl Workspace {
             items.push((STOP, "terminal.kill"));
         }
         items.push(("Close", "tabs.close"));
-        self.menu = Some(PaneMenu { at, items });
-        cx.notify();
+        items
     }
 
     fn menu_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -1750,7 +2383,7 @@ impl Workspace {
             .child(self.bar_link(
                 "open-palette",
                 "Commands",
-                cx.listener(|this, _, _, cx| this.toggle_palette(cx)),
+                cx.listener(|this, _, window, cx| this.toggle_palette(window, cx)),
             ))
             .child(self.bar_link(
                 "open-settings",
@@ -1811,6 +2444,20 @@ impl Workspace {
     }
 
     fn pane(&self, id: &str, focused: bool, cx: &mut Context<Self>) -> AnyElement {
+        let body = self.pane_body(id, focused, cx);
+        match self.screens.inflow(&format!("pane-header#{id}")) {
+            Some(header) => div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(div().flex_none().h(px(PANE_HEADER_HEIGHT)).child(header))
+                .child(div().flex_1().min_h_0().child(body))
+                .into_any_element(),
+            None => body,
+        }
+    }
+
+    fn pane_body(&self, id: &str, focused: bool, cx: &mut Context<Self>) -> AnyElement {
         let target = id.to_string();
         let frame = div()
             .id(format!("pane-{id}"))
@@ -2316,6 +2963,25 @@ impl Workspace {
     }
 }
 
+/// A screen result's web action: `{action, args}`.
+fn action_of(result: &Value) -> (Option<String>, Vec<Value>) {
+    let action = result
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let args = result
+        .get("args")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    (action, args)
+}
+
+/// Argument `at` of an action, as text.
+fn word(args: &[Value], at: usize) -> Option<String> {
+    args.get(at).and_then(Value::as_str).map(str::to_string)
+}
+
 /// A setting: its name and what it does on the left, its control on the right.
 fn setting_row(title: &str, note: &str, control: AnyElement) -> gpui::Div {
     div()
@@ -2349,9 +3015,20 @@ fn setting_row(title: &str, note: &str, control: AnyElement) -> gpui::Div {
 impl gpui::Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.viewport_height = f32::from(window.viewport_size().height);
+        // Screens mods draw: the notifications screen is up while there are notifications, the
+        // floating ones opened since the last draw get their views, the in-flow ones are placed.
+        let toast_up = self.screens.is_open("toast");
+        if self.notifications.is_empty() && toast_up {
+            self.screens.take("toast", cx);
+        } else if !self.notifications.is_empty() && !toast_up {
+            self.screens.open("toast", json!({}), None, None, cx);
+        }
+        self.screens.realize(&self.screen_focus, window, cx);
+        let wanted = self.inflow_wanted(cx);
+        self.screens.place(wanted, window, cx);
         // A terminal that attaches takes the keyboard when it first draws; the tab that has it in
-        // the layout keeps it.
-        if self.palette.is_none() && self.settings.is_none() {
+        // the layout keeps it. A modal screen has the keyboard while it is up.
+        if self.palette.is_none() && self.settings.is_none() && self.screens.top_modal().is_none() {
             let peeked = self
                 .peek
                 .as_ref()
@@ -2363,6 +3040,11 @@ impl gpui::Render for Workspace {
                     window.defer(cx, move |window, cx| handle.focus(window, cx));
                 }
             }
+        } else if self.screens.top_modal().is_some() && window.focused(cx).is_none() {
+            // A press on a modal mod's background lets go of the keyboard; the screen's layer
+            // takes it back, so Escape still reaches the window.
+            let handle = self.screen_focus.clone();
+            window.defer(cx, move |window, cx| handle.focus(window, cx));
         }
         // Every kept tab stays attached; the ones not on screen are told so, which ends their
         // focus and their redraws until their tab comes back. Any change to the layout (a tab
@@ -2399,7 +3081,24 @@ impl gpui::Render for Workspace {
             let sidebar = self.sidebar.read(cx);
             (sidebar.visible(), sidebar.needs_you())
         };
-        let sidebar = if visible {
+        let sidebar = if let Some(view) = self.screens.inflow("sidebar").filter(|_| visible) {
+            let (width, _) = self.screens.size("sidebar", cx);
+            // ponytail: the Rust sidebar is still drawn, clipped to nothing, because its render
+            // tells the core when the window is active; that belongs in the window, then this goes.
+            div()
+                .flex_none()
+                .w(px(width))
+                .h_full()
+                .child(view)
+                .child(
+                    div()
+                        .absolute()
+                        .size_0()
+                        .overflow_hidden()
+                        .child(self.sidebar.clone()),
+                )
+                .into_any_element()
+        } else if visible {
             self.sidebar.clone().into_any_element()
         } else {
             // Hidden, the sidebar leaves a control that shows it, with the count that needs you.
@@ -2441,7 +3140,14 @@ impl gpui::Render for Workspace {
                 )
                 .absolute()
                 .size_full();
-                area = area.child(self.tab_bar(cx)).child(
+                let bar = match self.screens.inflow("tabs") {
+                    Some(view) => {
+                        let (_, height) = self.screens.size("tabs", cx);
+                        div().flex_none().h(px(height)).child(view)
+                    }
+                    None => self.tab_bar(cx),
+                };
+                area = area.child(bar).child(
                     div()
                         .relative()
                         .flex_1()
@@ -2464,10 +3170,14 @@ impl gpui::Render for Workspace {
                         .child(self.bar_link(
                             "open-palette",
                             "Commands",
-                            cx.listener(|this, _, _, cx| this.toggle_palette(cx)),
+                            cx.listener(|this, _, window, cx| this.toggle_palette(window, cx)),
                         )),
                 );
             }
+        }
+        if let Some(view) = self.screens.inflow("status") {
+            let (_, height) = self.screens.size("status", cx);
+            area = area.child(div().flex_none().w_full().h(px(height)).child(view));
         }
         if let Some(notice) = &self.notice {
             area = area.child(
@@ -2480,6 +3190,10 @@ impl gpui::Render for Workspace {
                     .child(notice.clone()),
             );
         }
+        let viewport = window.viewport_size();
+        let floating: Vec<AnyElement> = (0..self.screens.floating.len())
+            .filter_map(|at| self.floating_view(&self.screens.floating[at], viewport, cx))
+            .collect();
         let overlays = self
             .palette_view(cx)
             .or_else(|| self.settings_view(cx))
@@ -2501,6 +3215,7 @@ impl gpui::Render for Workspace {
             .child(area.children(overlays))
             // Over the whole window: it opens where the pointer was, in window coordinates.
             .children(self.menu_view(cx))
+            .children(floating)
     }
 }
 

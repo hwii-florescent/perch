@@ -85,3 +85,8 @@ harness = false
 name = "mods_perch"
 path = "tests/mods_perch.rs"
 harness = false
+
+[[test]]
+name = "mods_screens"
+path = "tests/mods_screens.rs"
+harness = false

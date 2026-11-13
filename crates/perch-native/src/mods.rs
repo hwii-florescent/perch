@@ -27,6 +27,7 @@
 //! module; [`ModHost::refresh`] re-renders the mods whose data changed.
 
 pub mod perch;
+pub mod screens;
 pub mod theme;
 
 use anyhow::{anyhow, Context as _, Result};
@@ -90,8 +91,18 @@ pub fn start(
     window: gpui::AnyWindowHandle,
     cx: &mut App,
 ) {
+    start_in(user_dir(), workspace, window, cx);
+}
+
+/// [`start`] with the mods of `dir` (a test's scratch folder).
+pub fn start_in(
+    dir: PathBuf,
+    workspace: &Entity<crate::workspace::Workspace>,
+    window: gpui::AnyWindowHandle,
+    cx: &mut App,
+) {
     init(cx);
-    let host = match ModHost::new(user_dir()) {
+    let host = match ModHost::new(dir) {
         Ok(host) => host,
         Err(error) => {
             eprintln!("perch-native: mods are off: {error:#}");
@@ -175,12 +186,26 @@ impl ModHost {
     /// The mod `id` as a view, loaded now and watched from then on. A mod that is missing or
     /// fails to load still gives a view, which shows nothing until a working version appears.
     pub fn view(&self, id: &str, window: &mut Window, cx: &mut App) -> Entity<ModView> {
+        self.view_keyed(id, id, window, cx)
+    }
+
+    /// The mod `id` as one of several copies, told apart by `key` (`pane-header#s-1`): host modules
+    /// are built for `key`, and [`Self::refresh`] names the copy by it.
+    pub fn view_keyed(
+        &self,
+        id: &str,
+        key: &str,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<ModView> {
         let host = self.clone();
+        let key = key.to_string();
         let id = id.to_string();
         let entity = cx.new(|cx| {
             let mut view = ModView {
                 host,
                 id,
+                key,
                 shown: None,
                 tried: None,
                 load_error: None,
@@ -212,7 +237,7 @@ impl ModHost {
         };
         for view in views {
             let view = view.read(cx);
-            if ids.is_some_and(|ids| !ids.contains(&view.id)) {
+            if ids.is_some_and(|ids| !ids.contains(&view.key)) {
                 continue;
             }
             let Some(root) = view.shown.as_ref().map(|shown| shown.root.clone()) else {
@@ -230,7 +255,7 @@ impl ModHost {
     }
 
     /// The policy the next load runs under: what a mod may touch and the modules it imports.
-    fn policy_for(&self, id: &str) -> Result<Policy> {
+    fn policy_for(&self, id: &str, key: &str) -> Result<Policy> {
         let capabilities = Capabilities::new()
             .read_roots(std::env::var_os("HOME").map(PathBuf::from))
             .write_roots([self.0.user_dir.clone()])
@@ -243,7 +268,7 @@ impl ModHost {
             .with_storage_path(self.0.user_dir.join(".data").join(id).join("store.json"));
         for factory in self.0.modules.borrow().iter() {
             policy = policy
-                .with_host_module(factory(id))
+                .with_host_module(factory(key))
                 .map_err(|error| anyhow!("host module for {id}: {error}"))?;
         }
         Ok(policy)
@@ -260,6 +285,8 @@ struct Shown {
 pub struct ModView {
     host: ModHost,
     id: String,
+    /// The copy: the id, or `id#instance`.
+    key: String,
     shown: Option<Shown>,
     /// The source and file stamp last acted on, so a broken version is tried once per change.
     tried: Option<(PathBuf, Stamp)>,
@@ -270,6 +297,11 @@ pub struct ModView {
 impl ModView {
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    /// Which copy of the mod this is: its id, or `id#instance`.
+    pub fn key(&self) -> &str {
+        &self.key
     }
 
     /// The folder the version on screen came from.
@@ -335,7 +367,7 @@ impl ModView {
     }
 
     fn load(&mut self, info: &ModInfo, window: &mut Window, cx: &mut App) -> Result<()> {
-        gpui_shell::policy::set_default(self.host.policy_for(&info.id)?);
+        gpui_shell::policy::set_default(self.host.policy_for(&info.id, &self.key)?);
         let root = self.host.0.runtime.try_load(&info.dir, window, cx);
         gpui_shell::policy::set_default(Policy::new());
         let root = root?;
