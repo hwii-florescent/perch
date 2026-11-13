@@ -200,10 +200,28 @@ pub struct ProjectView {
     pub sessions: Vec<SessionView>,
     /// The project's checkouts, when it has more than one (or a linked one).
     pub workspaces: Vec<WorkspaceView>,
+    /// The project has one plain checkout, which has no row of its own: there is nothing to fold
+    /// away, so its sessions are always listed (`singleWorkspaceOf` in the web sidebar).
+    pub single_checkout: bool,
     /// The most urgent state among every session of the project, `None` when it cannot be stated.
     pub top: Option<Attention>,
     /// How many sessions are in that state.
     pub top_count: usize,
+}
+
+impl ProjectView {
+    /// Whether the person can fold the project's rows away. The web's `collapsible`.
+    pub fn foldable(&self) -> bool {
+        !self.single_checkout
+    }
+
+    /// What a folded project still says: its most urgent state and how many sessions are in it.
+    /// Idle is not worth a mark (the web's `foldedTop !== "idle"`).
+    pub fn rollup(&self) -> Option<(Attention, usize)> {
+        self.top
+            .filter(|top| *top != Attention::Idle && self.top_count > 0)
+            .map(|top| (top, self.top_count))
+    }
 }
 
 /// Chats of one project inside a By status section.
@@ -1081,6 +1099,7 @@ impl State {
             favorite: project.is_some_and(|p| p.favorite),
             sessions: nest_under_leads(direct),
             workspaces,
+            single_checkout: single,
             top,
             top_count,
         }
@@ -1733,6 +1752,74 @@ mod tests {
         assert_eq!(
             depths,
             [("w1".into(), 0), ("w2".into(), 0), ("w4".into(), 1)]
+        );
+    }
+
+    /// A session the core announces appears under its project at once, whatever the project's
+    /// checkouts are. The model holds no fold: whether the rows show is the view's (`Nav`).
+    #[test]
+    fn a_new_session_is_listed_under_its_project_with_the_foldability_the_web_gives_it() {
+        let rows = |state: &State| -> Vec<String> {
+            let project = &state.model().hosts[0].projects[0];
+            project
+                .sessions
+                .iter()
+                .chain(project.workspaces.iter().flat_map(|w| &w.sessions))
+                .map(|s| s.id.clone())
+                .collect()
+        };
+        // (checkouts the core lists for project `a`, whether the person can fold it)
+        let cases: [(Vec<Value>, bool); 3] = [
+            (vec![], true),
+            (vec![workspace("w1", "a", json!({}))], false),
+            (
+                vec![
+                    workspace("w1", "a", json!({})),
+                    workspace("w2", "a", json!({"parentWorkspaceId": "w1"})),
+                ],
+                true,
+            ),
+        ];
+        for (checkouts, foldable) in cases {
+            let mut state = state();
+            state.apply(&session_list(vec![]));
+            state.apply(&snapshot(checkouts.clone()));
+            state.apply(&updated(session(
+                "new",
+                LOCAL,
+                "a",
+                json!({"workspaceId": "w1"}),
+            )));
+            assert_eq!(rows(&state), ["new"], "{} checkouts", checkouts.len());
+            assert_eq!(
+                state.model().hosts[0].projects[0].foldable(),
+                foldable,
+                "{} checkouts",
+                checkouts.len()
+            );
+        }
+    }
+
+    /// A folded project still says what needs you or is working, as the web's rollup does, and
+    /// says nothing for chats that are only idle.
+    #[test]
+    fn a_folded_project_rolls_up_what_needs_you_or_is_working() {
+        let rollup = |flags: Value| {
+            let mut state = state();
+            state.apply(&session_list(vec![
+                session("idle", LOCAL, "a", json!({})),
+                session("other", LOCAL, "a", flags),
+            ]));
+            state.model().hosts[0].projects[0].rollup()
+        };
+        assert_eq!(rollup(json!({})), None);
+        assert_eq!(
+            rollup(json!({"status": "running"})),
+            Some((Attention::Working, 1))
+        );
+        assert_eq!(
+            rollup(json!({"blocked": true})),
+            Some((Attention::NeedsYou, 1))
         );
     }
 

@@ -4,7 +4,10 @@
 //! (`Window::render_to_image`); no window is created, shown or focused. This is its own
 //! binary with a custom `main`, as Zed's headless tests are, so AppKit runs on the main thread.
 
-use gpui::{px, size, AppContext, Context, HeadlessAppContext, Window};
+use gpui::{
+    point, px, size, AppContext, Context, HeadlessAppContext, Modifiers, MouseButton,
+    MouseDownEvent, MouseUpEvent, PlatformInput, Window,
+};
 use perch_core::protocol::ServerMessage;
 use perch_native::sidebar::{Attention, State};
 use perch_native::ui::{tint, OpenSession, Sidebar, Workspace, SIDEBAR_WIDTH};
@@ -147,6 +150,82 @@ fn draw_with(
         raw: image.into_raw(),
         sidebar_edge: (SIDEBAR_WIDTH * scale) as usize,
     }
+}
+
+/// The sidebar's rows of text, top to bottom, as the first pixel row of each run of rows that
+/// hold anything but the sidebar's background (device pixels).
+fn text_rows(frame: &Frame) -> Vec<usize> {
+    let background = [0x1c, 0x1c, 0x1f];
+    let mut runs = Vec::new();
+    let mut inside = false;
+    for (y, row) in frame.raw.chunks_exact(frame.width * 4).enumerate() {
+        let ink = row.chunks_exact(4).take(frame.sidebar_edge).any(|p| {
+            p[..3]
+                .iter()
+                .zip(background)
+                .any(|(a, b)| a.abs_diff(b) > 40)
+        });
+        if ink && !inside {
+            runs.push(y);
+        }
+        inside = ink;
+    }
+    runs
+}
+
+/// Pick the project's header (second row of text, below the controls) and draw again. The
+/// click goes through the window's own event dispatch, as a pointer does.
+fn pick_project_header(cx: &mut HeadlessAppContext, state: &State) -> (Frame, Frame) {
+    let window = cx
+        .open_window(size(px(640.), px(360.)), |_, cx| {
+            cx.new(|cx| Workspace::new(state.model(), None, cx))
+        })
+        .unwrap();
+    let draw = |cx: &mut HeadlessAppContext| {
+        let (image, scale) = cx
+            .update_window(window.into(), |_, window: &mut Window, cx| {
+                let _ = window.draw(cx);
+                (
+                    window.render_to_image().expect("offscreen render"),
+                    window.scale_factor(),
+                )
+            })
+            .unwrap();
+        Frame {
+            opened: None,
+            width: image.width() as usize,
+            raw: image.into_raw(),
+            sidebar_edge: (SIDEBAR_WIDTH * scale) as usize,
+        }
+    };
+    let before = draw(cx);
+    let scale = before.sidebar_edge as f32 / SIDEBAR_WIDTH;
+    let header = text_rows(&before)[1] as f32 / scale + 4.;
+    for event in [true, false] {
+        let position = point(px(60.), px(header));
+        cx.update_window(window.into(), |_, window: &mut Window, cx| {
+            let input = if event {
+                PlatformInput::MouseDown(MouseDownEvent {
+                    button: MouseButton::Left,
+                    position,
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                    first_mouse: false,
+                })
+            } else {
+                PlatformInput::MouseUp(MouseUpEvent {
+                    button: MouseButton::Left,
+                    position,
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                })
+            };
+            window.dispatch_event(input, cx);
+        })
+        .unwrap();
+    }
+    cx.run_until_parked();
+    (before, draw(cx))
 }
 
 fn main() {
@@ -312,6 +391,43 @@ fn main() {
     assert!(
         first_fill(&by_project, Attention::NeedsYou) > first_fill(&by_project, Attention::Working),
         "the project view keeps the core's order"
+    );
+
+    // Picking the header of a project folds it only when it has checkouts to fold away. With one
+    // plain checkout, which has no row of its own, the sessions stay listed (the web does the
+    // same), so a session created there is never missing until the project is unfolded.
+    let workspace = |id: &str, extra: Value| {
+        let mut value = json!({"id": id, "projectId": "p", "hostId": "local", "path": "/work",
+            "name": id, "dirty": false, "state": "active", "createdAt": 0, "updatedAt": 0,
+            "pinned": false});
+        for (k, v) in extra.as_object().unwrap() {
+            value[k] = v.clone();
+        }
+        value
+    };
+    let with_checkouts = |checkouts: Vec<Value>| {
+        let mut listed = state(&idle(&["alpha", "bravo"]));
+        listed.apply(&message(json!({
+            "type": "workspace.snapshot", "requestId": "r", "hostId": "local",
+            "snapshotEpoch": "e", "snapshotRevision": 1, "projects": [],
+            "workspaces": checkouts})));
+        listed
+    };
+    let single_checkout = with_checkouts(vec![workspace("w1", json!({}))]);
+    let (before, after) = pick_project_header(&mut cx, &single_checkout);
+    assert_eq!(
+        text_rows(&before).len(),
+        text_rows(&after).len(),
+        "one plain checkout: the sessions are still listed after its header is picked"
+    );
+    let two_checkouts = with_checkouts(vec![
+        workspace("w1", json!({})),
+        workspace("w2", json!({"parentWorkspaceId": "w1", "path": "/work-2"})),
+    ]);
+    let (before, after) = pick_project_header(&mut cx, &two_checkouts);
+    assert!(
+        text_rows(&after).len() < text_rows(&before).len(),
+        "a project with checkouts folds its rows away"
     );
 
     println!(
