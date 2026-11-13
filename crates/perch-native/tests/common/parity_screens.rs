@@ -618,6 +618,24 @@ fn named(screen: &str, selector: &str) -> String {
     if let Some(e) = elements.iter().find(|e| e["selector"] == selector) {
         return e["name"].as_str().unwrap().to_string();
     }
+    // One alternative of an element's selector list: that element, keyed by the test id when
+    // it is keyed by its whole test id.
+    if let Some(e) = elements.iter().find(|e| {
+        e["selector"]
+            .as_str()
+            .is_some_and(|s| s.split(", ").any(|alt| alt == selector))
+    }) {
+        let name = e["name"].as_str().unwrap();
+        let test_id = selector
+            .strip_prefix("[data-testid=\"")
+            .and_then(|s| s.strip_suffix("\"]"));
+        return match test_id {
+            Some(id) if e["key"]["attr"] == "data-testid" && e["key"]["strip"].is_null() => {
+                format!("{name}:{id}")
+            }
+            _ => name.to_string(),
+        };
+    }
     let test_id = selector
         .strip_prefix("[data-testid=\"")
         .and_then(|s| s.strip_suffix("\"]"))

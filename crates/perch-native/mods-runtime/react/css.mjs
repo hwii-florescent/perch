@@ -359,6 +359,11 @@ export function expand(prop, value) {
       const color = parseColor(v, () => "#000000");
       return color ? [["background-color", v], ["background-image", "none"]] : [["background-color", "transparent"], ["background-image", v]];
     }
+    // ponytail: only the CSS-wide keywords (`[font:inherit]` on a button); a full `font` value is kept unexpanded.
+    case "font": {
+      if (!/^(inherit|initial|unset|revert|revert-layer)$/.test(v)) return [[prop, v]];
+      return ["font-family", "font-size", "font-weight", "font-style", "line-height"].map((p) => [p, v]);
+    }
     case "overflow": { const p = parts(); return [["overflow-x", p[0]], ["overflow-y", p[1] ?? p[0]]]; }
     case "gap": { const p = parts(); return [["row-gap", p[0]], ["column-gap", p[1] ?? p[0]]]; }
     case "grid-gap": return expand("gap", v);

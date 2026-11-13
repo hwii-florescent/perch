@@ -360,6 +360,12 @@ impl Perch {
         theme::resolve(&name)
     }
 
+    /// The computer the navigation shows and the workspace focused with no session of it on
+    /// screen, for the start page.
+    pub fn shown_place(&self) -> (String, Option<String>) {
+        (self.host_id(), self.0.data.borrow().workspace_id.clone())
+    }
+
     /// The computer the navigation shows: the one picked, else the focused session's.
     fn host_id(&self) -> String {
         let data = self.0.data.borrow();

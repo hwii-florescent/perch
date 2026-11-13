@@ -94,6 +94,16 @@ pub const STOCK: &[(&str, &str)] = &[
         "new-session/tabs/main.js",
         include_str!("../mods/new-session/tabs/main.js"),
     ),
+    ("start/main.js", include_str!("../mods/start/main.js")),
+    (
+        "start/start/card.js",
+        include_str!("../mods/start/start/card.js"),
+    ),
+    (
+        "start/start/main.js",
+        include_str!("../mods/start/start/main.js"),
+    ),
+    ("start/mod.json", include_str!("../mods/start/mod.json")),
     (
         "launcher/launcher/main.js",
         include_str!("../mods/launcher/launcher/main.js"),

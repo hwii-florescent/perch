@@ -5,7 +5,8 @@
 //! Rust view stays, and with no screen mods the window draws exactly as it did. Two kinds:
 //!
 //! - in flow, a region of the layout: `sidebar`, `tabs`, `status`, `pane-header` (one copy per
-//!   pane, keyed `pane-header#<tab id>`, while the area is split);
+//!   pane, keyed `pane-header#<tab id>`, while the area is split), `start` (the main area while
+//!   nothing is open in it);
 //! - floating, opened by the window over the whole of it, as the web's take the whole page:
 //!   `navigator`, `pane-menu`, `tab-menu`, `confirm`, `dialog`, `new-session`, `keybind-help`, `launcher` (modal) and `toast`
 //!   (not modal: shown while there are notifications).
@@ -140,6 +141,12 @@ pub const SCREENS: &[Screen] = &[
     Screen {
         id: "launcher",
         place: MODAL,
+        width: 0.,
+        height: 0.,
+    },
+    Screen {
+        id: "start",
+        place: Place::InFlow,
         width: 0.,
         height: 0.,
     },

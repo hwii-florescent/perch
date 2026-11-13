@@ -1,0 +1,5 @@
+{
+  "name": "Start",
+  "description": "The web app's stock start page (what the main area shows with nothing open), unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

@@ -284,8 +284,16 @@ export function copyFor(cx, screen) {
         dismiss(kind, props, "no screen draws it yet");
         return id;
       }
+      let opening;
+      try {
+        opening = perch.openScreen(known.screen, known.props(props));
+      } catch (error) {
+        // No window opens screens for this copy (a mod drawn on its own): the overlay closes, the screen stays.
+        dismiss(kind, props, error?.message ?? String(error));
+        return id;
+      }
       openOverlays.add(id);
-      perch.openScreen(known.screen, known.props(props)).then(
+      opening.then(
         answer((result) => {
           if (openOverlays.delete(id)) known.result(props, result);
         }),

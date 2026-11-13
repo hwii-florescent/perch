@@ -219,10 +219,6 @@ impl Rig {
     fn asked(&mut self) -> Vec<Command> {
         std::iter::from_fn(|| self.asked.try_recv().ok()).collect()
     }
-
-    fn shown(&mut self) -> Option<String> {
-        self.ws(|ws, _, _| ws.open().map(|o| o.session_id.clone()))
-    }
 }
 
 const HELP_KEY: &str = if cfg!(target_os = "macos") {
@@ -421,16 +417,8 @@ fn launcher(rig: &mut Rig) {
     println!("launcher: ok");
 }
 
-fn main() {
-    let scratch: PathBuf = std::env::temp_dir().join(format!(
-        "perch-chrome-screens-window-{}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&scratch);
-    std::fs::create_dir_all(scratch.join("home")).unwrap();
-    std::env::set_var("HOME", scratch.join("home"));
-    let user = scratch.join("native-mods");
-
+/// A window on `state()` with the stock mods written to `user`, nothing open in it.
+fn rig(user: PathBuf) -> Rig {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
         Arc::new(()),
@@ -456,12 +444,87 @@ fn main() {
             opened.borrow_mut().push(event.clone())
         })
     });
-    let mut rig = Rig {
+    Rig {
         cx,
         window,
         opened,
         asked,
-    };
+    }
+}
+
+fn rig_with_nothing_open(user: PathBuf) -> Rig {
+    let mut rig = rig(user);
+    rig.draw();
+    rig
+}
+
+fn start(rig: &mut Rig) {
+    // Nothing open: the main area is the web's home page, with Add project and New session.
+    assert!(
+        rig.record("start-panel").is_some(),
+        "the start page is drawn"
+    );
+    assert!(rig.record("start-logo").is_some(), "with the logo's box");
+    assert_eq!(
+        rig.keys("start-action"),
+        ["home-add-project", "no-session-create"]
+    );
+    // New session opens the New session menu under the button; a project starts the agent.
+    rig.asked();
+    rig.click("start-action:no-session-create");
+    assert_eq!(rig.open_screens(), ["new-session"]);
+    rig.click("project-option:0");
+    assert!(rig.open_screens().is_empty(), "the pick closed it");
+    assert_eq!(
+        launched(rig),
+        [("local".into(), Some("/work".into()), "claude".into())]
+    );
+    // A plain `?` with nothing focused opens the keybind help.
+    rig.press("shift-/");
+    assert_eq!(
+        rig.open_screens(),
+        ["keybind-help"],
+        "`?` outside a terminal"
+    );
+    rig.press("escape");
+
+    // A workspace focused with no session of it open: its start picker; an agent starts there.
+    rig.ws(|ws, window, cx| {
+        ws.run_command("workspace.focus", Some(&json!({"id": "w1"})), window, cx)
+    })
+    .unwrap();
+    rig.draw();
+    let agents = rig.keys("start-action");
+    assert!(!agents.is_empty(), "an agent button per agent");
+    assert!(rig.record("start-target").is_some(), "the place picker");
+    rig.click(&format!("start-action:{}", agents[0]));
+    let started = launched(rig);
+    assert_eq!(started.len(), 1, "one start: {started:?}");
+    assert_eq!(started[0].1.as_deref(), Some("/work"), "in its own folder");
+
+    // With the core away: Connecting…, nothing to press.
+    rig.ws(|ws, _, cx| {
+        let model = State::default().model();
+        ws.sidebar()
+            .update(cx, |sidebar, cx| sidebar.apply(Update::Model(model), cx))
+    });
+    rig.draw();
+    assert!(rig.record("start-panel").is_some(), "Connecting… is drawn");
+    assert!(rig.keys("start-action").is_empty());
+    println!("start: ok");
+}
+
+fn main() {
+    let scratch: PathBuf = std::env::temp_dir().join(format!(
+        "perch-chrome-screens-window-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(scratch.join("home")).unwrap();
+    std::env::set_var("HOME", scratch.join("home"));
+    let user = scratch.join("native-mods");
+
+    let mut rig = rig(user.clone());
     rig.ws(|ws, _, cx| {
         ws.sidebar().update(cx, |s, cx| {
             s.open("local".into(), "alpha".into(), Some("claude".into()), cx)
@@ -475,6 +538,13 @@ fn main() {
 
     keybind_help(&mut rig);
     launcher(&mut rig);
+    rig.cx
+        .update_window(rig.window.into(), |_, window, _| window.remove_window())
+        .unwrap();
+    rig.cx.run_until_parked();
+
+    let mut rig = rig_with_nothing_open(user);
+    start(&mut rig);
 
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())
