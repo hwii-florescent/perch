@@ -4,7 +4,9 @@
   "private": true,
   "description": "Playwright e2e tests for perch",
   "scripts": {
-    "test:e2e": "npx playwright test"
+    "test:e2e": "npx playwright test",
+    "parity:web": "playwright test -c native-parity/playwright.config.ts",
+    "parity:selftest": "node --test native-parity/compare.test.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",

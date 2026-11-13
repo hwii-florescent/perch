@@ -190,6 +190,23 @@ pub fn key_bytes_with(
     }))
 }
 
+/// Whether `keystroke` only types its text: no modifier but Shift, not a repeat, printable text,
+/// and the program's keyboard mode sends exactly that text. GPUI builds a key's text from its key
+/// code, which names the wrong character for a key event a program posts with its own text, so
+/// the window leaves such a key to the system's text input, which types the event's characters.
+/// A repeat stays here, so macOS's press-and-hold accent menu never takes a held key.
+pub fn types_only_its_text(vt: &mut Vt, keystroke: &Keystroke, repeat: bool) -> bool {
+    let m = keystroke.modifiers;
+    let Some(text) = keystroke.key_char.as_deref() else {
+        return false;
+    };
+    !repeat
+        && !(m.control || m.alt || m.platform || m.function)
+        && !text.is_empty()
+        && !text.chars().any(char::is_control)
+        && key_bytes(vt, keystroke, false).as_deref() == Some(text.as_bytes())
+}
+
 /// A bare key press.
 fn plain(key: g::GhosttyKey, mods: g::GhosttyMods) -> KeyInput<'static> {
     KeyInput {
@@ -596,6 +613,55 @@ mod tests {
         assert!(expects_real_chords(&mut vt));
         vt.write(b"\x1b[<u");
         assert!(!expects_real_chords(&mut vt));
+    }
+
+    #[test]
+    fn only_a_key_that_types_its_own_text_is_left_to_the_text_input() {
+        let key = |key: &str, text: Option<&str>, modifiers: gpui::Modifiers| Keystroke {
+            modifiers,
+            key: key.into(),
+            key_char: text.map(Into::into),
+        };
+        let none = gpui::Modifiers::default();
+        let mut vt = Vt::new(80, 24);
+        for text in [key("a", Some("a"), none), key("/", Some("/"), none)] {
+            assert!(types_only_its_text(&mut vt, &text, false), "{text:?}");
+        }
+        // Shift spent on the text, as macOS reports `A` and `!`.
+        assert!(types_only_its_text(
+            &mut vt,
+            &key("a", Some("A"), gpui::Modifiers::shift()),
+            false
+        ));
+        // A repeat, a control character, a modifier, or no text at all stay on the key path.
+        assert!(!types_only_its_text(
+            &mut vt,
+            &key("a", Some("a"), none),
+            true
+        ));
+        for other in [
+            key("enter", Some("\n"), none),
+            key("tab", Some("\t"), none),
+            key("x", Some("\u{2248}"), gpui::Modifiers::alt()),
+            key("c", None, gpui::Modifiers::control()),
+            key("v", Some("v"), gpui::Modifiers::command()),
+            key("up", None, none),
+        ] {
+            assert!(!types_only_its_text(&mut vt, &other, false), "{other:?}");
+        }
+        // Disambiguation leaves plain text as text; reporting every key as an escape code does not.
+        vt.write(b"\x1b[>1u");
+        assert!(types_only_its_text(
+            &mut vt,
+            &key("a", Some("a"), none),
+            false
+        ));
+        vt.write(b"\x1b[<u\x1b[>9u");
+        assert!(!types_only_its_text(
+            &mut vt,
+            &key("a", Some("a"), none),
+            false
+        ));
     }
 
     #[test]

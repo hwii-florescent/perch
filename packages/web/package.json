@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "check:stock-ui": "node --test scripts/export-stock-ui.test.mjs && node scripts/export-stock-ui.mjs --check",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "parity:serve": "vite --config ../../e2e/native-parity/vite.config.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
