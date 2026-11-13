@@ -17,8 +17,6 @@
 //!
 //! Elements are what the mod names with `.id(...)`: `name`, or `name:key` for one of many. An id that starts with
 //! `~` is not an element: a mod that needs ids for handlers on unnamed nodes (the React runtime) marks them so.
-//! GPUI's system UI face (`.SystemUIFont`) is written as the web serialises the app's UI font stack
-//! ([`UI_FONT_STACK`]), which is the face both draw with.
 
 #![allow(dead_code)]
 
@@ -37,19 +35,6 @@ use std::path::{Path, PathBuf};
 
 pub const SCHEMA: &str = "perch-native-parity/1";
 
-/// WebKit's serialisation of the app's `--font-ui` stack, the macOS system UI face (San Francisco).
-pub const UI_FONT_STACK: &str =
-    "-apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif";
-
-/// A font family as the web reference writes it.
-fn family(name: &str) -> String {
-    if name == ".SystemUIFont" {
-        UI_FONT_STACK.into()
-    } else {
-        name.into()
-    }
-}
-
 /// The repository's `e2e/native-parity/`.
 pub fn parity_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../e2e/native-parity")
@@ -57,6 +42,11 @@ pub fn parity_dir() -> PathBuf {
 
 pub fn fixture_path(screen: &str) -> PathBuf {
     parity_dir().join("fixtures").join(format!("{screen}.json"))
+}
+
+/// The parent of every rendering folder: `e2e/artifacts-native-parity/`.
+pub fn artifacts_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../e2e/artifacts-native-parity")
 }
 
 /// Where native renderings go, beside the web's `artifacts-native-parity/web/`.
@@ -368,7 +358,7 @@ pub fn elements(
                 "textSized": text_sized(&name),
                 "colors": colors,
                 "font": {
-                    "family": family(&r.font_family),
+                    "family": web_family(&r.font_family),
                     "size": round(r.font_size),
                     "weight": r.font_weight.0,
                     // What the style asks for, and what GPUI draws (it rounds to whole pixels).
@@ -384,6 +374,18 @@ pub fn elements(
             element
         })
         .collect()
+}
+
+/// The web's system font stack, which is what GPUI's `.SystemUIFont` (San Francisco on macOS) is:
+/// a native mod asks for the system font by that name and the web asks for it by this stack.
+const WEB_SYSTEM_FONT: &str = "-apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif";
+
+fn web_family(family: &str) -> String {
+    if family == ".SystemUIFont" {
+        WEB_SYSTEM_FONT.into()
+    } else {
+        family.into()
+    }
 }
 
 /// Names `named-elements.json` marks as sized by their text, for `screen`.
@@ -402,6 +404,19 @@ fn text_sized_names(screen: &str) -> Vec<String> {
         .collect()
 }
 
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("the mod folder");
+    for entry in std::fs::read_dir(from).unwrap_or_else(|e| panic!("{}: {e}", from.display())) {
+        let entry = entry.expect("a directory entry");
+        let target = to.join(entry.file_name());
+        if entry.path().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).expect("a mod file is copied");
+        }
+    }
+}
+
 /// Draws mod `mod_id` with the fixture state's data and theme at the fixture's logical size and
 /// scale 2, and writes `<screen>.<state>.<theme>.png` and `.json` into `out`.
 pub fn capture(cx: &mut HeadlessAppContext, capture: &Capture) -> Shot {
@@ -414,6 +429,14 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &Capture) -> Shot {
         capture.theme.word()
     ));
     let _ = std::fs::remove_dir_all(&scratch);
+    // `PERCH_PARITY_MODS=<dir>`: `<dir>/<mod_id>` is used instead of the stock mod of that id, so
+    // a mod can be edited on disk and drawn again without rebuilding the binary.
+    if let Some(dir) = std::env::var_os("PERCH_PARITY_MODS") {
+        copy_dir(
+            &Path::new(&dir).join(capture.mod_id),
+            &scratch.join("native-mods").join(capture.mod_id),
+        );
+    }
     let host = ModHost::new(scratch.join("native-mods")).expect("the mod host starts");
     let perch = Perch::new();
     perch.register(&host);
@@ -429,8 +452,8 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &Capture) -> Shot {
     let view = window.entity(&*cx).unwrap();
     let (image, scale) = cx
         .update_window(window.into(), |_, window: &mut Window, cx| {
-            // The pointer starts at the window's top left, which would hover what is drawn there; the web
-            // reference is drawn with no pointer over it.
+            // The window's idle pointer sits at its corner and would hover whatever is there; a
+            // reference is drawn with no pointer over it, as the web's is.
             window.dispatch_event(
                 PlatformInput::MouseMove(MouseMoveEvent {
                     position: point(px(-1.), px(-1.)),
