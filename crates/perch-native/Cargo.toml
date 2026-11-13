@@ -100,3 +100,13 @@ harness = false
 name = "mods_screen_capture"
 path = "tests/mods_screen_capture.rs"
 harness = false
+
+[[test]]
+name = "mods_floating_gate"
+path = "tests/mods_floating_gate.rs"
+harness = false
+
+[[test]]
+name = "mods_floating_window"
+path = "tests/mods_floating_window.rs"
+harness = false

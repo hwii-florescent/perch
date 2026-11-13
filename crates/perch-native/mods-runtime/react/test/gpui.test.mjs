@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fixture, mountSidebar, THEMES } from "./support.mjs";
-import { snapColumns } from "../gpui.mjs";
+import { scrollGutters, snapColumns, snapRows } from "../gpui.mjs";
 
 /** A gpui-kit stand-in that records each call, and keeps the handlers. */
 function recordingKit() {
@@ -147,4 +147,50 @@ test("lengths stacked in a column follow the exact running total on device pixel
   assert.equal(snapped.get(root).gap_y, 0, "the gap is carried in the margins");
   assert.equal(snapped.get(wrapping)?.h, undefined, "wrapping text keeps its own height");
   assert.equal(snapped.get(root.children[11]).h, 22.5, "the total restarts after it");
+});
+
+test("a packed row lays its items on device pixels by their measured text widths", () => {
+  const box = (style, children = []) => ({ kind: "div", style, children });
+  const text = (t) => ({ kind: "text", text: t });
+  // Each character measures 6.3px: a chip of "ab" is 12.6 wide plus 4.25 padding each side.
+  const measure = (t) => t.length * 6.3;
+  const chip = () => box({ pl: 4.25, pr: 4.25, whitespace: "nowrap", text_size: 12 }, [text("ab")]);
+  const chips = [chip(), chip(), chip()];
+  const row = box({ display: "flex", gap_x: 3 }, chips);
+  const overrides = new Map();
+  snapRows([row], 2, measure, overrides);
+  assert.equal(overrides.get(row).gap_x, 0, "the gap is carried in the margins");
+  let laid = 0;
+  chips.forEach((c, i) => {
+    const o = overrides.get(c);
+    laid += (o.ml ?? 0) + o.w + (o.mr ?? 0);
+    assert.equal((o.w * 2) % 1, 0, "on device pixels");
+    const exact = (i + 1) * 21.1 + i * 3;
+    assert.ok(Math.abs(laid - exact) <= 0.25, `chip ${i}: laid ${laid}, exact ${exact}`);
+  });
+  // Text that may wrap, or whose width is not known, is left to GPUI.
+  const wraps = box({ display: "flex" }, [box({}, [text("two words")]), box({}, [text("x")])]);
+  const left = new Map();
+  snapRows([wraps], 2, () => NaN, left);
+  assert.equal(left.get(wraps.children[0])?.w, undefined);
+});
+
+test("a scroller whose known content overflows its room makes room for the scrollbar", () => {
+  const box = (style, children = []) => ({ kind: "div", style, children });
+  const rows = Array.from({ length: 5 }, () => box({ h: 30 }));
+  const list = box({ overflow_y: "scroll", pr: 4 }, rows);
+  list.scrollbar = 8;
+  const header = box({ h: 40 });
+  const panel = box({ display: "flex", flex_direction: "col", max_h: 160 }, [header, list]);
+  const heights = new Map([...rows, header].map((n) => [n, n.style.h]));
+  const overrides = Object.assign(new Map(), { heights });
+  scrollGutters([panel], overrides);
+  assert.equal(overrides.get(list)?.pr, 12, "150 of content in 120 of room: the bar's width is added");
+
+  const short = box({ overflow_y: "scroll" }, rows.slice(0, 3));
+  short.scrollbar = 8;
+  const roomy = box({ display: "flex", flex_direction: "col", max_h: 160 }, [header, short]);
+  const fits = Object.assign(new Map(), { heights });
+  scrollGutters([roomy], fits);
+  assert.equal(fits.get(short), undefined, "content that fits takes no room");
 });
