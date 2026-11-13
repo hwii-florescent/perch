@@ -494,6 +494,15 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
     if (/^(checkbox|radio)$/.test(node.input_type)) node.checked = element.checked;
     if (tag !== "select") node.value = element.value;
     if (tag === "input" && TEXT_FIELD.test(node.input_type)) node.field_w = FIELD_EMS * computed.values["font-size"];
+    // A text area with no height of its own is `rows` lines high (2 by default) and its padding and borders, as a
+    // browser sizes it.
+    if (tag === "textarea" && style.h === undefined) {
+      const v = computed.values;
+      const px = (x) => (x && typeof x === "object" && "px" in x ? x.px : 0);
+      const border = (side) => (v[`border-${side}-style`] === "none" ? 0 : px(v[`border-${side}-width`]));
+      const rows = Number(element.props.rows) > 0 ? Math.floor(Number(element.props.rows)) : 2;
+      style.h = rows * lineHeightPx(v, ctx.measure) + px(v["padding-top"]) + px(v["padding-bottom"]) + border("top") + border("bottom");
+    }
     return node;
   }
   if (tag === "img") {
@@ -598,7 +607,8 @@ function keyOf(element, spec) {
  * `name:key` for one of many. A `textRange` name is the element's own text (`range_name`), not the element. */
 function nameElements(document, defs, nodes) {
   // One walk of the tree, each element tried against every selector, rather than a walk per selector: the same
-  // names (the first matching definition of a kind wins), a fraction of the visits.
+  // names, a fraction of the visits. The first matching definition of a kind is the element's name; a later one
+  // of the same kind is one more name for it (`also`), as the page's selectors each find it.
   const parsed = defs.map((def) => [def, parseSelector(def.selector)]);
   // An engine id names one element: a name with no key that matches again is `name@<n>` (its index in document
   // order, which the parity report reads back).
@@ -609,11 +619,13 @@ function nameElements(document, defs, nodes) {
       if (node) {
         for (const [def, list] of parsed) {
           const slot = def.textRange ? "range_name" : "name";
-          if (node[slot] != null || !list.some((steps) => matchesComplex(element, steps))) continue;
+          if ((def.textRange && node[slot] != null) || !list.some((steps) => matchesComplex(element, steps))) continue;
           const key = keyOf(element, def.key);
           const at = key == null ? (seen.get(def.name) ?? 0) : 0;
           if (key == null) seen.set(def.name, at + 1);
-          node[slot] = key != null ? `${def.name}:${key}` : at ? `${def.name}@${at}` : def.name;
+          const name = key != null ? `${def.name}:${key}` : at ? `${def.name}@${at}` : def.name;
+          if (node[slot] == null) node[slot] = name;
+          else (node.also ??= []).push(name);
         }
       }
       walk(element);

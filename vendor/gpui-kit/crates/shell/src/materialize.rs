@@ -395,6 +395,8 @@ struct Behavior {
     window_layer: bool,
     /// PERCH: the key the element's laid-out box is kept under for the host (`measure`).
     measure: Option<SharedString>,
+    /// PERCH: more names a test reads this element's box by, beside its `id` (`also_named`).
+    also_named: Vec<SharedString>,
     /// The key-binding context this element and its subtree sit in.
     ///
     /// What a keymap's `context` predicate is matched against, so a chord can
@@ -869,7 +871,10 @@ fn materialize_node(
 
     // PERCH: a named node records its box, colours and font for tests (`probe`).
     #[cfg(feature = "render-test-support")]
-    let probe = behavior.key.clone().map(|name| (name, Box::new(refinement.clone())));
+    let probe = behavior.key.clone().map(|name| {
+        let also = behavior.also_named.clone();
+        (name, also, Box::new(refinement.clone()))
+    });
     // PERCH: an element in a window layer is drawn over the whole window (`window_layer_of`).
     let window_layer = behavior.window_layer;
     // PERCH: an element a script asked about keeps its box (`measure`).
@@ -900,7 +905,11 @@ fn materialize_node(
     };
     #[cfg(feature = "render-test-support")]
     let element = match probe {
-        Some((name, style)) => crate::probe::wrap(name, *style, element),
+        // PERCH: each further name wraps the element once more; a probe lays out as what it wraps.
+        Some((name, also, style)) => also.into_iter().fold(
+            crate::probe::wrap(name, (*style).clone(), element),
+            |element, name| crate::probe::wrap(name, (*style).clone(), element),
+        ),
         None => element,
     };
     let element = match measure {
@@ -3457,6 +3466,12 @@ fn apply_behavior(behavior: &mut Behavior, name: &str, args: &[Bridged]) {
                 .and_then(|value| value.as_str().ok())
                 .map(SharedString::from);
         }
+        // PERCH: one more name for the element's box in tests (`probe`).
+        "also_named" => behavior.also_named.extend(
+            args.first()
+                .and_then(|value| value.as_str().ok())
+                .map(SharedString::from),
+        ),
         "key_context" => {
             behavior.key_context = args
                 .first()

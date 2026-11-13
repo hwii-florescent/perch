@@ -471,6 +471,11 @@ declare module "perch" {
    * memory state, or `{file?, error?}` for `memory.get`). The fields are the core's messages' own.
    */
   export function ask(kind: string, args: Record<string, unknown>): Promise<unknown>;
+  /** Whether computer `hostId`'s core (default this one) has `capability` (its `server.info`), e.g.
+   * `"memory.off.v1"`. */
+  export function coreCan(capability: string, hostId?: string): boolean;
+  /** The instant a test holds the screens' clock at (ms since the epoch), else null. */
+  export function heldClock(): number | null;
   /** `shortcutFor(event, scope)` for a screen's own scope (`"directory"`): the command the key event presses. */
   export function shortcutFor(
     event: { key: string; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; altKey?: boolean },

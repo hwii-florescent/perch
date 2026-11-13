@@ -54,12 +54,17 @@ export const SCREENS = [
   "start",
   "tab-drag",
   "folder-browser",
+  "instructions",
+  "memory",
+  "worktree",
 ];
 /** Other stock screens a screen's folder carries, by the screen: they draw inside it (the close guard asks its question
  * through the confirmation, with its own rows in it; the New session menu draws the tab strip's icons; the dialog draws
  * the file menu's name prompts). */
 export const ALSO = {
-  sidebar: ["folder-browser"],
+  sidebar: ["folder-browser", "worktree"],
+  memory: ["confirm"],
+  worktree: ["confirm"],
   confirm: ["close-guard"],
   "new-session": ["tabs"],
   dialog: ["file-menu"],

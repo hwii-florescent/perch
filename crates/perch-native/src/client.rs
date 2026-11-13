@@ -876,6 +876,42 @@ const ASKS: &[(&str, &[(&str, Field)])] = &[
         "memory.enable",
         &[("projectId", Field::Text), ("enabled", Field::Flag)],
     ),
+    (
+        "worktree.list",
+        &[("hostId", Field::Host), ("repoPath", Field::Text)],
+    ),
+    (
+        "worktree.create",
+        &[
+            ("hostId", Field::Host),
+            ("repoPath", Field::Text),
+            ("branch", Field::Text),
+            ("newBranch", Field::Flag),
+            ("path", Field::MaybeText),
+            ("name", Field::MaybeText),
+            ("startFrom", Field::MaybeText),
+            ("parentWorkspaceId", Field::MaybeText),
+        ],
+    ),
+    (
+        "worktree.remove",
+        &[
+            ("hostId", Field::Host),
+            ("repoPath", Field::Text),
+            ("path", Field::Text),
+            ("force", Field::Flag),
+            ("deleteBranch", Field::Flag),
+        ],
+    ),
+    (
+        "worktree.branch.delete",
+        &[
+            ("hostId", Field::Host),
+            ("repoPath", Field::Text),
+            ("branch", Field::Text),
+            ("expectedHead", Field::Text),
+        ],
+    ),
 ];
 
 #[derive(Clone, Copy)]
@@ -967,6 +1003,17 @@ fn answer_of(message: &ServerMessage) -> Option<(&str, Result<Value, String>)> {
             request_id,
             Ok(json!({ "path": path, "parent": parent, "entries": entries })),
         )),
+        // A worktree answer keeps its kind: a refusal (`worktree.error`, `dirty` for the checkout's
+        // guard) is an answer the screen reads, not a failure of the question.
+        ServerMessage::WorktreeListResult { request_id, .. }
+        | ServerMessage::WorktreeDone { request_id, .. }
+        | ServerMessage::WorktreeError { request_id, .. } => {
+            let mut answer = serde_json::to_value(message).unwrap_or(Value::Null);
+            if let Some(answer) = answer.as_object_mut() {
+                answer.remove("requestId");
+            }
+            Some((request_id, Ok(answer)))
+        }
         // The core sends the project's snapshot to the connection that created it only.
         ServerMessage::WorkspaceSnapshot { request_id, .. } => Some((request_id, Ok(Value::Null))),
         ServerMessage::Error {
@@ -1523,6 +1570,24 @@ mod tests {
                 json!({"projectId": "p", "name": "a.md", "baseRevision": "r1"}),
             ),
             ("memory.enable", json!({"projectId": "p", "enabled": false})),
+            (
+                "worktree.list",
+                json!({"hostId": "local", "repoPath": "/r"}),
+            ),
+            (
+                "worktree.create",
+                json!({"hostId": "build-box", "repoPath": "/r", "branch": "", "newBranch": true,
+                    "name": "Fix it", "startFrom": null, "path": null, "parentWorkspaceId": "w"}),
+            ),
+            (
+                "worktree.remove",
+                json!({"hostId": "local", "repoPath": "/r", "path": "/wt/a", "force": true,
+                    "deleteBranch": false}),
+            ),
+            (
+                "worktree.branch.delete",
+                json!({"hostId": "local", "repoPath": "/r", "branch": "a", "expectedHead": "c1"}),
+            ),
         ];
         for (kind, args) in asks {
             let mut frame = ask_frame(kind, &args).unwrap();
@@ -1539,6 +1604,13 @@ mod tests {
         assert!(ask_frame("session.delete", &json!({"sessionId": "s"})).is_err());
         assert!(ask_frame("instructions.get", &json!({"scope": "host", "id": "p"})).is_err());
         assert!(ask_frame("memory.enable", &json!({"projectId": "p", "enabled": "no"})).is_err());
+        assert!(ask_frame(
+            "worktree.remove",
+            &json!({"repoPath": "/r", "path": "/wt/a", "force": "yes", "deleteBranch": false})
+        )
+        .is_err());
+        // A background create is not asked: the window lists no worktree jobs.
+        assert!(ask_frame("worktree.job.start", &json!({"repoPath": "/r"})).is_err());
         assert!(ask_frame(
             "instructions.set",
             &json!({"scope": "project", "id": "p", "text": "t", "folders": [1]})
@@ -1577,6 +1649,18 @@ mod tests {
         assert_eq!(
             answer.unwrap(),
             json!({"scope": "project", "id": "p", "text": "t", "folders": [], "revision": 2, "maxChars": 100})
+        );
+        // A worktree refusal is an answer the screen reads (the dirty guard), with its kind.
+        let dirty = message(
+            json!({"type": "worktree.error", "requestId": "t1", "hostId": "local",
+            "message": "contains modified files", "dirty": true}),
+        );
+        let (id, answer) = answer_of(&dirty).expect("a worktree refusal answers");
+        assert_eq!(id, "t1");
+        assert_eq!(
+            answer.unwrap(),
+            json!({"type": "worktree.error", "hostId": "local", "message": "contains modified files",
+                "dirty": true})
         );
     }
 

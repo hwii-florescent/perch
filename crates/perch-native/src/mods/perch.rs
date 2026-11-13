@@ -180,6 +180,8 @@ struct Shared {
     hosts: RefCell<Vec<ModHost>>,
     /// Answers screens' questions in place of the window's core (`Self::set_asker`).
     asker: RefCell<Option<Asker>>,
+    /// The instant screens read as now, in ms since the epoch, when held (`Self::hold_clock`).
+    held_clock: std::cell::Cell<Option<f64>>,
     attached: RefCell<Option<Attached>>,
     flush_queued: Cell<bool>,
 }
@@ -202,6 +204,7 @@ impl Perch {
             reads: RefCell::default(),
             hosts: RefCell::default(),
             asker: RefCell::default(),
+            held_clock: std::cell::Cell::default(),
             attached: RefCell::default(),
             flush_queued: Cell::new(false),
         }))
@@ -904,8 +907,8 @@ impl Perch {
             })
             // A question for the core, `ask(kind, args)` (`client::ask_frame`'s list): the
             // folder browser's listing (`fs.browse`, which the core routes to a remote host),
-            // Instructions and Project memory. Resolves with the core's answer, rejects with its
-            // refusal.
+            // Instructions and Project memory. Resolves with the core's answer, or null when no
+            // core answers; rejects with its refusal.
             .async_function("ask", {
                 let perch = self.clone();
                 move |args| {
@@ -916,7 +919,7 @@ impl Perch {
                         match answer.await {
                             Ok(Ok(answer)) => Ok(to_host(&answer)),
                             Ok(Err(error)) => Err(HostError::new(error)),
-                            Err(_) => Err(HostError::new("No core answered.")),
+                            Err(_) => Ok(HostValue::Null),
                         }
                     })
                 }
@@ -944,6 +947,33 @@ impl Perch {
                     Ok(HostValue::Null)
                 }
             })
+            // The instant a test holds the screens' clock at (`Self::hold_clock`), else null.
+            .function("heldClock", {
+                let perch = self.clone();
+                move |_| {
+                    Ok(perch
+                        .0
+                        .held_clock
+                        .get()
+                        .map_or(HostValue::Null, HostValue::Number))
+                }
+            })
+            // Whether a computer's core has a capability (`server.info`; another computer's as the
+            // core relays it), as the web's clients check before offering what needs it.
+            .function(
+                "coreCan",
+                reader(STORE, |perch, args| {
+                    let capability = args.get(0).and_then(HostValue::as_str).unwrap_or("");
+                    let host = args.get(1).and_then(HostValue::as_str).unwrap_or(LOCAL);
+                    let store = perch.store();
+                    let capabilities = if host == LOCAL {
+                        Some(&store.local_capabilities)
+                    } else {
+                        store.host_capabilities.get(host)
+                    };
+                    json!(capabilities.is_some_and(|c| c.iter().any(|c| c == capability)))
+                }),
+            )
             // Whether a screen sits in a region of the window (a sidebar) rather than over all of it.
             .function("inRegion", |args| {
                 let id = args.get(0).and_then(HostValue::as_str).unwrap_or("");
@@ -1022,6 +1052,12 @@ impl Perch {
             })
     }
 
+    /// Holds the clock screens read (`Date.now`) at `ms` since the epoch, as a test's reference
+    /// page holds its own; set before the screens load.
+    pub fn hold_clock(&self, ms: f64) {
+        self.0.held_clock.set(Some(ms));
+    }
+
     /// Answers screens' questions with `asker` instead of the window's core (a test's fixture).
     pub fn set_asker(&self, asker: Asker) {
         *self.0.asker.borrow_mut() = Some(asker);
@@ -1042,8 +1078,10 @@ impl Perch {
         self.in_workspace(move |ws, cx| {
             let answer = ws.ask(frame, cx);
             cx.spawn(async move |_, _| {
-                let no_core = || Err("No core is connected.".to_string());
-                let _ = tx.send(answer.await.unwrap_or_else(|_| no_core()));
+                // No core followed: the sender goes unanswered, and so does the screen.
+                if let Ok(answer) = answer.await {
+                    let _ = tx.send(answer);
+                }
             })
             .detach();
         })?;

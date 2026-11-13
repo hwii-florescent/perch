@@ -808,6 +808,90 @@ fn fixture_browser(fixture: &ScreenFixture, state: &str) -> perch_native::mods::
     })
 }
 
+/// The instant the web harness holds the page's clock at.
+const FIXTURE_NOW_MS: f64 = 1_800_000_000_000.;
+
+/// Instructions' and Project memory's answers as the web harness gives them, from the state's
+/// props: `loaded` for `instructions.get`, `saved` for a write, `index` for `memory.list`,
+/// `texts` (by file) for `memory.get`, `removed` for `memory.delete`; one the props leave out is
+/// the core not answering (null), and `loading` never answers.
+fn fixture_answers(fixture: &ScreenFixture, state: &str) -> perch_native::mods::perch::Asker {
+    let props = fixture.props(state).unwrap_or_default();
+    let unanswered = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    std::rc::Rc::new(move |kind: &str, args: &Value| {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let answer = match kind {
+            "instructions.get" if props["loading"] == true => None,
+            "memory.list" if props["loading"] == true => None,
+            "instructions.get" => Some(props["loaded"].clone()),
+            "memory.list" => Some(props["index"].clone()),
+            "memory.get" => {
+                let file = &props["texts"][args["name"].as_str().unwrap_or_default()];
+                Some(if file.is_null() {
+                    json!({"error": "That file is gone."})
+                } else {
+                    json!({ "file": file })
+                })
+            }
+            "memory.delete" => Some(props["removed"].clone()),
+            _ => Some(props["saved"].clone()),
+        };
+        match answer {
+            Some(answer) => {
+                let _ = tx.send(Ok(answer));
+            }
+            // Kept, so the question is never answered and never fails.
+            None => unanswered.borrow_mut().push(tx),
+        }
+        rx
+    })
+}
+
+/// The core's `worktree.*` answers in state `state`, as the web reference's page gives the menu
+/// its fixture's: the listing is the state's `worktrees` (`listLoading`: never answered, a
+/// `listAnswer` error refused), and `createAnswer`, `removePlain`, `removeForce` and
+/// `deleteBranchAnswer` are what those operations answer.
+fn fixture_worktree(fixture: &ScreenFixture, state: &str) -> perch_native::mods::perch::Asker {
+    let props = fixture.props(state).unwrap_or_default();
+    let unanswered = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    std::rc::Rc::new(move |kind: &str, args: &Value| {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        // A web answer as the core says it: a refusal is `worktree.error`, else `worktree.done`.
+        let reply = |given: &Value| match given["error"].as_str() {
+            Some(message) => json!({"type": "worktree.error", "hostId": "local",
+                "message": message, "dirty": given["dirty"] == true}),
+            None => json!({"type": "worktree.done", "hostId": "local", "action": kind,
+                "path": args["path"].as_str().unwrap_or("/created"),
+                "preservedBranch": given["preservedBranch"]}),
+        };
+        let answer = match kind {
+            "worktree.list" if props["listLoading"] == true => None,
+            "worktree.list" if props["listAnswer"]["error"].is_string() => {
+                Some(reply(&props["listAnswer"]))
+            }
+            "worktree.list" => {
+                let list = &props["worktrees"];
+                Some(json!({"type": "worktree.list.result", "hostId": "local",
+                    "repoPath": props["cwd"], "worktrees": list["worktrees"].as_array().cloned().unwrap_or_default(),
+                    "defaultRoot": list["defaultRoot"].as_str().unwrap_or(""),
+                    "baseRef": list["baseRef"], "refs": list["refs"].as_array().cloned().unwrap_or_default()}))
+            }
+            "worktree.create" => Some(reply(&props["createAnswer"])),
+            "worktree.remove" if args["force"] == true => Some(reply(&props["removeForce"])),
+            "worktree.remove" => Some(reply(&props["removePlain"])),
+            _ => Some(reply(&props["deleteBranchAnswer"])),
+        };
+        match answer {
+            Some(answer) => {
+                let _ = tx.send(Ok(answer));
+            }
+            // Kept, so the question is never answered and never fails.
+            None => unanswered.borrow_mut().push(tx),
+        }
+        rx
+    })
+}
+
 /// The `localStorage` mod `drawn` starts state `state` with, as the state's page has it: the
 /// folder browser's last folder on its host (`view.lastPath`), else nothing kept from the state
 /// drawn before.
@@ -1074,8 +1158,26 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
     let perch = Perch::new();
     perch.register(&host);
     publish(&perch, fixture, capture.state);
-    if screen_id == "folder-browser" {
-        perch.set_asker(fixture_browser(fixture, capture.state));
+    match screen_id {
+        "folder-browser" => perch.set_asker(fixture_browser(fixture, capture.state)),
+        "instructions" => perch.set_asker(fixture_answers(fixture, capture.state)),
+        "worktree" => perch.set_asker(fixture_worktree(fixture, capture.state)),
+        "memory" => {
+            perch.set_asker(fixture_answers(fixture, capture.state));
+            // The memory page's clock is held at this instant (a file's "5m ago").
+            perch.hold_clock(FIXTURE_NOW_MS);
+            // The page offers the switch for the project's memory unless the state has no switch
+            // (`noToggle`): the core can turn memory off.
+            if fixture
+                .props(capture.state)
+                .is_none_or(|p| p["noToggle"] != true)
+            {
+                let mut data = fixture.data(capture.state);
+                data["serverInfo"]["capabilities"] = json!(["memory.off.v1"]);
+                perch.set_model(model_from(&data));
+            }
+        }
+        _ => {}
     }
     let floating = matches!(screen.place, Place::Floating { .. });
     let mut props = fixture.props(capture.state);

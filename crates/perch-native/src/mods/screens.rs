@@ -7,10 +7,11 @@
 //! - in flow, a region of the layout: `sidebar`, `tabs`, `status`, `pane-header` (one copy per
 //!   pane, keyed `pane-header#<tab id>`, while the area is split), `start` (the main area while
 //!   nothing is open in it), `folder-browser` (the sidebar draws its own copy in its Add project
-//!   dialog, so the window places this one nowhere yet);
+//!   dialog) and `worktree` (the sidebar draws its own copy on each git project's row), which the
+//!   window places nowhere yet;
 //! - floating, opened by the window over the whole of it, as the web's take the whole page:
 //!   `navigator`, `pane-menu`, `tab-menu`, `confirm`, `dialog`, `new-session`, `session-split`,
-//!   `keybind-help`, `launcher` (modal), `toast` and `tab-drag`
+//!   `keybind-help`, `launcher`, `instructions`, `memory` (modal), `toast` and `tab-drag`
 //!   (not modal: shown while there are notifications).
 //!
 //! A screen gets its arguments from `perch.props()` (the web's prop names, with each callback
@@ -169,6 +170,24 @@ pub const SCREENS: &[Screen] = &[
         place: Place::InFlow,
         width: 480.,
         height: 416.,
+    },
+    Screen {
+        id: "worktree",
+        place: Place::InFlow,
+        width: 0.,
+        height: 0.,
+    },
+    Screen {
+        id: "instructions",
+        place: MODAL,
+        width: 0.,
+        height: 0.,
+    },
+    Screen {
+        id: "memory",
+        place: MODAL,
+        width: 0.,
+        height: 0.,
     },
 ];
 

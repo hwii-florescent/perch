@@ -31,6 +31,8 @@ const SCREENS: &[&str] = &[
     "session-menu",
     "keybind-help",
     "launcher",
+    "instructions",
+    "memory",
     "tab-drag",
     // Not a screen of the window's: a test-only mod draws the SDK's dropdown.
     "select",

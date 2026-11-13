@@ -12,6 +12,16 @@
 //!   browser listing folders through the core; typing filters, a folder goes in, Use this folder
 //!   (its key) registers it through the core and closes the form, a refusal stays in it; Escape
 //!   and a press outside close it.
+//! - Instructions: the project's menu opens them, loaded through the core; typed text is saved
+//!   through it and the dialog closes once it takes it, a refusal stays in it with the reason;
+//!   Escape and a press on the backdrop close it.
+//! - Memory: the project's menu opens its files, listed through the core; a file opens, Back
+//!   returns, Delete asks first in place and deletes at the revision read; Close, Escape and a
+//!   press on the backdrop close it.
+//! - Worktrees: a git project's + opens its worktree menu on the create form, listed through the
+//!   core; a create the core refuses stays with the reason, one it makes closes the form; Remove
+//!   asks first and a dirty checkout is asked again, forced; Open starts a terminal there;
+//!   Escape and a press outside close it.
 //! - Start: the main area with nothing open; New session, `?`, a workspace's agent buttons and the
 //!   connecting page.
 //!
@@ -25,7 +35,7 @@ use gpui::{
 };
 use gpui_shell::probe::{self, ProbeRecord};
 use perch_core::protocol::ServerMessage;
-use perch_native::client::{Command, Update};
+use perch_native::client::{self, Command, Update};
 use perch_native::keymap::Keymap;
 use perch_native::mods::{self, POLL};
 use perch_native::sidebar::State;
@@ -43,15 +53,16 @@ fn message(value: Value) -> ServerMessage {
     serde_json::from_value(value).unwrap()
 }
 
-/// Project `p` on this computer, holding `alpha` and `bravo` (Claude sessions).
+/// Project `p` on this computer (a git repository), holding `alpha` and `bravo` (Claude sessions).
 fn state() -> State {
     let project = json!({"id": "p", "hostId": "local", "name": "Work", "path": "/work",
-        "favorite": false, "createdAt": 0, "updatedAt": 0});
+        "repoPath": "/work", "favorite": false, "createdAt": 0, "updatedAt": 0});
     let mut state = State::default();
     state.connect();
     state.apply(&message(json!({
         "type": "server.info", "hostname": "studio", "isSsh": false, "platform": "macOS",
-        "capabilities": ["workspace.snapshot"]})));
+        "capabilities": ["workspace.snapshot", "instructions.v1", "memory.v1", "memory.off.v1",
+            "worktree.startFrom"]})));
     state.apply(&message(json!({
         "type": "project.list", "requestId": "r", "hostId": "local", "snapshotEpoch": "e",
         "snapshotRevision": 1, "projects": [project]})));
@@ -669,6 +680,318 @@ fn folder_browser(rig: &mut Rig) {
     println!("folder-browser: ok");
 }
 
+/// The record whose id ends in `:test_id`: an element the parity table does not name, by its
+/// `data-testid` (`~n12:workspace-project-memory-p`).
+fn by_test_id(rig: &mut Rig, test_id: &str) -> String {
+    let suffix = format!(":{test_id}");
+    rig.draw()
+        .into_iter()
+        .map(|r| r.name.to_string())
+        .find(|name| name.ends_with(&suffix))
+        .unwrap_or_else(|| panic!("{test_id} is drawn"))
+}
+
+/// The one question the window put to the core since the last call: its frame and its reply.
+fn one_ask(rig: &mut Rig, kind: &str) -> (Value, client::Answer) {
+    let asked = rig.asked();
+    let mut asks: Vec<(Value, client::Answer)> = asked
+        .into_iter()
+        .filter_map(|command| match command {
+            Command::Ask { frame, reply } => Some((frame, reply)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(asks.len(), 1, "one question");
+    let (frame, reply) = asks.pop().unwrap();
+    assert_eq!(frame["type"], kind, "{frame}");
+    (frame, reply)
+}
+
+/// Project `p`'s menu (a right press on its row), then its item `test_id`.
+fn project_menu_item(rig: &mut Rig, test_id: &str) {
+    let at = rig
+        .record("project-toggle:p")
+        .expect("the project row")
+        .bounds
+        .center();
+    rig.mouse_with(MouseButton::Right, f32::from(at.x), f32::from(at.y));
+    let item = by_test_id(rig, test_id);
+    rig.click(&item);
+}
+
+fn instructions(rig: &mut Rig) {
+    rig.asked();
+    // The project's menu opens Instructions, which loads them through the core.
+    project_menu_item(rig, "workspace-project-instructions-p");
+    assert_eq!(rig.open_screens(), ["instructions"]);
+    let (frame, reply) = one_ask(rig, "instructions.get");
+    assert_eq!(
+        (&frame["scope"], &frame["id"]),
+        (&json!("project"), &json!("p"))
+    );
+    let loaded = json!({"scope": "project", "id": "p", "text": "", "folders": [], "revision": 1,
+        "maxChars": 100});
+    reply.send(Ok(loaded.clone())).unwrap();
+    rig.draw();
+    assert!(!rig.terminal_focused(), "the dialog has the keyboard");
+    // Typed text is saved through the core; once it takes it the dialog closes.
+    let field = rig
+        .record("instructions-text")
+        .expect("the text field")
+        .bounds
+        .center();
+    rig.mouse(f32::from(field.x), f32::from(field.y));
+    rig.type_text("Hi");
+    rig.click("instructions-save");
+    let (frame, reply) = one_ask(rig, "instructions.set");
+    assert_eq!(
+        (&frame["text"], &frame["folders"]),
+        (&json!("Hi"), &json!([]))
+    );
+    reply
+        .send(Ok(json!({"text": "Hi", "folders": [], "maxChars": 100})))
+        .unwrap();
+    rig.draw();
+    assert!(rig.open_screens().is_empty(), "saved, closed");
+    assert!(rig.terminal_focused(), "the keyboard is back");
+
+    // A refusal stays in the dialog with the core's reason.
+    project_menu_item(rig, "workspace-project-instructions-p");
+    let (_, reply) = one_ask(rig, "instructions.get");
+    reply.send(Ok(loaded.clone())).unwrap();
+    rig.draw();
+    rig.click("instructions-save");
+    let (_, reply) = one_ask(rig, "instructions.set");
+    reply
+        .send(Err("Reference folders must be absolute paths.".into()))
+        .unwrap();
+    rig.draw();
+    assert_eq!(
+        rig.open_screens(),
+        ["instructions"],
+        "the refusal keeps it open"
+    );
+    assert!(
+        rig.record("instructions-error").is_some(),
+        "with the reason"
+    );
+    // Escape closes it, and so does a press on the backdrop.
+    rig.press("escape");
+    assert!(rig.open_screens().is_empty(), "Escape closed it");
+    assert!(rig.terminal_focused());
+    project_menu_item(rig, "workspace-project-instructions-p");
+    let (_, reply) = one_ask(rig, "instructions.get");
+    reply.send(Ok(loaded)).unwrap();
+    rig.mouse(8., 8.);
+    assert!(rig.open_screens().is_empty(), "the backdrop closed it");
+    assert!(rig.terminal_focused());
+    println!("instructions: ok");
+}
+
+fn memory(rig: &mut Rig) {
+    rig.asked();
+    let entry = json!({"name": "a.md", "size": 2, "revision": "r1",
+        "author": {"kind": "outside"}, "updatedAt": 0});
+    let index = json!({"projectId": "p", "files": [entry], "maxFiles": 8, "maxChars": 100});
+    // The project's menu opens its memory, listed through the core.
+    project_menu_item(rig, "workspace-project-memory-p");
+    assert_eq!(rig.open_screens(), ["memory"]);
+    let (frame, reply) = one_ask(rig, "memory.list");
+    assert_eq!(frame["projectId"], "p");
+    reply.send(Ok(index.clone())).unwrap();
+    rig.draw();
+    assert_eq!(rig.keys("memory-row"), ["a.md"]);
+    assert!(
+        rig.record("memory-enabled").is_some(),
+        "the core can turn memory off"
+    );
+    // A file opens through the core; Back returns to the list.
+    rig.click("memory-open:a.md");
+    let (frame, reply) = one_ask(rig, "memory.get");
+    assert_eq!(frame["name"], "a.md");
+    reply
+        .send(Ok(
+            json!({"projectId": "p", "file": {"entry": entry, "text": "hi"}}),
+        ))
+        .unwrap();
+    rig.draw();
+    assert!(rig.record("memory-file-name").is_some(), "the file is open");
+    rig.click("memory-back");
+    assert!(rig.record("memory-file-name").is_none(), "back in the list");
+    // Delete asks first, in place over the dialog; yes deletes it at the revision it was read at.
+    rig.click("memory-delete:a.md");
+    assert!(rig.record("memory-confirm").is_some(), "the question");
+    assert_eq!(rig.open_screens(), ["memory"], "drawn in the dialog");
+    let accept = by_test_id(rig, "confirm-accept");
+    rig.click(&accept);
+    let (frame, reply) = one_ask(rig, "memory.delete");
+    assert_eq!(
+        (&frame["name"], &frame["baseRevision"]),
+        (&json!("a.md"), &json!("r1"))
+    );
+    reply
+        .send(Ok(
+            json!({"projectId": "p", "files": [], "maxFiles": 8, "maxChars": 100}),
+        ))
+        .unwrap();
+    rig.draw();
+    assert!(
+        rig.record("memory-note").is_some() || rig.keys("memory-row").is_empty(),
+        "gone"
+    );
+    // Close, Escape and a press on the backdrop close it.
+    rig.click("memory-close");
+    assert!(rig.open_screens().is_empty(), "Close closed it");
+    assert!(rig.terminal_focused());
+    project_menu_item(rig, "workspace-project-memory-p");
+    let (_, reply) = one_ask(rig, "memory.list");
+    reply.send(Ok(index)).unwrap();
+    rig.press("escape");
+    assert!(rig.open_screens().is_empty(), "Escape closed it");
+    project_menu_item(rig, "workspace-project-memory-p");
+    rig.mouse(8., 8.);
+    assert!(rig.open_screens().is_empty(), "the backdrop closed it");
+    assert!(rig.terminal_focused());
+    println!("memory: ok");
+}
+
+/// Project `p`'s worktrees as the core lists them: its main checkout and a dirty linked one.
+fn worktree_listing() -> Value {
+    json!({"type": "worktree.list.result", "hostId": "local", "repoPath": "/work",
+        "defaultRoot": "/wt", "worktrees": [
+            {"path": "/work", "branch": "main", "head": "a1", "isPrimary": true, "isDirty": false},
+            {"path": "/wt/fix", "branch": "fix", "head": "b2", "isPrimary": false, "isDirty": true}]})
+}
+
+/// Answers the menu's listing of project `p`'s worktrees.
+fn list_worktrees(rig: &mut Rig) {
+    let (frame, reply) = one_ask(rig, "worktree.list");
+    assert_eq!(frame["repoPath"], "/work", "{frame}");
+    assert!(frame.get("hostId").is_none(), "this computer is left out");
+    reply.send(Ok(worktree_listing())).unwrap();
+    rig.draw();
+}
+
+/// Project `p`'s + (shown while the pointer is over its row, and only then named).
+fn click_worktree_plus(rig: &mut Rig) {
+    let plus = match rig.record("worktree-plus") {
+        Some(_) => "worktree-plus".to_string(),
+        None => by_test_id(rig, "worktree-menu-local-/work"),
+    };
+    rig.click(&plus);
+}
+
+/// The window's question in its confirmation, then yes.
+fn accept_confirmation(rig: &mut Rig) {
+    assert_eq!(rig.open_screens(), ["confirm"], "asked first");
+    rig.click("confirm-accept");
+}
+
+fn worktree(rig: &mut Rig) {
+    rig.asked();
+    // A git project's + (shown when the pointer is over its row) opens its menu on the create
+    // form, its worktrees listed through the core and the keyboard in the task name.
+    click_worktree_plus(rig);
+    list_worktrees(rig);
+    assert!(rig.record("worktree-popover").is_some(), "the menu is open");
+    assert_eq!(rig.keys("worktree-entry"), ["/work", "/wt/fix"]);
+    assert!(rig.record("worktree-name-input").is_some(), "on the form");
+    assert!(!rig.terminal_focused(), "the form has the keyboard");
+    // A create the core refuses stays in the form with its reason.
+    rig.type_text("Fix it");
+    rig.click("worktree-create-submit");
+    let (frame, reply) = one_ask(rig, "worktree.create");
+    assert_eq!(
+        (&frame["repoPath"], &frame["name"], &frame["branch"]),
+        (&json!("/work"), &json!("Fix it"), &json!("")),
+        "{frame}"
+    );
+    reply
+        .send(Ok(json!({"type": "worktree.error", "hostId": "local",
+            "message": "A branch named fix-it already exists.", "dirty": false})))
+        .unwrap();
+    rig.draw();
+    assert!(rig.record("worktree-error").is_some(), "with the reason");
+    assert!(
+        rig.record("worktree-name-input").is_some(),
+        "still on the form"
+    );
+    // One it makes closes the form and lists the worktrees again.
+    rig.click("worktree-create-submit");
+    let (_, reply) = one_ask(rig, "worktree.create");
+    reply
+        .send(Ok(
+            json!({"type": "worktree.done", "hostId": "local", "action": "create",
+            "path": "/wt/fix-it"}),
+        ))
+        .unwrap();
+    rig.draw();
+    list_worktrees(rig);
+    assert!(
+        rig.record("worktree-name-input").is_none(),
+        "the form closed"
+    );
+    assert!(
+        rig.record("worktree-new").is_some(),
+        "the list's New worktree"
+    );
+
+    // Remove asks first; a dirty checkout comes back refused and is asked again, forced.
+    rig.click("worktree-remove:/wt/fix");
+    accept_confirmation(rig);
+    let (frame, reply) = one_ask(rig, "worktree.remove");
+    assert_eq!(
+        (&frame["path"], &frame["force"], &frame["deleteBranch"]),
+        (&json!("/wt/fix"), &json!(false), &json!(false)),
+        "{frame}"
+    );
+    reply
+        .send(Ok(json!({"type": "worktree.error", "hostId": "local",
+            "message": "contains modified or untracked files", "dirty": true})))
+        .unwrap();
+    rig.draw();
+    accept_confirmation(rig);
+    let (frame, reply) = one_ask(rig, "worktree.remove");
+    assert_eq!(frame["force"], true, "forced the second time");
+    reply
+        .send(Ok(
+            json!({"type": "worktree.done", "hostId": "local", "action": "remove",
+            "path": "/wt/fix"}),
+        ))
+        .unwrap();
+    rig.draw();
+    list_worktrees(rig);
+    assert!(rig.open_screens().is_empty(), "the questions are gone");
+
+    // Open starts a terminal in that checkout and closes the menu.
+    rig.click("worktree-open:/work");
+    assert_eq!(
+        launched(rig),
+        [(
+            "local".to_string(),
+            Some("/work".to_string()),
+            "terminal".to_string()
+        )]
+    );
+    assert!(rig.record("worktree-popover").is_none(), "Open closed it");
+
+    // Escape closes it, and so does a press outside it; the keyboard goes back.
+    click_worktree_plus(rig);
+    list_worktrees(rig);
+    rig.press("escape");
+    assert!(rig.record("worktree-popover").is_none(), "Escape closed it");
+    assert!(rig.terminal_focused(), "the keyboard is back");
+    click_worktree_plus(rig);
+    list_worktrees(rig);
+    rig.mouse(WIDTH - 8., HEIGHT - 8.);
+    assert!(
+        rig.record("worktree-popover").is_none(),
+        "a press outside closed it"
+    );
+    assert!(rig.terminal_focused());
+    println!("worktree: ok");
+}
+
 fn main() {
     let scratch: PathBuf = std::env::temp_dir().join(format!(
         "perch-chrome-screens-window-{}",
@@ -694,6 +1017,9 @@ fn main() {
     keybind_help(&mut rig);
     launcher(&mut rig);
     folder_browser(&mut rig);
+    instructions(&mut rig);
+    memory(&mut rig);
+    worktree(&mut rig);
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())
         .unwrap();

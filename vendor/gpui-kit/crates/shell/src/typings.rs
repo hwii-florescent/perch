@@ -1512,6 +1512,11 @@ const ELEMENT_METHODS: &str = r#"    /**
      */
     measure<Self extends Element>(this: Self, key: string): Self;
     /**
+     * PERCH: one more name a test reads the element's box by, beside its `id`
+     * (two parity names for one element). Recorded only in test builds.
+     */
+    also_named<Self extends Element>(this: Self, name: string): Self;
+    /**
      * `handler(key, cx)` when a row of a virtual list is clicked, where `key`
      * is what the list's `get_key(index)` returned for that row.
      *
@@ -4026,6 +4031,7 @@ mod tests {
         "keep_mounted",
         "window_layer", // PERCH: a window layer (`materialize::window_layer_of`).
         "measure",      // PERCH: an element's box for the host (`measure`).
+        "also_named",   // PERCH: one more name a test reads the box by (`probe`).
         "on_item_click",
         "on_item_secondary_click",
         "on_change",

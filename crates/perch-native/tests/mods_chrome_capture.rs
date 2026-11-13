@@ -12,7 +12,14 @@ mod parity_screens;
 use parity_screens::ScreenFixture;
 use std::time::Instant;
 
-const SCREENS: [&str; 5] = ["tabs", "status", "pane-header", "start", "folder-browser"];
+const SCREENS: [&str; 6] = [
+    "tabs",
+    "status",
+    "pane-header",
+    "start",
+    "folder-browser",
+    "worktree",
+];
 
 fn main() {
     let scratch = std::env::temp_dir().join(format!("perch-chrome-capture-{}", std::process::id()));
