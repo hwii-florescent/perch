@@ -15,11 +15,17 @@
 //! });
 //! ```
 //!
-//! Elements are what the mod names with `.id(...)`: `name`, or `name:key` for one of many.
+//! Elements are what the mod names with `.id(...)`: `name`, or `name:key` for one of many. An id that starts with
+//! `~` is not an element: a mod that needs ids for handlers on unnamed nodes (the React runtime) marks them so.
+//! GPUI's system UI face (`.SystemUIFont`) is written as the web serialises the app's UI font stack
+//! ([`UI_FONT_STACK`]), which is the face both draw with.
 
 #![allow(dead_code)]
 
-use gpui::{px, size, HeadlessAppContext, Hsla, Pixels, Window};
+use gpui::{
+    point, px, size, HeadlessAppContext, Hsla, Modifiers, MouseMoveEvent, Pixels, PlatformInput,
+    Window,
+};
 use gpui_shell::probe::{self, ProbeRecord};
 use perch_core::protocol::ServerMessage;
 use perch_native::mods::perch::{Perch, SidebarSettings};
@@ -30,6 +36,19 @@ use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 
 pub const SCHEMA: &str = "perch-native-parity/1";
+
+/// WebKit's serialisation of the app's `--font-ui` stack, the macOS system UI face (San Francisco).
+pub const UI_FONT_STACK: &str =
+    "-apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif";
+
+/// A font family as the web reference writes it.
+fn family(name: &str) -> String {
+    if name == ".SystemUIFont" {
+        UI_FONT_STACK.into()
+    } else {
+        name.into()
+    }
+}
 
 /// The repository's `e2e/native-parity/`.
 pub fn parity_dir() -> PathBuf {
@@ -299,6 +318,7 @@ pub fn elements(
 ) -> Vec<Value> {
     let mut list: Vec<(String, Option<String>, ProbeRecord)> = records
         .into_iter()
+        .filter(|r| !r.name.starts_with('~'))
         .map(|r| {
             let (name, key) = match r.name.split_once(':') {
                 Some((name, key)) => (name.to_string(), Some(key.to_string())),
@@ -348,7 +368,7 @@ pub fn elements(
                 "textSized": text_sized(&name),
                 "colors": colors,
                 "font": {
-                    "family": r.font_family.to_string(),
+                    "family": family(&r.font_family),
                     "size": round(r.font_size),
                     "weight": r.font_weight.0,
                     "lineHeight": round(r.line_height),
@@ -407,6 +427,16 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &Capture) -> Shot {
     let view = window.entity(&*cx).unwrap();
     let (image, scale) = cx
         .update_window(window.into(), |_, window: &mut Window, cx| {
+            // The pointer starts at the window's top left, which would hover what is drawn there; the web
+            // reference is drawn with no pointer over it.
+            window.dispatch_event(
+                PlatformInput::MouseMove(MouseMoveEvent {
+                    position: point(px(-1.), px(-1.)),
+                    pressed_button: None,
+                    modifiers: Modifiers::default(),
+                }),
+                cx,
+            );
             probe::clear();
             window.refresh();
             let _ = window.draw(cx);
