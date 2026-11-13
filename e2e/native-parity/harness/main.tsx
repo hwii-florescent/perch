@@ -137,6 +137,12 @@ const SCREENS: Record<string, Screen> = {
     props: (fixed) => ({ ...fixed, open: true, onClose: noop }),
     Probe: KeybindProbe,
   },
+  launcher: {
+    load: () => import("../../../packages/web/src/stock-ui/launcher/main"),
+    mount: "stage",
+    props: (fixed) => ({ ...fixed, onClose: noop, actions: acts() }),
+    Probe: NewSessionProbe,
+  },
   "pane-menu": {
     load: () => import("../../../packages/web/src/stock-ui/pane-menu/main"),
     mount: "stage",

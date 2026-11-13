@@ -1721,6 +1721,102 @@
           "textSized": true
         }
       ]
+    },
+    "launcher": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 4,
+      "elements": [
+        {
+          "name": "launcher-scrim",
+          "selector": "body > div.fixed.inset-0",
+          "description": "The dimming layer over the whole window (55% black); a press on it closes the launcher."
+        },
+        {
+          "name": "launcher-panel",
+          "selector": "[data-testid=\"new-session-dialog\"]",
+          "description": "The panel: 480 px wide at most, 420 px high at most, its top 12% of the window down; rounded, on the panel fill with a shadow."
+        },
+        {
+          "name": "launcher-title",
+          "selector": "[data-testid=\"new-session-dialog\"] > p",
+          "description": "'New session in...' or 'New in <project>', small and muted.",
+          "text": true
+        },
+        {
+          "name": "launcher-filter",
+          "selector": "[data-testid=\"new-session-filter\"]",
+          "description": "The filter field on the panel fill (no lighter band); `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        },
+        {
+          "name": "launcher-list",
+          "selector": "#new-session-list",
+          "description": "The scrolling list of rows."
+        },
+        {
+          "name": "launcher-row",
+          "selector": "[data-testid^=\"new-session-row-\"]",
+          "description": "One row; the highlighted one is on the lighter fill; muted rows are in the muted colour; disabled rows are 40% opacity.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "new-session-row-"
+          }
+        },
+        {
+          "name": "launcher-row-icon",
+          "selector": "[data-testid^=\"new-session-row-\"] > :first-child:not(span):not(kbd)",
+          "description": "The agent's icon, or the browser or file mark.",
+          "key": {
+            "closest": "[data-testid^=\"new-session-row-\"]",
+            "attr": "data-testid",
+            "strip": "new-session-row-"
+          }
+        },
+        {
+          "name": "launcher-row-label",
+          "selector": "[data-testid^=\"new-session-row-\"] > span.shrink-0",
+          "description": "The row's name.",
+          "key": {
+            "closest": "[data-testid^=\"new-session-row-\"]",
+            "attr": "data-testid",
+            "strip": "new-session-row-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "launcher-row-detail",
+          "selector": "[data-testid^=\"new-session-row-\"] > span.ml-auto",
+          "description": "The project's path (or the Quickchat note), right aligned, small, cut with an ellipsis.",
+          "key": {
+            "closest": "[data-testid^=\"new-session-row-\"]",
+            "attr": "data-testid",
+            "strip": "new-session-row-"
+          },
+          "text": true
+        },
+        {
+          "name": "launcher-row-key",
+          "selector": "[data-testid^=\"new-session-row-\"] > kbd",
+          "description": "The row's number key, 1 to 9, while nothing is typed.",
+          "key": {
+            "closest": "[data-testid^=\"new-session-row-\"]",
+            "attr": "data-testid",
+            "strip": "new-session-row-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "launcher-note",
+          "selector": "#new-session-list > p",
+          "description": "No match, Checking agents, or the host's error (red).",
+          "text": true
+        }
+      ]
     }
   }
 }

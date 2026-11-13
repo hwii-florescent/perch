@@ -1,0 +1,27 @@
+{
+  "props": {
+    "hostId": "local",
+    "projects": []
+  },
+  "agentChoices": {
+    "connected": true,
+    "discovery": true,
+    "choices": [
+      {
+        "id": "claude",
+        "label": "Claude",
+        "isDefault": true
+      },
+      {
+        "id": "codex",
+        "label": "Codex"
+      },
+      {
+        "id": "pi",
+        "label": "Pi"
+      }
+    ],
+    "lastChoice": "claude",
+    "state": "ready"
+  }
+}

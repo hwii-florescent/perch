@@ -1,0 +1,73 @@
+{
+  "props": {
+    "hostId": "local",
+    "projects": [
+      {
+        "id": "p-perch",
+        "name": "perch",
+        "path": "/Users/dev/code/perch",
+        "workspace": {
+          "id": "w-perch-main",
+          "path": "/Users/dev/code/perch"
+        }
+      },
+      {
+        "id": "p-api",
+        "name": "api-server",
+        "path": "/Users/dev/code/api-server",
+        "workspace": {
+          "id": "w-api-main",
+          "path": "/Users/dev/code/api-server"
+        }
+      },
+      {
+        "id": "p-notes",
+        "name": "notes",
+        "path": "/Users/dev/notes",
+        "workspace": {
+          "id": "w-notes",
+          "path": "/Users/dev/notes"
+        }
+      },
+      {
+        "id": "p-site",
+        "name": "scratch-site",
+        "path": "/Users/dev/code/scratch-site",
+        "workspace": {
+          "id": "w-site",
+          "path": "/Users/dev/code/scratch-site"
+        }
+      }
+    ],
+    "activeProjectId": "p-perch"
+  },
+  "agentChoices": {
+    "connected": true,
+    "discovery": true,
+    "choices": [
+      {
+        "id": "claude",
+        "label": "Claude",
+        "isDefault": true
+      },
+      {
+        "id": "codex",
+        "label": "Codex"
+      },
+      {
+        "id": "pi",
+        "label": "Pi"
+      }
+    ],
+    "lastChoice": "claude",
+    "state": "ready"
+  },
+  "steps": [
+    {
+      "type": {
+        "selector": "[data-testid=\"new-session-filter\"]",
+        "text": "api"
+      }
+    }
+  ]
+}
