@@ -996,6 +996,41 @@ mod tests {
         );
     }
 
+    /// The palette is the web's Navigator: `mod+p`, which is Command-P on a Mac. The web binds no
+    /// Command-Shift-P, and neither does this client until a person chooses it.
+    #[test]
+    fn the_palettes_key_is_the_webs_and_command_shift_p_is_the_persons_to_choose() {
+        let m = keymap(&[], None);
+        for context in [IN_TERMINAL, Context::default()] {
+            assert_eq!(run(m.resolve(&press("cmd-p"), context)), "global.navigator");
+            assert_eq!(m.resolve(&press("cmd-shift-p"), context), None);
+        }
+        assert_eq!(m.label("global.navigator").as_deref(), Some("⌘P"));
+        // Where `mod` is Control+Shift the palette is Ctrl-Shift-P, as in the web.
+        let other = keymap(&[], None).with_platform(false);
+        assert_eq!(
+            run(other.resolve(&press("ctrl-shift-p"), IN_TERMINAL)),
+            "global.navigator"
+        );
+
+        // A person's choice moves it, in Settings > Keyboard or in keys.json.
+        let chosen = keymap(&[("global.navigator", "cmd+shift+p")], None);
+        assert_eq!(
+            run(chosen.resolve(&press("cmd-shift-p"), IN_TERMINAL)),
+            "global.navigator"
+        );
+        assert_eq!(chosen.resolve(&press("cmd-p"), IN_TERMINAL), None);
+        let file = keymap(&[], Some(json!({"global": {"cmd-shift-p": "app.palette"}})));
+        assert_eq!(
+            run(file.resolve(&press("cmd-shift-p"), IN_TERMINAL)),
+            "app.palette"
+        );
+        assert_eq!(
+            run(file.resolve(&press("cmd-p"), IN_TERMINAL)),
+            "global.navigator"
+        );
+    }
+
     #[test]
     fn the_file_wins_and_the_terminal_section_is_more_specific_than_global() {
         let file = json!({

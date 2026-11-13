@@ -762,6 +762,59 @@ fn plain(key: &str, text: &str) -> Keystroke {
     }
 }
 
+/// The palette is the web's Navigator and opens on its key, Command-P. Command-Shift-P is not
+/// bound in the web or here: the window leaves it to the terminal, which sends a Command chord
+/// nothing. A person who wants it chooses it in Settings or `keys.json`, and the window then
+/// opens the palette from a terminal that has the keyboard.
+fn the_palette_opens_on_the_webs_key() {
+    let mut h = Harness::new(model(&[("alpha", json!({}))]));
+    h.open("alpha");
+    h.draw();
+    let (mut rx, _core) = h.live();
+    h.draw();
+    typed(&mut rx);
+    assert!(!h.press("cmd-shift-p"), "nothing binds Command-Shift-P");
+    assert!(!h.ws(|ws| ws.palette_open()));
+    assert_eq!(
+        typed(&mut rx),
+        Vec::<Vec<u8>>::new(),
+        "and the shell gets nothing"
+    );
+    assert!(h.press("cmd-p"));
+    assert!(h.ws(|ws| ws.palette_open()));
+    assert!(h.press("escape"));
+
+    for chosen in [
+        // Settings > Keyboard replaces the default key.
+        (Some(("global.navigator", "cmd+shift+p")), None),
+        // keys.json adds a key for the typed command.
+        (
+            None,
+            Some(json!({"global": {"cmd-shift-p": "app.palette"}})),
+        ),
+    ] {
+        let mut keyed = model(&[("alpha", json!({}))]);
+        if let Some((id, keys)) = chosen.0 {
+            keyed.keybindings.insert(id.into(), keys.into());
+        }
+        keyed.keys_file = chosen.1.clone();
+        let mut h = Harness::new(keyed);
+        h.open("alpha");
+        h.draw();
+        let (mut rx, _core) = h.live();
+        h.draw();
+        typed(&mut rx);
+        assert!(
+            h.press("cmd-shift-p"),
+            "{chosen:?}: the chosen key is taken"
+        );
+        assert!(h.ws(|ws| ws.palette_open()), "{chosen:?}");
+        assert!(h.press("escape"));
+        assert_eq!(typed(&mut rx), Vec::<Vec<u8>>::new());
+    }
+    println!("workspace_render: palette key ok");
+}
+
 /// `/` goes through the window's keymap and the terminal like any letter and types `/`, however
 /// it is spelled: the key itself, or a posted event whose key code GPUI reads as another key.
 fn a_slash_types_a_slash() {
@@ -1793,6 +1846,7 @@ fn a_blank_session_offers_the_launch_choices() {
 }
 
 fn main() {
+    the_palette_opens_on_the_webs_key();
     a_slash_types_a_slash();
     posted_characters_type_as_they_are();
     a_click_needs_no_move_before_it();
