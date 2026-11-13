@@ -527,6 +527,32 @@ fn main() {
         "the header that stayed redrew"
     );
     assert_ne!(dot(&mut rig, "delta"), before.1, "the new header redrew");
+    // A third pane, then one closed: the headers that stay redraw when their sessions change.
+    split(&mut rig, "echo");
+    assert_eq!(
+        rig.ws(|ws, _, _| ws.tabs().shown().to_vec()),
+        ["charlie", "delta", "echo"],
+        "a split holds a third pane"
+    );
+    rig.click("pane-close:echo");
+    assert_eq!(
+        rig.ws(|ws, _, _| ws.tabs().shown().to_vec()),
+        ["charlie", "delta"],
+        "pane.close ran"
+    );
+    let blocked = (dot(&mut rig, "charlie"), dot(&mut rig, "delta"));
+    let model = state_with(&["alpha", "bravo", "charlie", "delta"], &[]).model();
+    rig.ws(|ws, _, cx| {
+        ws.sidebar()
+            .update(cx, |sidebar, cx| sidebar.apply(Update::Model(model), cx))
+    });
+    rig.draw();
+    assert_ne!(
+        dot(&mut rig, "charlie"),
+        blocked.0,
+        "a header that stayed redrew"
+    );
+    assert_ne!(dot(&mut rig, "delta"), blocked.1, "the other one too");
     println!("mods_chrome_window: a header per copy ok");
 
     // A copy keeps its own document while others come and go: with the Navigator open a card
@@ -582,6 +608,39 @@ fn main() {
         palette(&mut rig);
     }
     assert_eq!(held(&mut rig), before, "nothing left behind");
+
+    // A copy that goes leaves React working for the copies after it: in a person's Navigator whose
+    // list shows once an effect's timer has updated its state (an update React's scheduler runs,
+    // not a key's or the data's own), the list shows each time it opens.
+    let mine = user.join("navigator");
+    copy_dir(&user.join(".stock/navigator"), &mine);
+    let source = mine.join("navigator/main.js");
+    let text = std::fs::read_to_string(&source).unwrap();
+    let edits = [
+        (
+            "const [query, setQuery] = useState(\"\");",
+            "const [query, setQuery] = useState(\"\");\n    const [late, setLate] = useState(false);\n    useEffect(() => { const t = setTimeout(() => setLate(true), 0); return () => clearTimeout(t); }, []);",
+        ),
+        ("return sessions\n", "return sessions.filter(() => late)\n"),
+        ("}, [sessions, filter, query, runMode]);", "}, [sessions, filter, query, runMode, late]);"),
+    ];
+    let text = edits.iter().fold(text, |text, (from, to)| {
+        assert!(text.contains(from), "the Navigator's source has {from}");
+        text.replacen(from, to, 1)
+    });
+    std::fs::write(&source, text).unwrap();
+    rig.draw();
+    for turn in 1..=3 {
+        palette(&mut rig);
+        assert_eq!(rig.ws(|ws, _, _| ws.screens_open()), ["navigator"]);
+        assert!(
+            !rig.keys("navigator-row").is_empty(),
+            "opened {turn} times, the list shows"
+        );
+        palette(&mut rig);
+    }
+    std::fs::remove_dir_all(&mine).unwrap();
+    rig.draw();
 
     // A person's copy of a screen takes over from the stock one and reloads on each save, and
     // removing it gives the stock one back: each time the copy it replaced goes, so one status

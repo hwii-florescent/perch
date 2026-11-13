@@ -10,9 +10,11 @@
 // the window (`copy.close()`, the view's final call) its tree is unmounted, so its effects clean up, and its listeners
 // and timers go; a build replaced by a save, or by a person's folder taking over from the stock one, gets the same
 // final call.
+// React's scheduler takes its turns in promise jobs (`setImmediate` below), which no copy owns.
 // ponytail: the engine ends a timer with the screen whose call set it (`scope::current_application_generation` in
-// `scheduler.rs`), whatever `cx` set it, so a timer set for one copy while another's call runs (React's scheduler
-// working for a tree that call touched) ends if that screen closes first.
+// `scheduler.rs`), whatever `cx` set it, so a timer a copy sets while another's call runs (an effect of a commit
+// that call caused, such as a request's answer) ends if that screen closes first; a timer owned by its copy's view
+// needs the engine to take the generation from `cx`.
 //
 // Data: the SDK's hooks read snapshots (`navigation(options)`, `hosts()`) that stay the same object until the data
 // changes. `refresh()` (each `render()`, which the engine runs again exactly when something the mod read moved)
@@ -107,7 +109,13 @@ function clearTimeout(id) {
   TIMERS.all.delete(id);
   try { timer.handle.cancel(); } catch { /* its copy is gone, and the timer with it */ }
 }
-for (const [name, value] of Object.entries({ setTimeout, clearTimeout })) {
+// React's scheduler runs its work loop on `setImmediate` when there is one (it reads it once, when the runtime loads),
+// else on a 0 ms timer, and holds that the loop runs until the turn it asked for comes. A timer is a copy's and ends
+// with it (and the engine ends every timer set during a screen's final call, where unmounting arms the loop), so the
+// folder's scheduler would wait forever for the copies after it. A promise job is no one's: it runs before the call
+// that queued it returns.
+const setImmediate = (fn, ...args) => { Promise.resolve().then(() => fn(...args)); };
+for (const [name, value] of Object.entries({ setTimeout, clearTimeout, setImmediate })) {
   Object.defineProperty(globalThis, name, { value, configurable: true, writable: true, enumerable: false });
 }
 // `globalThis.perch`: the running copy's host (a script reading it while this file loads gets the platform's facts).
@@ -116,7 +124,10 @@ Object.defineProperty(globalThis, "perch", { get: () => globalThis[RUNNING]?.hos
 
 // Per-viewer view settings the sidebar keeps in `localStorage` are the window's sidebar settings in the `perch`
 // module, so they follow the window (and the fixture a test publishes); every other key is the mod's own storage.
-const own = globalThis.localStorage;
+// The engine's own, kept by the first folder to load: later, `localStorage` is the running copy's (`installGlobals`).
+const OWN = Symbol.for("perch.react.storage");
+if (!(OWN in globalThis)) globalThis[OWN] = globalThis.localStorage;
+const own = globalThis[OWN];
 const SETTINGS = {
   "perch.sidebar.organize": [(s) => s.organize, (v) => ({ organize: v === "status" || v === "list" ? v : "project" })],
   "perch.sidebar.sort": [(s) => (s.sortByAttention ? "attention" : "manual"), (v) => ({ sortByAttention: v === "attention" })],
