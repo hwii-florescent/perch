@@ -344,6 +344,7 @@ pub fn window_from(data: &Value, model: &Model) -> WindowState {
         zoom: 1.,
         notifications,
         new_tab: 0,
+        terminals: Default::default(),
     }
 }
 

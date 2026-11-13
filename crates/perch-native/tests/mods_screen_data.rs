@@ -27,23 +27,39 @@ const SCREENS: [&str; 9] = [
     "new-session",
 ];
 
-const NO_FILE_TABS: &str =
-    "the native strip holds sessions only: no file, review or browser tabs, and so no file tab \
-     on screen";
+/// The states whose web strip also holds file, review and browser tabs. The native strip holds
+/// sessions only, so only the web's session tabs are compared there; the rest of
+/// `workspaceTabs` is compared as everywhere else.
+const SESSIONS_ONLY: &[(&str, &str)] = &[("tabs", "files-and-pages"), ("pane-header", "corner")];
+
+const FILE_FOCUSED: &str = "a file tab has the focus on the web; the native strip holds sessions \
+     only, so its focus stays on the window's session";
 
 /// Every difference the native client cannot remove, and why.
 const EXCEPTIONS: &[Exception] = &[
     Exception {
         screen: "tabs",
         states: &["files-and-pages"],
-        path: "workspaceTabs",
-        reason: NO_FILE_TABS,
+        path: "workspaceTabs.activeId",
+        reason: FILE_FOCUSED,
+    },
+    Exception {
+        screen: "tabs",
+        states: &["files-and-pages"],
+        path: "workspaceTabs.tabs[2].state",
+        reason: FILE_FOCUSED,
     },
     Exception {
         screen: "pane-header",
         states: &["corner"],
-        path: "workspaceTabs",
-        reason: NO_FILE_TABS,
+        path: "workspaceTabs.activeId",
+        reason: FILE_FOCUSED,
+    },
+    Exception {
+        screen: "pane-header",
+        states: &["corner"],
+        path: "workspaceTabs.tabs[2].state",
+        reason: FILE_FOCUSED,
     },
     Exception {
         screen: "tabs",
@@ -83,6 +99,10 @@ fn compare(
 ) -> Vec<Difference> {
     let mut web = expected.clone();
     parity_screens::fill_wire_defaults(&mut web);
+    if SESSIONS_ONLY.contains(&(fixture.screen.as_str(), state)) {
+        let tabs = web["workspaceTabs"]["tabs"].as_array_mut().unwrap();
+        tabs.retain(|t| t["kind"] == "session");
+    }
     let props = fixture.props(state);
     let native = parity_screens::native_sdk(perch, &web, props.as_ref());
     let mut found = Vec::new();
@@ -154,6 +174,23 @@ fn a_changed_expected_value_fails() {
             web: json!("/somewhere/else"),
             native: json!("/Users/dev/code/perch"),
         }]
+    );
+}
+
+/// Beside the web's file tabs, its session tabs are still compared field for field.
+#[test]
+fn session_tabs_beside_file_tabs_are_compared() {
+    let fixture = ScreenFixture::load("tabs");
+    let perch = Perch::new();
+    parity_screens::publish(&perch, &fixture, "files-and-pages");
+    let mut expected = fixture.expected("files-and-pages");
+    let mut used = vec![false; EXCEPTIONS.len()];
+    assert!(compare(&perch, &fixture, "files-and-pages", &expected, &mut used).is_empty());
+    expected["workspaceTabs"]["tabs"][0]["label"] = json!("Another session");
+    let found = compare(&perch, &fixture, "files-and-pages", &expected, &mut used);
+    assert_eq!(
+        found.iter().map(|d| d.path.as_str()).collect::<Vec<_>>(),
+        ["workspaceTabs.tabs[0].label"]
     );
 }
 

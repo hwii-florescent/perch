@@ -31,6 +31,38 @@ export default class extends View {
 }
 "##;
 
+/// A mod that tries what a mod may and may not reach, and names a box for each outcome.
+const REACH: &str = r##"
+import { View, div } from "gpui-kit";
+import { readFile, writeFile } from "fs/promises";
+export default class extends View {
+  init(_props, cx) {
+    this.seen = {};
+    const note = (key, attempt) => attempt.then(() => "ok", () => "denied")
+      .then((how) => { this.seen[key] = how; cx.notify(); });
+    const now = (f) => { try { f(); return Promise.resolve(); } catch (e) { return Promise.reject(e); } };
+    note("own", now(() => {}).then(() => readFile("main.js", "utf8")));
+    note("home", now(() => {}).then(() => readFile("{home}", "utf8")));
+    note("other", now(() => {}).then(() => writeFile("{other}", "overwritten")));
+    note("data", now(() => {}).then(() => writeFile("{data}", "mine")));
+    note("clipboard", now(() => cx.read_from_clipboard()));
+  }
+  render() {
+    return div().id("reach-root").size_full().children(
+      Object.entries(this.seen).map(([k, v]) => div().id(`reach-${k}-${v}`).w(10).h(10)));
+  }
+}
+"##;
+
+fn draw_any(cx: &mut HeadlessAppContext, window: gpui::AnyWindowHandle) {
+    cx.update_window(window, |_, window: &mut Window, cx| {
+        probe::clear();
+        window.refresh();
+        let _ = window.draw(cx);
+    })
+    .unwrap();
+}
+
 fn box_mod(bg: &str, width: u32, text: &str) -> String {
     BOX.replace("{bg}", bg)
         .replace("{width}", &width.to_string())
@@ -289,7 +321,85 @@ export default class extends View {
         "the stock mod comes back"
     );
 
-    for window in [window.into(), stock.into()] {
+    // What a mod may reach: its own folder to read, its own data folder to write, the clipboard
+    // to write but not read. Not the home folder, not another mod's folder.
+    std::fs::write(scratch.join("home/secret"), "token").unwrap();
+    let reach = user.join("reach");
+    std::fs::create_dir_all(&reach).unwrap();
+    write(
+        &reach,
+        &REACH
+            .replace("{home}", &scratch.join("home/secret").display().to_string())
+            .replace("{other}", &dir.join("main.js").display().to_string())
+            .replace(
+                "{data}",
+                &user.join(".data/reach/note.txt").display().to_string(),
+            ),
+    );
+    let before = std::fs::read_to_string(dir.join("main.js")).unwrap();
+    let reached = cx
+        .open_window(size(px(WIDTH), px(HEIGHT)), |window, cx| {
+            host.view("reach", window, cx)
+        })
+        .unwrap();
+    let want = [
+        "reach-own-ok",
+        "reach-data-ok",
+        "reach-home-denied",
+        "reach-other-denied",
+        "reach-clipboard-denied",
+    ];
+    let all = (0..40).any(|_| {
+        cx.advance_clock(POLL);
+        cx.run_until_parked();
+        draw_any(&mut cx, reached.into());
+        std::thread::sleep(Duration::from_millis(25));
+        want.iter().all(|name| probe::record(name).is_some())
+    });
+    let drawn: Vec<String> = probe::records()
+        .into_keys()
+        .map(|n| n.to_string())
+        .filter(|n| n.starts_with("reach-"))
+        .collect();
+    assert!(all, "what the mod reached: {drawn:?}");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("main.js")).unwrap(),
+        before
+    );
+    assert_eq!(
+        std::fs::read_to_string(user.join(".data/reach/note.txt")).unwrap(),
+        "mine"
+    );
+
+    // A folder with the engine's own manifest is refused before the engine reads it (it would
+    // clone the manifest's git dependencies), and says why where a load failure is shown. This
+    // manifest lacks the engine's required `id`, so even unrefused nothing would be cloned.
+    let manifest = user.join("manifest");
+    std::fs::create_dir_all(&manifest).unwrap();
+    write(&manifest, &box_mod("#ff0000", 120, "Manifest"));
+    std::fs::write(
+        manifest.join("gpui-shell.json"),
+        r#"{"dependencies": {"x": {"git": "https://example.invalid/x.git", "rev": "main"}}}"#,
+    )
+    .unwrap();
+    let refused = cx
+        .open_window(size(px(WIDTH), px(HEIGHT)), |window, cx| {
+            host.view("manifest", window, cx)
+        })
+        .unwrap();
+    cx.advance_clock(POLL);
+    cx.run_until_parked();
+    let error = refused
+        .read_with(&cx, |view, _| view.load_error().map(str::to_string))
+        .unwrap();
+    assert!(
+        error
+            .as_deref()
+            .is_some_and(|e| e.contains("gpui-shell.json")),
+        "{error:?}"
+    );
+
+    for window in [window.into(), stock.into(), reached.into(), refused.into()] {
         cx.update_window(window, |_, window, _| window.remove_window())
             .unwrap();
     }

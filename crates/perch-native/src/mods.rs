@@ -16,9 +16,11 @@
 //! files every [`POLL`] and reloads it in place when they change; when the user adds or removes an
 //! override folder it switches source. A new version that throws while loading never replaces
 //! the one on screen ([`ModView::load_error`]); one that throws in `render()` leaves the last good
-//! render drawn under the shell's error banner ([`ModView::render_error`]). A mod is trusted code,
-//! as web mods are; it may read the home folder, write only the native mods folder, and keep
-//! `localStorage` in `<user dir>/.data/<id>/`.
+//! render drawn under the shell's error banner ([`ModView::render_error`]). A mod gets no more
+//! than a web mod ([`ModHost::policy_for`]): it reads its own folder, writes and keeps
+//! `localStorage` only in `<user dir>/.data/<id>/`, may write the clipboard but not read it, and
+//! runs nothing and reaches no network. A folder with a `gpui-shell.json` is refused, as the
+//! engine would clone its git dependencies while loading.
 //!
 //! The data a mod can import comes from host modules: [`ModHost::register_module`] takes a
 //! factory that builds one [`HostModule`] (for example `perch`: data, commands, theme tokens) for
@@ -426,18 +428,21 @@ impl ModHost {
         self.0.user_dir.join(".stock")
     }
 
-    /// The policy the next load runs under: what a mod may touch and the modules it imports.
-    fn policy_for(&self, id: &str, key: &str) -> Result<Policy> {
+    /// The policy the next load of mod `id` from `dir` runs under: what it may touch and the
+    /// modules it imports. No more than a web mod gets: it reads its own folder, writes only its
+    /// data folder, and may put text on the clipboard but not read it. No process, no network.
+    fn policy_for(&self, id: &str, key: &str, dir: &Path) -> Result<Policy> {
+        let data = self.0.user_dir.join(".data").join(id);
         let capabilities = Capabilities::new()
-            .read_roots(std::env::var_os("HOME").map(PathBuf::from))
-            .write_roots([self.0.user_dir.clone()])
+            .read_roots([dir.to_path_buf()])
+            .write_roots([data.clone()])
             .storage(true)
-            .clipboard_read(true)
+            .clipboard_read(false)
             .clipboard_write(true);
         let mut policy = Policy::new()
             .with_application(id)
             .with_capabilities(capabilities)
-            .with_storage_path(self.0.user_dir.join(".data").join(id).join("store.json"));
+            .with_storage_path(data.join("store.json"));
         for factory in self.0.modules.borrow().iter() {
             policy = policy
                 .with_host_module(factory(key))
@@ -522,6 +527,12 @@ impl ModView {
         }
         self.tried = current;
         let outcome = match &self.shown {
+            // The engine would clone the manifest's git dependencies while loading, outside any
+            // grant Perch gives: a Perch mod is its own files.
+            _ if info.dir.join(gpui_shell::plugin::MANIFEST_FILE).is_file() => Err(anyhow!(
+                "{} in a mod folder is not allowed: a Perch mod imports only its own files",
+                gpui_shell::plugin::MANIFEST_FILE
+            )),
             Some(shown) if shown.dir == info.dir => {
                 let root = shown.root.clone();
                 self.host.0.runtime.reload_now(&root, window, cx)
@@ -541,7 +552,7 @@ impl ModView {
     }
 
     fn load(&mut self, info: &ModInfo, window: &mut Window, cx: &mut App) -> Result<()> {
-        gpui_shell::policy::set_default(self.host.policy_for(&info.id, &self.key)?);
+        gpui_shell::policy::set_default(self.host.policy_for(&info.id, &self.key, &info.dir)?);
         let root = self.host.0.runtime.try_load(&info.dir, window, cx);
         gpui_shell::policy::set_default(Policy::new());
         let root = root?;
@@ -781,5 +792,47 @@ mod tests {
         std::fs::write(dir.join("main.js"), "ab").unwrap();
         assert_ne!(stamp(&dir), before);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The notices name every vendored file Perch changed (marked `PERCH:`) and the React
+    /// packages the runtime bundles.
+    #[test]
+    fn notices_name_every_perch_change_and_the_bundled_react() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let notices = std::fs::read_to_string(root.join("THIRD_PARTY_NOTICES.md")).unwrap();
+        let mut dirs = vec![root.join("vendor")];
+        let mut changed = Vec::new();
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else if std::fs::read(&path)
+                    .is_ok_and(|bytes| bytes.windows(6).any(|w| w == b"PERCH:"))
+                {
+                    let relative = path.strip_prefix(&root).unwrap().to_string_lossy();
+                    changed.push(relative.replace('\\', "/"));
+                }
+            }
+        }
+        assert!(changed.len() >= 10, "found {changed:?}");
+        let missing: Vec<&String> = changed
+            .iter()
+            .filter(|p| !notices.contains(&format!("`{p}`")))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "not in THIRD_PARTY_NOTICES.md: {missing:?}"
+        );
+        let runtime = include_str!("../mods/react-runtime/runtime.mjs");
+        for (package, file) in [
+            ("React", "react.production.js"),
+            ("`react/jsx-runtime`", "react-jsx-runtime.production.js"),
+            ("`react-reconciler`", "react-reconciler.production.js"),
+            ("`scheduler`", "scheduler.production.js"),
+        ] {
+            assert!(runtime.contains(file), "the runtime bundles {file}");
+            assert!(notices.contains(package), "the notices name {package}");
+        }
     }
 }

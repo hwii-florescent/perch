@@ -20,7 +20,6 @@
 use super::theme::{self, Theme};
 use super::ModHost;
 use crate::actions::ACTIONS;
-use crate::client::Command;
 use crate::keymap::{all_shortcuts, Keymap, Scope, TYPED};
 use crate::sidebar::navigation::{self, AgentList, Store, View};
 use crate::sidebar::{Model, KNOWN_AGENTS, LOCAL, MANIFEST_CAPABILITY};
@@ -126,6 +125,8 @@ pub struct WindowState {
     /// How many times the window asked the tab strip for a new tab (Cmd+T): the strip opens its
     /// New session menu at its "+" on each.
     pub new_tab: u64,
+    /// The open tabs whose terminal is known to be `running` or `exited`; any other is unknown.
+    pub terminals: HashMap<String, &'static str>,
 }
 
 #[derive(Default)]
@@ -222,6 +223,7 @@ impl Perch {
                 zoomed: tabs.zoomed(),
                 zoom: ws.zoom_factor(),
                 new_tab: ws.new_tab_asks(),
+                terminals: ws.terminal_states(cx),
                 notifications: ws
                     .notifications()
                     .iter()
@@ -305,8 +307,10 @@ impl Perch {
         }
     }
 
-    /// Screen `key` is closed: its props go.
+    /// Screen `key` is closed: its props go, and what it read (a view made for the key again
+    /// reads afresh).
     pub fn clear_props(&self, key: &str) {
+        self.0.reads.borrow_mut().remove(key);
         if self.0.data.borrow_mut().props.remove(key).is_some() {
             self.bump(&format!("props:{key}"));
         }
@@ -591,36 +595,6 @@ impl Perch {
             (attached.handle, attached.workspace.clone())
         };
         let workspace = workspace.upgrade().ok_or("The window is gone.")?;
-        if id == "app.theme" {
-            // The core keeps the choice, for every screen.
-            let name = args.and_then(|a| a.get("name")).cloned();
-            if let Some(name) = name {
-                let sidebar = workspace.read(cx).sidebar().clone();
-                sidebar
-                    .read(cx)
-                    .send(Command::UpdateSettings(json!({ "theme": name })));
-            }
-            return Ok(());
-        }
-        if id == "session.open" {
-            let session = args
-                .and_then(|a| a.get("id"))
-                .and_then(Value::as_str)
-                .ok_or("This command needs {id}.")?
-                .to_string();
-            let found = self
-                .store()
-                .sessions
-                .iter()
-                .find(|s| s.id == session)
-                .map(|s| (s.host_id.clone(), s.cli_provider_id.clone()))
-                .ok_or_else(|| format!("No session {session}."))?;
-            let sidebar = workspace.read(cx).sidebar().clone();
-            sidebar.update(cx, |sidebar, cx| {
-                sidebar.open(found.0, session, found.1, cx)
-            });
-            return Ok(());
-        }
         handle
             .update(cx, |_, window, cx| {
                 workspace.update(cx, |ws, cx| ws.run_command(id, args, window, cx))
@@ -885,11 +859,17 @@ impl Perch {
         Ok(HostValue::Null)
     }
 
+    /// A mod opens screen `id` with `props`. `busy` (a confirmation whose action is running,
+    /// which Escape and its buttons cannot end) is the window's to set: dropped here, so a mod
+    /// cannot open a screen nothing closes.
     fn open_screen(
         &self,
         id: &str,
-        props: Value,
+        mut props: Value,
     ) -> Result<futures::channel::oneshot::Receiver<Result<Value, String>>, HostError> {
+        if let Some(fields) = props.as_object_mut() {
+            fields.remove("busy");
+        }
         let (tx, rx) = futures::channel::oneshot::channel();
         let attached = self.0.attached.borrow();
         let attached = attached
@@ -1192,7 +1172,11 @@ impl Perch {
                     "pinned": false,
                     "order": Value::Null,
                     "focused": data.window.active.as_deref() == Some(s.id.as_str()),
-                    "state": if !reachable { "host-unavailable" } else if open { "running" } else { "unknown" },
+                    "state": if !reachable {
+                        "host-unavailable"
+                    } else {
+                        data.window.terminals.get(&s.id).copied().unwrap_or("unknown")
+                    },
                 });
                 if let Some(w) = &s.workspace_id {
                     record["workspaceId"] = json!(w);
@@ -1630,6 +1614,20 @@ mod tests {
         ] {
             assert!(notice_from(&bad).is_err(), "{bad} is refused");
         }
+    }
+
+    #[test]
+    fn a_screen_that_goes_forgets_what_it_read() {
+        let perch = Perch::new();
+        for key in ["pane-header#a", "pane-header#b"] {
+            perch.set_props(key, json!({ "id": key }));
+            perch.read(key, &format!("props:{key}"));
+            perch.read(key, STORE);
+        }
+        perch.clear_props("pane-header#a");
+        let reads = perch.0.reads.borrow();
+        assert!(!reads.contains_key("pane-header#a"), "the copy that went");
+        assert_eq!(reads["pane-header#b"].len(), 2, "the one still on screen");
     }
 
     #[test]

@@ -14,7 +14,7 @@ use gpui::{
 };
 use gpui_shell::{HostArguments, HostModule, HostResult, HostValue};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// The module's TypeScript face.
@@ -27,11 +27,17 @@ const MAX_MARKUP: usize = 256 * 1024;
 /// Icons kept decoded, by markup and colour; cleared whole when it grows past this.
 const CACHE: usize = 512;
 
+/// The longest side, in device pixels, an icon is rasterised at (GPUI's own cap is 8192, 256 MB
+/// a frame); one drawn larger is scaled up from this.
+const MAX_SIDE: f32 = 256.;
+
 /// Text measured before the shaper's cache is started afresh (it keeps every line it laid out).
 const MEASURED: usize = 4096;
 
 thread_local! {
     static ICONS: RefCell<HashMap<(String, String, u32), Arc<RenderImage>>> = RefCell::default();
+    /// The markup (and colour) already reported as not drawable, so a frame does not repeat it.
+    static REPORTED: RefCell<HashSet<u64>> = RefCell::default();
     /// The app's text system, for `textWidth`, with how many lines it has measured.
     static TEXT: RefCell<Option<(Arc<gpui::TextSystem>, WindowTextSystem, usize)>> = const { RefCell::new(None) };
 }
@@ -63,7 +69,9 @@ fn icon(props: &HostValue, scale: f32, cx: &App) -> AnyElement {
     match image(text("markup"), text("color"), scale, cx) {
         Ok(image) => gpui::img(image).size_full().into_any_element(),
         Err(error) => {
-            eprintln!("perch-native: perch-react Icon: {error}");
+            if first_report(text("markup"), text("color")) {
+                eprintln!("perch-native: perch-react Icon: {error}");
+            }
             gpui::div().size_full().into_any_element()
         }
     }
@@ -128,7 +136,7 @@ fn image(markup: &str, color: &str, scale: f32, cx: &App) -> Result<Arc<RenderIm
     }
     let image = cx
         .svg_renderer()
-        .render_single_frame(bytes.as_bytes(), scale)
+        .render_single_frame(bytes.as_bytes(), raster_scale(bytes.as_bytes(), scale)?)
         .map_err(|e| format!("the markup is not an SVG GPUI can draw: {e}"))?;
     ICONS.with(|icons| {
         let mut icons = icons.borrow_mut();
@@ -138,6 +146,34 @@ fn image(markup: &str, color: &str, scale: f32, cx: &App) -> Result<Arc<RenderIm
         icons.insert(key, image.clone());
     });
     Ok(image)
+}
+
+/// The scale to rasterise `svg` at for a window at `scale`: that, unless the SVG's own size would
+/// make a side longer than [`MAX_SIDE`].
+fn raster_scale(svg: &[u8], scale: f32) -> Result<f32, String> {
+    let tree = usvg::Tree::from_data(svg, &usvg::Options::default())
+        .map_err(|e| format!("the markup is not an SVG GPUI can draw: {e}"))?;
+    let size = tree.size();
+    let side = size.width().max(size.height()) * scale * gpui::SMOOTH_SVG_SCALE_FACTOR;
+    Ok(if side > MAX_SIDE {
+        scale * MAX_SIDE / side
+    } else {
+        scale
+    })
+}
+
+/// True the first time `markup` in `color` fails to draw.
+fn first_report(markup: &str, color: &str) -> bool {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (markup, color).hash(&mut hasher);
+    REPORTED.with(|reported| {
+        let mut reported = reported.borrow_mut();
+        if reported.len() >= CACHE {
+            reported.clear();
+        }
+        reported.insert(hasher.finish())
+    })
 }
 
 /// The markup to draw: checked, `currentColor` replaced by `color`.
@@ -190,5 +226,32 @@ mod tests {
         assert!(paint(markup, "red").is_err());
         assert!(paint(&format!("<svg>{}</svg>", " ".repeat(MAX_MARKUP)), "").is_err());
         module().validate().expect("declarations and exports agree");
+    }
+
+    #[test]
+    fn a_huge_svg_is_rasterised_no_larger_than_an_icon_needs() {
+        let svg = |w: u32, h: u32| {
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}"><rect width="1" height="1"/></svg>"#
+            )
+        };
+        let sixteen = raster_scale(svg(16, 16).as_bytes(), 2.).unwrap();
+        assert_eq!(sixteen, 2., "a small icon keeps the window's scale");
+        for (w, h) in [(100_000, 100_000), (1, 100_000), (100_000, 1)] {
+            let scale = raster_scale(svg(w, h).as_bytes(), 2.).unwrap();
+            let side = w.max(h) as f32 * scale * gpui::SMOOTH_SVG_SCALE_FACTOR;
+            assert!(side <= MAX_SIDE + 0.5, "{w}x{h} drawn {side} px a side");
+        }
+        assert!(raster_scale(b"<svg", 2.).is_err());
+    }
+
+    #[test]
+    fn a_markup_that_cannot_be_drawn_is_reported_once() {
+        assert!(first_report("<svg broken", "#ffffff"));
+        assert!(!first_report("<svg broken", "#ffffff"));
+        assert!(
+            first_report("<svg broken", "#000000"),
+            "another colour is another icon"
+        );
     }
 }

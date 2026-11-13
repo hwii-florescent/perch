@@ -332,6 +332,23 @@ impl Workspace {
             .collect()
     }
 
+    /// What is known of each open tab's terminal (`perch.terminals()`' `state`): `running` while
+    /// it is attached, `exited` once the core said its shell ended. A tab missing here is unknown:
+    /// attaching, reattaching, parked or never attached.
+    pub fn terminal_states(&self, cx: &App) -> HashMap<String, &'static str> {
+        self.panes
+            .iter()
+            .filter_map(|(id, pane)| {
+                let state = match pane.view.as_ref()?.read(cx).status() {
+                    Status::Live => "running",
+                    Status::Exited(_) => "exited",
+                    _ => return None,
+                };
+                Some((id.clone(), state))
+            })
+            .collect()
+    }
+
     /// The session of the tab with the keyboard.
     pub fn open(&self) -> Option<&OpenSession> {
         Some(&self.panes.get(self.tabs.active()?)?.open)
@@ -902,6 +919,10 @@ impl Workspace {
             }
             _ => {}
         }
+        // `perch.terminals()` reports each terminal's state, read from the window on a change.
+        if matches!(event, TerminalEvent::Status(_)) {
+            cx.notify();
+        }
     }
 
     /// The connection of a terminal dropped. The shell is not known to have ended, so the screen
@@ -1264,6 +1285,21 @@ impl Workspace {
                     return Err("Nothing is open to close.".into());
                 }
             }
+            "session.open" => {
+                let session = text("id").ok_or("This command needs {id}.")?.to_string();
+                let (host, provider) = self
+                    .sidebar
+                    .read(cx)
+                    .model()
+                    .store
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == session)
+                    .map(|s| (s.host_id.clone(), s.cli_provider_id.clone()))
+                    .ok_or_else(|| format!("No session {session}."))?;
+                self.sidebar
+                    .update(cx, |sidebar, cx| sidebar.open(host, session, provider, cx));
+            }
             "notification.open" | "notification.dismiss" => {
                 let id = text("id").ok_or("This command needs {id}.")?;
                 let at = self
@@ -1458,7 +1494,14 @@ impl Workspace {
                     Some(result)
                 });
                 match own {
-                    Some(result) => result?,
+                    Some(result) => {
+                        result?;
+                        // The core keeps the theme, for every screen.
+                        if name == "app.theme" {
+                            let theme = json!({ "theme": text("name") });
+                            self.sidebar.read(cx).send(Command::UpdateSettings(theme));
+                        }
+                    }
                     None => {
                         let handled = self
                             .sidebar
