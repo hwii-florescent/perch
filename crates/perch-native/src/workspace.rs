@@ -35,7 +35,7 @@ use crate::settings::{
     self, next_choice, scrollback_from_text, stepped, Change, CONTRAST, MAX_SCROLLBACK,
     MIN_SCROLLBACK, OPACITY, OPTION_AS_ALT, PADDING, TOAST_DELIVERY,
 };
-use crate::sidebar::{Alert, Heard, Provider, LOCAL};
+use crate::sidebar::{navigation, Alert, Heard, Provider, LOCAL};
 use crate::tab_drag::{self, Drop, TabDrag};
 use crate::tabs::{Dir, Node, Side, Tabs};
 use crate::terminal::actions::{Action, Scroll};
@@ -705,6 +705,42 @@ impl Workspace {
         Ok(())
     }
 
+    /// The session `id` names, when the core has it.
+    fn known_session(&self, id: Option<&str>, cx: &App) -> Result<String, String> {
+        let id = id.ok_or("This command needs {id}.")?;
+        let model = self.sidebar.read(cx).model();
+        model
+            .store
+            .sessions
+            .iter()
+            .any(|s| s.id == id)
+            .then(|| id.to_string())
+            .ok_or_else(|| format!("There is no session {id}."))
+    }
+
+    fn known_project(&self, id: &str, cx: &App) -> Result<(), String> {
+        let model = self.sidebar.read(cx).model();
+        model
+            .store
+            .projects
+            .iter()
+            .any(|p| p.id == id)
+            .then_some(())
+            .ok_or_else(|| format!("There is no project {id}."))
+    }
+
+    fn known_workspace(&self, id: Option<&str>, cx: &App) -> Result<String, String> {
+        let id = id.ok_or("This command needs {id}.")?;
+        let model = self.sidebar.read(cx).model();
+        model
+            .store
+            .workspaces
+            .iter()
+            .any(|w| w.id == id)
+            .then(|| id.to_string())
+            .ok_or_else(|| format!("There is no workspace {id}."))
+    }
+
     /// The pointer moved during a press on a tab: once it is a drag, where a drop would land,
     /// drawn by the `tab-drag` screen.
     fn drag_moved(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
@@ -765,10 +801,8 @@ impl Workspace {
                 target,
                 side: Some(side),
                 ..
-            } if self.tabs.contains(&target) => {
-                if self.tabs.drop_beside(&drag.id, &target, side) {
-                    self.after_change(cx);
-                }
+            } if self.tabs.contains(&target) && self.tabs.drop_beside(&drag.id, &target, side) => {
+                self.after_change(cx);
             }
             _ => {}
         }
@@ -1578,6 +1612,180 @@ impl Workspace {
                     return Err(format!("Session {id} has no tab in this window."));
                 }
                 self.close(&id, cx);
+            }
+            // The sidebar's actions on what the core keeps: each names its target, and one the
+            // core does not know is refused, so a command never acts on another.
+            "session.close" => {
+                let id = self.known_session(text("id"), cx)?;
+                // The tab goes when the core says the session is deleted.
+                self.sidebar
+                    .read(cx)
+                    .send(Command::DeleteSession { session_id: id });
+            }
+            "session.move" => {
+                let id = self.known_session(text("id"), cx)?;
+                let target = self.known_session(text("target"), cx)?;
+                let siblings: Vec<String> = args
+                    .and_then(|a| a.get("siblings"))
+                    .and_then(Value::as_array)
+                    .and_then(|list| {
+                        list.iter()
+                            .map(|v| v.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .ok_or("This command needs {siblings: [ids…]}.")?;
+                let after = args.and_then(|a| a.get("after")) == Some(&Value::Bool(true));
+                let store = self.sidebar.read(cx).model().store.clone();
+                let host = store
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == id)
+                    .map(|s| s.host_id.clone())
+                    .unwrap_or_else(|| LOCAL.into());
+                // ponytail: the group is the sidebar's siblings, not also each workspace's strip
+                // order as the web's `moveChat` refills; the native strip keeps no order of its own.
+                let mut group: Vec<String> = siblings.clone();
+                for extra in [&id, &target] {
+                    if !group.contains(extra) {
+                        group.push(extra.clone());
+                    }
+                }
+                let live = store
+                    .sessions
+                    .iter()
+                    .filter(|s| s.host_id == host)
+                    .map(|s| s.id.clone())
+                    .collect();
+                let core = store
+                    .order
+                    .get(&host)
+                    .map(|o| o.1.clone())
+                    .unwrap_or_default();
+                let moved = navigation::move_beside(&group, &id, &target, after);
+                let sessions = navigation::write_scope(&core, &moved, Some(&live));
+                self.sidebar.read(cx).send(Command::SetOrder {
+                    host_id: host,
+                    projects: None,
+                    sessions: Some(sessions),
+                });
+            }
+            "project.move" => {
+                let store = self.sidebar.read(cx).model().store.clone();
+                let project = |key: &str| {
+                    let id = text(key).ok_or(format!("This command needs {{{key}}}."))?;
+                    store
+                        .projects
+                        .iter()
+                        .find(|p| p.id == id)
+                        .cloned()
+                        .ok_or(format!("There is no project {id}."))
+                };
+                let (moved, target) = (project("id")?, project("target")?);
+                let after = args.and_then(|a| a.get("after")) == Some(&Value::Bool(true));
+                let view = navigation::View {
+                    host_id: moved.host_id.clone(),
+                    ..Default::default()
+                };
+                let shown: Vec<String> = navigation::navigation(&store, &view)
+                    .projects
+                    .into_iter()
+                    .map(|p| p.id)
+                    .collect();
+                let core = store
+                    .order
+                    .get(&moved.host_id)
+                    .map(|o| o.0.clone())
+                    .unwrap_or_default();
+                let order = navigation::move_beside(&shown, &moved.id, &target.id, after);
+                self.sidebar.read(cx).send(Command::SetOrder {
+                    host_id: moved.host_id,
+                    projects: Some(navigation::write_scope(&core, &order, None)),
+                    sessions: None,
+                });
+            }
+            "project.close" => {
+                let id = text("id").ok_or("This command needs {id}.")?.to_string();
+                // As the web's: the sidebar asks first, so the command itself needs the answer.
+                if args.and_then(|a| a.get("confirmed")) != Some(&Value::Bool(true)) {
+                    return Err("This ends the project's agents and shells: pass {confirmed: true} to go ahead.".into());
+                }
+                self.known_project(&id, cx)?;
+                self.sidebar
+                    .read(cx)
+                    .send(Command::RemoveProject { project_id: id });
+            }
+            "project.rename" => {
+                let id = text("id").ok_or("This command needs {id}.")?.to_string();
+                self.known_project(&id, cx)?;
+                let name = text("name").unwrap_or_default().trim().to_string();
+                self.sidebar.read(cx).send(Command::RenameProject {
+                    project_id: id,
+                    name,
+                });
+            }
+            "project.new" => {
+                let folder = text("folder")
+                    .ok_or(r#"This command needs {folder: "/path"}."#)?
+                    .to_string();
+                if args.is_some_and(|a| a.get("argv").is_some() || a.get("task").is_some()) {
+                    return Err(
+                        "The native window cannot run a program in a new project yet.".into(),
+                    );
+                }
+                let host = text("hostId").unwrap_or(LOCAL).to_string();
+                self.sidebar.read(cx).send(Command::CreateProject {
+                    host_id: host,
+                    path: folder,
+                    name: text("name").map(str::to_string),
+                });
+            }
+            "workspace.open" => {
+                let id = self.known_workspace(text("id"), cx)?;
+                // Its session last shown here, else the workspace alone (the native window has no
+                // start screen).
+                let store = self.sidebar.read(cx).model().store.clone();
+                let last = self.tabs.strip().iter().rev().find(|tab| {
+                    store
+                        .sessions
+                        .iter()
+                        .any(|s| s.id == **tab && s.workspace_id.as_deref() == Some(id.as_str()))
+                });
+                match last.cloned() {
+                    Some(tab) => self.show_session(&tab, cx)?,
+                    None => {
+                        self.run_command("workspace.focus", Some(&json!({ "id": id })), window, cx)?
+                    }
+                }
+            }
+            "workspace.hide" => {
+                let id = self.known_workspace(text("id"), cx)?;
+                let hidden = args.and_then(|a| a.get("hidden")) != Some(&Value::Bool(false));
+                self.sidebar.read(cx).send(Command::HideWorkspace {
+                    workspace_id: id,
+                    hidden,
+                });
+            }
+            "workspace.restore" => {
+                let id = self.known_workspace(text("id"), cx)?;
+                self.sidebar
+                    .read(cx)
+                    .send(Command::RestoreWorkspace { workspace_id: id });
+            }
+            "workspace.rename" => {
+                let id = self.known_workspace(text("id"), cx)?;
+                let name = text("name").unwrap_or_default().trim().to_string();
+                self.sidebar.read(cx).send(Command::RenameWorkspace {
+                    workspace_id: id,
+                    name,
+                });
+            }
+            "host.refresh" => {
+                let id = text("id").ok_or("This command needs {id}.")?.to_string();
+                let store = &self.sidebar.read(cx).model().store;
+                if id != LOCAL && !store.host_entries.iter().any(|h| h.id == id) {
+                    return Err(format!("No host {id}."));
+                }
+                self.sidebar.read(cx).send(Command::RefreshHost(id));
             }
             "agent.focus" => {
                 let id = text("id")

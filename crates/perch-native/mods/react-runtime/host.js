@@ -27,15 +27,11 @@
 // draws and its other actions work: an overlay with no screen (or whose screen no mod draws) closes at once and says
 // so on stderr, session folders are empty, the add-project flow does not run and a row drag stays a press. A tab's
 // press (`beginTabDrag`) is the window's from then on (`tab.beginDrag`, with where the strip's tabs are): it follows
-// the pointer, draws the `tab-drag` screen and moves or splits the tab once it is let go. A
-// workspace line's `workspace.open` runs `workspace.focus` (`STAND_IN`); other commands the module lacks are refused
-// by it and logged.
+// the pointer, draws the `tab-drag` screen and moves or splits the tab once it is let go. Commands the module and the
+// window lack are refused by it and logged.
 import * as perch from "perch";
 import { Icon, textWidth } from "perch-react";
 import { ICONS, LETTERS, LETTER } from "./agent-icons.js";
-
-/** Commands the module does not run yet, and the one it does that comes closest. */
-const STAND_IN = { "workspace.open": "workspace.focus" };
 
 export const INERT = [
   "shortcutFor",
@@ -276,8 +272,7 @@ export function copyFor(cx, screen) {
       perch.startSession(hostId, cwd ?? undefined, agent).catch(answer((error) => console.error(`perch.startSession: ${error?.message ?? error}`)));
     },
     command(name, args) {
-      const id = STAND_IN[name] ?? name;
-      perch.run(id, args && Object.keys(args).length ? args : undefined).catch(answer((error) => console.error(`perch.run ${name}: ${error?.message ?? error}`)));
+      perch.run(name, args && Object.keys(args).length ? args : undefined).catch(answer((error) => console.error(`perch.run ${name}: ${error?.message ?? error}`)));
       return true;
     },
     // The web's own marks (`agent-icons.js`, rendered from its `AgentIcon`); a provider without one gets the letter

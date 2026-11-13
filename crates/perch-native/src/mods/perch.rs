@@ -535,7 +535,8 @@ impl Perch {
                 self.bump(VIEW);
                 Ok(())
             })(),
-            "workspace.focus" => (|| {
+            // `workspace.open` is the window's too (its session last shown), once this has run.
+            "workspace.focus" | "workspace.open" => (|| {
                 let workspace = text("id").ok_or("This command needs {id}.")?;
                 if !self.store().workspaces.iter().any(|w| w.id == workspace) {
                     return Err(format!("No workspace {workspace}."));
@@ -544,6 +545,69 @@ impl Perch {
                 self.bump(VIEW);
                 Ok(())
             })(),
+            // The project's checkout the window lands in, as the web's `focusWorkspaceProject`.
+            "project.focus" | "project.select" | "project.next" | "project.prev" => (|| {
+                let store = self.store();
+                let view = self.view(None);
+                let shown: Vec<String> = navigation::navigation(&store, &view)
+                    .projects
+                    .into_iter()
+                    .map(|p| p.id)
+                    .collect();
+                let index = args
+                    .get("index")
+                    .and_then(Value::as_f64)
+                    .filter(|n| n.fract() == 0.0 && *n >= 1.0);
+                let current = view.workspace_id.as_ref().and_then(|w| {
+                    let project = &store.workspaces.iter().find(|x| x.id == *w)?.project_id;
+                    shown.iter().position(|p| p == project)
+                });
+                let step = |by: isize| {
+                    let n = shown.len() as isize;
+                    (n > 0).then(|| {
+                        let at = current.map_or(if by > 0 { 0 } else { n - 1 }, |i| {
+                            (i as isize + by).rem_euclid(n)
+                        });
+                        shown[at as usize].clone()
+                    })
+                };
+                let project = match id {
+                    "project.next" => step(1).ok_or("There are no projects.")?,
+                    "project.prev" => step(-1).ok_or("There are no projects.")?,
+                    "project.select" if index.is_some() => {
+                        let n = index.unwrap_or(0.) as usize;
+                        shown
+                            .get(n - 1)
+                            .cloned()
+                            .ok_or_else(|| format!("There is no project {n}."))?
+                    }
+                    _ => {
+                        let wanted = text("id").ok_or(if id == "project.select" {
+                            "This command needs {index} or {id}."
+                        } else {
+                            "This command needs {id}."
+                        })?;
+                        if !store.projects.iter().any(|p| p.id == wanted) {
+                            return Err(format!("There is no project {wanted}."));
+                        }
+                        wanted
+                    }
+                };
+                let (workspace, _) = navigation::landing_workspace(&store, &project, None)
+                    .ok_or_else(|| format!("Project {project} has no workspace yet."))?;
+                let host = store
+                    .projects
+                    .iter()
+                    .find(|p| p.id == project)
+                    .map(|p| p.host_id.clone());
+                let mut data = self.0.data.borrow_mut();
+                data.workspace_id = Some(workspace);
+                data.host_id = host.or(data.host_id.take());
+                drop(data);
+                self.bump(VIEW);
+                Ok(())
+            })(
+            ),
             "project.fold" => (|| {
                 let project = text("id").ok_or("This command needs {id}.")?;
                 let mut data = self.0.data.borrow_mut();
@@ -802,8 +866,10 @@ impl Perch {
                     Some(result) => {
                         result.map_err(HostError::new)?;
                         run.flush_later();
-                        // `app.theme` is also the core's to keep.
-                        if id == "app.theme" && run.0.attached.borrow().is_some() {
+                        // `app.theme` is also the core's to keep, and `workspace.open` also shows
+                        // the workspace's session in the window.
+                        let window_too = matches!(id.as_str(), "app.theme" | "workspace.open");
+                        if window_too && run.0.attached.borrow().is_some() {
                             let perch = run.clone();
                             gpui_shell::with_current_app(|cx| {
                                 cx.defer(move |cx| {
@@ -1231,8 +1297,16 @@ impl Perch {
 /// The commands this module answers for, with their titles and arguments. `session.open` and
 /// `app.theme` also reach the window (the sidebar opens the session, the core keeps the theme);
 /// every other command is the window's.
-const OWN: [(&str, &str, &str); 6] = [
+const OWN: [(&str, &str, &str); 10] = [
     ("session.open", "Go to a session", "{id}"),
+    ("project.focus", "Focus a project", "{id}"),
+    (
+        "project.select",
+        "Show a project by position (1 = first, as the sidebar orders them) or id",
+        "{index | id}",
+    ),
+    ("project.next", "Show the next project", "{}"),
+    ("project.prev", "Show the previous project", "{}"),
     ("host.select", "Show a host's projects and sessions", "{id}"),
     ("workspace.focus", "Focus a workspace", "{id}"),
     (
@@ -1250,7 +1324,7 @@ const OWN: [(&str, &str, &str); 6] = [
 
 /// Window commands beyond the keymap's: the web's ids the window can perform (some under the
 /// name its keys use), and the native ones screens need.
-const WINDOW_COMMANDS: [(&str, &str, &str); 12] = [
+const WINDOW_COMMANDS: [(&str, &str, &str); 23] = [
     (
         "session.start",
         "Start an agent in a folder on a host",
@@ -1291,6 +1365,45 @@ const WINDOW_COMMANDS: [(&str, &str, &str); 12] = [
         "{id}",
     ),
     ("notification.dismiss", "Put a notification away", "{id}"),
+    ("session.close", "Delete a session", "{id}"),
+    (
+        "session.move",
+        "Move a session beside another in the order the core keeps for every screen",
+        "{id, target, after, siblings}",
+    ),
+    (
+        "project.move",
+        "Move a project beside another in the order the core keeps for every screen",
+        "{id, target, after}",
+    ),
+    (
+        "project.close",
+        "Delete a project and end its sessions (the folder stays on disk); needs {confirmed: true}",
+        "{id, confirmed: true}",
+    ),
+    ("project.rename", "Rename a project", "{id, name}"),
+    (
+        "project.new",
+        "Add a folder as a project",
+        "{folder, name?, hostId?}",
+    ),
+    (
+        "workspace.open",
+        "Show a workspace: its session last shown here, else the workspace",
+        "{id}",
+    ),
+    (
+        "workspace.hide",
+        "Hide a linked worktree from the sidebar, or show it again",
+        "{id, hidden}",
+    ),
+    ("workspace.restore", "Wake a sleeping workspace", "{id}"),
+    ("workspace.rename", "Rename a workspace", "{id, name}"),
+    (
+        "host.refresh",
+        "Ask a host for its projects and workspaces again",
+        "{id}",
+    ),
 ];
 
 /// Plan usage, as the web's status bar asks for it (`usePlanUsage`, `refreshUsage`,

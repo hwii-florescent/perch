@@ -505,6 +505,55 @@ fn has(list: Option<&[String]>, wanted: &str) -> bool {
     list.is_some_and(|l| l.iter().any(|c| c == wanted))
 }
 
+/// `ids` with `id` moved just before `target`, or just after it; to the end when `target` is not
+/// among them (`moveBeside`).
+pub fn move_beside(ids: &[String], id: &str, target: &str, after: bool) -> Vec<String> {
+    let mut rest: Vec<String> = ids.iter().filter(|other| *other != id).cloned().collect();
+    let at = rest
+        .iter()
+        .position(|other| other == target)
+        .map_or(rest.len(), |at| at + usize::from(after));
+    if ids.iter().any(|other| other == id) {
+        rest.insert(at.min(rest.len()), id.to_string());
+    }
+    rest
+}
+
+/// Above this many ids, an order written is pruned to the live ones (`PRUNE_ABOVE`).
+const PRUNE_ABOVE: usize = 256;
+
+/// The core's order `list` with the ids of `scope` written in `scope`'s order into the slots
+/// they held, and those it did not hold after the last of them (`writeScope`): the ids out of
+/// scope keep their places, so a move in one group changes no other.
+pub fn write_scope(
+    list: &[String],
+    scope: &[String],
+    live: Option<&HashSet<String>>,
+) -> Vec<String> {
+    let in_scope: HashSet<&str> = scope.iter().map(String::as_str).collect();
+    let mut seen = HashSet::new();
+    let mut next = 0;
+    let mut last = None;
+    let mut out: Vec<String> = Vec::new();
+    for id in list.iter().filter(|id| seen.insert(id.as_str())) {
+        if in_scope.contains(id.as_str()) {
+            last = Some(out.len());
+            out.push(scope[next].clone());
+            next += 1;
+        } else {
+            out.push(id.clone());
+        }
+    }
+    let at = last.map_or(out.len(), |at| at + 1);
+    out.splice(at..at, scope[next..].iter().cloned());
+    match live {
+        Some(live) if out.len() > PRUNE_ABOVE => {
+            out.into_iter().filter(|id| live.contains(id)).collect()
+        }
+        _ => out,
+    }
+}
+
 /// `useNavigation`: the shown computer's projects, workspaces and sessions with Perch's rules.
 pub fn navigation(store: &Store, view: &View) -> Navigation {
     Builder::new(store, view).navigation()
@@ -1076,5 +1125,38 @@ pub fn hosts(store: &Store, active_id: &str) -> Hosts {
             branch,
         },
         connected: store.connected,
+    }
+}
+
+#[cfg(test)]
+mod order_tests {
+    use super::{move_beside, write_scope};
+
+    fn ids(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_move_lands_beside_its_target_and_writes_only_its_group() {
+        let group = ids(&["a", "b", "c"]);
+        assert_eq!(move_beside(&group, "a", "c", true), ids(&["b", "c", "a"]));
+        assert_eq!(move_beside(&group, "c", "a", false), ids(&["c", "a", "b"]));
+        assert_eq!(
+            move_beside(&group, "a", "gone", false),
+            ids(&["b", "c", "a"])
+        );
+        // The core's order holds another group (x, y) between: its ids keep their places, and a
+        // new id of the group goes after the group's last.
+        let core = ids(&["a", "x", "b", "y"]);
+        let scope = ids(&["b", "a", "c"]);
+        assert_eq!(
+            write_scope(&core, &scope, None),
+            ids(&["b", "x", "a", "c", "y"])
+        );
+        assert_eq!(
+            write_scope(&[], &scope, None),
+            scope,
+            "no order yet: the group's"
+        );
     }
 }
