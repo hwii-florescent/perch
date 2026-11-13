@@ -280,3 +280,18 @@ export function installGlobals(perch, target = globalThis) {
   if (!target.navigator) define(target, "navigator", navigator);
   return { document, window, globals };
 }
+
+/** The form `element` submits, as a browser's default action does: a submit button's (a `<button>` whose type is not
+ * `button` or `reset`), or a single-line text field's on Enter. `null` for anything else, or a disabled button. */
+export function submits(element, enter = false) {
+  const own = enter
+    ? element?.tagName === "input" && isTextField(element)
+    : element?.tagName === "button" && !/^(button|reset)$/.test(String(element.props.type ?? "submit")) && !element.props.disabled;
+  if (!own) return null;
+  for (let node = element.parentElement; node; node = node.parentElement) if (node.tagName === "form") return node;
+  return null;
+}
+
+/** Whether `element` is a field a person types a line of text into. */
+export const isTextField = (element) =>
+  element?.tagName === "textarea" || (element?.tagName === "input" && /^(text|search|url|email|tel|password|number|)$/.test(String(element.props.type ?? "")));

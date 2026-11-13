@@ -91,3 +91,29 @@ test("a click ticks a check box, and the source sees it in onChange", async () =
     handle.unmount();
   }
 });
+
+test("a form submits as a browser's does: its submit button clicked, or Enter in its text field", async () => {
+  const { runtime } = await loadSidebar();
+  const { createElement: h } = await import("react");
+  const submitted = [];
+  function Form() {
+    return h("form", { onSubmit: (e) => { e.preventDefault(); submitted.push("form"); } },
+      h("input", { autoFocus: true, defaultValue: "" }),
+      h("button", { type: "button", "data-testid": "plain" }, "Plain"),
+      h("button", { type: "submit", "data-testid": "save" }, "Save"));
+  }
+  const perch = { isMac: true, render() {}, error: (e) => { throw e; } };
+  const handle = runtime.mount(perch, Form, { container: { width: 200, height: 40 } });
+  try {
+    await new Promise((r) => setTimeout(r, 0));
+    const button = (testId) => handle.document.body.querySelector(`[data-testid="${testId}"]`);
+    handle.click(button("plain"));
+    assert.deepEqual(submitted, [], "a type=button does not submit");
+    handle.click(button("save"));
+    assert.deepEqual(submitted, ["form"], "the submit button submits");
+    assert.equal(handle.key({ key: "Enter" }), true);
+    assert.deepEqual(submitted, ["form", "form"], "Enter in its field submits");
+  } finally {
+    handle.unmount();
+  }
+});
