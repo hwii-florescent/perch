@@ -793,4 +793,46 @@ mod tests {
         assert_ne!(stamp(&dir), before);
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// The notices name every vendored file Perch changed (marked `PERCH:`) and the React
+    /// packages the runtime bundles.
+    #[test]
+    fn notices_name_every_perch_change_and_the_bundled_react() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let notices = std::fs::read_to_string(root.join("THIRD_PARTY_NOTICES.md")).unwrap();
+        let mut dirs = vec![root.join("vendor")];
+        let mut changed = Vec::new();
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else if std::fs::read(&path)
+                    .is_ok_and(|bytes| bytes.windows(6).any(|w| w == b"PERCH:"))
+                {
+                    let relative = path.strip_prefix(&root).unwrap().to_string_lossy();
+                    changed.push(relative.replace('\\', "/"));
+                }
+            }
+        }
+        assert!(changed.len() >= 10, "found {changed:?}");
+        let missing: Vec<&String> = changed
+            .iter()
+            .filter(|p| !notices.contains(&format!("`{p}`")))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "not in THIRD_PARTY_NOTICES.md: {missing:?}"
+        );
+        let runtime = include_str!("../mods/react-runtime/runtime.mjs");
+        for (package, file) in [
+            ("React", "react.production.js"),
+            ("`react/jsx-runtime`", "react-jsx-runtime.production.js"),
+            ("`react-reconciler`", "react-reconciler.production.js"),
+            ("`scheduler`", "scheduler.production.js"),
+        ] {
+            assert!(runtime.contains(file), "the runtime bundles {file}");
+            assert!(notices.contains(package), "the notices name {package}");
+        }
+    }
 }

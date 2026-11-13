@@ -272,21 +272,52 @@ it from its upstreams. Each copy keeps its upstream licence file and herdr's
 - `vendor/gpui-kit/` (`Cargo.toml`, `LICENSE-APACHE`, `crates/base`, `crates/fps`,
   `crates/shell` with `rquickjs-compat`): [longbridge/gpui-kit](https://github.com/longbridge/gpui-kit)
   at `1ccf011`, version 0.7.1, Apache-2.0 (Copyright 2024 - 2026 Longbridge); the
-  `rquickjs-compat` facade is MIT. Perch adds `src/probe.rs` and its hook in
-  `src/materialize.rs` (test builds only: the box, colours and font of each named element).
+  `rquickjs-compat` facade is MIT. Perch's changes, each marked `PERCH:`:
+  - `vendor/gpui-kit/Cargo.toml`: a header saying so.
+  - `vendor/gpui-kit/crates/shell/Cargo.toml`, `vendor/gpui-kit/crates/shell/src/probe.rs`,
+    `vendor/gpui-kit/crates/shell/src/materialize.rs` and the `probe` module in
+    `vendor/gpui-kit/crates/shell/src/lib.rs`: test builds only (`render-test-support`), the
+    laid-out box, colours and font of each named element.
+  - `vendor/gpui-kit/crates/shell/src/lib.rs`: the window a host function is called from, for
+    facts about it (its scale factor).
+  - `vendor/gpui-kit/crates/shell/src/style.rs`: OpenType font features, by tag and as CSS
+    `font-variant-numeric: tabular-nums` (`tnum`).
+  - `vendor/gpui-kit/crates/shell/src/entities.rs` and
+    `vendor/gpui-kit/crates/shell/src/materialize/components/scrollbar.rs`: a scroll request
+    made before a scroll area's first layout waits for it, and one made after is taken in the
+    same frame.
+  - `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/entity_api.rs` and
+    `vendor/gpui-kit/crates/shell/src/typings.rs`: a scroll handle's `item_bounds`, where a
+    child was last laid out, for a script that anchors something to it.
 - `vendor/quickjs-jit-runtime/`: the `jit` crate of
   [longbridge/quickjs-jit](https://github.com/longbridge/quickjs-jit) at `96593cd` with
   herdr's fix for longbridge/quickjs-jit#38, MIT (Copyright (c) 2020 Mees Delzenne,
-  (c) 2025 Rquickjs Contributors). Perch only quiets its unused-code warnings.
+  (c) 2025 Rquickjs Contributors). Perch only quiets its unused-code warnings
+  (`vendor/quickjs-jit-runtime/Cargo.toml`).
 - `vendor/gpui-pre/` and `vendor/gpui-pre-macos/`: the crates.io `gpui-pre` and
   `gpui-pre-macos` 0.3.8 (Zed's GPUI, Apache-2.0, Copyright 2022 - 2025 Zed Industries,
   Inc.), unchanged except for three of herdr's additions the shell names, each marked
   `PERCH:`: `AssetSource::image_resource` (a default method; nothing in this copy calls
-  it), `Application::with_activation_policy` and `ActivationPolicy::Prohibited` (with its
-  AppKit mapping in `gpui-pre-macos`). Herdr's other GPUI patches (idle wake, frame
-  capture, terminal metrics, image cache) are not taken.
+  it; `vendor/gpui-pre/src/assets.rs`), `Application::with_activation_policy` and
+  `ActivationPolicy::Prohibited` (`vendor/gpui-pre/src/app.rs`,
+  `vendor/gpui-pre/src/platform.rs`, with its AppKit mapping in
+  `vendor/gpui-pre-macos/src/platform.rs`). `vendor/gpui-pre/Cargo.toml` and
+  `vendor/gpui-pre-macos/Cargo.toml` say so in a header, and the latter quiets lints. Herdr's
+  other GPUI patches (idle wake, frame capture, terminal metrics, image cache) are not taken.
 
 The shell also pulls `quickjs-jit` (MIT, with QuickJS-ng's MIT C sources) and
 [LLRT](https://github.com/awslabs/llrt) modules (Apache-2.0) from git at the revisions
 `vendor/gpui-kit/crates/shell/Cargo.toml` pins. Apache-2.0 and MIT code may be combined
 into a GPL-3.0-only program; the licence texts stay beside each copy.
+
+## React in the native mod runtime
+
+`crates/perch-native/mods/react-runtime/runtime.mjs` (built from
+`crates/perch-native/mods-runtime/react/` and compiled into the native client) bundles
+[React](https://github.com/facebook/react) 19.2.8 (`react`, `react/jsx-runtime`),
+`react-reconciler` 0.33.0 and `scheduler` 0.27.0, MIT, Copyright (c) Meta Platforms, Inc.
+and affiliates. Each module keeps its `@license React` header in the bundle. `react-dom`
+19.2.8 (MIT, the same copyright) runs only at build time: `react-dom/server` renders the
+agent icons' SVG markup into `agent-icons.js`; none of its code ships. The bundle's own
+`react-dom` is Perch's (`mods-runtime/react/react-dom.mjs`).
