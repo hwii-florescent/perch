@@ -652,6 +652,13 @@ impl Perch {
                 "zoom",
                 reader(WINDOW, |perch, _| json!(perch.0.data.borrow().window.zoom)),
             )
+            // The scale factor of the window this mod is drawn in (physical pixels per logical
+            // pixel), read where the script runs, so it is the window's own and a mod can lay out
+            // on whole device pixels.
+            .function("scale", |_| {
+                gpui_shell::with_current(|window, _| to_host(&json!(window.scale_factor())))
+                    .ok_or_else(|| HostError::new("scale() is read while a mod draws."))
+            })
             .function("paneLook", |_| {
                 Ok(to_host(&json!({
                     "headerAt": "top",

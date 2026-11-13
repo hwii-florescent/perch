@@ -134,6 +134,8 @@ pub use runtime::{
     resolve_app_root,
 };
 pub use scope::{ScopePhase, with_current_app};
+// PERCH: the window a host function is called from, for facts about it (its scale factor).
+pub use scope::with_current;
 pub use snapshot::RenderSnapshot;
 pub use view::ScriptView;
 pub use watch::Watcher;
