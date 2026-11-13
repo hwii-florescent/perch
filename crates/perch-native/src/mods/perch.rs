@@ -119,6 +119,10 @@ pub struct WindowState {
     pub shown: Vec<String>,
     pub active: Option<String>,
     pub zoomed: bool,
+    /// The terminals' zoom factor (1 is 100%).
+    pub zoom: f32,
+    /// The in-app notifications, oldest first (`useNotifications`' items).
+    pub notifications: Vec<Value>,
 }
 
 #[derive(Default)]
@@ -134,6 +138,8 @@ struct Data {
     chosen_theme: Option<String>,
     /// The theme last put into gpui-base's global.
     applied: Option<Theme>,
+    /// What each screen was opened with, by its key (`perch.props()`).
+    props: HashMap<String, Value>,
 }
 
 /// Where window commands run.
@@ -145,9 +151,9 @@ struct Attached {
 
 struct Shared {
     data: RefCell<Data>,
-    revisions: RefCell<HashMap<&'static str, u64>>,
+    revisions: RefCell<HashMap<String, u64>>,
     /// Per mod id, the revision of each part it read when it last rendered.
-    reads: RefCell<HashMap<String, HashMap<&'static str, u64>>>,
+    reads: RefCell<HashMap<String, HashMap<String, u64>>>,
     hosts: RefCell<Vec<ModHost>>,
     attached: RefCell<Option<Attached>>,
     flush_queued: Cell<bool>,
@@ -203,13 +209,19 @@ impl Perch {
         let (model, window, open) = {
             let ws = workspace.read(cx);
             let tabs = ws.tabs();
+            let model = ws.sidebar().read(cx).model();
             let window = WindowState {
                 strip: tabs.strip().to_vec(),
                 shown: tabs.shown(),
                 active: tabs.active().map(str::to_string),
                 zoomed: tabs.zoomed(),
+                zoom: ws.zoom_factor(),
+                notifications: ws
+                    .notifications()
+                    .iter()
+                    .map(|n| notification_json(n, model))
+                    .collect(),
             };
-            let model = ws.sidebar().read(cx).model();
             let fresh = !Arc::ptr_eq(&model.store, &self.0.data.borrow().model.store);
             (
                 fresh.then(|| model.clone()),
@@ -263,6 +275,24 @@ impl Perch {
             data.window = window;
             drop(data);
             self.bump(WINDOW);
+        }
+    }
+
+    /// Gives screen `key` its props (`perch.props()`); a change re-renders it. Call
+    /// [`Self::flush`] after.
+    pub fn set_props(&self, key: &str, props: Value) {
+        let mut data = self.0.data.borrow_mut();
+        if data.props.get(key) != Some(&props) {
+            data.props.insert(key.to_string(), props);
+            drop(data);
+            self.bump(&format!("props:{key}"));
+        }
+    }
+
+    /// Screen `key` is closed: its props go.
+    pub fn clear_props(&self, key: &str) {
+        if self.0.data.borrow_mut().props.remove(key).is_some() {
+            self.bump(&format!("props:{key}"));
         }
     }
 
@@ -352,19 +382,24 @@ impl Perch {
         self.0.data.borrow().model.store.clone()
     }
 
-    fn bump(&self, part: &'static str) {
-        *self.0.revisions.borrow_mut().entry(part).or_default() += 1;
+    fn bump(&self, part: &str) {
+        *self
+            .0
+            .revisions
+            .borrow_mut()
+            .entry(part.to_string())
+            .or_default() += 1;
     }
 
     /// Notes that mod `id` read `part` at its current revision.
-    fn read(&self, id: &str, part: &'static str) {
+    fn read(&self, id: &str, part: &str) {
         let revision = self.0.revisions.borrow().get(part).copied().unwrap_or(0);
         self.0
             .reads
             .borrow_mut()
             .entry(id.to_string())
             .or_default()
-            .entry(part)
+            .entry(part.to_string())
             .or_insert(revision);
     }
 
@@ -374,7 +409,7 @@ impl Perch {
         let mut changed = HashSet::new();
         for (id, seen) in self.0.reads.borrow_mut().iter_mut() {
             for (part, revision) in seen.iter_mut() {
-                let now = revisions.get(part).copied().unwrap_or(0);
+                let now = revisions.get(part.as_str()).copied().unwrap_or(0);
                 if *revision != now {
                     *revision = now;
                     changed.insert(id.clone());
@@ -429,7 +464,7 @@ impl Perch {
                 }));
             }
         };
-        for (id, title, args) in OWN {
+        for (id, title, args) in OWN.iter().chain(&WINDOW_COMMANDS) {
             push(id, title, Some(args));
         }
         for shortcut in all_shortcuts() {
@@ -453,7 +488,9 @@ impl Perch {
     }
 
     fn known(&self, id: &str) -> bool {
-        OWN.iter().any(|(own, _, _)| *own == id)
+        OWN.iter()
+            .chain(&WINDOW_COMMANDS)
+            .any(|(own, _, _)| *own == id)
             || TYPED.iter().any(|(typed, _)| *typed == id)
             || all_shortcuts().any(|s| s.id == id && s.scope != Scope::Leader)
     }
@@ -591,7 +628,54 @@ impl Perch {
         };
         let sidebar_set = self.clone();
         let run = self.clone();
+        let start = self.clone();
+        let (props, props_id) = (self.clone(), id.clone());
+        let (close, close_id) = (self.clone(), id.clone());
         HostModule::new("perch")
+            .function("props", move |_| {
+                props.read(&props_id, &format!("props:{props_id}"));
+                let value = props.0.data.borrow().props.get(&*props_id).cloned();
+                Ok(to_host(&value.unwrap_or_else(|| json!({}))))
+            })
+            .function("close", move |args| {
+                let result = args.get(0).map(from_host).unwrap_or(Value::Null);
+                close.close_screen(&close_id, result)
+            })
+            .function(
+                "notifications",
+                reader(
+                    WINDOW,
+                    |perch, _| json!({ "items": perch.0.data.borrow().window.notifications }),
+                ),
+            )
+            .function(
+                "zoom",
+                reader(WINDOW, |perch, _| json!(perch.0.data.borrow().window.zoom)),
+            )
+            .function("paneLook", |_| {
+                Ok(to_host(&json!({
+                    "headerAt": "top",
+                    "headerReveal": "always",
+                    "headerHeight": super::screens::PANE_HEADER_HEIGHT,
+                })))
+            })
+            .function(
+                "providers",
+                reader(STORE, |perch, args| {
+                    let host = args.get(0).and_then(HostValue::as_str).unwrap_or(LOCAL);
+                    perch.providers(host)
+                }),
+            )
+            .async_function("startSession", move |args| {
+                let host = args.string(0)?.to_string();
+                let cwd = args.get(1).and_then(HostValue::as_str).map(str::to_string);
+                let agent = args.string(2)?.to_string();
+                let rx = start.in_window(
+                    "session.start",
+                    Some(json!({ "hostId": host, "cwd": cwd, "agent": agent })),
+                )?;
+                Ok(settled(rx))
+            })
             .declarations(module_body(DECLARATIONS))
             .function(
                 "navigation",
@@ -674,24 +758,62 @@ impl Perch {
                         }
                         let _ = tx.send(Ok(()));
                     }
-                    None => {
-                        let perch = run.clone();
-                        gpui_shell::with_current_app(|cx| {
-                            cx.defer(move |cx| {
-                                let _ = tx.send(perch.run_in_window(&id, options.as_ref(), cx));
-                            })
-                        })
-                        .ok_or_else(|| HostError::new("No app to run the command in."))?;
-                    }
+                    None => return Ok(settled(run.in_window(&id, options)?)),
                 }
-                Ok(async move {
-                    match rx.await {
-                        Ok(Ok(())) => Ok(HostValue::Bool(true)),
-                        Ok(Err(error)) => Err(HostError::new(error)),
-                        Err(_) => Err(HostError::new("The window went before the command ran.")),
-                    }
-                })
+                Ok(settled(rx))
             })
+    }
+
+    /// Runs window command `id` once the calling script has unwound; the promise settles with it.
+    fn in_window(
+        &self,
+        id: &str,
+        args: Option<Value>,
+    ) -> Result<futures::channel::oneshot::Receiver<Result<(), String>>, HostError> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let (perch, id) = (self.clone(), id.to_string());
+        gpui_shell::with_current_app(|cx| {
+            cx.defer(move |cx| {
+                let _ = tx.send(perch.run_in_window(&id, args.as_ref(), cx));
+            })
+        })
+        .ok_or_else(|| HostError::new("No app to run the command in."))?;
+        Ok(rx)
+    }
+
+    /// A floating screen closes itself with `result`; the window runs what it was opened for.
+    fn close_screen(&self, key: &str, result: Value) -> HostResult {
+        let attached = self.0.attached.borrow();
+        let attached = attached
+            .as_ref()
+            .ok_or_else(|| HostError::new("No window opened this screen."))?;
+        let (handle, workspace, key) =
+            (attached.handle, attached.workspace.clone(), key.to_string());
+        gpui_shell::with_current_app(|cx| {
+            cx.defer(move |cx| {
+                let Some(workspace) = workspace.upgrade() else {
+                    return;
+                };
+                let _ = handle.update(cx, |_, window, cx| {
+                    workspace.update(cx, |ws, cx| ws.screen_closed(&key, result, window, cx))
+                });
+            })
+        })
+        .ok_or_else(|| HostError::new("No app to close the screen in."))?;
+        Ok(HostValue::Null)
+    }
+
+    /// `hostId`'s agents by id and name, for a screen to tell them apart (and draw their icons).
+    fn providers(&self, host_id: &str) -> Value {
+        let store = self.store();
+        let list: Vec<Value> = store
+            .providers
+            .get(host_id)
+            .into_iter()
+            .flatten()
+            .map(|p| json!({ "id": p.id, "name": p.name }))
+            .collect();
+        json!(list)
     }
 
     fn theme_tokens(&self) -> Value {
@@ -770,6 +892,12 @@ impl Perch {
         }
         if let Some(branch) = session.and_then(|s| s.current_branch.clone()) {
             line["branch"] = json!(branch);
+        }
+        if let Some(tokens) = store.context_tokens {
+            line["contextTokens"] = json!(tokens);
+        }
+        if let Some(cost) = store.cost_usd {
+            line["costUsd"] = json!(cost);
         }
         line
     }
@@ -970,6 +1098,102 @@ const OWN: [(&str, &str, &str); 6] = [
     ("app.theme", "Choose a theme by name", "{name}"),
 ];
 
+/// Window commands beyond the keymap's: the web's ids the window can perform (some under the
+/// name its keys use), and the native ones screens need.
+const WINDOW_COMMANDS: [(&str, &str, &str); 11] = [
+    (
+        "session.start",
+        "Start an agent in a folder on a host",
+        "{hostId, cwd?, agent}",
+    ),
+    ("session.rename", "Rename a session", "{id, name}"),
+    (
+        "session.request_close",
+        "Close a session's tab as its × does (an agent asks first)",
+        "{id}",
+    ),
+    ("agent.focus", "Show an agent's session", "{id}"),
+    (
+        "pane.unsplit",
+        "Take a tab out of its split and show it full size",
+        "{id}",
+    ),
+    (
+        "tab.menu",
+        "Open a tab's menu at a point of the window",
+        "{id, x, y}",
+    ),
+    (
+        "host.enable",
+        "Turn a configured host on or off",
+        "{id, enabled}",
+    ),
+    ("quickchat.new", "A new chat in Quickchat", "{}"),
+    ("overlay.close", "Close the top screen, menu or panel", "{}"),
+    (
+        "notification.open",
+        "Go to what a notification is about",
+        "{id}",
+    ),
+    ("notification.dismiss", "Put a notification away", "{id}"),
+];
+
+/// The promise half of a window command.
+async fn settled(rx: futures::channel::oneshot::Receiver<Result<(), String>>) -> HostResult {
+    match rx.await {
+        Ok(Ok(())) => Ok(HostValue::Bool(true)),
+        Ok(Err(error)) => Err(HostError::new(error)),
+        Err(_) => Err(HostError::new("The window went before the command ran.")),
+    }
+}
+
+/// `useNotifications`' item for one of the window's notifications, worded as the web words it.
+pub fn notification_json(note: &crate::workspace::Notification, model: &Model) -> Value {
+    use crate::sidebar::Alert;
+    let session = model
+        .store
+        .sessions
+        .iter()
+        .find(|s| s.id == note.heard.session_id);
+    let blocked = note.heard.alert == Alert::Blocked;
+    let provider =
+        session.and_then(|s| s.current_provider_id.clone().or(s.cli_provider_id.clone()));
+    let program = provider
+        .filter(|p| p != perch_core::agent_fleet::TERMINAL_PROVIDER)
+        .and_then(|p| {
+            model
+                .store
+                .providers
+                .values()
+                .flatten()
+                .find(|known| known.id == p)
+                .map(|known| known.name.clone())
+        });
+    let heading = if blocked {
+        "Needs your attention".to_string()
+    } else {
+        program.map_or_else(
+            || "Session finished".into(),
+            |name| format!("{name} finished"),
+        )
+    };
+    let title = &note.heard.title;
+    let mut item = json!({
+        "id": note.id,
+        "kind": if blocked { "blocked" } else { "done" },
+        "title": title,
+        "heading": heading,
+        "detail": if title.is_empty() { "(new session)" } else { title.as_str() },
+        "sessionId": note.heard.session_id,
+        "hasSession": session.is_some(),
+        "timeout": if blocked { 10_000 } else { 6000 },
+    });
+    if let Some(s) = session {
+        item["sessionTitle"] = json!(s.title);
+    }
+    item
+}
+
 /// A typed command's title, from the shortcut it stands for where there is one.
 fn typed_title(id: &str) -> &'static str {
     match id {
@@ -1019,7 +1243,7 @@ fn session_label(title: &str) -> String {
 }
 
 /// `sessionDotState`, by the web's word.
-fn session_state(session: &perch_core::protocol::SessionSummary) -> &'static str {
+pub(crate) fn session_state(session: &perch_core::protocol::SessionSummary) -> &'static str {
     use perch_core::protocol::SessionStatus;
     if session.blocked && !session.stale {
         "blocked"

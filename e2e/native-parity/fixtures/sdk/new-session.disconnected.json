@@ -1,0 +1,44 @@
+{
+  "props": {
+    "hostId": "local",
+    "projectCwds": [],
+    "fixedCwd": "/Users/dev/code/perch",
+    "anchorRect": {
+      "x": 1041,
+      "y": 14,
+      "width": 28,
+      "height": 32
+    },
+    "extras": [
+      {
+        "id": "browser",
+        "label": "New browser"
+      },
+      {
+        "id": "file",
+        "label": "New file"
+      }
+    ]
+  },
+  "agentChoices": {
+    "connected": false,
+    "discovery": true,
+    "choices": [
+      {
+        "id": "claude",
+        "label": "Claude",
+        "isDefault": true
+      },
+      {
+        "id": "codex",
+        "label": "Codex"
+      },
+      {
+        "id": "pi",
+        "label": "Pi"
+      }
+    ],
+    "lastChoice": "claude",
+    "state": "ready"
+  }
+}

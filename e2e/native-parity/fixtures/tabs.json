@@ -1,0 +1,212 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "tabs",
+  "note": "The tab strip of the shown workspace (stock-ui/tabs), as it sits in the main card of the default 1280x800 window. Data: the sidebar fixture's store (dataFrom), whose shown workspace is w-perch-main with three sessions; a state's patch changes it. The strip's own derived value is @perch/sdk `useWorkspaceTabs()`, recorded in each output's sdk.workspaceTabs. No props: the screen takes none.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 976,
+    "height": 44
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "states": [
+    {
+      "id": "one-tab",
+      "title": "One session: its tab is the focused one, then the + button",
+      "patch": {
+        "keepSessions": [
+          "s-perch-1"
+        ]
+      }
+    },
+    {
+      "id": "several",
+      "title": "Three sessions, the first focused: the other two are plain with a hairline between them",
+      "patch": {}
+    },
+    {
+      "id": "needs-attention",
+      "title": "One session is blocked on the person and one finished unseen: the stock strip draws neither (only the slot data and the sidebar do)",
+      "patch": {
+        "sessions": {
+          "s-perch-3": {
+            "blocked": true
+          }
+        }
+      }
+    },
+    {
+      "id": "long-title",
+      "title": "A title longer than 24 characters is cut with an ellipsis by the SDK, then clipped by the tab's own width",
+      "patch": {
+        "sessions": {
+          "s-perch-2": {
+            "title": "Fix the terminal slash input when the IME is composing a long phrase"
+          }
+        }
+      }
+    },
+    {
+      "id": "split-visible",
+      "title": "Two sessions share the canvas: the focused tab is filled, its neighbour in the split is plain (state visible)",
+      "patch": {
+        "splitSets": {
+          "sets": [
+            {
+              "ids": [
+                "s-perch-1",
+                "s-perch-2"
+              ],
+              "sizes": [
+                0.5,
+                0.5
+              ]
+            }
+          ],
+          "zoomedId": null
+        }
+      }
+    },
+    {
+      "id": "files-and-pages",
+      "title": "Sessions, then a previewed file, a file, the review and a browser page; the file is focused",
+      "patch": {
+        "fileTabs": {
+          "tabs": [
+            {
+              "workspaceId": "w-perch-main",
+              "path": "packages/web/src/sdk.ts",
+              "preview": true
+            },
+            {
+              "workspaceId": "w-perch-main",
+              "path": "crates/perch-core/src/protocol.rs"
+            },
+            {
+              "workspaceId": "w-perch-main",
+              "path": "",
+              "kind": "review"
+            },
+            {
+              "workspaceId": "w-perch-main",
+              "path": "https://docs.perch.dev/native",
+              "kind": "browser"
+            }
+          ],
+          "active": "w-perch-main\ncrates/perch-core/src/protocol.rs"
+        },
+        "browserPages": {
+          "w-perch-main\n\u0000browser\nhttps://docs.perch.dev/native": {
+            "url": "https://docs.perch.dev/native",
+            "title": "Native client notes",
+            "icon": ""
+          }
+        }
+      }
+    },
+    {
+      "id": "overflow",
+      "title": "Ten sessions do not fit: the strip scrolls sideways and keeps the last (focused) tab in view, with no scrollbar (the Mac draws one only while scrolling)",
+      "patch": {
+        "addSessions": [
+          {
+            "id": "s-perch-x4",
+            "title": "Wire the status bar",
+            "cwd": "/Users/dev/code/perch",
+            "createdAt": 1767268796000,
+            "status": "idle",
+            "hostId": "local",
+            "cliProviderId": "claude",
+            "currentBranch": "main",
+            "projectId": "p-perch",
+            "workspaceId": "w-perch-main"
+          },
+          {
+            "id": "s-perch-x5",
+            "title": "Draft the release notes",
+            "cwd": "/Users/dev/code/perch",
+            "createdAt": 1767268795000,
+            "status": "idle",
+            "hostId": "local",
+            "cliProviderId": "codex",
+            "currentBranch": "main",
+            "projectId": "p-perch",
+            "workspaceId": "w-perch-main"
+          },
+          {
+            "id": "s-perch-x6",
+            "title": "Profile the terminal redraw",
+            "cwd": "/Users/dev/code/perch",
+            "createdAt": 1767268794000,
+            "status": "idle",
+            "hostId": "local",
+            "cliProviderId": "claude",
+            "currentBranch": "main",
+            "projectId": "p-perch",
+            "workspaceId": "w-perch-main"
+          },
+          {
+            "id": "s-perch-x7",
+            "title": "Audit open handles",
+            "cwd": "/Users/dev/code/perch",
+            "createdAt": 1767268793000,
+            "status": "idle",
+            "hostId": "local",
+            "cliProviderId": "codex",
+            "currentBranch": "main",
+            "projectId": "p-perch",
+            "workspaceId": "w-perch-main"
+          },
+          {
+            "id": "s-perch-x8",
+            "title": "Rework the tab drag order",
+            "cwd": "/Users/dev/code/perch",
+            "createdAt": 1767268792000,
+            "status": "idle",
+            "hostId": "local",
+            "cliProviderId": "claude",
+            "currentBranch": "main",
+            "projectId": "p-perch",
+            "workspaceId": "w-perch-main"
+          },
+          {
+            "id": "s-perch-x9",
+            "title": "Trace the resize race",
+            "cwd": "/Users/dev/code/perch",
+            "createdAt": 1767268791000,
+            "status": "idle",
+            "hostId": "local",
+            "cliProviderId": "codex",
+            "currentBranch": "main",
+            "projectId": "p-perch",
+            "workspaceId": "w-perch-main"
+          },
+          {
+            "id": "s-perch-x10",
+            "title": "Summarise the week",
+            "cwd": "/Users/dev/code/perch",
+            "createdAt": 1767268790000,
+            "status": "idle",
+            "hostId": "local",
+            "cliProviderId": "claude",
+            "currentBranch": "main",
+            "projectId": "p-perch",
+            "workspaceId": "w-perch-main"
+          }
+        ]
+      }
+    },
+    {
+      "id": "round-shape",
+      "title": "The person's tab-shape setting is round: tabs and the + button are pills",
+      "patch": {
+        "settings": {
+          "tabShape": "round"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "props": {
+    "hostId": "local",
+    "projectCwds": [
+      "/Users/dev/code/perch",
+      "/Users/dev/code/api-server",
+      "/Users/dev/notes"
+    ],
+    "anchorRect": {
+      "x": 600,
+      "y": 300,
+      "width": 28,
+      "height": 28
+    }
+  },
+  "agentChoices": {
+    "connected": true,
+    "discovery": true,
+    "choices": [
+      {
+        "id": "claude",
+        "label": "Claude",
+        "isDefault": true
+      },
+      {
+        "id": "codex",
+        "label": "Codex"
+      },
+      {
+        "id": "pi",
+        "label": "Pi"
+      }
+    ],
+    "lastChoice": "claude",
+    "state": "ready"
+  }
+}

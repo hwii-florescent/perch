@@ -1,0 +1,119 @@
+{
+  "props": {
+    "open": true,
+    "sessions": [
+      {
+        "id": "s-perch-1",
+        "title": "Port the sidebar to GPUI",
+        "cwd": "/Users/dev/code/perch",
+        "hostId": "local",
+        "createdAt": 1767268800000,
+        "state": "working"
+      },
+      {
+        "id": "s-perch-2",
+        "title": "Fix terminal slash input",
+        "cwd": "/Users/dev/code/perch",
+        "hostId": "local",
+        "createdAt": 1767265200000,
+        "state": "done"
+      },
+      {
+        "id": "s-perch-3",
+        "title": "Review agent mail",
+        "cwd": "/Users/dev/code/perch",
+        "hostId": "local",
+        "createdAt": 1767261600000,
+        "state": "idle"
+      },
+      {
+        "id": "s-api-1",
+        "title": "Add rate limiting",
+        "cwd": "/Users/dev/code/api-server-wt/rate-limit",
+        "hostId": "local",
+        "createdAt": 1767254400000,
+        "state": "working"
+      },
+      {
+        "id": "s-api-2",
+        "title": "Load test the gateway",
+        "cwd": "/Users/dev/code/api-server",
+        "hostId": "local",
+        "createdAt": 1767250800000,
+        "state": "working"
+      },
+      {
+        "id": "s-notes-1",
+        "title": "Trip planning",
+        "cwd": "/Users/dev/notes",
+        "hostId": "local",
+        "createdAt": 1767247200000,
+        "state": "idle"
+      },
+      {
+        "id": "s-chat-1",
+        "title": "Explain git rebase",
+        "cwd": "/Users/dev/.perch/scratch",
+        "hostId": "local",
+        "createdAt": 1767243600000,
+        "state": "idle"
+      },
+      {
+        "id": "s-chat-2",
+        "title": "Regex for ISO dates",
+        "cwd": "/Users/dev/.perch/scratch",
+        "hostId": "local",
+        "createdAt": 1767240000000,
+        "state": "done"
+      },
+      {
+        "id": "s-infra-1",
+        "title": "Rotate the CI runners",
+        "cwd": "/srv/infra",
+        "hostId": "buildbox",
+        "createdAt": 1767268800000,
+        "state": "working"
+      },
+      {
+        "id": "s-infra-2",
+        "title": "Audit open ports",
+        "cwd": "/srv/infra",
+        "hostId": "buildbox",
+        "createdAt": 1767265200000,
+        "state": "idle"
+      },
+      {
+        "id": "s-jobs-1",
+        "title": "Why did the export fail",
+        "cwd": "/srv/nightly-jobs",
+        "hostId": "buildbox",
+        "createdAt": 1767261600000,
+        "state": "done"
+      }
+    ],
+    "currentSessionId": "s-perch-1",
+    "connected": true,
+    "workspace": {
+      "id": "w-perch-main",
+      "path": "/Users/dev/code/perch"
+    },
+    "supportsSearch": true,
+    "supportsRun": true,
+    "agents": [
+      {
+        "id": "claude",
+        "label": "Claude"
+      },
+      {
+        "id": "codex",
+        "label": "Codex"
+      },
+      {
+        "id": "pi",
+        "label": "Pi"
+      }
+    ],
+    "agentCwd": "/Users/dev/code/perch",
+    "terminalCwd": "/Users/dev/code/perch"
+  }
+}

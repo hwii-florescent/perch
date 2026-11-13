@@ -1,0 +1,63 @@
+{
+  "notifications": [
+    {
+      "id": "t1",
+      "kind": "done",
+      "title": "Fix terminal slash input",
+      "heading": "Codex finished",
+      "detail": "Fix terminal slash input",
+      "sessionId": "s-perch-2",
+      "sessionTitle": "Fix terminal slash input",
+      "hasSession": true,
+      "timeout": 600000
+    },
+    {
+      "id": "t2",
+      "kind": "blocked",
+      "title": "Review agent mail",
+      "heading": "Needs your attention",
+      "detail": "Review agent mail",
+      "sessionId": "s-perch-3",
+      "sessionTitle": "Review agent mail",
+      "hasSession": true,
+      "timeout": 600000
+    },
+    {
+      "id": "t3",
+      "kind": "usage",
+      "level": "warning",
+      "title": "Codex 5h limit at 93%",
+      "body": "Resets in 42 minutes",
+      "heading": "Codex 5h limit at 93%",
+      "detail": "Resets in 42 minutes",
+      "sessionId": "usage",
+      "hasSession": false,
+      "timeout": 600000
+    },
+    {
+      "id": "t4",
+      "kind": "usage",
+      "level": "info",
+      "title": "Deploy finished",
+      "body": "perch.dev is live",
+      "icon": "✓",
+      "heading": "Deploy finished",
+      "detail": "perch.dev is live",
+      "sessionId": "mod:deploy",
+      "hasSession": false,
+      "timeout": 600000
+    },
+    {
+      "id": "t5",
+      "kind": "usage",
+      "level": "error",
+      "title": "Build failed",
+      "body": "3 errors in perch-core",
+      "heading": "Build failed",
+      "detail": "3 errors in perch-core",
+      "sessionId": "mod:ci",
+      "hasSession": false,
+      "timeout": 600000
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "notifications": [
+    {
+      "id": "t1",
+      "kind": "done",
+      "title": "Fix terminal slash input",
+      "heading": "Codex finished",
+      "detail": "Fix terminal slash input",
+      "sessionId": "s-perch-2",
+      "sessionTitle": "Fix terminal slash input",
+      "hasSession": true,
+      "timeout": 600000
+    },
+    {
+      "id": "t2",
+      "kind": "blocked",
+      "title": "Review agent mail",
+      "heading": "Needs your attention",
+      "detail": "Review agent mail",
+      "sessionId": "s-perch-3",
+      "sessionTitle": "Review agent mail",
+      "hasSession": true,
+      "timeout": 600000
+    }
+  ]
+}
