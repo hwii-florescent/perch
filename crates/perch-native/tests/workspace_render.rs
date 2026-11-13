@@ -13,7 +13,8 @@ use perch_native::client::{Command, Core, Update};
 use perch_native::sidebar::{Alert, Attention, Heard, Model, State, Toast};
 use perch_native::terminal::attach::{FromCore, ToCore};
 use perch_native::terminal::clipboard::MemoryClipboard;
-use perch_native::terminal::{Status, TerminalView};
+use perch_native::terminal::links::Target;
+use perch_native::terminal::{Status, TerminalEvent, TerminalView};
 use perch_native::ui::{tint, Workspace, SIDEBAR_WIDTH};
 use perch_native::workspace::TAB_BAR_HEIGHT;
 use serde_json::{json, Value};
@@ -108,6 +109,25 @@ impl Shot {
             .sum()
     }
 
+    /// The box (logical pixels, `x0 x1 y0 y1`) holding every pixel of `color` inside the area.
+    fn bounds_of(&self, color: u32, x0: f32, x1: f32, y0: f32, y1: f32) -> Option<[f32; 4]> {
+        let want = [(color >> 16) as u8, (color >> 8) as u8, color as u8];
+        let mut found: Option<[usize; 4]> = None;
+        for (y, row) in self.raw.chunks_exact(self.width * 4).enumerate() {
+            for (x, p) in row.chunks_exact(4).enumerate() {
+                let inside = (x0 * self.scale) as usize <= x
+                    && x < (x1 * self.scale) as usize
+                    && (y0 * self.scale) as usize <= y
+                    && y < (y1 * self.scale) as usize;
+                if inside && p[..3].iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 2) {
+                    let [a, b, c, d] = found.get_or_insert([x, x, y, y]);
+                    (*a, *b, *c, *d) = ((*a).min(x), (*b).max(x), (*c).min(y), (*d).max(y));
+                }
+            }
+        }
+        found.map(|f| f.map(|v| v as f32 / self.scale))
+    }
+
     /// Pixels that are clearly red, inside the box (an image scaled smoothly has no exact colour).
     fn reddish(&self, x0: f32, x1: f32, y0: f32, y1: f32) -> usize {
         let (x0, x1) = ((x0 * self.scale) as usize, (x1 * self.scale) as usize);
@@ -151,6 +171,8 @@ struct Harness {
     window: WindowHandle<Workspace>,
     /// What the terminals copy to and paste from; the real clipboard is never touched.
     clipboard: Rc<MemoryClipboard>,
+    /// The links the window was asked to open. None is ever handed to the system.
+    opened: Rc<std::cell::RefCell<Vec<Target>>>,
 }
 
 impl Harness {
@@ -171,12 +193,17 @@ impl Harness {
         );
         let clipboard = Rc::new(MemoryClipboard::default());
         let held = clipboard.clone();
+        let opened = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let record = opened.clone();
         let window = cx
             .open_window(size(px(WIDTH), px(HEIGHT)), |_, cx| {
                 cx.new(|cx| {
                     Workspace::new(model, commands, cx)
                         .with_core(locate)
                         .with_clipboard(held)
+                        .with_opener(Rc::new(move |target| {
+                            record.borrow_mut().push(target.clone())
+                        }))
                 })
             })
             .unwrap();
@@ -184,6 +211,7 @@ impl Harness {
             cx,
             window,
             clipboard,
+            opened,
         }
     }
 
@@ -644,6 +672,95 @@ fn terminal_settings_show_what_the_core_sent() {
     assert!(h.press("cmd-,"), "the same key closes it");
     assert!(!h.ws(|ws| ws.settings_open()));
     println!("workspace_render: settings ok");
+}
+
+/// A control in the settings panel sends the core the one setting it changes, and the panel shows
+/// the value the core then reports. The core's side (saving it, telling every follower) is
+/// `workspace_session`.
+fn a_settings_control_sends_the_changed_value() {
+    let mut shown = model(&[("alpha", json!({}))]);
+    shown.terminal = Some(Box::new(perch_native::settings::TerminalSettings {
+        scrollback: 4321,
+        login_shell: true,
+        ..Default::default()
+    }));
+    let (commands, mut sent) = unbounded();
+    let mut h = Harness::build(shown, Some(commands), || Err(anyhow::anyhow!("no core")));
+    h.open("alpha");
+    assert!(h.press("cmd-,"));
+    assert!(h.ws(|ws| ws.settings_open()));
+    let panel = h.draw();
+    // Only the login shell switch is on, so its text is the one green thing below the tab strip
+    // (a tab's idle dot is the same green).
+    let on = 0x4caf6a;
+    let [x0, x1, y0, y1] = panel
+        .bounds_of(on, SIDEBAR_WIDTH, WIDTH, TAB_BAR_HEIGHT, HEIGHT)
+        .expect("the login shell switch shows On");
+    std::iter::from_fn(|| sent.try_recv().ok()).for_each(drop);
+    h.click(
+        (x0 + x1) / 2.,
+        (y0 + y1) / 2.,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    let patches: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
+        .filter_map(|c| match c {
+            Command::UpdateSettings(patch) => Some(patch),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        patches,
+        [json!({"terminalLoginShell": false})],
+        "the click changes that setting alone"
+    );
+
+    // The panel shows what the core reports, not what was asked.
+    assert!(panel.count(on, SIDEBAR_WIDTH, WIDTH, TAB_BAR_HEIGHT, HEIGHT) > 20);
+    let mut told = model(&[("alpha", json!({}))]);
+    told.terminal = Some(Box::new(perch_native::settings::TerminalSettings {
+        scrollback: 4321,
+        login_shell: false,
+        ..Default::default()
+    }));
+    h.window
+        .update(&mut h.cx, |ws, _, cx| {
+            ws.sidebar()
+                .update(cx, |sidebar, cx| sidebar.apply(Update::Model(told), cx))
+        })
+        .unwrap();
+    assert_eq!(
+        h.draw()
+            .count(on, SIDEBAR_WIDTH, WIDTH, TAB_BAR_HEIGHT, HEIGHT),
+        0,
+        "the switch is off once the core says so"
+    );
+    println!("workspace_render: settings control ok");
+}
+
+/// A click on a link in a terminal reaches the window, which hands the target to its opener: a
+/// URL and a file alike, from whichever pane the click was in. Here the opener only records, so
+/// nothing is ever opened. (Finding the link under the pointer is `terminal_render`'s.)
+fn a_clicked_link_reaches_the_windows_opener() {
+    let mut h = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
+    h.open("alpha");
+    h.open("bravo");
+    h.draw();
+    let say = |h: &mut Harness, target: Target| {
+        h.window
+            .update(&mut h.cx, |ws, _, cx| {
+                let view = ws.terminal().expect("a terminal on screen").clone();
+                view.update(cx, |_, cx| cx.emit(TerminalEvent::OpenLink(target)))
+            })
+            .unwrap();
+        h.cx.run_until_parked();
+    };
+    let url = Target::Url("https://example.com/docs".into());
+    let file = Target::File("/work/notes.txt".into());
+    say(&mut h, url.clone());
+    say(&mut h, file.clone());
+    assert_eq!(*h.opened.borrow(), [url, file]);
+    println!("workspace_render: link opener ok");
 }
 
 fn keys_json_and_chosen_keys_rule() {
@@ -1866,6 +1983,8 @@ fn main() {
     a_split_shows_each_pane();
     the_palette_lists_and_runs_commands();
     terminal_settings_show_what_the_core_sent();
+    a_settings_control_sends_the_changed_value();
+    a_clicked_link_reaches_the_windows_opener();
     keys_json_and_chosen_keys_rule();
     editing_keys_reach_the_shell_through_the_window();
     terminal_commands_run_from_keys_and_the_palette();
