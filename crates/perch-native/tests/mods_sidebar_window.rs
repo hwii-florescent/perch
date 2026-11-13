@@ -368,6 +368,15 @@ fn main() {
         "each state has its own fill: {fills:?}"
     );
 
+    // The Needs you button opens the session that needs you.
+    rig.opened.borrow_mut().clear();
+    rig.click("needs-you-button");
+    assert_eq!(
+        rig.opened.borrow().last().map(|o| o.session_id.clone()),
+        Some("ask".into()),
+        "global.needsYou reached the window"
+    );
+
     // Disconnected: the row is still there, with no state claimed.
     let mut dropped = state(&[("ask", json!({"blocked": true}))]);
     dropped.disconnect(Some("connection refused".into()));
@@ -492,6 +501,15 @@ fn main() {
     rig.click("project-header:p");
     assert!(rig.record("project-workspaces:p").is_some(), "and unfolds");
     println!("mods_sidebar_window: sidebar behaviour ok");
+
+    // The gear opens Settings.
+    rig.click("settings-gear");
+    assert!(
+        rig.ws(|ws, _, _| ws.settings_open()),
+        "app.settings reached the window"
+    );
+    rig.ws(|ws, window, cx| ws.run_command("overlay.close", None, window, cx))
+        .unwrap();
 
     // New session: with no mod drawing the New session screen, the window says so.
     rig.ws(|ws, window, cx| ws.run_command("sessions.new", None, window, cx))
