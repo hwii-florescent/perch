@@ -59,6 +59,16 @@ pub const STOCK: &[(&str, &str)] = &[
     ("confirm/main.js", include_str!("../mods/confirm/main.js")),
     ("confirm/mod.json", include_str!("../mods/confirm/mod.json")),
     (
+        "dialog/dialog/main.js",
+        include_str!("../mods/dialog/dialog/main.js"),
+    ),
+    (
+        "dialog/file-menu/main.js",
+        include_str!("../mods/dialog/file-menu/main.js"),
+    ),
+    ("dialog/main.js", include_str!("../mods/dialog/main.js")),
+    ("dialog/mod.json", include_str!("../mods/dialog/mod.json")),
+    (
         "new-session/main.js",
         include_str!("../mods/new-session/main.js"),
     ),

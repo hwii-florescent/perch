@@ -229,18 +229,27 @@ export function mount(perch, Component, options = {}) {
     },
     /** A key pressed while the screen has the keyboard (`init`: the DOM's `key`, modifiers, `repeat`), at the
      * focused element. When nothing prevented it and that element is a text field, the key edits the field as a
-     * browser would: a character is typed at the end, Backspace deletes the last one, and the field gets `input` and
-     * `change` events with its new `value`. Returns whether the source took the key (prevented it, or a field
-     * changed). */
+     * browser would: a character is typed at the end (or replaces the text when all of it is selected), Backspace
+     * deletes the last one, and the field gets `input` and `change` events with its new `value`. Returns whether the
+     * source took the key (prevented it, or a field changed). */
     key(init) {
       const target = document.activeElement && document.activeElement !== document.body ? document.activeElement : document.body;
       const typed = handle.dispatch(target, "keydown", init);
       if (!typed) return true;
-      if (!isTextField(target) || target.props.disabled || target.props.readOnly || init.ctrlKey || init.metaKey) return false;
-      // ponytail: the caret is always at the end and there is no selection; a field that edits in the middle needs
-      // the engine's input element.
+      if (!isTextField(target) || target.props.disabled || target.props.readOnly) return false;
+      // Cmd/Ctrl+A selects the whole field: the next character replaces it, Backspace or Delete clears it.
+      if ((init.ctrlKey || init.metaKey) && !init.altKey && !init.shiftKey && init.key.toLowerCase() === "a") {
+        target.selectedAll = true;
+        return true;
+      }
+      if (init.ctrlKey || init.metaKey) return false;
+      // ponytail: the caret is always at the end and the only selection is all of it, not drawn; a field that edits
+      // in the middle or shows a selection needs the engine's input element.
+      const all = target.selectedAll;
+      target.selectedAll = false;
       const before = target.value;
-      const after = init.key === "Backspace" ? before.slice(0, -1) : [...init.key].length === 1 ? before + init.key : before;
+      const erase = init.key === "Backspace" || (all && init.key === "Delete");
+      const after = erase ? (all ? "" : before.slice(0, -1)) : [...init.key].length === 1 ? (all ? "" : before) + init.key : before;
       if (after === before) return false;
       target.value = after;
       handle.dispatch(target, "input", { data: init.key });

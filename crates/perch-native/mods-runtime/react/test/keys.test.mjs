@@ -35,6 +35,37 @@ test("typing reaches a focused field: characters, Backspace, and keys the source
   }
 });
 
+test("all of a field selected, by Cmd+A or the source's select(), is replaced by what is typed next", async () => {
+  const { runtime } = await loadSidebar();
+  const { createElement: h, useEffect, useRef, useState } = await import("react");
+  const seen = [];
+  function Field() {
+    const [value, setValue] = useState("draft.md");
+    const ref = useRef(null);
+    useEffect(() => { ref.current.focus(); ref.current.setSelectionRange(0, value.length); }, []);
+    seen.push(value);
+    return h("input", { ref, value, onChange: (e) => setValue(e.target.value) });
+  }
+  const perch = { isMac: true, render() {}, error: (e) => { throw e; } };
+  const handle = runtime.mount(perch, Field, { container: { width: 200, height: 40 } });
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  try {
+    await settle();
+    handle.key({ key: "x" });
+    await settle();
+    assert.equal(seen.at(-1), "x", "the source's whole-text selection is replaced");
+    handle.key({ key: "y" });
+    await settle();
+    assert.equal(seen.at(-1), "xy", "then typing goes on at the end");
+    assert.equal(handle.key({ key: "a", metaKey: true }), true, "Cmd+A is the field's");
+    handle.key({ key: "Backspace" });
+    await settle();
+    assert.equal(seen.at(-1), "", "Backspace clears what is selected");
+  } finally {
+    handle.unmount();
+  }
+});
+
 test("a click ticks a check box, and the source sees it in onChange", async () => {
   const { runtime } = await loadSidebar();
   const { createElement: h, useState } = await import("react");

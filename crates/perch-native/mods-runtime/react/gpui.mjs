@@ -80,6 +80,17 @@ export function applyStyle(el, style) {
 
 const point = (event) => ({ clientX: event?.position?.x ?? 0, clientY: event?.position?.y ?? 0 });
 
+/** Nodes inside one that takes pointer events: a press on one is that node's, as the page's event target. */
+const UNDER_POINTER = new WeakSet();
+
+/** The node a press at `event` is on: the innermost node under `id` that recorded this press (`handle.pressed`),
+ * else `id`. GPUI calls the innermost listener first, so the record is there when `id`'s listener runs. */
+function pressTarget(handle, id, event) {
+  const pressed = handle.pressed;
+  const at = point(event);
+  return pressed && pressed.x === at.clientX && pressed.y === at.clientY ? pressed.id : id;
+}
+
 /** The engine id of a node: its parity name, else (when the engine needs one, for events and interaction styles)
  * `~`, the host element's id and its `data-testid` if any, which tests that read named elements leave out. */
 function engineId(node, events, overlay) {
@@ -96,6 +107,7 @@ const drawn = (child) => child.style?.display !== "hidden";
  * named elements are not shown (the page counts them hidden) and carry no name. */
 export function toGpui(node, kit, handle, files, overlay = false, unseen = false, color = null, text = {}, rowItem = false, snapped = new Map()) {
   if (node.kind === "text") return snapped.get(node)?.text ?? node.text;
+  const underPointer = UNDER_POINTER.has(node);
   unseen ||= node.style.opacity === 0 || node.style.visibility === "invisible";
   if (unseen && (node.name || node.range_name)) node = { ...node, name: undefined, range_name: undefined };
   color = node.style.text_color ?? color;
@@ -148,19 +160,24 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   const box = node.kind === "input" ? node : node.meta?.tag === "label" ? tickBox(node) : null;
   if (box && !box.disabled && /^(checkbox|radio)$/.test(box.input_type)) el = el.on_click((_event, cx) => { cx.stop_propagation?.(); handle.toggle(box.id); cx.notify(); });
   const pointer = ["click", "double_click", "context_menu", "mouse_down", "mouse_up"].some((name) => events.has(name));
+  if (pointer || underPointer) for (const child of node.children ?? []) if (child.kind !== "text") UNDER_POINTER.add(child);
   if (pointer) {
     el = el.on_mouse_down("left", (event, cx) => {
       cx.stop_propagation?.();
       if (event.bounds) handle.setBounds(node.id, event.bounds);
       const at = { ...point(event), button: 0, buttons: 1, detail: event.click_count };
-      handle.dispatch(node.id, "pointerdown", { ...at, pointerType: "mouse" });
-      handle.dispatch(node.id, "mousedown", at);
+      const target = pressTarget(handle, node.id, event);
+      handle.pressed = null;
+      handle.dispatch(target, "pointerdown", { ...at, pointerType: "mouse" });
+      handle.dispatch(target, "mousedown", at);
       cx.notify();
     });
     el = el.on_mouse_down("right", (event, cx) => {
       cx.stop_propagation?.();
       if (event.bounds) handle.setBounds(node.id, event.bounds);
-      handle.dispatch(node.id, "contextmenu", { ...point(event), button: 2 });
+      const target = pressTarget(handle, node.id, event);
+      handle.pressed = null;
+      handle.dispatch(target, "contextmenu", { ...point(event), button: 2 });
       cx.notify();
     });
     el = el.on_mouse_up("left", (event, cx) => {
@@ -179,6 +196,14 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   // anywhere else in that stack it reaches what is beneath the screen.
   if (node.blocks_pointer && !pointer) {
     for (const button of ["left", "right"]) el = el.on_mouse_down(button, (_event, cx) => cx.stop_propagation?.());
+  } else if (underPointer && !pointer) {
+    // The innermost node under the press records it for the listener above (`pressTarget`).
+    for (const button of ["left", "right"]) {
+      el = el.on_mouse_down(button, (event) => {
+        const at = point(event);
+        if (handle.pressed?.x !== at.clientX || handle.pressed?.y !== at.clientY) handle.pressed = { id: node.id, x: at.clientX, y: at.clientY };
+      });
+    }
   }
   if (events.has("mouse_move")) el = el.on_mouse_move((event, cx) => { handle.dispatch(node.id, "pointermove", { ...point(event), pointerType: "mouse" }); cx.notify(); });
   if (node.track_hover || hoverIcons) el = el.on_hover((on, cx) => { handle.hover(node.id, on); cx.notify(); });

@@ -150,7 +150,8 @@ function tokenizeExpr(text) {
 
 /** Evaluates a length expression: `{ px, pct, num }` (a percentage stays apart), or null. */
 export function evalLength(text, ctx) {
-  const tokens = tokenizeExpr(text.trim());
+  // A window on a desktop has no safe area: `env(safe-area-inset-*)` is 0 there.
+  const tokens = tokenizeExpr(text.trim().replace(/env\(\s*safe-area-inset-(?:top|right|bottom|left)\s*(?:,[^()]*)?\)/gi, "0px"));
   if (!tokens) return null;
   let i = 0;
   const unitValue = ({ num, unit }) => {

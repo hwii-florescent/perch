@@ -12,6 +12,9 @@
 //!   the computer's projects then No project; a project or No project starts the picked agent there
 //!   (a Quickchat for No project); Escape and a press outside close it without anything beneath
 //!   taking the press. Cmd+T opens the tab strip's launcher below its "+".
+//! - Dialog: a script opens it with the file menu's New file prompt; a path typed (or typed over
+//!   all of the field after Cmd+A) and Enter close it with the create action; Escape and a press on
+//!   the dim backdrop close it with nothing.
 //! - Confirmation: closing an agent's tab asks through the close guard drawn in the confirmation;
 //!   Escape and a press on the dim backdrop cancel and keep the tab, Keep running puts the tab
 //!   away without ending it, and Enter stops it (with Don't show again, the warning is turned off).
@@ -593,6 +596,84 @@ fn new_session(rig: &mut Rig) {
     println!("new-session: ok");
 }
 
+/// Opens the dialog as a script does, with the New file prompt for `/work`; what it closes with
+/// goes to `results`.
+fn open_dialog(rig: &mut Rig, results: &Rc<RefCell<Vec<Value>>>) {
+    let seen = results.clone();
+    let props = json!({"workspaceId": "w", "workspacePath": "/work", "x": 0, "y": 0,
+        "initialStage": "newFile", "nativeAvailable": true, "canAsk": true});
+    let opened = rig.ws(move |ws, _, cx| {
+        ws.open_screen(
+            "dialog",
+            props,
+            None,
+            Some(Box::new(move |_, result, _, _| {
+                seen.borrow_mut().push(result)
+            })),
+            cx,
+        )
+    });
+    assert!(opened, "the stock dialog draws the dialog screen");
+    rig.draw();
+    assert_eq!(rig.open_screens(), ["dialog"]);
+}
+
+fn dialog(rig: &mut Rig) {
+    let results: Rc<RefCell<Vec<Value>>> = Rc::default();
+    // The field holds the folder; a name typed after it and Enter create the file there.
+    open_dialog(rig, &results);
+    let panel = rig
+        .record("dialog-panel")
+        .expect("the panel is drawn")
+        .bounds;
+    assert_eq!(
+        panel.origin.x,
+        px((WIDTH - 480.) / 2.),
+        "centred, 480px wide"
+    );
+    assert!(!rig.terminal_focused(), "the dialog has the keyboard");
+    rig.type_text("notes.md");
+    rig.press("enter");
+    assert!(rig.open_screens().is_empty(), "Enter closed it");
+    assert_eq!(
+        results.borrow_mut().drain(..).collect::<Vec<_>>(),
+        [json!({"action": "createFileAt", "args": ["/work", "notes.md"]})]
+    );
+    assert!(rig.terminal_focused());
+
+    // Cmd+A, then a path typed over all of it.
+    open_dialog(rig, &results);
+    rig.press(if cfg!(target_os = "macos") {
+        "cmd-a"
+    } else {
+        "ctrl-a"
+    });
+    rig.type_text("/tmp/plan.md");
+    rig.click("dialog-confirm");
+    assert_eq!(
+        results.borrow_mut().drain(..).collect::<Vec<_>>(),
+        [json!({"action": "createFileAt", "args": ["/tmp", "plan.md"]})]
+    );
+
+    // Escape, and a press on the backdrop, close it with nothing; nothing beneath takes the press.
+    open_dialog(rig, &results);
+    rig.press("escape");
+    assert!(rig.open_screens().is_empty(), "Escape closed it");
+    open_dialog(rig, &results);
+    rig.click("dialog-title");
+    assert_eq!(rig.open_screens(), ["dialog"], "a press inside keeps it");
+    let before = rig.opened.borrow().len();
+    rig.mouse(20., HEIGHT - 20.);
+    assert!(rig.open_screens().is_empty(), "the backdrop closed it");
+    assert_eq!(rig.opened.borrow().len(), before, "nothing beneath");
+    assert_eq!(
+        results.borrow_mut().drain(..).collect::<Vec<_>>(),
+        [Value::Null, Value::Null]
+    );
+    assert!(rig.terminal_focused());
+    println!("dialog: ok");
+}
+
 fn main() {
     let scratch: PathBuf =
         std::env::temp_dir().join(format!("perch-floating-window-{}", std::process::id()));
@@ -646,6 +727,7 @@ fn main() {
     navigator(&mut rig);
     pane_menu(&mut rig);
     new_session(&mut rig);
+    dialog(&mut rig);
     confirm(&mut rig);
 
     rig.cx

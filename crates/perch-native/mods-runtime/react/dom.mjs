@@ -154,7 +154,10 @@ export class HostElement extends Target {
   /** A box's tick: what a click just made it (`ticked`, during the change event it causes), else its props'. */
   get checked() { return this.ticked ?? !!(this.props.checked ?? this.props.defaultChecked); }
   set checked(on) { this.ticked = !!on; }
-  select() {}
+  /** Selection in a field: the caret stays at the end of its text, and the one selection kept is all of it
+   * (`selectedAll`: the next character typed replaces the text). */
+  select() { this.selectedAll = true; }
+  setSelectionRange(start, end) { this.selectedAll = start === 0 && end >= this.value.length && end > 0; }
   /** Asks the scroll area around this element to show it (`toGpui`, on the next frame: the engine scrolls by the
    * fewest pixels, as `{ inline: "nearest", block: "nearest" }`, whatever the options). */
   scrollIntoView() { if (this.ownerDocument) this.ownerDocument.scrollTarget = this; }

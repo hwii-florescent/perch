@@ -663,8 +663,9 @@ fn press(cx: &mut HeadlessAppContext, window: gpui::AnyWindowHandle, keystroke: 
     cx.run_until_parked();
 }
 
-/// Does a fixture state's `steps` in the window, as events: a `type` clicks its field and types
-/// the text a key at a time, a `key` presses one key where the keyboard is, a `click` clicks.
+/// Does a fixture state's `steps` in the window, as events: a `type` clicks its field, selects
+/// what is in it and types the text a key at a time, a `key` presses one key where the keyboard
+/// is, a `click` clicks.
 fn run_steps(
     cx: &mut HeadlessAppContext,
     window: gpui::AnyWindowHandle,
@@ -678,6 +679,13 @@ fn run_steps(
                 window,
                 &named(screen, typed["selector"].as_str().unwrap()),
             );
+            // The web sets the field's value: what was in it goes, so it is selected first.
+            let all = if cfg!(target_os = "macos") {
+                "cmd-a"
+            } else {
+                "ctrl-a"
+            };
+            press(cx, window, Keystroke::parse(all).unwrap());
             for c in typed["text"].as_str().unwrap_or_default().chars() {
                 let key = if c == ' ' {
                     "space".to_string()

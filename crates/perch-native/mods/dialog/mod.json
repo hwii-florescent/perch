@@ -1,0 +1,5 @@
+{
+  "name": "Dialog",
+  "description": "The web app's stock dialog with the file menu's name prompt drawn in it, unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}
