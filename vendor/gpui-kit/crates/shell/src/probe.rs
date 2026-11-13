@@ -37,7 +37,10 @@ pub struct ProbeRecord {
     pub font_size: Pixels,
     pub font_weight: FontWeight,
     pub font_style: FontStyle,
+    /// The line height GPUI draws: the requested one rounded to whole pixels.
     pub line_height: Pixels,
+    /// PERCH: the line height the style asks for, before GPUI's rounding.
+    pub line_height_requested: Pixels,
     /// Its own opacity, when it sets one.
     pub opacity: Option<f32>,
 }
@@ -139,6 +142,7 @@ impl Element for Probe {
             font_weight: text.font_weight,
             font_style: text.font_style,
             line_height: text.line_height_in_pixels(rem),
+            line_height_requested: text.line_height.to_pixels(text.font_size, rem),
             opacity: style.opacity,
         };
         RECORDS.with(|records| records.borrow_mut().insert(self.name.clone(), record));
