@@ -139,6 +139,16 @@ pub const STOCK: &[(&str, &str)] = &[
         "status/status/usage.js",
         include_str!("../mods/status/status/usage.js"),
     ),
+    ("tabs/main.js", include_str!("../mods/tabs/main.js")),
+    ("tabs/mod.json", include_str!("../mods/tabs/mod.json")),
+    (
+        "tabs/tabs/icons.js",
+        include_str!("../mods/tabs/tabs/icons.js"),
+    ),
+    (
+        "tabs/tabs/main.js",
+        include_str!("../mods/tabs/tabs/main.js"),
+    ),
 ];
 
 /// Where user mods live: `native-mods/` in the folder that holds the core's database

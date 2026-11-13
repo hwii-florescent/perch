@@ -35,7 +35,7 @@ use crate::settings::{
     next_choice, scrollback_from_text, stepped, Change, CONTRAST, MAX_SCROLLBACK, MIN_SCROLLBACK,
     OPACITY, OPTION_AS_ALT, PADDING, TOAST_DELIVERY,
 };
-use crate::sidebar::{Attention, Heard, Provider, LOCAL};
+use crate::sidebar::{Heard, Provider, LOCAL};
 use crate::tabs::{Dir, Node, Side, Tabs};
 use crate::terminal::actions::{Action, Scroll};
 use crate::terminal::attach::FromCore;
@@ -43,8 +43,8 @@ use crate::terminal::clipboard::{Clipboard, SystemClipboard};
 use crate::terminal::links::{open_in_system, Target};
 use crate::terminal::{Status, TerminalEvent, TerminalView};
 use crate::ui::{
-    hint, label, tint, LaunchFailed, OpenSession, Sidebar, DIM_COLOR, MAIN_BG, SELECTED_BG,
-    SIDEBAR_BG, SIDEBAR_WIDTH, TITLE_COLOR,
+    hint, LaunchFailed, OpenSession, Sidebar, DIM_COLOR, MAIN_BG, SELECTED_BG, SIDEBAR_BG,
+    SIDEBAR_WIDTH, TITLE_COLOR,
 };
 use crate::zoom::Zoom;
 use futures::channel::mpsc::UnboundedSender;
@@ -2312,103 +2312,6 @@ impl Workspace {
 
     // Drawing
 
-    fn tab_bar(&self, cx: &mut Context<Self>) -> gpui::Div {
-        let shown = self.tabs.shown();
-        let active = self.tabs.active().map(str::to_string);
-        let mut bar = div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_1()
-            .h(px(TAB_BAR_HEIGHT))
-            .px_2()
-            .bg(rgb(TAB_BAR_BG))
-            .text_sm();
-        for id in self.tabs.strip() {
-            let is_active = active.as_deref() == Some(id.as_str());
-            let in_split = shown.len() > 1 && shown.contains(id);
-            let attention = self
-                .sidebar
-                .read(cx)
-                .find_session(id)
-                .and_then(|s| s.attention);
-            let dot = attention.map_or(DIM_COLOR, |a| tint(a).0);
-            let (select, close) = (id.clone(), id.clone());
-            let mut tab = div()
-                .id(format!("tab-{id}"))
-                .cursor_pointer()
-                .flex()
-                .items_center()
-                .gap_2()
-                .px_2()
-                .h(px(TAB_BAR_HEIGHT - 6.))
-                .max_w(px(220.))
-                .rounded_sm()
-                .text_color(rgb(if is_active { TITLE_COLOR } else { DIM_COLOR }))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if this.tabs.show(&select) {
-                        this.after_change(cx);
-                    }
-                }))
-                .child(div().flex_none().size(px(8.)).rounded_full().bg(rgb(dot)))
-                .child(div().truncate().child(self.title_of(id, cx)));
-            if is_active {
-                tab = tab.bg(rgb(SELECTED_BG));
-            } else if in_split {
-                tab = tab.text_color(rgb(0xb0b0b8));
-            }
-            if attention == Some(Attention::NeedsYou) {
-                tab = tab.child(label(Attention::NeedsYou));
-            }
-            tab = tab.child(
-                div()
-                    .id(format!("close-{id}"))
-                    .flex_none()
-                    .text_color(rgb(DIM_COLOR))
-                    .child("×")
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        cx.stop_propagation();
-                        this.close(&close, cx);
-                    })),
-            );
-            bar = bar.child(tab);
-        }
-        bar = bar.child(
-            div()
-                .id("new-tab")
-                .cursor_pointer()
-                .px_2()
-                .text_color(rgb(DIM_COLOR))
-                .child("+")
-                .on_click(cx.listener(|this, _, window, cx| {
-                    let result = this.run_command("tabs.new", None, window, cx);
-                    this.finish(result, cx);
-                })),
-        );
-        if self.leader.is_some() {
-            bar = bar.child(
-                div()
-                    .text_xs()
-                    .text_color(rgb(DIM_COLOR))
-                    .child("Leader… press a key"),
-            );
-        }
-        bar.child(div().flex_1())
-            .child(self.bar_link(
-                "open-palette",
-                "Commands",
-                cx.listener(|this, _, window, cx| this.toggle_palette(window, cx)),
-            ))
-            .child(self.bar_link(
-                "open-settings",
-                "Settings",
-                cx.listener(|this, _, _, cx| {
-                    this.settings = Some(SettingsPanel::default());
-                    cx.notify();
-                }),
-            ))
-    }
-
     fn bar_link(
         &self,
         id: &'static str,
@@ -3174,9 +3077,23 @@ impl gpui::Render for Workspace {
                 let bar = match self.screens.inflow("tabs") {
                     Some(view) => {
                         let (_, height) = self.screens.size("tabs", cx);
-                        div().flex_none().h(px(height)).child(view)
+                        div().flex_none().h(px(height)).child(view).into_any_element()
                     }
-                    None => self.tab_bar(cx),
+                    // The stock `tabs` mod draws the strip; without it its place says why.
+                    None => div()
+                        .id("tab-strip-missing")
+                        .flex_none()
+                        .h(px(TAB_BAR_HEIGHT))
+                        .px_2()
+                        .flex()
+                        .items_center()
+                        .bg(rgb(TAB_BAR_BG))
+                        .child(hint(if screens::mods(cx).is_none() {
+                            "Mods are off in this window, so nothing draws the tab strip."
+                        } else {
+                            "No mod draws the tab strip. The stock one is restored when the app starts."
+                        }))
+                        .into_any_element(),
                 };
                 area = area.child(bar).child(
                     div()

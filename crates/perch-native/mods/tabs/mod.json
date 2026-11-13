@@ -1,0 +1,6 @@
+{
+  "name": "Tabs",
+  "description": "The web app's stock tab strip, unchanged, drawn natively through the React runtime.",
+  "runtime": "react",
+  "screen": { "height": 44 }
+}

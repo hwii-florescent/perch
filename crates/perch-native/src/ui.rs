@@ -265,17 +265,6 @@ impl Sidebar {
     }
 }
 
-/// The small tinted word that names a state.
-pub(crate) fn label(attention: Attention) -> gpui::Div {
-    div()
-        .flex_none()
-        .px_1()
-        .rounded_sm()
-        .text_xs()
-        .bg(rgb(tint(attention).1))
-        .child(attention.label().unwrap_or_default())
-}
-
 /// A quiet line of text.
 pub(crate) fn hint(text: impl Into<gpui::SharedString>) -> gpui::Div {
     div()

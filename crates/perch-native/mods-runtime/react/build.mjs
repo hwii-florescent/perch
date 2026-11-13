@@ -37,6 +37,7 @@ export const RUNTIME = "react-runtime";
  * its id here, then `npm run build:mods-runtime`, then its `main.js`, `mod.json` and tests (see the findings recipe). */
 export const SCREENS = [
   "sidebar",
+  "tabs",
   "status",
   "pane-header",
 ];

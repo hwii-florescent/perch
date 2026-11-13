@@ -57,6 +57,11 @@ path = "tests/mods_chrome_capture.rs"
 harness = false
 
 [[test]]
+name = "mods_chrome_window"
+path = "tests/mods_chrome_window.rs"
+harness = false
+
+[[test]]
 name = "terminal_render"
 path = "tests/terminal_render.rs"
 harness = false

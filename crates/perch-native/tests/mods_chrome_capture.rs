@@ -1,4 +1,4 @@
-//! The stock chrome screens on the React runtime (`status`, `pane-header`: the web's stock
+//! The stock chrome screens on the React runtime (`tabs`, `status`, `pane-header`: the web's stock
 //! source, unchanged) drawn in every state of their parity fixtures, light and dark, as the window
 //! places them, into `e2e/artifacts-native-parity/native/` for the gate (`compare.mjs`).
 //!
@@ -12,7 +12,7 @@ mod parity_screens;
 use parity_screens::ScreenFixture;
 use std::time::Instant;
 
-const SCREENS: [&str; 2] = ["status", "pane-header"];
+const SCREENS: [&str; 3] = ["tabs", "status", "pane-header"];
 
 fn main() {
     let scratch = std::env::temp_dir().join(format!("perch-chrome-capture-{}", std::process::id()));
