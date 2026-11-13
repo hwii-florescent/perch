@@ -878,6 +878,39 @@ fn a_click_needs_no_move_before_it() {
         })
         .unwrap();
     assert!(focused, "and its terminal the keyboard");
+
+    // The first click on a window that is not key makes it key, and the window is drawn again
+    // between the press and the release: the click on the second tab still lands.
+    h.press("x");
+    let at = point(px(SIDEBAR_WIDTH + 30. + 150.), px(TAB_BAR_HEIGHT / 2.));
+    let plain = Modifiers::default();
+    h.cx.update_window(h.window.into(), |_, window: &mut Window, cx| {
+        window.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                button: MouseButton::Left,
+                position: at,
+                modifiers: plain,
+                click_count: 1,
+                first_mouse: true,
+            }),
+            cx,
+        );
+        window.activate_window();
+        window.refresh();
+        let _ = window.draw(cx);
+        window.dispatch_event(
+            PlatformInput::MouseUp(MouseUpEvent {
+                button: MouseButton::Left,
+                position: at,
+                modifiers: plain,
+                click_count: 1,
+            }),
+            cx,
+        );
+    })
+    .unwrap();
+    h.cx.run_until_parked();
+    assert_eq!(h.active().as_deref(), Some("bravo"), "the second tab");
     println!("workspace_render: click without a move ok");
 }
 
