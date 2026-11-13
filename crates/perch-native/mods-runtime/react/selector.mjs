@@ -3,7 +3,7 @@
 //! compiled stylesheet, `css.mjs`) and the tests (the web reference's named-element selectors).
 //!
 //! Supported: type, `*`, `.class`, `#id`, `[attr]`, `[attr=v]`, `[attr^=v]`, `[attr$=v]`, `[attr*=v]`, `[attr~=v]`,
-//! `:first-child`, `:last-child`, `:nth-child(n)`, `:not()`, `:is()`, `:where()`, `:root`, the state pseudo-classes
+//! `:first-child`, `:last-child`, `:only-child`, `:nth-child(n)`, `:not()`, `:is()`, `:where()`, `:root`, the state pseudo-classes
 //! (`:hover`, `:focus`, `:focus-visible`, `:focus-within`, `:active`, `:disabled`, `:enabled`, `:checked`), and the
 //! descendant and child combinators. Anything else (`+`, `~`, `:has()`, pseudo-elements, ...) throws a
 //! `SelectorError`, so a caller can skip a rule it cannot evaluate instead of guessing.
@@ -15,7 +15,7 @@ export class SelectorError extends Error {}
 
 const STATES = new Set(["hover", "focus", "focus-visible", "focus-within", "active", "disabled", "enabled", "checked"]);
 const FUNCTIONAL = new Set(["not", "is", "where", "nth-child"]);
-const SIMPLE = new Set(["first-child", "last-child", "root", ...STATES]);
+const SIMPLE = new Set(["first-child", "last-child", "only-child", "root", ...STATES]);
 
 /** `text` without CSS escapes (`\:` is `:`, `\31 ` is `1`). */
 export function unescapeIdent(text) {
@@ -193,6 +193,7 @@ function compoundMatches(element, compound, options, isSubject) {
   for (const pseudo of compound.pseudos) {
     switch (pseudo.name) {
       case "first-child": if (siblingsOf(element)[0] !== element) return false; break;
+      case "only-child": if (siblingsOf(element).length !== 1) return false; break;
       case "last-child": { const list = siblingsOf(element); if (list[list.length - 1] !== element) return false; break; }
       case "nth-child": if (siblingsOf(element).indexOf(element) !== pseudo.n - 1) return false; break;
       case "root": if (!element.isDocumentRoot) return false; break;

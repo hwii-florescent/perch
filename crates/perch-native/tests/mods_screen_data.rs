@@ -52,12 +52,6 @@ const EXCEPTIONS: &[Exception] = &[
         reason: "the native client reads no tab shape setting; its strip is square",
     },
     Exception {
-        screen: "status",
-        states: &["*"],
-        path: "planUsage",
-        reason: "the native client keeps no plan usage (`usage.get` is never asked)",
-    },
-    Exception {
         screen: "toast",
         states: &["*"],
         path: "notifications[*].timeout",

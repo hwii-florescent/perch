@@ -55,6 +55,7 @@ const STYLE = {
   text_size: (el, v) => el.text_size(v),
   font_weight: (el, v) => el.font_weight(v),
   font_family: (el, v) => el.font_family(v),
+  font_features: (el, v) => el.font_features(v),
   line_height: (el, v) => el.line_height(v),
   italic: (el, v) => (v ? el.italic() : el.not_italic()),
   whitespace: (el, v) => (v === "nowrap" ? el.whitespace_nowrap() : el.whitespace_normal()),
@@ -121,6 +122,18 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   const wraps = text.whitespace !== "nowrap" && !text.text_ellipsis;
   if (rowItem && wraps && node.style.flex_shrink !== 0 && node.style.min_w === undefined && (node.children ?? []).some((c) => c.kind === "text")) el = el.min_w(0);
   for (const variant of ["hover", "focus", "active"]) if (node[variant]) el = el[variant]((s) => applyStyle(s, node[variant]));
+  // `scrollIntoView()`: the scroll area holding the element shows the child it is in. ponytail: the kit's one
+  // `ScrollHandle` (`kit.scroll`) serves the first scroll area asked; a second one would need a handle per area.
+  if (kit.scroll && (node.style.overflow_x === "scroll" || node.style.overflow_y === "scroll")) {
+    const target = handle.document?.scrollTarget;
+    const at = target ? (node.children ?? []).filter(drawn).findIndex((child) => holds(child, target.id)) : -1;
+    if (at >= 0 && (handle.scroller ?? node.id) === node.id) {
+      handle.document.scrollTarget = null;
+      handle.scroller = node.id;
+      kit.scroll.scroll_to_item(at);
+    }
+    if (handle.scroller === node.id) el = el.track_scroll(kit.scroll);
+  }
 
   // A press on a text field puts the keyboard in it, as a browser does.
   if (node.kind === "input" && !node.disabled) el = el.on_mouse_down("left", (_event, cx) => { handle.focus(node.id); cx.notify(); });
@@ -233,6 +246,9 @@ const tickBox = (node) => {
   }
   return null;
 };
+
+/** Whether `node` is the host element `id` or holds it. */
+const holds = (node, id) => node.id === id || (node.children ?? []).some((child) => child.kind !== "text" && holds(child, id));
 
 /** Whether `node` or a node under it draws an icon. */
 const hasIcon = (node) => !!node.markup || (node.children ?? []).some((child) => child.kind !== "text" && hasIcon(child));

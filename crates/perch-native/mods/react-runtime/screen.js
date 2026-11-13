@@ -28,8 +28,12 @@
 // each screen's folder); `build.mjs` leaves it alone.
 import { asRender, files, host, onFocus, refresh, setContext, settingsMoved } from "./host.js";
 import { View, div, image } from "gpui-kit";
+import { ScrollHandle } from "gpui-base";
 import { close, props as screenProps, scale } from "perch";
-import { describeToGpui, mount, NAMED_ELEMENTS } from "./runtime.mjs";
+import { describeToGpui, mount, NAMED_ELEMENTS, sdk } from "./runtime.mjs";
+
+// This folder's `@perch/sdk` calls this folder's host, whichever screen loads after it.
+sdk.bindHost(host);
 
 const KIT = { div, image };
 
@@ -86,6 +90,8 @@ export function screen(id, Component, options = {}) {
       this.mounts = 0;
       const props = { ...toProps(JSON.parse(this.raw)), key: this.mounts };
       this.handle = mount(host, Component, { container: options.container, names: NAMED_ELEMENTS[id], props });
+      // Where `scrollIntoView()` leaves its request (a handle can only be made here, not while drawing).
+      this.kit = { ...KIT, scroll: ScrollHandle.new() };
     }
 
     render(cx) {
@@ -96,7 +102,10 @@ export function screen(id, Component, options = {}) {
         const raw = JSON.stringify(screenProps());
         if (refresh(false) || raw !== this.raw || settingsMoved()) {
           cx.timer.after(0, (task) => {
+            const size = JSON.stringify(host.viewport());
             refresh(true);
+            // A new window size changes media rules and `vw`, which no component re-renders for: describe again.
+            if (JSON.stringify(host.viewport()) !== size) this.handle.describe();
             // The web reads its view settings when it mounts: settings changed elsewhere mount it again.
             const moved = settingsMoved();
             if (moved) this.mounts += 1;
@@ -109,7 +118,7 @@ export function screen(id, Component, options = {}) {
           });
         }
         // Vertical lengths are laid on the window's device pixels (`snapColumns` in the runtime).
-        const drawn = describeToGpui(this.handle.description, KIT, this.handle, files, scale());
+        const drawn = describeToGpui(this.handle.description, this.kit, this.handle, files, scale());
         if (!this.keys) return drawn;
         return drawn.track_focus(this.keys).on_key_down((event, cx) => {
           if (this.handle.key(domKey(event))) cx.stop_propagation();

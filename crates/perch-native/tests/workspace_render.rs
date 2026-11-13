@@ -10,12 +10,12 @@ use gpui::{
     Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput, Window, WindowHandle,
 };
 use perch_native::client::{Command, Core, Update};
-use perch_native::sidebar::{Alert, Attention, Heard, Model, State, Toast};
+use perch_native::sidebar::{Alert, Heard, Model, State, Toast};
 use perch_native::terminal::attach::{FromCore, ToCore};
 use perch_native::terminal::clipboard::MemoryClipboard;
 use perch_native::terminal::links::Target;
 use perch_native::terminal::{Status, TerminalEvent, TerminalView};
-use perch_native::ui::{tint, Workspace, SIDEBAR_WIDTH};
+use perch_native::ui::{Workspace, SIDEBAR_WIDTH};
 use perch_native::workspace::TAB_BAR_HEIGHT;
 use serde_json::{json, Value};
 use std::rc::Rc;
@@ -397,7 +397,6 @@ fn filled(r: u8, g: u8, b: u8) -> String {
 fn two_tabs() {
     let mut h = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
     let area = SIDEBAR_WIDTH..WIDTH;
-    let bar = (0.0, TAB_BAR_HEIGHT);
 
     // Nothing open: no tab strip, a quiet main area.
     let empty = h.draw();
@@ -412,12 +411,8 @@ fn two_tabs() {
     // Only the tab on screen has a terminal laid out; the other is kept and not drawn.
     assert_eq!(h.shown(), ["bravo"]);
     assert_eq!(h.ws(|ws| ws.terminals().len()), 1);
-    let both = h.draw();
-    assert!(
-        both.bright(area.start, area.end, bar.0, bar.1) > 20,
-        "the active tab's title is drawn in the strip"
-    );
-    both.save("two-tabs");
+    // The strip itself is the stock `tabs` mod (`mods_chrome_window`); mods are off here.
+    h.draw().save("two-tabs");
 
     // The keys of the web's table switch tabs, and the window takes them before the terminal.
     assert!(h.press("cmd-1"), "tabs.jump1 is taken");
@@ -450,53 +445,6 @@ fn two_tabs() {
     assert_eq!(h.strip(), Vec::<String>::new());
     assert!(h.ws(|ws| ws.open().is_none()));
     println!("workspace_render: two tabs ok");
-}
-
-fn attention_on_a_tab() {
-    let tab_bar_dot = |h: &mut Harness, attention: Attention| {
-        h.draw()
-            .count(tint(attention).0, SIDEBAR_WIDTH, WIDTH, 0.0, TAB_BAR_HEIGHT)
-    };
-    let mut quiet = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
-    quiet.open("alpha");
-    quiet.open("bravo");
-    assert_eq!(
-        tab_bar_dot(&mut quiet, Attention::NeedsYou),
-        0,
-        "no tab needs you"
-    );
-
-    // alpha needs you while bravo is the tab being read: alpha's tab says so, in the strip.
-    let mut h = Harness::new(model(&[
-        ("alpha", json!({"blocked": true})),
-        ("bravo", json!({})),
-    ]));
-    h.open("alpha");
-    h.open("bravo");
-    assert!(
-        tab_bar_dot(&mut h, Attention::NeedsYou) > 10,
-        "the tab of a session that needs you has the red dot"
-    );
-    let marked = h.draw();
-    marked.save("attention");
-    let fill = marked.count(
-        tint(Attention::NeedsYou).1,
-        SIDEBAR_WIDTH,
-        WIDTH,
-        0.0,
-        TAB_BAR_HEIGHT,
-    );
-    assert!(fill > 30, "and its label ({fill} fill pixels)");
-    // The mark is live: when the core says the session is no longer waiting, it goes.
-    let settled = model(&[("alpha", json!({})), ("bravo", json!({}))]);
-    h.window
-        .update(&mut h.cx, |ws, _, cx| {
-            ws.sidebar()
-                .update(cx, |sidebar, cx| sidebar.apply(Update::Model(settled), cx))
-        })
-        .unwrap();
-    assert_eq!(tab_bar_dot(&mut h, Attention::NeedsYou), 0);
-    println!("workspace_render: attention mark ok");
 }
 
 fn a_split_shows_each_pane() {
@@ -944,22 +892,13 @@ fn posted_characters_type_as_they_are() {
 }
 
 /// A click lands where it is, with no pointer move before it and after typing: GPUI finds what is
-/// under the pointer from the click's own position. A tab, a pane of a split and a sidebar row.
+/// under the pointer from the click's own position. A pane of a split (a tab: `mods_chrome_window`).
 fn a_click_needs_no_move_before_it() {
     let mut h = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
     h.open("alpha");
     h.open("bravo");
-    h.draw();
-    assert_eq!(h.active().as_deref(), Some("bravo"));
-    // The keyboard was the last thing used.
-    h.press("x");
-    h.click(
-        SIDEBAR_WIDTH + 30.,
-        TAB_BAR_HEIGHT / 2.,
-        MouseButton::Left,
-        Modifiers::default(),
-    );
-    assert_eq!(h.active().as_deref(), Some("alpha"), "the first tab");
+    assert!(h.press("cmd-1"));
+    assert_eq!(h.active().as_deref(), Some("alpha"));
     h.draw();
 
     // A split: a click in the pane without the keyboard gives it the keyboard.
@@ -999,38 +938,6 @@ fn a_click_needs_no_move_before_it() {
         .unwrap();
     assert!(focused, "and its terminal the keyboard");
 
-    // The first click on a window that is not key makes it key, and the window is drawn again
-    // between the press and the release: the click on the second tab still lands.
-    h.press("x");
-    let at = point(px(SIDEBAR_WIDTH + 30. + 150.), px(TAB_BAR_HEIGHT / 2.));
-    let plain = Modifiers::default();
-    h.cx.update_window(h.window.into(), |_, window: &mut Window, cx| {
-        window.dispatch_event(
-            PlatformInput::MouseDown(MouseDownEvent {
-                button: MouseButton::Left,
-                position: at,
-                modifiers: plain,
-                click_count: 1,
-                first_mouse: true,
-            }),
-            cx,
-        );
-        window.activate_window();
-        window.refresh();
-        let _ = window.draw(cx);
-        window.dispatch_event(
-            PlatformInput::MouseUp(MouseUpEvent {
-                button: MouseButton::Left,
-                position: at,
-                modifiers: plain,
-                click_count: 1,
-            }),
-            cx,
-        );
-    })
-    .unwrap();
-    h.cx.run_until_parked();
-    assert_eq!(h.active().as_deref(), Some("bravo"), "the second tab");
     println!("workspace_render: click without a move ok");
 }
 
@@ -1825,7 +1732,6 @@ fn main() {
     tabs_out_of_sight_are_parked_beyond_twelve();
     zoom_scales_the_terminals();
     two_tabs();
-    attention_on_a_tab();
     a_split_shows_each_pane();
     terminal_settings_show_what_the_core_sent();
     a_settings_control_sends_the_changed_value();

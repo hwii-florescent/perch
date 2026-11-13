@@ -1,0 +1,5 @@
+{
+  "name": "Pane header",
+  "description": "The web app's stock pane header, unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

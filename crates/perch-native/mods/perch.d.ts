@@ -417,6 +417,17 @@ declare module "perch" {
   export function zoom(): number;
   /** `usePaneLook`. */
   export function paneLook(): PaneLook;
+  /** `usePlanUsage`: plan usage as the core last answered `usage.get` (`run("usage.get")` asks), with the last
+   * `usage.redeemResult`; `{ usage: [], updatedAt: 0, spend: null, redeemResult: null }` until it answers. */
+  export function planUsage(): {
+    usage: Record<string, unknown>[];
+    updatedAt: number;
+    spend: Record<string, unknown> | null;
+    redeemResult: Record<string, unknown> | null;
+  };
+  /** The window's logical size (`window.innerWidth`/`innerHeight`); null before a window has drawn the mod. A resize
+   * re-renders the mod. */
+  export function viewport(): { width: number; height: number } | null;
   /** A host's agents (default `local`), by id and display name, to tell them apart and draw their icons. */
   export function providers(hostId?: string): { id: string; name: string }[];
   /** `startSession`: starts `agent` in `cwd` on `hostId` (no `cwd`: a Quickchat). Rejects with why not. */

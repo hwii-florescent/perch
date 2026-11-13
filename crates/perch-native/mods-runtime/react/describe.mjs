@@ -105,6 +105,50 @@ function fillsLessMargins(value, v) {
   return !!at && !at.num && at.pct === 100 && Math.abs(at.px + margins) < 0.01;
 }
 
+/** The `[x, y]` a `transform: translate…()` or a `translate` declaration moves a box by, as text; `[]` for none,
+ * null for a transform that is more than one translation. */
+function translation(v) {
+  const transform = v.transform;
+  if (transform && transform !== "none") {
+    const m = /^\s*translate(X|Y)?\(([^]*)\)\s*$/.exec(transform);
+    const args = m && splitTop(m[2], ",").map((a) => a.trim());
+    if (!args || args.length > (m[1] ? 1 : 2)) return null;
+    if (m[1] === "X") return [args[0], "0"];
+    if (m[1] === "Y") return ["0", args[0]];
+    return [args[0], args[1] ?? "0"];
+  }
+  const translate = v.translate;
+  if (translate && translate !== "none") {
+    const parts = splitTop(String(translate).trim(), " ").filter(Boolean);
+    if (parts.length > 3 || (parts[2] !== undefined && evalLength(parts[2], {})?.px)) return null;
+    return [parts[0], parts[1] ?? "0"];
+  }
+  return [];
+}
+
+/** An absolutely placed box moved by a translation, which the engine has no transform for: the same move as a
+ * margin on that side (a percentage is of the box's own fixed size). Anything else is reported. */
+function shiftByTranslate(computed, s, report) {
+  const v = computed.values;
+  const shift = translation(v);
+  if (shift?.length === 0) return;
+  const prop = v.transform && v.transform !== "none" ? "transform" : "translate";
+  const ctx = { fontSize: v["font-size"] };
+  const of = (text, size) => {
+    const e = evalLength(text, ctx);
+    if (!e || (e.unitless && e.num)) return undefined;
+    if (!e.pct) return e.px;
+    return typeof size === "number" ? e.px + (e.pct / 100) * size : undefined;
+  };
+  const dx = shift ? of(shift[0], s.w) : undefined, dy = shift ? of(shift[1], s.h) : undefined;
+  if (dx === undefined || dy === undefined) {
+    report("unsupported", prop, v[prop], computed.sources[prop]);
+    return;
+  }
+  if (dx) s.ml = (s.ml ?? 0) + dx;
+  if (dy) s.mt = (s.mt ?? 0) + dy;
+}
+
 /** The non-text engine styles of one computed style, plus what could not be expressed. */
 function boxStyle(computed, report, viewport = null) {
   const v = computed.values;
@@ -195,6 +239,7 @@ function boxStyle(computed, report, viewport = null) {
       const room = viewport.width - s.left - (typeof s.ml === "number" ? s.ml : 0) - (typeof s.mr === "number" ? s.mr : 0);
       s.max_w = typeof s.max_w === "number" ? Math.min(s.max_w, room) : room;
     }
+    shiftByTranslate(computed, s, report);
   } else if (position === "sticky") report("unsupported", "position", "sticky", src("position"));
   if (v["z-index"] !== "auto" && own("z-index")) report("unsupported", "z-index", v["z-index"], src("z-index"), "paint order is tree order");
 
@@ -244,6 +289,15 @@ function boxStyle(computed, report, viewport = null) {
   return s;
 }
 
+/** The OpenType feature tags (`"tnum,zero"`) of a `font-variant-numeric` value; `""` for normal, null for a keyword
+ * with no tag here. */
+const NUMERIC = { "tabular-nums": "tnum", "proportional-nums": "pnum", "lining-nums": "lnum", "oldstyle-nums": "onum", "slashed-zero": "zero", "diagonal-fractions": "frac", "stacked-fractions": "afrc", ordinal: "ordn" };
+function numericFeatures(value) {
+  if (!value || value === "normal") return "";
+  const tags = String(value).trim().split(/\s+/).map((word) => NUMERIC[word]);
+  return tags.every(Boolean) ? tags.join(",") : null;
+}
+
 /** The text styles a node's computed style asks for, before inheritance is taken into account. */
 function textWanted(computed, measure) {
   const v = computed.values;
@@ -252,6 +306,7 @@ function textWanted(computed, measure) {
   return {
     text_color: color,
     text_size: Math.round(v["font-size"] * 1000) / 1000,
+    font_features: numericFeatures(v["font-variant-numeric"]) ?? "",
     font_weight: v["font-weight"],
     line_height: lh.factor !== undefined ? { factor: lh.factor } : { px: Math.round(lineHeightPx(v, measure) * 1000) / 1000 },
     font_family: ENGINE_FAMILY(v["font-family"]),
@@ -267,7 +322,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 function textStyle(computed, wanted, inheritedText) {
   const s = {};
   const set = (key, cssProps) => cssProps.some((p) => !computed.inherited.has(p));
-  for (const [key, props] of [["text_color", ["color"]], ["text_size", ["font-size"]], ["font_weight", ["font-weight"]], ["font_family", ["font-family"]], ["italic", ["font-style"]], ["whitespace", ["white-space"]], ["text_align", ["text-align"]]]) {
+  for (const [key, props] of [["text_color", ["color"]], ["text_size", ["font-size"]], ["font_weight", ["font-weight"]], ["font_family", ["font-family"]], ["italic", ["font-style"]], ["whitespace", ["white-space"]], ["text_align", ["text-align"]], ["font_features", ["font-variant-numeric"]]]) {
     if (set(key, props) || !same(wanted[key], inheritedText[key])) s[key] = wanted[key];
   }
   const wantedPx = lineHeightOf(wanted.line_height, wanted.text_size);
@@ -314,7 +369,7 @@ function reportDeclarations(computed, report) {
         if (value !== "normal" && !(value?.px === 0)) report("approximated", prop, value?.px !== undefined ? `${Math.round(value.px * 1000) / 1000}px` : value, source, "the run is as wide as with the spacing (room after it), the letters are not spread");
         break;
       case "font-variant-numeric":
-        if (value !== "normal") report("unsupported", prop, value, source, "no font features in the engine");
+        if (value !== "normal" && numericFeatures(value) === null) report("unsupported", prop, value, source);
         break;
       case "text-transform":
         if (value !== "none") report("approximated", prop, value, source, "applied to the text in JS");
@@ -335,7 +390,11 @@ function reportDeclarations(computed, report) {
       case "outline-style": case "outline-width": case "outline-color":
         if (v["outline-style"] !== "none" && prop === "outline-style") report("unsupported", "outline", `${length(v["outline-width"])}px ${v["outline-style"]} ${colorOut(v["outline-color"])?.value ?? ""}`.trim(), source, "no outline in the engine (no focus ring)");
         break;
-      case "transform": case "translate": case "rotate": case "scale": case "animation": case "animation-name": case "filter": case "backdrop-filter":
+      case "transform": case "translate":
+        // An absolute box's translation is drawn as a margin (`shiftByTranslate`), which reports what it cannot do.
+        if (v.position !== "absolute" && v.position !== "fixed" && value && value !== "none") report("unsupported", prop, value, source);
+        break;
+      case "rotate": case "scale": case "animation": case "animation-name": case "filter": case "backdrop-filter":
       case "mask": case "-webkit-mask": case "clip-path": case "content": case "list-style": case "resize": case "appearance": case "-webkit-appearance":
       case "vertical-align": case "float": case "clear": case "order": case "aspect-ratio": case "object-fit": case "isolation": case "mix-blend-mode":
       case "will-change": case "contain": case "touch-action": case "caret-color": case "scroll-behavior": case "scrollbar-gutter": case "text-wrap":
@@ -469,6 +528,19 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
     style.items = "start";
     if (drop > 0) only.style.mt = Math.round(((only.style.mt ?? 0) + drop) * 100) / 100;
     report("approximated", "display", `${computed.values.display} holding one ${only[DISPLAY]} box`, "(inline formatting)", "a column, the box lowered to the line's baseline");
+  } else if (!style.display && kids.length === 1 && (kids[0].kind === "svg" || kids[0].kind === "image") && kids[0][DISPLAY] === "inline" && typeof kids[0].style.h === "number") {
+    // One inline image alone on its line (an icon in a plain span): it sits on the baseline of the line's strut, so
+    // the line is as high as the strut's ascent or the image, whichever is taller, plus the strut's descent.
+    const icon = kids[0];
+    const ascent = strutAscent(computed.values, ctx.measure);
+    const descent = lineHeightPx(computed.values, ctx.measure) - ascent;
+    const round = (n) => Math.round(n * 100) / 100;
+    style.display = "flex";
+    style.flex_direction = "col";
+    style.items = "start";
+    if (ascent > icon.style.h) icon.style.mt = round((icon.style.mt ?? 0) + ascent - icon.style.h);
+    if (descent > 0) icon.style.mb = round((icon.style.mb ?? 0) + descent);
+    report("approximated", "display", `${computed.values.display} holding one inline image`, "(inline formatting)", "a column, the image on the line's baseline");
   } else if (!style.display && inline && hasElements) {
     style.display = "flex";
     style.flex_direction = blockKids ? "col" : "row";
@@ -504,14 +576,14 @@ function keyOf(element, spec) {
 }
 
 /** Engine names for the elements a parity table names, from its selectors over the host tree: `name`, or
- * `name:key` for one of many. A `textRange` name is the element's own text (`range_name`), not the element. A name
- * with no key that more than one element takes is `name@n` from the second on (`n` from 1, in document order), so
- * each has an id of its own; the parity report reads it as `name`. */
+ * `name:key` for one of many. A `textRange` name is the element's own text (`range_name`), not the element. */
 function nameElements(document, defs, nodes) {
-  const taken = new Map();
   // One walk of the tree, each element tried against every selector, rather than a walk per selector: the same
   // names (the first matching definition of a kind wins), a fraction of the visits.
   const parsed = defs.map((def) => [def, parseSelector(def.selector)]);
+  // An engine id names one element: a name with no key that matches again is `name@<n>` (its index in document
+  // order, which the parity report reads back).
+  const seen = new Map();
   const walk = (el) => {
     for (const element of el.children) {
       const node = nodes.get(element.id);
@@ -520,12 +592,9 @@ function nameElements(document, defs, nodes) {
           const slot = def.textRange ? "range_name" : "name";
           if (node[slot] != null || !list.some((steps) => matchesComplex(element, steps))) continue;
           const key = keyOf(element, def.key);
-          if (key != null) node[slot] = `${def.name}:${key}`;
-          else {
-            const n = taken.get(def.name) ?? 0;
-            taken.set(def.name, n + 1);
-            node[slot] = n ? `${def.name}@${n}` : def.name;
-          }
+          const at = key == null ? (seen.get(def.name) ?? 0) : 0;
+          if (key == null) seen.set(def.name, at + 1);
+          node[slot] = key != null ? `${def.name}:${key}` : at ? `${def.name}@${at}` : def.name;
         }
       }
       walk(element);
@@ -593,7 +662,7 @@ function themeOf(perch) {
 
 /** Nothing inherited at the top of a described tree: its root sets every text key, so nothing depends on the
  * engine's own defaults. */
-const ENGINE_ROOT_TEXT = {};
+const ENGINE_ROOT_TEXT = { font_features: "" };
 
 /**
  * Describes the document for the engine: `root` (the screen's container) and `overlays` (what was portalled into

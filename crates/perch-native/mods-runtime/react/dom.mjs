@@ -154,9 +154,18 @@ export class HostElement extends Target {
   /** A box's tick: what a click just made it (`ticked`, during the change event it causes), else its props'. */
   get checked() { return this.ticked ?? !!(this.props.checked ?? this.props.defaultChecked); }
   set checked(on) { this.ticked = !!on; }
-  // ponytail: the engine has no scroll offsets a script sets, so a row scrolled into view stays where the list has it.
-  scrollIntoView() {}
   select() {}
+  /** Asks the scroll area around this element to show it (`toGpui`, on the next frame: the engine scrolls by the
+   * fewest pixels, as `{ inline: "nearest", block: "nearest" }`, whatever the options). */
+  scrollIntoView() { if (this.ownerDocument) this.ownerDocument.scrollTarget = this; }
+}
+
+/** `ResizeObserver`: the engine tells the description of no resizes, so an observer is never called back (its
+ * screen reads boxes when it renders instead). */
+export class HostResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
 }
 
 /** An in-memory `Storage` (the engine's own per-copy storage replaces it when it has one). */
@@ -250,6 +259,7 @@ export function installGlobals(perch, target = globalThis) {
   define(target, "HTMLElement", HostElement);
   define(target, "Element", HostElement);
   define(target, "DOMRect", DOMRect);
+  if (typeof target.ResizeObserver !== "function") define(target, "ResizeObserver", HostResizeObserver);
   const navigator = target.navigator && typeof target.navigator === "object" ? target.navigator : {};
   if (!navigator.clipboard && perch.clipboard) {
     try { define(navigator, "clipboard", perch.clipboard); } catch { /* a frozen navigator keeps its own */ }

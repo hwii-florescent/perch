@@ -371,8 +371,9 @@ fn main() {
         "the tab's terminal has the keyboard"
     );
 
-    // In flow: no tabs mod, the Rust strip; a tabs mod takes its place with the window's tabs;
-    // removing it brings the Rust strip back.
+    // In flow: the stock strip; a user's tabs mod takes its place with the window's tabs;
+    // removing it brings the stock strip back.
+    assert!(rig.record("tab-strip").is_some(), "the stock strip");
     assert!(rig.record("tabs-count").is_none());
     rig.write("tabs", TABS);
     let strip = rig.record("tabs-count").expect("the tabs mod is placed");
@@ -381,10 +382,11 @@ fn main() {
     assert_eq!(
         (root.bounds.origin, root.bounds.size.height),
         (point(px(SIDEBAR_WIDTH), px(0.)), px(30.)),
-        "where the Rust strip is drawn"
+        "where the strip is drawn"
     );
     rig.remove("tabs");
-    assert!(rig.record("tabs-count").is_none(), "the Rust strip is back");
+    assert!(rig.record("tabs-count").is_none());
+    assert!(rig.record("tab-strip").is_some(), "the stock strip is back");
 
     // The status bar: the status line's usage from `status.update` and the zoom reach it, and a
     // change of either re-renders it.

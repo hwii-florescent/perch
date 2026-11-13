@@ -725,7 +725,7 @@ impl Argument {
 /// its bare number means a multiplier rather than pixels, and that is a
 /// documentation matter rather than a typing one.
 fn argument_of(name: &str) -> Argument {
-    if name == "font_family" {
+    if name == "font_family" || name == "font_features" {
         return Argument::String;
     }
     if name == "font_weight" {

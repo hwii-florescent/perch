@@ -31,6 +31,8 @@ export const INERT = [
   "overlay:instructions",
   "overlay:memory",
   "overlay:worktree",
+  "overlay:new-file",
+  "beginTabDrag",
 ];
 
 /** Overlays that open as one of the window's screens: the screen, its props from the overlay's, and what the
@@ -160,6 +162,7 @@ const sessionsOf = (nav) => {
 };
 
 const NO_ADD = { status: "idle", error: null };
+const DESKTOP = { width: 1000, height: 800 };
 let nextOverlay = 1;
 const openOverlays = new Set();
 
@@ -169,13 +172,9 @@ export const host = {
   storage,
   clipboard: { writeText: async (text) => ambient?.write_to_clipboard(String(text)) },
   theme: () => perch.theme(),
-  // A floating screen has the window's size in its props (`viewport`), kept current by the window.
-  // ponytail: an in-flow screen (the sidebar) sits in the desktop layout, so its media queries (`min-[701px]:`) take a
-  // desktop window; a host call for the window's size would let a narrow window use the phone rules.
-  viewport: () => {
-    const size = perch.props()?.viewport;
-    return size && size.width > 0 && size.height > 0 ? { width: size.width, height: size.height } : { width: 1000, height: 800 };
-  },
+  // The window's logical size (`window.innerWidth`/`innerHeight`, media rules, `vw`/`vh`); a resize re-renders. Before
+  // a window has drawn the mod there is none: a desktop window's size.
+  viewport: () => snapshot("viewport", () => perch.viewport() ?? DESKTOP),
   /** The source focused `element`: the screen takes the keyboard (`screen.js`). */
   focused: () => { for (const listener of [...focusListeners]) listener(); },
   subscribe(listener) {
@@ -187,6 +186,11 @@ export const host = {
     return snapshot(`navigation:${JSON.stringify(opts)}`, () => perch.navigation(opts));
   },
   hosts: () => snapshot("hosts", () => perch.hosts()),
+  workspaceTabs: () => snapshot("workspaceTabs", () => perch.workspaceTabs()),
+  statusLine: () => snapshot("statusLine", () => perch.statusLine()),
+  zoom: () => snapshot("zoom", () => perch.zoom()),
+  paneLook: () => snapshot("paneLook", () => perch.paneLook()),
+  planUsage: () => snapshot("planUsage", () => perch.planUsage()),
   agentChoices: (hostId) => snapshot(`agentChoices:${hostId}`, () => perch.agentChoices(hostId)),
   // A session on any computer (the web's store has them all): the shown computer's first, then the others'.
   session: (id) => {
