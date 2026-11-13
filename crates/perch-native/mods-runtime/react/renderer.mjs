@@ -163,7 +163,7 @@ export function mount(perch, Component, options = {}) {
   let described = "";
   const kept = {};
   const render = () => {
-    description = describe(document, perch, styleSheet(), kept);
+    description = describe(document, perch, styleSheet(), kept, options.names);
     described = listening();
     perch.render?.(description);
     return description;

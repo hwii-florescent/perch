@@ -1,10 +1,9 @@
 //! What the runtime's tests share: the stock sidebar exported as the app exports it (unchanged source, plain JS),
-//! loaded with its `react`, `react/jsx-runtime`, `react-dom` and `@perch/sdk` imports resolved to `bundle/` as a
-//! native host resolves them; a `perch` host double fed from the web reference (`sdk`, `tokens`, `window`) and the
+//! loaded with its `react`, `react/jsx-runtime`, `react-dom` and `@perch/sdk` imports resolved to the stock mod's
+//! generated files as the native mod engine resolves them; a `perch` host double fed from the web reference (`sdk`, `tokens`, `window`) and the
 //! fixture's per-viewer view; and a selector adapter over the description, so the reference's named-element
 //! selectors run against what the engine would draw.
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { registerHooks } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -14,7 +13,7 @@ import { MemoryStorage } from "../dom.mjs";
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const runtimeDir = path.resolve(here, "..");
 export const repo = path.resolve(runtimeDir, "../../../..");
-const bundle = path.join(runtimeDir, "bundle");
+const bundle = path.join(repo, "crates/perch-native/mods/sidebar-react");
 const parity = path.join(repo, "e2e/native-parity");
 const referenceDir = path.join(repo, "e2e/artifacts-native-parity/web");
 
@@ -29,12 +28,11 @@ export function reference(state, theme) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
-// The bundle's modules for a screen's bare imports, as the native host maps them (`bundle/imports.json`).
-const imports = JSON.parse(fs.readFileSync(path.join(bundle, "imports.json"), "utf8"));
+// A screen's bare imports, as the mod engine resolves them (`<mod>/<specifier>.js`).
+const BARE = new Set(["react", "react/jsx-runtime", "react-dom", "@perch/sdk"]);
 registerHooks({
   resolve(specifier, context, next) {
-    const file = imports[specifier];
-    if (file && specifier !== "@perch/runtime") return { url: pathToFileURL(path.join(bundle, file)).href, shortCircuit: true, format: "module" };
+    if (BARE.has(specifier)) return { url: pathToFileURL(path.join(bundle, `${specifier}.js`)).href, shortCircuit: true, format: "module" };
     return next(specifier, context);
   },
 });
@@ -81,25 +79,15 @@ export function perchDouble(ref, view) {
   return perch;
 }
 
-// The sidebar as the app exports it: `exportStockUi` over the stock source, written where its relative imports work.
+// The sidebar as the app exports it: the stock mod's copy (`build.mjs` writes it; the bundle test holds it current).
 let sidebar = null;
 export async function loadSidebar() {
   if (sidebar) return sidebar;
-  const { exportStockUi } = await import(pathToFileURL(path.join(repo, "packages/web/scripts/export-stock-ui.mjs")).href);
-  const files = exportStockUi({ sourceDir: path.join(repo, "packages/web/src/stock-ui"), sdkTypesFile: path.join(repo, "packages/web/src/perch-sdk.d.ts") });
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-"));
-  process.on("exit", () => fs.rmSync(dir, { recursive: true, force: true }));
-  for (const [rel, bytes] of files) {
-    if (!rel.startsWith("sidebar/")) continue;
-    const file = path.join(dir, rel);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, bytes);
-  }
   // `@perch/sdk` reads `globalThis.perch` once when the runtime loads (isMac, pickFolder): a host without a folder
   // dialog, like the reference page.
   globalThis.perch ??= { isMac: true };
   const runtime = await import(pathToFileURL(path.join(bundle, "runtime.mjs")).href);
-  const main = await import(pathToFileURL(path.join(dir, "sidebar/main.js")).href);
+  const main = await import(pathToFileURL(path.join(bundle, "sidebar/main.js")).href);
   sidebar = { runtime, Sidebar: main.default };
   return sidebar;
 }
@@ -108,13 +96,13 @@ export async function loadSidebar() {
 export const CARD = { display: "flex", flexDirection: "column", width: 240, height: 800, overflow: "hidden", background: "var(--card-bg)" };
 
 /** Mounts the sidebar for one state and theme; returns the handle, the double and the runtime. */
-export async function mountSidebar(state, theme) {
+export async function mountSidebar(state, theme, options = {}) {
   const ref = reference(state, theme);
   const view = fixture.states.find((s) => s.id === state).view;
   const { runtime, Sidebar } = await loadSidebar();
   const perch = perchDouble(ref, view);
   globalThis.perch = perch;
-  const handle = runtime.mount(perch, Sidebar, { container: CARD });
+  const handle = runtime.mount(perch, Sidebar, { container: CARD, ...options });
   return { ref, perch, handle, runtime };
 }
 
@@ -139,6 +127,8 @@ class Node {
     const walk = (n) => {
       for (const c of n.children ?? []) {
         if (c.kind === "text") parts.push(c.source ?? c.text);
+        // A letter-spaced run (in a box of its own that is no element) is still the element's own text.
+        else if (!c.meta) parts.push(c.children.map((ch) => ch.source ?? ch.text).join(""));
         else if (!ownOnly) walk(c);
       }
     };

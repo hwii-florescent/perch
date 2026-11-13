@@ -29,6 +29,11 @@ codegen-units = 1
 [profile.release.build-override]
 strip = "none"
 
+# The mod engine's QuickJS interpreter (C) runs every script call against a time budget (50 ms for a render);
+# built at -O0 in a debug build it is several times slower than shipped, and the React sidebar mod overruns it.
+[profile.dev.package.quickjs-jit-sys]
+opt-level = 2
+
 # perch-native's mod engine (vendored gpui-shell): LLRT modules name `rquickjs`,
 # and must share the shell's quickjs-jit VM, as gpui-kit's own workspace does.
 [patch.crates-io]

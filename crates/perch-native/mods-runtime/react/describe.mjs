@@ -10,12 +10,16 @@
 //! - `{ kind: "text", text, source? }` (`source`: the text before `text-transform`)
 //! - `{ kind: "svg", id, markup, style, ... }` (tinted with the text colour) and `{ kind: "image", markup }` (as drawn)
 //! - `{ kind: "input", id, value, placeholder, checked, input_type, style, ... }`
+//! - a node `mount` was given a parity table for (`options.names`) carries `name` (`name` or `name:key`, the engine
+//!   id tests find it by) and, for a name that is the element's own text, `range_name`.
+//! - letter-spaced text is a `div` (no `id`) around the run with the spacing as room after it.
 //!
 //! Text styles follow GPUI's inheritance: a node carries a text style when it sets one itself (so an ancestor's
 //! hover colour does not reach it, as in CSS) or when the inherited value would differ (`line-height: normal`, a
 //! multiplier under a new size). `tokens` names the theme token each colour came from.
 import { Cascade, colorOut, familyOut, lineHeightPx, splitTop, THEME_TOKENS } from "./css.mjs";
 import { HostElement, HostText } from "./dom.mjs";
+import { closest as closestBy, querySelectorAll as queryBy } from "./selector.mjs";
 
 export const SCHEMA = "perch-native-description/1";
 /** The CSS display a node was computed with (kept off the serialised description). */
@@ -276,7 +280,7 @@ function reportDeclarations(computed, report) {
     const value = v[prop];
     switch (prop) {
       case "letter-spacing":
-        if (value !== "normal" && !(value?.px === 0)) report("unsupported", prop, value?.px !== undefined ? `${Math.round(value.px * 1000) / 1000}px` : value, source, "no letter spacing in the engine");
+        if (value !== "normal" && !(value?.px === 0)) report("approximated", prop, value?.px !== undefined ? `${Math.round(value.px * 1000) / 1000}px` : value, source, "the run is as wide as with the spacing (room after it), the letters are not spread");
         break;
       case "font-variant-numeric":
         if (value !== "normal") report("unsupported", prop, value, source, "no font features in the engine");
@@ -406,17 +410,77 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
   // A block holding inline content and elements: the engine has no inline formatting, so its inline children are
   // laid out as a row on the text baseline (one line; wrapping inline runs would need text runs in the engine).
   const hasElements = kids.some((k) => k.kind !== "text");
-  if (!style.display && inline && hasElements) {
+  const only = kids.length === 1 && kids[0].kind !== "text" && /^inline-(block|flex)$/.test(kids[0][DISPLAY]) ? kids[0] : null;
+  if (!style.display && only) {
+    // One inline box alone on its line (a button in a plain div): CSS puts its baseline on the line's strut, the
+    // block's own font and line height, which lowers it under a larger font. The engine has no line boxes: the box
+    // is moved down by the strut's ascent less its own baseline.
+    const child = ctx.cache.get(element.childNodes.find((n) => n.id === only.id))?.part.computed;
+    const drop = child ? strutAscent(computed.values, ctx.measure) - ownBaseline(child.values, ctx.measure) : 0;
+    style.display = "flex";
+    style.flex_direction = "col";
+    style.items = "start";
+    if (drop > 0) only.style.mt = Math.round(((only.style.mt ?? 0) + drop) * 100) / 100;
+    report("approximated", "display", `${computed.values.display} holding one ${only[DISPLAY]} box`, "(inline formatting)", "a column, the box lowered to the line's baseline");
+  } else if (!style.display && inline && hasElements) {
     style.display = "flex";
     style.flex_direction = blockKids ? "col" : "row";
     if (!blockKids) style.items = "baseline";
     report("approximated", "display", `${computed.values.display} with inline content`, "(inline formatting)", blockKids ? "a column of its children" : "a row on the text baseline");
   }
+  // Letter spacing: the engine has none. A spaced run keeps its glyphs together and gets the spacing WebKit adds
+  // after each character as room after the run, so the run's box is as wide as the page's (the letters are not
+  // spread). A row of single characters with gaps spreads them, but every character's box snaps to the device pixel
+  // grid and the run comes out 2.7 to 5.8 px wider than the page's.
+  const spacing = computed.values["letter-spacing"]?.px;
+  if (spacing) {
+    for (let i = 0; i < kids.length; i++) {
+      const run = kids[i];
+      if (run.kind !== "text") continue;
+      const room = Math.round(spacing * [...run.text].length * 1000) / 1000;
+      kids[i] = { kind: "div", style: { pr: room }, tokens: {}, children: [run] };
+    }
+  }
   node.children = kids;
   return node;
 }
 
-const applyTransform = (text, transform) => (transform === "uppercase" ? text.toUpperCase() : transform === "lowercase" ? text.toLowerCase() : transform === "capitalize" ? text.replace(/\b\p{L}/gu, (c) => c.toUpperCase()) : text);
+/** The parity table's key for an element (`e2e/native-parity/named-elements.json`, `key`). */
+function keyOf(element, spec) {
+  if (!spec) return null;
+  const at = spec.self ? element : spec.closest ? closestBy(element, spec.closest) : spec.find ? queryBy(element, spec.find)[0] : null;
+  let value = at?.getAttribute(spec.attr) ?? null;
+  if (value && spec.strip && value.startsWith(spec.strip)) value = value.slice(spec.strip.length);
+  return value;
+}
+
+/** Engine names for the elements a parity table names, from its selectors over the host tree: `name`, or
+ * `name:key` for one of many. A `textRange` name is the element's own text (`range_name`), not the element. */
+function nameElements(document, defs, nodes) {
+  for (const def of defs) {
+    for (const element of queryBy(document.documentElement, def.selector)) {
+      const node = nodes.get(element.id);
+      if (!node) continue;
+      const key = keyOf(element, def.key);
+      node[def.textRange ? "range_name" : "name"] ??= key == null ? def.name : `${def.name}:${key}`;
+    }
+  }
+}
+
+/** The UI face's ascent and descent per px of font size (San Francisco: the page's glyph run box is 1.1777 x the
+ * size high). */
+const ASCENT = 0.9521;
+const DESCENT = 0.2256;
+/** How far the baseline of a line in `values`' font sits below the line's top (half the leading, then the ascent). */
+const strutAscent = (values, measure) => (lineHeightPx(values, measure) - (ASCENT + DESCENT) * values["font-size"]) / 2 + ASCENT * values["font-size"];
+/** How far an inline box's first baseline sits below its top: its top padding and border, then its line's. */
+function ownBaseline(values, measure) {
+  const px = (v) => (v && typeof v === "object" && "px" in v ? v.px : 0);
+  const border = values["border-top-style"] === "none" ? 0 : px(values["border-top-width"]);
+  return px(values["padding-top"]) + border + strutAscent(values, measure);
+}
+
+const applyTransform =(text, transform) => (transform === "uppercase" ? text.toUpperCase() : transform === "lowercase" ? text.toLowerCase() : transform === "capitalize" ? text.replace(/\b\p{L}/gu, (c) => c.toUpperCase()) : text);
 
 const ATTR_SKIP = new Set(["children", "style", "className", "key", "ref", "dangerouslySetInnerHTML"]);
 /** Tag, classes and attributes as the page would have them: for tests, devtools and selectors over the description. */
@@ -469,7 +533,7 @@ const ENGINE_ROOT_TEXT = {};
  * `document.body`, in order), the `document_events` the source listens for on `document`/`window`, and every
  * declaration the engine cannot draw (`unsupported`).
  */
-export function describe(document, perch, sheet, kept = {}) {
+export function describe(document, perch, sheet, kept = {}, names = null) {
   const theme = themeOf(perch);
   const viewport = perch.viewport?.() ?? { width: 1000, height: 800 };
   // What was computed for the last description is kept (`kept`) while the sheet, theme and window stay the same.
@@ -480,6 +544,12 @@ export function describe(document, perch, sheet, kept = {}) {
   // <html> and <body> carry no state of their own here: computed once per look.
   kept.top ??= cascade.compute(document.body, cascade.compute(document.documentElement, null));
   const trees = document.body.children.map((child) => describeElement(child, kept.top, ENGINE_ROOT_TEXT, ctx));
+  if (names?.length) {
+    const nodes = new Map();
+    const walk = (node) => { if (node.id) nodes.set(node.id, node); for (const child of node.children ?? []) walk(child); };
+    trees.forEach(walk);
+    nameElements(document, names, nodes);
+  }
   const listening = new Set();
   for (const target of [document, document.defaultView]) {
     for (const { type } of target?.listeners ?? []) if (DOCUMENT_EVENTS[type]) listening.add(DOCUMENT_EVENTS[type]);

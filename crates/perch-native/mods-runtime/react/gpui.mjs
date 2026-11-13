@@ -9,8 +9,16 @@
 //! returns when the click that follows opens a menu under it. A press outside an overlay is a `pointerdown` on the
 //! document (what a menu listens for to close).
 //!
-//! `kit` is `{ div, svg, image }` from `gpui-kit`; `files.svg(markup)` gives an application path for an icon's
-//! markup (`svg()` and `image()` take paths).
+//! Ids: a node the parity table names has that name (`name` or `name:key`; a name for an element's own text is a box
+//! around the text); another node that needs an id for its handlers or interaction styles gets `~`, its host id and its
+//! `data-testid` (`~n12:workspace-organize-status`);
+//! the rest get none. Display-none nodes are left out; a named node that is invisible or fully transparent (a
+//! hover-only button at rest) keeps no name, as the page does not count it shown.
+//!
+//! `kit` is `{ div, image }` from `gpui-kit`; `files.icon(id, markup, color)` gives the element that draws an icon's
+//! markup (`currentColor` as `color`; the mod's `perch-react` `Icon`), as gpui-kit's `svg()` and `image()` read
+//! files through an asset source the host may not have. An icon does not follow a hover colour (it is drawn once
+//! per colour it is described with).
 
 /** Description key -> how it is applied to a builder (`el[name](...)`). */
 const STYLE = {
@@ -62,17 +70,38 @@ export function applyStyle(el, style) {
 
 const point = (event) => ({ clientX: event?.position?.x ?? 0, clientY: event?.position?.y ?? 0 });
 
-/** One node and its subtree as builder chains. */
-export function toGpui(node, kit, handle, files, overlay = false) {
+/** The engine id of a node: its parity name, else (when the engine needs one, for events and interaction styles)
+ * `~`, the host element's id and its `data-testid` if any, which tests that read named elements leave out. */
+function engineId(node, events, overlay) {
+  if (node.name) return node.name;
+  if (!(events.size || node.hover || node.focus || node.active || node.track_hover || overlay)) return null;
+  const testId = node.meta?.attrs["data-testid"];
+  return testId ? `~${node.id}:${testId}` : `~${node.id}`;
+}
+
+/** A node the engine draws (display none is left out, so it is neither laid out nor recorded). */
+const drawn = (child) => child.style?.display !== "hidden";
+
+/** One node and its subtree as builder chains. `unseen`: an ancestor is invisible or fully transparent, so its
+ * named elements are not shown (the page counts them hidden) and carry no name. */
+export function toGpui(node, kit, handle, files, overlay = false, unseen = false, color = null, text = {}) {
   if (node.kind === "text") return node.text;
+  unseen ||= node.style.opacity === 0 || node.style.visibility === "invisible";
+  if (unseen && (node.name || node.range_name)) node = { ...node, name: undefined, range_name: undefined };
+  color = node.style.text_color ?? color;
+  text = { ...text };
+  for (const key of ["text_size", "line_height", "whitespace"]) if (node.style[key] !== undefined) text[key] = node.style[key];
+  const events = new Set(node.events ?? []);
   let el;
-  if (node.kind === "svg") el = kit.svg(files.svg(node.markup));
-  else if (node.kind === "image") el = kit.image(node.markup ? files.svg(node.markup) : node.src);
+  if (node.kind === "image" && !node.markup) el = kit.image(node.src);
   else el = kit.div();
-  el = applyStyle(el.id(node.id), node.style);
+  // An icon is a box with the icon drawn in it (`svg`: in the colour its text would have, `image`: as drawn).
+  if (node.markup) el = el.child(files.icon(`~icon-${node.id}`, node.markup, node.kind === "svg" ? color : ""));
+  const id = engineId(node, events, overlay);
+  if (id) el = el.id(id);
+  el = applyStyle(el, node.style);
   for (const variant of ["hover", "focus", "active"]) if (node[variant]) el = el[variant]((s) => applyStyle(s, node[variant]));
 
-  const events = new Set(node.events ?? []);
   const pointer = ["click", "double_click", "context_menu", "mouse_down", "mouse_up"].some((name) => events.has(name));
   if (pointer) {
     el = el.on_mouse_down("left", (event, cx) => {
@@ -104,13 +133,38 @@ export function toGpui(node, kit, handle, files, overlay = false) {
   if (events.has("mouse_move")) el = el.on_mouse_move((event, cx) => { handle.dispatch(node.id, "pointermove", { ...point(event), pointerType: "mouse" }); cx.notify(); });
   if (node.track_hover) el = el.on_hover((on, cx) => { handle.hover(node.id, on); cx.notify(); });
   if (overlay) el = el.on_mouse_down_out((event, cx) => { handle.dispatch(handle.document.body.id, "pointerdown", { ...point(event), pointerType: "mouse" }); handle.dispatch(handle.document.body.id, "mousedown", point(event)); cx.notify(); });
-  for (const child of node.children ?? []) el = el.child(toGpui(child, kit, handle, files));
+  // A name for the element's own text (a bare text node in the page) goes on a box around that text. A line of
+  // text that cannot wrap sits in a box of the CSS line height: GPUI rounds a line height to whole pixels when it
+  // lays text out, so without the box every line would add up to half a pixel. (Wrapping text keeps GPUI's height,
+  // as its line count is not known here.)
+  const line = text.whitespace === "nowrap" ? lineHeightPx(text) : null;
+  let ranged = !node.range_name;
+  for (const child of (node.children ?? []).filter(drawn)) {
+    let built = toGpui(child, kit, handle, files, false, unseen, color, text);
+    const own = !ranged && (child.kind === "text" || !child.meta);
+    if (own || (child.kind === "text" && line)) {
+      let box = kit.div();
+      if (own) box = box.id(node.range_name);
+      if (child.kind === "text" && line) box = box.h(line);
+      built = box.child(built);
+      ranged ||= own;
+    }
+    el = el.child(built);
+  }
   return el;
+}
+
+/** The CSS line height in logical px of text styled `text` (a multiplier or `"Npx"`), or null when not known. */
+export function lineHeightPx(text) {
+  const lh = text.line_height;
+  if (typeof lh === "string" && lh.endsWith("px")) return Number.parseFloat(lh);
+  if (typeof lh === "number" && typeof text.text_size === "number") return lh * text.text_size;
+  return null;
 }
 
 /** The whole description: the screen, then its overlays (absolute) above it, outside the screen's clip. */
 export function describeToGpui(description, kit, handle, files) {
-  let layer = kit.div().id("perch-react-layer").relative().size_full().child(toGpui(description.root, kit, handle, files));
+  let layer = kit.div().relative().size_full().child(toGpui(description.root, kit, handle, files));
   for (const overlay of description.overlays) layer = layer.child(toGpui(overlay, kit, handle, files, true));
   return layer;
 }

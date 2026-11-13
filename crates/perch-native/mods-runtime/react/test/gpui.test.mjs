@@ -28,7 +28,7 @@ function recordingKit() {
   };
   return { kit: { div: () => make("div"), svg: (path) => make("svg", path), image: (path) => make("image", path) }, calls, handlers };
 }
-const files = { svg: (markup) => `icons/${markup.length}.svg` };
+const files = { icon: (id, markup, color) => ({ record: { id, children: [], markup, color } }) };
 const cx = () => ({ notified: 0, stopped: 0, notify() { this.notified++; }, stop_propagation() { this.stopped++; } });
 
 for (const { id: state } of fixture.states) {
@@ -54,11 +54,31 @@ test("a press and click through the builders open the session", async () => {
     const find = (n) => (n.meta?.attrs["data-testid"] === "workspace-session-s-api-2" ? n : (n.children ?? []).map(find).find(Boolean));
     const button = find(handle.description.root);
     const press = cx();
-    handlers.get(`${button.id}:on_mouse_down:left`)({ button: "left", click_count: 1, position: { x: 40, y: 430 }, bounds: { x: 3, y: 419.94, width: 206, height: 32 } }, press);
+    const id = `~${button.id}:workspace-session-s-api-2`;
+    handlers.get(`${id}:on_mouse_down:left`)({ button: "left", click_count: 1, position: { x: 40, y: 430 }, bounds: { x: 3, y: 419.94, width: 206, height: 32 } }, press);
     assert.equal(press.stopped, 1, "the deepest handler takes the press; the tree bubbles it");
-    handlers.get(`${button.id}:on_click`)({ click_count: 1 }, cx());
+    handlers.get(`${id}:on_click`)({ click_count: 1 }, cx());
     assert.deepEqual(perch.commands, [["session.open", { id: "s-api-2" }]]);
     assert.deepEqual(handle.document.querySelector('[data-testid="workspace-session-s-api-2"]').getBoundingClientRect().toJSON(), { x: 3, y: 419.94, width: 206, height: 32 });
+  } finally {
+    handle.unmount();
+  }
+});
+
+test("named elements get their parity names as engine ids; hidden and hover-only ones none", async () => {
+  const { handle, runtime } = await mountSidebar("by-project", "dark", { names: (await import("./support.mjs")).named.elements });
+  try {
+    const { kit } = recordingKit();
+    const ids = [];
+    const walk = (el) => { if (typeof el === "string") return; const r = el.record; if (r.id) ids.push(r.id); r.children.forEach(walk); };
+    const icons = [];
+    const walkIcons = (el) => { if (typeof el === "string") return; if (el.record.markup) icons.push(el.record); el.record.children.forEach(walkIcons); };
+    walk(runtime.describeToGpui(handle.description, kit, handle, files));
+    for (const id of ["sidebar-root", "project-header:p-perch", "session-button:s-perch-3", "new-session-label", "chats-label", "host-badge"]) assert.ok(ids.includes(id), id);
+    assert.equal(ids.filter((id) => id === "chats-label").length, 1);
+    walkIcons(runtime.describeToGpui(handle.description, kit, handle, files));
+    assert.ok(icons.length > 10 && icons.every((icon) => icon.markup.startsWith("<svg") && /^#[0-9a-f]{8}$/.test(icon.color)), "icons are drawn from markup in their text colour");
+    assert.ok(!ids.some((id) => id.startsWith("session-close-button:") || id.startsWith("project-menu-button:")), "hover-only buttons at rest are not shown elements");
   } finally {
     handle.unmount();
   }

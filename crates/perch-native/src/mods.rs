@@ -27,6 +27,7 @@
 //! module; [`ModHost::refresh`] re-renders the mods whose data changed.
 
 pub mod perch;
+pub mod react_host;
 pub mod theme;
 
 use anyhow::{anyhow, Context as _, Result};
@@ -53,6 +54,66 @@ pub const STOCK: &[(&str, &str)] = &[
         include_str!("../mods/parity-probe/main.js"),
     ),
     ("perch.d.ts", perch::DECLARATIONS),
+    (
+        "sidebar-react/main.js",
+        include_str!("../mods/sidebar-react/main.js"),
+    ),
+    (
+        "sidebar-react/mod.json",
+        include_str!("../mods/sidebar-react/mod.json"),
+    ),
+    (
+        "sidebar-react/host.js",
+        include_str!("../mods/sidebar-react/host.js"),
+    ),
+    (
+        "sidebar-react/runtime.mjs",
+        include_str!("../mods/sidebar-react/runtime.mjs"),
+    ),
+    (
+        "sidebar-react/react.js",
+        include_str!("../mods/sidebar-react/react.js"),
+    ),
+    (
+        "sidebar-react/react/jsx-runtime.js",
+        include_str!("../mods/sidebar-react/react/jsx-runtime.js"),
+    ),
+    (
+        "sidebar-react/react-dom.js",
+        include_str!("../mods/sidebar-react/react-dom.js"),
+    ),
+    (
+        "sidebar-react/@perch/sdk.js",
+        include_str!("../mods/sidebar-react/@perch/sdk.js"),
+    ),
+    (
+        "sidebar-react/sidebar/main.js",
+        include_str!("../mods/sidebar-react/sidebar/main.js"),
+    ),
+    (
+        "sidebar-react/sidebar/content.js",
+        include_str!("../mods/sidebar-react/sidebar/content.js"),
+    ),
+    (
+        "sidebar-react/sidebar/folders.js",
+        include_str!("../mods/sidebar-react/sidebar/folders.js"),
+    ),
+    (
+        "sidebar-react/sidebar/hosts.js",
+        include_str!("../mods/sidebar-react/sidebar/hosts.js"),
+    ),
+    (
+        "sidebar-react/sidebar/icons.js",
+        include_str!("../mods/sidebar-react/sidebar/icons.js"),
+    ),
+    (
+        "sidebar-react/sidebar/overview.js",
+        include_str!("../mods/sidebar-react/sidebar/overview.js"),
+    ),
+    (
+        "sidebar-react/sidebar/parts.js",
+        include_str!("../mods/sidebar-react/sidebar/parts.js"),
+    ),
 ];
 
 /// Where user mods live: `native-mods/` in the folder that holds the core's database
@@ -134,12 +195,14 @@ impl ModHost {
     pub fn new(user_dir: PathBuf) -> Result<Self> {
         write_stock(&user_dir.join(".stock"), STOCK)?;
         let runtime = ShellRuntime::new_isolated().context("could not start the mod runtime")?;
-        Ok(Self(Rc::new(Inner {
+        let host = Self(Rc::new(Inner {
             user_dir,
             runtime,
             modules: RefCell::default(),
             views: RefCell::default(),
-        })))
+        }));
+        react_host::register(&host);
+        Ok(host)
     }
 
     pub fn user_dir(&self) -> &Path {
