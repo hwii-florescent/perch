@@ -25,3 +25,4 @@ e2e/artifacts-provider-config/
 e2e/artifacts-native-ui/
 e2e/artifacts-native-review/
 e2e/artifacts-native-composer/
+e2e/artifacts-native-parity/

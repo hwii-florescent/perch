@@ -1,0 +1,676 @@
+{
+  "schema": "perch-native-parity-named-elements/1",
+  "note": "Selectors are evaluated with document.querySelectorAll on the web page (each resolves from the rendered stock source: test ids, classes and structure that already exist). A native renderer ignores them and emits the same names and keys. Fields: name, selector, description; textSized (width comes from the element's own text); text (record the element's text); textRange (box is the element's own text node, for a label that is a bare text node); hoverOnly (drawn only on hover: recorded only when visible); key (how an instance is told apart: the attribute of the element itself, its closest ancestor, or a descendant, with a prefix stripped), else the instance's index among its name.",
+  "screens": {
+    "sidebar": {
+      "root": "aside.sidebar",
+      "elements": [
+        {
+          "name": "sidebar-root",
+          "selector": "aside.sidebar",
+          "description": "The whole sidebar: the box every other box is measured against."
+        },
+        {
+          "name": "sidebar-content",
+          "selector": "aside.sidebar > div:first-child",
+          "description": "The scrolling body above the settings bar."
+        },
+        {
+          "name": "host-switcher",
+          "selector": "[data-testid=\"host-switcher\"]",
+          "description": "The button across the top that names the shown host (present once there is more than this machine)."
+        },
+        {
+          "name": "host-chip",
+          "selector": "[data-testid=\"host-switcher\"] > div",
+          "description": "The chip inside it: badge row over the detail line."
+        },
+        {
+          "name": "host-badge",
+          "selector": ".sidebar__env-badge",
+          "description": "LOCAL, SSH, REMOTE or HOST badge.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "host-name",
+          "selector": ".sidebar__env-host",
+          "description": "The shown host's name.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "host-meta",
+          "selector": "[data-testid=\"host-switcher\"] > div > div:first-child > span:nth-child(3)",
+          "description": "Platform of this machine, or the state word (connected, error, ...) of a remote.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "host-line",
+          "selector": ".sidebar__env-cwd",
+          "description": "The folder and branch of this machine, or the address (or last error) of a remote.",
+          "text": true
+        },
+        {
+          "name": "host-caret",
+          "selector": "[data-testid=\"host-switcher\"] > span[aria-hidden=\"true\"]",
+          "description": "The switcher's down arrow.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "new-session-button",
+          "selector": "button[data-testid^=\"new-session-\"]",
+          "description": "The New session row.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "new-session-"
+          }
+        },
+        {
+          "name": "new-session-icon",
+          "selector": "button[data-testid^=\"new-session-\"] > svg",
+          "description": "Its plus mark."
+        },
+        {
+          "name": "new-session-label",
+          "selector": "button[data-testid^=\"new-session-\"]",
+          "description": "Its words (the text node only).",
+          "textRange": true,
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "new-session-shortcut",
+          "selector": "button[data-testid^=\"new-session-\"] > span",
+          "description": "Its key hint, right aligned.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "overview",
+          "selector": "[data-testid=\"workspace-overview\"]",
+          "description": "The project list section under New session."
+        },
+        {
+          "name": "overview-header",
+          "selector": "[data-testid=\"workspace-overview\"] > div:first-child",
+          "description": "Its header row: title on the left, actions on the right."
+        },
+        {
+          "name": "overview-title",
+          "selector": "[data-testid=\"workspace-overview\"] > div:first-child > div:first-child > span:first-child",
+          "description": "Projects or Sessions.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "needs-you-button",
+          "selector": "[data-testid=\"workspace-needs-you\"]",
+          "description": "The \"N need(s) you\" button, present while a chat needs the person.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "organize-button",
+          "selector": "[data-testid=\"workspace-organize\"]",
+          "description": "The organize menu button."
+        },
+        {
+          "name": "organize-icon",
+          "selector": "[data-testid=\"workspace-organize\"] > svg",
+          "description": "Its three-lines glyph."
+        },
+        {
+          "name": "add-project-button",
+          "selector": "[data-testid=\"workspace-add-project\"]",
+          "description": "The Add project button.",
+          "textSized": true
+        },
+        {
+          "name": "add-project-icon",
+          "selector": "[data-testid=\"workspace-add-project\"] > svg",
+          "description": "Its plus mark."
+        },
+        {
+          "name": "add-project-label",
+          "selector": "[data-testid=\"workspace-add-project\"]",
+          "description": "Its word (the text node only).",
+          "textRange": true,
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "project-list",
+          "selector": "[data-testid=\"project-list\"]",
+          "description": "The scrolling list of projects, or of status sections."
+        },
+        {
+          "name": "project",
+          "selector": ".workspace-project",
+          "description": "One project: header, workspaces, sessions.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "workspace-project-"
+          }
+        },
+        {
+          "name": "project-header",
+          "selector": ".workspace-project > div:first-child",
+          "description": "Its header row (the whole line a click folds).",
+          "key": {
+            "closest": ".workspace-project",
+            "attr": "data-testid",
+            "strip": "workspace-project-"
+          }
+        },
+        {
+          "name": "project-toggle",
+          "selector": "[data-testid^=\"project-toggle-\"]",
+          "description": "The header's button: chevron, folder mark, name, branch.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "project-toggle-"
+          }
+        },
+        {
+          "name": "project-chevron",
+          "selector": "[data-testid^=\"project-toggle-\"] > svg:not([data-testid])",
+          "description": "The fold chevron (down open, right folded); only a project with more than one checkout has one.",
+          "key": {
+            "closest": "[data-testid^=\"project-toggle-\"]",
+            "attr": "data-testid",
+            "strip": "project-toggle-"
+          }
+        },
+        {
+          "name": "project-folder-icon",
+          "selector": "[data-testid=\"project-folder-icon\"]",
+          "description": "The folder mark (filled for a favourite).",
+          "key": {
+            "closest": "[data-testid^=\"project-toggle-\"]",
+            "attr": "data-testid",
+            "strip": "project-toggle-"
+          }
+        },
+        {
+          "name": "project-name",
+          "selector": "[data-testid^=\"project-toggle-\"] strong",
+          "description": "The project's name.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"project-toggle-\"]",
+            "attr": "data-testid",
+            "strip": "project-toggle-"
+          }
+        },
+        {
+          "name": "project-branch",
+          "selector": "[data-testid^=\"project-toggle-\"] > span.whitespace-nowrap",
+          "description": "The branch of a one-checkout project, when it differs from the name.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"project-toggle-\"]",
+            "attr": "data-testid",
+            "strip": "project-toggle-"
+          }
+        },
+        {
+          "name": "project-dirty-mark",
+          "selector": "[data-testid^=\"project-toggle-\"] > span[title=\"Uncommitted changes\"]",
+          "description": "The dot for uncommitted changes on a one-checkout project.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"project-toggle-\"]",
+            "attr": "data-testid",
+            "strip": "project-toggle-"
+          }
+        },
+        {
+          "name": "project-rollup",
+          "selector": "[data-testid^=\"project-rollup-\"]",
+          "description": "A folded project's most urgent state and its count.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "project-rollup-"
+          }
+        },
+        {
+          "name": "project-rollup-badge",
+          "selector": "[data-testid^=\"project-rollup-\"] > span",
+          "description": "The coloured pill inside the rollup (state word and count).",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"project-rollup-\"]",
+            "attr": "data-testid",
+            "strip": "project-rollup-"
+          }
+        },
+        {
+          "name": "project-menu-button",
+          "selector": "[data-testid^=\"workspace-project-menu-\"]",
+          "description": "The header's three-dots button, shown on hover.",
+          "hoverOnly": true,
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "workspace-project-menu-"
+          }
+        },
+        {
+          "name": "project-add-button",
+          "selector": ".workspace-project > div:first-child .worktree-menu__btn",
+          "description": "The header's plus button, shown on hover.",
+          "hoverOnly": true,
+          "key": {
+            "closest": ".workspace-project",
+            "attr": "data-testid",
+            "strip": "workspace-project-"
+          }
+        },
+        {
+          "name": "project-workspaces",
+          "selector": ".workspace-project__workspaces",
+          "description": "The block under a header that holds workspaces, sessions, jobs and the hidden-worktrees line.",
+          "key": {
+            "closest": ".workspace-project",
+            "attr": "data-testid",
+            "strip": "workspace-project-"
+          }
+        },
+        {
+          "name": "workspace",
+          "selector": "[data-testid=\"workspace-tree-root\"] [data-testid^=\"workspace-entry-\"]",
+          "description": "One checkout of a multi-checkout project, with its sessions.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "workspace-entry-"
+          }
+        },
+        {
+          "name": "workspace-button",
+          "selector": "[data-testid=\"workspace-tree-root\"] button.workspace-entry__button",
+          "description": "The checkout's row button.",
+          "key": {
+            "closest": "[data-testid^=\"workspace-entry-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-entry-"
+          }
+        },
+        {
+          "name": "workspace-icon",
+          "selector": "[data-testid=\"workspace-tree-root\"] [data-testid=\"workspace-checkout-icon\"]",
+          "description": "Diamond for a main folder, branch glyph for a worktree.",
+          "key": {
+            "closest": "[data-testid^=\"workspace-entry-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-entry-"
+          }
+        },
+        {
+          "name": "workspace-name",
+          "selector": "[data-testid=\"workspace-tree-root\"] strong[title=\"Double-click to rename\"]",
+          "description": "The checkout's name.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"workspace-entry-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-entry-"
+          }
+        },
+        {
+          "name": "workspace-branch",
+          "selector": "[data-testid=\"workspace-tree-root\"] button.workspace-entry__button > span.items-baseline > span",
+          "description": "Its branch, when it differs from the name.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"workspace-entry-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-entry-"
+          }
+        },
+        {
+          "name": "workspace-dirty-mark",
+          "selector": "[data-testid=\"workspace-tree-root\"] button.workspace-entry__button > span[title=\"Uncommitted changes\"]",
+          "description": "The dot for uncommitted changes.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"workspace-entry-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-entry-"
+          }
+        },
+        {
+          "name": "workspace-pinned-label",
+          "selector": "[data-testid=\"workspace-tree-root\"] button.workspace-entry__button > span.shrink-0:not([title])",
+          "description": "The word pinned (or sleeping).",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"workspace-entry-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-entry-"
+          }
+        },
+        {
+          "name": "hidden-worktrees-button",
+          "selector": "[data-testid^=\"workspace-hidden-\"]",
+          "description": "The \"N hidden worktrees\" line at the end of a project.",
+          "text": true,
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "workspace-hidden-"
+          }
+        },
+        {
+          "name": "session-row",
+          "selector": "div[class~=\"group/row\"]",
+          "description": "One session row: button plus its close button.",
+          "key": {
+            "find": "button[data-testid^=\"workspace-session-\"]:not([data-testid^=\"workspace-session-close-\"])",
+            "attr": "data-testid",
+            "strip": "workspace-session-"
+          }
+        },
+        {
+          "name": "session-button",
+          "selector": "button[data-testid^=\"workspace-session-\"]:not([data-testid^=\"workspace-session-close-\"])",
+          "description": "The row's button (the whole clickable line).",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "workspace-session-"
+          }
+        },
+        {
+          "name": "session-mark",
+          "selector": ".agent-mark",
+          "description": "The agent's mark at the start of the row.",
+          "key": {
+            "closest": "button[data-testid^=\"workspace-session-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-session-"
+          }
+        },
+        {
+          "name": "session-mark-icon",
+          "selector": ".agent-mark > span > *",
+          "description": "The agent artwork inside the mark.",
+          "key": {
+            "closest": "button[data-testid^=\"workspace-session-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-session-"
+          }
+        },
+        {
+          "name": "session-title",
+          "selector": "button[data-testid^=\"workspace-session-\"] > span.whitespace-nowrap",
+          "description": "The session's title, in the project and Quickchat lists.",
+          "text": true,
+          "key": {
+            "closest": "button[data-testid^=\"workspace-session-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-session-"
+          }
+        },
+        {
+          "name": "status-row-title",
+          "selector": "button[data-session] span.truncate:not([data-testid])",
+          "description": "The session's title in By status.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "button[data-testid^=\"workspace-session-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-session-"
+          }
+        },
+        {
+          "name": "status-row-detail",
+          "selector": "[data-testid=\"status-row-detail\"]",
+          "description": "What a By status row adds: its workspace, or why it needs you.",
+          "text": true,
+          "key": {
+            "closest": "button[data-testid^=\"workspace-session-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-session-"
+          }
+        },
+        {
+          "name": "session-state-badge",
+          "selector": "[data-testid^=\"session-state-\"]",
+          "description": "The state word at the end of a row (Needs you, Working, Done; Idle shows none).",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "session-state-"
+          }
+        },
+        {
+          "name": "session-close-button",
+          "selector": "[data-testid^=\"workspace-session-close-\"]",
+          "description": "The row's close button, shown on hover.",
+          "hoverOnly": true,
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "workspace-session-close-"
+          }
+        },
+        {
+          "name": "chats",
+          "selector": "[data-testid=\"workspace-chats\"]",
+          "description": "The Quickchat section."
+        },
+        {
+          "name": "chats-header",
+          "selector": "[data-testid=\"workspace-chats\"] > div:first-child",
+          "description": "Its header row."
+        },
+        {
+          "name": "chats-toggle",
+          "selector": "[data-testid=\"workspace-chats-collapse\"]",
+          "description": "The header's fold button."
+        },
+        {
+          "name": "chats-label",
+          "selector": "[data-testid=\"workspace-chats-collapse\"]",
+          "description": "The word Quickchat (the text node only).",
+          "textRange": true,
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "chats-chevron",
+          "selector": "[data-testid=\"workspace-chats-collapse\"] > svg",
+          "description": "Its fold chevron."
+        },
+        {
+          "name": "chats-menu-button",
+          "selector": "[data-testid=\"workspace-chats-menu\"]",
+          "description": "The Quickchat actions button, shown on hover.",
+          "hoverOnly": true
+        },
+        {
+          "name": "chats-new-button",
+          "selector": "[data-testid=\"workspace-chats-new\"]",
+          "description": "The New chat button."
+        },
+        {
+          "name": "chats-new-icon",
+          "selector": "[data-testid=\"workspace-chats-new\"] > svg",
+          "description": "Its pencil-over-page glyph."
+        },
+        {
+          "name": "status-view",
+          "selector": "[data-testid=\"workspace-status-view\"]",
+          "description": "By status: the whole list."
+        },
+        {
+          "name": "status-section",
+          "selector": "[data-testid^=\"status-section-\"]:not([data-testid^=\"status-section-title-\"])",
+          "description": "One status section (Needs you, Done, Working, Idle, or Offline).",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "status-section-"
+          }
+        },
+        {
+          "name": "status-heading",
+          "selector": "[data-testid^=\"status-section-title-\"], [data-testid=\"status-no-sessions-title\"]",
+          "description": "A section's heading line (also the No sessions heading).",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "status-heading-dot",
+          "selector": "[data-testid^=\"status-section-title-\"] > span:first-child, [data-testid=\"status-no-sessions-title\"] > span:first-child",
+          "description": "The state dot (hollow for Idle and for headings that claim no state).",
+          "key": {
+            "closest": "[data-testid^=\"status-section-title-\"], [data-testid=\"status-no-sessions-title\"]",
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "status-heading-label",
+          "selector": "[data-testid^=\"status-section-title-\"] > span:nth-child(2), [data-testid=\"status-no-sessions-title\"] > span:nth-child(2)",
+          "description": "The section's name.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"status-section-title-\"], [data-testid=\"status-no-sessions-title\"]",
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "status-heading-count",
+          "selector": "[data-testid^=\"status-section-title-\"] > span[aria-label], [data-testid=\"status-no-sessions-title\"] > span[aria-label]",
+          "description": "How many chats (or projects) are in it.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"status-section-title-\"], [data-testid=\"status-no-sessions-title\"]",
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "status-heading-note",
+          "selector": "[data-testid^=\"status-section-title-\"] > span.truncate, [data-testid=\"status-no-sessions-title\"] > span.truncate",
+          "description": "A note after the count (the offline reason).",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"status-section-title-\"], [data-testid=\"status-no-sessions-title\"]",
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "status-project",
+          "selector": "div[data-testid^=\"status-project-\"]",
+          "description": "A project's cluster inside a section.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "status-project-"
+          }
+        },
+        {
+          "name": "status-project-header",
+          "selector": "div[data-testid^=\"status-project-\"] > div:first-child",
+          "description": "The cluster's header row.",
+          "key": {
+            "closest": "div[data-testid^=\"status-project-\"]",
+            "attr": "data-testid",
+            "strip": "status-project-"
+          }
+        },
+        {
+          "name": "status-project-icon",
+          "selector": "div[data-testid^=\"status-project-\"] > div:first-child > svg",
+          "description": "The folder mark.",
+          "key": {
+            "closest": "div[data-testid^=\"status-project-\"]",
+            "attr": "data-testid",
+            "strip": "status-project-"
+          }
+        },
+        {
+          "name": "status-project-title",
+          "selector": "[data-testid=\"status-project-title\"]",
+          "description": "The project's name.",
+          "text": true,
+          "key": {
+            "closest": "div[data-testid^=\"status-project-\"]",
+            "attr": "data-testid",
+            "strip": "status-project-"
+          }
+        },
+        {
+          "name": "status-empty-project",
+          "selector": "[data-testid^=\"status-empty-project-\"]",
+          "description": "A project with no chats, listed under No sessions.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "status-empty-project-"
+          }
+        },
+        {
+          "name": "status-empty-project-icon",
+          "selector": "[data-testid^=\"status-empty-project-\"] > button:first-child > svg",
+          "description": "Its folder mark.",
+          "key": {
+            "closest": "[data-testid^=\"status-empty-project-\"]",
+            "attr": "data-testid",
+            "strip": "status-empty-project-"
+          }
+        },
+        {
+          "name": "status-empty-project-title",
+          "selector": "[data-testid^=\"status-empty-project-\"] > button > span.whitespace-nowrap",
+          "description": "Its name.",
+          "text": true,
+          "key": {
+            "closest": "[data-testid^=\"status-empty-project-\"]",
+            "attr": "data-testid",
+            "strip": "status-empty-project-"
+          }
+        },
+        {
+          "name": "settings-bar",
+          "selector": "aside.sidebar > div:last-child",
+          "description": "The strip at the foot of the sidebar."
+        },
+        {
+          "name": "settings-gear",
+          "selector": "[data-testid=\"settings-gear\"]",
+          "description": "The Settings button."
+        },
+        {
+          "name": "settings-gear-icon",
+          "selector": "[data-testid=\"settings-gear\"] > svg",
+          "description": "Its cog glyph."
+        }
+      ]
+    }
+  }
+}
