@@ -603,6 +603,7 @@ fn main() {
                 sound: false,
                 file: None,
                 toast: Toast::App,
+                body: None,
             },
             cx,
         )

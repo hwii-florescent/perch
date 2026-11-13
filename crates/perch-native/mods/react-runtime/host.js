@@ -191,6 +191,7 @@ export const host = {
   zoom: () => snapshot("zoom", () => perch.zoom()),
   paneLook: () => snapshot("paneLook", () => perch.paneLook()),
   planUsage: () => snapshot("planUsage", () => perch.planUsage()),
+  notifications: () => snapshot("notifications", () => perch.notifications()),
   // The window's requests (`perch.requests()`: a count per kind, one more per request), as the web's window events:
   // `listener` runs once for each request made after it subscribed.
   onRequest(kind, listener) {

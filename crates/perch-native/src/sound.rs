@@ -79,7 +79,8 @@ pub fn play(heard: &Heard) {
 fn beeps(alert: Alert) -> u32 {
     match alert {
         Alert::Done => 1,
-        Alert::Blocked => 2,
+        // As the web: a usage alert plays the blocked tone.
+        Alert::Blocked | Alert::Usage => 2,
     }
 }
 

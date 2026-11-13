@@ -117,6 +117,7 @@ mod tests {
             toast,
             session_id: "s".into(),
             title: "t".into(),
+            body: None,
         }
     }
 

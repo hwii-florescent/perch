@@ -653,6 +653,7 @@ impl Perch {
         let (props, props_id) = (self.clone(), id.clone());
         let (close, close_id) = (self.clone(), id.clone());
         let opener = self.clone();
+        let (notifier, notify_id) = (self.clone(), id.clone());
         HostModule::new("perch")
             .function("props", move |_| {
                 props.read(&props_id, &format!("props:{props_id}"));
@@ -682,6 +683,11 @@ impl Perch {
                     |perch, _| json!({ "items": perch.0.data.borrow().window.notifications }),
                 ),
             )
+            // A notification from this mod, as the web's `notify`: `{title, body?, level?, icon?,
+            // action?: {command, args?}, timeout?}`.
+            .function("notify", move |args| {
+                notifier.notify(&notify_id, &from_host(args.value(0)?))
+            })
             .function(
                 "zoom",
                 reader(WINDOW, |perch, _| json!(perch.0.data.borrow().window.zoom)),
@@ -858,6 +864,27 @@ impl Perch {
     /// Opens floating screen `id` with `props` for the calling mod, once its script has unwound; the
     /// receiver gets the screen's result (`null` when dismissed, or when another opening of it
     /// replaces this one), or an error when no mod draws that screen.
+    /// Mod `mod_id`'s notification (`perch.notify`), shown in this mod's window.
+    fn notify(&self, mod_id: &str, note: &Value) -> HostResult {
+        let (title, body, notice) = notice_from(note).map_err(HostError::new)?;
+        let attached = self.0.attached.borrow();
+        let attached = attached
+            .as_ref()
+            .ok_or_else(|| HostError::new("No window shows this mod's notifications."))?;
+        let (workspace, mod_id) = (attached.workspace.clone(), mod_id.to_string());
+        gpui_shell::with_current_app(|cx| {
+            cx.defer(move |cx| {
+                if let Some(workspace) = workspace.upgrade() {
+                    workspace.update(cx, |ws, cx| {
+                        ws.notify_for_mod(&mod_id, title, body, notice, cx)
+                    });
+                }
+            })
+        })
+        .ok_or_else(|| HostError::new("No app to notify in."))?;
+        Ok(HostValue::Null)
+    }
+
     fn open_screen(
         &self,
         id: &str,
@@ -1316,9 +1343,86 @@ async fn settled(rx: futures::channel::oneshot::Receiver<Result<(), String>>) ->
     }
 }
 
+/// A mod's `notify` argument, checked: a title is needed, a level is one of the three, an action
+/// names a command, and it stays 1 to 60 s.
+pub fn notice_from(
+    note: &Value,
+) -> Result<(String, Option<String>, crate::workspace::Notice), String> {
+    let text = |key: &str| -> Result<Option<String>, String> {
+        match &note[key] {
+            Value::Null => Ok(None),
+            Value::String(text) => Ok(Some(text.clone())),
+            _ => Err(format!("notify: {key} is text.")),
+        }
+    };
+    let title = text("title")?
+        .filter(|t| !t.trim().is_empty())
+        .ok_or("notify needs a title.")?;
+    let level = text("level")?;
+    if level
+        .as_deref()
+        .is_some_and(|l| !matches!(l, "info" | "warning" | "error"))
+    {
+        return Err("notify: level is info, warning or error.".into());
+    }
+    let action = match &note["action"] {
+        Value::Null => None,
+        action => Some((
+            action["command"]
+                .as_str()
+                .ok_or("notify: action needs a command.")?
+                .to_string(),
+            action.get("args").filter(|a| !a.is_null()).cloned(),
+        )),
+    };
+    let timeout = match &note["timeout"] {
+        Value::Null => None,
+        t => Some(
+            t.as_f64()
+                .ok_or("notify: timeout is milliseconds.")?
+                .clamp(1000., 60_000.) as u64,
+        ),
+    };
+    let notice = crate::workspace::Notice {
+        level,
+        icon: text("icon")?,
+        action,
+        timeout,
+    };
+    Ok((title, text("body")?, notice))
+}
+
 /// `useNotifications`' item for one of the window's notifications, worded as the web words it.
 pub fn notification_json(note: &crate::workspace::Notification, model: &Model) -> Value {
     use crate::sidebar::Alert;
+    let heard = &note.heard;
+    if heard.alert == Alert::Usage {
+        // About no session: its title is the heading and its body the detail.
+        let mut item = json!({
+            "id": note.id,
+            "kind": "usage",
+            "title": heard.title,
+            "heading": heard.title,
+            "detail": heard.body.as_deref().unwrap_or_default(),
+            "sessionId": heard.session_id,
+            "hasSession": false,
+            "timeout": 6000,
+        });
+        if let Some(body) = &heard.body {
+            item["body"] = json!(body);
+        }
+        if let Some(notice) = &note.notice {
+            for (key, value) in [("level", &notice.level), ("icon", &notice.icon)] {
+                if let Some(value) = value {
+                    item[key] = json!(value);
+                }
+            }
+            if let Some(timeout) = notice.timeout {
+                item["timeout"] = json!(timeout);
+            }
+        }
+        return item;
+    }
     let session = model
         .store
         .sessions
@@ -1496,6 +1600,37 @@ pub fn from_host(value: &HostValue) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mods_notification_is_checked_as_the_web_takes_it() {
+        let (title, body, notice) = notice_from(&json!({
+            "title": "Build failed", "body": "3 errors", "level": "error", "icon": "!",
+            "action": {"command": "tab.select", "args": {"id": "s1"}}, "timeout": 500}))
+        .unwrap();
+        assert_eq!(
+            (title.as_str(), body.as_deref()),
+            ("Build failed", Some("3 errors"))
+        );
+        assert_eq!(notice.level.as_deref(), Some("error"));
+        assert_eq!(notice.icon.as_deref(), Some("!"));
+        assert_eq!(
+            notice.action,
+            Some(("tab.select".into(), Some(json!({"id": "s1"}))))
+        );
+        assert_eq!(notice.timeout, Some(1000), "at least 1 s");
+        let long = notice_from(&json!({"title": "t", "timeout": 600_000})).unwrap();
+        assert_eq!(long.2.timeout, Some(60_000), "at most 60 s");
+        for bad in [
+            json!({}),
+            json!({"title": "  "}),
+            json!({"title": "t", "level": "loud"}),
+            json!({"title": "t", "action": {}}),
+            json!({"title": "t", "body": 3}),
+            json!({"title": "t", "timeout": "soon"}),
+        ] {
+            assert!(notice_from(&bad).is_err(), "{bad} is refused");
+        }
+    }
 
     #[test]
     fn the_typescript_face_names_exactly_what_is_registered() {

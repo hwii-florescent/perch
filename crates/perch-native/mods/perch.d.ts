@@ -159,8 +159,15 @@ declare module "perch" {
   /** One notification (`useNotifications`' item): what happened (`heading`) and to what (`detail`). */
   export interface NotificationItem {
     id: string;
-    kind: "done" | "blocked";
+    /** `usage`: the core's usage alert (`sessionId` "usage") or a mod's `notify` ("mod:<id>"). */
+    kind: "done" | "blocked" | "usage";
     title: string;
+    /** A usage alert's or a mod's detail line. */
+    body?: string;
+    /** A mod's: the ring's colour. */
+    level?: "info" | "warning" | "error";
+    /** A mod's: a short mark drawn in place of the ring. */
+    icon?: string;
     heading: string;
     detail: string;
     sessionId: string;
@@ -413,6 +420,16 @@ declare module "perch" {
   export function openScreen(id: string, props?: Record<string, unknown>): Promise<unknown>;
   /** `useNotifications`: the notifications, oldest first. Open and dismiss them with `run`. */
   export function notifications(): { items: NotificationItem[] };
+  /** Show a notification from this mod. Opening it runs `action` (else only puts it away);
+   * `timeout` is clamped to 1 to 60 s (default 6 s). */
+  export function notify(note: {
+    title: string;
+    body?: string;
+    level?: "info" | "warning" | "error";
+    icon?: string;
+    action?: { command: string; args?: unknown };
+    timeout?: number;
+  }): void;
   /** The window's requests to a screen, a count per kind that grows by one per request:
    * `"new-tab"` (Cmd+T, for the tab strip, which opens its New session menu at its "+"). */
   export function requests(): { "new-tab": number };

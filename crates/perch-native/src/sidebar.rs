@@ -87,7 +87,13 @@ pub enum Alert {
     Done,
     /// A session is waiting on an answer.
     Blocked,
+    /// The core's usage alert (`usage.alert`): a plan limit is near or was reset. It is about no
+    /// session, so opening its toast only puts it away.
+    Usage,
 }
+
+/// The session id a usage alert's notification carries (the web's `USAGE_NOTIFICATION_ID`).
+pub const USAGE_NOTIFICATION: &str = "usage";
 
 /// How a toast is delivered (`toastDelivery`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,8 +115,8 @@ impl Toast {
     }
 }
 
-/// A session finished or needs the person while they are not looking at it: the app plays the
-/// sound and shows the toast. The follower only reports it; it never plays or shows anything.
+/// A session finished or needs the person while they are not looking at it, or the core's usage
+/// alert: the app plays the sound and shows the toast. The follower only reports it; it never plays or shows anything.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Heard {
     pub alert: Alert,
@@ -121,6 +127,8 @@ pub struct Heard {
     pub sound: bool,
     pub file: Option<std::path::PathBuf>,
     pub toast: Toast,
+    /// A usage alert's detail line.
+    pub body: Option<String>,
 }
 
 impl Heard {
@@ -129,6 +137,12 @@ impl Heard {
         let what = match self.alert {
             Alert::Done => "finished",
             Alert::Blocked => "needs you",
+            Alert::Usage => {
+                return match &self.body {
+                    Some(body) => format!("{} · {body}", self.title),
+                    None => self.title.clone(),
+                }
+            }
         };
         format!("{} {what}", self.title)
     }
@@ -552,6 +566,28 @@ impl State {
                     .map_or(0, |d| d.as_millis() as u64);
                 self.usage_result(json!(accounts), json!(spend), at);
             }
+            // As the web's store: told like a finished session, but about no session; a reset
+            // makes no sound.
+            ServerMessage::UsageAlert { kind, title, body } => {
+                let settings = self.terminal.as_deref();
+                let toast = settings.map_or(Toast::App, |t| Toast::parse(&t.toast_delivery));
+                let sound = self.sound_enabled && kind != "reset";
+                if sound || toast != Toast::Off {
+                    self.alerts.push(Heard {
+                        alert: Alert::Usage,
+                        session_id: USAGE_NOTIFICATION.into(),
+                        title: title.clone(),
+                        sound,
+                        file: self
+                            .sounds_in
+                            .as_deref()
+                            .zip(settings.map(|t| t.sound_blocked.as_str()))
+                            .and_then(|(folder, rel)| crate::sound::file_in(folder, rel)),
+                        toast,
+                        body: (!body.is_empty()).then(|| body.clone()),
+                    });
+                }
+            }
             ServerMessage::UsageRedeemResult { .. } => {
                 let result = serde_json::to_value(message).unwrap_or(Value::Null);
                 self.plan_usage_mut()["redeemResult"] = result;
@@ -742,7 +778,7 @@ impl State {
                 let toast = settings.map_or(Toast::App, |t| Toast::parse(&t.toast_delivery));
                 let chosen = settings.map(|t| match alert {
                     Alert::Done => t.sound_done.as_str(),
-                    Alert::Blocked => t.sound_blocked.as_str(),
+                    _ => t.sound_blocked.as_str(),
                 });
                 if self.sound_enabled || toast != Toast::Off {
                     self.alerts.push(Heard {
@@ -756,6 +792,7 @@ impl State {
                             .zip(chosen)
                             .and_then(|(folder, rel)| crate::sound::file_in(folder, rel)),
                         toast,
+                        body: None,
                     });
                 }
             }
@@ -2254,6 +2291,38 @@ mod tests {
         // A change in the folder is asked about again.
         let asks = state.apply(&message(json!({"type": "mods.changed"})));
         assert!(matches!(asks.as_slice(), [Request::Mods]));
+    }
+
+    #[test]
+    fn a_usage_alert_is_told_like_a_finished_chat_but_a_reset_is_silent() {
+        let mut state = state();
+        state.apply(&settings(true, json!({})));
+        let alert = |kind: &str, body: &str| {
+            message(json!({"type": "usage.alert", "kind": kind,
+                "title": "Codex 5h limit at 93%", "body": body}))
+        };
+        state.apply(&alert("threshold", "Resets in 42 minutes"));
+        let heard = state.take_alerts();
+        assert_eq!(heard.len(), 1);
+        assert_eq!(
+            (heard[0].alert, heard[0].sound, heard[0].toast),
+            (Alert::Usage, true, Toast::App)
+        );
+        assert_eq!(heard[0].session_id, USAGE_NOTIFICATION);
+        assert_eq!(
+            heard[0].text(),
+            "Codex 5h limit at 93% · Resets in 42 minutes"
+        );
+        state.apply(&alert("reset", ""));
+        let heard = state.take_alerts();
+        assert!(!heard[0].sound, "a reset makes no sound");
+        assert_eq!(heard[0].body, None, "an empty body is none");
+        assert_eq!(heard[0].text(), "Codex 5h limit at 93%");
+        // With sound and toasts off, nothing is due.
+        state.apply(&message(json!({"type": "settings.current", "settings":
+            {"defaultCwd": null, "soundEnabled": false, "toastDelivery": "off"}})));
+        state.apply(&alert("threshold", "x"));
+        assert!(state.take_alerts().is_empty());
     }
 
     #[test]

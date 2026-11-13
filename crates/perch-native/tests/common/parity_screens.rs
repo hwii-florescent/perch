@@ -38,7 +38,7 @@ use perch_native::mods::perch::{from_host, notification_json, to_host, Perch, Wi
 use perch_native::mods::screens::{self, Place};
 use perch_native::mods::{theme, ModHost, ModView};
 use perch_native::sidebar::{Alert, Heard, Model, Request, Toast};
-use perch_native::workspace::Notification;
+use perch_native::workspace::{Notice, Notification};
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -253,7 +253,7 @@ pub fn model_from(data: &Value) -> Model {
 
 /// What the window shows in a fixture state: the shown workspace's sessions as its tabs (oldest
 /// first), the focused one active, its split beside it unless it is zoomed, the zoom at 100% and
-/// the session notifications.
+/// the notifications (sessions, usage alerts and mods' `notify`).
 pub fn window_from(data: &Value, model: &Model) -> WindowState {
     let active = data["sessionId"].as_str().map(str::to_string);
     let sessions = data["sessions"].as_array().cloned().unwrap_or_default();
@@ -305,18 +305,33 @@ pub fn window_from(data: &Value, model: &Model) -> WindowState {
             let alert = match toast["kind"].as_str() {
                 Some("done") => Alert::Done,
                 Some("blocked") => Alert::Blocked,
+                Some("usage") => Alert::Usage,
                 _ => return None,
             };
+            let session_id = toast["sessionId"].as_str()?.to_string();
+            let text = |key: &str| toast[key].as_str().map(str::to_string);
+            // A mod's `notify` carries its level, icon and action; the core's usage alert and a
+            // session's carry none.
+            let notice = session_id.starts_with("mod:").then(|| Notice {
+                level: text("level"),
+                icon: text("icon"),
+                action: toast["action"]["command"]
+                    .as_str()
+                    .map(|c| (c.to_string(), toast["action"].get("args").cloned())),
+                timeout: None,
+            });
             let note = Notification {
                 id: toast["id"].as_str()?.to_string(),
                 heard: Heard {
                     alert,
-                    session_id: toast["sessionId"].as_str()?.to_string(),
-                    title: toast["title"].as_str().unwrap_or_default().to_string(),
+                    session_id,
+                    title: text("title").unwrap_or_default(),
                     sound: false,
                     file: None,
                     toast: Toast::App,
+                    body: (alert == Alert::Usage).then(|| text("body")).flatten(),
                 },
+                notice,
             };
             Some(notification_json(&note, model))
         })

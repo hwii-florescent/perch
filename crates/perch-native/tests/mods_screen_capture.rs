@@ -314,6 +314,7 @@ fn openers_give_the_web_fields(scratch: &Path) {
                 sound: false,
                 file: None,
                 toast: Toast::App,
+                body: None,
             },
             cx,
         )

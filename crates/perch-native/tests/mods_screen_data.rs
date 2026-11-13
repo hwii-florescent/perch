@@ -60,10 +60,10 @@ const EXCEPTIONS: &[Exception] = &[
     },
     Exception {
         screen: "toast",
-        states: &["usage-alert", "mod-info", "mod-error", "over-limit"],
-        path: "notifications",
-        reason: "the native window notifies only of sessions (done, blocked): no plan usage \
-                 alerts and no mod notifications",
+        states: &["usage-alert", "over-limit"],
+        path: "notifications[*].level",
+        reason: "the fixture gives the core's usage alert a warning level; `usage.alert` carries \
+                 none and the web's store sets none (a usage card's ring is yellow either way)",
     },
     Exception {
         screen: "new-session",

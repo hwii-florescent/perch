@@ -35,7 +35,7 @@ use crate::settings::{
     self, next_choice, scrollback_from_text, stepped, Change, CONTRAST, MAX_SCROLLBACK,
     MIN_SCROLLBACK, OPACITY, OPTION_AS_ALT, PADDING, TOAST_DELIVERY,
 };
-use crate::sidebar::{Heard, Provider, LOCAL};
+use crate::sidebar::{Alert, Heard, Provider, LOCAL};
 use crate::tabs::{Dir, Node, Side, Tabs};
 use crate::terminal::actions::{Action, Scroll};
 use crate::terminal::attach::FromCore;
@@ -65,8 +65,6 @@ const LEADER_TIMEOUT: Duration = Duration::from_millis(1500);
 /// terminal lets go of the shell (which keeps running) and attaches again, with the core's
 /// repaint, when the tab is shown.
 const MAX_PARKED: usize = 12;
-/// How long a toast stays before it goes by itself.
-const TOAST_FOR: Duration = Duration::from_secs(8);
 /// How long the core has to confirm that a session ended before the tab says it is still running.
 const END_WAIT: Duration = Duration::from_secs(5);
 /// How long to wait before attaching a dropped terminal to the core again: it doubles from the
@@ -157,23 +155,30 @@ struct SettingsPanel {
     editing: Option<String>,
 }
 
-/// A message in the window about a session that finished or needs the person.
-struct Toast {
-    session_id: String,
-    text: String,
-    /// Takes the toast away after [`TOAST_FOR`].
-    _timer: Task<()>,
-}
-
 /// The most notifications kept for a screen to show; the oldest go first.
 const MAX_NOTIFICATIONS: usize = 20;
 
-/// A session finished or needs the person: what a notifications screen lists until it is
-/// dismissed or opened (`useNotifications`).
+/// A session finished or needs the person, a usage alert, or a mod's `notify`: what the
+/// notifications screen lists until it is dismissed or opened (`useNotifications`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Notification {
     pub id: String,
     pub heard: Heard,
+    /// What a mod's `notify` adds, as the web's toast: none for the window's own.
+    pub notice: Option<Notice>,
+}
+
+/// A mod's notification beyond its title and body (`perch.notify`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Notice {
+    /// `info`, `warning` or `error`: the ring's colour.
+    pub level: Option<String>,
+    /// A short mark drawn in place of the ring.
+    pub icon: Option<String>,
+    /// The command opening it runs, with its arguments.
+    pub action: Option<(String, Option<Value>)>,
+    /// How long it stays, in milliseconds.
+    pub timeout: Option<u64>,
 }
 
 /// The pane menu's entry that stops the terminal's process.
@@ -191,7 +196,6 @@ pub struct Workspace {
     zoom: Zoom,
     /// Counts the changes of what is on screen, for [`Pane::seen`].
     tick: u64,
-    toast: Option<Toast>,
     /// The window's height as last drawn, which keeps an overlay inside it.
     viewport_height: f32,
     /// The session whose terminal is over the window for a moment (`terminal.peek`), with no tab
@@ -261,7 +265,6 @@ impl Workspace {
             settings: None,
             zoom: Zoom::default(),
             tick: 0,
-            toast: None,
             viewport_height: 0.0,
             peek: None,
             leader: None,
@@ -1270,8 +1273,17 @@ impl Workspace {
                     .ok_or_else(|| format!("No notification {id}."))?;
                 let note = self.notifications.remove(at);
                 cx.notify();
+                // As the web: its action if it has one, else the session it is about.
                 if name == "notification.open" {
-                    self.show_session(&note.heard.session_id, cx)?;
+                    match note.notice.and_then(|n| n.action) {
+                        Some((command, args)) => {
+                            self.run_command(&command, args.as_ref(), window, cx)?
+                        }
+                        None if note.heard.alert != Alert::Usage => {
+                            self.show_session(&note.heard.session_id, cx)?
+                        }
+                        None => {}
+                    }
                 }
             }
             "global.settings" | "app.settings" => {
@@ -1686,71 +1698,45 @@ impl Workspace {
         }
     }
 
-    /// Show a toast for a session that finished or needs the person: it goes by itself, or when
-    /// clicked, which also opens the session. Only the newest is kept.
+    /// List a notification for the notifications screen: a session that finished or needs the
+    /// person, or a usage alert. The screen says how long each stays.
     pub fn toast(&mut self, heard: Heard, cx: &mut Context<Self>) {
+        self.notify(heard, None, cx);
+    }
+
+    /// List mod `mod_id`'s notification (`perch.notify`): about no session, so opening it runs
+    /// its action, if any, and puts it away.
+    pub fn notify_for_mod(
+        &mut self,
+        mod_id: &str,
+        title: String,
+        body: Option<String>,
+        notice: Notice,
+        cx: &mut Context<Self>,
+    ) {
+        let heard = Heard {
+            alert: Alert::Usage,
+            session_id: format!("mod:{mod_id}"),
+            title,
+            sound: false,
+            file: None,
+            toast: crate::sidebar::Toast::App,
+            body,
+        };
+        self.notify(heard, Some(notice), cx);
+    }
+
+    fn notify(&mut self, heard: Heard, notice: Option<Notice>, cx: &mut Context<Self>) {
         self.next_notification += 1;
         self.notifications.push(Notification {
             id: format!("n{}", self.next_notification),
-            heard: heard.clone(),
+            heard,
+            notice,
         });
         if self.notifications.len() > MAX_NOTIFICATIONS {
             self.notifications.remove(0);
         }
-        let session_id = heard.session_id.clone();
-        let mine = session_id.clone();
-        let timer = cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(TOAST_FOR).await;
-            let _ = this.update(cx, |this, cx| {
-                if this.toast.as_ref().is_some_and(|t| t.session_id == mine) {
-                    this.toast = None;
-                    cx.notify();
-                }
-            });
-        });
-        self.toast = Some(Toast {
-            session_id,
-            text: heard.text(),
-            _timer: timer,
-        });
         cx.notify();
-    }
-
-    /// The toast's text, while one is up.
-    pub fn toast_text(&self) -> Option<&str> {
-        self.toast.as_ref().map(|t| t.text.as_str())
-    }
-
-    fn toast_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.screens.has("toast", cx) {
-            return None;
-        }
-        let toast = self.toast.as_ref()?;
-        let session = toast.session_id.clone();
-        Some(
-            div()
-                .id("toast")
-                .absolute()
-                .top(px(TAB_BAR_HEIGHT + 12.))
-                .right_3()
-                .max_w(px(360.))
-                .px_3()
-                .py_2()
-                .rounded_md()
-                .border_1()
-                .border_color(rgb(OVERLAY_BORDER))
-                .bg(rgb(SIDEBAR_BG))
-                .cursor_pointer()
-                .text_sm()
-                .text_color(rgb(TITLE_COLOR))
-                .child(toast.text.clone())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.toast = None;
-                    let result = this.show_session(&session, cx);
-                    this.finish(result, cx);
-                }))
-                .into_any_element(),
-        )
     }
 
     /// Open the pane menu at `at` for the pane `id`. A pane in a split takes the keyboard first,
@@ -2811,11 +2797,7 @@ impl gpui::Render for Workspace {
             .iter()
             .filter_map(|open| self.floating_view(open))
             .collect();
-        let overlays = self
-            .settings_view(cx)
-            .into_iter()
-            .chain(self.peek_view(cx))
-            .chain(self.toast_view(cx));
+        let overlays = self.settings_view(cx).into_iter().chain(self.peek_view(cx));
         div()
             .relative()
             .flex()

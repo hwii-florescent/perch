@@ -92,6 +92,17 @@ const lastChoiceStored = () => {
   const raw = host().storage?.getItem(LAST_CHOICE);
   return raw === "claude" || raw === "codex" ? raw : "claude";
 };
+const NO_NOTIFICATIONS = Object.freeze({ items: [] });
+/** The notifications, oldest first, worded as the web words them (`perch.notifications()`); opening one goes to what
+ * it is about and puts it away, dismissing only puts it away (`notification.open` / `notification.dismiss`). */
+export function useNotifications() {
+  const data = useHostSnapshot((perch) => perch.notifications?.() ?? NO_NOTIFICATIONS);
+  return useMemo(() => ({
+    items: data.items ?? [],
+    open: (id) => host().command("notification.open", { id }),
+    dismiss: (id) => host().command("notification.dismiss", { id }),
+  }), [data]);
+}
 /** What `hostId` can start (`perch.agentChoices(hostId)`), the last agent picked, and remembering a pick. Manage
  * agents runs `agents.manage`, which a host without an agents page refuses. */
 export function useAgentChoices(hostId) {

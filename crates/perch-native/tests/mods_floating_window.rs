@@ -15,6 +15,9 @@
 //! - Dialog: a script opens it with the file menu's New file prompt; a path typed (or typed over
 //!   all of the field after Cmd+A) and Enter close it with the create action; Escape and a press on
 //!   the dim backdrop close it with nothing.
+//! - Notifications: a session's card opens that session and goes; × only puts it away; a usage
+//!   alert's card opens nothing; a mod's runs its action; a card goes by itself; the keyboard stays on the terminal and a
+//!   press beside a card reaches what is beneath.
 //! - Confirmation: closing an agent's tab asks through the close guard drawn in the confirmation;
 //!   Escape and a press on the dim backdrop cancel and keep the tab, Keep running puts the tab
 //!   away without ending it, and Enter stops it (with Don't show again, the warning is turned off).
@@ -31,9 +34,10 @@ use gpui_shell::probe::{self, ProbeRecord};
 use perch_core::protocol::ServerMessage;
 use perch_native::client::Command;
 use perch_native::mods::{self, POLL};
-use perch_native::sidebar::State;
+use perch_native::sidebar::{Alert, Heard, State, Toast};
 use perch_native::terminal::attach::{FromCore, ToCore};
 use perch_native::ui::{OpenSession, Workspace};
+use perch_native::workspace::Notice;
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -674,6 +678,99 @@ fn dialog(rig: &mut Rig) {
     println!("dialog: ok");
 }
 
+fn heard(alert: Alert, session_id: &str, title: &str, body: Option<&str>) -> Heard {
+    Heard {
+        alert,
+        session_id: session_id.into(),
+        title: title.into(),
+        sound: false,
+        file: None,
+        toast: Toast::App,
+        body: body.map(str::to_string),
+    }
+}
+
+fn toast(rig: &mut Rig) {
+    // A finished session's card, top right; the terminal keeps the keyboard.
+    rig.ws(|ws, _, cx| ws.toast(heard(Alert::Done, "bravo", "bravo", None), cx));
+    rig.draw();
+    assert_eq!(rig.open_screens(), ["toast"]);
+    let card = rig.record("toast-card").expect("the card is drawn").bounds;
+    assert_eq!(
+        card.origin.x + card.size.width,
+        px(WIDTH - 12.),
+        "12px from the right"
+    );
+    assert_eq!(card.origin.y, px(12.), "12px from the top");
+    assert!(rig.terminal_focused(), "the keyboard stays on the terminal");
+    // A press beside the card reaches the terminal beneath, and the card stays.
+    rig.mouse(WIDTH / 2., HEIGHT / 2.);
+    assert!(rig.terminal_focused());
+    assert_eq!(rig.open_screens(), ["toast"], "the card stays");
+    // The card opens its session and goes.
+    rig.click("toast-open");
+    assert_eq!(rig.shown().as_deref(), Some("bravo"));
+    assert!(rig.ws(|ws, _, _| ws.notifications().is_empty()));
+    assert!(rig.open_screens().is_empty(), "no card, no screen");
+
+    // × only puts it away.
+    rig.ws(|ws, _, cx| ws.toast(heard(Alert::Blocked, "alpha", "alpha", None), cx));
+    rig.draw();
+    rig.click("toast-dismiss");
+    assert!(rig.ws(|ws, _, _| ws.notifications().is_empty()));
+    assert_eq!(rig.shown().as_deref(), Some("bravo"), "nothing opened");
+
+    // A usage alert says its title and body, and opening it opens nothing.
+    let alert = heard(
+        Alert::Usage,
+        "usage",
+        "Codex 5h limit at 93%",
+        Some("Resets in 42 minutes"),
+    );
+    rig.ws(|ws, _, cx| ws.toast(alert, cx));
+    rig.draw();
+    assert!(
+        rig.record("toast-detail").is_some(),
+        "its body is the detail line"
+    );
+    rig.click("toast-open");
+    assert!(rig.ws(|ws, _, _| ws.notifications().is_empty()));
+    assert_eq!(rig.shown().as_deref(), Some("bravo"), "nothing opened");
+
+    // A mod's notification runs its action when opened.
+    rig.ws(|ws, _, cx| {
+        let action = Some(("tab.select".to_string(), Some(json!({"id": "alpha"}))));
+        let notice = Notice {
+            level: Some("info".into()),
+            icon: Some("\u{2713}".into()),
+            action,
+            timeout: None,
+        };
+        ws.notify_for_mod("deploy", "Deployed".into(), None, notice, cx)
+    });
+    rig.draw();
+    rig.click("toast-open");
+    assert_eq!(rig.shown().as_deref(), Some("alpha"), "its action ran");
+    assert!(rig.ws(|ws, _, _| ws.notifications().is_empty()));
+
+    // Left alone, a card goes by itself (6 s for a finished session).
+    rig.ws(|ws, _, cx| ws.toast(heard(Alert::Done, "alpha", "alpha", None), cx));
+    rig.draw();
+    rig.cx.advance_clock(std::time::Duration::from_secs(7));
+    rig.draw();
+    assert!(rig.ws(|ws, _, _| ws.notifications().is_empty()), "it went");
+    assert!(rig.open_screens().is_empty());
+
+    // The confirmation that follows closes alpha's tab: show it again.
+    rig.ws(|ws, _, cx| {
+        ws.sidebar().update(cx, |s, cx| {
+            s.open("local".into(), "alpha".into(), Some("claude".into()), cx)
+        })
+    });
+    rig.draw();
+    println!("toast: ok");
+}
+
 fn main() {
     let scratch: PathBuf =
         std::env::temp_dir().join(format!("perch-floating-window-{}", std::process::id()));
@@ -728,6 +825,7 @@ fn main() {
     pane_menu(&mut rig);
     new_session(&mut rig);
     dialog(&mut rig);
+    toast(&mut rig);
     confirm(&mut rig);
 
     rig.cx
