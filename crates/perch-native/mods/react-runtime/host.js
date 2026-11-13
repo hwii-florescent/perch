@@ -25,7 +25,9 @@
 // `tab-menu`), and its callbacks get the screen's result. What the `perch` module or the window cannot do yet is an
 // inert default (`INERT`), so a screen
 // draws and its other actions work: an overlay with no screen (or whose screen no mod draws) closes at once and says
-// so on stderr, session folders are empty, the add-project flow does not run and a row drag stays a press. A
+// so on stderr, session folders are empty, the add-project flow does not run and a row drag stays a press. A tab's
+// press (`beginTabDrag`) is the window's from then on (`tab.beginDrag`, with where the strip's tabs are): it follows
+// the pointer, draws the `tab-drag` screen and moves or splits the tab once it is let go. A
 // workspace line's `workspace.open` runs `workspace.focus` (`STAND_IN`); other commands the module lacks are refused
 // by it and logged.
 import * as perch from "perch";
@@ -45,7 +47,6 @@ export const INERT = [
   "overlay:memory",
   "overlay:worktree",
   "overlay:new-file",
-  "beginTabDrag",
 ];
 
 /** Overlays that open as one of the window's screens: the screen, its props from the overlay's, and what the
@@ -312,6 +313,17 @@ export function copyFor(cx, screen) {
     },
     // The native keymap has no `navigator.*` (or other in-screen) bindings: a screen's home-row keys are not matched.
     shortcutFor: () => null,
+    // A press on a tab, which the window turns into a drag after a few pixels. The strip's tabs as laid out now are
+    // where a drop on the strip lands (`slotIndex` in the web).
+    beginTabDrag(event, id, label) {
+      if ((event?.button ?? 0) !== 0) return;
+      const entries = [...(globalThis.document?.querySelectorAll?.("[data-tab-entry]") ?? [])].map((el) => {
+        const box = el.getBoundingClientRect();
+        return { id: el.dataset?.tabEntry ?? el.getAttribute?.("data-tab-entry"), left: box.left, width: box.width };
+      });
+      const args = { id: String(id), label: String(label ?? ""), x: event.clientX, y: event.clientY, entries };
+      perch.run("tab.beginDrag", args).catch(answer((error) => console.error(`perch.run tab.beginDrag: ${error?.message ?? error}`)));
+    },
     render: () => { if (!rendering && !copy.closed) cx.notify(); },
     error: (error) => console.error(`react-runtime: ${error?.stack ?? error}`),
   };

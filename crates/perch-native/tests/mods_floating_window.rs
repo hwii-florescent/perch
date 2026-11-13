@@ -29,7 +29,7 @@
 use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 use gpui::{
     point, px, size, AppContext as _, Focusable as _, HeadlessAppContext, Keystroke, Modifiers,
-    MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput, Window, WindowHandle,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PlatformInput, Window, WindowHandle,
 };
 use gpui_shell::probe::{self, ProbeRecord};
 use perch_core::protocol::ServerMessage;
@@ -163,6 +163,54 @@ impl Rig {
             .unwrap();
         self.cx.run_until_parked();
         self.draw();
+    }
+
+    /// A left press, a move with it held or its release at `(x, y)`, through the window's
+    /// dispatch.
+    fn down(&mut self, (x, y): (f32, f32)) {
+        self.input(PlatformInput::MouseDown(MouseDownEvent {
+            button: MouseButton::Left,
+            position: point(px(x), px(y)),
+            modifiers: Modifiers::default(),
+            click_count: 1,
+            first_mouse: false,
+        }));
+    }
+
+    fn held_to(&mut self, (x, y): (f32, f32)) {
+        self.input(PlatformInput::MouseMove(MouseMoveEvent {
+            position: point(px(x), px(y)),
+            pressed_button: Some(MouseButton::Left),
+            modifiers: Modifiers::default(),
+        }));
+    }
+
+    fn up(&mut self, (x, y): (f32, f32)) {
+        self.input(PlatformInput::MouseUp(MouseUpEvent {
+            button: MouseButton::Left,
+            position: point(px(x), px(y)),
+            modifiers: Modifiers::default(),
+            click_count: 1,
+        }));
+    }
+
+    fn input(&mut self, input: PlatformInput) {
+        self.cx
+            .update_window(self.window.into(), |_, window: &mut Window, cx| {
+                window.dispatch_event(input, cx);
+            })
+            .unwrap();
+        self.cx.run_until_parked();
+        self.draw();
+    }
+
+    fn center(&mut self, name: &str) -> (f32, f32) {
+        let at = self
+            .record(name)
+            .unwrap_or_else(|| panic!("{name} is drawn"))
+            .bounds
+            .center();
+        (f32::from(at.x), f32::from(at.y))
     }
 
     /// A click in the middle of what is named `name`.
@@ -586,6 +634,94 @@ fn tab_menu(rig: &mut Rig) {
 }
 
 /// Attaches the tab with the keyboard to a stand-in core: what it asks the core, and what the core says.
+fn tab_drag(rig: &mut Rig) {
+    rig.ws(|ws, _, cx| {
+        ws.sidebar().update(cx, |s, cx| {
+            s.open("local".into(), "bravo".into(), Some("claude".into()), cx)
+        })
+    });
+    let select = |rig: &mut Rig, id: &str| {
+        rig.ws(|ws, window, cx| {
+            ws.run_command("tab.select", Some(&json!({ "id": id })), window, cx)
+        })
+        .unwrap();
+        rig.draw();
+    };
+    select(rig, "alpha");
+    let layout = |rig: &mut Rig| rig.ws(|ws, _, _| (ws.tabs().strip().to_vec(), ws.tabs().shown()));
+    let ids = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(layout(rig), (ids(&["alpha", "bravo"]), ids(&["alpha"])));
+
+    // A press that moves less than 5 px is a press: nothing is dragged.
+    let tab = rig.center("tab:alpha");
+    rig.down(tab);
+    rig.held_to((tab.0 + 3., tab.1));
+    assert!(rig.open_screens().is_empty());
+    rig.up((tab.0 + 3., tab.1));
+    assert_eq!(layout(rig), (ids(&["alpha", "bravo"]), ids(&["alpha"])));
+
+    // On the strip the drop is a slot in it: past bravo's middle, alpha goes after it. The layer
+    // is up while the tab is dragged, with no split to show; Escape ends it with nothing changed.
+    let past = (rig.center("tab:bravo").0 + 20., tab.1);
+    rig.down(tab);
+    rig.held_to((tab.0 + 10., tab.1));
+    rig.held_to(past);
+    assert_eq!(rig.open_screens(), ["tab-drag"]);
+    assert!(rig.record("tab-drag-layer").is_some(), "the layer is drawn");
+    assert!(
+        rig.record("tab-drop-zone").is_none(),
+        "over the strip, no split"
+    );
+    rig.press("escape");
+    assert!(rig.open_screens().is_empty(), "Escape took the layer away");
+    rig.up(past);
+    assert_eq!(
+        layout(rig),
+        (ids(&["alpha", "bravo"]), ids(&["alpha"])),
+        "and changed nothing"
+    );
+    rig.down(tab);
+    rig.held_to((tab.0 + 10., tab.1));
+    rig.held_to(past);
+    rig.up(past);
+    assert_eq!(
+        layout(rig),
+        (ids(&["bravo", "alpha"]), ids(&["alpha"])),
+        "alpha went after bravo"
+    );
+    assert!(rig.open_screens().is_empty());
+
+    // On a pane the drop splits on the side nearest the pointer: alpha dragged to the right edge
+    // of bravo's pane shows beside it, on its right, with the keyboard. Its own pane takes nothing.
+    select(rig, "bravo");
+    let tab = rig.center("tab:alpha");
+    let right = (WIDTH - 20., HEIGHT / 2.);
+    rig.down(tab);
+    rig.held_to((tab.0, tab.1 + 20.));
+    rig.held_to(right);
+    let zone = rig
+        .record("tab-drop-zone:right")
+        .expect("the right half a split takes");
+    let middle = f32::from(zone.bounds.origin.x + zone.bounds.size.width / 2.);
+    assert!(middle > WIDTH / 2., "the right half: {:?}", zone.bounds);
+    rig.up(right);
+    assert_eq!(
+        layout(rig),
+        (ids(&["bravo", "alpha"]), ids(&["bravo", "alpha"]))
+    );
+    assert_eq!(
+        rig.shown().as_deref(),
+        Some("alpha"),
+        "the dropped tab has the keyboard"
+    );
+    assert!(rig.open_screens().is_empty());
+    rig.ws(|ws, window, cx| {
+        ws.run_command("pane.unsplit", Some(&json!({"id": "alpha"})), window, cx)
+    })
+    .unwrap();
+    println!("tab-drag: ok");
+}
+
 fn link(
     rig: &mut Rig,
 ) -> (
@@ -1085,6 +1221,7 @@ fn main() {
     pane_menu(&mut rig);
     split_with_session(&mut rig);
     tab_menu(&mut rig);
+    tab_drag(&mut rig);
     new_session(&mut rig);
     dialog(&mut rig);
     toast(&mut rig);

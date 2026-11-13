@@ -252,6 +252,15 @@ pub const STOCK: &[(&str, &str)] = &[
         "tabs/tabs/main.js",
         include_str!("../mods/tabs/tabs/main.js"),
     ),
+    ("tab-drag/main.js", include_str!("../mods/tab-drag/main.js")),
+    (
+        "tab-drag/mod.json",
+        include_str!("../mods/tab-drag/mod.json"),
+    ),
+    (
+        "tab-drag/tab-drag/main.js",
+        include_str!("../mods/tab-drag/tab-drag/main.js"),
+    ),
     ("tab-menu/main.js", include_str!("../mods/tab-menu/main.js")),
     (
         "tab-menu/mod.json",

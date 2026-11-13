@@ -31,6 +31,7 @@ const SCREENS: &[&str] = &[
     "session-menu",
     "keybind-help",
     "launcher",
+    "tab-drag",
 ];
 
 fn main() {

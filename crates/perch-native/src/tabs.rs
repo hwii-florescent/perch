@@ -41,6 +41,16 @@ impl Side {
         })
     }
 
+    /// The web's name for the side (`DropZone`).
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::Up => "up",
+            Self::Down => "down",
+        }
+    }
+
     fn dir(self) -> Dir {
         match self {
             Self::Left | Self::Right => Dir::Row,
@@ -448,13 +458,21 @@ impl Tabs {
         (rest.leaves().len() < MAX_SPLIT).then_some(rest)
     }
 
-    /// Drop `dragged` on the `side` of `target`, as the web's `dropSplit`: it joins (or starts)
-    /// `target`'s set, leaving any other; a side across the set's direction nests. The dropped
-    /// tab gets the keyboard. `false`, and nothing changes, when it cannot be.
+    /// Drop `dragged` on the `side` of `target`, as the web's `dropTab`: it joins (or starts)
+    /// `target`'s set, leaving any other (`dropSplit`); a side across the set's direction nests.
+    /// In the strip it goes just before `target` (left, up) or after it (right, down), so the
+    /// strip's order is the panes'. The dropped tab gets the keyboard. `false`, and nothing
+    /// changes, when it cannot be.
     pub fn drop_beside(&mut self, dragged: &str, target: &str, side: Side) -> bool {
         let Some(rest) = self.beside(dragged, target) else {
             return false;
         };
+        if let Some(from) = self.strip.iter().position(|tab| tab == dragged) {
+            let tab = self.strip.remove(from);
+            let at = self.strip.iter().position(|t| t == target).unwrap_or(0);
+            let after = matches!(side, Side::Right | Side::Down);
+            self.strip.insert(at + usize::from(after), tab);
+        }
         let made = rest.insert_beside(target, dragged, side);
         if let Some(i) = self.set_of(Some(target)) {
             self.sets.remove(i);
@@ -715,6 +733,10 @@ mod tests {
         // Moving a member within its own set: it leaves, then lands on the new side.
         assert!(t.drop_beside("a", "c", Side::Left));
         assert_eq!(t.shown(), ["b", "a", "c"]);
+        // The strip follows: a drop on the left goes just before its target, on the right after.
+        assert_eq!(t.strip(), ["b", "a", "c"]);
+        assert!(t.drop_beside("b", "c", Side::Right));
+        assert_eq!(t.strip(), ["a", "c", "b"]);
         assert!(!t.drop_beside("a", "a", Side::Left), "onto itself");
         assert!(!t.can_drop("a", "nope"));
         let before = t.clone();

@@ -11,6 +11,7 @@ pub mod notify;
 pub mod settings;
 pub mod sidebar;
 pub mod sound;
+pub mod tab_drag;
 pub mod tabs;
 pub mod terminal;
 pub mod ui;

@@ -36,6 +36,7 @@ use crate::settings::{
     MIN_SCROLLBACK, OPACITY, OPTION_AS_ALT, PADDING, TOAST_DELIVERY,
 };
 use crate::sidebar::{Alert, Heard, Provider, LOCAL};
+use crate::tab_drag::{self, Drop, TabDrag};
 use crate::tabs::{Dir, Node, Side, Tabs};
 use crate::terminal::actions::{Action, Scroll};
 use crate::terminal::attach::FromCore;
@@ -49,12 +50,12 @@ use crate::ui::{
 use crate::zoom::Zoom;
 use futures::channel::mpsc::UnboundedSender;
 use gpui::{
-    canvas, div, point, prelude::*, px, relative, rgb, size, AnyElement, App, Context, Entity,
-    Focusable, KeyDownEvent, Keystroke, MouseButton, Pixels, Point, SharedString, Size,
-    Subscription, Task, Window,
+    canvas, div, point, prelude::*, px, relative, rgb, size, AnyElement, App, Bounds, Context,
+    DispatchPhase, Entity, Focusable, KeyDownEvent, Keystroke, MouseButton, MouseMoveEvent,
+    MouseUpEvent, Pixels, Point, SharedString, Size, Subscription, Task, Window,
 };
 use serde_json::{json, Value};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -220,9 +221,20 @@ pub struct Workspace {
     next_notification: u64,
     /// Cmd+T asks the tab strip mod for a new tab this many times (`perch.requests()`).
     new_tab_asks: u64,
+    /// A press on a tab of the strip, which may become a drag (`tab.beginDrag`).
+    drag: Option<TabDrag>,
+    /// Where the strip and each pane on screen were last drawn, for where a drag would drop.
+    drop_boxes: Rc<RefCell<DropBoxes>>,
     /// Tells the core whether this window is the one being looked at.
     activation: Option<Subscription>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// The strip's box and each shown pane's, as last drawn.
+#[derive(Default)]
+struct DropBoxes {
+    strip: Option<Bounds<Pixels>>,
+    panes: HashMap<String, Bounds<Pixels>>,
 }
 
 impl Workspace {
@@ -275,6 +287,8 @@ impl Workspace {
             notifications: Vec::new(),
             next_notification: 0,
             new_tab_asks: 0,
+            drag: None,
+            drop_boxes: Rc::default(),
             activation: None,
             _subscriptions: vec![opened, failed, observed],
         }
@@ -689,6 +703,76 @@ impl Workspace {
         self.ensure_pane(&open, cx);
         self.tabs.open(id);
         Ok(())
+    }
+
+    /// The pointer moved during a press on a tab: once it is a drag, where a drop would land,
+    /// drawn by the `tab-drag` screen.
+    fn drag_moved(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(drag) = self.drag.as_mut() else {
+            return;
+        };
+        if !drag.moved(at) {
+            return;
+        }
+        let boxes = self.drop_boxes.borrow();
+        let on_strip = boxes.strip.is_some_and(|b| b.contains(&at))
+            && drag.spans.iter().any(|s| s.id == drag.id);
+        drag.drop = if on_strip {
+            Drop::Strip(drag.slot(f32::from(at.x)))
+        } else {
+            let pane = boxes
+                .panes
+                .iter()
+                .find(|(id, b)| **id != drag.id && b.contains(&at));
+            match pane {
+                Some((target, pane)) => match tab_drag::resolve_zone(*pane, at) {
+                    Some(side) => Drop::Pane {
+                        target: target.clone(),
+                        pane: *pane,
+                        side: self.tabs.can_drop(&drag.id, target).then_some(side),
+                    },
+                    None => Drop::None,
+                },
+                None => Drop::None,
+            }
+        };
+        let props = drag.props();
+        drop(boxes);
+        if !self.screens.update("tab-drag", props.clone(), cx) {
+            self.screens.open("tab-drag", props, None, None, cx);
+        }
+        cx.notify();
+    }
+
+    /// The press on a tab ends: let go (`apply`), the drop it was over is made; Escape, the
+    /// window losing focus or a lost release (`!apply`) changes nothing. A press that never
+    /// became a drag is a click, which the strip handles.
+    fn drag_ended(&mut self, apply: bool, cx: &mut Context<Self>) -> bool {
+        let Some(drag) = self.drag.take() else {
+            return false;
+        };
+        self.screens.take("tab-drag", cx);
+        cx.notify();
+        // The tab (or the pane it was over) may have closed during the drag.
+        if !drag.started || !apply || !self.tabs.contains(&drag.id) {
+            return drag.started;
+        }
+        match drag.drop {
+            Drop::Strip(Some(slot)) => {
+                self.tabs.move_tab(&drag.id, slot + 1);
+            }
+            Drop::Pane {
+                target,
+                side: Some(side),
+                ..
+            } if self.tabs.contains(&target) => {
+                if self.tabs.drop_beside(&drag.id, &target, side) {
+                    self.after_change(cx);
+                }
+            }
+            _ => {}
+        }
+        true
     }
 
     /// Show session `id` on the `side` of tab `target`, its tab opened first when it has none;
@@ -1257,6 +1341,11 @@ impl Workspace {
 
     /// One key press, before the focused terminal sees it. True when it was handled here.
     fn key(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        // Escape ends a tab drag with nothing changed.
+        if keystroke.key == "escape" && self.drag.as_ref().is_some_and(|d| d.started) {
+            self.drag_ended(false, cx);
+            return true;
+        }
         let keymap = self.keymap(cx);
         // A modal screen has the keyboard. Escape dismisses it, here and not in each mod, and so
         // does the Navigator's own key while the Navigator is up; every other key is the mod's.
@@ -1507,6 +1596,30 @@ impl Workspace {
                 }
                 self.tabs.unsplit(&id);
                 self.after_change(cx);
+            }
+            // The SDK's `beginTabDrag`: a press on tab `id`, with where the strip's tabs are.
+            "tab.beginDrag" => {
+                let id = text("id").ok_or("This command needs {id}.")?.to_string();
+                if !self.tabs.contains(&id) {
+                    return Err(format!("No tab {id}."));
+                }
+                let coordinate = |key: &str| {
+                    args.and_then(|a| a.get(key))
+                        .and_then(Value::as_f64)
+                        .map(|v| px(v as f32))
+                };
+                let start = coordinate("x")
+                    .zip(coordinate("y"))
+                    .map(|(x, y)| point(x, y))
+                    .ok_or("This command needs {x, y}.")?;
+                // One drag at a time, as the web's.
+                if self.drag.is_none() {
+                    let spans =
+                        tab_drag::spans_from(&args.map_or(Value::Null, |a| a["entries"].clone()));
+                    let label = text("label").unwrap_or_default().to_string();
+                    self.drag = Some(TabDrag::new(id, label, start, spans));
+                    cx.notify();
+                }
             }
             "tab.menu" => {
                 let id = text("id")
@@ -2381,7 +2494,26 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match node {
-            Node::Pane(id) => self.pane(id, focused == Some(id.as_str()) && split, cx),
+            Node::Pane(id) => {
+                let boxes = self.drop_boxes.clone();
+                let key = id.clone();
+                let measure = canvas(
+                    move |bounds, _, _| {
+                        boxes.borrow_mut().panes.insert(key, bounds);
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full();
+                div()
+                    .relative()
+                    .size_full()
+                    .child(self.pane(id, focused == Some(id.as_str()) && split, cx))
+                    .child(measure)
+                    .into_any_element()
+            }
             Node::Split { dir, kids, sizes } => {
                 let mut row = div().flex().size_full().gap(px(PANE_GAP));
                 row = match dir {
@@ -2890,6 +3022,10 @@ impl gpui::Render for Workspace {
                 window,
                 move |this, window, cx| {
                     send(window.is_window_active(), &this.sidebar, cx);
+                    // As the web's blur: a tab drag ends with nothing changed.
+                    if !window.is_window_active() {
+                        this.drag_ended(false, cx);
+                    }
                 },
             ));
         }
@@ -2929,6 +3065,8 @@ impl gpui::Render for Workspace {
         // switch, a close, a zoom, a split) ends here.
         let shown = self.tabs.shown();
         let room = self.room.get();
+        // Every pane on screen draws its box afresh below.
+        self.drop_boxes.borrow_mut().panes.clear();
         // A blank session's choices follow the computer's launch list as it arrives.
         let choosing: Vec<_> = self
             .panes
@@ -3026,7 +3164,22 @@ impl gpui::Render for Workspace {
                 let bar = match self.screens.inflow("tabs") {
                     Some(view) => {
                         let (_, height) = self.screens.size("tabs", cx);
-                        div().flex_none().h(px(height)).child(view).into_any_element()
+                        let boxes = self.drop_boxes.clone();
+                        let measure = canvas(
+                            move |bounds, _, _| boxes.borrow_mut().strip = Some(bounds),
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full();
+                        div()
+                            .relative()
+                            .flex_none()
+                            .h(px(height))
+                            .child(view)
+                            .child(measure)
+                            .into_any_element()
                     }
                     // The stock `tabs` mod draws the strip; without it its place says why.
                     None => div()
@@ -3101,6 +3254,47 @@ impl gpui::Render for Workspace {
             .filter_map(|open| self.floating_view(open))
             .collect();
         let overlays = self.settings_view(cx).into_iter().chain(self.peek_view(cx));
+        // While a tab is pressed the window follows the pointer wherever it is, before anything
+        // under it: what is under a drag does not react to it.
+        let follow = self.drag.is_some().then(|| {
+            let this = cx.entity().downgrade();
+            canvas(
+                |_, _, _| {},
+                move |_, _, window, _| {
+                    let moved = this.clone();
+                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                        if phase != DispatchPhase::Capture {
+                            return;
+                        }
+                        let _ = moved.update(cx, |this, cx| {
+                            if event.pressed_button == Some(MouseButton::Left) {
+                                this.drag_moved(event.position, cx);
+                            } else {
+                                // The release was not seen: nothing changes.
+                                this.drag_ended(false, cx);
+                            }
+                        });
+                    });
+                    let released = this.clone();
+                    window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                        if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
+                            return;
+                        }
+                        let dragged = released
+                            .update(cx, |this, cx| this.drag_ended(true, cx))
+                            .unwrap_or(false);
+                        // The release after a drag is not a click on what is under it.
+                        if dragged {
+                            cx.stop_propagation();
+                        }
+                    });
+                },
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+        });
         div()
             .relative()
             .flex()
@@ -3116,6 +3310,7 @@ impl gpui::Render for Workspace {
             .child(area.children(overlays))
             // Over the whole window: it opens where the pointer was, in window coordinates.
             .children(floating)
+            .children(follow)
     }
 }
 

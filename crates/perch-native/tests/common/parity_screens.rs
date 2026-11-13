@@ -814,6 +814,42 @@ fn session_menu_props(data: &Value, menu: &Value) -> Value {
     tab_menu_props(&tabs, &mates, id, at, &title, false, extra)
 }
 
+/// The window's `tab-drag` props for the fixture's drag (the pointer, the pane under it and its
+/// zone, the tab its ghost copies), as `TabDrag::props` makes them: the drop with the half a split
+/// takes (`zone_box`), and no ghost, which is the tab's own markup in the web.
+fn tab_drag_props(fixture: &Value) -> Value {
+    use perch_native::tab_drag::{Drop, TabDrag};
+    let drag = &fixture["drag"];
+    let number = |v: &Value| v.as_f64().unwrap_or(0.) as f32;
+    let at = point(px(number(&drag["x"])), px(number(&drag["y"])));
+    let mut native = TabDrag::new(
+        drag["id"].as_str().unwrap_or_default().into(),
+        drag["label"].as_str().unwrap_or_default().into(),
+        at,
+        Vec::new(),
+    );
+    let pane = &drag["pane"];
+    native.drop = if drag["overStrip"] == true {
+        Drop::Strip(None)
+    } else if pane.is_object() {
+        let pane = gpui::bounds(
+            point(px(number(&pane["left"])), px(number(&pane["top"]))),
+            size(px(number(&pane["width"])), px(number(&pane["height"]))),
+        );
+        let side = drag["zone"]
+            .as_str()
+            .and_then(perch_native::tabs::Side::parse);
+        Drop::Pane {
+            target: "pane".into(),
+            pane,
+            side,
+        }
+    } else {
+        Drop::None
+    };
+    native.props()
+}
+
 /// Draws screen `fixture.screen`'s mod in a fixture state as the window holds it: an in-flow
 /// screen alone at the state's size, a floating one over the whole of the state's window on the
 /// backdrop, with `viewport` in its props. The state's `steps` are done as events. Writes
@@ -837,6 +873,8 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
     if drawn != screen_id {
         let menu = props.take().unwrap_or_else(|| json!({}));
         props = Some(session_menu_props(&fixture.data(capture.state), &menu));
+    } else if screen_id == "tab-drag" {
+        props = props.map(|p| tab_drag_props(&p));
     }
     if floating {
         // As the window gives every floating screen: its size.

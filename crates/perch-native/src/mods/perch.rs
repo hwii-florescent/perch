@@ -1250,7 +1250,7 @@ const OWN: [(&str, &str, &str); 6] = [
 
 /// Window commands beyond the keymap's: the web's ids the window can perform (some under the
 /// name its keys use), and the native ones screens need.
-const WINDOW_COMMANDS: [(&str, &str, &str); 11] = [
+const WINDOW_COMMANDS: [(&str, &str, &str); 12] = [
     (
         "session.start",
         "Start an agent in a folder on a host",
@@ -1272,6 +1272,11 @@ const WINDOW_COMMANDS: [(&str, &str, &str); 11] = [
         "tab.menu",
         "Open a tab's menu at a point of the window",
         "{id, x, y}",
+    ),
+    (
+        "tab.beginDrag",
+        "A press on a tab, which the window follows as a drag (the SDK's beginTabDrag)",
+        "{id, label, x, y, entries: [{id, left, width}]}",
     ),
     (
         "host.enable",
