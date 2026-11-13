@@ -30,6 +30,9 @@ export const INERT = [
   "overlay:instructions",
   "overlay:memory",
   "overlay:worktree",
+  "overlay:new-file",
+  "beginTabDrag",
+  "planUsage",
 ];
 
 /** Overlays that open as one of the window's screens: the screen, its props from the overlay's, and what the
@@ -180,6 +183,10 @@ export const host = {
     return snapshot(`navigation:${JSON.stringify(opts)}`, () => perch.navigation(opts));
   },
   hosts: () => snapshot("hosts", () => perch.hosts()),
+  workspaceTabs: () => snapshot("workspaceTabs", () => perch.workspaceTabs()),
+  statusLine: () => snapshot("statusLine", () => perch.statusLine()),
+  zoom: () => snapshot("zoom", () => perch.zoom()),
+  paneLook: () => snapshot("paneLook", () => perch.paneLook()),
   session: (id) => sessionsOf(host.navigation({})).get(id) ?? null,
   sessionFolders: () => snapshot("sessionFolders", () => ({ hostId: perch.navigation().hostId, folders: [] })),
   addProject: () => NO_ADD,

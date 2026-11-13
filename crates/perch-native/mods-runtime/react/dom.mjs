@@ -148,6 +148,17 @@ export class HostElement extends Target {
   getClientRects() { return [this.getBoundingClientRect()]; }
   focus() { this.ownerDocument?.focus(this); }
   blur() { this.ownerDocument?.blur(this); }
+  /** Asks the scroll area around this element to show it (`toGpui`, on the next frame: the engine scrolls by the
+   * fewest pixels, as `{ inline: "nearest", block: "nearest" }`, whatever the options). */
+  scrollIntoView() { if (this.ownerDocument) this.ownerDocument.scrollTarget = this; }
+}
+
+/** `ResizeObserver`: the engine tells the description of no resizes, so an observer is never called back (its
+ * screen reads boxes when it renders instead). */
+export class HostResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
 }
 
 /** An in-memory `Storage` (the engine's own per-copy storage replaces it when it has one). */
@@ -236,6 +247,7 @@ export function installGlobals(perch, target = globalThis) {
   define(target, "HTMLElement", HostElement);
   define(target, "Element", HostElement);
   define(target, "DOMRect", DOMRect);
+  if (typeof target.ResizeObserver !== "function") define(target, "ResizeObserver", HostResizeObserver);
   const navigator = target.navigator && typeof target.navigator === "object" ? target.navigator : {};
   if (!navigator.clipboard && perch.clipboard) {
     try { define(navigator, "clipboard", perch.clipboard); } catch { /* a frozen navigator keeps its own */ }

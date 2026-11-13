@@ -18,6 +18,8 @@ import { HostStateDot } from "../../../../packages/web/src/components/HostStateD
 import StockDialog from "../../../../packages/web/src/stock-ui/dialog/main.tsx";
 import { DOT_GLYPH, sessionDotState } from "../../../../packages/web/src/statusDot.ts";
 import { isNestedIn, nestUnderLeads } from "../../../../packages/web/src/sidebarOrder.ts";
+import { computeAnchoredPopoverStyle, useDismissOnOutsideClick } from "../../../../packages/web/src/components/popoverPosition.ts";
+import { PageIcon } from "../../../../packages/web/src/components/PageIcon.tsx";
 
 /** The SDK version this surface implements (`perch-sdk.d.ts`'s navigation part). */
 export const version = "1.3.0";
@@ -30,7 +32,8 @@ function host() {
 }
 const subscribe = (listener) => host().subscribe?.(listener) ?? (() => {});
 
-export { cn, menuPanel, CloseIcon, EllipsisIcon, GearIcon, PlusIcon, HostStateDot };
+export { cn, menuPanel, CloseIcon, EllipsisIcon, GearIcon, PlusIcon, HostStateDot, PageIcon, useDismissOnOutsideClick };
+export const anchoredPopoverStyle = computeAnchoredPopoverStyle;
 /** Read once: the host (`globalThis.perch`) is set before the runtime is evaluated. */
 export const isMac = globalThis.perch?.isMac !== false;
 export const keyLabel = (combo) => formatCombo(combo, host().isMac !== false);
@@ -172,3 +175,36 @@ export function WorktreeMenu({ hostId, path, className }) {
 /** A row drag: the host follows the pointer and slides the rows (`perch.beginReorderDrag`); without it a press
  * stays a press. */
 export const beginReorderDrag = (event, options) => host().beginReorderDrag?.(event, options);
+
+// ---- chrome (1.2: tabs, status bar, pane header) ------------------------------------------------------------------
+
+export const useWorkspaceTabs = () => useHostSnapshot((perch) => perch.workspaceTabs());
+export const useStatusLine = () => useHostSnapshot((perch) => perch.statusLine());
+export const useZoom = () => useHostSnapshot((perch) => perch.zoom());
+export const usePaneLook = () => useHostSnapshot((perch) => perch.paneLook());
+const NO_USAGE = Object.freeze({ usage: Object.freeze([]), updatedAt: 0, spend: null, redeemResult: null });
+/** Plan usage as the host has it (`perch.planUsage()`), none where it keeps none. */
+export const usePlanUsage = () => useHostSnapshot((perch) => perch.planUsage?.() ?? NO_USAGE);
+export const refreshUsage = () => host().command("usage.refresh", { force: true });
+export const redeemUsageReset = (accountId) => host().command("usage.redeemReset", { accountId });
+export const resetZoom = () => runCommand("app.zoom_reset");
+/** A tab's fill and text by its pane state: the app's `TAB_PANE_CLASS` (`tabPaneState.ts`, whose module also holds
+ * the split store, so its three strings are here; `test/sdk.test.mjs` checks they are the app's). */
+export const tabStateClass = {
+  focused: "bg-[color-mix(in_srgb,var(--text)_10%,var(--panel-bg))] hover:bg-[color-mix(in_srgb,var(--text)_10%,var(--panel-bg))] text-fg font-semibold",
+  visible: "bg-transparent text-subtext-0 hover:bg-surface-0 hover:text-fg",
+  hidden: "bg-transparent text-subtext-0 hover:bg-surface-0 hover:text-fg",
+};
+/** A tab drag: the host follows the pointer (`perch.beginTabDrag`); without it a press stays a press. */
+export const beginTabDrag = (event, id, label) => host().beginTabDrag?.(event, id, label);
+/** Calls `listener` when the window asks for a new tab (`perch.onRequest("new-tab")`). */
+export function useNewTabRequest(listener) {
+  useEffect(() => host().onRequest?.("new-tab", listener) ?? undefined, [listener]);
+}
+export const openBrowserTab = (workspaceId) => runCommand("browser.open", { workspaceId });
+export const openFileTab = (workspaceId, path) => runCommand("file.open", { workspaceId, path });
+/** The tab menu is the window's (`tab.menu` opens it); nothing is drawn in the strip. */
+export const TabMenu = () => null;
+/** A dragged tab's ghost is the host's; nothing is drawn in the strip. */
+export const TabDragLayer = () => null;
+export const NewFilePrompt = overlay("new-file");

@@ -121,6 +121,18 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   const wraps = text.whitespace !== "nowrap" && !text.text_ellipsis;
   if (rowItem && wraps && node.style.flex_shrink !== 0 && node.style.min_w === undefined && (node.children ?? []).some((c) => c.kind === "text")) el = el.min_w(0);
   for (const variant of ["hover", "focus", "active"]) if (node[variant]) el = el[variant]((s) => applyStyle(s, node[variant]));
+  // `scrollIntoView()`: the scroll area holding the element shows the child it is in. ponytail: the kit's one
+  // `ScrollHandle` (`kit.scroll`) serves the first scroll area asked; a second one would need a handle per area.
+  if (kit.scroll && (node.style.overflow_x === "scroll" || node.style.overflow_y === "scroll")) {
+    const target = handle.document?.scrollTarget;
+    const at = target ? (node.children ?? []).filter(drawn).findIndex((child) => holds(child, target.id)) : -1;
+    if (at >= 0 && (handle.scroller ?? node.id) === node.id) {
+      handle.document.scrollTarget = null;
+      handle.scroller = node.id;
+      kit.scroll.scroll_to_item(at);
+    }
+    if (handle.scroller === node.id) el = el.track_scroll(kit.scroll);
+  }
 
   const pointer = ["click", "double_click", "context_menu", "mouse_down", "mouse_up"].some((name) => events.has(name));
   if (pointer) {
@@ -174,6 +186,9 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   }
   return el;
 }
+
+/** Whether `node` is the host element `id` or holds it. */
+const holds = (node, id) => node.id === id || (node.children ?? []).some((child) => child.kind !== "text" && holds(child, id));
 
 /** Whether `node` or a node under it draws an icon. */
 const hasIcon = (node) => !!node.markup || (node.children ?? []).some((child) => child.kind !== "text" && hasIcon(child));

@@ -120,7 +120,20 @@ pub(in crate::materialize) fn track_scroll_position<E: StatefulInteractiveElemen
     }
     let mut element = element;
     let handle = if let Some(owned) = owned {
-        if let Some(index) = owned.pending.take() {
+        // PERCH: an area laid out before takes the request as gpui's own, in this frame's prepaint
+        // against its last viewport (as the next frame would), so it does not wait for a frame the
+        // platform may not ask for (a headless draw). One not laid out yet waits one frame for that.
+        let laid_out = owned.handle.bounds().size != Size::default();
+        if let Some(index) = owned.pending.get().filter(|_| laid_out) {
+            owned.pending.set(None);
+            owned.waited.set(false);
+            owned.handle.scroll_to_item(index);
+        } else if owned.pending.get().is_some() && !owned.waited.replace(true) {
+            element = element.on_prepaint(|_, window, _| {
+                window.on_next_frame(|window, _| window.refresh());
+            });
+        } else if let Some(index) = owned.pending.take() {
+            owned.waited.set(false);
             let requested = owned.handle.clone();
             // Native scrolling needs the viewport and overflow from a completed layout.
             element = element.on_prepaint(move |_, window, _| {

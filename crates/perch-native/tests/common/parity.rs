@@ -306,7 +306,7 @@ pub fn elements(
     tokens: &Map<String, Value>,
     text_sized: &dyn Fn(&str) -> bool,
 ) -> Vec<Value> {
-    let mut list: Vec<(String, Option<String>, ProbeRecord)> = records
+    let mut list: Vec<(String, Option<String>, Option<usize>, ProbeRecord)> = records
         .into_iter()
         .filter(|r| !r.name.starts_with('~'))
         .map(|r| {
@@ -314,26 +314,33 @@ pub fn elements(
                 Some((name, key)) => (name.to_string(), Some(key.to_string())),
                 None => (r.name.to_string(), None),
             };
-            (name, key, r)
+            // A repeated name without a key is `name@<index>` (document order).
+            let (name, at) = match name.split_once('@') {
+                Some((name, at)) => (name.to_string(), at.parse::<usize>().ok()),
+                None => (name, None),
+            };
+            (name, key, at, r)
         })
         .collect();
     list.sort_by(|a, b| {
         (
             a.0.as_str(),
-            f32::from(a.2.bounds.origin.y),
-            f32::from(a.2.bounds.origin.x),
+            f32::from(a.3.bounds.origin.y),
+            f32::from(a.3.bounds.origin.x),
         )
             .partial_cmp(&(
                 b.0.as_str(),
-                f32::from(b.2.bounds.origin.y),
-                f32::from(b.2.bounds.origin.x),
+                f32::from(b.3.bounds.origin.y),
+                f32::from(b.3.bounds.origin.x),
             ))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     let mut index = std::collections::HashMap::<String, usize>::new();
     list.into_iter()
-        .map(|(name, key, r)| {
-            let at = index.entry(name.clone()).or_default();
+        .map(|(name, key, named_at, r)| {
+            let counted = index.entry(name.clone()).or_default();
+            let at = named_at.unwrap_or(*counted);
+            *counted += 1;
             let mut colors = Map::new();
             colors.insert("color".into(), colour(r.text_color, tokens));
             if let Some(bg) = r.background.filter(|c| c.a > 0.) {
@@ -350,7 +357,7 @@ pub fn elements(
             let mut element = json!({
                 "name": name,
                 "key": key,
-                "index": *at,
+                "index": at,
                 "box": {
                     "x": round(r.bounds.origin.x), "y": round(r.bounds.origin.y),
                     "width": round(r.bounds.size.width), "height": round(r.bounds.size.height),
@@ -370,7 +377,6 @@ pub fn elements(
             if let Some(opacity) = r.opacity.filter(|o| *o < 1.) {
                 element["opacity"] = json!(opacity);
             }
-            *at += 1;
             element
         })
         .collect()

@@ -180,6 +180,8 @@ enum Record {
 pub(crate) struct PlainScrollHandle {
     pub(crate) handle: gpui::ScrollHandle,
     pub(crate) pending: Rc<Cell<Option<usize>>>,
+    /// PERCH: the request has waited a frame for the area's first layout (`track_scroll_position`).
+    pub(crate) waited: Rc<Cell<bool>>,
 }
 
 // HERDR: script editor construction options, decoded before retaining any state.

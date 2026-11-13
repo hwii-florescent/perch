@@ -19,6 +19,7 @@
 // each screen's folder); `build.mjs` leaves it alone.
 import { asRender, files, host, refresh, setContext, settingsMoved } from "./host.js";
 import { View, div, image } from "gpui-kit";
+import { ScrollHandle } from "gpui-base";
 import { close, props as screenProps, scale } from "perch";
 import { describeToGpui, mount, NAMED_ELEMENTS } from "./runtime.mjs";
 
@@ -48,6 +49,8 @@ export function screen(id, Component, options = {}) {
       this.mounts = 0;
       const props = { ...toProps(JSON.parse(this.raw)), key: this.mounts };
       this.handle = mount(host, Component, { container: options.container, names: NAMED_ELEMENTS[id], props });
+      // Where `scrollIntoView()` leaves its request (a handle can only be made here, not while drawing).
+      this.kit = { ...KIT, scroll: ScrollHandle.new() };
     }
 
     render(cx) {
@@ -71,7 +74,7 @@ export function screen(id, Component, options = {}) {
           });
         }
         // Vertical lengths are laid on the window's device pixels (`snapColumns` in the runtime).
-        return describeToGpui(this.handle.description, KIT, this.handle, files, scale());
+        return describeToGpui(this.handle.description, this.kit, this.handle, files, scale());
       });
     }
   };
