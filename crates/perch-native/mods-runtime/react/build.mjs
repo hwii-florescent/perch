@@ -47,6 +47,8 @@ export const SCREENS = [
   "pane-header",
   "dialog",
   "toast",
+  "session-split",
+  "tab-menu",
 ];
 /** Other stock screens a screen's folder carries, by the screen: they draw inside it (the close guard asks its question
  * through the confirmation, with its own rows in it; the New session menu draws the tab strip's icons; the dialog draws
@@ -61,6 +63,10 @@ const HAND_WRITTEN = new Set([`${RUNTIME}/host.js`, `${RUNTIME}/screen.js`, ...S
 const requireWeb = createRequire(path.join(web, "package.json"));
 const load = async (name) => import(pathToFileURL(requireWeb.resolve(name)).href);
 
+/** The app's stylesheets: its global one, and the ones its screens import beside them (the Split with session
+ * picker's, from the docked layout). */
+const STYLESHEETS = ["src/styles/index.css", "src/dockview/paneSplit.css"];
+
 /** The app's stylesheet, as its own build compiles it. */
 export async function compileCss() {
   const { build } = await load("vite");
@@ -70,7 +76,7 @@ export async function compileCss() {
     configFile: false,
     root: web,
     logLevel: "silent",
-    plugins: [tailwind(), { name: "perch-app-css", resolveId: (id) => (id === entry ? `\0${entry}` : null), load: (id) => (id === `\0${entry}` ? `import ${JSON.stringify(path.join(web, "src/styles/index.css"))};` : null) }],
+    plugins: [tailwind(), { name: "perch-app-css", resolveId: (id) => (id === entry ? `\0${entry}` : null), load: (id) => (id === `\0${entry}` ? STYLESHEETS.map((file) => `import ${JSON.stringify(path.join(web, file))};`).join("\n") : null) }],
     build: { write: false, cssMinify: false, minify: false, rollupOptions: { input: entry } },
   });
   const css = (Array.isArray(result) ? result : [result]).flatMap((r) => r.output).filter((o) => o.fileName.endsWith(".css")).map((o) => o.source).join("\n");

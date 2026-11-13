@@ -89,7 +89,8 @@ function entered(copy, handle) {
 }
 
 /** The mod class for stock screen `id` drawn by `Component`. `options.container`: the style of the box the screen
- * fills (as the web's layout gives it); `options.props`: props from `perch.props()` (default `resultProps`). */
+ * fills (as the web's layout gives it); `options.props`: props from `perch.props()` (default `resultProps`);
+ * `options.names`: the names of its elements, as the parity table's, for a screen the table has none for. */
 export function screen(id, Component, options = {}) {
   const toProps = options.props ?? resultProps;
   return class Screen extends View {
@@ -104,7 +105,7 @@ export function screen(id, Component, options = {}) {
       this.raw = JSON.stringify(screenProps());
       this.mounts = 0;
       const props = { ...toProps(JSON.parse(this.raw)), key: this.mounts };
-      const handle = mount(copy.host, Component, { container: options.container, names: NAMED_ELEMENTS[id], props });
+      const handle = mount(copy.host, Component, { container: options.container, names: NAMED_ELEMENTS[id] ?? options.names, props });
       copy.attach(handle);
       this.handle = entered(copy, handle);
       // Where `scrollIntoView()` leaves its request (a handle can only be made here, not while drawing).

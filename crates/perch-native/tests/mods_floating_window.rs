@@ -60,7 +60,7 @@ fn state() -> State {
     state.connect();
     state.apply(&message(json!({
         "type": "server.info", "hostname": "studio", "isSsh": false, "platform": "macOS",
-        "capabilities": ["workspace.snapshot"]})));
+        "capabilities": ["workspace.snapshot", "inbound.v1"]})));
     state.apply(&message(json!({
         "type": "project.list", "requestId": "r", "hostId": "local", "snapshotEpoch": "e",
         "snapshotRevision": 1, "projects": [project]})));
@@ -331,11 +331,12 @@ fn pane_menu(rig: &mut Rig) {
             "split-right",
             "split-down",
             "split-session",
+            "split-tab",
             "zoom",
             "rename",
             "close"
         ],
-        "no Show beside (the native split cannot) and no Stop agent (nothing to stop)"
+        "no Stop agent (nothing to stop)"
     );
 
     // Escape closes it and the terminal has the keyboard again.
@@ -384,6 +385,204 @@ fn pane_menu(rig: &mut Rig) {
     });
     assert!(renamed, "OK renamed it");
     println!("pane-menu: ok");
+}
+
+/// The panes on screen, in layout order, and the one with the keyboard.
+fn panes(rig: &mut Rig) -> (Vec<String>, Option<String>) {
+    rig.ws(|ws, _, _| (ws.tabs().shown(), ws.tabs().active().map(str::to_string)))
+}
+
+fn split_with_session(rig: &mut Rig) {
+    let (x, y) = (600., 300.);
+    assert_eq!(panes(rig), (vec!["alpha".into()], Some("alpha".into())));
+
+    // Add session inside this tab: the Split with session picker opens where the menu was, listing
+    // every other session; dismissed, nothing changes.
+    rig.mouse_with(MouseButton::Right, x, y);
+    rig.click("pane-menu-item:split-session");
+    assert_eq!(rig.open_screens(), ["session-split"]);
+    let picker = rig.record("session-split").expect("the picker is drawn");
+    assert_eq!(
+        picker.bounds.origin,
+        point(px(x), px(y)),
+        "at the menu's place"
+    );
+    assert_eq!(
+        rig.keys("session-split-option"),
+        ["bravo"],
+        "not the pane's own"
+    );
+    rig.press("escape");
+    assert!(rig.open_screens().is_empty());
+    assert_eq!(panes(rig), (vec!["alpha".into()], Some("alpha".into())));
+
+    // A session picked shows on the right of the pane, with the keyboard.
+    rig.mouse_with(MouseButton::Right, x, y);
+    rig.click("pane-menu-item:split-session");
+    rig.click("session-split-option:bravo");
+    assert!(rig.open_screens().is_empty());
+    assert_eq!(
+        panes(rig),
+        (vec!["alpha".into(), "bravo".into()], Some("bravo".into()))
+    );
+
+    // Show beside an open tab: the tab menu opens for the pane, offering the open tabs it can
+    // take; Show this tab full size takes the pane out, Separate all dissolves the split.
+    rig.ws(|ws, window, cx| {
+        ws.run_command("pane.unsplit", Some(&json!({"id": "bravo"})), window, cx)
+    })
+    .unwrap();
+    rig.ws(|ws, window, cx| {
+        ws.run_command("tab.select", Some(&json!({"id": "alpha"})), window, cx)
+    })
+    .unwrap();
+    assert_eq!(panes(rig), (vec!["alpha".into()], Some("alpha".into())));
+    rig.mouse_with(MouseButton::Right, x, y);
+    rig.click("pane-menu-item:split-tab");
+    assert_eq!(rig.open_screens(), ["tab-menu"]);
+    assert_eq!(
+        rig.keys("tab-menu-item"),
+        [
+            "tab-menu-rename",
+            "tab-menu-split-right",
+            "tab-menu-split-below",
+            "tab-split-with-bravo",
+            "session-inbound-accept-alpha",
+            "session-inbound-hold-alpha",
+            "session-inbound-refuse-alpha",
+            "tab-menu-close"
+        ]
+    );
+    rig.click("tab-menu-item:tab-split-with-bravo");
+    assert!(rig.open_screens().is_empty());
+    assert_eq!(
+        panes(rig),
+        (vec!["alpha".into(), "bravo".into()], Some("alpha".into())),
+        "bravo beside alpha, which keeps the keyboard"
+    );
+    rig.mouse_with(MouseButton::Right, x / 2. + 120., y);
+    rig.click("pane-menu-item:split-tab");
+    assert_eq!(
+        rig.keys("tab-menu-item"),
+        [
+            "tab-menu-rename",
+            "tab-menu-split-right",
+            "tab-menu-split-below",
+            "tab-unsplit",
+            "tab-untile-all",
+            "session-inbound-accept-alpha",
+            "session-inbound-hold-alpha",
+            "session-inbound-refuse-alpha",
+            "tab-menu-close"
+        ],
+        "in a split, with no other tab to offer"
+    );
+    rig.click("tab-menu-item:tab-untile-all");
+    assert_eq!(panes(rig), (vec!["alpha".into()], Some("alpha".into())));
+    println!("split-with-session: ok");
+}
+
+fn tab_menu(rig: &mut Rig) {
+    // bravo is a tab: a right-click on it in the strip opens its menu at the press, and does not
+    // show it.
+    assert!(tabs(rig).contains(&"bravo".to_string()));
+    let at = rig
+        .record("tab:bravo")
+        .expect("bravo's tab")
+        .bounds
+        .center();
+    let (x, y) = (f32::from(at.x), f32::from(at.y));
+    rig.mouse_with(MouseButton::Right, x, y);
+    assert_eq!(rig.open_screens(), ["tab-menu"]);
+    let menu = rig.record("tab-menu").expect("the menu is drawn");
+    assert_eq!(menu.bounds.origin, point(px(x), px(y)), "at the press");
+    assert_eq!(
+        rig.shown().as_deref(),
+        Some("alpha"),
+        "a right-click selects nothing"
+    );
+    assert_eq!(
+        rig.keys("tab-menu-item"),
+        [
+            "tab-menu-rename",
+            "tab-menu-split-right",
+            "tab-menu-split-below",
+            "tab-split-with-alpha",
+            "session-inbound-accept-bravo",
+            "session-inbound-hold-bravo",
+            "session-inbound-refuse-bravo",
+            "tab-menu-close"
+        ]
+    );
+    // The session's inbound choices, the current one ticked; another one picked is asked of the
+    // core, which the menu then follows.
+    let props = rig
+        .ws(|ws, _, _| ws.screen_props("tab-menu").cloned())
+        .unwrap();
+    assert_eq!(
+        props["extraItems"][0]["label"], "\u{2713} Accept messages from other sessions",
+        "accept is ticked"
+    );
+    rig.asked();
+    rig.click("tab-menu-item:session-inbound-hold-bravo");
+    assert!(rig.open_screens().is_empty());
+    let held = rig.asked().into_iter().any(|c| {
+        matches!(c, Command::InboundMode { session_id, mode } if session_id == "bravo" && mode == "hold")
+    });
+    assert!(held, "hold is asked for");
+    rig.mouse_with(MouseButton::Right, x, y);
+    rig.click("tab-menu-item:session-inbound-accept-bravo");
+    assert!(rig.asked().is_empty(), "the current choice asks nothing");
+    rig.mouse_with(MouseButton::Right, x, y);
+    rig.press("escape");
+    assert!(rig.open_screens().is_empty(), "Escape closed it");
+    assert!(rig.terminal_focused());
+
+    // Rename tab: a field holding the tab's title, all of it selected, with the keyboard; what is
+    // typed replaces it and Save renames bravo's session.
+    rig.mouse_with(MouseButton::Right, x, y);
+    rig.asked();
+    rig.click("tab-menu-item:tab-menu-rename");
+    assert!(rig.record("tab-menu-rename-input").is_some());
+    rig.type_text("Bravo two");
+    rig.click("tab-menu-rename-save");
+    assert!(rig.open_screens().is_empty());
+    let renamed = rig.asked().into_iter().any(|c| {
+        matches!(c, Command::Rename { session_id, title } if session_id == "bravo" && title == "Bravo two")
+    });
+    assert!(renamed, "Save renamed bravo");
+    assert_eq!(rig.shown().as_deref(), Some("alpha"));
+
+    // Split right with new terminal: bravo gets the keyboard and a terminal is started beside it.
+    rig.mouse_with(MouseButton::Right, x, y);
+    rig.click("tab-menu-item:tab-menu-split-right");
+    assert_eq!(
+        rig.shown().as_deref(),
+        Some("bravo"),
+        "the split is made on bravo"
+    );
+    let launched = rig
+        .asked()
+        .into_iter()
+        .any(|c| matches!(c, Command::Launch { provider, .. } if provider == "terminal"));
+    assert!(launched, "a new terminal is asked for");
+    rig.ws(|ws, window, cx| {
+        ws.run_command("tab.select", Some(&json!({"id": "alpha"})), window, cx)
+    })
+    .unwrap();
+
+    // Close tab is the tab's ×: bravo's terminal is attached to nothing, so the tab is put away
+    // and its session is not ended (the close guard of an attached agent is `confirm`'s test).
+    rig.mouse_with(MouseButton::Right, x, y);
+    rig.click("tab-menu-item:tab-menu-close");
+    assert!(!tabs(rig).contains(&"bravo".to_string()), "the tab went");
+    let notice = rig.ws(|ws, _, _| ws.notice().map(str::to_string));
+    assert!(
+        notice.is_some_and(|n| n.contains("keeps running")),
+        "and says the session was not ended"
+    );
+    rig.draw();
+    println!("tab-menu: ok");
 }
 
 /// Attaches the tab with the keyboard to a stand-in core: what it asks the core, and what the core says.
@@ -883,6 +1082,8 @@ fn main() {
 
     navigator(&mut rig);
     pane_menu(&mut rig);
+    split_with_session(&mut rig);
+    tab_menu(&mut rig);
     new_session(&mut rig);
     dialog(&mut rig);
     toast(&mut rig);

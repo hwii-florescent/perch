@@ -1,5 +1,5 @@
 //! The stock floating screens (the web's own Navigator, pane menu, confirmation, dialog,
-//! notifications and New session menu, unchanged, through the native React runtime) drawn in
+//! notifications, New session menu, tab menu and the sidebar's session menu (the tab menu), unchanged, through the native React runtime) drawn in
 //! every state of their parity fixtures, light and dark, as the window places them, and written
 //! to `e2e/artifacts-native-parity/native/` for the gate:
 //!
@@ -27,6 +27,8 @@ const SCREENS: &[&str] = &[
     "new-session",
     "dialog",
     "toast",
+    "tab-menu",
+    "session-menu",
 ];
 
 fn main() {

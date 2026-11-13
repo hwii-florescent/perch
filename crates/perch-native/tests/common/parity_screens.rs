@@ -34,10 +34,14 @@ use gpui::{
 };
 use gpui_shell::probe::{self, ProbeRecord};
 use gpui_shell::HostArguments;
-use perch_native::mods::perch::{from_host, notification_json, to_host, Perch, WindowState};
+use perch_native::mods::perch::{
+    from_host, inbound_items, notification_json, tab_menu_props, to_host, workspace_mates, Perch,
+    WindowState,
+};
 use perch_native::mods::screens::{self, Place};
 use perch_native::mods::{theme, ModHost, ModView};
 use perch_native::sidebar::{Alert, Heard, Model, Request, Toast};
+use perch_native::tabs::Tabs;
 use perch_native::workspace::{Notice, Notification};
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
@@ -747,6 +751,57 @@ fn text_sized_names(screen: &str) -> Vec<String> {
         .collect()
 }
 
+/// The screen whose mod draws fixture screen `screen`: the sidebar's session menu is the tab
+/// menu for that session.
+fn drawn_by(screen: &str) -> &str {
+    match screen {
+        "session-menu" => "tab-menu",
+        other => other,
+    }
+}
+
+/// The tab menu's props for a session menu's (`{id, x, y, extraItems}`), as the window works
+/// them out (`open_session_menu`): the window's tabs in fixture state `data`, its split set
+/// joined, and the session's inbound choices after the sidebar's rows.
+fn session_menu_props(data: &Value, menu: &Value) -> Value {
+    let model = model_from(data);
+    let window = window_from(data, &model);
+    let mut tabs = Tabs::default();
+    for id in &window.strip {
+        tabs.open(id);
+    }
+    for set in data["splitSets"]["sets"].as_array().into_iter().flatten() {
+        let ids: Vec<&str> = set["ids"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        for other in ids.iter().skip(1) {
+            tabs.join(ids[0], other);
+        }
+    }
+    let id = menu["id"]
+        .as_str()
+        .expect("a session menu names its session");
+    let title = |tab: &str| {
+        model
+            .store
+            .sessions
+            .iter()
+            .find(|s| s.id == tab)
+            .map_or_else(|| tab.to_string(), |s| s.title.clone())
+    };
+    let mut extra = menu["extraItems"].as_array().cloned().unwrap_or_default();
+    extra.extend(inbound_items(&model.store, id));
+    let at = (
+        menu["x"].as_f64().unwrap_or(0.) as f32,
+        menu["y"].as_f64().unwrap_or(0.) as f32,
+    );
+    let mates = workspace_mates(&model.store, tabs.strip(), id);
+    tab_menu_props(&tabs, &mates, id, at, &title, false, extra)
+}
+
 /// Draws screen `fixture.screen`'s mod in a fixture state as the window holds it: an in-flow
 /// screen alone at the state's size, a floating one over the whole of the state's window on the
 /// backdrop, with `viewport` in its props. The state's `steps` are done as events. Writes
@@ -754,21 +809,23 @@ fn text_sized_names(screen: &str) -> Vec<String> {
 pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
     let fixture = capture.fixture;
     let screen_id = fixture.screen.as_str();
-    let screen = screens::screen(screen_id).unwrap_or_else(|| panic!("no screen {screen_id}"));
+    let drawn = drawn_by(screen_id);
+    let screen = screens::screen(drawn).unwrap_or_else(|| panic!("no screen {drawn}"));
     let ((width, height), (window_w, window_h)) = fixture.size(capture.state);
     let empty =
         std::env::temp_dir().join(format!("perch-parity-screens-{}-none", std::process::id()));
     let host =
         ModHost::new(capture.mods.map_or(empty, Path::to_path_buf)).expect("the mod host starts");
-    assert!(
-        host.find(screen_id).is_some(),
-        "a mod draws screen {screen_id}"
-    );
+    assert!(host.find(drawn).is_some(), "a mod draws screen {drawn}");
     let perch = Perch::new();
     perch.register(&host);
     publish(&perch, fixture, capture.state);
     let floating = matches!(screen.place, Place::Floating { .. });
     let mut props = fixture.props(capture.state);
+    if drawn != screen_id {
+        let menu = props.take().unwrap_or_else(|| json!({}));
+        props = Some(session_menu_props(&fixture.data(capture.state), &menu));
+    }
     if floating {
         // As the window gives every floating screen: its size.
         let with =
@@ -851,7 +908,7 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
     let sized = text_sized_names(screen.id);
     let report = json!({
         "schema": parity::SCHEMA,
-        "screen": screen.id,
+        "screen": screen_id,
         "state": capture.state,
         "theme": capture.theme.word(),
         "renderer": "perch-native gpui",
