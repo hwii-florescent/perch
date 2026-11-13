@@ -178,9 +178,22 @@ declare module "perch" {
 
   // Screens: what the window passes a mod it opens as a screen (`props()`). The web's callbacks
   // are results: `onClose()` is `close()`, `actions.x(a, b)` is `close({ action: "x", args: [a, b] })`.
+  //
+  // A floating screen (every one here but `PaneHeaderProps`) is laid out over the whole window,
+  // as the web's take the whole page: it places its own panel (at `x`, `y` or `anchorRect`) and
+  // draws its own backdrop, and it closes itself on a press outside its panel (a backdrop whose
+  // press calls `close()`, or `on_mouse_down_out` on a menu's panel). Under a modal screen nothing
+  // beneath takes the mouse, and Escape dismisses it unless `busy`. Under the toast everything
+  // beneath does, except where the mod's elements call `cx.stop_propagation()` on a press.
+
+  /** The window's size in logical pixels (the web's `window.innerWidth`, `innerHeight`), in
+   * every floating screen's props, kept current as the window resizes. */
+  export interface Viewport {
+    viewport: { width: number; height: number };
+  }
 
   /** `navigator`. Close with an action (`switchTo`, `newTerminal`, `startAgent`) or `{ command, args? }`. */
-  export interface NavigatorScreenProps {
+  export interface NavigatorScreenProps extends Viewport {
     open: boolean;
     sessions: { id: string; title: string; cwd: string; hostId?: string; createdAt: number; state: AgentState }[];
     currentSessionId: string | null;
@@ -195,7 +208,7 @@ declare module "perch" {
 
   /** `pane-menu`. Close with an action (`splitNew`, `toggleZoom`, `rename`, `stopAgent`, `close`) or
    * `{ command }` of one of `items` (the native menu's entries). */
-  export interface PaneMenuScreenProps {
+  export interface PaneMenuScreenProps extends Viewport {
     panelId: string;
     title: string;
     x: number;
@@ -208,7 +221,7 @@ declare module "perch" {
   }
 
   /** `tab-menu`. Close with an action (`rename`, `splitNew`, `showFull`, `stopAgent`, `close`). */
-  export interface TabMenuScreenProps {
+  export interface TabMenuScreenProps extends Viewport {
     id: string;
     x: number;
     y: number;
@@ -222,7 +235,7 @@ declare module "perch" {
   }
 
   /** `confirm`. Close with `{ confirmed: true }` (`onConfirm`) or `{ confirmed: false }` (`onCancel`). */
-  export interface ConfirmProps {
+  export interface ConfirmProps extends Viewport {
     message: string;
     confirmLabel?: string;
     cancelLabel?: string;
@@ -230,14 +243,14 @@ declare module "perch" {
   }
 
   /** `dialog`: the opener's title and fields. Close with `{ value }`. */
-  export interface DialogProps {
+  export interface DialogProps extends Viewport {
     title: string;
     testId?: string;
     [field: string]: unknown;
   }
 
   /** `new-session`. Close with `{ cwd, agent }` (`onSelect`; no `cwd`: a Quickchat). */
-  export interface NewSessionScreenProps {
+  export interface NewSessionScreenProps extends Viewport {
     hostId: string;
     projectCwds: string[];
     fixedCwd?: string;

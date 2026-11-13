@@ -737,49 +737,21 @@ impl Workspace {
         wanted
     }
 
-    /// A floating screen over the window: a modal one on a layer whose press dismisses it.
-    fn floating_view(
-        &self,
-        open: &screens::Floating,
-        viewport: Size<Pixels>,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    /// A floating screen over the whole window. A modal one is on a layer that keeps the mouse
+    /// from what is beneath and holds the keyboard; the mod draws its own backdrop and closes
+    /// itself on a press outside its panel. The toast's layer takes nothing: only what the mod
+    /// draws, and stops, does.
+    fn floating_view(&self, open: &screens::Floating) -> Option<AnyElement> {
         let view = open.view.clone()?;
-        let (w, h) = (open.width, open.height);
-        let (vw, vh) = (f32::from(viewport.width), f32::from(viewport.height));
-        let panel = div()
-            .id(SharedString::from(format!("screen-{}", open.id)))
-            .absolute()
-            .w(px(w))
-            .h(px(h))
-            .overflow_hidden()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-            .child(view);
-        let (left, top) = screens::origin(open.id, open.at, (w, h), (vw, vh));
-        let panel = panel.left(px(left)).top(px(top));
+        let layer = div().absolute().inset_0().child(view);
         if !open.modal() {
-            return Some(panel.into_any_element());
+            return Some(layer.into_any_element());
         }
-        let id = open.id;
-        let dismiss = move |this: &mut Self, window: &mut Window, cx: &mut Context<Self>| {
-            this.screen_closed(id, Value::Null, window, cx)
-        };
         Some(
-            div()
-                .id(SharedString::from(format!("screen-layer-{id}")))
+            layer
+                .id(SharedString::from(format!("screen-layer-{}", open.id)))
                 .track_focus(&self.screen_focus)
-                .absolute()
-                .inset_0()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _, window, cx| dismiss(this, window, cx)),
-                )
-                .on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(move |this, _, window, cx| dismiss(this, window, cx)),
-                )
-                .child(panel)
+                .occlude()
                 .into_any_element(),
         )
     }
@@ -1031,8 +1003,12 @@ impl Workspace {
                     Some(Hit::Run { name, .. })
                         if matches!(name.as_str(), "global.navigator" | "global.navigatorAlt")
                 );
-            if keystroke.key == "escape" || toggles {
+            let busy = keystroke.key == "escape" && !self.screens.dismissable(top);
+            if (keystroke.key == "escape" && !busy) || toggles {
                 self.screen_closed(top, Value::Null, window, cx);
+                return true;
+            }
+            if busy {
                 return true;
             }
             return false;
@@ -3181,9 +3157,11 @@ impl gpui::Render for Workspace {
                     .child(notice.clone()),
             );
         }
-        let viewport = window.viewport_size();
-        let floating: Vec<AnyElement> = (0..self.screens.floating.len())
-            .filter_map(|at| self.floating_view(&self.screens.floating[at], viewport, cx))
+        let floating: Vec<AnyElement> = self
+            .screens
+            .floating
+            .iter()
+            .filter_map(|open| self.floating_view(open))
             .collect();
         let overlays = self
             .palette_view(cx)

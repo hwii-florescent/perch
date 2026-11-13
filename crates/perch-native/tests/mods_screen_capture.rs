@@ -49,7 +49,8 @@ export default class extends View {
 }
 "##;
 
-/// Floating: the Navigator, whose field takes the keys typed into it once clicked.
+/// Floating: the Navigator over the whole window, placing its panel as the web's does (12% of the
+/// window down, centred), whose field takes the keys typed into it once clicked.
 const NAVIGATOR: &str = r##"
 import { View, div } from "gpui-kit";
 import { v_flex } from "gpui-base";
@@ -58,7 +59,12 @@ export default class extends View {
   init(props, cx) { this.field = cx.focus_handle(); this.query = ""; }
   render() {
     const p = perch.props();
-    return v_flex().id("navigator-panel").size_full().bg("#202020")
+    return v_flex().id("navigator-scrim").size_full().items_center()
+      .pt(Math.round(p.viewport.height * 0.12))
+      .child(this.panel(p));
+  }
+  panel(p) {
+    return v_flex().id("navigator-panel").w(560).h(320).bg("#202020")
       .child(div().id("navigator-input").track_focus(this.field)
         .w(10 + 10 * this.query.length).h(30).bg("#333333")
         .on_click(() => this.field.focus())
@@ -72,6 +78,10 @@ export default class extends View {
 
 const WIDTH: f32 = 1280.;
 const HEIGHT: f32 = 800.;
+
+/// Fields the window adds to a floating screen's props: the window's size, which the web reads
+/// from `window.innerWidth`/`innerHeight` rather than a prop.
+const VIEWPORT: &str = "viewport";
 
 /// Every field path of `web` that `native` lacks and of `native` that `web` lacks, less the
 /// `allowed` paths (each with its reason, which the caller states).
@@ -234,7 +244,11 @@ fn openers_give_the_web_fields(scratch: &Path) {
         .unwrap();
     let native = rig.props("navigator");
     let web = navigator.expected("empty-query")["props"].clone();
-    check("navigator (palette key)", &web, &native, &[]);
+    check("navigator (palette key)", &web, &native, &[VIEWPORT]);
+    assert_eq!(
+        native["viewport"],
+        json!({ "width": WIDTH, "height": HEIGHT })
+    );
     // The values the window derives from the same data, as the web derives them; the agents and
     // what the native Navigator can do are its own (no file search, no run).
     for key in ["sessions", "connected", "workspace"] {
@@ -247,7 +261,12 @@ fn openers_give_the_web_fields(scratch: &Path) {
     let native = rig.props("pane-menu");
     let web = ScreenFixture::load("pane-menu").expected("agent-pane")["props"].clone();
     // `items`: the native menu's own entries, which a mod may list as they are.
-    check("pane-menu (right-click)", &web, &native, &["items"]);
+    check(
+        "pane-menu (right-click)",
+        &web,
+        &native,
+        &["items", VIEWPORT],
+    );
     for key in ["panelId", "title", "canClose", "maximized"] {
         assert_eq!(native[key], web[key], "pane-menu {key}");
     }
@@ -273,10 +292,16 @@ fn openers_give_the_web_fields(scratch: &Path) {
     let native = rig.props("confirm");
     let web = ScreenFixture::load("confirm").expected("run-busy")["props"].clone();
     // `cancelLabel`: `ConfirmProps` has it; every web state leaves it at its default.
-    check("confirm (close guard)", &web, &native, &["cancelLabel"]);
+    check(
+        "confirm (close guard)",
+        &web,
+        &native,
+        &["cancelLabel", VIEWPORT],
+    );
     rig.close_all();
 
-    // A notification puts up the toast, with no props: it reads `notifications()`.
+    // A notification puts up the toast, with no props but the window's size: it reads
+    // `notifications()`.
     rig.ws(|ws, _, cx| {
         ws.toast(
             Heard {
@@ -291,7 +316,11 @@ fn openers_give_the_web_fields(scratch: &Path) {
         )
     });
     let native = rig.props("toast");
-    assert_eq!(native, json!({}), "the toast takes no props");
+    assert_eq!(
+        native,
+        json!({ "viewport": { "width": WIDTH, "height": HEIGHT } }),
+        "the toast takes no props"
+    );
     let item = rig.cx.update(|cx| {
         let ws = workspace.read(cx);
         let model = ws.sidebar().read(cx).model();
@@ -306,7 +335,7 @@ fn openers_give_the_web_fields(scratch: &Path) {
         .unwrap();
     let native = rig.props("new-session");
     let web = ScreenFixture::load("new-session").expected("unscoped")["props"].clone();
-    check("new-session (sidebar's New)", &web, &native, &[]);
+    check("new-session (sidebar's New)", &web, &native, &[VIEWPORT]);
     // The folders differ by design: the web's callers offer one project (a project row's +) or
     // none, and this fixture state lists three by hand; the native sidebar's New offers every
     // project the host can start in.
@@ -395,11 +424,15 @@ fn captures_a_screen_as_the_window_places_it(scratch: &Path) {
         },
     );
     let report = &shot.report;
-    let (w, h) = (560., 420.);
+    assert_eq!(
+        element(report, "navigator-scrim")["box"],
+        json!({ "x": 0.0, "y": 0.0, "width": WIDTH, "height": HEIGHT }),
+        "over the whole window"
+    );
     assert_eq!(
         element(report, "navigator-panel")["box"],
-        json!({ "x": (WIDTH - w) / 2., "y": 48.0, "width": w, "height": h }),
-        "where the window puts the Navigator, in window coordinates"
+        json!({ "x": 360.0, "y": 96.0, "width": 560.0, "height": 320.0 }),
+        "where the mod puts its panel from the viewport, as the web's: in window coordinates"
     );
     // The state's step typed "perch" into the field: five keys, each a real event.
     assert_eq!(

@@ -6,16 +6,26 @@
 //!
 //! - in flow, a region of the layout: `sidebar`, `tabs`, `status`, `pane-header` (one copy per
 //!   pane, keyed `pane-header#<tab id>`, while the area is split);
-//! - floating, opened by the window over it: `navigator`, `pane-menu`, `tab-menu`, `confirm`,
-//!   `dialog`, `new-session` (modal: Escape or a press outside dismisses them, handled once by the
-//!   window, and the keyboard goes back to where it was on close) and `toast` (not modal: shown
-//!   while there are notifications).
+//! - floating, opened by the window over the whole of it, as the web's take the whole page:
+//!   `navigator`, `pane-menu`, `tab-menu`, `confirm`, `dialog`, `new-session` (modal) and `toast`
+//!   (not modal: shown while there are notifications).
 //!
 //! A screen gets its arguments from `perch.props()` (the web's prop names, with each callback
 //! replaced by a result) and a floating one closes itself with `perch.close(result)`. A dismissal
 //! is the result `null`. The terminal is always Rust.
 //!
-//! A screen's box is its default size here, or `"screen": {"width", "height"}` in its `mod.json`.
+//! A floating screen places its own panel and draws its own backdrop, from its props (a menu's
+//! `x`, `y`, the New session panel's `anchorRect`) and `viewport`, the window's size, which the
+//! window adds to every floating screen's props (the web's `window.innerWidth/innerHeight`). It
+//! also closes itself on a press outside its panel, as the web's do: a backdrop that calls
+//! `perch.close()`, or `on_mouse_down_out` on a menu's panel. The window keeps two things: under
+//! a modal screen nothing beneath takes the mouse, and Escape dismisses it (unless its props say
+//! `busy`), giving the keyboard back to what had it. Under the toast the window takes nothing:
+//! presses, scrolls and keys reach what is beneath except where the mod's own elements stop them
+//! (`cx.stop_propagation()` in `on_mouse_down`, as a DOM element that takes pointer events does).
+//!
+//! An in-flow screen's box is its default size here, or `"screen": {"width", "height"}` in its
+//! `mod.json`.
 
 use super::perch::Perch;
 use super::{ModHost, ModView, WindowMods, POLL};
@@ -34,27 +44,20 @@ pub const PANE_HEADER_HEIGHT: f32 = 28.;
 pub enum Place {
     /// A region of the layout.
     InFlow,
-    /// Over the window. A modal one takes the keyboard and is dismissed by Escape or a press
-    /// outside; an anchored one opens at a point (a menu), the others centred near the top.
-    Floating { modal: bool, anchored: bool },
+    /// Over the whole window. A modal one takes the keyboard, and the mouse from what is beneath.
+    Floating { modal: bool },
 }
 
 pub struct Screen {
     pub id: &'static str,
     pub place: Place,
-    /// Logical size; `0` in flow is "the region's" (a sidebar's height, a strip's width).
+    /// Logical size in flow; `0` is "the region's" (a sidebar's height, a strip's width). A
+    /// floating screen has the whole window.
     pub width: f32,
     pub height: f32,
 }
 
-const MODAL: Place = Place::Floating {
-    modal: true,
-    anchored: false,
-};
-const MENU: Place = Place::Floating {
-    modal: true,
-    anchored: true,
-};
+const MODAL: Place = Place::Floating { modal: true };
 
 /// Every screen a mod can take, in the order the web's are ported.
 pub const SCREENS: &[Screen] = &[
@@ -79,8 +82,8 @@ pub const SCREENS: &[Screen] = &[
     Screen {
         id: "navigator",
         place: MODAL,
-        width: 560.,
-        height: 420.,
+        width: 0.,
+        height: 0.,
     },
     Screen {
         id: "pane-header",
@@ -90,42 +93,39 @@ pub const SCREENS: &[Screen] = &[
     },
     Screen {
         id: "pane-menu",
-        place: MENU,
-        width: 220.,
-        height: 320.,
+        place: MODAL,
+        width: 0.,
+        height: 0.,
     },
     Screen {
         id: "tab-menu",
-        place: MENU,
-        width: 220.,
-        height: 320.,
+        place: MODAL,
+        width: 0.,
+        height: 0.,
     },
     Screen {
         id: "confirm",
         place: MODAL,
-        width: 420.,
-        height: 160.,
+        width: 0.,
+        height: 0.,
     },
     Screen {
         id: "dialog",
         place: MODAL,
-        width: 520.,
-        height: 420.,
+        width: 0.,
+        height: 0.,
     },
     Screen {
         id: "toast",
-        place: Place::Floating {
-            modal: false,
-            anchored: false,
-        },
-        width: 360.,
-        height: 96.,
+        place: Place::Floating { modal: false },
+        width: 0.,
+        height: 0.,
     },
     Screen {
         id: "new-session",
-        place: MENU,
-        width: 280.,
-        height: 360.,
+        place: MODAL,
+        width: 0.,
+        height: 0.,
     },
 ];
 
@@ -149,26 +149,14 @@ pub fn size_in(host: &ModHost, id: &str) -> (f32, f32) {
     (side("width", screen.width), side("height", screen.height))
 }
 
-/// Where the window puts floating screen `id`'s `size` box in a `viewport`, as its top-left
-/// corner: an anchored one at `at`, moved in to stay inside; a notification under the tab strip
-/// at the right; the others centred, near the top.
-pub fn origin(
-    id: &str,
-    at: Option<Point<Pixels>>,
-    (width, height): (f32, f32),
-    (vw, vh): (f32, f32),
-) -> (f32, f32) {
-    let place = screen(id).map(|s| s.place);
-    match (place, at) {
-        (Some(Place::Floating { anchored: true, .. }), Some(at)) => (
-            f32::from(at.x).min(vw - width).max(0.),
-            f32::from(at.y).min(vh - height).max(0.),
-        ),
-        (Some(Place::Floating { modal: false, .. }), _) => {
-            (vw - width - 12., crate::workspace::TAB_BAR_HEIGHT + 12.)
-        }
-        _ => (((vw - width) / 2.).max(0.), 48.),
-    }
+/// `props` with the window's size as `viewport`, which a floating screen places itself by.
+pub fn with_viewport(props: &Value, (width, height): (f32, f32)) -> Value {
+    let mut props = match props {
+        Value::Object(_) => props.clone(),
+        _ => Value::Object(Default::default()),
+    };
+    props["viewport"] = serde_json::json!({ "width": width, "height": height });
+    props
 }
 
 /// What runs when a floating screen closes, with its result (`null` when it was dismissed).
@@ -177,10 +165,8 @@ pub type OnResult = Box<dyn FnOnce(&mut Workspace, Value, &mut Window, &mut Cont
 /// A floating screen the window opened.
 pub struct Floating {
     pub id: &'static str,
-    /// Where an anchored one opens, in window coordinates.
+    /// The point it was opened at, in window coordinates (a menu's props say it too).
     pub at: Option<Point<Pixels>>,
-    pub width: f32,
-    pub height: f32,
     /// Made at the first draw after opening: a view needs the window.
     pub view: Option<Entity<ModView>>,
     pub on_result: Option<OnResult>,
@@ -193,8 +179,14 @@ impl Floating {
     pub fn modal(&self) -> bool {
         matches!(
             screen(self.id).map(|s| s.place),
-            Some(Place::Floating { modal: true, .. })
+            Some(Place::Floating { modal: true })
         )
+    }
+
+    /// Escape may dismiss it: not while its props say it is `busy` (a confirmation whose action
+    /// is under way), as the web's confirmation ignores Escape then.
+    pub fn dismissable(&self) -> bool {
+        self.props.get("busy") != Some(&Value::Bool(true))
     }
 }
 
@@ -205,6 +197,8 @@ pub struct Screens {
     present: RefCell<HashMap<&'static str, (bool, Instant)>>,
     inflow: HashMap<String, Entity<ModView>>,
     pub floating: Vec<Floating>,
+    /// The window's size at the last draw, in every floating screen's props.
+    viewport: (f32, f32),
 }
 
 /// The window's mod host and `perch` module, when the engine was started for it.
@@ -285,7 +279,7 @@ impl Screens {
             return false;
         }
         let screen = screen(id).expect("a known screen");
-        let (width, height) = self.size(id, cx);
+        let props = with_viewport(&props, self.viewport);
         let focus_back = self
             .floating
             .iter()
@@ -298,8 +292,6 @@ impl Screens {
         self.floating.push(Floating {
             id: screen.id,
             at,
-            width,
-            height,
             view: None,
             on_result,
             focus_back,
@@ -313,6 +305,7 @@ impl Screens {
         let Some(open) = self.floating.iter_mut().find(|f| f.id == id) else {
             return false;
         };
+        let props = with_viewport(&props, self.viewport);
         open.props = props.clone();
         if let Some((_, perch)) = mods(cx) {
             perch.set_props(id, props);
@@ -321,17 +314,28 @@ impl Screens {
         true
     }
 
-    /// The props an open screen was given.
+    /// The props an open screen has, `viewport` with them.
     pub fn props(&self, id: &str) -> Option<&Value> {
         self.floating.iter().find(|f| f.id == id).map(|f| &f.props)
     }
 
-    /// Makes the views of screens opened since the last draw. A modal one takes the keyboard from
-    /// whatever had it (giving it to `layer`), which gets it back on close.
+    /// Makes the views of screens opened since the last draw, and keeps their `viewport` the
+    /// window's size. A modal one takes the keyboard from whatever had it (giving it to `layer`),
+    /// which gets it back on close.
     pub fn realize(&mut self, layer: &FocusHandle, window: &mut Window, cx: &mut App) {
-        let Some((host, _)) = mods(cx) else {
+        let Some((host, perch)) = mods(cx) else {
             return;
         };
+        let size = window.viewport_size();
+        let viewport = (f32::from(size.width), f32::from(size.height));
+        if viewport != self.viewport {
+            self.viewport = viewport;
+            for open in &mut self.floating {
+                open.props = with_viewport(&open.props, viewport);
+                perch.set_props(open.id, open.props.clone());
+            }
+            perch.flush(cx);
+        }
         for open in self.floating.iter_mut().filter(|f| f.view.is_none()) {
             open.view = Some(host.view(open.id, window, cx));
             if open.modal() {
@@ -352,11 +356,19 @@ impl Screens {
         Some(self.floating.remove(at))
     }
 
+    /// Whether Escape may dismiss open screen `id` now.
+    pub fn dismissable(&self, id: &str) -> bool {
+        self.floating
+            .iter()
+            .find(|f| f.id == id)
+            .is_none_or(Floating::dismissable)
+    }
+
     pub fn is_open(&self, id: &str) -> bool {
         self.floating.iter().any(|f| f.id == id)
     }
 
-    /// The modal screen on top, which the keyboard and presses outside belong to.
+    /// The modal screen on top, which the keyboard belongs to.
     pub fn top_modal(&self) -> Option<&'static str> {
         self.floating.iter().rev().find(|f| f.modal()).map(|f| f.id)
     }
