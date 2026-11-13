@@ -950,9 +950,10 @@ impl Perch {
     }
 }
 
-/// The commands this module runs itself, with their titles and arguments; `session.open` and the
-/// rest go to the window.
-const OWN: [(&str, &str, &str); 7] = [
+/// The commands this module answers for, with their titles and arguments. `session.open` and
+/// `app.theme` also reach the window (the sidebar opens the session, the core keeps the theme);
+/// every other command is the window's.
+const OWN: [(&str, &str, &str); 6] = [
     ("session.open", "Go to a session", "{id}"),
     ("host.select", "Show a host's projects and sessions", "{id}"),
     ("workspace.focus", "Focus a workspace", "{id}"),
@@ -967,7 +968,6 @@ const OWN: [(&str, &str, &str); 7] = [
         "{organize?}",
     ),
     ("app.theme", "Choose a theme by name", "{name}"),
-    ("app.palette", "Open the Navigator", "{}"),
 ];
 
 /// A typed command's title, from the shortcut it stands for where there is one.
