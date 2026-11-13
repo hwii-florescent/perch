@@ -384,6 +384,128 @@ impl Tabs {
         true
     }
 
+    /// Put `other` beside `anchor`, as the web's `joinSplit`: into `anchor`'s set if it has one
+    /// (`other` leaves any set it was in), else `anchor` joins `other`'s set, else a new row of
+    /// the two. The one joining goes at the end of the set's outermost row or column. `false`, and
+    /// nothing changes, when either is not a tab, they are one tab or already together, or the set
+    /// is full. Which tab has the keyboard does not change.
+    pub fn join(&mut self, anchor: &str, other: &str) -> bool {
+        if anchor == other || !self.contains(anchor) || !self.contains(other) {
+            return false;
+        }
+        let home = self.set_of(Some(anchor));
+        if home.is_some_and(|i| self.sets[i].has(other)) {
+            return false;
+        }
+        let dest = home.or_else(|| self.set_of(Some(other)));
+        if dest.is_some_and(|i| self.sets[i].leaves().len() >= MAX_SPLIT) {
+            return false;
+        }
+        let (joiner, member) = if home.is_some() || dest.is_none() {
+            (other, anchor)
+        } else {
+            (anchor, other)
+        };
+        let base = dest.map_or_else(|| Node::Pane(member.into()), |i| self.sets[i].clone());
+        let grown = match base {
+            Node::Pane(_) => Node::Split {
+                dir: Dir::Row,
+                kids: vec![base, Node::Pane(joiner.into())],
+                sizes: vec![0.5, 0.5],
+            },
+            Node::Split { dir, mut kids, .. } => {
+                kids.push(Node::Pane(joiner.into()));
+                Node::Split {
+                    dir,
+                    sizes: equal(kids.len()),
+                    kids,
+                }
+            }
+        };
+        if let Some(i) = dest {
+            self.sets.remove(i);
+        }
+        self.leave(joiner);
+        self.sets.push(grown);
+        self.zoomed = false;
+        true
+    }
+
+    /// Whether dropping `dragged` on the `side` of `target` can split (the web's `planDrop`): two
+    /// tabs, and room in `target`'s set once `dragged` has left it.
+    pub fn can_drop(&self, dragged: &str, target: &str) -> bool {
+        self.beside(dragged, target).is_some()
+    }
+
+    /// The set `target`'s pane is in, with `dragged` out of it; `None` when the drop cannot be.
+    fn beside(&self, dragged: &str, target: &str) -> Option<Node> {
+        if dragged == target || !self.contains(dragged) || !self.contains(target) {
+            return None;
+        }
+        let home = self.set_of(Some(target));
+        let base = home.map_or_else(|| Node::Pane(target.into()), |i| self.sets[i].clone());
+        let rest = base.without(dragged).unwrap_or(Node::Pane(target.into()));
+        (rest.leaves().len() < MAX_SPLIT).then_some(rest)
+    }
+
+    /// Drop `dragged` on the `side` of `target`, as the web's `dropSplit`: it joins (or starts)
+    /// `target`'s set, leaving any other; a side across the set's direction nests. The dropped
+    /// tab gets the keyboard. `false`, and nothing changes, when it cannot be.
+    pub fn drop_beside(&mut self, dragged: &str, target: &str, side: Side) -> bool {
+        let Some(rest) = self.beside(dragged, target) else {
+            return false;
+        };
+        let made = rest.insert_beside(target, dragged, side);
+        if let Some(i) = self.set_of(Some(target)) {
+            self.sets.remove(i);
+        }
+        self.leave(dragged);
+        self.sets.push(made);
+        self.zoomed = false;
+        self.active = Some(dragged.into());
+        true
+    }
+
+    /// Dissolve the set `id` is in: every tab in it shows alone again (`separateAll`).
+    pub fn untile(&mut self, id: &str) {
+        self.sets.retain(|set| !set.has(id));
+        self.zoomed = false;
+    }
+
+    /// Whether tab `id` is in a split.
+    pub fn in_split(&self, id: &str) -> bool {
+        self.set_of(Some(id)).is_some()
+    }
+
+    /// Whether the set tab `id` is in (or `id` alone) has room for another pane.
+    pub fn room_beside(&self, id: &str) -> bool {
+        self.set_of(Some(id))
+            .is_none_or(|i| self.sets[i].leaves().len() < MAX_SPLIT)
+    }
+
+    /// Which of `among` (tabs, or sessions with no tab yet) [`Self::join`] can put beside `id`
+    /// (the tab menu's `offered`), in that order: not `id` or in its set, and the set the two
+    /// would make fits [`MAX_SPLIT`].
+    pub fn offered(&self, id: &str, among: &[String]) -> Vec<String> {
+        let home = self.set_of(Some(id));
+        among
+            .iter()
+            .filter(|other| *other != id && !home.is_some_and(|i| self.sets[i].has(other)))
+            .filter(|other| {
+                let size = match home {
+                    Some(i) => self.sets[i].leaves().len() + 1,
+                    None => {
+                        self.set_of(Some(other))
+                            .map_or(1, |i| self.sets[i].leaves().len())
+                            + 1
+                    }
+                };
+                size <= MAX_SPLIT
+            })
+            .cloned()
+            .collect()
+    }
+
     /// What the area draws: the focused pane alone when zoomed or in no split, else its split.
     pub fn visible(&self) -> Option<Node> {
         let active = self.active.as_deref()?;
@@ -531,6 +653,73 @@ mod tests {
 
     fn pane(id: &str) -> Node {
         Node::Pane(id.into())
+    }
+
+    fn split(dir: Dir, ids: &[&str]) -> Node {
+        Node::Split {
+            dir,
+            kids: ids.iter().map(|id| pane(id)).collect(),
+            sizes: equal(ids.len()),
+        }
+    }
+
+    #[test]
+    fn joining_follows_the_web_split_sets() {
+        // Two lone tabs make a row, the anchor first; the keyboard stays where it was.
+        let mut t = tabs(&["a", "b", "c", "d", "e"]);
+        assert!(t.join("a", "b"));
+        t.show("a");
+        assert_eq!(t.visible(), Some(split(Dir::Row, &["a", "b"])));
+        assert!(!t.join("a", "b"), "already together");
+        assert!(!t.join("a", "a"));
+        assert!(!t.join("a", "nope"));
+        // A lone anchor joins the other's set, at its end.
+        assert!(t.join("c", "a"));
+        t.show("c");
+        assert_eq!(t.visible(), Some(split(Dir::Row, &["a", "b", "c"])));
+        assert_eq!(t.offered("c", &t.strip.clone()), ["d", "e"]);
+        assert!(t.join("a", "d"));
+        assert!(
+            t.offered("a", &t.strip.clone()).is_empty(),
+            "the set is full"
+        );
+        assert!(
+            t.offered("e", &t.strip.clone()).is_empty(),
+            "a set of five cannot be"
+        );
+        assert!(!t.join("a", "e"));
+        assert!(!t.room_beside("b"));
+        assert!(t.room_beside("e"));
+        // Separating dissolves the set.
+        assert!(t.in_split("b"));
+        t.untile("b");
+        assert!(!t.in_split("a"));
+        assert_eq!(t.shown(), ["c"]);
+    }
+
+    #[test]
+    fn a_drop_on_a_side_nests_across_the_set() {
+        let mut t = tabs(&["a", "b", "c"]);
+        assert!(t.drop_beside("b", "a", Side::Right));
+        assert_eq!(t.active(), Some("b"), "the dropped tab has the keyboard");
+        assert_eq!(t.visible(), Some(split(Dir::Row, &["a", "b"])));
+        assert!(t.drop_beside("c", "b", Side::Down));
+        assert_eq!(
+            t.visible(),
+            Some(Node::Split {
+                dir: Dir::Row,
+                kids: vec![pane("a"), split(Dir::Col, &["b", "c"])],
+                sizes: vec![0.5, 0.5],
+            })
+        );
+        // Moving a member within its own set: it leaves, then lands on the new side.
+        assert!(t.drop_beside("a", "c", Side::Left));
+        assert_eq!(t.shown(), ["b", "a", "c"]);
+        assert!(!t.drop_beside("a", "a", Side::Left), "onto itself");
+        assert!(!t.can_drop("a", "nope"));
+        let before = t.clone();
+        assert!(!t.drop_beside("a", "a", Side::Right));
+        assert_eq!(t, before, "a drop that cannot be changes nothing");
     }
 
     #[test]
