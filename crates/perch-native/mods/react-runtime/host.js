@@ -210,6 +210,51 @@ export function copyFor(cx, screen) {
   let rendering = false;
   let handle = null;
 
+  // The strip's tabs slide while the window drags one of them (`perch.tabSlide()`, the offsets of the web's
+  // `slideOffsets`), with the inline styles the web's `createSlide` sets, all put back when the drag ends however it
+  // ends (or a new press begins).
+  let sliding = null;
+  const SLIDE_STYLED = ["transform", "transition", "zIndex", "filter", "pointerEvents", "position"];
+  const entryId = (el) => el.dataset?.tabEntry ?? el.getAttribute?.("data-tab-entry");
+  function slideWith(items, id) {
+    sliding?.();
+    const saved = items.map((el) => SLIDE_STYLED.map((key) => el.style[key]));
+    const read = () => snapshot("tabSlide", () => perch.tabSlide?.() ?? null);
+    let started = false;
+    const end = () => {
+      listeners.delete(check);
+      if (sliding === end) sliding = null;
+      if (started) items.forEach((el, i) => SLIDE_STYLED.forEach((key, k) => { el.style[key] = saved[i][k]; }));
+    };
+    function check() {
+      const slide = read();
+      if (slide?.id !== id) {
+        if (started) end();
+        return;
+      }
+      if (!started) {
+        started = true;
+        for (const el of items) {
+          el.style.pointerEvents = "none";
+          if (entryId(el) !== id) el.style.transition = "transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1)";
+          else {
+            el.style.position = "relative";
+            el.style.zIndex = "30";
+            el.style.filter = "drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45))";
+          }
+        }
+      }
+      const offsets = new Map((slide.offsets ?? []).map((o) => [o.id, o.px]));
+      for (const el of items) {
+        const px = offsets.get(entryId(el)) ?? 0;
+        el.style.transform = px ? `translateX(${px}px)` : "";
+      }
+    }
+    sliding = end;
+    listeners.add(check);
+    read();
+  }
+
   const host = {
     isMac: true,
     hostname: "localhost",
@@ -320,11 +365,22 @@ export function copyFor(cx, screen) {
     // where a drop on the strip lands (`slotIndex` in the web).
     beginTabDrag(event, id, label) {
       if ((event?.button ?? 0) !== 0) return;
-      const entries = [...(globalThis.document?.querySelectorAll?.("[data-tab-entry]") ?? [])].map((el) => {
+      const items = [...(globalThis.document?.querySelectorAll?.("[data-tab-entry]") ?? [])];
+      const entries = items.map((el) => {
         const box = el.getBoundingClientRect();
         return { id: el.dataset?.tabEntry ?? el.getAttribute?.("data-tab-entry"), left: box.left, width: box.width };
       });
-      const args = { id: String(id), label: String(label ?? ""), x: event.clientX, y: event.clientY, entries };
+      // A copy of the tab's own markup, so off the strip its ghost looks as it does on it (`tabDrag.ts`): no ids or
+      // test ids (there is one real tab) and no inline style (the drag's own offset is on the original).
+      const source = items.find((el) => (el.dataset?.tabEntry ?? el.getAttribute?.("data-tab-entry")) === String(id));
+      let look = null;
+      if (typeof source?.copyMarkup === "function") {
+        const rect = source.getBoundingClientRect();
+        const html = source.copyMarkup(["data-testid", "data-tab-entry", "id", "style"]);
+        look = { html, width: rect.width, height: rect.height, dx: event.clientX - rect.left, dy: event.clientY - rect.top };
+      }
+      const args = { id: String(id), label: String(label ?? ""), x: event.clientX, y: event.clientY, entries, look };
+      slideWith(items, String(id));
       perch.run("tab.beginDrag", args).catch(answer((error) => console.error(`perch.run tab.beginDrag: ${error?.message ?? error}`)));
     },
     render: () => { if (!rendering && !copy.closed) cx.notify(); },

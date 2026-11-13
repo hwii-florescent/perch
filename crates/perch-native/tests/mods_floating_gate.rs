@@ -32,6 +32,8 @@ const SCREENS: &[&str] = &[
     "keybind-help",
     "launcher",
     "tab-drag",
+    // Not a screen of the window's: a test-only mod draws the SDK's dropdown.
+    "select",
 ];
 
 fn main() {
@@ -52,6 +54,7 @@ fn main() {
             continue;
         }
         let fixture = parity_screens::ScreenFixture::load(screen);
+        let demo = (*screen == "select").then(parity_screens::select_demo_mods);
         for state in fixture.states() {
             for theme in [parity::Theme::Light, parity::Theme::Dark] {
                 let started = Instant::now();
@@ -61,7 +64,7 @@ fn main() {
                         fixture: &fixture,
                         state: &state,
                         theme,
-                        mods: None,
+                        mods: demo.as_deref(),
                         out: &out,
                     },
                 );
@@ -77,6 +80,9 @@ fn main() {
                     started.elapsed().as_secs_f64() * 1000.
                 );
             }
+        }
+        if let Some(dir) = demo {
+            let _ = std::fs::remove_dir_all(dir);
         }
     }
     let _ = std::fs::remove_dir_all(&scratch);

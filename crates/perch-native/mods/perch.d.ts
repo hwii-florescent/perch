@@ -435,6 +435,10 @@ declare module "perch" {
   export function requests(): { "new-tab": number };
   /** `useZoom`: the terminals' zoom factor (1 is 100%). */
   export function zoom(): number;
+  /** A tab drag in flight, for the tab strip to slide its tabs as the web's does (`slideDrag.ts`): the dragged
+   * tab, whether the pointer is over the strip, and each tab's offset along it (`slideOffsets`); null when no tab
+   * is dragged. */
+  export function tabSlide(): { id: string; overStrip: boolean; offsets: { id: string; px: number }[] } | null;
   /** `usePaneLook`. */
   export function paneLook(): PaneLook;
   /** `usePlanUsage`: plan usage as the core last answered `usage.get` (`run("usage.get")` asks), with the last

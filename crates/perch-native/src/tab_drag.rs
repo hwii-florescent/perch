@@ -50,6 +50,9 @@ pub struct TabDrag {
     /// The press moved far enough to be a drag.
     pub started: bool,
     pub drop: Drop,
+    /// The ghost a drag off the strip shows: the tab's own markup as the strip's runtime copied
+    /// it, with its size and where on it the press was (`TabDragState.look`); null without one.
+    pub look: Value,
 }
 
 impl TabDrag {
@@ -62,6 +65,7 @@ impl TabDrag {
             spans,
             started: false,
             drop: Drop::None,
+            look: Value::Null,
         }
     }
 
@@ -85,8 +89,36 @@ impl TabDrag {
         (to != from).then_some(to)
     }
 
-    /// What the web's `TabDragLayer` hands its screen (`TabDragProps.drag`). The ghost (`look`)
-    /// is a copy of the tab's markup in the web, which a native screen cannot draw: none.
+    /// What the strip draws while this is a drag (`tabSlide()`): over the strip the tabs slide
+    /// aside for the slot under the pointer and the dragged one follows it; off it they rest.
+    /// Null while it is still a press.
+    pub fn slide(&self) -> Value {
+        let Some(from) = self
+            .spans
+            .iter()
+            .position(|s| s.id == self.id)
+            .filter(|_| self.started)
+        else {
+            return Value::Null;
+        };
+        let over = matches!(self.drop, Drop::Strip(_));
+        let offsets = match self.drop {
+            Drop::Strip(slot) => {
+                let delta = f32::from(self.at.x - self.start.x);
+                slide_offsets(&self.spans, from, slot.unwrap_or(from), delta)
+            }
+            _ => vec![0.; self.spans.len()],
+        };
+        let offsets: Vec<Value> = self
+            .spans
+            .iter()
+            .zip(offsets)
+            .map(|(s, px)| json!({ "id": s.id, "px": px }))
+            .collect();
+        json!({ "id": self.id, "overStrip": over, "offsets": offsets })
+    }
+
+    /// What the web's `TabDragLayer` hands its screen (`TabDragProps.drag`).
     pub fn props(&self) -> Value {
         let rect = |b: Bounds<Pixels>| {
             json!({ "left": f32::from(b.origin.x), "top": f32::from(b.origin.y),
@@ -104,10 +136,41 @@ impl TabDrag {
             "id": self.id, "label": self.label,
             "x": f32::from(self.at.x), "y": f32::from(self.at.y),
             "overStrip": matches!(self.drop, Drop::Strip(_)),
-            "look": Value::Null,
+            "look": self.look,
             "drop": drop,
         }})
     }
+}
+
+/// Each span's offset along the strip while the one at `from` is dragged to slot `to` by
+/// `delta` (`slideOffsets`): the spans it passes shift by its size plus the gap, toward the slot
+/// it leaves; the dragged one follows the pointer, kept inside the strip.
+pub fn slide_offsets(spans: &[Span], from: usize, to: usize, delta: f32) -> Vec<f32> {
+    let mut out = vec![0.; spans.len()];
+    let Some(dragged) = spans.get(from) else {
+        return out;
+    };
+    let gap = match (
+        spans.get(from + 1),
+        from.checked_sub(1).and_then(|i| spans.get(i)),
+    ) {
+        (Some(next), _) => next.start - dragged.end,
+        (None, Some(prev)) => dragged.start - prev.end,
+        (None, None) => 0.,
+    };
+    let shift = dragged.end - dragged.start + gap;
+    for (i, offset) in out.iter_mut().enumerate() {
+        if from < to && i > from && i <= to {
+            *offset = -shift;
+        } else if to < from && i >= to && i < from {
+            *offset = shift;
+        }
+    }
+    let (first, last) = (&spans[0], &spans[spans.len() - 1]);
+    out[from] = delta
+        .max(first.start - dragged.start)
+        .min(last.end - dragged.end);
+    out
 }
 
 /// The slot (0..n-1 in the final list) the item at `from` lands in when its center is at
@@ -162,6 +225,23 @@ pub fn zone_box(pane: Bounds<Pixels>, side: Side) -> Bounds<Pixels> {
         }
     }
     half
+}
+
+/// The ghost from a `tab.beginDrag` request (`{html, width, height, dx, dy}`), or null when it
+/// is not one: markup text and a box that is there.
+pub fn look_from(look: &Value) -> Value {
+    let number = |key: &str| look[key].as_f64().filter(|v| v.is_finite());
+    let sized = number("width")
+        .zip(number("height"))
+        .is_some_and(|(w, h)| w > 0. && h > 0.);
+    if look["html"].is_string() && sized && number("dx").is_some() && number("dy").is_some() {
+        json!({
+            "html": look["html"], "width": look["width"], "height": look["height"],
+            "dx": look["dx"], "dy": look["dy"],
+        })
+    } else {
+        Value::Null
+    }
 }
 
 /// The strip's tab entries from a `tab.beginDrag` request (`[{id, left, width}]`), in order;
@@ -222,6 +302,49 @@ mod tests {
         let drag = TabDrag::new("c".into(), "C".into(), at(0., 0.), spans());
         assert_eq!(drag.slot(0.), Some(0));
         assert_eq!(slot_index(&spans(), 1, 44.), 0, "before a's center");
+    }
+
+    #[test]
+    fn the_tabs_passed_slide_aside_and_the_dragged_one_follows() {
+        // a b c, 90 px wide with 10 px gaps: a dragged past c shifts b and c left by 100.
+        assert_eq!(slide_offsets(&spans(), 0, 2, 230.), [200., -100., -100.]);
+        assert_eq!(slide_offsets(&spans(), 2, 0, -150.), [100., 100., -150.]);
+        assert_eq!(slide_offsets(&spans(), 1, 1, 7.), [0., 7., 0.]);
+        // The dragged one stays inside the strip.
+        assert_eq!(slide_offsets(&spans(), 0, 2, 900.)[0], 200.);
+        assert_eq!(slide_offsets(&spans(), 0, 0, -50.)[0], 0.);
+        let mut drag = TabDrag::new("a".into(), "A".into(), at(10., 10.), spans());
+        assert!(drag.slide().is_null(), "a press slides nothing");
+        drag.moved(at(160., 10.));
+        drag.drop = Drop::Strip(drag.slot(160.));
+        assert_eq!(
+            drag.slide()["offsets"][1],
+            json!({ "id": "b", "px": -100. })
+        );
+        drag.drop = Drop::None;
+        assert_eq!(drag.slide()["overStrip"], false);
+        assert_eq!(
+            drag.slide()["offsets"][0]["px"],
+            0.,
+            "off the strip the tabs rest"
+        );
+    }
+
+    #[test]
+    fn a_ghost_is_markup_with_a_box() {
+        let look =
+            json!({ "html": "x", "width": 256, "height": 32, "dx": 60, "dy": 14, "more": 1 });
+        assert_eq!(look_from(&look)["width"], 256);
+        assert!(
+            look_from(&look).get("more").is_none(),
+            "only the ghost's fields"
+        );
+        assert!(
+            look_from(&json!({ "html": "x", "width": 0, "height": 32, "dx": 0, "dy": 0 }))
+                .is_null()
+        );
+        assert!(look_from(&json!({ "width": 9, "height": 9, "dx": 0, "dy": 0 })).is_null());
+        assert!(look_from(&Value::Null).is_null());
     }
 
     #[test]

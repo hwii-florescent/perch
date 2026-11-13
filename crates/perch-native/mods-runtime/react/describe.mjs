@@ -126,9 +126,10 @@ function translation(v) {
   return [];
 }
 
-/** An absolutely placed box moved by a translation, which the engine has no transform for: the same move as a
- * margin on that side (a percentage is of the box's own fixed size). Anything else is reported. */
-function shiftByTranslate(computed, s, report) {
+/** A box moved by a translation, which the engine has no transform for (a percentage is of the box's own fixed
+ * size): an absolutely placed box by a margin on that side, a box in flow by a relative offset, which moves it
+ * without moving what is around it, as a transform does. Anything else is reported. */
+function shiftByTranslate(computed, s, report, inFlow = false) {
   const v = computed.values;
   const shift = translation(v);
   if (shift?.length === 0) return;
@@ -143,6 +144,11 @@ function shiftByTranslate(computed, s, report) {
   const dx = shift ? of(shift[0], s.w) : undefined, dy = shift ? of(shift[1], s.h) : undefined;
   if (dx === undefined || dy === undefined) {
     report("unsupported", prop, v[prop], computed.sources[prop]);
+    return;
+  }
+  if (inFlow) {
+    if (dx) s.left = dx;
+    if (dy) s.top = dy;
     return;
   }
   if (dx) s.ml = (s.ml ?? 0) + dx;
@@ -241,6 +247,11 @@ function boxStyle(computed, report, viewport = null) {
     }
     shiftByTranslate(computed, s, report);
   } else if (position === "sticky") report("unsupported", "position", "sticky", src("position"));
+  else if (translation(v)?.length !== 0) {
+    // ponytail: a relative box's own `left`/`top` are not drawn, so its translation is its only offset.
+    s.position = "relative";
+    shiftByTranslate(computed, s, report, true);
+  }
   if (v["z-index"] !== "auto" && own("z-index")) report("unsupported", "z-index", v["z-index"], src("z-index"), "paint order is tree order");
 
   for (const [axis, prop] of [["overflow_x", "overflow-x"], ["overflow_y", "overflow-y"]]) {
@@ -391,8 +402,7 @@ function reportDeclarations(computed, report) {
         if (v["outline-style"] !== "none" && prop === "outline-style") report("unsupported", "outline", `${length(v["outline-width"])}px ${v["outline-style"]} ${colorOut(v["outline-color"])?.value ?? ""}`.trim(), source, "no outline in the engine (no focus ring)");
         break;
       case "transform": case "translate":
-        // An absolute box's translation is drawn as a margin (`shiftByTranslate`), which reports what it cannot do.
-        if (v.position !== "absolute" && v.position !== "fixed" && value && value !== "none") report("unsupported", prop, value, source);
+        // A translation is drawn as a margin or an offset (`shiftByTranslate`), which reports what it cannot do.
         break;
       case "rotate": case "scale": case "animation": case "animation-name": case "filter": case "backdrop-filter":
       case "mask": case "-webkit-mask": case "clip-path": case "content": case "list-style": case "resize": case "appearance": case "-webkit-appearance":
