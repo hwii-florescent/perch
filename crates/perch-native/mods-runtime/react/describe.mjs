@@ -19,7 +19,7 @@
 //! multiplier under a new size). `tokens` names the theme token each colour came from.
 import { Cascade, colorOut, familyOut, lineHeightPx, splitTop, THEME_TOKENS } from "./css.mjs";
 import { HostElement, HostText } from "./dom.mjs";
-import { closest as closestBy, querySelectorAll as queryBy } from "./selector.mjs";
+import { closest as closestBy, matchesComplex, parseSelector, querySelectorAll as queryBy } from "./selector.mjs";
 
 export const SCHEMA = "perch-native-description/1";
 /** The CSS display a node was computed with (kept off the serialised description). */
@@ -457,14 +457,24 @@ function keyOf(element, spec) {
 /** Engine names for the elements a parity table names, from its selectors over the host tree: `name`, or
  * `name:key` for one of many. A `textRange` name is the element's own text (`range_name`), not the element. */
 function nameElements(document, defs, nodes) {
-  for (const def of defs) {
-    for (const element of queryBy(document.documentElement, def.selector)) {
+  // One walk of the tree, each element tried against every selector, rather than a walk per selector: the same
+  // names (the first matching definition of a kind wins), a fraction of the visits.
+  const parsed = defs.map((def) => [def, parseSelector(def.selector)]);
+  const walk = (el) => {
+    for (const element of el.children) {
       const node = nodes.get(element.id);
-      if (!node) continue;
-      const key = keyOf(element, def.key);
-      node[def.textRange ? "range_name" : "name"] ??= key == null ? def.name : `${def.name}:${key}`;
+      if (node) {
+        for (const [def, list] of parsed) {
+          const slot = def.textRange ? "range_name" : "name";
+          if (node[slot] != null || !list.some((steps) => matchesComplex(element, steps))) continue;
+          const key = keyOf(element, def.key);
+          node[slot] = key == null ? def.name : `${def.name}:${key}`;
+        }
+      }
+      walk(element);
     }
-  }
+  };
+  walk(document.documentElement);
 }
 
 /** The UI face's ascent and descent per px of font size (San Francisco: the page's glyph run box is 1.1777 x the
