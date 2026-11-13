@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SessionSummary } from "@perch/shared";
-import { scopeSessionId, terminalScopeId, workspaceRecord } from "./terminalScope";
+import { dirScopeId, scopeSessionId, terminalScopeId, workspaceRecord } from "./terminalScope";
 
 const state = {
   workspaces: [
@@ -34,6 +34,17 @@ describe("terminalScope", () => {
     expect(workspaceRecord(withSession, id)).toBe(row); // stable for selectors
     expect(terminalScopeId(withSession, session({ currentCwd: "/tmp" }))).not.toBe(id);
     expect(workspaceRecord(withSession, "w-proj")?.id).toBe("w-proj");
-    expect(workspaceRecord({ ...state, sessions: [] }, id)).toBeUndefined();
+    // The terminal closed: the scope still names its directory (the core keeps resolving it).
+    const closed = workspaceRecord({ ...state, sessions: [] }, id)!;
+    expect(closed).toMatchObject({ path: "/home/u/café", name: "café", hostId: "local" });
+    expect(workspaceRecord({ ...state, sessions: [] }, id)).toBe(closed);
+    expect(workspaceRecord({ ...state, sessions: [] }, "term:s1:***")).toBeUndefined();
+  });
+
+  it("a chosen directory scope is a hidden local row at that directory, under its workspace", () => {
+    const id = dirScopeId("w-proj", "/tmp/notes");
+    expect(workspaceRecord(state, id)).toMatchObject({ id, projectId: "p-proj", hostId: "local", path: "/tmp/notes", name: "notes", hidden: true });
+    expect(workspaceRecord(state, dirScopeId("gone", "/tmp"))).toBeUndefined();
+    expect(scopeSessionId(id)).toBeNull();
   });
 });

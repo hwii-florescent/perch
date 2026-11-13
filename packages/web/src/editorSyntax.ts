@@ -28,22 +28,16 @@ export const syntaxStyle = HighlightStyle.define([
 /** Above this the language is skipped: parsing a huge file must not cost typing latency. */
 export const MAX_HIGHLIGHT_CHARS = 300_000;
 
-// The starter set; any other extension stays plain text.
-const STARTER = new Set([
-  "TypeScript", "TSX", "JavaScript", "JSX", "JSON", "Rust", "Python", "Markdown", "CSS", "HTML",
-  "YAML", "TOML", "Shell", "Go", "Dockerfile",
-]);
-const starter = languages.filter((lang) => STARTER.has(lang.name));
-
+// Every language in `@codemirror/language-data`; each grammar is a lazy chunk, loaded only when a matching file opens.
 /** The language for `path`, loaded, or null (unknown extension, or `large`: over `MAX_HIGHLIGHT_CHARS`). */
 export async function loadLanguage(path: string, large: boolean): Promise<LanguageSupport | null> {
   if (large) return null;
-  const description = LanguageDescription.matchFilename(starter, path.split("/").pop() ?? path);
+  const description = LanguageDescription.matchFilename(languages, path.split("/").pop() ?? path);
   return description ? description.load().catch(() => null) : null;
 }
 
 /** The language a Markdown fence names (`ts`, `bash`, `rust`…), loaded, or null. */
 export async function loadLanguageByName(name: string): Promise<LanguageSupport | null> {
-  const description = name ? LanguageDescription.matchLanguageName(starter, name, true) : null;
+  const description = name ? LanguageDescription.matchLanguageName(languages, name, true) : null;
   return description ? description.load().catch(() => null) : null;
 }

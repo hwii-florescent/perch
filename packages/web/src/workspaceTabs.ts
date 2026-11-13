@@ -30,8 +30,8 @@ export function workspaceTabs(nav: ProjectNavState, resources: FileTab[]): TabEn
   const ws = effectiveWorkspace(nav);
   const entries: TabEntry[] = [
     ...activeWorkspaceSessions(nav).map((session): TabEntry => ({ id: session.id, kind: "session", session })),
-    // A scoped tab (a terminal's file) shows only while that terminal is on screen.
-    ...(ws ? resources.filter((tab) => tab.workspaceId === ws.id && (!tab.scope || scopeSessionId(tab.scope) === nav.sessionId)) : [])
+    // A scoped tab (a terminal's file) shows only while that terminal is on screen, or once it has closed.
+    ...(ws ? resources.filter((tab) => tab.workspaceId === ws.id && (!tab.scope || scopeSessionId(tab.scope) === nav.sessionId || !nav.sessions.some((session) => session.id === scopeSessionId(tab.scope!)))) : [])
       .map((tab): TabEntry => ({ id: fileTabKey(tab), kind: "resource", tab })),
   ];
   const key = tabOrderKey(nav);

@@ -29,7 +29,7 @@ import { Select as HostSelect } from "./components/ui/select";
 import { SELECT } from "./components/ui/settings";
 import { rowAction } from "./components/ui/row-action";
 import { nestSessions, pickFolder, useAddProject, useAddProjectRequest, useHosts, useNavigation, useSessionFolders } from "./navigation";
-import { fileTabKey, isBlankBrowser, openBlankBrowser, useFileTabs } from "./fileTabs";
+import { fileTabKey, isBlankBrowser, openBlankBrowser, tabDirectory, useFileTabs } from "./fileTabs";
 import { useWorkspaceFilesStore } from "./filesystemStore";
 import { fetchTerminalAt, focusInfo, layoutTree, readTerminalAt, runCommand as runAppCommand, sendTerminalAt, terminalRecords } from "./modApp";
 import { surfaceLayout } from "./modUi";
@@ -135,7 +135,8 @@ export const assetUrl = (path: string): string => {
 // 1.2: the status bar (`stock:status`).
 
 /** What the status bar says about the focused session: its host (else the active one), folder, branch and the
- * agent's context and cost; the workspace's when no session is focused. */
+ * agent's context and cost; the workspace's when no session is focused. While a file or review tab is on
+ * screen, the folder and branch are that tab's (a file opened from Downloads says Downloads). */
 export function useStatusLine(): Sdk.StatusLine {
   const connected = usePerchStore((s) => s.connected);
   const status = usePerchStore((s) => s.status);
@@ -146,10 +147,13 @@ export function useStatusLine(): Sdk.StatusLine {
   const hostName = usePerchStore((s) => s.hosts.find((h) => h.id === hostId)?.name);
   const hostState = usePerchStore((s) => s.hostStates[hostId]?.state);
   const workspace = usePerchStore((s) => s.workspaces.find((w) => w.id === s.activeWorkspaceId));
+  const tab = useFileTabs((s) => s.tabs.find((candidate) => fileTabKey(candidate) === s.active));
+  const shown = usePerchStore((s) => tabDirectory(s, tab)?.path);
+  const shownBranch = usePerchStore((s) => tabDirectory(s, tab)?.branch);
   return {
     connected, hostId, hostName, hostState, sessionId,
-    cwd: status?.cwd || knownSession?.cwd || workspace?.path || "",
-    branch: status?.branch ?? workspace?.branch,
+    cwd: shown ?? (status?.cwd || knownSession?.cwd || workspace?.path || ""),
+    branch: shown !== undefined ? shownBranch : status?.branch ?? workspace?.branch,
     contextTokens: status?.contextTokens,
     costUsd: status?.costUsd,
   };

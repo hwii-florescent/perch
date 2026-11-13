@@ -19,7 +19,7 @@ export const SELECT = `${FIELD} px-2 py-[0.3rem] text-[0.8rem] max-[700px]:min-h
 export const SELECT_HOST = `${SELECT} min-w-[5.5rem] shrink-0`;
 const INPUT_BASE = `${FIELD} min-w-0 px-[0.55rem] py-[0.35rem] text-[0.82rem] max-[700px]:min-h-11 focus:[outline:1px_solid_var(--accent)]`;
 export const INPUT = `${INPUT_BASE} flex-1 max-[700px]:flex-[1_1_100%]`;
-export const INPUT_PORT = `${INPUT_BASE} flex-[0_0_5rem] max-[700px]:flex-[1_1_6rem]`;
+export const INPUT_PORT = `${INPUT_BASE} w-20 flex-[0_0_5rem] max-[700px]:w-24 max-[700px]:flex-[1_1_6rem]`;
 export const INPUT_WIDE = `${INPUT_BASE} flex-[1_1_100%]`;
 export const ADD_ROW = "flex flex-wrap items-center gap-[0.4rem]";
 

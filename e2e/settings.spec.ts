@@ -109,6 +109,39 @@ async function closeSettingsEsc(page: Page): Promise<void> {
 // Serial block
 // ---------------------------------------------------------------------------
 
+test("numeric settings stay inside their rows at desktop and phone widths", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await freshSession(page);
+
+  for (const width of [1512, 900, 701, 700, 390, 320]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await openSettings(page);
+    for (const section of ["notifications", "terminal", "hosts"]) {
+      await page.getByTestId(`settings-nav-${section}`).click();
+      const inputs = page.getByTestId("settings-modal").locator('input[type="number"]');
+      await expect(inputs.first()).toBeVisible();
+      const bounds = await inputs.evaluateAll((fields) => fields.map((field) => {
+        const input = field.getBoundingClientRect();
+        // SettingRow has a shrink-wrapped control container; the host form is a wrapping flex row.
+        const container = field.parentElement!.getBoundingClientRect();
+        return { testId: field.getAttribute("data-testid") ?? "host port", left: input.left, right: input.right, containerLeft: container.left, containerRight: container.right };
+      }));
+      for (const bound of bounds) {
+        expect(bound.left, `${width}px ${section}: ${bound.testId} left edge`).toBeGreaterThanOrEqual(bound.containerLeft - 1);
+        expect(bound.right, `${width}px ${section}: ${bound.testId} right edge`).toBeLessThanOrEqual(bound.containerRight + 1);
+      }
+      if (section === "notifications" && (width === 1512 || width === 390)) {
+        await page.getByTestId("settings-maxLiveSubSessions").scrollIntoViewIfNeeded();
+        await page.screenshot({ path: `artifacts/settings-numeric-${width}.png` });
+      }
+      if (width <= 700) await page.getByTestId("settings-back").click();
+    }
+    await closeSettingsEsc(page);
+  }
+  expect(errors).toEqual([]);
+});
+
 test.describe("Stage D: settings modal + SSH hosts CRUD", () => {
   test.describe.configure({ mode: "serial" });
 

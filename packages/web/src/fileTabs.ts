@@ -3,6 +3,7 @@ import { effectiveWorkspace, usePerchStore } from "./store";
 import { readViewerStored, viewerKey } from "./viewer";
 import { recordClosedFile } from "./closedTabs";
 import { useWorkspaceFilesStore } from "./filesystemStore";
+import { workspaceRecord } from "./terminalScope";
 
 /** A workspace resource open as a top-row tab, a peer of the workspace's sessions:
  * a file, or (`kind: "review"`) the workspace's change review, or (`kind: "browser"`)
@@ -25,6 +26,16 @@ export interface FileTab {
 
 // NUL cannot occur in a path, so a review never collides with a file.
 export const fileTabKey = (tab: FileTab) => `${tab.scope ?? tab.workspaceId}\n${tab.kind === "review" ? "\0review" : tab.kind === "browser" ? `\0browser\n${tab.path}` : tab.kind === "mod" ? `\0mod\n${tab.path}` : tab.path}`;
+
+/** The folder a file tab shows, absolute, with its branch when known; a review shows its root. Null for a tab
+ * that is no file (a browser page, a mod). A scoped tab is read through its terminal's or chosen directory. */
+export function tabDirectory(state: Parameters<typeof workspaceRecord>[0], tab: FileTab | undefined): { path: string; branch?: string } | null {
+  if (!tab || tab.kind === "browser" || tab.kind === "mod") return null;
+  const root = workspaceRecord(state, tab.scope ?? tab.workspaceId);
+  if (!root) return null;
+  const parent = tab.kind === "review" ? "" : tab.path.split("/").slice(0, -1).join("/");
+  return { path: parent ? `${root.path.replace(/\/+$/, "")}/${parent}` : root.path, branch: root.branch };
+}
 
 /** A browser tab starts blank under a unique `blank:` path (a tab is keyed by its path, so two blank
  * pages need distinct ones); the page's own address lives in the webview, not the tab. */
@@ -149,16 +160,19 @@ export function restoreSelection(workspaceId: string): void {
 
 // Any session or workspace switch (tab, sidebar, Navigator, keybinding) shows that session,
 // except when the workspace's last session closes: its newest file or review is shown instead.
+// Only a session that is gone counts: "new chat" focuses the workspace and then clears the session
+// while the old one lives on elsewhere, and that is a start screen, not a closed tab.
 usePerchStore.subscribe((state, previous) => {
   const files = useFileTabs.getState();
   const workspaceId = effectiveWorkspace(state)?.id;
   const sameWorkspace = workspaceId === effectiveWorkspace(previous)?.id;
   if (state.sessionId === previous.sessionId && sameWorkspace) return;
-  const left = state.sessionId === null && previous.sessionId !== null && sameWorkspace
-    ? files.tabs.findLast((tab) => tab.workspaceId === workspaceId)
-    : undefined;
+  const closed = state.sessionId === null && previous.sessionId !== null && sameWorkspace
+    && !state.sessions.some((session) => session.id === previous.sessionId);
+  const left = closed ? files.tabs.findLast((tab) => tab.workspaceId === workspaceId) : undefined;
   if (left) {
-    files.open(left.workspaceId, left.path, left.kind);
+    // Already open: show that tab itself (a re-open would drop its terminal scope, or a mod's props).
+    useFileTabs.setState({ active: fileTabKey(left) });
     return;
   }
   if (!files.active) return;

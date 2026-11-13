@@ -1787,6 +1787,9 @@ declare module "@perch/sdk" {
     actions: {
       /** `fs.mutate`; rejects with the reason (it never overwrites anything). */
       mutate(op: "createFile" | "createDir" | "rename" | "copy" | "delete", path: string, to?: string): Promise<void>;
+      /** Creates file `name` in the existing absolute local directory `dir` (inside the workspace or not) and opens it;
+       * rejects with the reason (it never overwrites anything). */
+      createFileAt(dir: string, name: string): Promise<void>;
       hold(path: string, cut: boolean): void;
       /** `name`, or `name 2`, ... free in folder `dir`. */
       freeName(name: string, dir: string): string;

@@ -363,6 +363,20 @@ Amends "Examples, not shipped defaults" and "Slots" below; the rest of the mods 
   docked, overlaid or run hidden on their own.
 - **Fixed built-ins.** Sanitizers (`markdown.ts`, `SafeHtml.tsx`, `uiBlocks.ts`) are not cloneable.
 
+## 2026-11-10 — Files outside the workspace (owner)
+
+Files and Git can reach directories outside the registered workspace, through a scope id that stands where
+the workspace id does in every `fs.*` / `git.*` request (`resolve_tool_workspace`).
+
+- **Terminal scope** (`term:<session>:<dir>`): only a directory that terminal has been in. Once verified it is
+  persisted (`terminal_scope_grants`), so a file opened from it keeps reading and saving after the terminal
+  closes. No read-only or reopen mode.
+- **Directory scope** (`dir:<workspace>:<dir>`): any existing, normalized, absolute local directory the
+  person chose. Its one user is the New file prompt (Cmd-T "+"): the full path is shown, starting at the
+  workspace folder, and can be edited to create the file anywhere; a path inside the workspace stays a plain
+  workspace file. This is the one place the client picks a root.
+- Local only. A remote workspace refuses both scopes.
+
 ## 2026-11-09 — Agent launch parity and conversation-scoped runs (owner)
 
 The owner chose all three lifecycle rules. An agent typed into a Perch shell has the same Perch
@@ -1508,8 +1522,8 @@ an exhaustive description of every component or a fresh acceptance result.
   with the existing action.
 - **Pull requests are read from the person's `gh` login and shown as GitHub's claim**, from a cache; a
   missing answer is unknown, not "no PR".
-
 - **The library is the Instructions reference list, grown to files and folders** (100 entries, 16 of them
   directories), with no picker. Files are named in the text for every provider; only folders are granted.
 - **Memory opt-out is per Project only**, not per session: one switch in the Memory dialog. Off refuses the
   Project's agents; people keep reading and editing the files.
+

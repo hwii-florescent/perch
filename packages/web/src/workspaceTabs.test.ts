@@ -44,6 +44,13 @@ describe("workspaceTabs", () => {
     expect(workspaceTabs(nav(), [{ workspaceId: "w2", path: "y" }]).map((e) => e.id)).toEqual(["a", "b"]);
   });
 
+  it("shows a terminal's file only on that terminal, or once the terminal has closed", () => {
+    const scoped = (id: string) => ({ workspaceId: "w1", scope: `term:${id}:L3RtcA`, path: "x" });
+    expect(workspaceTabs(nav("a"), [scoped("a")]).map((e) => e.id)).toContain(fileTabKey(scoped("a")));
+    expect(workspaceTabs(nav("b"), [scoped("a")]).map((e) => e.id)).not.toContain(fileTabKey(scoped("a")));
+    expect(workspaceTabs(nav("b"), [scoped("gone")]).map((e) => e.id)).toContain(fileTabKey(scoped("gone")));
+  });
+
   it("never collides a review with a file of the same workspace", () => {
     expect(fileTabKey(review)).not.toBe(fileTabKey({ workspaceId: "w1", path: "" }));
   });

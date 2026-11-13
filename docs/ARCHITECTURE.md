@@ -424,9 +424,14 @@ launch (`issue`, `issue_for_launch`) and at a provider-confirmed new conversatio
 `server/native_ui.rs::observe_run_boundary` feeds the adapters' conversation ids to
 `HistoryDb::observe_conversation` (the first one since a launch joins its run; an unseen one in a
 session that had one begins a fresh run; a known one restores its own run; another session's is
-ignored). Nothing is inferred from typed input; an adapter with no id gives no boundary. A person's
-strip still lists every child of the tab, marking earlier runs (`previousRun`). Changing the schema
-makes `<db>.pre-run-identity.bak` first (`VACUUM INTO`); `sub_sessions` is rebuilt once.
+ignored). An unrecognized conversation on a legacy tab without a recorded launch starts a fresh
+run, even on its first snapshot: the tab-id fallback is not evidence that it owns the old family.
+Old children and reports remain intact for the person; already known conversation resumes still
+restore their recorded run. Nothing is inferred from typed input; an adapter with no id gives no
+boundary. A person's strip still lists every child of the tab, marking earlier runs (`previousRun`).
+This does not reclassify conversations already bound before the fix; a fresh conversation leaves that
+old association. Changing the schema makes `<db>.pre-run-identity.bak` first (`VACUUM INTO`);
+`sub_sessions` is rebuilt once.
 Limits: a stale snapshot of an old conversation arriving after a newer one would read as a resume
 (adapters publish the latest only); a provider that gives a resumed conversation a new id reads as a
 fresh conversation (fail closed). An agent that omits its token gets nothing from
@@ -623,13 +628,6 @@ strip's actions are the next section.
   agent's `report` with its source (`report`, or `summary` with the `model` that wrote it; none when there is neither, and the
   child's last message is never shown in their place). The strip's headline counts working, waiting on you
   and reported (a report or a summary).
-- *Freshness.* The strip asks again when a family member's session updates. Mail receipts change without
-  one, so the mail code calls `notify_session_updated` for both ends when a message is queued, cancelled
-  or settled. No polling.
-- *Sidebar.* A sub-session's row sits under its lead's wherever both are listed together (By project, in
-  compact dots its dot follows its lead's and is set in; By status within one section; Quickchat); in another section it is an ordinary row, so Needs you stays
-  complete. "In one list" stays purely chronological. No panel, tab or drawer.
-- *Notes folder.* One per run under the private native directory (`/tmp/perch-native-<uid>/notes/<lead
 - *Branch and pull request* (`thread_pr.rs`, capability `crew.pr.v1`; optional `CrewRow.branch` and `pr`). The
   branch is read from the member's Workspace (`.git/HEAD`), local sessions only. The pull request is whatever
   the person's own `gh` login answers for that branch (`gh pr view`, read only, 4 s limit, `https` links only). A
@@ -644,6 +642,13 @@ strip's actions are the next section.
   thread whose start, stop or lifecycle is unknown is never Idle or Resolved. Local Projects only. The Project
   home tab shows it (`stock:project-home`, bound by `components/ProjectHomeTab.tsx`; opened by the command
   `project.home`, one tab per Project): the screen only draws the core's groups.
+- *Freshness.* The strip asks again when a family member's session updates. Mail receipts change without
+  one, so the mail code calls `notify_session_updated` for both ends when a message is queued, cancelled
+  or settled. No polling.
+- *Sidebar.* A sub-session's row sits under its lead's wherever both are listed together (By project, in
+  compact dots its dot follows its lead's and is set in; By status within one section; Quickchat); in another section it is an ordinary row, so Needs you stays
+  complete. "In one list" stays purely chronological. No panel, tab or drawer.
+- *Notes folder.* One per run under the private native directory (`/tmp/perch-native-<uid>/notes/<lead
   session id>/`, 0700), created on first use and removed when the lead is deleted. `perch whoami` and the
   end of `perch guide` give the path; the guide says what it is for. Nothing in it is ever injected into a
   prompt, and an agent reading it treats it as a peer's text. (Project memory, above, is the durable
@@ -807,13 +812,6 @@ person's approval, or **refuse**. It is the person's setting, in the session's r
   from the person or from the sender's own view.
 - *Not changed:* the delivery rules ("Messages"), quoting, the envelope, limits, receipts' retry rules.
 
-**Reading a sub-session** (`child_read.rs` rules, `sub_sessions::read`, route `/agent/read`, `perch read <session>
-[--turns N]`; slice 9c). A lead reads a bounded tail of its own child's conversation, on demand, with no model call:
-the last N turns (default 2, at most 5) from the snapshot the child's native bridge holds, through the same
-`transcript::project` the chat and the reporter use. Per turn: what opened it (a delivered message reads as who
-sent it), one sentence per run of tool calls, the files its landed edits changed with their line counts, the
-last thing the agent said, and a pending question or "still running". **Never** a tool's output or a file's
-contents; at most 8,000 characters in all, dropping the oldest turn first (the newest is kept, and a single turn is
 **Searching a Project's sessions** (`session_search.rs` rules, `server/session_search.rs`, route `/agent/search`,
 `perch search <text> [--limit N]`; owner decision 2026-11-10). Any agent of a Project, a sub-session included,
 may search the other sessions of that Project: literal, case-insensitive, 3 to 200 characters, newest message
@@ -823,6 +821,13 @@ another Project's. Sessions on another computer or whose chat is not connected a
 not silently skipped. The caller's own session is not searched. A hit is another session's claim, labelled
 so, and never an instruction. Unlike `perch read` this is not limited to the caller's own sub-sessions.
 
+**Reading a sub-session** (`child_read.rs` rules, `sub_sessions::read`, route `/agent/read`, `perch read <session>
+[--turns N]`; slice 9c). A lead reads a bounded tail of its own child's conversation, on demand, with no model call:
+the last N turns (default 2, at most 5) from the snapshot the child's native bridge holds, through the same
+`transcript::project` the chat and the reporter use. Per turn: what opened it (a delivered message reads as who
+sent it), one sentence per run of tool calls, the files its landed edits changed with their line counts, the
+last thing the agent said, and a pending question or "still running". **Never** a tool's output or a file's
+contents; at most 8,000 characters in all, dropping the oldest turn first (the newest is kept, and a single turn is
 cut with a marker). Only a lead may ask, and only about a session it started (`parent_session_id` matches);
 another session or a non-existent one is `not one of your sub-sessions`, a sub-session asking is refused, and a
 child whose bridge Perch cannot reach (not connected, or after a core restart) says so instead of guessing. It

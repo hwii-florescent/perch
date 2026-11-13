@@ -6,10 +6,11 @@
  */
 import type { DirectoryEntry } from "@perch/shared";
 import { askAgentAboutFile, contextBridgeAvailable } from "../contextBridge";
-import { freeName, mutateEntry, namesIn, useEntryClipboard } from "../fileOps";
+import { freeName, joinPath, mutateEntry, namesIn, useEntryClipboard } from "../fileOps";
+import { useFileTabs } from "../fileTabs";
 import { tauriInvoke } from "../links";
 import { usePerchStore } from "../store";
-import { workspaceRecord } from "../terminalScope";
+import { dirScopeId, workspaceRecord } from "../terminalScope";
 import FileMenu from "../stock-ui/file-menu/main";
 import { StockRoute } from "./mod-root";
 
@@ -40,6 +41,19 @@ export function FileEntryMenu(props: FileEntryMenuProps) {
     canAsk: contextBridgeAvailable(workspaceId),
     actions: {
       mutate: (op: "createFile" | "createDir" | "rename" | "copy" | "delete", path: string, to?: string) => mutateEntry(workspaceId, op, path, to),
+      createFileAt: async (dir: string, name: string) => {
+        const root = props.workspacePath.replace(/\/+$/, "");
+        const inside = dir === root ? "" : dir.startsWith(`${root}/`) ? dir.slice(root.length + 1) : null;
+        if (inside !== null) {
+          await mutateEntry(workspaceId, "createFile", joinPath(inside, name));
+          props.onOpenFile(joinPath(inside, name));
+          return;
+        }
+        // Outside the workspace: the file is read and saved through a scope for that directory.
+        const scope = dirScopeId(workspaceId, dir);
+        await mutateEntry(scope, "createFile", name);
+        useFileTabs.getState().open(workspaceId, name, undefined, scope);
+      },
       hold: (path: string, cut: boolean) => useEntryClipboard.setState({ entry: { workspaceId, path, cut } }),
       freeName: (name: string, dir: string) => freeName(name, namesIn(workspaceId, dir)),
       openInDefaultApp: async (path: string) => { if (!tauriInvoke) throw new Error("Only the desktop app opens files in their default app."); await tauriInvoke("open_in_default_app", { path }); },

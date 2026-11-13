@@ -20,6 +20,16 @@ import { buttonClass as button, ConfirmDialog, Dialog, menuDividerClass as menuD
 const parentPath = (path: string): string => path.split("/").slice(0, -1).join("/");
 const joinPath = (dir: string, name: string): string => (dir ? `${dir}/${name}` : name);
 
+/** `/a/b/../c/` -> `/a/c`; "" (a path like `/name`) is the root. Relative paths stay as typed for the core to refuse. */
+function normalizeDir(dir: string): string {
+  const parts: string[] = [];
+  for (const part of dir.split("/")) {
+    if (part === "..") parts.pop();
+    else if (part && part !== ".") parts.push(part);
+  }
+  return `/${parts.join("/")}`;
+}
+
 type Stage = "menu" | "newFile" | "newFolder" | "rename" | "delete" | "error";
 
 const MENU_W = 210;
@@ -106,11 +116,32 @@ export default function FileMenu({ workspacePath, target, x, y, onClose, onOpenF
     actions.reveal(absolute(target?.path ?? ""));
     onClose();
   };
-  if (stage === "newFile" || stage === "newFolder" || stage === "rename") {
+  if (stage === "newFile") {
+    const base = absolute(createDir).replace(/\/+$/, "");
+    return (
+      <NameDialog
+        title="New file"
+        initial={`${base}/`}
+        label="File path"
+        path
+        confirmLabel="Create"
+        busy={busy}
+        error={error}
+        onCancel={onClose}
+        onSubmit={(value) => run(() => {
+          // A bare name goes in the default folder; anything with a / is a full path.
+          const at = value.lastIndexOf("/");
+          return actions.createFileAt(at < 0 ? base : normalizeDir(value.slice(0, at)), value.slice(at + 1));
+        })}
+      />
+    );
+  }
+
+  if (stage === "newFolder" || stage === "rename") {
     const renaming = stage === "rename" && target;
     return (
       <NameDialog
-        title={renaming ? `Rename ${target.name}` : stage === "newFile" ? "New file" : "New folder"}
+        title={renaming ? `Rename ${target.name}` : "New folder"}
         initial={renaming ? target.name : ""}
         confirmLabel={renaming ? "Rename" : "Create"}
         busy={busy}
@@ -122,10 +153,8 @@ export default function FileMenu({ workspacePath, target, x, y, onClose, onOpenF
             if (to !== target.path) await actions.mutate("rename", target.path, to);
             return;
           }
-          const path = joinPath(createDir, name);
-          await actions.mutate(stage === "newFile" ? "createFile" : "createDir", path);
+          await actions.mutate("createDir", joinPath(createDir, name));
           if (createDir) onExpand(createDir);
-          if (stage === "newFile") onOpenFile(path);
         })}
       />
     );
@@ -194,9 +223,13 @@ export default function FileMenu({ workspacePath, target, x, y, onClose, onOpenF
   );
 }
 
-function NameDialog({ title, initial, confirmLabel, busy, error, onCancel, onSubmit }: {
+function NameDialog({ title, initial, label = "Name", path = false, confirmLabel, busy, error, onCancel, onSubmit }: {
   title: string;
   initial: string;
+  /** The input's label. */
+  label?: string;
+  /** The value is a full path (VS Code's new file): a `/` is fine, but the last part must be a name. */
+  path?: boolean;
   confirmLabel: string;
   busy: boolean;
   error: string | null;
@@ -209,26 +242,29 @@ function NameDialog({ title, initial, confirmLabel, busy, error, onCancel, onSub
     const input = inputRef.current;
     if (!input) return;
     input.focus();
-    // Like Finder/VS Code: select the stem, not the extension.
+    // Like Finder/VS Code: select the stem, not the extension; a full path starts with the caret at its end.
     const dot = initial.lastIndexOf(".");
-    input.setSelectionRange(0, dot > 0 ? dot : initial.length);
-  }, [initial]);
+    if (path) input.setSelectionRange(initial.length, initial.length);
+    else input.setSelectionRange(0, dot > 0 ? dot : initial.length);
+  }, [initial, path]);
   const trimmed = name.trim();
-  const invalid = !trimmed || trimmed === "." || trimmed === ".." || /[\\/]/.test(trimmed);
+  const leaf = path ? trimmed.slice(trimmed.lastIndexOf("/") + 1) : trimmed;
+  const invalid = !leaf || leaf === "." || leaf === ".." || (!path && /[\\/]/.test(trimmed)) || (path && trimmed.includes("/") && !trimmed.startsWith("/"));
   const submit = () => { if (!invalid && !busy) onSubmit(trimmed); };
   return (
     <Dialog title={title} onClose={onCancel} testId="file-name-dialog">
       <input
         ref={inputRef}
         className="min-h-8 w-full rounded-ui bg-surface-0 px-2 text-[0.85rem] text-fg [font-family:inherit] focus-visible:outline focus-visible:outline-1 focus-visible:outline-fg"
-        aria-label="Name"
+        aria-label={label}
         data-testid="file-name-input"
         value={name}
         spellCheck={false}
         onChange={(event) => setName(event.target.value)}
         onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); submit(); } }}
       />
-      {trimmed && /[\\/]/.test(trimmed) && <p className="m-0 text-[0.75rem] text-red">A name cannot contain / or \.</p>}
+      {!path && trimmed && /[\\/]/.test(trimmed) && <p className="m-0 text-[0.75rem] text-red">A name cannot contain / or \.</p>}
+      {path && trimmed.includes("/") && !trimmed.startsWith("/") && <p className="m-0 text-[0.75rem] text-red">Enter an absolute path, starting with /.</p>}
       {error && <p role="alert" className="m-0 text-[0.78rem] text-red">{error}</p>}
       <div className="flex justify-end gap-2">
         <button type="button" className={button()} onClick={onCancel}>Cancel</button>

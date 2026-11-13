@@ -1,6 +1,6 @@
 //! Status bar, the stock screen `stock:status`: the bottom row of the desktop window (and a layout's
 //! `status` block). Left: connection dot, host, folder and branch of the focused session (else the
-//! workspace). Middle: zoom (click resets), context tokens and cost of the focused agent. Right: plan
+//! workspace; while a file or review tab is on screen, that tab's folder). Middle: zoom (click resets), context tokens and cost of the focused agent. Right: plan
 //! usage (`usage.tsx`) and the connection check. A legacy mod can redraw it through the
 //! `status-bar` slot.
 //!

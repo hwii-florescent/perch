@@ -14,7 +14,7 @@ import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type
 import { Annotation, Compartment, EditorState, Prec, Transaction, type StateEffect } from "@codemirror/state";
 import { EditorView, drawSelection, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from "@codemirror/view";
 import { history, historyField } from "@codemirror/commands";
-import { bracketMatching, indentUnit, syntaxHighlighting } from "@codemirror/language";
+import { bracketMatching, indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { gotoLine, highlightSelectionMatches, search } from "@codemirror/search";
 import { editorKeymap } from "../editorKeymap";
 import { detectEol, externalChanges, fromLf, toLf, type Eol } from "../editorDiff";
@@ -22,6 +22,7 @@ import { IS_MAC } from "../keyCombo";
 import { createSearchPanel } from "../editorSearchPanel";
 import { EditorContextMenu } from "./EditorContextMenu";
 import { MAX_HIGHLIGHT_CHARS, loadLanguage, syntaxStyle } from "../editorSyntax";
+import { languageTyping } from "../editorTyping";
 
 export interface CodeEditorHandle {
   openGoto: () => void;
@@ -151,6 +152,7 @@ export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, l
           history(),
           drawSelection(),
           bracketMatching(),
+          indentOnInput(),
           highlightSelectionMatches(),
           search({ top: true, createPanel: createSearchPanel }),
           indentUnit.of("  "),
@@ -214,7 +216,7 @@ export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, l
   useEffect(() => {
     let alive = true;
     void loadLanguage(path, large).then((support) => {
-      if (alive) view.current?.dispatch({ effects: language.reconfigure(support ?? []) });
+      if (alive) view.current?.dispatch({ effects: language.reconfigure(support ? [support, languageTyping] : []) });
     });
     return () => { alive = false; };
   }, [path, large]);

@@ -5,13 +5,17 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { DirectoryEntry } from "@perch/shared";
 
 const native = vi.hoisted(() => ({ available: true, invoke: vi.fn() }));
+const mutate = vi.hoisted(() => vi.fn());
+const openTab = vi.hoisted(() => vi.fn());
 const state = vi.hoisted(() => ({ workspaces: [{ id: "w", hostId: "local" }] }));
 vi.mock("../links", () => ({ get tauriInvoke() { return native.available ? native.invoke : undefined; } }));
 vi.mock("../store", () => ({ usePerchStore: Object.assign((select: (value: typeof state) => unknown) => select(state), { subscribe: () => () => {}, getState: () => state, setState: () => {} }) }));
 // The confirmation is a stock screen with its own tests; this file is about the menu.
 vi.mock("./ConfirmDialog", () => ({ ConfirmDialog: () => null }));
+vi.mock("../fileTabs", () => ({ useFileTabs: { getState: () => ({ open: openTab }) } }));
 vi.mock("../contextBridge", () => ({ contextBridgeAvailable: () => false, askAgentAboutFile: vi.fn() }));
 vi.mock("../fileOps", () => ({
+  mutateEntry: mutate,
   joinPath: (dir: string, name: string) => dir ? `${dir}/${name}` : name,
   parentPath: (path: string) => path.split("/").slice(0, -1).join("/"),
   useEntryClipboard: (select: (value: { entry: null }) => unknown) => select({ entry: null }),
@@ -114,4 +118,43 @@ it("uses the rendered menu height to stay above the bottom edge", async () => {
   expect(menu.style.top).toBe(`${window.innerHeight - 520 - 8}px`);
   expect(menu.style.maxHeight).toBe("calc(100vh - 16px)");
   expect(menu.style.overflowY).toBe("auto");
+});
+
+async function typePath(value: string) {
+  await act(async () => root.render(
+    <FileEntryMenu workspaceId="w" workspacePath="/repo with spaces/" target={null} x={0} y={0} onClose={onClose} onOpenFile={onOpenFile} onExpand={() => {}} onRefresh={() => {}} initialStage="newFile" />,
+  ));
+  const input = document.querySelector<HTMLInputElement>('[data-testid="file-name-input"]')!;
+  const initial = input.value;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await click("file-name-confirm");
+  return initial;
+}
+
+it("new file shows the full default directory and creates in the workspace for a bare name", async () => {
+  mutate.mockResolvedValue(undefined);
+  expect(await typePath("a.txt")).toBe("/repo with spaces/");
+  expect(mutate).toHaveBeenCalledExactlyOnceWith("w", "createFile", "a.txt");
+  expect(onOpenFile).toHaveBeenCalledExactlyOnceWith("a.txt");
+});
+
+it("new file in a changed directory outside the workspace goes through that directory's scope", async () => {
+  mutate.mockResolvedValue(undefined);
+  await typePath("/tmp/x/../notes/a.txt");
+  const scope = mutate.mock.calls[0]![0] as string;
+  expect(scope).toMatch(/^dir:w:/);
+  expect(mutate).toHaveBeenCalledWith(scope, "createFile", "a.txt");
+  expect(openTab).toHaveBeenCalledExactlyOnceWith("w", "a.txt", undefined, scope);
+  expect(atob(scope.slice(6).replace(/-/g, "+").replace(/_/g, "/"))).toBe("/tmp/notes");
+  expect(onOpenFile).not.toHaveBeenCalled();
+});
+
+it("new file typed as a path inside the workspace stays a workspace file", async () => {
+  mutate.mockResolvedValue(undefined);
+  await typePath("/repo with spaces/src/a.txt");
+  expect(mutate).toHaveBeenCalledExactlyOnceWith("w", "createFile", "src/a.txt");
+  expect(onOpenFile).toHaveBeenCalledExactlyOnceWith("src/a.txt");
 });

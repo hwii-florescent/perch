@@ -2,7 +2,8 @@
  * terminalScope.ts — Files/Git follow the terminal: once a terminal's shell leaves
  * its workspace's folder, its scope id (`term:<session id>:<base64url directory>`)
  * stands where the workspace id does in every fs.* / git.* request; the core
- * (`resolve_tool_workspace`) accepts only a directory that terminal has been in.
+ * (`resolve_tool_workspace`) accepts only a directory that terminal has been in, and keeps
+ * accepting that scope (a persisted grant) after the terminal closes.
  * A terminal still in its workspace's folder keeps the plain workspace id.
  */
 import type { SessionSummary } from "@perch/shared";
@@ -17,6 +18,7 @@ export function isChatsProject(project: WorkspaceProject): boolean {
 }
 
 const PREFIX = "term:";
+const DIR_PREFIX = "dir:";
 
 const encode = (text: string) =>
   btoa(String.fromCharCode(...new TextEncoder().encode(text))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -35,31 +37,52 @@ export function terminalScopeId(state: Pick<State, "workspaces">, session: Sessi
 }
 
 // One stable object per scope and session update: store selectors must not return a new one each call.
-const records = new Map<string, { session: SessionSummary; record: WorkspaceRecord }>();
+const records = new Map<string, { session: SessionSummary | undefined; record: WorkspaceRecord }>();
 
-/** The workspace row for `id`; a terminal scope gets one made from its session and directory. */
+/** The scope id for local directory `path`, chosen on purpose (the New file prompt) and filed
+ * under `workspaceId`: files in it are read and saved through the id, even outside the workspace. */
+export const dirScopeId = (workspaceId: string, path: string): string => `${DIR_PREFIX}${workspaceId}:${encode(path)}`;
+
+/** The workspace row for `id`; a terminal scope gets one made from its directory and, while
+ * its terminal is open, that session. The core keeps resolving a verified scope after its
+ * terminal closes, so the row then stands on the directory alone. */
 export function workspaceRecord(state: Pick<State, "workspaces" | "sessions">, id: string): WorkspaceRecord | undefined {
+  if (id.startsWith(DIR_PREFIX)) return dirRecord(state, id);
   const sessionId = scopeSessionId(id);
   if (!sessionId) return state.workspaces.find((candidate) => candidate.id === id);
   const session = state.sessions.find((candidate) => candidate.id === sessionId);
-  if (!session) return undefined;
   const cached = records.get(id);
-  if (cached?.session === session) return cached.record;
+  if (cached && cached.session === session) return cached.record;
   let path = "";
   try { path = decode(id.slice(PREFIX.length + sessionId.length + 1)); } catch { return undefined; }
   const record: WorkspaceRecord = {
     id,
-    projectId: session.projectId ?? "",
+    projectId: session?.projectId ?? "",
     hostId: "local",
     path,
     name: path.replace(/\/+$/, "").split("/").pop() || "/",
-    branch: path === session.currentCwd ? session.currentBranch : undefined,
+    branch: session && path === session.currentCwd ? session.currentBranch : undefined,
     dirty: false,
     state: "active",
-    createdAt: session.createdAt,
-    updatedAt: session.createdAt,
+    createdAt: session?.createdAt ?? 0,
+    updatedAt: session?.createdAt ?? 0,
     hidden: true,
   };
   records.set(id, { session, record });
+  return record;
+}
+
+const dirRecords = new Map<string, WorkspaceRecord>();
+
+function dirRecord(state: Pick<State, "workspaces">, id: string): WorkspaceRecord | undefined {
+  const cached = dirRecords.get(id);
+  if (cached) return cached;
+  const [workspaceId = "", encoded = ""] = id.slice(DIR_PREFIX.length).split(":");
+  const workspace = state.workspaces.find((candidate) => candidate.id === workspaceId);
+  let path = "";
+  try { path = decode(encoded); } catch { return undefined; }
+  if (!workspace || !path) return undefined;
+  const record: WorkspaceRecord = { ...workspace, id, path, name: path.replace(/\/+$/, "").split("/").pop() || "/", branch: undefined, dirty: false, hidden: true };
+  dirRecords.set(id, record);
   return record;
 }
