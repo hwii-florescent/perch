@@ -1,0 +1,16 @@
+{
+  "notifications": [
+    {
+      "id": "t5",
+      "kind": "usage",
+      "level": "error",
+      "title": "Build failed",
+      "body": "3 errors in perch-core",
+      "heading": "Build failed",
+      "detail": "3 errors in perch-core",
+      "sessionId": "mod:ci",
+      "hasSession": false,
+      "timeout": 600000
+    }
+  ]
+}
