@@ -37,6 +37,9 @@ pub enum Scope {
     /// A command on the terminal that has the keyboard (find, clear, copy, scroll). It applies only
     /// while a terminal has the keyboard; the window runs it on that terminal.
     Terminal,
+    /// The folder browser's own keys: the screen asks for them (`shortcutFor(event, "directory")`),
+    /// the window never runs them.
+    Directory,
 }
 
 /// A named command and its default keys, by the web's id and wording.
@@ -333,6 +336,18 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["shift+l"],
         Scope::Leader,
     ),
+    scoped(
+        "directory.use",
+        "Use this folder",
+        &["cmd+enter"],
+        Scope::Directory,
+    ),
+    scoped(
+        "directory.useAlt",
+        "Use this folder (alternate)",
+        &["ctrl+enter"],
+        Scope::Directory,
+    ),
 ];
 
 /// Every shortcut the window answers: the sidebar's actions, then [`SHORTCUTS`].
@@ -364,6 +379,7 @@ fn help_group(id: &str) -> &'static str {
         "panes" => "panes",
         "terminal" => "terminal",
         "leader" => "leader",
+        "directory" => "directory",
         _ => "global",
     }
 }
@@ -884,7 +900,7 @@ impl Keymap {
                         Scope::Any => true,
                         Scope::OutsideTerminal => !context.in_terminal,
                         Scope::OutsideEditable => !context.in_terminal && !context.typing,
-                        Scope::Leader | Scope::Terminal => false,
+                        Scope::Leader | Scope::Terminal | Scope::Directory => false,
                     })
                     .find(bound)
             })
@@ -902,6 +918,41 @@ impl Keymap {
                     })
                     .map(|(_, text)| Hit::Edit(text))
             })
+    }
+
+    /// The command of screen scope `scope` (`"directory"`) a DOM key event (`{key, ctrlKey,
+    /// metaKey, shiftKey, altKey}`) presses, as the web's `shortcutFor(event, scope)` finds it.
+    pub fn screen_shortcut(&self, event: &Value, scope: &str) -> Option<&'static str> {
+        let scope = match scope {
+            "directory" => Scope::Directory,
+            _ => return None,
+        };
+        let flag = |name: &str| event[name].as_bool().unwrap_or(false);
+        let key = match event["key"].as_str()? {
+            " " => "space".to_string(),
+            "ArrowUp" => "up".to_string(),
+            "ArrowDown" => "down".to_string(),
+            "ArrowLeft" => "left".to_string(),
+            "ArrowRight" => "right".to_string(),
+            other => other.to_lowercase(),
+        };
+        let keystroke = Keystroke {
+            modifiers: gpui::Modifiers {
+                control: flag("ctrlKey"),
+                alt: flag("altKey"),
+                shift: flag("shiftKey"),
+                platform: flag("metaKey"),
+                ..Default::default()
+            },
+            key,
+            key_char: None,
+        };
+        all_shortcuts()
+            .filter(|s| s.scope == scope)
+            .find(|s| {
+                effective_spec(s, &self.chosen, self.mac).is_some_and(|c| matches(&c, &keystroke))
+            })
+            .map(|s| s.id)
     }
 
     /// The press after the leader chord: a follow-up runs, Escape ends it quietly, anything else

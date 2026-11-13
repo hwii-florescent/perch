@@ -20,7 +20,7 @@ use futures::{SinkExt, StreamExt};
 use perch_core::agent_fleet::TERMINAL_PROVIDER;
 use perch_core::protocol::{AgentLifecycleStatus, ProjectSummary, ServerMessage, SessionSummary};
 use serde_json::{json, Value};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -786,6 +786,17 @@ pub enum Command {
     /// What a session does with messages from other sessions (`inbound.act` `set_mode`): `accept`,
     /// `hold` or `refuse`. The menu follows the session list's `inboundMode`, not this request.
     InboundMode { session_id: String, mode: String },
+    /// A question for the core (`frame`, from [`ask_frame`], given a request id here), answered
+    /// with what the core says to it or why not. A dropped connection drops `reply`.
+    Ask { frame: Value, reply: Answer },
+    /// Register `path` on `host_id` as a project (`project.create`), named `name` or by its
+    /// folder. Answered once the core sends this connection the project's snapshot, or refuses.
+    AddProject {
+        host_id: String,
+        path: String,
+        name: Option<String>,
+        reply: Answer,
+    },
     /// End a session and delete it (`session.delete`). Its tab goes when the core says it is
     /// deleted, not on this request.
     DeleteSession { session_id: String },
@@ -814,6 +825,157 @@ pub enum Command {
     RestoreWorkspace { workspace_id: String },
     /// Ask a computer for its projects and workspaces again (`workspace.snapshot`).
     RefreshHost(String),
+}
+
+/// Where the answer to one request goes.
+pub type Answer = futures::channel::oneshot::Sender<Result<Value, String>>;
+
+/// The questions a screen may put to the core (`kind`), and the fields each takes: a string, an
+/// optional string, a bool or a list of strings.
+const ASKS: &[(&str, &[(&str, Field)])] = &[
+    (
+        "fs.browse",
+        &[("hostId", Field::Host), ("path", Field::MaybeText)],
+    ),
+    (
+        "instructions.get",
+        &[("scope", Field::Scope), ("id", Field::Text)],
+    ),
+    (
+        "instructions.set",
+        &[
+            ("scope", Field::Scope),
+            ("id", Field::Text),
+            ("text", Field::Text),
+            ("folders", Field::Texts),
+        ],
+    ),
+    ("memory.list", &[("projectId", Field::Text)]),
+    (
+        "memory.get",
+        &[("projectId", Field::Text), ("name", Field::Text)],
+    ),
+    (
+        "memory.set",
+        &[
+            ("projectId", Field::Text),
+            ("name", Field::Text),
+            ("text", Field::Text),
+            ("baseRevision", Field::MaybeText),
+        ],
+    ),
+    (
+        "memory.delete",
+        &[
+            ("projectId", Field::Text),
+            ("name", Field::Text),
+            ("baseRevision", Field::Text),
+        ],
+    ),
+    (
+        "memory.enable",
+        &[("projectId", Field::Text), ("enabled", Field::Flag)],
+    ),
+];
+
+#[derive(Clone, Copy)]
+enum Field {
+    Text,
+    MaybeText,
+    Flag,
+    Texts,
+    /// `project` or `workspace`.
+    Scope,
+    /// A computer: left out for this one, as the web client does.
+    Host,
+}
+
+/// The frame for question `kind` with `args`' fields, checked against [`ASKS`] (its request
+/// id is added when it is sent), or why it cannot be asked.
+pub fn ask_frame(kind: &str, args: &Value) -> Result<Value, String> {
+    let (_, fields) = ASKS
+        .iter()
+        .find(|(k, _)| *k == kind)
+        .ok_or_else(|| format!("The core is not asked {kind:?} from a screen."))?;
+    let mut frame = json!({ "type": kind });
+    for (name, field) in fields.iter() {
+        let value = &args[*name];
+        let bad = || format!("{kind} needs {name} as {}.", field.word());
+        let out = match field {
+            Field::Text => Some(value.as_str().ok_or_else(bad)?.into()),
+            Field::MaybeText | Field::Host if value.is_null() => None,
+            Field::MaybeText => Some(value.as_str().ok_or_else(bad)?.into()),
+            Field::Host => Some(value.as_str().ok_or_else(bad)?)
+                .filter(|host| *host != LOCAL)
+                .map(Value::from),
+            Field::Flag => Some(value.as_bool().ok_or_else(bad)?.into()),
+            Field::Scope => Some(
+                value
+                    .as_str()
+                    .filter(|s| matches!(*s, "project" | "workspace"))
+                    .ok_or_else(bad)?
+                    .into(),
+            ),
+            Field::Texts => {
+                let list = value.as_array().ok_or_else(bad)?;
+                if !list.iter().all(Value::is_string) {
+                    return Err(bad());
+                }
+                Some(value.clone())
+            }
+        };
+        if let Some(out) = out {
+            frame[*name] = out;
+        }
+    }
+    Ok(frame)
+}
+
+impl Field {
+    fn word(self) -> &'static str {
+        match self {
+            Field::Text => "text",
+            Field::MaybeText | Field::Host => "text or null",
+            Field::Flag => "true or false",
+            Field::Texts => "a list of text",
+            Field::Scope => "\"project\" or \"workspace\"",
+        }
+    }
+}
+
+/// The answer `message` gives to one of this connection's requests: its id and the outcome.
+fn answer_of(message: &ServerMessage) -> Option<(&str, Result<Value, String>)> {
+    match message {
+        // The state the core answers with, as the web's clients keep it (without its kind and id).
+        ServerMessage::InstructionsState { request_id, .. }
+        | ServerMessage::MemoryState { request_id, .. }
+        | ServerMessage::MemoryFileState { request_id, .. } => {
+            let mut state = serde_json::to_value(message).unwrap_or(Value::Null);
+            if let Some(state) = state.as_object_mut() {
+                state.remove("type");
+                state.remove("requestId");
+            }
+            Some((request_id, Ok(state)))
+        }
+        ServerMessage::FsBrowseResult {
+            request_id,
+            path,
+            parent,
+            entries,
+            ..
+        } => Some((
+            request_id,
+            Ok(json!({ "path": path, "parent": parent, "entries": entries })),
+        )),
+        // The core sends the project's snapshot to the connection that created it only.
+        ServerMessage::WorkspaceSnapshot { request_id, .. } => Some((request_id, Ok(Value::Null))),
+        ServerMessage::Error {
+            message,
+            request_id: Some(id),
+            ..
+        } => Some((id, Err(message.clone()))),
+        _ => None,
+    }
 }
 
 /// What the window learns.
@@ -1006,6 +1168,8 @@ async fn live(
     launch: &mut Option<Launch>,
 ) -> Result<()> {
     state.connect();
+    // The requests waiting on an answer, by id; they go with the connection.
+    let mut pending: HashMap<String, Answer> = HashMap::new();
     connection.send(json!({"type": "session.list"})).await?;
     connection.request(&Request::Projects(LOCAL.into())).await?;
     let providers = Request::Providers(LOCAL.into());
@@ -1028,6 +1192,11 @@ async fn live(
         tokio::select! {
             message = connection.next() => {
                 let message = message?;
+                if let Some((id, outcome)) = answer_of(&message) {
+                    if let Some(reply) = pending.remove(id) {
+                        let _ = reply.send(outcome);
+                    }
+                }
                 if let Some(step) = launch.as_mut().map(|l| l.on_message(&message)) {
                     for frame in step.send {
                         connection.send(frame).await?;
@@ -1112,6 +1281,19 @@ async fn live(
                 }
                 Some(Command::UsageGet { force }) => {
                     connection.send(json!({"type": "usage.get", "force": force})).await?;
+                }
+                Some(Command::Ask { mut frame, reply }) => {
+                    let id = connection.request_id();
+                    frame["requestId"] = json!(id);
+                    connection.send(frame).await?;
+                    pending.insert(id, reply);
+                }
+                Some(Command::AddProject { host_id, path, name, reply }) => {
+                    let id = connection.request_id();
+                    connection
+                        .send(create_project_frame(&id, &host_id, &path, name.as_deref()))
+                        .await?;
+                    pending.insert(id, reply);
                 }
                 Some(Command::UsageRedeemReset { account_id }) => {
                     state.clear_redeem_result();
@@ -1314,6 +1496,88 @@ mod tests {
                 .send_request("r2", "why?", "digest", "agent")
                 .unwrap(),
         )
+    }
+
+    #[test]
+    fn a_screens_questions_are_the_cores_messages() {
+        let asks = [
+            ("fs.browse", json!({"hostId": "local"})),
+            ("fs.browse", json!({"hostId": "build-box", "path": "/tmp"})),
+            ("instructions.get", json!({"scope": "project", "id": "p"})),
+            (
+                "instructions.set",
+                json!({"scope": "workspace", "id": "w", "text": "t", "folders": ["/a"]}),
+            ),
+            ("memory.list", json!({"projectId": "p"})),
+            ("memory.get", json!({"projectId": "p", "name": "a.md"})),
+            (
+                "memory.set",
+                json!({"projectId": "p", "name": "a.md", "text": "t"}),
+            ),
+            (
+                "memory.set",
+                json!({"projectId": "p", "name": "a.md", "text": "t", "baseRevision": "r1"}),
+            ),
+            (
+                "memory.delete",
+                json!({"projectId": "p", "name": "a.md", "baseRevision": "r1"}),
+            ),
+            ("memory.enable", json!({"projectId": "p", "enabled": false})),
+        ];
+        for (kind, args) in asks {
+            let mut frame = ask_frame(kind, &args).unwrap();
+            frame["requestId"] = json!("r");
+            serde_json::from_value::<ClientMessage>(frame.clone())
+                .unwrap_or_else(|e| panic!("{frame}: {e}"));
+        }
+        assert_eq!(
+            ask_frame("fs.browse", &json!({"hostId": "local"})).unwrap(),
+            json!({"type": "fs.browse"}),
+            "this computer is left out"
+        );
+        // Only the questions listed, with their fields as the core takes them.
+        assert!(ask_frame("session.delete", &json!({"sessionId": "s"})).is_err());
+        assert!(ask_frame("instructions.get", &json!({"scope": "host", "id": "p"})).is_err());
+        assert!(ask_frame("memory.enable", &json!({"projectId": "p", "enabled": "no"})).is_err());
+        assert!(ask_frame(
+            "instructions.set",
+            &json!({"scope": "project", "id": "p", "text": "t", "folders": [1]})
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_listing_or_a_refusal_answers_the_request_it_names() {
+        let message = |frame: Value| serde_json::from_value::<ServerMessage>(frame).unwrap();
+        let listing = message(
+            json!({"type": "fs.browse.result", "requestId": "b1", "hostId": "local",
+            "path": "/home/dev", "parent": "/home", "home": "/home/dev",
+            "entries": [{"name": "code", "path": "/home/dev/code", "isGitRepo": true}]}),
+        );
+        let (id, answer) = answer_of(&listing).expect("a listing answers");
+        assert_eq!(id, "b1");
+        assert_eq!(
+            answer.unwrap(),
+            json!({"path": "/home/dev", "parent": "/home",
+                "entries": [{"name": "code", "path": "/home/dev/code", "isGitRepo": true}]})
+        );
+        let refused =
+            message(json!({"type": "error", "requestId": "p1", "message": "not a directory"}));
+        let (id, answer) = answer_of(&refused).expect("a refusal answers");
+        assert_eq!((id, answer), ("p1", Err("not a directory".to_string())));
+        // An error for no request answers nothing.
+        assert!(answer_of(&message(json!({"type": "error", "message": "x"}))).is_none());
+        // A state is answered as the web's client keeps it.
+        let state = message(
+            json!({"type": "instructions.state", "requestId": "i1", "scope": "project",
+            "id": "p", "text": "t", "folders": [], "revision": 2, "maxChars": 100}),
+        );
+        let (id, answer) = answer_of(&state).expect("a state answers");
+        assert_eq!(id, "i1");
+        assert_eq!(
+            answer.unwrap(),
+            json!({"scope": "project", "id": "p", "text": "t", "folders": [], "revision": 2, "maxChars": 100})
+        );
     }
 
     #[test]

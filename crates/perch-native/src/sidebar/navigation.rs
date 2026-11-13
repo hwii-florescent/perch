@@ -1050,6 +1050,92 @@ impl<'a> Builder<'a> {
 }
 
 /// `useHosts`: this computer first, then every configured one, and the one shown.
+/// One folder of `useSessionFolders`. Its `git` summary is not followed by the native client, so
+/// it is absent.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionFolder {
+    pub key: String,
+    pub cwd: String,
+    pub active: bool,
+    pub state: &'static str,
+    pub sessions: Vec<SessionInfo>,
+    pub registered: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_workspace_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionFolders {
+    pub host_id: String,
+    pub folders: Vec<SessionFolder>,
+}
+
+/// `useSessionFolders`: the shown computer's sessions by the folder they run in, the folder with
+/// the newest session first and each folder's newest session first (`projectsForHost`). The
+/// active folder is the shown session's, else the newest. No folder's git state is followed here.
+pub fn session_folders(store: &Store, view: &View) -> SessionFolders {
+    let builder = Builder::new(store, view);
+    let host = view.host_id.as_str();
+    let mut groups: Vec<(String, Vec<&SessionSummary>)> = Vec::new();
+    for session in store.sessions.iter().filter(|s| s.host_id == host) {
+        let cwd = if session.cwd.is_empty() {
+            "(unknown)"
+        } else {
+            session.cwd.as_str()
+        };
+        match groups.iter_mut().find(|(c, _)| c == cwd) {
+            Some((_, list)) => list.push(session),
+            None => groups.push((cwd.to_string(), vec![session])),
+        }
+    }
+    for (_, list) in &mut groups {
+        list.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    }
+    groups.sort_by(|a, b| b.1[0].created_at.cmp(&a.1[0].created_at));
+    let shown = view
+        .session_id
+        .as_deref()
+        .and_then(|id| {
+            store
+                .sessions
+                .iter()
+                .find(|s| s.id == id && s.host_id == host)
+        })
+        .map(|s| s.cwd.as_str())
+        .filter(|cwd| groups.iter().any(|(c, _)| c == cwd));
+    let active = shown
+        .or_else(|| groups.first().map(|(c, _)| c.as_str()))
+        .map(str::to_string);
+    let review = has(capabilities(store, host), "git.status");
+    let folders = groups
+        .iter()
+        .map(|(cwd, list)| SessionFolder {
+            key: format!("{host}:{cwd}"),
+            cwd: cwd.clone(),
+            active: active.as_deref() == Some(cwd.as_str()),
+            state: list
+                .iter()
+                .map(|s| dot(s))
+                .min_by_key(|d| *d as usize)
+                .map_or("unknown", dot_word),
+            sessions: list.iter().map(|s| builder.info(s)).collect(),
+            registered: store
+                .projects
+                .iter()
+                .any(|p| p.host_id == host && p.repo_path.as_deref() == Some(cwd.as_str())),
+            review_workspace_id: review
+                .then(|| list.iter().find_map(|s| s.workspace_id.clone()))
+                .flatten(),
+        })
+        .collect();
+    SessionFolders {
+        host_id: host.to_string(),
+        folders,
+    }
+}
+
 pub fn hosts(store: &Store, active_id: &str) -> Hosts {
     let local = HostInfo {
         id: LOCAL.into(),
@@ -1125,6 +1211,62 @@ pub fn hosts(store: &Store, active_id: &str) -> Hosts {
             branch,
         },
         connected: store.connected,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn session(id: &str, host: &str, cwd: &str, created_at: i64) -> SessionSummary {
+        serde_json::from_value(json!({
+            "id": id, "title": id, "cwd": cwd, "createdAt": created_at, "status": "idle",
+            "hostId": host, "cliProviderId": "claude",
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn session_folders_group_the_shown_computers_sessions_newest_first() {
+        let store = Store {
+            sessions: vec![
+                session("s1", LOCAL, "/a", 1),
+                session("s2", LOCAL, "/b", 3),
+                session("s3", LOCAL, "/a", 2),
+                session("r1", "remote", "/a", 9),
+            ],
+            projects: vec![serde_json::from_value(json!({
+                "id": "p", "hostId": LOCAL, "name": "a", "path": "/a", "repoPath": "/a",
+                "favorite": false, "createdAt": 0, "updatedAt": 0,
+            }))
+            .unwrap()],
+            ..Store::default()
+        };
+        let folders = |view: &View| {
+            session_folders(&store, view)
+                .folders
+                .into_iter()
+                .map(|f| {
+                    let ids: Vec<String> = f.sessions.into_iter().map(|s| s.id).collect();
+                    (f.cwd, f.active, f.registered, ids)
+                })
+                .collect::<Vec<_>>()
+        };
+        // The folder with the newest session first, its newest session first; the newest is active.
+        assert_eq!(
+            folders(&View::default()),
+            [
+                ("/b".into(), true, false, vec!["s2".into()]),
+                ("/a".into(), false, true, vec!["s3".into(), "s1".into()]),
+            ]
+        );
+        // The shown session's folder is the active one.
+        let shown = View {
+            session_id: Some("s1".into()),
+            ..View::default()
+        };
+        assert!(folders(&shown)[1].1, "the shown session's folder");
     }
 }
 

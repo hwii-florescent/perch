@@ -25,7 +25,8 @@
 // `tab-menu`), and its callbacks get the screen's result. What the `perch` module or the window cannot do yet is an
 // inert default (`INERT`), so a screen
 // draws and its other actions work: an overlay with no screen (or whose screen no mod draws) closes at once and says
-// so on stderr, session folders are empty, the add-project flow does not run and a row drag stays a press. A tab's
+// so on stderr, and a row drag stays a press. Add project is the window's (`addProjectFolder`, through the core's
+// `project.create`), and so are the folder browser's listing (`browse`) and the sessions by folder. A tab's
 // press (`beginTabDrag`) is the window's from then on (`tab.beginDrag`, with where the strip's tabs are): it follows
 // the pointer, draws the `tab-drag` screen and moves or splits the tab once it is let go. Commands the module and the
 // window lack are refused by it and logged.
@@ -34,9 +35,8 @@ import { Icon, textWidth } from "perch-react";
 import { ICONS, LETTERS, LETTER } from "./agent-icons.js";
 
 export const INERT = [
+  // Only a screen's own scope (`directory`) is matched; the window's own keys are the window's.
   "shortcutFor",
-  "sessionFolders",
-  "addProject",
   "beginReorderDrag",
   "overlay:folder-browser",
   "overlay:instructions",
@@ -160,7 +160,8 @@ const sessionsOf = (nav) => {
   return out;
 };
 
-const NO_ADD = { status: "idle", error: null };
+// The requests some copy took, by kind (every copy shares one script context): a late copy takes only a newer one.
+const TAKEN = (globalThis[Symbol.for("perch.react.requests")] ??= {});
 const DESKTOP = { width: 1000, height: 800 };
 let nextOverlay = 1;
 
@@ -289,10 +290,16 @@ export function copyFor(cx, screen) {
     onRequest(kind, listener) {
       const count = () => snapshot("requests", () => perch.requests())[kind] ?? 0;
       let heard = count();
+      // A request made a moment before this screen mounted (the sidebar that same request showed) is still its, once.
+      if (heard > (TAKEN[kind] ?? 0) && perch.requestFresh(kind)) {
+        TAKEN[kind] = heard;
+        queueMicrotask(listener);
+      }
       const check = () => {
         const now = count();
         if (now === heard) return;
         heard = now;
+        TAKEN[kind] = now;
         listener();
       };
       listeners.add(check);
@@ -309,10 +316,21 @@ export function copyFor(cx, screen) {
       }
       return null;
     },
-    sessionFolders: () => snapshot("sessionFolders", () => ({ hostId: perch.navigation().hostId, folders: [] })),
-    addProject: () => NO_ADD,
-    addProjectFolder: () => {},
-    clearAddProject: () => {},
+    sessionFolders: () => snapshot("sessionFolders", () => perch.sessionFolders()),
+    addProject: () => snapshot("addProject", () => perch.addProject()),
+    addProjectFolder: (path, name, hostId) => {
+      try {
+        perch.addProjectFolder(String(path), name ? String(name) : null, hostId ?? null);
+      } catch (error) {
+        console.error(`perch.addProjectFolder: ${error?.message ?? error}`);
+      }
+    },
+    clearAddProject: () => perch.clearAddProject(),
+    /** The folder browser's listing of `path` (absent: home) on `hostId` (`FolderBrowserProps.browse`). */
+    browse: (hostId, path) => perch.ask("fs.browse", { hostId, path: path ?? null }),
+    /** One of the folder's own fields has the keyboard, or none does now (`screen.js`). */
+    holdKeyboard: (held) => perch.holdKeyboard(!!held),
+    shortcutLabel: (id) => perch.shortcutLabel(id),
     startSession: (hostId, cwd, agent) => {
       perch.startSession(hostId, cwd ?? undefined, agent).catch(answer((error) => console.error(`perch.startSession: ${error?.message ?? error}`)));
     },
@@ -359,8 +377,13 @@ export function copyFor(cx, screen) {
     closeOverlay(id) {
       if (openOverlays.delete(id)) perch.run("overlay.close").catch(() => {});
     },
-    // The native keymap has no `navigator.*` (or other in-screen) bindings: a screen's home-row keys are not matched.
-    shortcutFor: () => null,
+    // A screen's own keys (`directory`: Use this folder); the native keymap has no `navigator.*` bindings, so the
+    // Navigator's home-row keys are not matched, and the window's own keys stay the window's.
+    shortcutFor: (event, scope) => {
+      if (!event || typeof scope !== "string") return null;
+      const { key, ctrlKey, metaKey, shiftKey, altKey } = event;
+      return perch.shortcutFor({ key, ctrlKey: !!ctrlKey, metaKey: !!metaKey, shiftKey: !!shiftKey, altKey: !!altKey }, scope);
+    },
     // A press on a tab, which the window turns into a drag after a few pixels. The strip's tabs as laid out now are
     // where a drop on the strip lands (`slotIndex` in the web).
     beginTabDrag(event, id, label) {

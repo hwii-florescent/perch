@@ -300,8 +300,12 @@ export function lineHeightPx(text) {
   return null;
 }
 
-/** The whole description: the screen, then its overlays (absolute) above it, outside the screen's clip. */
-export function describeToGpui(description, kit, handle, files, scale = 0) {
+/**
+ * The whole description: the screen, then its overlays (absolute) above it, outside the screen's clip. A screen in a
+ * region of the window (`windowLayer`) puts its overlays in a layer over the whole window, so that what it portals
+ * (a dialog's backdrop, a popover placed from `getBoundingClientRect`) is laid out against the window as `fixed` is.
+ */
+export function describeToGpui(description, kit, handle, files, scale = 0, windowLayer = false) {
   const roots = [description.root, ...description.overlays];
   const snapped = scale > 0 ? snapColumns(roots, scale) : new Map();
   if (scale > 0 && files.measure) snapRows(roots, scale, files.measure, snapped);
@@ -309,8 +313,9 @@ export function describeToGpui(description, kit, handle, files, scale = 0) {
   shrinkWrapBases(roots, snapped);
   if (files.measure) breakLines(roots, files.measure, snapped);
   let layer = kit.div().relative().size_full().child(toGpui(description.root, kit, handle, files, false, false, null, {}, false, snapped));
-  for (const overlay of description.overlays) layer = layer.child(toGpui(overlay, kit, handle, files, true, false, null, {}, false, snapped));
-  return layer;
+  let over = windowLayer && description.overlays.length ? kit.div().relative().size_full().window_layer() : layer;
+  for (const overlay of description.overlays) over = over.child(toGpui(overlay, kit, handle, files, true, false, null, {}, false, snapped));
+  return over === layer ? layer : layer.child(over);
 }
 
 // ---- device-pixel rows -----------------------------------------------------------------------------------------

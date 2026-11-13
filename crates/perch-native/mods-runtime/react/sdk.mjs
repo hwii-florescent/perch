@@ -61,6 +61,8 @@ export const agentStateColor = (state) => DOT_GLYPH[state].color;
  * no bindings for that scope (the native keymap has no `navigator.*` keys yet, so the Navigator moves with the arrows
  * only). */
 export const shortcutFor = (event, scope) => host().shortcutFor?.(event, scope) ?? null;
+/** The key that runs command `id` as the person has it (`"⌘↵"`), or null. */
+export const shortcutLabel = (id) => host().shortcutLabel?.(id) ?? null;
 
 /** A typed command (`session.open`, `project.move`, ...) for the host to run; false when it refused it. */
 export const runCommand = (command, args) => host().command(command, args ?? {}) !== false;
@@ -193,7 +195,15 @@ export function ConfirmDialog(props) { return createElement(confirmInPlace ?? Co
 /** A dropdown: the web's stock select, its list drawn in place over the screen (a portal), with the app's field
  * look unless the caller gives its own. */
 export function Select({ className = SELECT, ...props }) { return createElement(StockSelect, { ...props, className }); }
-export const FolderBrowser = overlay("folder-browser");
+/** The folder browser drawn in place, from the copy the screen drawing it carries (the sidebar's `main.js` sets it),
+ * listing folders through the host; a screen that carries none opens the window's `folder-browser` overlay. */
+let folderBrowserInPlace = null;
+export const drawFolderBrowserInPlace = (Component) => { folderBrowserInPlace = Component; };
+const FolderBrowserOverlay = overlay("folder-browser");
+export function FolderBrowser(props) {
+  if (!folderBrowserInPlace) return createElement(FolderBrowserOverlay, props);
+  return createElement(folderBrowserInPlace, { ...props, browse: (path) => host().browse(props.hostId, path) });
+}
 export const InstructionsDialog = overlay("instructions");
 export const MemoryDialog = overlay("memory");
 /** The app's own stock dialog: drawn from the screen's children in the overlay layer (`document.body`). */

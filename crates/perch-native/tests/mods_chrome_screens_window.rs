@@ -8,6 +8,12 @@
 //! - Launcher: Cmd+Shift+T opens it on the computer's projects; a project then an agent starts
 //!   it there, No project a Quickchat; Backspace goes back; the browser and new file rows are
 //!   refused with the reason; Escape and a press on the backdrop close it.
+//! - Folder browser: the sidebar's Add (and the start page's Add project) opens its form with the
+//!   browser listing folders through the core; typing filters, a folder goes in, Use this folder
+//!   (its key) registers it through the core and closes the form, a refusal stays in it; Escape
+//!   and a press outside close it.
+//! - Start: the main area with nothing open; New session, `?`, a workspace's agent buttons and the
+//!   connecting page.
 //!
 //! Offscreen, as the other render tests: no window is shown or focused, no core runs, and every
 //! event goes through the window's own dispatch.
@@ -487,6 +493,19 @@ fn start(rig: &mut Rig) {
         "`?` outside a terminal"
     );
     rig.press("escape");
+    // Add project asks the sidebar for its form, which lists the folder it was last in.
+    rig.asked();
+    rig.click("start-action:home-add-project");
+    assert!(
+        answer_listings(rig, home_listing).is_empty(),
+        "only the listing"
+    );
+    assert!(
+        rig.record("folder-browser-filter").is_some(),
+        "the form is open"
+    );
+    rig.press("escape");
+    assert!(rig.record("folder-browser").is_none());
 
     // A workspace focused with no session of it open: its start picker; an agent starts there.
     rig.ws(|ws, window, cx| {
@@ -514,6 +533,142 @@ fn start(rig: &mut Rig) {
     println!("start: ok");
 }
 
+/// Answers every folder listing the window asked for with `listing(path)`; what else it asked
+/// for is returned.
+fn answer_listings(rig: &mut Rig, listing: impl Fn(Option<&str>) -> Value) -> Vec<Command> {
+    let mut other = Vec::new();
+    for command in rig.asked() {
+        match command {
+            Command::Ask { frame, reply } if frame["type"] == "fs.browse" => {
+                let _ = reply.send(Ok(listing(frame["path"].as_str())));
+            }
+            command => other.push(command),
+        }
+    }
+    rig.draw();
+    other
+}
+
+/// The folders under `/home/dev` and nothing under `code`.
+fn home_listing(path: Option<&str>) -> Value {
+    match path {
+        None | Some("/home/dev") => json!({"path": "/home/dev", "parent": "/home", "entries": [
+            {"name": "code", "path": "/home/dev/code", "isGitRepo": false},
+            {"name": "notes", "path": "/home/dev/notes", "isGitRepo": true}]}),
+        Some(other) => json!({"path": other, "parent": "/home/dev", "entries": []}),
+    }
+}
+
+const USE_FOLDER: &str = if cfg!(target_os = "macos") {
+    "cmd-enter"
+} else {
+    "ctrl-enter"
+};
+
+/// The sidebar's Add project, opened and its folder listed through the core.
+fn open_add_project(rig: &mut Rig) {
+    rig.click("add-project-button");
+    let asked = answer_listings(rig, home_listing);
+    assert!(asked.is_empty(), "only the listing: {asked:?}");
+    assert!(
+        rig.record("folder-browser-filter").is_some(),
+        "the form is open"
+    );
+}
+
+fn folder_browser(rig: &mut Rig) {
+    rig.asked();
+    // The sidebar's Add opens its form with the folder browser in it, listing home through the
+    // core; the filter field has the keyboard, so typing filters and runs no window key.
+    open_add_project(rig);
+    assert_eq!(rig.keys("folder-browser-entry"), ["code", "notes"]);
+    // The form is laid out against the window, as the web's fixed dialog is, not inside the sidebar.
+    let form = rig.record("folder-browser").unwrap().bounds;
+    assert!(
+        f32::from(form.size.width) > 400. && f32::from(form.center().x) > 400.,
+        "the form is centred in the window: {form:?}"
+    );
+    assert!(
+        rig.record("folder-browser-git:notes").is_some(),
+        "a git badge"
+    );
+    assert!(!rig.terminal_focused(), "the form's field has the keyboard");
+    rig.type_text("no");
+    assert_eq!(rig.keys("folder-browser-entry"), ["notes"], "filtered");
+    assert!(rig.open_screens().is_empty(), "no window key ran");
+    rig.press("backspace");
+    rig.press("backspace");
+    assert_eq!(rig.keys("folder-browser-entry"), ["code", "notes"]);
+    // A folder goes in; the core lists it.
+    rig.click("folder-browser-entry:code");
+    answer_listings(rig, home_listing);
+    assert!(rig.record("folder-browser-note").is_some(), "No subfolders");
+    // Use this folder's key registers it as a project through the core; once the core says so the
+    // form closes and the terminal has the keyboard again.
+    rig.press(USE_FOLDER);
+    let asked = rig.asked();
+    let [Command::AddProject {
+        host_id,
+        path,
+        name,
+        reply,
+    }] = <[Command; 1]>::try_from(asked).expect("one request")
+    else {
+        panic!("Add project asks the core to register the folder");
+    };
+    assert_eq!(
+        (host_id.as_str(), path.as_str(), name),
+        ("local", "/home/dev/code", None)
+    );
+    reply.send(Ok(Value::Null)).unwrap();
+    rig.draw();
+    assert!(rig.record("folder-browser").is_none(), "the form closed");
+    assert!(rig.terminal_focused(), "the keyboard is back");
+    assert_eq!(
+        rig.ws(|ws, _, _| ws.add_project_state().clone())["status"],
+        "idle",
+        "the sidebar took the answer"
+    );
+
+    // A refusal stays in the form, with the core's reason. The form opens again in the folder
+    // it was last in.
+    open_add_project(rig);
+    assert!(
+        rig.record("folder-browser-crumb@2").is_some(),
+        "back in code"
+    );
+    assert!(rig.record("folder-browser-note").is_some(), "No subfolders");
+    rig.click("folder-browser-use");
+    let Some(Command::AddProject { reply, .. }) = rig.asked().pop() else {
+        panic!("Use this folder registers it");
+    };
+    reply
+        .send(Err("project path is not an existing directory".into()))
+        .unwrap();
+    rig.draw();
+    assert!(rig.record("folder-browser").is_some(), "the form stays");
+    assert_eq!(
+        rig.ws(|ws, _, _| ws.add_project_state().clone())["error"],
+        "project path is not an existing directory"
+    );
+
+    // Escape closes the form, and so does a press outside it; the keyboard goes back each time.
+    rig.press("escape");
+    assert!(rig.record("folder-browser").is_none(), "Escape closed it");
+    assert!(rig.terminal_focused(), "the keyboard is back after Escape");
+    open_add_project(rig);
+    rig.mouse(WIDTH - 8., HEIGHT - 8.);
+    assert!(
+        rig.record("folder-browser").is_none(),
+        "a press outside closed it"
+    );
+    assert!(
+        rig.terminal_focused(),
+        "the keyboard is back after the press"
+    );
+    println!("folder-browser: ok");
+}
+
 fn main() {
     let scratch: PathBuf = std::env::temp_dir().join(format!(
         "perch-chrome-screens-window-{}",
@@ -538,6 +693,7 @@ fn main() {
 
     keybind_help(&mut rig);
     launcher(&mut rig);
+    folder_browser(&mut rig);
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())
         .unwrap();

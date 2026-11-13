@@ -80,7 +80,7 @@ impl ScreenFixture {
             .collect()
     }
 
-    fn state(&self, id: &str) -> &Value {
+    pub fn state(&self, id: &str) -> &Value {
         self.raw["states"]
             .as_array()
             .and_then(|list| list.iter().find(|s| s["id"] == id))
@@ -360,7 +360,7 @@ pub fn window_from(data: &Value, model: &Model) -> WindowState {
         notifications,
         new_tab: 0,
         terminals: Default::default(),
-        slide: Value::Null,
+        ..WindowState::default()
     }
 }
 
@@ -768,6 +768,54 @@ fn run_steps(
     }
 }
 
+/// The folder browser's listings as the web harness answers them: from the props' `tree` (path to
+/// `{parent, entries}`); the folder it opens at is the state's `view.lastPath` (the folder the
+/// host remembers), else `home`; `loading` never answers.
+fn fixture_browser(fixture: &ScreenFixture, state: &str) -> perch_native::mods::perch::Asker {
+    let props = fixture.props(state).unwrap_or_default();
+    let start = fixture.state(state)["view"]["lastPath"]
+        .as_str()
+        .or(props["home"].as_str())
+        .unwrap_or("/")
+        .to_string();
+    let loading = props["loading"] == true;
+    let tree = props["tree"].clone();
+    let unanswered = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    std::rc::Rc::new(move |_kind: &str, args: &Value| {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let path = args["path"].as_str().map(str::to_string);
+        if loading {
+            // Kept, so the listing is never answered and never fails.
+            unanswered.borrow_mut().push(tx);
+            return rx;
+        }
+        let path = path.unwrap_or_else(|| start.clone());
+        let listing = &tree[path.as_str()];
+        let _ = tx.send(Ok(json!({
+            "path": path,
+            "parent": listing["parent"],
+            "entries": listing["entries"].as_array().cloned().unwrap_or_default(),
+        })));
+        rx
+    })
+}
+
+/// The `localStorage` mod `drawn` starts state `state` with, as the state's page has it: the
+/// folder browser's last folder on its host (`view.lastPath`), else nothing kept from the state
+/// drawn before.
+fn seed_storage(user: &Path, drawn: &str, fixture: &ScreenFixture, state: &str) {
+    let data = user.join(".data").join(drawn);
+    let store = data.join("store.json");
+    let _ = std::fs::remove_file(&store);
+    if let Some(last) = fixture.state(state)["view"]["lastPath"].as_str() {
+        let props = fixture.props(state).unwrap_or_default();
+        let host = props["hostId"].as_str().unwrap_or("local");
+        std::fs::create_dir_all(&data).unwrap();
+        let body = json!({ format!("perch.dirBrowser.lastPath.{host}"): last });
+        std::fs::write(&store, body.to_string()).unwrap();
+    }
+}
+
 /// Names `named-elements.json` marks as sized by their text, for `screen`.
 fn text_sized_names(screen: &str) -> Vec<String> {
     let text = std::fs::read_to_string(parity::parity_dir().join("named-elements.json"))
@@ -1011,12 +1059,16 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
     let ((width, height), (window_w, window_h)) = fixture.size(capture.state);
     let empty =
         std::env::temp_dir().join(format!("perch-parity-screens-{}-none", std::process::id()));
-    let host =
-        ModHost::new(capture.mods.map_or(empty, Path::to_path_buf)).expect("the mod host starts");
+    let user = capture.mods.map_or(empty, Path::to_path_buf);
+    seed_storage(&user, drawn, fixture, capture.state);
+    let host = ModHost::new(user).expect("the mod host starts");
     assert!(host.find(drawn).is_some(), "a mod draws screen {drawn}");
     let perch = Perch::new();
     perch.register(&host);
     publish(&perch, fixture, capture.state);
+    if screen_id == "folder-browser" {
+        perch.set_asker(fixture_browser(fixture, capture.state));
+    }
     let floating = matches!(screen.place, Place::Floating { .. });
     let mut props = fixture.props(capture.state);
     if screen_id == "session-menu" {

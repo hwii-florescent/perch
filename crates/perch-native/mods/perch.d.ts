@@ -10,6 +10,23 @@ declare module "perch" {
   /** `StatusSection`: the status grouping a session falls in. */
   export type StatusSection = "needs" | "done" | "working" | "idle";
 
+  /** One folder of `sessionFolders()`, `useSessionFolders`'s: a host without projects lists its sessions by folder. */
+  export interface SessionFolder {
+    /** `<host>:<cwd>`. */
+    key: string;
+    cwd: string;
+    /** The shown session's folder, else the newest. */
+    active: boolean;
+    /** The most urgent state of its sessions. */
+    state: string;
+    /** Newest first. */
+    sessions: SessionInfo[];
+    /** A registered project has this folder as its repository. */
+    registered: boolean;
+    /** The workspace whose review opens, when the host can show one. */
+    reviewWorkspaceId?: string;
+  }
+
   export interface SessionInfo {
     id: string;
     title: string;
@@ -431,8 +448,39 @@ declare module "perch" {
     timeout?: number;
   }): void;
   /** The window's requests to a screen, a count per kind that grows by one per request:
-   * `"new-tab"` (Cmd+T, for the tab strip, which opens its New session menu at its "+"). */
-  export function requests(): { "new-tab": number };
+   * `"new-tab"` (Cmd+T, for the tab strip, which opens its New session menu at its "+") and `"add-project"` (the
+   * start page's or the launcher's Add project, for the sidebar, which opens its form). */
+  export function requests(): { "new-tab": number; "add-project": number };
+  /** Whether the last request of `kind` is recent enough (3 s) that a screen mounting now takes it: the sidebar
+   * that the Add project request showed. */
+  export function requestFresh(kind: string): boolean;
+  /** `useSessionFolders`: the shown computer's sessions by the folder they run in, newest first. */
+  export function sessionFolders(): { hostId: string; folders: SessionFolder[] };
+  /** `useAddProject`'s state: the last Add project request. */
+  export function addProject(): { status: "idle" | "pending" | "error" | "success"; error?: string; hostId?: string };
+  /** `useAddProject().add`: registers `path` on `hostId` (default: the shown computer) as a project, named
+   * `name` or by its folder. Ignored while one is pending. */
+  export function addProjectFolder(path: string, name?: string | null, hostId?: string | null): void;
+  /** `useAddProject().clear`: forgets the last answer. */
+  export function clearAddProject(): void;
+  /**
+   * A question for the core, answered with what it says or rejected with its refusal: `fs.browse` (`{hostId,
+   * path?}`: `{path, parent?, entries}`, a remote host's listing routed by the core), `instructions.get` and
+   * `instructions.set` (`{scope, id, text?, folders?}`: the Instructions state), `memory.list`, `memory.get`,
+   * `memory.set`, `memory.delete` and `memory.enable` (`{projectId, name?, text?, baseRevision?, enabled?}`: the
+   * memory state, or `{file?, error?}` for `memory.get`). The fields are the core's messages' own.
+   */
+  export function ask(kind: string, args: Record<string, unknown>): Promise<unknown>;
+  /** `shortcutFor(event, scope)` for a screen's own scope (`"directory"`): the command the key event presses. */
+  export function shortcutFor(
+    event: { key: string; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; altKey?: boolean },
+    scope: string,
+  ): { id: string; scope: string } | null;
+  /** An in-flow screen says one of its own fields has the keyboard (true) or let it go (false): while it holds it,
+   * the window types into it and does not move the keyboard to a terminal. */
+  export function holdKeyboard(held: boolean): void;
+  /** Whether the screen `id` sits in a region of the window (a sidebar) rather than over all of it. */
+  export function inRegion(id: string): boolean;
   /** `useZoom`: the terminals' zoom factor (1 is 100%). */
   export function zoom(): number;
   /** A tab drag in flight, for the tab strip to slide its tabs as the web's does (`slideDrag.ts`): the dragged
