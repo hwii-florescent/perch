@@ -217,10 +217,15 @@ pub struct Workspace {
     /// What has the keyboard while a modal screen is up, unless the mod gives it to a field of its
     /// own: its layer, so keys pass the window on their way to the mod.
     screen_focus: gpui::FocusHandle,
+    /// The window's own keyboard focus, held while nothing in it has the keyboard (nothing open),
+    /// so its keys still reach the window, as a page's reach the document.
+    root_focus: gpui::FocusHandle,
     notifications: Vec<Notification>,
     next_notification: u64,
     /// Cmd+T asks the tab strip mod for a new tab this many times (`perch.requests()`).
     new_tab_asks: u64,
+    /// The place the start page's picker chose, for the workspace it was chosen in.
+    start_place: Option<(String, String)>,
     /// A press on a tab of the strip, which may become a drag (`tab.beginDrag`).
     drag: Option<TabDrag>,
     /// Where the strip and each pane on screen were last drawn, for where a drag would drop.
@@ -284,9 +289,11 @@ impl Workspace {
             opener: Rc::new(open_in_system),
             screens: Screens::default(),
             screen_focus: cx.focus_handle(),
+            root_focus: cx.focus_handle(),
             notifications: Vec::new(),
             next_notification: 0,
             new_tab_asks: 0,
+            start_place: None,
             drag: None,
             drop_boxes: Rc::default(),
             activation: None,
@@ -445,6 +452,11 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let Some(open) = self.screens.take(id, cx) else {
+            // The start page is in flow: what it closes with is an action, and it stays.
+            if id == "start" {
+                let outcome = self.start_result(&result, window, cx);
+                self.finish(outcome, cx);
+            }
             return;
         };
         if let Some(handle) = open.focus_back {
@@ -936,6 +948,140 @@ impl Workspace {
         }
     }
 
+    /// `StartScreenProps`, as the web's `StartScreen` works them out: `connecting` while the core
+    /// is away, the focused workspace's start picker when one is focused with no session of it on
+    /// screen, else `home`. The place chosen in the picker is the window's (`start_place`).
+    fn start_props(&self, cx: &App) -> Value {
+        let model = self.sidebar.read(cx).model();
+        let store = &model.store;
+        let (host_id, focused) = screens::mods(cx)
+            .map(|(_, perch)| perch.shown_place())
+            .unwrap_or_else(|| (LOCAL.to_string(), None));
+        let host = model.hosts.iter().find(|h| h.id == host_id);
+        let choices: Vec<Value> = host
+            .map(|h| {
+                h.providers
+                    .iter()
+                    .map(|p| json!({ "id": p.id, "label": p.name }))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let base = |kind: &str| {
+            json!({
+                "kind": kind, "hostId": host_id, "logo": "", "projectCwds": [],
+                "targets": [], "targetKey": "", "choices": [], "discovery": null,
+                "disabled": kind == "connecting", "canManageAgents": false,
+            })
+        };
+        if !store.connected {
+            return base("connecting");
+        }
+        let Some(workspace) = focused.and_then(|id| store.workspaces.iter().find(|w| w.id == id))
+        else {
+            // New session offers the project a session would start in (the sidebar's target).
+            let mut props = base("home");
+            let project = host.and_then(|host| {
+                host.projects
+                    .iter()
+                    .find(|p| crate::actions::startable(host, p) && !p.quickchat)
+            });
+            props["projectCwds"] = json!(project.map(|p| vec![p.path.clone()]).unwrap_or_default());
+            return props;
+        };
+        let basename = |path: &str| {
+            path.rsplit('/')
+                .find(|part| !part.is_empty())
+                .unwrap_or(path)
+                .to_string()
+        };
+        let projects: Vec<_> = store
+            .projects
+            .iter()
+            .filter(|p| p.host_id == workspace.host_id)
+            .collect();
+        let own = projects
+            .iter()
+            .find(|p| p.id == workspace.project_id && p.path == workspace.path)
+            .map(|p| p.name.clone());
+        // Quickchat sessions run in the home folder, so that is what it shows.
+        let quickchat = workspace.path.ends_with("/.perch/scratch");
+        let name = if quickchat {
+            "Quickchat".to_string()
+        } else {
+            Some(workspace.name.clone())
+                .filter(|n| !n.is_empty())
+                .or(own.filter(|n| !n.is_empty()))
+                .unwrap_or_else(|| basename(&workspace.path))
+        };
+        let path = if quickchat {
+            "~"
+        } else {
+            workspace.path.as_str()
+        };
+        let mut targets = vec![json!({
+            "key": workspace.path, "label": format!("{name} (current folder)"), "name": name, "path": path,
+        })];
+        for p in projects.iter().filter(|p| p.path != workspace.path) {
+            let label = Some(p.name.clone())
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| basename(&p.path));
+            targets.push(json!({ "key": p.path, "label": label, "name": label, "path": p.path }));
+        }
+        if !quickchat {
+            targets.push(json!({
+                "key": "~", "label": "No project (Quickchat)", "name": "Quickchat", "path": "~",
+            }));
+        }
+        let key = self
+            .start_place
+            .as_ref()
+            .filter(|(id, key)| *id == workspace.id && targets.iter().any(|t| t["key"] == *key))
+            .map_or_else(|| workspace.path.clone(), |(_, key)| key.clone());
+        let mut props = base("workspace");
+        props["hostId"] = json!(workspace.host_id);
+        props["targets"] = json!(targets);
+        props["targetKey"] = json!(key);
+        props["choices"] = json!(choices);
+        props
+    }
+
+    /// What the start page did (one of its `actions`).
+    fn start_result(
+        &mut self,
+        result: &Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let (action, args) = action_of(result);
+        let props = self.start_props(cx);
+        let host = props["hostId"].as_str().unwrap_or(LOCAL).to_string();
+        match action.as_deref() {
+            None | Some("retry") => Ok(()),
+            Some("choose") => {
+                let key = word(&args, 0).ok_or("choose needs a place.")?;
+                let workspace = screens::mods(cx).and_then(|(_, perch)| perch.shown_place().1);
+                self.start_place = workspace.map(|id| (id, key));
+                cx.notify();
+                Ok(())
+            }
+            Some("start") => {
+                let agent = word(&args, 0).ok_or("start needs an agent.")?;
+                let cwd = props["targetKey"].as_str().map(str::to_string);
+                self.start_session(&host, cwd, &agent, cx)
+            }
+            Some("startIn") => {
+                let agent = word(&args, 1).ok_or("startIn needs an agent.")?;
+                self.start_session(&host, word(&args, 0), &agent, cx)
+            }
+            Some("openSettings") => self.run_command("global.settings", None, window, cx),
+            Some("manageAgents") => self.run_command("agents.manage", None, window, cx),
+            Some("addProject") => {
+                Err("Adding a project does not work in the native window yet.".into())
+            }
+            Some(other) => Err(format!("The native window cannot {other} yet.")),
+        }
+    }
+
     /// The launcher (`LauncherProps`, as the web's `NewSessionDialog` builds them): `target`'s
     /// computer's projects but its Quickchat, each with the workspace a new tab lands in (the one on
     /// screen when it is the project's, else its first), the project of what is shown marked.
@@ -1098,6 +1244,9 @@ impl Workspace {
             want("tabs", "tabs".into(), json!({}));
         }
         want("status", "status".into(), json!({}));
+        if self.tabs.visible().is_none() {
+            want("start", "start".into(), self.start_props(cx));
+        }
         let shown = self.tabs.shown();
         if shown.len() > 1 {
             for id in shown {
@@ -2677,22 +2826,6 @@ impl Workspace {
 
     // Drawing
 
-    fn bar_link(
-        &self,
-        id: &'static str,
-        text: &'static str,
-        on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
-    ) -> gpui::Stateful<gpui::Div> {
-        div()
-            .id(id)
-            .cursor_pointer()
-            .px_2()
-            .text_xs()
-            .text_color(rgb(DIM_COLOR))
-            .child(text)
-            .on_click(on_click)
-    }
-
     /// The visible panes: a lone one fills the area, a split is rows and columns of them.
     fn node(
         &self,
@@ -3221,6 +3354,9 @@ fn setting_row(title: &str, note: &str, control: AnyElement) -> gpui::Div {
 impl gpui::Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.viewport_height = f32::from(window.viewport_size().height);
+        if window.focused(cx).is_none() {
+            self.root_focus.focus(window, cx);
+        }
         if self.activation.is_none() {
             let send = |active: bool, sidebar: &Entity<Sidebar>, cx: &App| {
                 sidebar.read(cx).send(Command::WindowActive(active));
@@ -3415,25 +3551,30 @@ impl gpui::Render for Workspace {
                         .child(self.node(&node, focused.as_deref(), split, cx)),
                 );
             }
+            // The stock `start` mod draws what the main area shows with nothing open; without it
+            // its place says why.
             None => {
-                // Centred in the room above the status line, which stays at the foot.
-                area = area.child(
-                    div()
+                let start = match self.screens.inflow("start") {
+                    Some(view) => div()
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .child(view)
+                        .into_any_element(),
+                    None => div()
+                        .id("start-missing")
                         .flex_1()
                         .flex()
-                        .flex_col()
                         .items_center()
                         .justify_center()
-                        .gap_2()
-                        .text_sm()
-                        .text_color(rgb(DIM_COLOR))
-                        .child("Select a session")
-                        .child(self.bar_link(
-                            "open-palette",
-                            "Commands",
-                            cx.listener(|this, _, window, cx| this.toggle_palette(window, cx)),
-                        )),
-                );
+                        .child(hint(if screens::mods(cx).is_none() {
+                            "Mods are off in this window, so nothing draws the start page."
+                        } else {
+                            "No mod draws the start page. The stock one is restored when the app starts."
+                        }))
+                        .into_any_element(),
+                };
+                area = area.child(start);
             }
         }
         if let Some(view) = self.screens.inflow("status") {
@@ -3509,6 +3650,7 @@ impl gpui::Render for Workspace {
             .size_full()
             .bg(rgb(MAIN_BG))
             .key_context("Workspace")
+            .track_focus(&self.root_focus)
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if this.key(&event.keystroke, window, cx) {
                     cx.stop_propagation();

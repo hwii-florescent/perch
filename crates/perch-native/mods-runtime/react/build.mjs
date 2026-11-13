@@ -51,6 +51,7 @@ export const SCREENS = [
   "tab-menu",
   "keybind-help",
   "launcher",
+  "start",
   "tab-drag",
 ];
 /** Other stock screens a screen's folder carries, by the screen: they draw inside it (the close guard asks its question

@@ -1,7 +1,7 @@
 //! The cascade's value engine on the forms the app's compiled CSS uses.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { evalLength, mediaMatches, parseColor, substitute, toHex } from "../css.mjs";
+import { evalLength, expand, mediaMatches, parseColor, substitute, toHex } from "../css.mjs";
 
 const desktop = { width: 1000, height: 800 };
 
@@ -30,4 +30,10 @@ test("colours keep the theme token through var() and a mix with transparent", ()
   assert.deepEqual({ hex: toHex(mixed.rgba), token: mixed.token }, { hex: "#c8c8c826", token: "accent" });
   const fallback = parseColor(substitute("var(--missing, var(--teal))", lookup), theme);
   assert.deepEqual({ hex: toHex(fallback.rgba), token: fallback.token }, { hex: "#7fb8b8ff", token: "teal" });
+});
+
+test("font: inherit sets each font longhand to inherit; a full font value is kept", () => {
+  assert.deepEqual(expand("font", "inherit").map(([p]) => p), ["font-family", "font-size", "font-weight", "font-style", "line-height"]);
+  assert.ok(expand("font", "inherit").every(([, v]) => v === "inherit"));
+  assert.deepEqual(expand("font", "12px serif"), [["font", "12px serif"]]);
 });

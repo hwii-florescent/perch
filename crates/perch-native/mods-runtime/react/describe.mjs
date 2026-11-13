@@ -487,6 +487,11 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
   if (tag === "img") {
     node.kind = "image";
     node.src = element.props.src ?? null;
+    // The `width`/`height` attributes are the image's size where its style gives none, as a browser takes them.
+    for (const [attr, key] of [["width", "w"], ["height", "h"]]) {
+      const value = Number(element.props[attr]);
+      if (style[key] === undefined && element.props[attr] != null && Number.isFinite(value)) style[key] = value;
+    }
     return node;
   }
 
