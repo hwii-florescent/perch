@@ -55,6 +55,7 @@ const STYLE = {
   text_size: (el, v) => el.text_size(v),
   font_weight: (el, v) => el.font_weight(v),
   font_family: (el, v) => el.font_family(v),
+  font_features: (el, v) => el.font_features(v),
   line_height: (el, v) => el.line_height(v),
   italic: (el, v) => (v ? el.italic() : el.not_italic()),
   whitespace: (el, v) => (v === "nowrap" ? el.whitespace_nowrap() : el.whitespace_normal()),

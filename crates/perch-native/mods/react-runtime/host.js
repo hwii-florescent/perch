@@ -32,7 +32,6 @@ export const INERT = [
   "overlay:worktree",
   "overlay:new-file",
   "beginTabDrag",
-  "planUsage",
 ];
 
 /** Overlays that open as one of the window's screens: the screen, its props from the overlay's, and what the
@@ -162,6 +161,7 @@ const sessionsOf = (nav) => {
 };
 
 const NO_ADD = { status: "idle", error: null };
+const DESKTOP = { width: 1000, height: 800 };
 let nextOverlay = 1;
 const openOverlays = new Set();
 
@@ -171,9 +171,9 @@ export const host = {
   storage,
   clipboard: { writeText: async (text) => ambient?.write_to_clipboard(String(text)) },
   theme: () => perch.theme(),
-  // ponytail: the sidebar sits in the desktop layout, so its media queries (`min-[701px]:`) take a desktop window;
-  // a host call for the window's size would let a narrow window use the phone rules.
-  viewport: () => ({ width: 1000, height: 800 }),
+  // The window's logical size (`window.innerWidth`/`innerHeight`, media rules, `vw`/`vh`); a resize re-renders. Before
+  // a window has drawn the mod there is none: a desktop window's size.
+  viewport: () => snapshot("viewport", () => perch.viewport() ?? DESKTOP),
   subscribe(listener) {
     listeners.add(listener);
     return () => listeners.delete(listener);
@@ -187,6 +187,7 @@ export const host = {
   statusLine: () => snapshot("statusLine", () => perch.statusLine()),
   zoom: () => snapshot("zoom", () => perch.zoom()),
   paneLook: () => snapshot("paneLook", () => perch.paneLook()),
+  planUsage: () => snapshot("planUsage", () => perch.planUsage()),
   session: (id) => sessionsOf(host.navigation({})).get(id) ?? null,
   sessionFolders: () => snapshot("sessionFolders", () => ({ hostId: perch.navigation().hostId, folders: [] })),
   addProject: () => NO_ADD,

@@ -39,6 +39,8 @@ pub struct Store {
     /// The agent's context window use and cost, from `status.update`.
     pub context_tokens: Option<u64>,
     pub cost_usd: Option<f64>,
+    /// Plan usage as `usePlanUsage` gives it; null until the core answers `usage.get`.
+    pub plan_usage: serde_json::Value,
     pub local_capabilities: Vec<String>,
     pub host_capabilities: HashMap<String, Vec<String>>,
     pub host_entries: Vec<SshHostEntry>,

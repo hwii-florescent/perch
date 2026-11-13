@@ -778,6 +778,10 @@ pub enum Command {
     PinWorkspace { workspace_id: String, pinned: bool },
     /// Change settings: the `settings.update` patch, with only the fields that changed.
     UpdateSettings(Value),
+    /// Ask the core for plan usage (`usage.get`); `force` skips its short cache.
+    UsageGet { force: bool },
+    /// Spend one banked reset of an account (`usage.redeemReset`).
+    UsageRedeemReset { account_id: String },
 }
 
 /// What the window learns.
@@ -1029,6 +1033,15 @@ async fn live(
                 }
                 Some(Command::UpdateSettings(patch)) => {
                     connection.send(settings_frame(patch)).await?;
+                }
+                Some(Command::UsageGet { force }) => {
+                    connection.send(json!({"type": "usage.get", "force": force})).await?;
+                }
+                Some(Command::UsageRedeemReset { account_id }) => {
+                    state.clear_redeem_result();
+                    connection
+                        .send(json!({"type": "usage.redeemReset", "accountId": account_id}))
+                        .await?;
                 }
                 Some(Command::SetHostEnabled { host_id, enabled }) => {
                     if let Some(frame) = state.host_enabled_frame(&host_id, enabled) {
@@ -1523,6 +1536,85 @@ mod tests {
                 socket.send(Message::text(frame.to_string())).await.unwrap();
             }
         }
+    }
+
+    #[tokio::test]
+    async fn plan_usage_is_asked_for_and_kept_as_the_web_keeps_it() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let core = Core::with_token(
+            &format!("http://{}/", listener.local_addr().unwrap()),
+            "token",
+        )
+        .unwrap();
+        let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = asked.clone();
+        let account = json!({"provider": "claude", "label": "dev@example.com", "plan": "Max 5x",
+                             "windows": [{"label": "5h", "usedPercent": 42.5, "windowMinutes": 300,
+                                          "resetsAt": 1767312000}]});
+        let reply = account.clone();
+        let hello = json!({"type": "session.list", "sessions": []});
+        tokio::spawn(scripted_core(listener, vec![hello], move |sent| {
+            seen.lock().unwrap().push(sent.clone());
+            match sent["type"].as_str() {
+                Some("usage.get") => {
+                    vec![json!({"type": "usage.result", "accounts": [reply.clone()]})]
+                }
+                Some("usage.redeemReset") => vec![json!({"type": "usage.redeemResult",
+                    "accountId": sent["accountId"], "outcome": "noCredit"})],
+                _ => vec![],
+            }
+        }));
+        let (commands_tx, commands) = futures::channel::mpsc::unbounded();
+        let (updates_tx, mut updates) = futures::channel::mpsc::unbounded();
+        let following = tokio::spawn(follow(
+            move || Ok(core.clone()),
+            commands,
+            updates_tx,
+            Duration::from_millis(50),
+        ));
+        let first = model_where(&mut updates, |m| m.connected).await;
+        assert!(
+            first.store.plan_usage.is_null(),
+            "nothing until the core answers"
+        );
+
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        commands_tx
+            .unbounded_send(Command::UsageGet { force: true })
+            .unwrap();
+        let model = model_where(&mut updates, |m| !m.store.plan_usage.is_null()).await;
+        let usage = &model.store.plan_usage;
+        assert_eq!(usage["usage"], json!([account]));
+        assert_eq!(usage["spend"], Value::Null, "an older core sends no spend");
+        assert!(usage["updatedAt"].as_u64().unwrap() >= before, "{usage}");
+        assert_eq!(usage["redeemResult"], Value::Null);
+
+        commands_tx
+            .unbounded_send(Command::UsageRedeemReset {
+                account_id: "codex:1".into(),
+            })
+            .unwrap();
+        let model = model_where(&mut updates, |m| {
+            !m.store.plan_usage["redeemResult"].is_null()
+        })
+        .await;
+        assert_eq!(
+            model.store.plan_usage["redeemResult"],
+            json!({"type": "usage.redeemResult", "accountId": "codex:1", "outcome": "noCredit"})
+        );
+        let sent = asked.lock().unwrap().clone();
+        assert!(
+            sent.contains(&json!({"type": "usage.get", "force": true})),
+            "{sent:?}"
+        );
+        assert!(
+            sent.contains(&json!({"type": "usage.redeemReset", "accountId": "codex:1"})),
+            "{sent:?}"
+        );
+        following.abort();
     }
 
     #[tokio::test]

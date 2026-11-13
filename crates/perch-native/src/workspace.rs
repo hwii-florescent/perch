@@ -1451,6 +1451,19 @@ impl Workspace {
             "view.zoomIn" | "view.zoomInShift" | "app.zoom_in" => self.zoom_to(self.zoom.in_(), cx),
             "view.zoomOut" | "app.zoom_out" => self.zoom_to(self.zoom.out(), cx),
             "view.zoomReset" | "app.zoom_reset" => self.zoom_to(self.zoom.reset(), cx),
+            "usage.get" => {
+                let force = args.and_then(|a| a.get("force")).and_then(Value::as_bool);
+                let force = force.unwrap_or(false);
+                self.sidebar
+                    .update(cx, |sidebar, _| sidebar.send(Command::UsageGet { force }));
+            }
+            "usage.redeemReset" => {
+                let account_id = text("accountId").ok_or("This command needs {accountId}.")?;
+                let account_id = account_id.to_string();
+                self.sidebar.update(cx, |sidebar, _| {
+                    sidebar.send(Command::UsageRedeemReset { account_id })
+                });
+            }
             // With a New session screen, the sidebar's target opens it instead of its panel.
             "tabs.new" | "tab.new" => {
                 self.sidebar

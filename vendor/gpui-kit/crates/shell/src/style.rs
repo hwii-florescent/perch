@@ -150,6 +150,11 @@ const PARAM_STYLES: &[(&str, &str)] = &[
     ),
     ("text_size", "Sets the font size."),
     ("font_family", "Sets the font family."),
+    // PERCH: OpenType features, as CSS `font-variant-numeric: tabular-nums` asks for `tnum`.
+    (
+        "font_features",
+        "Turns on OpenType features by tag, comma-separated (`\"tnum\"`), which children inherit.",
+    ),
     (
         "font_weight",
         "Sets the font weight to a number between 100 and 900.",
@@ -490,6 +495,19 @@ pub fn apply_param(
         "text_bg" => refinement.text_bg(color!()),
         "text_size" => refinement.text_size(absolute!()),
         "font_family" => refinement.font_family(arg(args, 0, name)?.as_str()?.to_owned()),
+        // PERCH: OpenType features by tag.
+        "font_features" => {
+            let tags = arg(args, 0, name)?.as_str()?.to_owned();
+            let on = tags
+                .split(',')
+                .map(str::trim)
+                .filter(|tag| !tag.is_empty())
+                .map(|tag| (tag.to_string(), 1))
+                .collect();
+            let mut refinement = refinement;
+            refinement.text.font_features = Some(gpui::FontFeatures(std::sync::Arc::new(on)));
+            refinement
+        }
         "font_weight" => refinement.font_weight(font_weight(number!(), name)?),
         // Line height is the one length whose bare number is a multiplier, not
         // pixels: `line_height(1.45)` means 1.45x the font size everywhere else

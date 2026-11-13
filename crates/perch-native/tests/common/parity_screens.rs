@@ -211,6 +211,13 @@ pub fn model_from(data: &Value) -> Model {
         }
         state.apply(&message(update));
     }
+    // Plan usage as the web's store holds it (`usage.result` as it came, received when the
+    // store says). The fixture's spend predates the core's `unpriced`, so it is kept as JSON,
+    // as the web keeps it.
+    if data["usage"].as_array().is_some_and(|a| !a.is_empty()) {
+        let at = data["usageUpdatedAt"].as_u64().unwrap_or(0);
+        state.usage_result(data["usage"].clone(), data["spend"].clone(), at);
+    }
     // A host's agent list as the core answered it. A list still loading keeps the last answer;
     // one that failed was never answered.
     for (host, catalog) in data["agentManifestsByHost"]
@@ -326,6 +333,10 @@ pub fn publish(perch: &Perch, fixture: &ScreenFixture, id: &str) {
         text("activeWorkspaceId"),
     );
     perch.set_window(window);
+    // The window's logical size, as the window publishes it (the screen itself is drawn at the
+    // state's size).
+    let (_, viewport) = fixture.size(id);
+    perch.set_viewport(viewport);
     if let Some(props) = fixture.props(id) {
         perch.set_props(&fixture.screen, props);
     }
@@ -351,6 +362,7 @@ pub fn native_sdk(perch: &Perch, expected: &Value, props: Option<&Value>) -> Val
             "statusLine" => call("statusLine", vec![]),
             "zoom" => call("zoom", vec![]),
             "paneLook" => call("paneLook", vec![]),
+            "planUsage" => call("planUsage", vec![]),
             "notifications" => call("notifications", vec![])["items"].clone(),
             "agentChoices" => {
                 let host = props

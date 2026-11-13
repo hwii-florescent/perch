@@ -258,6 +258,15 @@ function boxStyle(computed, report) {
   return s;
 }
 
+/** The OpenType feature tags (`"tnum,zero"`) of a `font-variant-numeric` value; `""` for normal, null for a keyword
+ * with no tag here. */
+const NUMERIC = { "tabular-nums": "tnum", "proportional-nums": "pnum", "lining-nums": "lnum", "oldstyle-nums": "onum", "slashed-zero": "zero", "diagonal-fractions": "frac", "stacked-fractions": "afrc", ordinal: "ordn" };
+function numericFeatures(value) {
+  if (!value || value === "normal") return "";
+  const tags = String(value).trim().split(/\s+/).map((word) => NUMERIC[word]);
+  return tags.every(Boolean) ? tags.join(",") : null;
+}
+
 /** The text styles a node's computed style asks for, before inheritance is taken into account. */
 function textWanted(computed, measure) {
   const v = computed.values;
@@ -266,6 +275,7 @@ function textWanted(computed, measure) {
   return {
     text_color: color,
     text_size: Math.round(v["font-size"] * 1000) / 1000,
+    font_features: numericFeatures(v["font-variant-numeric"]) ?? "",
     font_weight: v["font-weight"],
     line_height: lh.factor !== undefined ? { factor: lh.factor } : { px: Math.round(lineHeightPx(v, measure) * 1000) / 1000 },
     font_family: ENGINE_FAMILY(v["font-family"]),
@@ -281,7 +291,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 function textStyle(computed, wanted, inheritedText) {
   const s = {};
   const set = (key, cssProps) => cssProps.some((p) => !computed.inherited.has(p));
-  for (const [key, props] of [["text_color", ["color"]], ["text_size", ["font-size"]], ["font_weight", ["font-weight"]], ["font_family", ["font-family"]], ["italic", ["font-style"]], ["whitespace", ["white-space"]], ["text_align", ["text-align"]]]) {
+  for (const [key, props] of [["text_color", ["color"]], ["text_size", ["font-size"]], ["font_weight", ["font-weight"]], ["font_family", ["font-family"]], ["italic", ["font-style"]], ["whitespace", ["white-space"]], ["text_align", ["text-align"]], ["font_features", ["font-variant-numeric"]]]) {
     if (set(key, props) || !same(wanted[key], inheritedText[key])) s[key] = wanted[key];
   }
   const wantedPx = lineHeightOf(wanted.line_height, wanted.text_size);
@@ -328,7 +338,7 @@ function reportDeclarations(computed, report) {
         if (value !== "normal" && !(value?.px === 0)) report("approximated", prop, value?.px !== undefined ? `${Math.round(value.px * 1000) / 1000}px` : value, source, "the run is as wide as with the spacing (room after it), the letters are not spread");
         break;
       case "font-variant-numeric":
-        if (value !== "normal") report("unsupported", prop, value, source, "no font features in the engine");
+        if (value !== "normal" && numericFeatures(value) === null) report("unsupported", prop, value, source);
         break;
       case "text-transform":
         if (value !== "none") report("approximated", prop, value, source, "applied to the text in JS");
@@ -603,7 +613,7 @@ function themeOf(perch) {
 
 /** Nothing inherited at the top of a described tree: its root sets every text key, so nothing depends on the
  * engine's own defaults. */
-const ENGINE_ROOT_TEXT = {};
+const ENGINE_ROOT_TEXT = { font_features: "" };
 
 /**
  * Describes the document for the engine: `root` (the screen's container) and `overlays` (what was portalled into

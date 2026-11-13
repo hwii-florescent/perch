@@ -61,7 +61,10 @@ export function screen(id, Component, options = {}) {
         const raw = JSON.stringify(screenProps());
         if (refresh(false) || raw !== this.raw || settingsMoved()) {
           cx.timer.after(0, (task) => {
+            const size = JSON.stringify(host.viewport());
             refresh(true);
+            // A new window size changes media rules and `vw`, which no component re-renders for: describe again.
+            if (JSON.stringify(host.viewport()) !== size) this.handle.describe();
             // The web reads its view settings when it mounts: settings changed elsewhere mount it again.
             const moved = settingsMoved();
             if (moved) this.mounts += 1;

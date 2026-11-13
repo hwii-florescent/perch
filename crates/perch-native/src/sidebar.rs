@@ -326,6 +326,9 @@ pub struct State {
     status: Option<(String, String)>,
     /// What the last `status.update` said of the agent's context window and cost.
     usage: (Option<u64>, Option<f64>),
+    /// Plan usage as the web's `usePlanUsage` gives it (`usage.result`, `usage.redeemResult`):
+    /// `{usage, updatedAt, spend, redeemResult}`, null until the core first answers.
+    plan_usage: Value,
     /// What each remote computer's `host.info` said it can do.
     host_capabilities: HashMap<String, Vec<String>>,
     snapshots: HashMap<String, SnapshotState>,
@@ -440,6 +443,31 @@ impl State {
         self.revision += 1;
     }
 
+    /// The core's `usage.result`, received at `at` (ms since the epoch, the web's `Date.now()`).
+    pub fn usage_result(&mut self, accounts: Value, spend: Value, at: u64) {
+        let usage = self.plan_usage_mut();
+        usage["usage"] = accounts;
+        usage["spend"] = spend;
+        usage["updatedAt"] = json!(at);
+        self.revision += 1;
+    }
+
+    /// A redeem asked for: the last answer goes, as the web's `redeemUsageReset` clears it.
+    pub fn clear_redeem_result(&mut self) {
+        if !self.plan_usage.is_null() {
+            self.plan_usage["redeemResult"] = Value::Null;
+            self.revision += 1;
+        }
+    }
+
+    fn plan_usage_mut(&mut self) -> &mut Value {
+        if self.plan_usage.is_null() {
+            self.plan_usage =
+                json!({"usage": [], "updatedAt": 0, "spend": null, "redeemResult": null});
+        }
+        &mut self.plan_usage
+    }
+
     pub fn viewing(&self) -> Option<&str> {
         self.viewing.as_deref()
     }
@@ -494,6 +522,16 @@ impl State {
             } => {
                 self.status = Some((cwd.clone(), branch.clone()));
                 self.usage = (*context_tokens, *cost_usd);
+            }
+            ServerMessage::UsageResult { accounts, spend } => {
+                let at = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_millis() as u64);
+                self.usage_result(json!(accounts), json!(spend), at);
+            }
+            ServerMessage::UsageRedeemResult { .. } => {
+                let result = serde_json::to_value(message).unwrap_or(Value::Null);
+                self.plan_usage_mut()["redeemResult"] = result;
             }
             ServerMessage::SessionList { sessions } => {
                 self.sessions = sessions.clone();
@@ -789,6 +827,7 @@ impl State {
             status: self.status.clone(),
             context_tokens: self.usage.0,
             cost_usd: self.usage.1,
+            plan_usage: self.plan_usage.clone(),
             local_capabilities: self.local_capabilities.clone(),
             host_capabilities: self.host_capabilities.clone(),
             host_entries: self.host_entries.clone(),

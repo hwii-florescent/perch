@@ -330,6 +330,7 @@ impl Screens {
         let viewport = (f32::from(size.width), f32::from(size.height));
         if viewport != self.viewport {
             self.viewport = viewport;
+            perch.set_viewport(viewport);
             for open in &mut self.floating {
                 open.props = with_viewport(&open.props, viewport);
                 perch.set_props(open.id, open.props.clone());

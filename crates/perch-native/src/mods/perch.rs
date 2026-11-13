@@ -133,6 +133,8 @@ struct Data {
     /// A workspace focused with no session of it on screen.
     workspace_id: Option<String>,
     sidebar: SidebarSettings,
+    /// The window's logical size (`set_viewport`).
+    viewport: (f32, f32),
     window: WindowState,
     /// A theme chosen here, until the core says which one is set.
     chosen_theme: Option<String>,
@@ -265,6 +267,16 @@ impl Perch {
         }
         if keys_changed {
             self.bump(KEYS);
+        }
+    }
+
+    /// Publishes the window's logical size. Call [`Self::flush`] after.
+    pub fn set_viewport(&self, viewport: (f32, f32)) {
+        let mut data = self.0.data.borrow_mut();
+        if data.viewport != viewport {
+            data.viewport = viewport;
+            drop(data);
+            self.bump(WINDOW);
         }
     }
 
@@ -464,7 +476,7 @@ impl Perch {
                 }));
             }
         };
-        for (id, title, args) in OWN.iter().chain(&WINDOW_COMMANDS) {
+        for (id, title, args) in OWN.iter().chain(&WINDOW_COMMANDS).chain(&USAGE_COMMANDS) {
             push(id, title, Some(args));
         }
         for shortcut in all_shortcuts() {
@@ -490,6 +502,7 @@ impl Perch {
     fn known(&self, id: &str) -> bool {
         OWN.iter()
             .chain(&WINDOW_COMMANDS)
+            .chain(&USAGE_COMMANDS)
             .any(|(own, _, _)| *own == id)
             || TYPED.iter().any(|(typed, _)| *typed == id)
             || all_shortcuts().any(|s| s.id == id && s.scope != Scope::Leader)
@@ -714,6 +727,31 @@ impl Perch {
                 }),
             )
             .function("statusLine", both(|perch, _| perch.status_line()))
+            // `usePlanUsage`'s value: the web's empty one until the core answers `usage.get`.
+            .function(
+                "planUsage",
+                reader(STORE, |perch, _| {
+                    let usage = perch.0.data.borrow().model.store.plan_usage.clone();
+                    if usage.is_null() {
+                        json!({"usage": [], "updatedAt": 0, "spend": null, "redeemResult": null})
+                    } else {
+                        usage
+                    }
+                }),
+            )
+            // The window's logical size (`window.innerWidth`/`innerHeight`, media rules).
+            .function(
+                "viewport",
+                reader(WINDOW, |perch, _| {
+                    // Null before a window has drawn the mod.
+                    let (width, height) = perch.0.data.borrow().viewport;
+                    if width > 0. && height > 0. {
+                        json!({"width": width, "height": height})
+                    } else {
+                        Value::Null
+                    }
+                }),
+            )
             .function("workspaceTabs", both(|perch, _| perch.workspace_tabs()))
             .function("focus", both(|perch, _| perch.focus()))
             .function("terminals", both(|perch, _| perch.terminals()))
@@ -1229,6 +1267,21 @@ const WINDOW_COMMANDS: [(&str, &str, &str); 11] = [
         "{id}",
     ),
     ("notification.dismiss", "Put a notification away", "{id}"),
+];
+
+/// Plan usage, as the web's status bar asks for it (`usePlanUsage`, `refreshUsage`,
+/// `redeemUsageReset`): the window sends them to the core, whose answer is `planUsage()`.
+const USAGE_COMMANDS: [(&str, &str, &str); 2] = [
+    (
+        "usage.get",
+        "Ask the core for plan usage (force: past its cache)",
+        "{force?}",
+    ),
+    (
+        "usage.redeemReset",
+        "Spend one banked reset of a plan account",
+        "{accountId}",
+    ),
 ];
 
 /// The promise half of a window command.

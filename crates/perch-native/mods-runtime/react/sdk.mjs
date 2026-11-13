@@ -183,9 +183,25 @@ export const useStatusLine = () => useHostSnapshot((perch) => perch.statusLine()
 export const useZoom = () => useHostSnapshot((perch) => perch.zoom());
 export const usePaneLook = () => useHostSnapshot((perch) => perch.paneLook());
 const NO_USAGE = Object.freeze({ usage: Object.freeze([]), updatedAt: 0, spend: null, redeemResult: null });
-/** Plan usage as the host has it (`perch.planUsage()`), none where it keeps none. */
-export const usePlanUsage = () => useHostSnapshot((perch) => perch.planUsage?.() ?? NO_USAGE);
-export const refreshUsage = () => host().command("usage.refresh", { force: true });
+/** Plan usage as the core last reported it (`perch.planUsage()`). With `keepFresh`, asks on connect and then every
+ * 3 min (the core's cache) while the caller is mounted, as the web's does. */
+export function usePlanUsage(options) {
+  const keepFresh = !!options?.keepFresh;
+  const connected = useHostSnapshot((perch) => perch.statusLine?.().connected ?? false);
+  const usage = useHostSnapshot((perch) => perch.planUsage?.() ?? NO_USAGE);
+  useEffect(() => {
+    if (!keepFresh || !connected) return undefined;
+    let timer;
+    const ask = () => {
+      host().command("usage.get");
+      timer = setTimeout(ask, 180_000);
+    };
+    ask();
+    return () => clearTimeout(timer);
+  }, [keepFresh, connected]);
+  return usage;
+}
+export const refreshUsage = () => host().command("usage.get", { force: true });
 export const redeemUsageReset = (accountId) => host().command("usage.redeemReset", { accountId });
 export const resetZoom = () => runCommand("app.zoom_reset");
 /** A tab's fill and text by its pane state: the app's `TAB_PANE_CLASS` (`tabPaneState.ts`, whose module also holds

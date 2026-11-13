@@ -13,7 +13,7 @@ use gpui::{
 };
 use gpui_shell::probe::{self, ProbeRecord};
 use perch_core::protocol::ServerMessage;
-use perch_native::client::Update;
+use perch_native::client::{Command, Update};
 use perch_native::mods::{self, POLL};
 use perch_native::sidebar::State;
 use perch_native::ui::{Workspace, SIDEBAR_WIDTH};
@@ -186,7 +186,7 @@ fn main() {
         Arc::new(()),
         gpui_platform::current_headless_renderer,
     );
-    let (tx, _asked) = unbounded();
+    let (tx, mut asked) = unbounded();
     let model = state(&["alpha", "bravo", "charlie"]).model();
     let window = cx
         .open_window(size(px(WIDTH), px(HEIGHT)), |_, cx| {
@@ -316,6 +316,72 @@ fn main() {
         "app.zoom_reset ran"
     );
     assert!(rig.record("zoom-indicator").is_none(), "at 100% it goes");
+
+    // Plan usage: the status bar asks the core once it is up (and every 3 minutes after, as the
+    // web's does), and shows the core's answer.
+    let usage_asks = std::iter::from_fn(|| asked.try_recv().ok())
+        .filter(|c| matches!(c, Command::UsageGet { force: false }))
+        .count();
+    assert_eq!(usage_asks, 1, "usage.get went out once on connect");
+    assert!(rig.keys("usage-account").is_empty(), "no answer yet");
+    let mut answered = state(&["alpha", "bravo", "charlie"]);
+    answered.usage_result(
+        json!([
+            {"provider": "claude", "label": "dev@example.com", "plan": "Max 5x",
+             "windows": [{"label": "5h", "usedPercent": 42, "windowMinutes": 300,
+                          "resetsAt": 1767312000}]},
+            {"provider": "codex", "label": "dev@example.com", "plan": "Plus",
+             "windows": [{"label": "5h", "usedPercent": 93, "windowMinutes": 300,
+                          "resetsAt": 1767312000}]},
+        ]),
+        Value::Null,
+        1767312000000,
+    );
+    let model = answered.model();
+    rig.ws(|ws, _, cx| {
+        ws.sidebar()
+            .update(cx, |sidebar, cx| sidebar.apply(Update::Model(model), cx))
+    });
+    rig.draw();
+    let account = rig
+        .record("usage-account")
+        .expect("the answer reaches the status bar");
+    assert!(
+        account.bounds.size.width > px(40.),
+        "an account and its window"
+    );
+    assert!(
+        rig.record("usage-account@1").is_some(),
+        "and the other account"
+    );
+    assert!(rig.record("usage-unavailable").is_none());
+
+    // The window's size is the screens' viewport: below 900 px the middle block goes, and it
+    // comes back when the window widens, without a restart.
+    let resize = |rig: &mut Rig, width: f32| {
+        rig.cx
+            .update_window(rig.window.into(), |_, window: &mut Window, cx| {
+                window.resize(size(px(width), px(HEIGHT)));
+                window.bounds_changed(cx);
+            })
+            .unwrap();
+        rig.draw();
+    };
+    rig.ws(|ws, window, cx| ws.run_command("app.zoom_in", None, window, cx))
+        .unwrap();
+    assert!(
+        rig.record("status-details").is_some(),
+        "wide: details shown"
+    );
+    resize(&mut rig, 850.);
+    assert!(
+        rig.record("status-details").is_none(),
+        "narrow: details hidden"
+    );
+    resize(&mut rig, WIDTH);
+    assert!(rig.record("status-details").is_some(), "wide again");
+    rig.ws(|ws, window, cx| ws.run_command("app.zoom_reset", None, window, cx))
+        .unwrap();
     println!("mods_chrome_window: status line ok");
 
     // A split heads each pane: leaving the split shows that pane alone, closing one closes its tab.
