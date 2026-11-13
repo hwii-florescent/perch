@@ -3189,11 +3189,14 @@ impl gpui::Render for Workspace {
                 );
             }
             None => {
-                area = area.items_center().justify_center().child(
+                // Centred in the room above the status line, which stays at the foot.
+                area = area.child(
                     div()
+                        .flex_1()
                         .flex()
                         .flex_col()
                         .items_center()
+                        .justify_center()
                         .gap_2()
                         .text_sm()
                         .text_color(rgb(DIM_COLOR))

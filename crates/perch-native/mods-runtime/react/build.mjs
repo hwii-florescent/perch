@@ -35,7 +35,11 @@ export const OUT = path.join(repo, "crates/perch-native/mods");
 export const RUNTIME = "react-runtime";
 /** The stock screens on the React runtime, by the id of their folder in `packages/web/src/stock-ui/`. Adding a screen:
  * its id here, then `npm run build:mods-runtime`, then its `main.js`, `mod.json` and tests (see the findings recipe). */
-export const SCREENS = ["sidebar"];
+export const SCREENS = [
+  "sidebar",
+  "status",
+  "pane-header",
+];
 /** Files under the folders the build writes that it does not write. */
 const HAND_WRITTEN = new Set([`${RUNTIME}/host.js`, `${RUNTIME}/screen.js`, ...SCREENS.flatMap((id) => [`${id}/main.js`, `${id}/mod.json`])]);
 const requireWeb = createRequire(path.join(web, "package.json"));

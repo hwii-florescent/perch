@@ -1,0 +1,5 @@
+{
+  "name": "Status bar",
+  "description": "The web app's stock status bar, unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

@@ -117,6 +117,28 @@ pub const STOCK: &[(&str, &str)] = &[
         "sidebar/sidebar/parts.js",
         include_str!("../mods/sidebar/sidebar/parts.js"),
     ),
+    (
+        "pane-header/main.js",
+        include_str!("../mods/pane-header/main.js"),
+    ),
+    (
+        "pane-header/mod.json",
+        include_str!("../mods/pane-header/mod.json"),
+    ),
+    (
+        "pane-header/pane-header/main.js",
+        include_str!("../mods/pane-header/pane-header/main.js"),
+    ),
+    ("status/main.js", include_str!("../mods/status/main.js")),
+    ("status/mod.json", include_str!("../mods/status/mod.json")),
+    (
+        "status/status/main.js",
+        include_str!("../mods/status/status/main.js"),
+    ),
+    (
+        "status/status/usage.js",
+        include_str!("../mods/status/status/usage.js"),
+    ),
 ];
 
 /// Where user mods live: `native-mods/` in the folder that holds the core's database
