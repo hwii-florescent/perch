@@ -44,7 +44,7 @@ use crate::terminal::links::{open_in_system, Target};
 use crate::terminal::{Status, TerminalEvent, TerminalView};
 use crate::ui::{
     hint, label, tint, LaunchFailed, OpenSession, Sidebar, DIM_COLOR, MAIN_BG, SELECTED_BG,
-    SIDEBAR_BG, TITLE_COLOR,
+    SIDEBAR_BG, SIDEBAR_WIDTH, TITLE_COLOR,
 };
 use crate::zoom::Zoom;
 use futures::channel::mpsc::UnboundedSender;
@@ -233,6 +233,8 @@ pub struct Workspace {
     screen_focus: gpui::FocusHandle,
     notifications: Vec<Notification>,
     next_notification: u64,
+    /// Tells the core whether this window is the one being looked at.
+    activation: Option<Subscription>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -250,13 +252,16 @@ impl Workspace {
             this.pending_split = None;
             cx.notify();
         });
-        // The sidebar's own changes (hiding it, a count, a session's state) redraw the window. Its
-        // New session panel opens as a screen when a mod draws one.
+        // The sidebar's own changes (hiding it, a count, a session's state) redraw the window. A
+        // New session asked for (`sessions.new`, `nests.scratchpad`) opens the `new-session` screen;
+        // with no mod drawing one, the window says so.
         let observed = cx.observe(&sidebar, |this, sidebar, cx| {
-            if this.screens.has("new-session", cx) {
-                let target = sidebar.update(cx, |sidebar, _| sidebar.take_new_session());
-                if let Some(target) = target {
+            let target = sidebar.update(cx, |sidebar, _| sidebar.take_new_session());
+            if let Some(target) = target {
+                if this.screens.has("new-session", cx) {
                     this.open_new_session(target, None, cx);
+                } else {
+                    this.notice = Some("No mod draws the New session screen.".into());
                 }
             }
             cx.notify()
@@ -285,6 +290,7 @@ impl Workspace {
             screen_focus: cx.focus_handle(),
             notifications: Vec::new(),
             next_notification: 0,
+            activation: None,
             _subscriptions: vec![opened, failed, observed],
         }
     }
@@ -390,6 +396,11 @@ impl Workspace {
     /// The floating screens open, bottom first.
     pub fn screens_open(&self) -> Vec<&'static str> {
         self.screens.floating.iter().map(|f| f.id).collect()
+    }
+
+    /// The in-flow screen `key` on screen (`sidebar`, `tabs`, `pane-header#<id>`), when a mod draws it.
+    pub fn screen_view(&self, key: &str) -> Option<Entity<crate::mods::ModView>> {
+        self.screens.inflow(key)
     }
 
     /// The props an open floating screen was given.
@@ -1545,11 +1556,23 @@ impl Workspace {
                 self.select(Some(n.ok_or_else(|| format!("No command {name}."))?), cx)?;
             }
             _ => {
-                let handled = self
-                    .sidebar
-                    .update(cx, |sidebar, cx| sidebar.run_action(name, cx));
-                if !handled {
-                    return Err(format!("No command {name}."));
+                // The sidebar's view settings (`sidebar.organize`, `project.fold`, ...) are the
+                // `perch` module's, which the sidebar mod reads.
+                let own = screens::mods(cx).and_then(|(_, perch)| {
+                    let result = perch.run_own(name, args.unwrap_or(&Value::Null))?;
+                    perch.flush(cx);
+                    Some(result)
+                });
+                match own {
+                    Some(result) => result?,
+                    None => {
+                        let handled = self
+                            .sidebar
+                            .update(cx, |sidebar, cx| sidebar.run_action(name, cx));
+                        if !handled {
+                            return Err(format!("No command {name}."));
+                        }
+                    }
                 }
             }
         }
@@ -2982,6 +3005,18 @@ fn setting_row(title: &str, note: &str, control: AnyElement) -> gpui::Div {
 impl gpui::Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.viewport_height = f32::from(window.viewport_size().height);
+        if self.activation.is_none() {
+            let send = |active: bool, sidebar: &Entity<Sidebar>, cx: &App| {
+                sidebar.read(cx).send(Command::WindowActive(active));
+            };
+            send(window.is_window_active(), &self.sidebar, cx);
+            self.activation = Some(cx.observe_window_activation(
+                window,
+                move |this, window, cx| {
+                    send(window.is_window_active(), &this.sidebar, cx);
+                },
+            ));
+        }
         // Screens mods draw: the notifications screen is up while there are notifications, the
         // floating ones opened since the last draw get their views, the in-flow ones are placed.
         let toast_up = self.screens.is_open("toast");
@@ -3050,23 +3085,28 @@ impl gpui::Render for Workspace {
         };
         let sidebar = if let Some(view) = self.screens.inflow("sidebar").filter(|_| visible) {
             let (width, _) = self.screens.size("sidebar", cx);
-            // ponytail: the Rust sidebar is still drawn, clipped to nothing, because its render
-            // tells the core when the window is active; that belongs in the window, then this goes.
             div()
                 .flex_none()
                 .w(px(width))
                 .h_full()
                 .child(view)
-                .child(
-                    div()
-                        .absolute()
-                        .size_0()
-                        .overflow_hidden()
-                        .child(self.sidebar.clone()),
-                )
                 .into_any_element()
         } else if visible {
-            self.sidebar.clone().into_any_element()
+            // The stock `sidebar` mod draws the sidebar; without it its place says why.
+            let why = if screens::mods(cx).is_none() {
+                "Mods are off in this window, so nothing draws the sidebar."
+            } else {
+                "No mod draws the sidebar. The stock one is restored when the app starts."
+            };
+            div()
+                .id("sidebar")
+                .flex_none()
+                .w(px(SIDEBAR_WIDTH))
+                .h_full()
+                .p_3()
+                .bg(rgb(SIDEBAR_BG))
+                .child(hint(why))
+                .into_any_element()
         } else {
             // Hidden, the sidebar leaves a control that shows it, with the count that needs you.
             let toggle = self.sidebar.clone();
@@ -3146,7 +3186,11 @@ impl gpui::Render for Workspace {
             let (_, height) = self.screens.size("status", cx);
             area = area.child(div().flex_none().w_full().h(px(height)).child(view));
         }
-        if let Some(notice) = &self.notice {
+        let notice = self
+            .notice
+            .clone()
+            .or_else(|| self.sidebar.read(cx).notice().map(str::to_string));
+        if let Some(notice) = notice {
             area = area.child(
                 div()
                     .absolute()
@@ -3154,7 +3198,7 @@ impl gpui::Render for Workspace {
                     .left_3()
                     .text_xs()
                     .text_color(rgb(DIM_COLOR))
-                    .child(notice.clone()),
+                    .child(notice),
             );
         }
         let floating: Vec<AnyElement> = self

@@ -15,7 +15,8 @@
 //! });
 //! ```
 //!
-//! Elements are what the mod names with `.id(...)`: `name`, or `name:key` for one of many.
+//! Elements are what the mod names with `.id(...)`: `name`, or `name:key` for one of many. An id that starts with
+//! `~` is not an element: a mod that needs ids for handlers on unnamed nodes (the React runtime) marks them so.
 
 #![allow(dead_code)]
 
@@ -307,6 +308,7 @@ pub fn elements(
 ) -> Vec<Value> {
     let mut list: Vec<(String, Option<String>, ProbeRecord)> = records
         .into_iter()
+        .filter(|r| !r.name.starts_with('~'))
         .map(|r| {
             let (name, key) = match r.name.split_once(':') {
                 Some((name, key)) => (name.to_string(), Some(key.to_string())),

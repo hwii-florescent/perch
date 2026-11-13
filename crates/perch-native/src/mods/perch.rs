@@ -496,7 +496,7 @@ impl Perch {
     }
 
     /// Runs one of the commands this module owns (the navigation's view). `None`: not one of them.
-    fn run_own(&self, id: &str, args: &Value) -> Option<Result<(), String>> {
+    pub(crate) fn run_own(&self, id: &str, args: &Value) -> Option<Result<(), String>> {
         let text = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_string);
         let result = match id {
             "host.select" => (|| {
@@ -631,6 +631,7 @@ impl Perch {
         let start = self.clone();
         let (props, props_id) = (self.clone(), id.clone());
         let (close, close_id) = (self.clone(), id.clone());
+        let opener = self.clone();
         HostModule::new("perch")
             .function("props", move |_| {
                 props.read(&props_id, &format!("props:{props_id}"));
@@ -640,6 +641,18 @@ impl Perch {
             .function("close", move |args| {
                 let result = args.get(0).map(from_host).unwrap_or(Value::Null);
                 close.close_screen(&close_id, result)
+            })
+            .async_function("openScreen", move |args| {
+                let screen = args.string(0)?.to_string();
+                let props = args.get(1).map(from_host).unwrap_or_else(|| json!({}));
+                let rx = opener.open_screen(&screen, props)?;
+                Ok(async move {
+                    match rx.await {
+                        Ok(Ok(result)) => Ok(to_host(&result)),
+                        Ok(Err(error)) => Err(HostError::new(error)),
+                        Err(_) => Err(HostError::new("The window went before the screen closed.")),
+                    }
+                })
             })
             .function(
                 "notifications",
@@ -785,6 +798,53 @@ impl Perch {
             })
         })
         .ok_or_else(|| HostError::new("No app to run the command in."))?;
+        Ok(rx)
+    }
+
+    /// Opens floating screen `id` with `props` for the calling mod, once its script has unwound; the
+    /// receiver gets the screen's result (`null` when dismissed, or when another opening of it
+    /// replaces this one), or an error when no mod draws that screen.
+    fn open_screen(
+        &self,
+        id: &str,
+        props: Value,
+    ) -> Result<futures::channel::oneshot::Receiver<Result<Value, String>>, HostError> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let attached = self.0.attached.borrow();
+        let attached = attached
+            .as_ref()
+            .ok_or_else(|| HostError::new("No window opens screens for this mod."))?;
+        let (handle, workspace, id) = (attached.handle, attached.workspace.clone(), id.to_string());
+        gpui_shell::with_current_app(|cx| {
+            cx.defer(move |cx| {
+                let Some(workspace) = workspace.upgrade() else {
+                    return;
+                };
+                let tx = Rc::new(RefCell::new(Some(tx)));
+                let answer = tx.clone();
+                let opened = handle.update(cx, |_, _, cx| {
+                    workspace.update(cx, |ws, cx| {
+                        ws.open_screen(
+                            &id,
+                            props,
+                            None,
+                            Some(Box::new(move |_, result, _, _| {
+                                if let Some(tx) = answer.borrow_mut().take() {
+                                    let _ = tx.send(Ok(result));
+                                }
+                            })),
+                            cx,
+                        )
+                    })
+                });
+                if !matches!(opened, Ok(true)) {
+                    if let Some(tx) = tx.borrow_mut().take() {
+                        let _ = tx.send(Err(format!("No mod draws the {id} screen.")));
+                    }
+                }
+            })
+        })
+        .ok_or_else(|| HostError::new("No app to open the screen in."))?;
         Ok(rx)
     }
 
