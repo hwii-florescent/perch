@@ -23,14 +23,19 @@
 //! The data a mod can import comes from host modules: [`ModHost::register_module`] takes a
 //! factory that builds one [`HostModule`] (for example `perch`: data, commands, theme tokens) for
 //! each mod as it loads. Theme tokens a mod reads through `gpui-base` live in the
-//! `gpui_base::Theme` global, which the host may set at any time.
+//! `gpui_base::Theme` global, which the host may set at any time. [`perch::Perch`] is that
+//! module; [`ModHost::refresh`] re-renders the mods whose data changed.
+
+pub mod perch;
+pub mod theme;
 
 use anyhow::{anyhow, Context as _, Result};
-use gpui::{div, prelude::*, AnyView, App, Context, Entity, Task, Window};
+use gpui::{div, prelude::*, AnyView, App, Context, Entity, Task, WeakEntity, Window};
 use gpui_shell::policy::Policy;
 use gpui_shell::{Capabilities, HostModule, ScriptView, ShellRoot, ShellRuntime};
 use serde_json::Value;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, SystemTime};
@@ -43,6 +48,11 @@ pub const POLL: Duration = Duration::from_millis(250);
 pub const STOCK: &[(&str, &str)] = &[
     ("example/main.js", include_str!("../mods/example/main.js")),
     ("example/mod.json", include_str!("../mods/example/mod.json")),
+    (
+        "parity-probe/main.js",
+        include_str!("../mods/parity-probe/main.js"),
+    ),
+    ("perch.d.ts", perch::DECLARATIONS),
 ];
 
 /// Where user mods live: `native-mods/` in the folder that holds the core's database
@@ -64,6 +74,36 @@ pub fn init(cx: &mut App) {
     gpui_shell::init(cx);
 }
 
+/// The window's mods and the `perch` module they import, kept for whoever places a mod view
+/// (`cx.global::<WindowMods>().host.view(id, window, cx)`).
+pub struct WindowMods {
+    pub host: ModHost,
+    pub perch: perch::Perch,
+}
+
+impl gpui::Global for WindowMods {}
+
+/// Starts the engine for the app's one window: its mods follow `workspace` and run commands in
+/// `window`. A mod host that cannot start leaves the window as it is, said on stderr.
+pub fn start(
+    workspace: &Entity<crate::workspace::Workspace>,
+    window: gpui::AnyWindowHandle,
+    cx: &mut App,
+) {
+    init(cx);
+    let host = match ModHost::new(user_dir()) {
+        Ok(host) => host,
+        Err(error) => {
+            eprintln!("perch-native: mods are off: {error:#}");
+            return;
+        }
+    };
+    let perch = perch::Perch::new();
+    perch.register(&host);
+    perch.attach(workspace, window, cx);
+    cx.set_global(WindowMods { host, perch });
+}
+
 /// A mod found on disk.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModInfo {
@@ -81,6 +121,7 @@ struct Inner {
     user_dir: PathBuf,
     runtime: Rc<ShellRuntime>,
     modules: RefCell<Vec<ModuleFactory>>,
+    views: RefCell<Vec<WeakEntity<ModView>>>,
 }
 
 /// The mods of one window: where they are, the JavaScript runtime they share and the host
@@ -97,6 +138,7 @@ impl ModHost {
             user_dir,
             runtime,
             modules: RefCell::default(),
+            views: RefCell::default(),
         })))
     }
 
@@ -135,7 +177,7 @@ impl ModHost {
     pub fn view(&self, id: &str, window: &mut Window, cx: &mut App) -> Entity<ModView> {
         let host = self.clone();
         let id = id.to_string();
-        cx.new(|cx| {
+        let entity = cx.new(|cx| {
             let mut view = ModView {
                 host,
                 id,
@@ -155,7 +197,32 @@ impl ModHost {
                 }
             });
             view
-        })
+        });
+        self.0.views.borrow_mut().push(entity.downgrade());
+        entity
+    }
+
+    /// Re-renders the shown mods whose id is in `ids` (every one for `None`), from the host data
+    /// as it is now.
+    pub fn refresh(&self, ids: Option<&HashSet<String>>, cx: &mut App) {
+        let views: Vec<Entity<ModView>> = {
+            let mut views = self.0.views.borrow_mut();
+            views.retain(|view| view.upgrade().is_some());
+            views.iter().filter_map(WeakEntity::upgrade).collect()
+        };
+        for view in views {
+            let view = view.read(cx);
+            if ids.is_some_and(|ids| !ids.contains(&view.id)) {
+                continue;
+            }
+            let Some(root) = view.shown.as_ref().map(|shown| shown.root.clone()) else {
+                continue;
+            };
+            let id = view.id.clone();
+            if let Err(error) = self.0.runtime.refresh(&root, cx) {
+                eprintln!("perch-native: mod {id} could not refresh: {error:#}");
+            }
+        }
     }
 
     fn stock_dir(&self) -> PathBuf {

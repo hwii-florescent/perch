@@ -59,6 +59,7 @@ fn main() {
             )
             .expect("could not open the window");
         let workspace = window.update(cx, |_, _, cx| cx.entity()).expect("window");
+        perch_native::mods::start(&workspace, window.into(), cx);
         // A scripted run is watched, not listened to: it makes no sound and posts no notification.
         let silent = test.is_some();
         if let Some(test) = test {
