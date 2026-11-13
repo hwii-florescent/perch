@@ -413,6 +413,9 @@ declare module "perch" {
   export function openScreen(id: string, props?: Record<string, unknown>): Promise<unknown>;
   /** `useNotifications`: the notifications, oldest first. Open and dismiss them with `run`. */
   export function notifications(): { items: NotificationItem[] };
+  /** The window's requests to a screen, a count per kind that grows by one per request:
+   * `"new-tab"` (Cmd+T, for the tab strip, which opens its New session menu at its "+"). */
+  export function requests(): { "new-tab": number };
   /** `useZoom`: the terminals' zoom factor (1 is 100%). */
   export function zoom(): number;
   /** `usePaneLook`. */

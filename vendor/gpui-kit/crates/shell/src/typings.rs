@@ -3012,6 +3012,9 @@ const BASE: &str = r#"  /** A row. */
      * Requests are consumed once, after layout; already visible children stay put.
      */
     scroll_to_item(index: number): void;
+    /** PERCH: the zero-based direct child's box in the window as last laid out (logical pixels), or
+     * null before the area is laid out or for an index it does not have. */
+    item_bounds(index: number): { x: number; y: number; width: number; height: number } | null;
     /** Releases the handle. Using it afterwards throws. */
     release(): boolean;
   }

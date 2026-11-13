@@ -1179,6 +1179,28 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
             Ok(())
         }),
     )?;
+    // PERCH: a child's box as the area's last layout placed it, in window coordinates, as
+    // `[x, y, width, height]`.
+    let item_bounds = runtime.clone();
+    globals.set(
+        "__scroll_item_bounds",
+        Func::from(
+            move |ctx: Ctx<'_>, handle: EntityHandle, index: usize| -> JsResult<Option<Vec<f32>>> {
+                let scroll = alive(&ctx, &item_bounds)?
+                    .entities()
+                    .scroll(handle)
+                    .ok_or_else(|| Exception::throw_type(&ctx, "this scroll handle has been released"))?;
+                Ok(scroll.handle.bounds_for_item(index).map(|b| {
+                    vec![
+                        f32::from(b.origin.x),
+                        f32::from(b.origin.y),
+                        f32::from(b.size.width),
+                        f32::from(b.size.height),
+                    ]
+                }))
+            },
+        ),
+    )?;
     let discard_scroll = runtime.clone();
     globals.set(
         "__scroll_release",

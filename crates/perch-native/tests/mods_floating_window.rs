@@ -11,7 +11,7 @@
 //! - New session: the sidebar's New session opens the menu with the keyboard, its agent picker and
 //!   the computer's projects then No project; a project or No project starts the picked agent there
 //!   (a Quickchat for No project); Escape and a press outside close it without anything beneath
-//!   taking the press.
+//!   taking the press. Cmd+T opens the tab strip's launcher below its "+".
 //! - Confirmation: closing an agent's tab asks through the close guard drawn in the confirmation;
 //!   Escape and a press on the dim backdrop cancel and keep the tab, Keep running puts the tab
 //!   away without ending it, and Enter stops it (with Don't show again, the warning is turned off).
@@ -551,6 +551,45 @@ fn new_session(rig: &mut Rig) {
     open_new_session(rig);
     rig.click("project-option:none");
     assert_eq!(launched(rig), [("local".into(), None, "claude".into())]);
+
+    // Cmd+T, as the web's: the tab strip opens the menu for its workspace's folder (home here, with
+    // no workspace open), below its "+".
+    let plus = rig
+        .record("tab-new")
+        .expect("the tab strip draws its +")
+        .bounds;
+    rig.press(if cfg!(target_os = "macos") {
+        "cmd-t"
+    } else {
+        "ctrl-t"
+    });
+    assert_eq!(rig.open_screens(), ["new-session"]);
+    let props = rig
+        .ws(|ws, _, _| ws.screen_props("new-session").cloned())
+        .unwrap();
+    assert_eq!(props["fixedCwd"], "~", "for the strip's folder");
+    let anchor = &props["anchorRect"];
+    assert_eq!(
+        (anchor["x"].as_f64(), anchor["y"].as_f64()),
+        (
+            Some(f32::from(plus.origin.x).into()),
+            Some(f32::from(plus.origin.y).into())
+        ),
+        "anchored to the +"
+    );
+    let panel = rig.record("launcher").expect("the menu is drawn").bounds;
+    assert_eq!(
+        panel.origin.y,
+        plus.origin.y + plus.size.height + px(4.),
+        "4px below the +"
+    );
+    assert!(
+        rig.record("launcher-filter").is_some(),
+        "the scoped launcher"
+    );
+    rig.press("escape");
+    assert!(rig.open_screens().is_empty());
+    assert!(rig.terminal_focused());
     println!("new-session: ok");
 }
 

@@ -328,6 +328,7 @@ pub fn window_from(data: &Value, model: &Model) -> WindowState {
         active,
         zoom: 1.,
         notifications,
+        new_tab: 0,
     }
 }
 

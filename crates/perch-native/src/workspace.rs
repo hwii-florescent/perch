@@ -217,6 +217,8 @@ pub struct Workspace {
     screen_focus: gpui::FocusHandle,
     notifications: Vec<Notification>,
     next_notification: u64,
+    /// Cmd+T asks the tab strip mod for a new tab this many times (`perch.requests()`).
+    new_tab_asks: u64,
     /// Tells the core whether this window is the one being looked at.
     activation: Option<Subscription>,
     _subscriptions: Vec<Subscription>,
@@ -272,6 +274,7 @@ impl Workspace {
             screen_focus: cx.focus_handle(),
             notifications: Vec::new(),
             next_notification: 0,
+            new_tab_asks: 0,
             activation: None,
             _subscriptions: vec![opened, failed, observed],
         }
@@ -352,6 +355,11 @@ impl Workspace {
     /// The terminals' zoom factor (1 is 100%).
     pub fn zoom_factor(&self) -> f32 {
         self.zoom.factor()
+    }
+
+    /// How many times the tab strip was asked for a new tab.
+    pub fn new_tab_asks(&self) -> u64 {
+        self.new_tab_asks
     }
 
     /// The notifications not yet dismissed, oldest first.
@@ -1319,9 +1327,16 @@ impl Workspace {
                 });
             }
             // With a New session screen, the sidebar's target opens it instead of its panel.
+            // As the web's Cmd+T: the tab strip opens its New session menu at its "+", for the
+            // shown workspace. With no strip drawn, the sidebar's target opens the menu.
             "tabs.new" | "tab.new" => {
-                self.sidebar
-                    .update(cx, |sidebar, cx| sidebar.run_action("sessions.new", cx));
+                if self.tabs.visible().is_some() && self.screens.has("tabs", cx) {
+                    self.new_tab_asks += 1;
+                    cx.notify();
+                } else {
+                    self.sidebar
+                        .update(cx, |sidebar, cx| sidebar.run_action("sessions.new", cx));
+                }
             }
             "tabs.next" | "tab.next" => {
                 self.tabs.step(1);

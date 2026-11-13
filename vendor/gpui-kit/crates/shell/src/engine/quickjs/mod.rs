@@ -6578,6 +6578,14 @@ globalThis.__gpui = (() => {
       }
       __scroll_to_item(handle, index);
     },
+    // PERCH: where a child was laid out, for a script that anchors something to it.
+    item_bounds: (index) => {
+      if (!Number.isSafeInteger(index) || index < 0) {
+        throw new TypeError("item_bounds(index) needs a whole, non-negative index");
+      }
+      const box = __scroll_item_bounds(handle, index);
+      return box ? { x: box[0], y: box[1], width: box[2], height: box[3] } : null;
+    },
     release: () => __scroll_release(handle),
   });
 

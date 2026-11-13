@@ -191,6 +191,20 @@ export const host = {
   zoom: () => snapshot("zoom", () => perch.zoom()),
   paneLook: () => snapshot("paneLook", () => perch.paneLook()),
   planUsage: () => snapshot("planUsage", () => perch.planUsage()),
+  // The window's requests (`perch.requests()`: a count per kind, one more per request), as the web's window events:
+  // `listener` runs once for each request made after it subscribed.
+  onRequest(kind, listener) {
+    const count = () => snapshot("requests", () => perch.requests())[kind] ?? 0;
+    let seen = count();
+    const check = () => {
+      const now = count();
+      if (now === seen) return;
+      seen = now;
+      listener();
+    };
+    listeners.add(check);
+    return () => listeners.delete(check);
+  },
   agentChoices: (hostId) => snapshot(`agentChoices:${hostId}`, () => perch.agentChoices(hostId)),
   // A session on any computer (the web's store has them all): the shown computer's first, then the others'.
   session: (id) => {

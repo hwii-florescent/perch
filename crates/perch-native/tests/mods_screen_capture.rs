@@ -334,7 +334,7 @@ fn openers_give_the_web_fields(scratch: &Path) {
     rig.close_all();
 
     // The sidebar's New opens the unscoped New session panel.
-    rig.ws(|ws, window, cx| ws.run_command("tabs.new", None, window, cx))
+    rig.ws(|ws, window, cx| ws.run_command("sessions.new", None, window, cx))
         .unwrap();
     let native = rig.props("new-session");
     let web = ScreenFixture::load("new-session").expected("unscoped")["props"].clone();

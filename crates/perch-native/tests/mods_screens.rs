@@ -682,7 +682,7 @@ fn main() {
 
     // New session opens as a screen in place of the sidebar's panel; what it picks is launched.
     rig.write("new-session", NEW_SESSION);
-    rig.ws(|ws, window, cx| ws.run_command("tabs.new", None, window, cx))
+    rig.ws(|ws, window, cx| ws.run_command("sessions.new", None, window, cx))
         .unwrap();
     rig.draw();
     let props = rig

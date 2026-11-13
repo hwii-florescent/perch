@@ -142,7 +142,7 @@ export class HostElement extends Target {
   querySelector(selector) { return queryBy(this, selector)[0] ?? null; }
   /** The engine's last box for this element; a zero box at the origin before it has been laid out. */
   getBoundingClientRect() {
-    const box = this.ownerDocument?.perch?.bounds?.(this.id) ?? this.bounds;
+    const box = this.ownerDocument?.perch?.bounds?.(this.id) ?? this.ownerDocument?.itemBounds?.(this.id) ?? this.bounds;
     return box ? new DOMRect(box.x, box.y, box.width, box.height) : new DOMRect();
   }
   getClientRects() { return [this.getBoundingClientRect()]; }

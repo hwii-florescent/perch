@@ -123,6 +123,9 @@ pub struct WindowState {
     pub zoom: f32,
     /// The in-app notifications, oldest first (`useNotifications`' items).
     pub notifications: Vec<Value>,
+    /// How many times the window asked the tab strip for a new tab (Cmd+T): the strip opens its
+    /// New session menu at its "+" on each.
+    pub new_tab: u64,
 }
 
 #[derive(Default)]
@@ -218,6 +221,7 @@ impl Perch {
                 active: tabs.active().map(str::to_string),
                 zoomed: tabs.zoomed(),
                 zoom: ws.zoom_factor(),
+                new_tab: ws.new_tab_asks(),
                 notifications: ws
                     .notifications()
                     .iter()
@@ -681,6 +685,14 @@ impl Perch {
             .function(
                 "zoom",
                 reader(WINDOW, |perch, _| json!(perch.0.data.borrow().window.zoom)),
+            )
+            // The window's requests to a screen, as counts that grow by one per request.
+            .function(
+                "requests",
+                reader(
+                    WINDOW,
+                    |perch, _| json!({ "new-tab": perch.0.data.borrow().window.new_tab }),
+                ),
             )
             // The scale factor of the window this mod is drawn in (physical pixels per logical
             // pixel), read where the script runs, so it is the window's own and a mod can lay out

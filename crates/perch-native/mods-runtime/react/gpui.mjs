@@ -132,7 +132,14 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
       handle.scroller = node.id;
       kit.scroll.scroll_to_item(at);
     }
-    if (handle.scroller === node.id) el = el.track_scroll(kit.scroll);
+    // Before any area asks, the first one drawn takes the handle, so its children's boxes are known.
+    handle.scroller ??= node.id;
+    if (handle.scroller === node.id && handle.document) {
+      el = el.track_scroll(kit.scroll);
+      // Where the engine laid its children out, for `getBoundingClientRect` (a menu anchored to one, opened by a key).
+      const ids = (node.children ?? []).filter(drawn).map((child) => child.id);
+      handle.document.itemBounds = (id) => (ids.includes(id) ? kit.scroll.item_bounds?.(ids.indexOf(id)) ?? null : null);
+    }
   }
 
   // A press on a text field puts the keyboard in it, as a browser does.
