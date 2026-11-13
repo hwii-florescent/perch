@@ -23,7 +23,7 @@ use crate::actions::ACTIONS;
 use crate::client::Command;
 use crate::keymap::{all_shortcuts, Keymap, Scope, TYPED};
 use crate::sidebar::navigation::{self, AgentList, Store, View};
-use crate::sidebar::{Model, LOCAL};
+use crate::sidebar::{Model, KNOWN_AGENTS, LOCAL, MANIFEST_CAPABILITY};
 use crate::workspace::Workspace;
 use gpui::{AnyWindowHandle, App, Entity, Subscription, WeakEntity};
 use gpui_shell::{HostArguments, HostError, HostModule, HostResult, HostValue};
@@ -1181,12 +1181,6 @@ impl Perch {
         answer
     }
 }
-
-/// The capability of a computer that lists the agents it can start.
-const MANIFEST_CAPABILITY: &str = "agent.manifest.list";
-
-/// What a computer without that capability can start (the web's `AGENTS`).
-const KNOWN_AGENTS: [(&str, &str); 2] = [("claude", "Claude"), ("codex", "Codex")];
 
 /// The commands this module answers for, with their titles and arguments. `session.open` and
 /// `app.theme` also reach the window (the sidebar opens the session, the core keeps the theme);

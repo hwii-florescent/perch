@@ -31,6 +31,10 @@ pub const LOCAL: &str = "local";
 const ATTENTION_CAPABILITY: &str = "attention.v1";
 /// Capability under which the core answers `workspace.snapshot`.
 const WORKSPACE_CAPABILITY: &str = "workspace.snapshot";
+/// The capability of a computer that lists the agents it can start (`agent.manifest.list`).
+pub const MANIFEST_CAPABILITY: &str = "agent.manifest.list";
+/// What a computer without that capability can start (the web's `AGENTS`).
+pub const KNOWN_AGENTS: [(&str, &str); 2] = [("claude", "Claude"), ("codex", "Codex")];
 /// Capability under which the core answers `workspace.pin`.
 const WORKSPACE_PIN_CAPABILITY: &str = "workspace.pin";
 
@@ -947,7 +951,19 @@ impl State {
             id: TERMINAL_PROVIDER.into(),
             name: "Terminal".into(),
         }];
-        providers.extend(self.providers.get(&id).cloned().unwrap_or_default());
+        let capabilities = if id == LOCAL {
+            Some(&self.local_capabilities)
+        } else {
+            self.host_capabilities.get(&id)
+        };
+        if capabilities.is_some_and(|c| has(c, MANIFEST_CAPABILITY)) {
+            providers.extend(self.providers.get(&id).cloned().unwrap_or_default());
+        } else {
+            providers.extend(KNOWN_AGENTS.iter().map(|(id, name)| Provider {
+                id: (*id).into(),
+                name: (*name).into(),
+            }));
+        }
         HostView {
             enabled: entry.map(|e| e.enabled),
             direct: entry.is_some_and(|e| e.mode == "direct"),
@@ -1588,6 +1604,18 @@ mod tests {
     #[test]
     fn launch_choices_are_the_agents_the_core_lists() {
         let mut state = state();
+        // A core that does not list its agents offers the two every Perch knows.
+        let ids = |state: &State| -> Vec<String> {
+            state.model().hosts[0]
+                .providers
+                .iter()
+                .map(|p| p.id.clone())
+                .collect()
+        };
+        assert_eq!(ids(&state), ["terminal", "claude", "codex"]);
+        state.apply(&message(json!({
+            "type": "server.info", "hostname": "h", "isSsh": false, "platform": "macOS",
+            "capabilities": [MANIFEST_CAPABILITY]})));
         let manifest = |id: &str, available: bool, enabled: Value, modes: Value| {
             json!({"id": id, "displayName": id.to_uppercase(), "supportedModes": modes,
                    "resumability": "none", "capabilities": ["interactiveTerminal"],
