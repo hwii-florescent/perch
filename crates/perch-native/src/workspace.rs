@@ -180,17 +180,8 @@ pub struct Notification {
     pub heard: Heard,
 }
 
-/// The pane menu's entry that stops the terminal's process, and what it reads once it asks to be
-/// confirmed.
+/// The pane menu's entry that stops the terminal's process.
 const STOP: &str = "Stop the terminal";
-const STOP_CONFIRM: &str = "Stop \u{2014} confirm";
-
-/// The menu a right-click in a pane opens: its entries are commands, run on that pane.
-struct PaneMenu {
-    at: Point<Pixels>,
-    /// The label and the command each runs.
-    items: Vec<(&'static str, &'static str)>,
-}
 
 pub struct Workspace {
     sidebar: Entity<Sidebar>,
@@ -204,7 +195,6 @@ pub struct Workspace {
     zoom: Zoom,
     /// Counts the changes of what is on screen, for [`Pane::seen`].
     tick: u64,
-    menu: Option<PaneMenu>,
     toast: Option<Toast>,
     /// The window's height as last drawn, which keeps an overlay inside it.
     viewport_height: f32,
@@ -273,7 +263,6 @@ impl Workspace {
             settings: None,
             zoom: Zoom::default(),
             tick: 0,
-            menu: None,
             toast: None,
             viewport_height: 0.0,
             peek: None,
@@ -346,18 +335,6 @@ impl Workspace {
         Some(&self.panes.get(self.tabs.active()?)?.open)
     }
 
-    /// The labels of the pane menu, when it is open.
-    pub fn menu_labels(&self) -> Option<Vec<&'static str>> {
-        Some(
-            self.menu
-                .as_ref()?
-                .items
-                .iter()
-                .map(|(label, _)| *label)
-                .collect(),
-        )
-    }
-
     /// The session peeked at, when there is one.
     pub fn peeked(&self) -> Option<&str> {
         self.peek.as_deref()
@@ -413,7 +390,6 @@ impl Workspace {
     ) -> bool {
         let opened = self.screens.open(id, props, at, on_result, cx);
         if opened {
-            self.menu = None;
             cx.notify();
         }
         opened
@@ -537,7 +513,9 @@ impl Workspace {
             "title": self.title_of(id, cx),
             "x": f32::from(at.x),
             "y": f32::from(at.y),
-            "sessionId": id,
+            // The web offers "Show beside an open tab" for a session's pane; the native split takes
+            // only a new terminal beside a tab, so the row is not offered.
+            "sessionId": Value::Null,
             "canClose": true,
             "maximized": self.tabs.zoomed(),
             "canStopAgent": can_stop,
@@ -970,8 +948,6 @@ impl Workspace {
 
     /// Tell the sidebar which tab is shown, so it is marked read and highlighted.
     fn after_change(&mut self, cx: &mut Context<Self>) {
-        // A pane menu acts on the active pane, so it must not outlive a change of what is active.
-        self.menu = None;
         self.keep_in_bounds(cx);
         let target = self.tabs.active().and_then(|id| {
             let open = &self.panes.get(id)?.open;
@@ -1016,13 +992,6 @@ impl Workspace {
                 return true;
             }
             return false;
-        }
-        // A menu closes on any key; Escape is only that.
-        if self.menu.take().is_some() {
-            cx.notify();
-            if keystroke.key == "escape" {
-                return true;
-            }
         }
         // Escape puts a peek away, unless its terminal has the keyboard: then it is the program's.
         if keystroke.key == "escape" && self.peek.is_some() {
@@ -1282,7 +1251,7 @@ impl Workspace {
             "overlay.close" => {
                 if let Some(top) = self.screens.top_modal() {
                     self.screen_closed(top, Value::Null, window, cx);
-                } else if self.menu.take().is_some() || self.settings.take().is_some() {
+                } else if self.settings.take().is_some() {
                     cx.notify();
                 } else {
                     return Err("Nothing is open to close.".into());
@@ -1777,11 +1746,12 @@ impl Workspace {
         let can_stop = view.read(cx).can_stop();
         if self.screens.has("pane-menu", cx) {
             self.open_pane_menu(id, at, can_stop, cx);
-            return;
+        } else {
+            self.notice = Some(
+                "No mod draws the pane menu. The stock one is restored when the app starts.".into(),
+            );
+            cx.notify();
         }
-        let items = self.menu_items(can_stop);
-        self.menu = Some(PaneMenu { at, items });
-        cx.notify();
     }
 
     /// The pane menu's entries: their labels and the commands they run.
@@ -1805,76 +1775,6 @@ impl Workspace {
         }
         items.push(("Close", "tabs.close"));
         items
-    }
-
-    fn menu_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let menu = self.menu.as_ref()?;
-        let mut list = div()
-            .absolute()
-            .left(menu.at.x)
-            .top(menu.at.y)
-            .min_w(px(180.))
-            .py_1()
-            .rounded_md()
-            .border_1()
-            .border_color(rgb(OVERLAY_BORDER))
-            .bg(rgb(SIDEBAR_BG))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation());
-        for (at, (label, command)) in menu.items.iter().copied().enumerate() {
-            list = list.child(
-                div()
-                    .id(SharedString::from(format!("menu-{at}")))
-                    .cursor_pointer()
-                    .px_3()
-                    .py_1()
-                    .text_sm()
-                    .text_color(rgb(TITLE_COLOR))
-                    .hover(|row| row.bg(rgb(SELECTED_BG)))
-                    .child(label)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        // Stopping the process cannot be taken back, and an agent may be what is
-                        // running: the first click asks, only the second stops it.
-                        if label == STOP {
-                            if let Some(item) =
-                                this.menu.as_mut().and_then(|menu| menu.items.get_mut(at))
-                            {
-                                item.0 = STOP_CONFIRM;
-                            }
-                            cx.notify();
-                            return;
-                        }
-                        this.menu = None;
-                        if let Err(error) = this.run_command(command, None, window, cx) {
-                            this.notice = Some(error);
-                        }
-                        cx.notify();
-                    })),
-            );
-        }
-        // A click anywhere else closes it.
-        Some(
-            div()
-                .id("pane-menu")
-                .absolute()
-                .inset_0()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, _, cx| {
-                        this.menu = None;
-                        cx.notify();
-                    }),
-                )
-                .on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(|this, _, _, cx| {
-                        this.menu = None;
-                        cx.notify();
-                    }),
-                )
-                .child(list)
-                .into_any_element(),
-        )
     }
 
     /// Go to a session's tab, opening one if it has none: a peek of it becomes that tab.
@@ -2993,7 +2893,6 @@ impl gpui::Render for Workspace {
             .child(sidebar)
             .child(area.children(overlays))
             // Over the whole window: it opens where the pointer was, in window coordinates.
-            .children(self.menu_view(cx))
             .children(floating)
     }
 }

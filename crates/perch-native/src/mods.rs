@@ -63,6 +63,18 @@ pub const STOCK: &[(&str, &str)] = &[
         include_str!("../mods/navigator/navigator/main.js"),
     ),
     (
+        "pane-menu/main.js",
+        include_str!("../mods/pane-menu/main.js"),
+    ),
+    (
+        "pane-menu/mod.json",
+        include_str!("../mods/pane-menu/mod.json"),
+    ),
+    (
+        "pane-menu/pane-menu/main.js",
+        include_str!("../mods/pane-menu/pane-menu/main.js"),
+    ),
+    (
         "parity-probe/main.js",
         include_str!("../mods/parity-probe/main.js"),
     ),

@@ -172,6 +172,8 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
     if (lineHeight) line = line.h(lineHeight);
     if (!node.value && color) line = line.text_color(halfAlpha(color));
     if (shown) el = el.child(line.child(node.input_type === "password" && node.value ? "•".repeat([...shown].length) : shown));
+    // Its width when its content sizes it (`field_w`), as an empty line: a stretched or narrower field is unaffected.
+    if (node.field_w) el = el.child(kit.div().w(node.field_w).h(0));
   }
   const line = text.whitespace === "nowrap" ? lineHeightPx(text) : null;
   const row = node.style.display === "flex" && !String(node.style.flex_direction ?? "row").startsWith("col");
@@ -230,6 +232,7 @@ export function describeToGpui(description, kit, handle, files, scale = 0) {
   const snapped = scale > 0 ? snapColumns(roots, scale) : new Map();
   if (scale > 0 && files.measure) snapRows(roots, scale, files.measure, snapped);
   scrollGutters(roots, snapped);
+  shrinkWrapBases(roots, snapped);
   let layer = kit.div().relative().size_full().child(toGpui(description.root, kit, handle, files, false, false, null, {}, false, snapped));
   for (const overlay of description.overlays) layer = layer.child(toGpui(overlay, kit, handle, files, true, false, null, {}, false, snapped));
   return layer;
@@ -339,6 +342,31 @@ export function snapRows(roots, scale, measure, overrides) {
     width(root, {}, false);
     visit(root);
   }
+}
+
+// ---- shrink-to-fit ----------------------------------------------------------------------------------------------
+
+/**
+ * A box placed absolutely with no width is as wide as its content (CSS's shrink-to-fit), and a browser sizes a row
+ * in it from its items' content even when they grow from a zero or percentage basis (`flex-1`); GPUI sizes it from
+ * that basis, so such an item keeps its content size as its basis there. The row then has exactly its items' room,
+ * and the item gets the same width either way. ponytail: a row clamped narrower (a `max-width`) shrinks every item
+ * by its basis, where CSS would take the room from the growing item first.
+ */
+export function shrinkWrapBases(roots, overrides) {
+  const walk = (node, wraps) => {
+    if (!node || node.kind === "text" || !drawn(node)) return;
+    const s = node.style;
+    const own = s.position === "absolute" ? s.w === undefined && (s.left === undefined || s.right === undefined) : wraps && typeof s.w !== "number";
+    if (own && isRow(node)) {
+      for (const kid of node.children ?? []) {
+        const basis = kid.kind === "text" ? undefined : kid.style.flex_basis;
+        if (kid.kind !== "text" && kid.style.flex_grow > 0 && (basis === 0 || (typeof basis === "string" && basis.endsWith("%")))) overrides.set(kid, { ...overrides.get(kid), flex_basis: "auto" });
+      }
+    }
+    for (const kid of node.children ?? []) walk(kid, own);
+  };
+  for (const root of roots) walk(root, false);
 }
 
 // ---- scrollbars ----------------------------------------------------------------------------------------------
@@ -525,13 +553,26 @@ export function snapColumns(roots, scale) {
       }
       set(kid, { mt: stack(flow, (i ? gap : 0) + px(kid.style.mt)) });
       if (Number.isFinite(heights.get(kid))) place(kid, flow);
-      else {
+      else if (wholeLines(kid)) {
+        // Its lines are a whole number of pixels in CSS and in GPUI alike, so the total keeps its fraction across them.
+        const s = kid.style;
+        set(kid, { border_t: stack(flow, px(s.border_t)), pt: stack(flow, px(s.pt)) });
+        set(kid, { pb: stack(flow, px(s.pb)), border_b: stack(flow, px(s.border_b)) });
+      } else {
         visit(kid);
         Object.assign(flow, fresh());
       }
       set(kid, { mb: stack(flow, px(kid.style.mb)) });
     });
     return true;
+  }
+
+  /** A box holding only text that may wrap, in lines of a whole number of pixels, sized by them alone. */
+  function wholeLines(node) {
+    const s = node.style;
+    const kids = (node.children ?? []).filter(inFlow);
+    const line = lineHeightPx(texts.get(node) ?? {});
+    return node.kind === "div" && !isRow(node) && kids.length > 0 && kids.every((kid) => kid.kind === "text") && Number.isInteger(line) && [s.h, s.min_h, s.max_h].every((v) => v === undefined || v === "auto");
   }
 
   /** A node whose height is known, at `flow`'s running total: its lengths on the total, its height their sum. */

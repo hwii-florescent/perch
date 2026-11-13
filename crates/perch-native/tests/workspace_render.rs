@@ -1396,55 +1396,20 @@ fn tabs_out_of_sight_are_parked_beyond_twelve() {
     println!("workspace_render: parked tabs ok");
 }
 
-/// A right-click in a pane opens the pane menu there, a click on an entry runs it on that pane,
-/// and a click elsewhere or any key closes it.
+/// A right-click in a pane asks for the pane menu there. No mod draws it here, so the window says
+/// so; the stock menu's own behaviour is `mods_floating_window`'s.
 fn the_pane_menu_opens_on_right_click() {
     let mut h = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
     h.open("alpha");
     h.draw();
-    let (x, y) = (SIDEBAR_WIDTH + 300., 200.);
-    let plain = Modifiers::default();
-    assert_eq!(h.ws(|ws| ws.menu_labels()), None);
-    h.click(x, y, MouseButton::Right, plain);
-    let before = h.draw();
-    before.save("pane-menu");
-    let labels = h.ws(|ws| ws.menu_labels()).expect("the menu is open");
-    assert_eq!(labels[0], "Copy");
-    assert!(labels.contains(&"Split right") && labels.contains(&"Close"));
-    assert!(
-        !labels.contains(&"Stop the terminal"),
-        "a view that cannot stop its shell does not offer to"
-    );
-    assert!(
-        !labels.contains(&"Zoom pane"),
-        "a lone pane has nothing to zoom"
-    );
-    assert!(
-        before.count(0x1c1c1f, x, x + 150., y, y + 100.) > 2000,
-        "the menu is drawn where it was asked"
-    );
-
-    // An entry runs on the pane: Find opens the find bar of that terminal.
-    let find = labels.iter().position(|l| l.starts_with("Find")).unwrap();
-    assert!(!h.view(|v| v.find_open()));
+    assert_eq!(h.notice(), None);
     h.click(
-        x + 20.,
-        y + 4. + 28. * find as f32 + 14.,
-        MouseButton::Left,
-        plain,
+        SIDEBAR_WIDTH + 300.,
+        200.,
+        MouseButton::Right,
+        Modifiers::default(),
     );
-    assert_eq!(
-        h.ws(|ws| ws.menu_labels()),
-        None,
-        "choosing closes the menu"
-    );
-    assert!(h.view(|v| v.find_open()), "Find ran on the clicked pane");
-
-    // A click elsewhere closes it without running anything; so does a key (Escape is only that).
-    h.click(x, y, MouseButton::Right, plain);
-    assert!(h.ws(|ws| ws.menu_labels()).is_some());
-    h.click(x + 400., y + 200., MouseButton::Left, plain);
-    assert_eq!(h.ws(|ws| ws.menu_labels()), None);
+    assert!(h.notice().is_some_and(|n| n.contains("pane menu")));
     println!("workspace_render: pane menu ok");
 }
 
@@ -1739,56 +1704,6 @@ fn a_deleted_session_closes_its_tab_whenever_the_core_says_so() {
     println!("workspace_render: deleted session ok");
 }
 
-/// The pane menu stops a terminal's process only on a second, explicit click.
-fn stopping_a_terminal_from_the_pane_menu_asks_first() {
-    let mut h = Harness::new(model(&[("alpha", json!({"cliProviderId": "claude"}))]));
-    h.open_as("alpha", None);
-    h.draw();
-    let (mut rx, _core) = h.live();
-    let (x, y) = (SIDEBAR_WIDTH + 300., 200.);
-    let plain = Modifiers::default();
-    h.click(x, y, MouseButton::Right, plain);
-    h.draw();
-    let labels = h.ws(|ws| ws.menu_labels()).expect("the menu is open");
-    let stop = labels
-        .iter()
-        .position(|l| *l == "Stop the terminal")
-        .unwrap();
-    // Rows are about 30 pixels tall; the click lands in the middle of the entry.
-    let item = (x + 20., y + 4. + 30. * stop as f32 + 15.);
-    h.click(item.0, item.1, MouseButton::Left, plain);
-    h.draw();
-    let labels = h.ws(|ws| ws.menu_labels()).expect("still open");
-    assert_eq!(labels[stop], "Stop \u{2014} confirm");
-    assert!(
-        !asked(&mut rx).contains(&ToCore::Kill),
-        "the first click stops nothing"
-    );
-    // A click elsewhere takes the question back; asking again starts over.
-    h.click(x + 400., y + 200., MouseButton::Left, plain);
-    assert_eq!(h.ws(|ws| ws.menu_labels()), None);
-    h.click(x, y, MouseButton::Right, plain);
-    h.draw();
-    assert_eq!(
-        h.ws(|ws| ws.menu_labels()).unwrap()[stop],
-        "Stop the terminal"
-    );
-    h.click(item.0, item.1, MouseButton::Left, plain);
-    h.draw();
-    assert!(!asked(&mut rx).contains(&ToCore::Kill));
-    h.click(item.0, item.1, MouseButton::Left, plain);
-    assert_eq!(
-        h.ws(|ws| ws.menu_labels()),
-        None,
-        "choosing closes the menu"
-    );
-    assert!(
-        asked(&mut rx).contains(&ToCore::Kill),
-        "the second click stops it"
-    );
-    println!("workspace_render: stop confirm ok");
-}
-
 /// A session with no recorded launch provider is not attached under a guessed one.
 fn a_session_with_no_launch_provider_is_not_attached() {
     let mut cx = HeadlessAppContext::with_platform(
@@ -1918,7 +1833,6 @@ fn main() {
     a_tab_that_cannot_end_its_session_is_put_away();
     a_session_with_no_launch_provider_is_not_attached();
     a_deleted_session_closes_its_tab_whenever_the_core_says_so();
-    stopping_a_terminal_from_the_pane_menu_asks_first();
     a_toast_names_the_session_and_opens_it();
     the_pane_menu_opens_on_right_click();
     a_peek_is_a_terminal_over_the_window();

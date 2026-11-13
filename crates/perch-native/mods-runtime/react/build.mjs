@@ -38,6 +38,7 @@ export const RUNTIME = "react-runtime";
 export const SCREENS = [
   "sidebar",
   "navigator",
+  "pane-menu",
 ];
 /** Files under the folders the build writes that it does not write. */
 const HAND_WRITTEN = new Set([`${RUNTIME}/host.js`, `${RUNTIME}/screen.js`, ...SCREENS.flatMap((id) => [`${id}/main.js`, `${id}/mod.json`])]);

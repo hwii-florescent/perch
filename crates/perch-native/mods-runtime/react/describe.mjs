@@ -10,7 +10,7 @@
 //! - `{ kind: "text", text, source? }` (`source`: the text before `text-transform`)
 //! - `{ kind: "svg", id, markup, style, ... }` (tinted with the text colour) and `{ kind: "image", markup }` (as drawn)
 //! - `{ kind: "input", id, value, placeholder, checked, input_type, style, ... }` (`value`: what the field holds,
-//!   typed text included)
+//!   typed text included; `field_w`: a line field's content width when its content sizes it)
 //! - `blocks_pointer` on a node that takes pointer events under an ancestor that lets them through; `tabular` on one
 //!   whose digits are tabular; `scrollbar` (its width) on a vertical scroller
 //! - a node `mount` was given a parity table for (`options.names`) carries `name` (`name` or `name:key`, the engine
@@ -90,8 +90,14 @@ const length = (l) => {
   return undefined;
 };
 
+/** The input types that are a line of text, and the content width a browser gives one sized by its content (20
+ * characters, `size`'s default), in ems of its font. ponytail: measured in the web reference for the app's UI face;
+ * another face gets the same width. The engine's text system could measure the face's average character instead. */
+const TEXT_FIELD = /^(text|search|url|email|tel|password|number)$/;
+const FIELD_EMS = 162.13 / 12.8;
+
 /** The non-text engine styles of one computed style, plus what could not be expressed. */
-function boxStyle(computed, report) {
+function boxStyle(computed, report, viewport = null) {
   const v = computed.values;
   const s = {};
   const src = (prop) => computed.sources[prop];
@@ -166,6 +172,12 @@ function boxStyle(computed, report) {
     for (const side of sides) {
       const out = length(v[side]);
       if (out !== undefined && out !== "auto") s[side] = out;
+    }
+    // A fixed box sized by its content is at most as wide as the window leaves it right of where it starts (CSS's
+    // shrink-to-fit width); the engine's absolute box would run past the window's edge instead.
+    if (position === "fixed" && viewport && s.w === undefined && s.right === undefined && typeof s.left === "number") {
+      const room = viewport.width - s.left - (typeof s.ml === "number" ? s.ml : 0) - (typeof s.mr === "number" ? s.mr : 0);
+      s.max_w = typeof s.max_w === "number" ? Math.min(s.max_w, room) : room;
     }
   } else if (position === "sticky") report("unsupported", "position", "sticky", src("position"));
   if (v["z-index"] !== "auto" && own("z-index")) report("unsupported", "z-index", v["z-index"], src("z-index"), "paint order is tree order");
@@ -328,7 +340,7 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
   const report = (kind, property, value, source, note) => reports.push([kind, property, value, source ?? "(user agent)", where, note]);
   const computed = ctx.cascade.compute(element, parentComputed);
   const tokens = {};
-  const base = boxStyle(computed, report);
+  const base = boxStyle(computed, report, ctx.viewport);
   reportDeclarations(computed, report);
   const wanted = textWanted(computed, ctx.measure);
   const ownText = textStyle(computed, wanted, inheritedText);
@@ -389,6 +401,7 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
     node.input_type = tag === "input" ? String(element.props.type ?? "text") : tag;
     for (const key of ["placeholder", "checked", "disabled"]) if (element.props[key] !== undefined) node[key] = element.props[key];
     if (tag !== "select") node.value = element.value;
+    if (tag === "input" && TEXT_FIELD.test(node.input_type)) node.field_w = FIELD_EMS * computed.values["font-size"];
     return node;
   }
   if (tag === "img") {
@@ -565,7 +578,7 @@ export function describe(document, perch, sheet, kept = {}, names = null) {
   const look = JSON.stringify([theme, viewport]);
   if (kept.look !== look || kept.sheet !== sheet) Object.assign(kept, { look, sheet, cache: new WeakMap(), cascade: new Cascade(sheet, { theme, viewport }), top: null });
   const { cascade, cache } = kept;
-  const ctx = { cascade, cache, findings: new Findings(), measure: perch.lineHeight ? (size) => perch.lineHeight(size) : null };
+  const ctx = { cascade, cache, viewport, findings: new Findings(), measure: perch.lineHeight ? (size) => perch.lineHeight(size) : null };
   // <html> and <body> carry no state of their own here: computed once per look.
   kept.top ??= cascade.compute(document.body, cascade.compute(document.documentElement, null));
   const trees = document.body.children.map((child) => describeElement(child, kept.top, ENGINE_ROOT_TEXT, ctx));

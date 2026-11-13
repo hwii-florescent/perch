@@ -1,0 +1,5 @@
+{
+  "name": "Pane menu",
+  "description": "The web app's stock pane menu (a pane's right-click menu), unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}
