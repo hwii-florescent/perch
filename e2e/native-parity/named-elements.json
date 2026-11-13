@@ -1868,6 +1868,45 @@
           "description": "A hairline between groups of rows."
         }
       ]
+    },
+    "tab-drag": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 1,
+      "elements": [
+        {
+          "name": "tab-drag-layer",
+          "selector": "[data-testid=\"tab-drag-layer\"]",
+          "description": "The transparent sheet over the whole window (no fill: the page shows through); it grabs the pointer so nothing under it reacts, with the grabbing cursor."
+        },
+        {
+          "name": "tab-drag-pane",
+          "selector": "[data-testid=\"tab-drag-layer\"] > div.bg-surface-1\\/30",
+          "description": "The pane under the pointer, dimmed with a translucent fill (30% of the lighter surface)."
+        },
+        {
+          "name": "tab-drop-zone",
+          "selector": "[data-testid=\"tab-drop-zone\"]",
+          "description": "The half a split would take (`data-zone`: left, right, up, down, or blocked): the accent at 35% with an inner glow, or the muted fill at 60% when blocked.",
+          "key": {
+            "self": true,
+            "attr": "data-zone"
+          }
+        },
+        {
+          "name": "tab-drop-label",
+          "selector": "[data-testid=\"tab-drop-zone\"] > span",
+          "description": "The label centred in the highlight: Split left / right / above / below, or the reason a split cannot take the tab; on the window's own fill, 0.75rem, with a shadow.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-drag-ghost",
+          "selector": "[data-testid=\"tab-drag-ghost\"]",
+          "description": "The copy of the dragged tab, at the pointer less the grab offset, the tab's own size, with a drop shadow."
+        }
+      ]
     }
   }
 }

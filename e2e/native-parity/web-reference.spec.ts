@@ -9,7 +9,7 @@ import * as path from "node:path";
 const here = __dirname;
 const OUT = path.resolve(here, "../artifacts-native-parity/web");
 /** Every screen with a reference; `PARITY_SCREENS=tabs,status` renders only those while one is being worked on. */
-const SCREENS = (process.env.PARITY_SCREENS ?? "sidebar,tabs,status,navigator,pane-header,pane-menu,confirm,dialog,toast,new-session,tab-menu,select,keybind-help,launcher,session-menu").split(",");
+const SCREENS = (process.env.PARITY_SCREENS ?? "sidebar,tabs,status,navigator,pane-header,pane-menu,confirm,dialog,toast,new-session,tab-menu,select,keybind-help,launcher,session-menu,tab-drag").split(",");
 const THEMES = ["light", "dark"] as const;
 /** The semantic colour tokens (`--<name>` on `<html>`): `themes.ts` `TOKEN_CSS_VARS`, plus the two derived ones. */
 const TOKENS = ["accent", "panel-bg", "surface-0", "surface-1", "surface-dim", "overlay-0", "overlay-1", "text", "subtext-0", "mauve", "green", "yellow", "red", "blue", "teal", "peach", "backdrop", "card-bg"];
@@ -50,6 +50,20 @@ function measure({ rootSelector, scopeSelector, overflowSelectors, defs, tokens 
     if (srgb) {
       const a = srgb[4] === undefined ? 1 : srgb[4].endsWith("%") ? parseFloat(srgb[4]) / 100 : parseFloat(srgb[4]);
       return `#${hex2(+srgb[1]! * 255)}${hex2(+srgb[2]! * 255)}${hex2(+srgb[3]! * 255)}${hex2(a * 255)}`;
+    }
+    // A translucent token (`bg-surface-1/30`) is a colour-mix, which the browser reports in OKLab.
+    const lab = /^oklab\(\s*([\d.]+%?)\s+(-?[\d.]+)\s+(-?[\d.]+)(?:\s*\/\s*([\d.]+%?))?\s*\)$/.exec(value);
+    if (lab) {
+      const L = lab[1]!.endsWith("%") ? parseFloat(lab[1]!) / 100 : parseFloat(lab[1]!);
+      const A = +lab[2]!;
+      const B = +lab[3]!;
+      const a = lab[4] === undefined ? 1 : lab[4].endsWith("%") ? parseFloat(lab[4]) / 100 : parseFloat(lab[4]);
+      const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
+      const m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
+      const s3 = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
+      const lin = [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s3, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s3, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s3];
+      const [r, g, b] = lin.map((c) => 255 * (c <= 0.0031308 ? 12.92 * c : 1.055 * Math.max(c, 0) ** (1 / 2.4) - 0.055));
+      return `#${hex2(r!)}${hex2(g!)}${hex2(b!)}${hex2(a * 255)}`;
     }
     throw new Error(`cannot read the colour ${JSON.stringify(css)}`);
   };

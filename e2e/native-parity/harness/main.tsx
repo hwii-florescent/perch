@@ -12,13 +12,14 @@
 //!   header). The box has the size the fixture names; boxes are measured against it.
 //! - `stage`: a screen that floats over the window (a menu, a dialog, the palette, the toasts: they render through a
 //!   portal into `<body>` and are placed against the viewport). The stage is the whole window on the app's backdrop.
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import "../../../packages/web/src/styles/index.css";
 import { usePerchStore } from "../../../packages/web/src/store";
 import { useFileTabs } from "../../../packages/web/src/fileTabs";
 import { useSplitSets } from "../../../packages/web/src/splitSets";
 import { useBrowserPages } from "../../../packages/web/src/browserPages";
+import { zoneBox } from "../../../packages/web/src/tabDrag";
 import { applyTheme } from "../../../packages/web/src/themes";
 import { BrowserIcon, FileIcon } from "../../../packages/web/src/stock-ui/tabs/icons";
 // The app registers its SDK with the package loader before anything renders (App.tsx); a stock source needs it.
@@ -90,6 +91,36 @@ function SelectDemo({ Select, at, ...props }: { Select: ComponentType<Json>; at:
   const [value, setValue] = useState(String(props.value));
   return <div style={{ position: "absolute", left: at.x, top: at.y, width: at.width }}><Select {...props} value={value} onChange={(next: string) => setValue(next)} /></div>;
 }
+/**
+ * The tab drag layer the way the drag hands it its props: `drag.look` is a copy of the dragged tab's own markup, so the
+ * real tab strip is drawn out of sight, the tab is copied exactly as `beginTabDrag` copies it, and the box a drop would
+ * take is worked out by `zoneBox` as TabDragLayer.tsx does. The fixture gives the pointer, the grab offset, the pane
+ * under the pointer and the zone; nothing else of the drag is an input.
+ */
+interface DragInput { id: string; label: string; x: number; y: number; overStrip: boolean; tab: string; grab: { dx: number; dy: number }; pane: { left: number; top: number; width: number; height: number } | null; zone: "left" | "right" | "up" | "down" | null }
+function TabDragDemo({ Layer, Tabs, drag: input }: { Layer: ComponentType<Json>; Tabs: ComponentType; drag: DragInput }) {
+  const strip = useRef<HTMLDivElement>(null);
+  const [drag, setDrag] = useState<Json | null>(null);
+  useLayoutEffect(() => {
+    const source = strip.current?.querySelector<HTMLElement>(`[data-tab-entry="${input.tab}"]`);
+    if (!source) throw new Error(`tab-drag: no tab ${input.tab} on the strip`);
+    const rect = source.getBoundingClientRect();
+    const html = source.outerHTML.replace(/\s(data-testid|data-tab-entry|id|style)="[^"]*"/g, "");
+    const built = {
+      id: input.id, label: input.label, x: input.x, y: input.y, overStrip: input.overStrip,
+      look: { html, width: rect.width, height: rect.height, ...input.grab },
+      drop: input.pane ? { pane: input.pane, zone: input.zone, box: input.zone ? zoneBox(input.pane, input.zone) : input.pane } : null,
+    };
+    record({ props: { drag: built } });
+    setDrag(built);
+  }, []);
+  return (
+    <>
+      <div ref={strip} style={{ position: "fixed", left: -10000, top: 0, width: 976, visibility: "hidden" }}><Tabs /></div>
+      {drag && <Layer drag={drag} />}
+    </>
+  );
+}
 /** A screen that is given everything as props and reads nothing else: the props are the whole story. */
 function PropsProbe({ props }: { props: Json }) {
   record({ props });
@@ -158,6 +189,13 @@ const SCREENS: Record<string, Screen> = {
         : { testId: row.getAttribute("data-testid"), text: (row.textContent ?? "").trim(), ...(row instanceof HTMLButtonElement && row.disabled ? { disabled: true } : {}) }),
     }),
     Probe: PropsProbe,
+  },
+  "tab-drag": {
+    load: async () => {
+      const [{ default: Layer }, { default: Tabs }] = await Promise.all([import("../../../packages/web/src/stock-ui/tab-drag/main"), import("../../../packages/web/src/stock-ui/tabs/main")]);
+      return { default: ((props: { drag: DragInput }) => <TabDragDemo Layer={Layer as unknown as ComponentType<Json>} Tabs={Tabs as unknown as ComponentType} drag={props.drag} />) as unknown as ComponentType<never> };
+    },
+    mount: "stage",
   },
   "pane-menu": {
     load: () => import("../../../packages/web/src/stock-ui/pane-menu/main"),
