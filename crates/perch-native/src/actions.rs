@@ -112,14 +112,6 @@ pub const ACTIONS: [Action; 17] = [
     ),
 ];
 
-/// How the sidebar lists work: the tree of projects, or sections by state.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Organize {
-    #[default]
-    Project,
-    Status,
-}
-
 /// The New session panel: which computer and project it will start in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NewSession {
@@ -167,7 +159,6 @@ pub struct Nav {
     /// A checkout picked with no session in it to show.
     pub workspace: Option<String>,
     pub sidebar_visible: bool,
-    pub organize: Organize,
     /// Folded projects, as `host/project`.
     pub collapsed: HashSet<String>,
     pub new_session: Option<NewSession>,
@@ -179,7 +170,6 @@ impl Default for Nav {
             selected: None,
             workspace: None,
             sidebar_visible: true,
-            organize: Organize::default(),
             collapsed: HashSet::new(),
             new_session: None,
         }
@@ -252,13 +242,6 @@ impl Nav {
             }
             "nests.prev" => self.step_workspace(model, -1),
             "nests.next" => self.step_workspace(model, 1),
-            "sidebar.organize" => {
-                self.organize = match self.organize {
-                    Organize::Project => Organize::Status,
-                    Organize::Status => Organize::Project,
-                };
-                Outcome::Nothing
-            }
             jump => {
                 let n = jump.strip_prefix("nests.jump")?.parse::<usize>().ok()?;
                 self.jump_workspace(model, n)
@@ -573,9 +556,10 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), ACTIONS.len(), "an id is listed once");
-        // Every action has a handler, and an id that is not ours is declined.
+        // Every action has a handler, and an id that is not ours is declined. The sidebar's view
+        // settings (`sidebar.organize`) are the `perch` module's, which the window runs first.
         let model = model(vec![project("a", &["s1"])], &[]);
-        for action in &ACTIONS {
+        for action in ACTIONS.iter().filter(|a| a.id != "sidebar.organize") {
             assert!(
                 Nav::default().run(action.id, &model).is_some(),
                 "{} has no handler",
@@ -587,7 +571,7 @@ mod tests {
     }
 
     #[test]
-    fn the_sidebar_toggles_and_organize_switches() {
+    fn the_sidebar_toggles() {
         let model = model(vec![], &[]);
         let mut nav = Nav::default();
         assert!(nav.sidebar_visible);
@@ -595,10 +579,6 @@ mod tests {
         assert!(!nav.sidebar_visible);
         nav.run("global.sidebar", &model);
         assert!(nav.sidebar_visible);
-        nav.run("sidebar.organize", &model);
-        assert_eq!(nav.organize, Organize::Status);
-        nav.run("sidebar.organize", &model);
-        assert_eq!(nav.organize, Organize::Project);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! What the runtime's tests share: the stock sidebar exported as the app exports it (unchanged source, plain JS),
 //! loaded with its `react`, `react/jsx-runtime`, `react-dom` and `@perch/sdk` imports resolved to the stock mod's
-//! generated files as the native mod engine resolves them; a `perch` host double fed from the web reference (`sdk`, `tokens`, `window`) and the
+//! generated files as the native mod engine resolves them (`mods/react-runtime/`, which the mod host writes into each
+//! React screen's folder); a `perch` host double fed from the web reference (`sdk`, `tokens`, `window`) and the
 //! fixture's per-viewer view; and a selector adapter over the description, so the reference's named-element
 //! selectors run against what the engine would draw.
 import * as fs from "node:fs";
@@ -13,7 +14,8 @@ import { MemoryStorage } from "../dom.mjs";
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const runtimeDir = path.resolve(here, "..");
 export const repo = path.resolve(runtimeDir, "../../../..");
-const bundle = path.join(repo, "crates/perch-native/mods/sidebar-react");
+const mods = path.join(repo, "crates/perch-native/mods");
+const bundle = path.join(mods, "react-runtime");
 const parity = path.join(repo, "e2e/native-parity");
 const referenceDir = path.join(repo, "e2e/artifacts-native-parity/web");
 
@@ -87,7 +89,7 @@ export async function loadSidebar() {
   // dialog, like the reference page.
   globalThis.perch ??= { isMac: true };
   const runtime = await import(pathToFileURL(path.join(bundle, "runtime.mjs")).href);
-  const main = await import(pathToFileURL(path.join(bundle, "sidebar/main.js")).href);
+  const main = await import(pathToFileURL(path.join(mods, "sidebar/sidebar/main.js")).href);
   sidebar = { runtime, Sidebar: main.default };
   return sidebar;
 }

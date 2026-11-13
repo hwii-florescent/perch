@@ -56,68 +56,66 @@ pub const STOCK: &[(&str, &str)] = &[
     ),
     ("perch.d.ts", perch::DECLARATIONS),
     (
-        "sidebar-react/main.js",
-        include_str!("../mods/sidebar-react/main.js"),
+        "react-runtime/@perch/sdk.js",
+        include_str!("../mods/react-runtime/@perch/sdk.js"),
     ),
     (
-        "sidebar-react/mod.json",
-        include_str!("../mods/sidebar-react/mod.json"),
+        "react-runtime/agent-icons.js",
+        include_str!("../mods/react-runtime/agent-icons.js"),
     ),
     (
-        "sidebar-react/host.js",
-        include_str!("../mods/sidebar-react/host.js"),
+        "react-runtime/host.js",
+        include_str!("../mods/react-runtime/host.js"),
     ),
     (
-        "sidebar-react/agent-icons.js",
-        include_str!("../mods/sidebar-react/agent-icons.js"),
+        "react-runtime/react-dom.js",
+        include_str!("../mods/react-runtime/react-dom.js"),
     ),
     (
-        "sidebar-react/runtime.mjs",
-        include_str!("../mods/sidebar-react/runtime.mjs"),
+        "react-runtime/react.js",
+        include_str!("../mods/react-runtime/react.js"),
     ),
     (
-        "sidebar-react/react.js",
-        include_str!("../mods/sidebar-react/react.js"),
+        "react-runtime/react/jsx-runtime.js",
+        include_str!("../mods/react-runtime/react/jsx-runtime.js"),
     ),
     (
-        "sidebar-react/react/jsx-runtime.js",
-        include_str!("../mods/sidebar-react/react/jsx-runtime.js"),
+        "react-runtime/runtime.mjs",
+        include_str!("../mods/react-runtime/runtime.mjs"),
     ),
     (
-        "sidebar-react/react-dom.js",
-        include_str!("../mods/sidebar-react/react-dom.js"),
+        "react-runtime/screen.js",
+        include_str!("../mods/react-runtime/screen.js"),
+    ),
+    ("sidebar/main.js", include_str!("../mods/sidebar/main.js")),
+    ("sidebar/mod.json", include_str!("../mods/sidebar/mod.json")),
+    (
+        "sidebar/sidebar/content.js",
+        include_str!("../mods/sidebar/sidebar/content.js"),
     ),
     (
-        "sidebar-react/@perch/sdk.js",
-        include_str!("../mods/sidebar-react/@perch/sdk.js"),
+        "sidebar/sidebar/folders.js",
+        include_str!("../mods/sidebar/sidebar/folders.js"),
     ),
     (
-        "sidebar-react/sidebar/main.js",
-        include_str!("../mods/sidebar-react/sidebar/main.js"),
+        "sidebar/sidebar/hosts.js",
+        include_str!("../mods/sidebar/sidebar/hosts.js"),
     ),
     (
-        "sidebar-react/sidebar/content.js",
-        include_str!("../mods/sidebar-react/sidebar/content.js"),
+        "sidebar/sidebar/icons.js",
+        include_str!("../mods/sidebar/sidebar/icons.js"),
     ),
     (
-        "sidebar-react/sidebar/folders.js",
-        include_str!("../mods/sidebar-react/sidebar/folders.js"),
+        "sidebar/sidebar/main.js",
+        include_str!("../mods/sidebar/sidebar/main.js"),
     ),
     (
-        "sidebar-react/sidebar/hosts.js",
-        include_str!("../mods/sidebar-react/sidebar/hosts.js"),
+        "sidebar/sidebar/overview.js",
+        include_str!("../mods/sidebar/sidebar/overview.js"),
     ),
     (
-        "sidebar-react/sidebar/icons.js",
-        include_str!("../mods/sidebar-react/sidebar/icons.js"),
-    ),
-    (
-        "sidebar-react/sidebar/overview.js",
-        include_str!("../mods/sidebar-react/sidebar/overview.js"),
-    ),
-    (
-        "sidebar-react/sidebar/parts.js",
-        include_str!("../mods/sidebar-react/sidebar/parts.js"),
+        "sidebar/sidebar/parts.js",
+        include_str!("../mods/sidebar/sidebar/parts.js"),
     ),
 ];
 
@@ -425,10 +423,12 @@ impl ModView {
         };
         self.load_error = outcome.err().map(|error| format!("{error:#}"));
         if let Some(error) = &self.load_error {
-            eprintln!(
-                "perch-native: mod {} kept its last version: {error}",
-                self.id
-            );
+            let kept = if self.shown.is_some() {
+                "kept its last version"
+            } else {
+                "did not load"
+            };
+            eprintln!("perch-native: mod {} {kept}: {error}", self.id);
         }
         cx.notify();
     }
@@ -449,9 +449,15 @@ impl ModView {
 impl Render for ModView {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let view = div().size_full().overflow_hidden();
-        match &self.shown {
-            Some(shown) => view.child(shown.root.clone()),
-            None => view,
+        match (&self.shown, &self.load_error) {
+            (Some(shown), _) => view.child(shown.root.clone()),
+            // Never loaded: its place says why, so a broken screen is not an empty gap.
+            (None, Some(error)) => view
+                .p_3()
+                .text_sm()
+                .text_color(gpui::rgb(0xe5484d))
+                .child(format!("The {} mod did not load: {error}", self.id)),
+            (None, None) => view,
         }
     }
 }
@@ -525,13 +531,43 @@ fn valid_id(id: &str) -> bool {
 }
 
 /// Replaces `dir` with the shipped files, so the stock mods on disk are exactly this build's.
+/// The folder of shared files a React screen gets ([`REACT_RUNTIME`]).
+pub const REACT_RUNTIME: &str = "react-runtime";
+
+/// Every file to write out: `files`, and for each stock mod whose `mod.json` says `"runtime": "react"`, the files of
+/// [`REACT_RUNTIME`] again inside that mod's folder. The binary holds the runtime once; each React screen's folder on
+/// disk is complete, so a copy of it is a working override of that screen.
+fn with_runtimes<'a>(files: &[(&'a str, &'a str)]) -> Vec<(String, &'a str)> {
+    let runtime: Vec<(&str, &str)> = files
+        .iter()
+        .filter_map(|(path, text)| {
+            let rest = path.strip_prefix(REACT_RUNTIME)?.strip_prefix('/')?;
+            Some((rest, *text))
+        })
+        .collect();
+    let mut out: Vec<(String, &str)> = files.iter().map(|(p, t)| (p.to_string(), *t)).collect();
+    for (path, text) in files {
+        let Some(id) = path.strip_suffix("/mod.json") else {
+            continue;
+        };
+        let react = serde_json::from_str::<Value>(text)
+            .ok()
+            .is_some_and(|m| m["runtime"] == "react");
+        if react {
+            out.extend(runtime.iter().map(|(rest, t)| (format!("{id}/{rest}"), *t)));
+        }
+    }
+    out
+}
+
 fn write_stock(dir: &Path, files: &[(&str, &str)]) -> Result<()> {
     match std::fs::remove_dir_all(dir) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error).context(format!("clearing {}", dir.display())),
     }
-    for (path, text) in files {
+    for (path, text) in with_runtimes(files) {
+        let (path, text) = (path.as_str(), text);
         let file = dir.join(path);
         if let Some(parent) = file.parent() {
             std::fs::create_dir_all(parent)
@@ -589,6 +625,32 @@ mod tests {
             (dir.join("example"), Value::Null)
         );
         assert!(find_mod(&dir, "missing").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_react_screen_is_written_out_with_the_shared_runtime() {
+        let dir = scratch("react");
+        write_stock(&dir.join(".stock"), STOCK).unwrap();
+        let sidebar = find_mod(&dir, "sidebar").unwrap();
+        for file in [
+            "main.js",
+            "screen.js",
+            "host.js",
+            "runtime.mjs",
+            "react.js",
+            "@perch/sdk.js",
+        ] {
+            assert!(sidebar.dir.join(file).is_file(), "{file}");
+        }
+        assert!(
+            !dir.join(".stock/example/runtime.mjs").exists(),
+            "only React screens"
+        );
+        assert!(
+            find_mod(&dir, REACT_RUNTIME).is_none(),
+            "the runtime is not a mod"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -1,18 +1,25 @@
-//! build.mjs: writes the generated files of the stock mod `crates/perch-native/mods/sidebar-react/`, the unchanged
-//! stock sidebar on the native React runtime:
-//! - `runtime.mjs`: React 19, `react-reconciler`, the renderer, the DOM shim, the cascade, `@perch/sdk`, the app's
-//!   compiled stylesheet as a table and the parity names (`e2e/native-parity/named-elements.json`), in one ES module
-//!   (`runtime.mjs` here is its entry);
-//! - `react.js`, `react/jsx-runtime.js`, `react-dom.js`, `@perch/sdk.js`: one module per bare specifier a screen
-//!   imports, where the mod engine looks for it (a bare `name` is `<mod>/name` or `<mod>/name.js`), each re-exporting
-//!   a namespace of `runtime.mjs`, so every screen shares one React;
-//! - `sidebar/*.js`: the stock sidebar as the app exports it (`packages/web/scripts/export-stock-ui.mjs`).
-//! `main.js`, `host.js` and `mod.json` there are written by hand and left alone.
+//! build.mjs: writes the generated files of the native React screens under `crates/perch-native/mods/`:
+//! - `react-runtime/` (shared, shipped once in the binary; not a mod itself, it has no `main.js`):
+//!   - `runtime.mjs`: React 19, `react-reconciler`, the renderer, the DOM shim, the cascade, the translator to
+//!     GPUI, `@perch/sdk`, the app's compiled stylesheet as a table and the parity names
+//!     (`e2e/native-parity/named-elements.json`) for every screen, in one ES module (`runtime.mjs` here is its
+//!     entry);
+//!   - `react.js`, `react/jsx-runtime.js`, `react-dom.js`, `@perch/sdk.js`: one module per bare specifier a
+//!     screen imports, where the mod engine looks for it (a bare `name` is `<mod>/name` or `<mod>/name.js`), each
+//!     re-exporting a namespace of `runtime.mjs`;
+//!   - `agent-icons.js`: the web's agent marks;
+//!   - `host.js` and `screen.js` there are written by hand and left alone.
+//! - `<screen>/<screen>/*.js` for every id in [`SCREENS`]: that stock screen as the app exports it
+//!   (`packages/web/scripts/export-stock-ui.mjs`). `<screen>/main.js` and `<screen>/mod.json` are written by hand.
+//!
+//! A screen's `mod.json` says `"runtime": "react"`, and the mod host writes `react-runtime/` into that screen's
+//! folder when it writes the stock mods out (`mods.rs`), so a written-out screen folder is complete on its own and a
+//! copy of it is a working override.
 //!
 //! The stylesheet is the app's own: `packages/web/src/styles/index.css` compiled by Vite with the app's Tailwind
-//! plugin, so the table has exactly the classes the app's build has. `--check` builds in memory and fails, listing
-//! the files, when the mod folder differs (a stale bundle after a change to the runtime, the SDK modules it compiles
-//! in, any class in the app, the stock sidebar or the parity names).
+//! plugin, so the table has exactly the classes the app's build has (every screen's). `--check` builds in memory
+//! and fails, listing the files, when anything it writes differs (a stale bundle after a change to the runtime, the
+//! SDK modules it compiles in, any class in the app, a stock screen or the parity names).
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -22,9 +29,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, "../../../..");
 const web = path.join(repo, "packages/web");
-export const OUT = path.join(repo, "crates/perch-native/mods/sidebar-react");
-/** Files of the mod folder the build does not write. */
-const HAND_WRITTEN = new Set(["main.js", "host.js", "mod.json"]);
+/** The stock mods folder. */
+export const OUT = path.join(repo, "crates/perch-native/mods");
+/** The shared runtime's folder under it. */
+export const RUNTIME = "react-runtime";
+/** The stock screens on the React runtime, by the id of their folder in `packages/web/src/stock-ui/`. Adding a screen:
+ * its id here, then `npm run build:mods-runtime`, then its `main.js`, `mod.json` and tests (see the findings recipe). */
+export const SCREENS = ["sidebar"];
+/** Files under the folders the build writes that it does not write. */
+const HAND_WRITTEN = new Set([`${RUNTIME}/host.js`, `${RUNTIME}/screen.js`, ...SCREENS.flatMap((id) => [`${id}/main.js`, `${id}/mod.json`])]);
 const requireWeb = createRequire(path.join(web, "package.json"));
 const load = async (name) => import(pathToFileURL(requireWeb.resolve(name)).href);
 
@@ -161,11 +174,18 @@ async function moduleFiles(code) {
   }
 }
 
-/** The stock sidebar's code as the app exports it (its types file and manifest are the web package's). */
-async function sidebarFiles() {
+/** The stock screens' code as the app exports it, `<screen>/<file>.js` (their types file and manifest are the web
+ * package's). */
+async function screenFiles() {
   const { exportStockUi } = await import(pathToFileURL(path.join(web, "scripts/export-stock-ui.mjs")).href);
   const files = exportStockUi({ sourceDir: path.join(web, "src/stock-ui"), sdkTypesFile: path.join(web, "src/perch-sdk.d.ts") });
-  return [...files].filter(([rel]) => rel.startsWith("sidebar/") && rel.endsWith(".js")).map(([rel, bytes]) => [rel, Buffer.from(bytes).toString("utf8")]);
+  const out = [];
+  for (const id of SCREENS) {
+    const own = [...files].filter(([rel]) => rel.startsWith(`${id}/`) && rel.endsWith(".js"));
+    if (!own.length) throw new Error(`packages/web/src/stock-ui has no screen ${id}`);
+    for (const [rel, bytes] of own) out.push([rel, Buffer.from(bytes).toString("utf8")]);
+  }
+  return out;
 }
 
 /** The web's agent marks as markup, rendered from its own `AgentIcon` (`components/AgentIcon.tsx`) at build time:
@@ -229,10 +249,11 @@ export function oklchToHex(text) {
 export async function buildFiles() {
   const table = await cssTable(await compileCss());
   const code = await bundleRuntime(table);
-  const files = await moduleFiles(code);
-  files.set("runtime.mjs", code);
-  for (const [rel, text] of await sidebarFiles()) files.set(rel, text);
-  files.set("agent-icons.js", await agentIcons());
+  const files = new Map();
+  for (const [name, text] of await moduleFiles(code)) files.set(`${RUNTIME}/${name}`, text);
+  files.set(`${RUNTIME}/runtime.mjs`, code);
+  files.set(`${RUNTIME}/agent-icons.js`, await agentIcons());
+  for (const [rel, text] of await screenFiles()) files.set(`${rel.split("/")[0]}/${rel}`, text);
   return files;
 }
 
@@ -245,7 +266,8 @@ function listFiles(dir, base = dir) {
   });
 }
 
-/** What differs between the mod folder and `files` (empty when equal). Hand-written files are not compared. */
+/** What differs between the folders the build writes (the runtime's and each screen's) and `files` (empty when
+ * equal). Hand-written files are not compared. */
 export function differences(files, dir = OUT) {
   const out = [];
   for (const [name, text] of files) {
@@ -253,7 +275,13 @@ export function differences(files, dir = OUT) {
     if (!fs.existsSync(file)) out.push(`missing ${name}`);
     else if (fs.readFileSync(file, "utf8") !== text) out.push(`changed ${name}`);
   }
-  for (const name of listFiles(dir)) if (!files.has(name) && !HAND_WRITTEN.has(name) && !path.basename(name).startsWith(".")) out.push(`extra ${name}`);
+  for (const folder of [RUNTIME, ...SCREENS]) {
+    for (const rel of listFiles(path.join(dir, folder))) {
+      const name = `${folder}/${rel}`;
+      if (!files.has(name) && !HAND_WRITTEN.has(name) && !path.basename(name).startsWith(".")) out.push(`extra ${name}`);
+    }
+    for (const name of HAND_WRITTEN) if (name.startsWith(`${folder}/`) && !fs.existsSync(path.join(dir, name))) out.push(`missing hand-written ${name}`);
+  }
   return out.sort();
 }
 
@@ -269,13 +297,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       }
       console.log(`mods-runtime bundle is current (${files.size} files)`);
     } else {
-      for (const name of differences(files)) if (name.startsWith("extra ")) fs.rmSync(path.join(OUT, name.slice(6)));
+      const stale = differences(files);
+      for (const name of stale) if (name.startsWith("extra ")) fs.rmSync(path.join(OUT, name.slice(6)));
+      const handMissing = stale.filter((name) => name.startsWith("missing hand-written "));
+      if (handMissing.length) console.error(`write these by hand (see the recipe):\n  ${handMissing.join("\n  ")}`);
       for (const [name, text] of files) {
         fs.mkdirSync(path.dirname(path.join(OUT, name)), { recursive: true });
         fs.writeFileSync(path.join(OUT, name), text);
       }
       const size = (name) => `${(Buffer.byteLength(files.get(name)) / 1024).toFixed(1)} KiB`;
-      console.log(`wrote ${files.size} files in ${path.relative(repo, OUT)}: runtime.mjs ${size("runtime.mjs")}`);
+      console.log(`wrote ${files.size} files in ${path.relative(repo, OUT)} (${[RUNTIME, ...SCREENS].join(", ")}): runtime.mjs ${size(`${RUNTIME}/runtime.mjs`)}`);
     }
   } catch (error) {
     console.error(error instanceof Error ? error.stack : error);

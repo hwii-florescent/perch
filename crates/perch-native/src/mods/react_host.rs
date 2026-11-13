@@ -1,4 +1,4 @@
-//! The `perch-react` module: what a mod running React screens (the stock `sidebar-react`) needs from Rust and cannot
+//! The `perch-react` module: what a mod running React screens (the stock `sidebar` and any screen on `mods/react-runtime/`) needs from Rust and cannot
 //! do in JavaScript. A React screen draws its icons as SVG markup, while gpui-kit's `svg()` and `image()` read a file
 //! through the app's asset source, which this window does not give mods. `Icon.new(id, { markup, color })` draws
 //! the markup itself, `currentColor` taken as `color` (`#rrggbb` or `#rrggbbaa`), filling its box, rasterised

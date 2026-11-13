@@ -47,8 +47,8 @@ path = "tests/terminal_session.rs"
 harness = false
 
 [[test]]
-name = "sidebar_render"
-path = "tests/sidebar_render.rs"
+name = "mods_sidebar_window"
+path = "tests/mods_sidebar_window.rs"
 harness = false
 
 [[test]]
@@ -87,8 +87,8 @@ path = "tests/mods_perch.rs"
 harness = false
 
 [[test]]
-name = "mods_sidebar_react"
-path = "tests/mods_sidebar_react.rs"
+name = "mods_sidebar"
+path = "tests/mods_sidebar.rs"
 harness = false
 
 [[test]]

@@ -1,6 +1,6 @@
-//! The stock `sidebar-react` mod (the web's unchanged stock sidebar through the native React runtime) in the real
+//! The stock `sidebar` mod (the web's unchanged stock sidebar through the native React runtime) in the real
 //! mod engine: it draws every sidebar fixture state in light and dark, written for the parity gate to
-//! `e2e/artifacts-native-parity/way2/`, and clicks dispatched into the offscreen window work as on the web: a
+//! `e2e/artifacts-native-parity/native/`, and clicks dispatched into the offscreen window work as on the web: a
 //! project header folds and unfolds its project, a session row opens the session, a workspace line focuses the
 //! workspace, and the organize menu switches the view to By status. Every agent mark the web draws is markup the
 //! engine's SVG renderer reads.
@@ -27,12 +27,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-const MOD: &str = "sidebar-react";
-
-/// Where the renderings go, beside the web reference.
-fn way2_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../e2e/artifacts-native-parity/way2")
-}
+const MOD: &str = "sidebar";
 
 /// Draws `window` afresh and returns every probe record (named or not).
 fn draw(cx: &mut HeadlessAppContext, window: WindowHandle<ModView>) -> Vec<ProbeRecord> {
@@ -96,7 +91,7 @@ fn press(
 
 /// The agent marks the stock mod ships (`agent-icons.js`, `export const ICONS = {...};`), by provider.
 fn agent_icons() -> Vec<(String, String)> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("mods/sidebar-react/agent-icons.js");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("mods/react-runtime/agent-icons.js");
     let text = std::fs::read_to_string(&path).unwrap();
     let json = text
         .lines()
@@ -112,7 +107,7 @@ fn agent_icons() -> Vec<(String, String)> {
 
 fn main() {
     let scratch: PathBuf =
-        std::env::temp_dir().join(format!("perch-sidebar-react-{}", std::process::id()));
+        std::env::temp_dir().join(format!("perch-sidebar-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&scratch);
     std::fs::create_dir_all(scratch.join("home")).unwrap();
     std::env::set_var("HOME", scratch.join("home"));
@@ -126,7 +121,7 @@ fn main() {
     let fixture = parity::Fixture::load(&parity::fixture_path("sidebar"));
 
     // The ten renderings for the gate.
-    let out = way2_dir();
+    let out = parity::native_dir();
     for state in fixture.states() {
         for theme in [parity::Theme::Light, parity::Theme::Dark] {
             let started = Instant::now();
@@ -147,7 +142,7 @@ fn main() {
                 theme.word()
             );
             println!(
-                "sidebar-react: {state} {} drawn, {elements} named elements, {:.0} ms with load",
+                "sidebar: {state} {} drawn, {elements} named elements, {:.0} ms with load",
                 theme.word(),
                 started.elapsed().as_secs_f64() * 1000.
             );
@@ -196,15 +191,15 @@ fn main() {
     let again = started.elapsed();
     // A data change: the needs-you state's sessions, then back.
     let started = Instant::now();
-    perch.set_sidebar(fixture.view("needs-you"));
+    perch.set_model(parity::state_from(&fixture.data("needs-you")).model());
     cx.update(|cx| perch.flush(cx));
     draw(&mut cx, window);
     let changed = started.elapsed();
-    perch.set_sidebar(fixture.view(state));
+    perch.set_model(parity::state_from(&data).model());
     cx.update(|cx| perch.flush(cx));
     draw(&mut cx, window);
     println!(
-        "sidebar-react: first render {:.0} ms (load, mount, describe, layout, paint), re-render {:.1} ms, \
+        "sidebar: first render {:.0} ms (load, mount, describe, layout, paint), re-render {:.1} ms, \
          re-render after a data change {:.1} ms",
         first.as_secs_f64() * 1000.,
         again.as_secs_f64() * 1000.,
@@ -242,7 +237,7 @@ fn main() {
     let handled = started.elapsed();
     let records = draw(&mut cx, window);
     println!(
-        "sidebar-react: fold click {:.1} ms (press, release and the React commit {:.1} ms; describe, layout, paint)",
+        "sidebar: fold click {:.1} ms (press, release and the React commit {:.1} ms; describe, layout, paint)",
         started.elapsed().as_secs_f64() * 1000.,
         handled.as_secs_f64() * 1000.
     );
@@ -310,5 +305,5 @@ fn main() {
     }
     cx.run_until_parked();
     let _ = std::fs::remove_dir_all(&scratch);
-    println!("mods_sidebar_react: ok");
+    println!("mods_sidebar: ok");
 }

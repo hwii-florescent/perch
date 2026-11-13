@@ -384,6 +384,9 @@ declare module "perch" {
   export function props<T = Record<string, unknown>>(): T;
   /** Closes this floating screen with `result`, which the window acts on; no result is a dismissal. */
   export function close(result?: unknown): void;
+  /** Opens floating screen `id` (`confirm`, `new-session`, `dialog`, ...) with `props`, as the window opens it, and
+   * resolves with its result (`null` when dismissed or replaced). Rejects when no mod draws that screen. */
+  export function openScreen(id: string, props?: Record<string, unknown>): Promise<unknown>;
   /** `useNotifications`: the notifications, oldest first. Open and dismiss them with `run`. */
   export function notifications(): { items: NotificationItem[] };
   /** `useZoom`: the terminals' zoom factor (1 is 100%). */

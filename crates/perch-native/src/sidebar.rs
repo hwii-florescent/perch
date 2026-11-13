@@ -214,33 +214,6 @@ impl ProjectView {
     pub fn foldable(&self) -> bool {
         !self.single_checkout
     }
-
-    /// What a folded project still says: its most urgent state and how many sessions are in it.
-    /// Idle is not worth a mark (the web's `foldedTop !== "idle"`).
-    pub fn rollup(&self) -> Option<(Attention, usize)> {
-        self.top
-            .filter(|top| *top != Attention::Idle && self.top_count > 0)
-            .map(|top| (top, self.top_count))
-    }
-}
-
-/// Chats of one project inside a By status section.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct StatusCluster {
-    pub project_id: Option<String>,
-    pub name: String,
-    pub quickchat: bool,
-    pub sessions: Vec<SessionView>,
-}
-
-/// A By status section. `attention` is `None` for "Offline: last known", which claims no state.
-#[derive(Clone, Debug, PartialEq)]
-pub struct StatusSection {
-    pub attention: Option<Attention>,
-    pub title: String,
-    pub note: Option<String>,
-    pub count: usize,
-    pub clusters: Vec<StatusCluster>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -259,10 +232,6 @@ pub struct HostView {
     /// Whether a configured computer is turned on; `None` for this one.
     pub enabled: Option<bool>,
     pub projects: Vec<ProjectView>,
-    /// By status: sections in fixed order, each split by project.
-    pub status: Vec<StatusSection>,
-    /// Projects with no listed session, which By status lists last.
-    pub empty_projects: Vec<ProjectView>,
     /// Terminal first, then the agents the computer can start.
     pub providers: Vec<Provider>,
 }
@@ -923,90 +892,6 @@ impl State {
             views.push(self.project_view(None, other));
         }
 
-        let empty_projects = views
-            .iter()
-            .zip(&projects)
-            .filter(|(_, p)| !is_chats(p))
-            .filter(|(_, p)| {
-                !rows
-                    .iter()
-                    .any(|r| r.1.project_id.as_deref() == Some(&p.id))
-            })
-            .map(|(v, _)| v.clone())
-            .collect();
-
-        // By status: newest first, from the core's order reversed.
-        let mut newest: Vec<&SessionSummary> = rows.iter().map(|r| r.1).collect();
-        newest.sort_by_key(|s| std::cmp::Reverse(s.created_at));
-        let reversed: Vec<String> = session_order.iter().rev().cloned().collect();
-        let newest = order_by(newest, &reversed, |s| &s.id);
-        let by_session: HashMap<&str, &(Option<usize>, &SessionSummary, SessionView)> =
-            rows.iter().map(|r| (r.1.id.as_str(), r)).collect();
-        // Project headings in the sidebar's project order, Other last.
-        let clusters = |members: &[&SessionSummary]| -> Vec<StatusCluster> {
-            (0..projects.len())
-                .map(Some)
-                .chain([None])
-                .filter_map(|at| {
-                    let sessions: Vec<SessionView> = members
-                        .iter()
-                        .filter_map(|s| by_session.get(s.id.as_str()))
-                        .filter(|r| r.0 == at)
-                        .map(|r| r.2.clone())
-                        .collect();
-                    let project = at.map(|at| projects[at]);
-                    (!sessions.is_empty()).then(|| StatusCluster {
-                        project_id: project.map(|p| p.id.clone()),
-                        name: project.map_or_else(|| "Other".into(), project_name),
-                        quickchat: project.is_some_and(is_chats),
-                        sessions: nest_under_leads(sessions),
-                    })
-                })
-                .collect()
-        };
-        let status = if !reachable {
-            // What these were doing is unknown: shown once, as last known, never as Working.
-            let all: Vec<&SessionSummary> = newest.clone();
-            if all.is_empty() {
-                Vec::new()
-            } else {
-                vec![StatusSection {
-                    attention: None,
-                    title: "Offline: last known".into(),
-                    note: Some(if id == LOCAL {
-                        "Reconnecting…".to_string()
-                    } else {
-                        format!("{name}: {state}")
-                    }),
-                    count: all.len(),
-                    clusters: clusters(&all),
-                }]
-            }
-        } else {
-            [
-                Attention::NeedsYou,
-                Attention::Done,
-                Attention::Working,
-                Attention::Idle,
-            ]
-            .into_iter()
-            .filter_map(|wanted| {
-                let members: Vec<&SessionSummary> = newest
-                    .iter()
-                    .copied()
-                    .filter(|s| by_session[s.id.as_str()].2.attention == Some(wanted))
-                    .collect();
-                (!members.is_empty()).then(|| StatusSection {
-                    attention: Some(wanted),
-                    title: wanted.heading().into(),
-                    note: None,
-                    count: members.len(),
-                    clusters: clusters(&members),
-                })
-            })
-            .collect()
-        };
-
         let mut providers = vec![Provider {
             id: TERMINAL_PROVIDER.into(),
             name: "Terminal".into(),
@@ -1024,8 +909,6 @@ impl State {
             state,
             reachable,
             projects: views,
-            status,
-            empty_projects,
             providers,
         }
     }
@@ -1810,29 +1693,6 @@ mod tests {
         }
     }
 
-    /// A folded project still says what needs you or is working, as the web's rollup does, and
-    /// says nothing for chats that are only idle.
-    #[test]
-    fn a_folded_project_rolls_up_what_needs_you_or_is_working() {
-        let rollup = |flags: Value| {
-            let mut state = state();
-            state.apply(&session_list(vec![
-                session("idle", LOCAL, "a", json!({})),
-                session("other", LOCAL, "a", flags),
-            ]));
-            state.model().hosts[0].projects[0].rollup()
-        };
-        assert_eq!(rollup(json!({})), None);
-        assert_eq!(
-            rollup(json!({"status": "running"})),
-            Some((Attention::Working, 1))
-        );
-        assert_eq!(
-            rollup(json!({"blocked": true})),
-            Some((Attention::NeedsYou, 1))
-        );
-    }
-
     #[test]
     fn a_pin_shows_when_the_core_broadcasts_it() {
         let mut state = state();
@@ -1933,84 +1793,6 @@ mod tests {
                 ("grand", false),
             ]
         );
-    }
-
-    #[test]
-    fn by_status_sorts_chats_by_state_then_project() {
-        let mut state = state();
-        state.apply(&project_list(
-            LOCAL,
-            vec![
-                project("a", LOCAL, "alpha"),
-                project("b", LOCAL, "beta"),
-                project("c", LOCAL, "empty"),
-                json!({"id": "q", "hostId": LOCAL, "name": "Chats", "path": "/home/.perch/scratch",
-                       "favorite": false, "createdAt": 0, "updatedAt": 0}),
-            ],
-        ));
-        state.apply(&session_list(vec![
-            session("old-idle", LOCAL, "a", json!({"createdAt": 1})),
-            session("new-idle", LOCAL, "a", json!({"createdAt": 9})),
-            session("run", LOCAL, "b", json!({"status": "running"})),
-            session("chat", LOCAL, "q", json!({"blocked": true})),
-            session("ask", LOCAL, "a", json!({"blocked": true})),
-            session(
-                "lead",
-                LOCAL,
-                "b",
-                json!({"status": "running", "createdAt": 3}),
-            ),
-            session(
-                "kid",
-                LOCAL,
-                "b",
-                json!({"status": "running", "parentSessionId": "lead", "createdAt": 4}),
-            ),
-        ]));
-        let model = state.model();
-        let host = &model.hosts[0];
-        let sections: Vec<_> = host
-            .status
-            .iter()
-            .map(|s| (s.title.as_str(), s.count))
-            .collect();
-        assert_eq!(sections, [("Needs you", 2), ("Working", 3), ("Idle", 2)]);
-        // Each section keeps its chats under their project, in the sidebar's order: Quickchat last.
-        let needs: Vec<_> = host.status[0]
-            .clusters
-            .iter()
-            .map(|c| (c.name.as_str(), ids(&c.sessions)))
-            .collect();
-        assert_eq!(
-            needs,
-            [
-                ("alpha", vec![("ask", false)]),
-                ("Quickchat", vec![("chat", false)])
-            ]
-        );
-        // Newest first within a project, a sub-session under its lead.
-        let idle = &host.status[2].clusters[0];
-        assert_eq!(
-            ids(&idle.sessions),
-            [("new-idle", false), ("old-idle", false)]
-        );
-        let working = &host.status[1].clusters[0];
-        assert_eq!(working.name, "beta");
-        assert_eq!(
-            ids(&working.sessions),
-            [("lead", false), ("kid", true), ("run", false)]
-        );
-        // Projects with no chat are listed last, so none goes missing.
-        let empty: Vec<_> = host.empty_projects.iter().map(|p| &*p.name).collect();
-        assert_eq!(empty, ["empty"]);
-
-        // A computer that cannot be reached claims no state: one section, as last known.
-        state.disconnect(None);
-        let host = &state.model().hosts[0];
-        assert_eq!(host.status.len(), 1);
-        assert_eq!(host.status[0].title, "Offline: last known");
-        assert_eq!(host.status[0].attention, None);
-        assert_eq!(host.status[0].count, 7);
     }
 
     #[test]

@@ -1,0 +1,5 @@
+{
+  "name": "Sidebar",
+  "description": "The web app's stock sidebar, unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}
