@@ -1,9 +1,11 @@
 //! Screens drawn by mods in a real window: a mod with a screen's id takes that screen's place (the
-//! tab strip in flow; a confirmation, the pane menu and the notifications floating), gets its
-//! props and re-renders when they change, and a floating one returns a result to the window,
-//! which gives the keyboard back to the terminal that had it. Escape and a press outside dismiss
-//! it, once, in the window. The data screens read (status line usage, zoom, notifications, tabs)
-//! reaches them and re-renders them when it changes.
+//! tab strip in flow; a confirmation, the pane menu and the notifications floating over the whole
+//! window), gets its props and re-renders when they change, and a floating one returns a result to
+//! the window, which gives the keyboard back to the terminal that had it. A floating mod places
+//! its own panel and closes itself on a press outside it; Escape is the window's. Under a modal
+//! screen nothing beneath takes the mouse; under the notifications everything does but the card.
+//! The data screens read (status line usage, zoom, notifications, tabs) reaches them and
+//! re-renders them when it changes.
 //!
 //! Offscreen, as the other render tests: no window is shown or focused, no core runs, and every
 //! event goes through the window's own dispatch. The mods are user mods the test writes.
@@ -11,7 +13,8 @@
 use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 use gpui::{
     point, px, size, AppContext as _, Focusable as _, HeadlessAppContext, Keystroke, Modifiers,
-    MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput, Window, WindowHandle,
+    MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput, ScrollDelta, ScrollWheelEvent,
+    TouchPhase, Window, WindowHandle,
 };
 use gpui_shell::probe::{self, ProbeRecord};
 use gpui_shell::{HostArguments, HostValue};
@@ -53,7 +56,12 @@ export default class extends View {
     const line = perch.statusLine();
     return h_flex().id("status-root").size_full()
       .child(div().id("status-zoom").w(Math.round(perch.zoom() * 100)).h(10).bg("#00ff00"))
-      .child(div().id("status-tokens").w((line.contextTokens ?? 0) / 100 + 1).h(10).bg("#0000ff"));
+      .child(div().id("status-tokens").w((line.contextTokens ?? 0) / 100 + 1).h(10).bg("#0000ff"))
+      .child(div().id("status-hit").flex_1().h_full()
+        .on_mouse_down("left", (event, cx) => { this.presses = (this.presses ?? 0) + 1; cx.notify(); })
+        .on_scroll_wheel((event, cx) => { this.scrolls = (this.scrolls ?? 0) + 1; cx.notify(); })
+        .child(div().id("status-presses").w(1 + 10 * (this.presses ?? 0)).h(4).bg("#ff00ff"))
+        .child(div().id("status-scrolls").w(1 + 10 * (this.scrolls ?? 0)).h(4).bg("#00ffff")));
   }
 }
 "##;
@@ -65,10 +73,13 @@ import * as perch from "perch";
 export default class extends View {
   render() {
     const props = perch.props();
-    return v_flex().id("confirm-root").size_full().bg("#303030")
-      .child(div().id("confirm-message").w(10 * (props.message ?? "").length).h(20).bg("#ffffff"))
-      .child(div().id("confirm-yes").w(80).h(30).bg("#00ff00")
-        .on_click(() => perch.close({ confirmed: true })));
+    return div().id("confirm-root").size_full()
+      .on_mouse_down("left", () => perch.close())
+      .child(v_flex().id("confirm-panel").w(360).h(120).bg("#303030")
+        .on_mouse_down("left", (event, cx) => cx.stop_propagation())
+        .child(div().id("confirm-message").w(10 * (props.message ?? "").length).h(20).bg("#ffffff"))
+        .child(div().id("confirm-yes").w(80).h(30).bg("#00ff00")
+          .on_click(() => perch.close({ confirmed: true }))));
   }
 }
 "##;
@@ -80,10 +91,13 @@ import * as perch from "perch";
 export default class extends View {
   render() {
     const props = perch.props();
-    return v_flex().id("menu-root").size_full().bg("#303030")
-      .child(div().id("menu-items").w(10 * (props.items ?? []).length).h(10).bg("#ffffff"))
-      .child(div().id("menu-rename").w(100).h(30).bg("#00ff00")
-        .on_click(() => perch.close({ action: "rename", args: ["Renamed"] })));
+    return div().id("menu-root").size_full()
+      .child(v_flex().id("menu-panel").absolute().left(props.x).top(props.y).w(200).h(120)
+        .bg("#303030")
+        .on_mouse_down_out(() => perch.close())
+        .child(div().id("menu-items").w(10 * (props.items ?? []).length).h(10).bg("#ffffff"))
+        .child(div().id("menu-rename").w(100).h(30).bg("#00ff00")
+          .on_click(() => perch.close({ action: "rename", args: ["Renamed"] }))));
   }
 }
 "##;
@@ -95,10 +109,12 @@ import * as perch from "perch";
 export default class extends View {
   render() {
     const { items } = perch.notifications();
-    return v_flex().id("toast-root").size_full()
-      .child(div().id("toast-count").w(20 * items.length + 1).h(10).bg("#ffffff"))
-      .child(div().id("toast-dismiss").w(50).h(30).bg("#ff0000")
-        .on_click(() => { if (items[0]) perch.run("notification.dismiss", { id: items[0].id }); }));
+    return v_flex().id("toast-root").size_full().justify_end().items_end()
+      .child(v_flex().id("toast-card").w(300).bg("#202020")
+        .on_mouse_down("left", (event, cx) => cx.stop_propagation())
+        .child(div().id("toast-count").w(20 * items.length + 1).h(10).bg("#ffffff"))
+        .child(div().id("toast-dismiss").w(50).h(30).bg("#ff0000")
+          .on_click(() => { if (items[0]) perch.run("notification.dismiss", { id: items[0].id }); })));
   }
 }
 "##;
@@ -228,6 +244,23 @@ impl Rig {
                         position,
                         modifiers: Modifiers::default(),
                         click_count: 1,
+                    }),
+                    cx,
+                );
+            })
+            .unwrap();
+        self.cx.run_until_parked();
+    }
+
+    fn scroll(&mut self, x: f32, y: f32) {
+        self.cx
+            .update_window(self.window.into(), |_, window: &mut Window, cx| {
+                window.dispatch_event(
+                    PlatformInput::ScrollWheel(ScrollWheelEvent {
+                        position: point(px(x), px(y)),
+                        delta: ScrollDelta::Lines(point(0., -3.)),
+                        modifiers: Modifiers::default(),
+                        touch_phase: TouchPhase::Moved,
                     }),
                     cx,
                 );
@@ -416,6 +449,17 @@ fn main() {
         px(50.)
     );
     assert!(!rig.terminal_focused(), "the confirmation has the keyboard");
+    // Over the whole window, which its props say the size of; it places its own panel.
+    let root = probe::record("confirm-root").unwrap();
+    assert_eq!(
+        (root.bounds.origin, root.bounds.size),
+        (point(px(0.), px(0.)), size(px(WIDTH), px(HEIGHT)))
+    );
+    assert_eq!(
+        rig.ws(|ws, _, _| ws.screen_props("confirm").cloned())
+            .unwrap()["viewport"],
+        json!({ "width": WIDTH, "height": HEIGHT })
+    );
     rig.ws(|ws, _, cx| ws.update_screen("confirm", json!({ "message": "Really sure?" }), cx));
     assert_eq!(
         rig.record("confirm-message").unwrap().bounds.size.width,
@@ -431,19 +475,34 @@ fn main() {
         "the keyboard is back on the terminal"
     );
 
-    // Escape dismisses it, once, in the window; so does a press outside. Each time it opens again.
+    // Escape dismisses it, once, in the window, unless it is busy; a press on its backdrop (the
+    // mod's own, as the web's) dismisses it too, and nothing beneath takes that press. Each time
+    // it opens again.
     let got = rig.open_confirm("Again?");
+    rig.ws(|ws, _, cx| {
+        ws.update_screen("confirm", json!({ "message": "Again?", "busy": true }), cx)
+    });
+    rig.press("escape");
+    assert_eq!(*got.borrow(), None, "a busy confirmation stays");
+    assert_eq!(rig.ws(|ws, _, _| ws.screens_open()), ["confirm"]);
+    rig.ws(|ws, _, cx| ws.update_screen("confirm", json!({ "message": "Again?" }), cx));
     rig.press("escape");
     assert_eq!(*got.borrow(), Some(Value::Null), "Escape is a dismissal");
     assert!(rig.ws(|ws, _, _| ws.screens_open()).is_empty());
     rig.draw();
     assert!(rig.terminal_focused());
     let got = rig.open_confirm("Once more?");
-    rig.mouse(WIDTH - 20., HEIGHT - 20.);
+    let presses = rig.record("status-presses").unwrap().bounds.size.width;
+    rig.mouse(WIDTH - 20., HEIGHT - 10.);
     assert_eq!(
         *got.borrow(),
         Some(Value::Null),
         "a press outside is a dismissal"
+    );
+    assert_eq!(
+        rig.record("status-presses").unwrap().bounds.size.width,
+        presses,
+        "the status bar beneath did not take it"
     );
     rig.draw();
     assert!(rig.terminal_focused());
@@ -496,9 +555,14 @@ fn main() {
     let items = rig.record("menu-items").expect("the pane menu mod is open");
     let root = probe::record("menu-root").unwrap();
     assert_eq!(
-        root.bounds.origin,
+        (root.bounds.origin, root.bounds.size),
+        (point(px(0.), px(0.)), size(px(WIDTH), px(HEIGHT))),
+        "over the whole window"
+    );
+    assert_eq!(
+        probe::record("menu-panel").unwrap().bounds.origin,
         point(px(400.), px(200.)),
-        "at the point"
+        "its panel at the point its props say"
     );
     assert!(
         items.bounds.size.width >= px(80.),
@@ -510,6 +574,22 @@ fn main() {
         matches!(c, Command::Rename { session_id, title } if session_id == "alpha" && title == "Renamed")
     });
     assert!(renamed, "the menu's rename ran on its tab");
+    // A press outside its panel closes it: the mod's own `on_mouse_down_out`, as the web's menu.
+    rig.ws(|ws, window, cx| {
+        ws.run_command(
+            "tab.menu",
+            Some(&json!({"id": "alpha", "x": 400, "y": 200})),
+            window,
+            cx,
+        )
+    })
+    .unwrap();
+    assert!(rig.record("menu-panel").is_some());
+    rig.mouse(100., 100.);
+    rig.draw();
+    assert!(rig.ws(|ws, _, _| ws.screens_open()).is_empty(), "closed");
+    assert!(rig.asked().is_empty(), "nothing ran");
+    assert!(rig.terminal_focused());
 
     // Notifications: the toast screen shows them, not modal, and dismissing the last puts it away.
     rig.write("toast", TOAST);
@@ -534,6 +614,32 @@ fn main() {
         rig.terminal_focused(),
         "a notification does not take the keyboard"
     );
+    // Its layer covers the window and takes nothing: a press and a scroll beside its card reach
+    // the status bar beneath; a press on the card is the card's.
+    let card = probe::record("toast-card").unwrap().bounds;
+    let hit = probe::record("status-hit").unwrap().bounds;
+    assert!(
+        card.right() > hit.left() && card.bottom() > hit.top(),
+        "the card is over the bar"
+    );
+    let beside = (f32::from(card.left()) - 20., f32::from(hit.top()) + 5.);
+    let over = (f32::from(card.right()) - 5., f32::from(hit.top()) + 5.);
+    let width = |rig: &mut Rig, name: &str| rig.record(name).unwrap().bounds.size.width;
+    let (presses, scrolls) = (
+        width(&mut rig, "status-presses"),
+        width(&mut rig, "status-scrolls"),
+    );
+    rig.mouse(beside.0, beside.1);
+    assert_eq!(width(&mut rig, "status-presses"), presses + px(10.));
+    rig.scroll(beside.0, beside.1);
+    assert_eq!(width(&mut rig, "status-scrolls"), scrolls + px(10.));
+    rig.mouse(over.0, over.1);
+    assert_eq!(
+        width(&mut rig, "status-presses"),
+        presses + px(10.),
+        "the card took it"
+    );
+    assert!(rig.terminal_focused(), "and the keyboard stays");
     let item = rig.cx.update(|cx| {
         let ws = workspace.read(cx);
         let model = ws.sidebar().read(cx).model();

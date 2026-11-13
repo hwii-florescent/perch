@@ -517,43 +517,22 @@ pub struct Shot {
     pub report: Value,
 }
 
-/// The window as it holds a screen: in flow, the screen's region alone; floating, the backdrop
-/// with the screen's box where the window puts it.
+/// The window as it holds a screen: in flow, the screen's region alone; floating, the screen
+/// over the whole window, on the backdrop.
 struct Stage {
     view: gpui::Entity<ModView>,
     backdrop: Option<gpui::Hsla>,
-    origin: (f32, f32),
-    size: (f32, f32),
 }
 
 impl Render for Stage {
     fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
-        let Some(backdrop) = self.backdrop else {
-            return div().size_full().child(self.view.clone());
-        };
-        div().size_full().bg(backdrop).child(
-            div()
-                .absolute()
-                .left(px(self.origin.0))
-                .top(px(self.origin.1))
-                .w(px(self.size.0))
-                .h(px(self.size.1))
-                .overflow_hidden()
-                .child(self.view.clone()),
-        )
+        let stage = div().size_full();
+        match self.backdrop {
+            Some(backdrop) => stage.bg(backdrop),
+            None => stage,
+        }
+        .child(self.view.clone())
     }
-}
-
-/// Where the window opens an anchored screen for these props: a menu at its point, the New
-/// session panel under its anchor.
-fn anchor(props: Option<&Value>) -> Option<gpui::Point<gpui::Pixels>> {
-    let props = props?;
-    let at = |x: &Value, y: f64| Some(point(px(x.as_f64()? as f32), px(y as f32)));
-    if let Some(rect) = props.get("anchorRect") {
-        let below = rect["y"].as_f64()? + rect["height"].as_f64().unwrap_or(0.);
-        return at(&rect["x"], below);
-    }
-    at(&props["x"], props["y"].as_f64()?)
 }
 
 /// The key a web step names, as a keystroke.
@@ -720,8 +699,8 @@ fn text_sized_names(screen: &str) -> Vec<String> {
 }
 
 /// Draws screen `fixture.screen`'s mod in a fixture state as the window holds it: an in-flow
-/// screen alone at the state's size, a floating one in the state's window on the backdrop at the
-/// window's place and box. The state's `steps` are done as events. Writes
+/// screen alone at the state's size, a floating one over the whole of the state's window on the
+/// backdrop, with `viewport` in its props. The state's `steps` are done as events. Writes
 /// `<screen>.<state>.<theme>.png` and `.json` into `out`, in the web reference's schema.
 pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
     let fixture = capture.fixture;
@@ -739,7 +718,15 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
     let perch = Perch::new();
     perch.register(&host);
     publish(&perch, fixture, capture.state);
-    let props = fixture.props(capture.state);
+    let floating = matches!(screen.place, Place::Floating { .. });
+    let mut props = fixture.props(capture.state);
+    if floating {
+        // As the window gives every floating screen: its size.
+        let with =
+            screens::with_viewport(props.as_ref().unwrap_or(&json!({})), (window_w, window_h));
+        perch.set_props(screen.id, with.clone());
+        props = Some(with);
+    }
     // A pane header is placed once per pane, keyed by its tab.
     let key = match (screen.id, props.as_ref().and_then(|p| p["id"].as_str())) {
         ("pane-header", Some(id)) => format!("pane-header#{id}"),
@@ -757,14 +744,10 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
         .zip(resolved.tokens.iter())
         .map(|(name, value)| (name.to_string(), json!(format!("{value}ff"))))
         .collect();
-    let floating = matches!(screen.place, Place::Floating { .. });
-    let (box_size, origin, window_size) = if floating {
-        let box_size = screens::size_in(&host, screen.id);
-        let at = anchor(props.as_ref());
-        let origin = screens::origin(screen.id, at, box_size, (window_w, window_h));
-        (box_size, origin, (window_w, window_h))
+    let window_size = if floating {
+        (window_w, window_h)
     } else {
-        ((width, height), (0., 0.), (width, height))
+        (width, height)
     };
     let backdrop = floating.then(|| {
         let hex = tokens["backdrop"].as_str().unwrap();
@@ -773,12 +756,7 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
     let window = cx
         .open_window(size(px(window_size.0), px(window_size.1)), |window, cx| {
             let view = host.view_keyed(screen.id, &key, window, cx);
-            cx.new(|_| Stage {
-                view,
-                backdrop,
-                origin,
-                size: box_size,
-            })
+            cx.new(|_| Stage { view, backdrop })
         })
         .expect("an offscreen window");
     let handle: gpui::AnyWindowHandle = window.into();
