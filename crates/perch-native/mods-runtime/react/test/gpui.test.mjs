@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fixture, mountSidebar, THEMES } from "./support.mjs";
-import { scrollGutters, shrinkWrapBases, snapColumns, snapRows } from "../gpui.mjs";
+import { breakLines, scrollGutters, shrinkWrapBases, snapColumns, snapRows } from "../gpui.mjs";
 
 /** A gpui-kit stand-in that records each call, and keeps the handlers. */
 function recordingKit() {
@@ -222,4 +222,19 @@ test("a row in a box sized by its content sizes a growing item by its content", 
   const kept = new Map();
   shrinkWrapBases([sized], kept);
   assert.equal(kept.size, 0, "a box with a width of its own leaves the basis alone");
+});
+
+test("text that breaks anywhere is broken as a browser does where its box's width is known", () => {
+  const text = { kind: "text", text: "Discard all in /a/long-path/xyzxyzxyzxyz?" };
+  const message = { kind: "div", break_anywhere: true, style: { text_size: 10, line_height: 1.5 }, children: [text] };
+  const panel = { kind: "div", style: { display: "flex", flex_direction: "col", w: 120, pl: 10, pr: 10 }, children: [message] };
+  const overrides = new Map();
+  // Every character is 6px wide: 16 to a 100px line.
+  breakLines([panel], (t) => t.length * 6, overrides);
+  // The path moves to its own line, breaks after its hyphen, and a word longer than a line breaks anywhere.
+  assert.equal(overrides.get(text).text, "Discard all in\n/a/long-\npath/xyzxyzxyzxy\nz?");
+  assert.equal(overrides.get(message).h, 4 * 15, "four lines of CSS line height");
+  const unknown = new Map();
+  breakLines([{ ...panel, style: { display: "flex", flex_direction: "col" } }], (t) => t.length * 6, unknown);
+  assert.equal(unknown.size, 0, "no width, no breaks");
 });

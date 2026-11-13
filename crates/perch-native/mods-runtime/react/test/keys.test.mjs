@@ -34,3 +34,29 @@ test("typing reaches a focused field: characters, Backspace, and keys the source
     handle.unmount();
   }
 });
+
+test("a click ticks a check box, and the source sees it in onChange", async () => {
+  const { runtime } = await loadSidebar();
+  const { createElement: h, useState } = await import("react");
+  const seen = [];
+  function Box() {
+    const [on, setOn] = useState(false);
+    seen.push(on);
+    return h("input", { type: "checkbox", id: "box", checked: on, onChange: (e) => setOn(e.target.checked) });
+  }
+  const perch = { isMac: true, render() {}, error: (e) => { throw e; } };
+  const handle = runtime.mount(perch, Box, { container: { width: 200, height: 40 } });
+  try {
+    const find = (n) => (n.kind === "input" ? n : (n.children ?? []).map(find).find(Boolean));
+    const id = find(handle.description.root).id;
+    handle.toggle(id);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(seen.at(-1), true, "ticked");
+    handle.toggle(id);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(seen.at(-1), false, "and off again");
+    assert.equal(find(handle.description.root).checked, false);
+  } finally {
+    handle.unmount();
+  }
+});

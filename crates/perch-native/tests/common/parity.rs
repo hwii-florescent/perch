@@ -312,7 +312,14 @@ pub fn elements(
         .map(|r| {
             let (name, key) = match r.name.split_once(':') {
                 Some((name, key)) => (name.to_string(), Some(key.to_string())),
-                None => (r.name.to_string(), None),
+                // A name more than one element takes, from the second on (`name@1`, ...).
+                None => (
+                    r.name
+                        .split_once('@')
+                        .map_or(&*r.name, |(name, _)| name)
+                        .to_string(),
+                    None,
+                ),
             };
             (name, key, r)
         })

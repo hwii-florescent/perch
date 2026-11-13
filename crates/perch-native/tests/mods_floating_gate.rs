@@ -20,7 +20,7 @@ use perch_native::mods;
 use std::time::Instant;
 
 /// The floating screens a stock React mod draws.
-const SCREENS: &[&str] = &["navigator", "pane-menu"];
+const SCREENS: &[&str] = &["navigator", "pane-menu", "confirm"];
 
 fn main() {
     let scratch = std::env::temp_dir().join(format!("perch-floating-gate-{}", std::process::id()));

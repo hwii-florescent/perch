@@ -8,6 +8,9 @@
 //! - Pane menu: a right-click in a pane opens it at the press; Rename pane turns it into a field
 //!   that has the keyboard, and Enter or OK renames that pane's session; Escape and a press outside
 //!   close it without anything beneath taking the press.
+//! - Confirmation: closing an agent's tab asks through the close guard drawn in the confirmation;
+//!   Escape and a press on the dim backdrop cancel and keep the tab, Keep running puts the tab
+//!   away without ending it, and Enter stops it (with Don't show again, the warning is turned off).
 //!
 //! Offscreen, as the other render tests: no window is shown or focused, no core runs, and every
 //! event goes through the window's own dispatch.
@@ -22,6 +25,7 @@ use perch_core::protocol::ServerMessage;
 use perch_native::client::Command;
 use perch_native::mods::{self, POLL};
 use perch_native::sidebar::State;
+use perch_native::terminal::attach::{FromCore, ToCore};
 use perch_native::ui::{OpenSession, Workspace};
 use serde_json::{json, Value};
 use std::cell::RefCell;
@@ -370,6 +374,120 @@ fn pane_menu(rig: &mut Rig) {
     println!("pane-menu: ok");
 }
 
+/// Attaches the tab with the keyboard to a stand-in core: what it asks the core, and what the core says.
+fn link(
+    rig: &mut Rig,
+) -> (
+    UnboundedReceiver<ToCore>,
+    futures::channel::mpsc::UnboundedSender<FromCore>,
+) {
+    let (to_core, asked) = unbounded::<ToCore>();
+    let (core, from_core) = unbounded::<FromCore>();
+    rig.ws(|ws, _, cx| {
+        let view = ws.terminal().expect("a terminal").clone();
+        view.update(cx, |view, cx| view.link(to_core, from_core, cx))
+    });
+    core.unbounded_send(FromCore::Attached {
+        replay: String::new(),
+        input: true,
+        resize: true,
+        agent: None,
+    })
+    .unwrap();
+    rig.draw();
+    (asked, core)
+}
+
+fn ends(rx: &mut UnboundedReceiver<ToCore>) -> usize {
+    std::iter::from_fn(|| rx.try_recv().ok())
+        .filter(|m| *m == ToCore::End)
+        .count()
+}
+
+fn tabs(rig: &mut Rig) -> Vec<String> {
+    rig.ws(|ws, _, _| ws.tabs().strip().to_vec())
+}
+
+fn close_tab(rig: &mut Rig) {
+    rig.ws(|ws, window, cx| ws.run_command("tabs.close", None, window, cx))
+        .unwrap();
+    rig.draw();
+}
+
+fn confirm(rig: &mut Rig) {
+    let (mut to_core, _core) = link(rig);
+    // Closing an agent's tab opens the close guard in the confirmation, centred, its Stop button
+    // holding the keyboard.
+    close_tab(rig);
+    assert_eq!(rig.open_screens(), ["confirm"]);
+    let panel = rig.record("confirm-panel").expect("the dialog is drawn");
+    assert_eq!(panel.bounds.size.width, px(360.));
+    assert_eq!(panel.bounds.origin.x, px((WIDTH - 360.) / 2.), "centred");
+    assert!(rig.record("confirm-accept").is_some());
+    assert!(!rig.terminal_focused(), "the dialog has the keyboard");
+
+    // Escape cancels: the tab stays, nothing was ended, the terminal has the keyboard again.
+    rig.press("escape");
+    assert!(rig.open_screens().is_empty(), "Escape closed it");
+    assert!(tabs(rig).contains(&"alpha".to_string()), "kept");
+    assert_eq!(ends(&mut to_core), 0);
+    assert!(rig.terminal_focused());
+
+    // A press on the backdrop cancels too, and nothing beneath takes it.
+    let before = rig.opened.borrow().len();
+    close_tab(rig);
+    rig.mouse(20., HEIGHT - 20.);
+    assert!(rig.open_screens().is_empty(), "the backdrop closed it");
+    assert_eq!(
+        rig.opened.borrow().len(),
+        before,
+        "nothing beneath was pressed"
+    );
+    assert!(tabs(rig).contains(&"alpha".to_string()), "kept");
+    assert_eq!(ends(&mut to_core), 0);
+    assert!(rig.terminal_focused());
+
+    // A press inside keeps it; Keep running puts the tab away and ends nothing.
+    close_tab(rig);
+    rig.click("confirm-message");
+    assert_eq!(rig.open_screens(), ["confirm"], "a press inside keeps it");
+    rig.click("confirm-extra");
+    assert!(rig.open_screens().is_empty());
+    assert!(
+        !tabs(rig).contains(&"alpha".to_string()),
+        "the tab was put away"
+    );
+    assert_eq!(ends(&mut to_core), 0, "and its agent keeps running");
+    assert!(rig.ws(|ws, _, _| ws.notice().is_some_and(|n| n.contains("keeps running"))));
+
+    // Opened again: Don't show again, then Enter stops it for everyone and turns the warning off.
+    rig.ws(|ws, _, cx| {
+        ws.sidebar().update(cx, |s, cx| {
+            s.open("local".into(), "alpha".into(), Some("claude".into()), cx)
+        })
+    });
+    rig.draw();
+    let (mut to_core, core) = link(rig);
+    close_tab(rig);
+    // A click on the row's words ticks its box, as on the web.
+    rig.click("confirm-extra@1");
+    rig.asked();
+    rig.press("enter");
+    assert!(rig.open_screens().is_empty(), "Enter closed it");
+    assert_eq!(ends(&mut to_core), 1, "Enter stopped it");
+    let off = rig.asked().into_iter().any(|c| {
+        matches!(c, Command::UpdateSettings(patch) if patch == serde_json::json!({"warnCloseAgent": false}))
+    });
+    assert!(off, "Don't show again turned the warning off");
+    core.unbounded_send(FromCore::Ended).unwrap();
+    rig.draw();
+    assert!(
+        !tabs(rig).contains(&"alpha".to_string()),
+        "the tab goes once the core says it ended"
+    );
+    println!("confirm: ok");
+}
+
 fn main() {
     let scratch: PathBuf =
         std::env::temp_dir().join(format!("perch-floating-window-{}", std::process::id()));
@@ -422,6 +540,7 @@ fn main() {
 
     navigator(&mut rig);
     pane_menu(&mut rig);
+    confirm(&mut rig);
 
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())
