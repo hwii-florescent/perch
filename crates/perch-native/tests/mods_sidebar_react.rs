@@ -2,7 +2,8 @@
 //! mod engine: it draws every sidebar fixture state in light and dark, written for the parity gate to
 //! `e2e/artifacts-native-parity/way2/`, and clicks dispatched into the offscreen window work as on the web: a
 //! project header folds and unfolds its project, a session row opens the session, a workspace line focuses the
-//! workspace, and the organize menu switches the view to By status.
+//! workspace, and the organize menu switches the view to By status. Every agent mark the web draws is markup the
+//! engine's SVG renderer reads.
 //!
 //! Offscreen, as the other render tests: GPUI's test platform draws through Metal into a texture; no window is
 //! shown or focused and no core runs.
@@ -60,7 +61,17 @@ fn find(records: &[ProbeRecord], name: &str) -> Option<ProbeRecord> {
 /// A left click at the middle of `name`'s box, as the platform would deliver it.
 fn click(cx: &mut HeadlessAppContext, window: WindowHandle<ModView>, name: &str) {
     let records = draw(cx, window);
-    let target = find(&records, name).unwrap_or_else(|| panic!("{name} is drawn"));
+    press(cx, window, &records, name);
+}
+
+/// A left press and release at the middle of `name`'s box in `records`, and the work they start.
+fn press(
+    cx: &mut HeadlessAppContext,
+    window: WindowHandle<ModView>,
+    records: &[ProbeRecord],
+    name: &str,
+) {
+    let target = find(records, name).unwrap_or_else(|| panic!("{name} is drawn"));
     let at = target.bounds.center();
     cx.update_window(window.into(), |_, window: &mut Window, cx| {
         let down = MouseDownEvent {
@@ -81,6 +92,22 @@ fn click(cx: &mut HeadlessAppContext, window: WindowHandle<ModView>, name: &str)
     })
     .unwrap();
     cx.run_until_parked();
+}
+
+/// The agent marks the stock mod ships (`agent-icons.js`, `export const ICONS = {...};`), by provider.
+fn agent_icons() -> Vec<(String, String)> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("mods/sidebar-react/agent-icons.js");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let json = text
+        .lines()
+        .find_map(|line| line.strip_prefix("export const ICONS = "))
+        .and_then(|rest| rest.strip_suffix(';'))
+        .expect("agent-icons.js lists ICONS");
+    let icons: serde_json::Map<String, Value> = serde_json::from_str(json).unwrap();
+    icons
+        .into_iter()
+        .map(|(provider, icon)| (provider, icon["markup"].as_str().unwrap().to_string()))
+        .collect()
 }
 
 fn main() {
@@ -167,21 +194,59 @@ fn main() {
     cx.update(|cx| host.refresh(None, cx));
     draw(&mut cx, window);
     let again = started.elapsed();
+    // A data change: the needs-you state's sessions, then back.
+    let started = Instant::now();
+    perch.set_sidebar(fixture.view("needs-you"));
+    cx.update(|cx| perch.flush(cx));
+    draw(&mut cx, window);
+    let changed = started.elapsed();
+    perch.set_sidebar(fixture.view(state));
+    cx.update(|cx| perch.flush(cx));
+    draw(&mut cx, window);
     println!(
-        "sidebar-react: first render {:.0} ms (load, mount, describe, layout, paint), re-render {:.1} ms",
+        "sidebar-react: first render {:.0} ms (load, mount, describe, layout, paint), re-render {:.1} ms, \
+         re-render after a data change {:.1} ms",
         first.as_secs_f64() * 1000.,
-        again.as_secs_f64() * 1000.
+        again.as_secs_f64() * 1000.,
+        changed.as_secs_f64() * 1000.
     );
+
+    // Every agent mark the web draws is markup the engine's SVG renderer reads.
+    let icons = agent_icons();
+    assert!(icons.len() > 30, "{} agent marks", icons.len());
+    cx.update(|cx| {
+        for (provider, markup) in &icons {
+            let image = cx
+                .svg_renderer()
+                .render_single_frame(markup.as_bytes(), 2.)
+                .unwrap_or_else(|e| panic!("{provider}: {e}"));
+            assert!(
+                image.size(0).width.0 >= 28,
+                "{provider} is drawn at 14 px x 2"
+            );
+        }
+    });
 
     // A project with several checkouts folds from its header and unfolds again.
     let project = "p-perch";
     let workspaces = format!("project-workspaces:{project}");
     assert!(find(&draw(&mut cx, window), &workspaces).is_some());
-    click(&mut cx, window, &format!("project-header:{project}"));
-    assert!(
-        find(&draw(&mut cx, window), &workspaces).is_none(),
-        "folded"
+    let records = draw(&mut cx, window);
+    let started = Instant::now();
+    press(
+        &mut cx,
+        window,
+        &records,
+        &format!("project-header:{project}"),
     );
+    let handled = started.elapsed();
+    let records = draw(&mut cx, window);
+    println!(
+        "sidebar-react: fold click {:.1} ms (press, release and the React commit {:.1} ms; describe, layout, paint)",
+        started.elapsed().as_secs_f64() * 1000.,
+        handled.as_secs_f64() * 1000.
+    );
+    assert!(find(&records, &workspaces).is_none(), "folded");
     assert_eq!(
         perch.sidebar().collapsed_projects,
         [project],
