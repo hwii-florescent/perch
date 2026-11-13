@@ -13,9 +13,9 @@ mod parity_screens;
 
 use parity_screens::{Difference, Exception, ScreenFixture};
 use perch_native::mods::perch::Perch;
-use serde_json::json;
+use serde_json::{json, Value};
 
-const SCREENS: [&str; 9] = [
+const SCREENS: [&str; 11] = [
     "tabs",
     "status",
     "navigator",
@@ -25,6 +25,8 @@ const SCREENS: [&str; 9] = [
     "dialog",
     "toast",
     "new-session",
+    "keybind-help",
+    "launcher",
 ];
 
 /// The states whose web strip also holds file, review and browser tabs. The native strip holds
@@ -87,7 +89,111 @@ const EXCEPTIONS: &[Exception] = &[
         path: "agentChoices.lastChoice",
         reason: "the native client remembers no last agent pick",
     },
+    Exception {
+        screen: "launcher",
+        states: &["*"],
+        path: "agentChoices.lastChoice",
+        reason: "the native client remembers no last agent pick",
+    },
+    Exception {
+        screen: "keybind-help",
+        states: &["*"],
+        path: "keybindings",
+        reason: "the native window lists the bindings it answers, a subset of the web's \
+                 (`keybind_help_lists_the_web_rows_the_window_answers` checks which)",
+    },
 ];
+
+/// The web's keybind help rows the native window has no command for, by description.
+const WEB_ONLY_BINDINGS: &[&str] = &[
+    // No files, editor or Git in this window.
+    "Toggle the right drawer (files and Git)",
+    "Save file",
+    "Find in file",
+    "Replace in file",
+    "Replace in file (alternate)",
+    "Next file match (while Find is open)",
+    "Previous file match (while Find is open)",
+    "Next file match (alternate)",
+    "Previous file match (alternate)",
+    "Go to line",
+    "Keep the preview tab open (make it a regular tab)",
+    // No resize mode, project cycling or tab history.
+    "Enter resize mode (Escape or timeout exits)",
+    "Grow the focused pane",
+    "Shrink the focused pane",
+    "Resize pane down (shrink)",
+    "Resize pane left (shrink)",
+    "Resize pane right (grow)",
+    "Resize pane up (grow)",
+    "Next project's most recent session",
+    "Back to where you were",
+    "Forward",
+    // The Navigator moves with the arrows only; the folder browser's own keys.
+    "Next Navigator result",
+    "Next Navigator result (alternate)",
+    "Previous Navigator result",
+    "Previous Navigator result (alternate)",
+    "Use this folder",
+    "Use this folder (alternate)",
+    // No key yet for adding a project or a worktree.
+    "Add project",
+    "New workspace (worktree)",
+    "Open this project's worktree menu",
+    // Worded for the web's launcher, which also offers files and browsers.
+    "New session: pick a project, then an agent, terminal or file",
+];
+
+/// The native window's rows the web's help has not: its wording of New session and its terminal
+/// select-all.
+const NATIVE_ONLY_BINDINGS: &[&str] = &[
+    "New session: pick a computer, a project, then an agent or terminal",
+    "Select all of the terminal's text",
+];
+
+/// Every native row is a web row (keys, words and group alike) unless it is listed above, and
+/// every web row the native window leaves out is listed, in every state of the fixture.
+#[test]
+fn keybind_help_lists_the_web_rows_the_window_answers() {
+    let fixture = ScreenFixture::load("keybind-help");
+    let row = |r: &Value| format!("{} | {} | {}", r["group"], r["keys"], r["description"]);
+    for state in fixture.states() {
+        let perch = Perch::new();
+        parity_screens::publish(&perch, &fixture, &state);
+        let expected = fixture.expected(&state);
+        let native = parity_screens::native_sdk(&perch, &expected, None);
+        let web: Vec<String> = expected["keybindings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(row)
+            .collect();
+        let native: Vec<String> = native["keybindings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(row)
+            .collect();
+        let listed =
+            |r: &String, list: &[&str]| list.iter().any(|d| r.ends_with(&format!("| \"{d}\"")));
+        let extra: Vec<&String> = native
+            .iter()
+            .filter(|r| !web.contains(r) && !listed(r, NATIVE_ONLY_BINDINGS))
+            .collect();
+        let missing: Vec<&String> = web
+            .iter()
+            .filter(|r| !native.contains(r) && !listed(r, WEB_ONLY_BINDINGS))
+            .collect();
+        assert!(
+            extra.is_empty(),
+            "{state}: native rows the web has not: {extra:?}"
+        );
+        assert!(
+            missing.is_empty(),
+            "{state}: web rows the native window lacks: {missing:?}"
+        );
+    }
+}
 
 /// The differences of `screen` in `state` that no exception covers, and the exceptions used.
 fn compare(

@@ -127,3 +127,8 @@ harness = false
 name = "mods_floating_window"
 path = "tests/mods_floating_window.rs"
 harness = false
+
+[[test]]
+name = "mods_chrome_screens_window"
+path = "tests/mods_chrome_screens_window.rs"
+harness = false

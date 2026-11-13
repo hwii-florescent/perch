@@ -818,6 +818,79 @@ impl Workspace {
         }
     }
 
+    /// The launcher (`LauncherProps`, as the web's `NewSessionDialog` builds them): `target`'s
+    /// computer's projects but its Quickchat, each with the workspace a new tab lands in (the one on
+    /// screen when it is the project's, else its first), the project of what is shown marked.
+    fn open_launcher(&mut self, target: &crate::actions::NewSession, cx: &mut Context<Self>) {
+        if self.screens.is_open("launcher") {
+            return;
+        }
+        let shown = self.tabs.active().map(str::to_string);
+        let model = self.sidebar.read(cx).model();
+        let host = model.hosts.iter().find(|h| h.id == target.host_id);
+        let projects: Vec<Value> = host
+            .map(|host| {
+                host.projects
+                    .iter()
+                    .filter(|p| !p.quickchat)
+                    .map(|p| {
+                        let workspace = crate::sidebar::navigation::landing_workspace(
+                            &model.store,
+                            &p.id,
+                            shown.as_deref(),
+                        )
+                        .map(|(id, path)| json!({ "id": id, "path": path }));
+                        json!({ "id": p.id, "name": p.name, "path": p.path, "workspace": workspace })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let active = target
+            .project_id
+            .as_ref()
+            .filter(|id| projects.iter().any(|p| p["id"] == json!(id)));
+        let host_id = target.host_id.clone();
+        self.open_screen(
+            "launcher",
+            json!({ "hostId": host_id, "projects": projects, "activeProjectId": active }),
+            None,
+            Some(Box::new(move |this, result, _, cx| {
+                let outcome = this.launcher_result(&host_id, &result, cx);
+                this.finish(outcome, cx);
+            })),
+            cx,
+        );
+    }
+
+    /// What the launcher closed with (one of its `actions`), on computer `host_id`.
+    fn launcher_result(
+        &mut self,
+        host_id: &str,
+        result: &Value,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let (action, args) = action_of(result);
+        match action.as_deref() {
+            None => Ok(()),
+            Some("start") => {
+                let agent = word(&args, 1).ok_or("start needs an agent.")?;
+                self.start_session(host_id, word(&args, 0), &agent, cx)
+            }
+            Some("openBrowser") => {
+                Err("A browser tab does not open in the native window yet.".into())
+            }
+            // New file names the file in the files view's prompt, which this window lacks.
+            Some("focusWorkspace") => Err(
+                "A new file needs the files view, which the native window does not have yet."
+                    .into(),
+            ),
+            Some("addProject") => {
+                Err("Adding a project does not work in the native window yet.".into())
+            }
+            Some(other) => Err(format!("The native window cannot {other} yet.")),
+        }
+    }
+
     /// The New session screen for `target` (`NewSessionScreenProps`), anchored at `at`.
     fn open_new_session(
         &mut self,
@@ -1381,6 +1454,18 @@ impl Workspace {
             "global.navigator" | "global.navigatorAlt" | "app.palette" => {
                 self.toggle_palette(window, cx)
             }
+            "global.help" | "global.helpPlain" => self.open_keybind_help(cx),
+            // As the web's Cmd+Shift+T and the sidebar's New session: the launcher, for the
+            // sidebar's target.
+            "sessions.new" if self.screens.has("launcher", cx) => {
+                let target = self.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.run_action("sessions.new", cx);
+                    sidebar.take_new_session()
+                });
+                if let Some(target) = target {
+                    self.open_launcher(&target, cx);
+                }
+            }
             "session.start" => {
                 let host = text("hostId").unwrap_or(LOCAL).to_string();
                 let agent = text("agent")
@@ -1698,6 +1783,21 @@ impl Workspace {
         }
         let _ = window;
         Ok(())
+    }
+
+    /// The keybind help (`stock:keybind-help`), as the web opens it: once, until it is closed.
+    fn open_keybind_help(&mut self, cx: &mut Context<Self>) {
+        if self.screens.is_open("keybind-help") {
+            return;
+        }
+        if self.screens.has("keybind-help", cx) {
+            self.open_screen("keybind-help", json!({ "open": true }), None, None, cx);
+            return;
+        }
+        self.notice = Some(
+            "No mod draws the keybind help. The stock one is restored when the app starts.".into(),
+        );
+        cx.notify();
     }
 
     fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {

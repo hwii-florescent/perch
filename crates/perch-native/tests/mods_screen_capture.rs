@@ -334,8 +334,8 @@ fn openers_give_the_web_fields(scratch: &Path) {
     check("toast item (notification)", &web, &item, &[]);
     rig.close_all();
 
-    // The sidebar's New opens the unscoped New session panel.
-    rig.ws(|ws, window, cx| ws.run_command("sessions.new", None, window, cx))
+    // New quickchat opens the unscoped New session panel (the sidebar's New is the launcher).
+    rig.ws(|ws, window, cx| ws.run_command("nests.scratchpad", None, window, cx))
         .unwrap();
     let native = rig.props("new-session");
     let web = ScreenFixture::load("new-session").expected("unscoped")["props"].clone();

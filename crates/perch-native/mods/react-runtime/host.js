@@ -239,6 +239,7 @@ export function copyFor(cx, screen) {
     statusLine: () => snapshot("statusLine", () => perch.statusLine()),
     zoom: () => snapshot("zoom", () => perch.zoom()),
     paneLook: () => snapshot("paneLook", () => perch.paneLook()),
+    keybindings: () => snapshot("keybindings", () => perch.keybindings()),
     planUsage: () => snapshot("planUsage", () => perch.planUsage()),
     notifications: () => snapshot("notifications", () => perch.notifications()),
     // The window's requests (`perch.requests()`: a count per kind, one more per request), as the web's window events:

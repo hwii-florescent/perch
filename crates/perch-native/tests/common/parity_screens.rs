@@ -252,7 +252,18 @@ pub fn model_from(data: &Value) -> Model {
             _ => {}
         }
     }
-    state.model()
+    let mut model = state.model();
+    // The person's own keys (`settings.keybindings`: a command's id to its combo, empty = none).
+    for (id, keys) in data["settings"]["keybindings"]
+        .as_object()
+        .into_iter()
+        .flatten()
+    {
+        if let Some(keys) = keys.as_str() {
+            model.keybindings.insert(id.clone(), keys.to_string());
+        }
+    }
+    model
 }
 
 /// What the window shows in a fixture state: the shown workspace's sessions as its tabs (oldest
@@ -395,6 +406,7 @@ pub fn native_sdk(perch: &Perch, expected: &Value, props: Option<&Value>) -> Val
             "statusLine" => call("statusLine", vec![]),
             "zoom" => call("zoom", vec![]),
             "paneLook" => call("paneLook", vec![]),
+            "keybindings" => call("keybindings", vec![]),
             "planUsage" => call("planUsage", vec![]),
             "notifications" => call("notifications", vec![])["items"].clone(),
             "agentChoices" => {

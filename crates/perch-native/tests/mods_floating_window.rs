@@ -699,8 +699,9 @@ fn confirm(rig: &mut Rig) {
     println!("confirm: ok");
 }
 
+/// The unscoped New session menu, as New quickchat opens it (Cmd+Shift+T is the launcher).
 fn open_new_session(rig: &mut Rig) {
-    rig.ws(|ws, window, cx| ws.run_command("sessions.new", None, window, cx))
+    rig.ws(|ws, window, cx| ws.run_command("nests.scratchpad", None, window, cx))
         .unwrap();
     rig.draw();
 }
@@ -720,8 +721,8 @@ fn launched(rig: &mut Rig) -> Vec<(String, Option<String>, String)> {
 }
 
 fn new_session(rig: &mut Rig) {
-    // The sidebar's New session opens the stock menu, unscoped: the agent picker, then the
-    // computer's project and No project.
+    // New quickchat opens the stock menu, unscoped: the agent picker, then the computer's
+    // project and No project.
     open_new_session(rig);
     assert_eq!(rig.open_screens(), ["new-session"]);
     assert!(rig.record("launcher").is_some(), "the menu is drawn");

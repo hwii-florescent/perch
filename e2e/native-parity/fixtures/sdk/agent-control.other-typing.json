@@ -1,0 +1,23 @@
+{
+  "props": {
+    "ac": {
+      "agent": "claude",
+      "label": "Another view is typing in this agent",
+      "connected": true,
+      "pending": false,
+      "retry": false,
+      "control": {
+        "label": "Take control",
+        "disabled": false
+      },
+      "error": null,
+      "ended": null,
+      "state": {
+        "controlling": false,
+        "shared": false,
+        "writable": false,
+        "phone": false
+      }
+    }
+  }
+}

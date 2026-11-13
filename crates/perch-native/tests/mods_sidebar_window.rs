@@ -511,11 +511,11 @@ fn main() {
     rig.ws(|ws, window, cx| ws.run_command("overlay.close", None, window, cx))
         .unwrap();
 
-    // New session: the stock New session screen opens for the sidebar's target.
+    // New session: the stock launcher opens for the sidebar's target, as the web's does.
     rig.ws(|ws, window, cx| ws.run_command("sessions.new", None, window, cx))
         .unwrap();
     rig.draw();
-    assert_eq!(rig.ws(|ws, _, _| ws.screens_open()), ["new-session"]);
+    assert_eq!(rig.ws(|ws, _, _| ws.screens_open()), ["launcher"]);
     rig.ws(|ws, window, cx| ws.run_command("overlay.close", None, window, cx))
         .unwrap();
 

@@ -1,0 +1,11 @@
+{
+  "props": {
+    "generation": 1,
+    "pending": false
+  },
+  "steps": [
+    {
+      "click": "[aria-label=\"Keep phone size and hide this\"]"
+    }
+  ]
+}

@@ -966,26 +966,10 @@ impl Perch {
         json!(list)
     }
 
-    /// `useKeybindings`: every binding as the person has it, grouped as the web's help groups them.
+    /// `useKeybindings`: every binding as the person has it, grouped as the web's help groups
+    /// them, with the bindings in `keys.json` (`Keymap::help`).
     fn keybindings(&self) -> Value {
-        let keymap = self.keymap();
-        let list: Vec<Value> = all_shortcuts()
-            .filter_map(|s| {
-                let keys = keymap.label(s.id)?;
-                let group = match s.scope {
-                    Scope::Leader => "leader",
-                    Scope::Terminal => "terminal",
-                    _ => match s.id.split('.').next().unwrap_or("") {
-                        "tabs" => "tabs",
-                        "nests" | "sessions" => "nests",
-                        "panes" => "panes",
-                        _ => "global",
-                    },
-                };
-                Some(json!({ "keys": keys, "description": s.title, "group": group }))
-            })
-            .collect();
-        json!(list)
+        json!(self.keymap().help())
     }
 
     /// `useStatusLine`: what the core's `status.update` says about the focused session, else the

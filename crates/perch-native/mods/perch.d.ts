@@ -354,7 +354,7 @@ declare module "perch" {
   export interface Keybinding {
     keys: string;
     description: string;
-    group: "global" | "tabs" | "nests" | "panes" | "terminal" | "leader";
+    group: "global" | "tabs" | "nests" | "panes" | "terminal" | "leader" | "navigator";
   }
 
   /** The 18 theme tokens by the web's CSS names (`--accent` is `accent`), as `#rrggbb`. */

@@ -1,0 +1,231 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "agent-control",
+  "note": "The box is one terminal pane of the shown workspace (the main card's canvas less the 28 px pane header: 1016x688; half of it, 505 wide, when split), on the card fill: the terminal's own picture (xterm) is not drawn, the chrome floats over `.terminal` (position: relative). What sits over an agent's terminal (stock-ui/agent-control), drawn in two places: `top`, a chip at the top right (8 px down, 12 px in) saying how this view stands, with Take control, Fit here or Retry CLI; and `bottom`, the agent's error line (a red notice 12 px above the bottom, centred) and, once its process has ended, the banner centred in the pane with Restart CLI or Resume agent and Close session. Props are `AgentControlProps` as views/PersistentAgentTerminal.tsx works them out: `label` (null: no chip), `pending`, `onRetry`, `control` (label and disabled), `error`, `ended` (`sleeping`, `exitCode`, a close action) and `state`; the harness gives the actions as no-ops (the fixture's `retry` and `ended.close` say whether the action is offered, and a `control` has its label and `disabled`). The chip is the app's glass surface. Each output's sdk.props.ac is what the harness built the props from.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1016,
+    "height": 688
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "props": {
+    "ac": {
+      "agent": "claude",
+      "label": null,
+      "connected": true,
+      "pending": false,
+      "retry": false,
+      "control": null,
+      "error": null,
+      "ended": null,
+      "state": {
+        "controlling": false,
+        "shared": false,
+        "writable": false,
+        "phone": false
+      }
+    }
+  },
+  "states": [
+    {
+      "id": "viewing",
+      "title": "This view only watches the agent: the chip 'Viewing agent' with Take control",
+      "props": {
+        "ac": {
+          "agent": "claude",
+          "label": "Viewing agent",
+          "connected": true,
+          "pending": false,
+          "retry": false,
+          "control": {
+            "label": "Take control",
+            "disabled": false
+          },
+          "error": null,
+          "ended": null,
+          "state": {
+            "controlling": false,
+            "shared": false,
+            "writable": false,
+            "phone": false
+          }
+        }
+      }
+    },
+    {
+      "id": "other-typing",
+      "title": "Another view is typing in this agent: the chip says so, with Take control",
+      "props": {
+        "ac": {
+          "agent": "claude",
+          "label": "Another view is typing in this agent",
+          "connected": true,
+          "pending": false,
+          "retry": false,
+          "control": {
+            "label": "Take control",
+            "disabled": false
+          },
+          "error": null,
+          "ended": null,
+          "state": {
+            "controlling": false,
+            "shared": false,
+            "writable": false,
+            "phone": false
+          }
+        }
+      }
+    },
+    {
+      "id": "taking",
+      "title": "A take-over in flight: 'Taking control...' on the button, disabled (40%)",
+      "props": {
+        "ac": {
+          "agent": "claude",
+          "label": "Viewing agent",
+          "connected": true,
+          "pending": true,
+          "retry": false,
+          "control": {
+            "label": "Taking control…",
+            "disabled": true
+          },
+          "error": null,
+          "ended": null,
+          "state": {
+            "controlling": false,
+            "shared": false,
+            "writable": false,
+            "phone": false
+          }
+        }
+      }
+    },
+    {
+      "id": "reconnecting",
+      "title": "The connection dropped: the chip 'Reconnecting...' and Take control disabled (40%)",
+      "props": {
+        "ac": {
+          "agent": "claude",
+          "label": "Reconnecting…",
+          "connected": false,
+          "pending": false,
+          "retry": false,
+          "control": {
+            "label": "Take control",
+            "disabled": true
+          },
+          "error": null,
+          "ended": null,
+          "state": {
+            "controlling": false,
+            "shared": false,
+            "writable": false,
+            "phone": false
+          }
+        }
+      }
+    },
+    {
+      "id": "unavailable",
+      "title": "The agent could not start: the chip 'Agent unavailable' with Retry CLI, and the red error line at the bottom",
+      "props": {
+        "ac": {
+          "agent": "claude",
+          "label": "Agent unavailable",
+          "connected": true,
+          "pending": false,
+          "retry": true,
+          "control": null,
+          "error": "claude: command not found",
+          "ended": null,
+          "state": {
+            "controlling": false,
+            "shared": false,
+            "writable": false,
+            "phone": false
+          }
+        }
+      }
+    },
+    {
+      "id": "exited",
+      "title": "The agent ended (code 1): the banner centred over the pane: 'claude exited (code 1)' with Restart CLI (primary) and Close session; no chip",
+      "props": {
+        "ac": {
+          "agent": "claude",
+          "label": null,
+          "connected": true,
+          "pending": false,
+          "retry": false,
+          "control": null,
+          "error": null,
+          "ended": {
+            "sleeping": false,
+            "exitCode": 1,
+            "close": true
+          },
+          "state": {
+            "controlling": false,
+            "shared": false,
+            "writable": false,
+            "phone": false
+          }
+        }
+      }
+    },
+    {
+      "id": "sleeping",
+      "title": "The agent is asleep to save memory: 'claude is sleeping to save memory - its conversation is kept' with Resume agent and Close session",
+      "props": {
+        "ac": {
+          "agent": "claude",
+          "label": null,
+          "connected": true,
+          "pending": false,
+          "retry": false,
+          "control": null,
+          "error": null,
+          "ended": {
+            "sleeping": true,
+            "exitCode": null,
+            "close": true
+          },
+          "state": {
+            "controlling": false,
+            "shared": false,
+            "writable": false,
+            "phone": false
+          }
+        }
+      }
+    },
+    {
+      "id": "error-line",
+      "title": "The agent is running with a notice of its own: only the red line at the bottom (shared typing is unavailable here)",
+      "props": {
+        "ac": {
+          "agent": "claude",
+          "label": null,
+          "connected": true,
+          "pending": false,
+          "retry": false,
+          "control": null,
+          "error": "Shared typing is unavailable in this terminal version. Use Take control.",
+          "ended": null,
+          "state": {
+            "controlling": false,
+            "shared": false,
+            "writable": false,
+            "phone": false
+          }
+        }
+      }
+    }
+  ]
+}

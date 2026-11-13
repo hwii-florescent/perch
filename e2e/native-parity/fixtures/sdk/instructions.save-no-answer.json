@@ -1,0 +1,23 @@
+{
+  "props": {
+    "scope": "project",
+    "id": "p-perch",
+    "name": "perch",
+    "loaded": {
+      "scope": "project",
+      "id": "p-perch",
+      "text": "Answer in short sentences.\nRun cargo test -p perch-core before saying a change is done.\nNever push; commit each verified slice locally.",
+      "folders": [
+        "/Users/dev/code/perch/docs",
+        "/Users/dev/notes/perch-decisions.md"
+      ],
+      "revision": 3,
+      "maxChars": 16000
+    }
+  },
+  "steps": [
+    {
+      "click": "[data-testid=\"instructions-save\"]"
+    }
+  ]
+}

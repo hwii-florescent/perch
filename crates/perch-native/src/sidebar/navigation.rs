@@ -384,6 +384,21 @@ fn workspaces_for_project<'a>(
     all
 }
 
+/// The checkout a new tab of project `project_id` lands in (the web's launcher): the one session
+/// `shown` belongs to when it is the project's, else the project's first. `(id, path)`.
+pub fn landing_workspace(
+    store: &Store,
+    project_id: &str,
+    shown: Option<&str>,
+) -> Option<(String, String)> {
+    let mine = workspaces_for_project(&store.workspaces, project_id);
+    let session = shown.and_then(|id| store.sessions.iter().find(|s| s.id == id));
+    let on_screen = session.and_then(|s| mine.iter().find(|w| in_workspace(s, w)));
+    on_screen
+        .or(mine.first())
+        .map(|w| (w.id.clone(), w.path.clone()))
+}
+
 /// Whether `session` belongs to `workspace`: by id, or for an older record by folder.
 fn in_workspace(session: &SessionSummary, workspace: &WorkspaceSummary) -> bool {
     match &session.workspace_id {
