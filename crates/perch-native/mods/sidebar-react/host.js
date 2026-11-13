@@ -9,15 +9,16 @@
 // What the `perch` module does not offer yet is an inert default (`INERT`), so the sidebar draws and its other
 // actions work: session folders are empty, overlays Perch would draw (session menu, new session menu, confirm,
 // select, folder browser, instructions, memory, worktree) do not open, the add-project flow does not run, a row
-// drag stays a press, `startSession` does nothing and agent marks are a plain dot. A workspace line's
+// drag stays a press and `startSession` does nothing. A workspace line's
 // `workspace.open` runs `workspace.focus` (`STAND_IN`); other commands the module lacks are refused by it and logged.
 import * as perch from "perch";
 import { Icon } from "perch-react";
+import { ICONS, LETTERS, LETTER } from "./agent-icons.js";
 
 /** Commands the module does not run yet, and the one it does that comes closest. */
 const STAND_IN = { "workspace.open": "workspace.focus" };
 
-export const INERT = ["sessionFolders", "openOverlay", "addProject", "beginReorderDrag", "startSession", "agentIcon"];
+export const INERT = ["sessionFolders", "openOverlay", "addProject", "beginReorderDrag", "startSession"];
 
 // The ambient `cx` `init` is handed: usable during any later host call (render, an event, a timer), which is when
 // React schedules work.
@@ -136,6 +137,15 @@ export const host = {
     const id = STAND_IN[name] ?? name;
     perch.run(id, args && Object.keys(args).length ? args : undefined).catch((error) => console.error(`perch.run ${name}: ${error?.message ?? error}`));
     return true;
+  },
+  // The web's own marks (`agent-icons.js`, rendered from its `AgentIcon`); a provider without one gets the letter
+  // tile, with the letter the web picks (a built-in program's name, else the provider's first letter). A person's
+  // own icon from `programs.json` is not drawn: the module gives a mod neither that file nor the icon files.
+  agentIcon(provider) {
+    if (ICONS[provider]) return ICONS[provider];
+    const letter = LETTERS[provider] ?? (provider?.[0]?.toUpperCase() || "?");
+    const escaped = letter.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+    return { markup: LETTER.replace("{letter}", escaped), tint: true };
   },
   openOverlay: (kind) => { console.error(`sidebar-react: the host draws no ${kind} overlay yet`); return 0; },
   closeOverlay: () => {},

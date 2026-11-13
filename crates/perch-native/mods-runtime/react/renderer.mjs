@@ -234,6 +234,8 @@ export function mount(perch, Component, options = {}) {
     },
     /** The pointer entered (`on`) or left node `id` (one the description marks `track_hover`): its `:hover` state,
      * which a descendant's group variant reads. The element's own `hover:` styles are the engine's hover style. */
+    /** Whether the pointer is over node `id`, as `hover` last said. */
+    hovered: (id) => !!byId(id)?.state.hover,
     hover(id, on) {
       const node = byId(id);
       if (!node || node.state.hover === on) return;

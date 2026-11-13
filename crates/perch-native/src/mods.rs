@@ -68,6 +68,10 @@ pub const STOCK: &[(&str, &str)] = &[
         include_str!("../mods/sidebar-react/host.js"),
     ),
     (
+        "sidebar-react/agent-icons.js",
+        include_str!("../mods/sidebar-react/agent-icons.js"),
+    ),
+    (
         "sidebar-react/runtime.mjs",
         include_str!("../mods/sidebar-react/runtime.mjs"),
     ),

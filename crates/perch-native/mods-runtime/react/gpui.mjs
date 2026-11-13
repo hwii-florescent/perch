@@ -84,13 +84,17 @@ const drawn = (child) => child.style?.display !== "hidden";
 
 /** One node and its subtree as builder chains. `unseen`: an ancestor is invisible or fully transparent, so its
  * named elements are not shown (the page counts them hidden) and carry no name. */
-export function toGpui(node, kit, handle, files, overlay = false, unseen = false, color = null, text = {}) {
+export function toGpui(node, kit, handle, files, overlay = false, unseen = false, color = null, text = {}, rowItem = false) {
   if (node.kind === "text") return node.text;
   unseen ||= node.style.opacity === 0 || node.style.visibility === "invisible";
   if (unseen && (node.name || node.range_name)) node = { ...node, name: undefined, range_name: undefined };
   color = node.style.text_color ?? color;
+  // An icon takes the colour of its text, hover included: a node whose own `hover:` changes the text colour
+  // reports the pointer (`on_hover`), and while it is over the node its icons are drawn in the hover colour.
+  const hoverIcons = !!node.hover?.text_color && hasIcon(node);
+  if (hoverIcons && handle.hovered?.(node.id)) color = node.hover.text_color;
   text = { ...text };
-  for (const key of ["text_size", "line_height", "whitespace"]) if (node.style[key] !== undefined) text[key] = node.style[key];
+  for (const key of ["text_size", "line_height", "whitespace", "text_ellipsis"]) if (node.style[key] !== undefined) text[key] = node.style[key];
   const events = new Set(node.events ?? []);
   let el;
   if (node.kind === "image" && !node.markup) el = kit.image(node.src);
@@ -100,6 +104,13 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   const id = engineId(node, events, overlay);
   if (id) el = el.id(id);
   el = applyStyle(el, node.style);
+  // CSS gives a flex item an automatic minimum width of its min-content width, which for text that can wrap is its
+  // longest word, so the item shrinks and its text wraps; GPUI's minimum for text is the whole line. A shrinkable
+  // row item holding wrappable text of its own therefore gets no minimum width.
+  // ponytail: zero rather than the longest word (not measured here), so in a row too narrow for one word the item
+  // can shrink further than on the web; measuring the longest word through the text system would close that.
+  const wraps = text.whitespace !== "nowrap" && !text.text_ellipsis;
+  if (rowItem && wraps && node.style.flex_shrink !== 0 && node.style.min_w === undefined && (node.children ?? []).some((c) => c.kind === "text")) el = el.min_w(0);
   for (const variant of ["hover", "focus", "active"]) if (node[variant]) el = el[variant]((s) => applyStyle(s, node[variant]));
 
   const pointer = ["click", "double_click", "context_menu", "mouse_down", "mouse_up"].some((name) => events.has(name));
@@ -131,16 +142,17 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
     });
   }
   if (events.has("mouse_move")) el = el.on_mouse_move((event, cx) => { handle.dispatch(node.id, "pointermove", { ...point(event), pointerType: "mouse" }); cx.notify(); });
-  if (node.track_hover) el = el.on_hover((on, cx) => { handle.hover(node.id, on); cx.notify(); });
+  if (node.track_hover || hoverIcons) el = el.on_hover((on, cx) => { handle.hover(node.id, on); cx.notify(); });
   if (overlay) el = el.on_mouse_down_out((event, cx) => { handle.dispatch(handle.document.body.id, "pointerdown", { ...point(event), pointerType: "mouse" }); handle.dispatch(handle.document.body.id, "mousedown", point(event)); cx.notify(); });
   // A name for the element's own text (a bare text node in the page) goes on a box around that text. A line of
   // text that cannot wrap sits in a box of the CSS line height: GPUI rounds a line height to whole pixels when it
   // lays text out, so without the box every line would add up to half a pixel. (Wrapping text keeps GPUI's height,
   // as its line count is not known here.)
   const line = text.whitespace === "nowrap" ? lineHeightPx(text) : null;
+  const row = node.style.display === "flex" && !String(node.style.flex_direction ?? "row").startsWith("col");
   let ranged = !node.range_name;
   for (const child of (node.children ?? []).filter(drawn)) {
-    let built = toGpui(child, kit, handle, files, false, unseen, color, text);
+    let built = toGpui(child, kit, handle, files, false, unseen, color, text, row && child.style?.position !== "absolute");
     const own = !ranged && (child.kind === "text" || !child.meta);
     if (own || (child.kind === "text" && line)) {
       let box = kit.div();
@@ -153,6 +165,9 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   }
   return el;
 }
+
+/** Whether `node` or a node under it draws an icon. */
+const hasIcon = (node) => !!node.markup || (node.children ?? []).some((child) => child.kind !== "text" && hasIcon(child));
 
 /** The CSS line height in logical px of text styled `text` (a multiplier or `"Npx"`), or null when not known. */
 export function lineHeightPx(text) {

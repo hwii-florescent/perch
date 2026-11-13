@@ -83,3 +83,47 @@ test("named elements get their parity names as engine ids; hidden and hover-only
     handle.unmount();
   }
 });
+
+/** The records of a built tree, by engine id. */
+function byId(el, out = new Map()) {
+  if (typeof el === "string") return out;
+  if (el.record.id) out.set(el.record.id, el.record);
+  el.record.children.forEach((child) => byId(child, out));
+  return out;
+}
+
+test("a row item with wrappable text can shrink below its text; nowrap and truncated text cannot", async () => {
+  const { handle, runtime } = await mountSidebar("offline-host", "light", { names: (await import("./support.mjs")).named.elements });
+  try {
+    const records = byId(runtime.describeToGpui(handle.description, recordingKit().kit, handle, files));
+    const minW = (id) => records.get(id)?.styles.some(([name, value]) => name === "min_w" && value === 0);
+    assert.ok(minW("status-heading-label:status-section-title-offline"), "the offline heading's label wraps as on the web");
+    assert.ok(!minW("host-badge"), "a nowrap badge keeps its width");
+  } finally {
+    handle.unmount();
+  }
+});
+
+test("an icon takes its button's hover colour while the pointer is over it", async () => {
+  const { handle, runtime } = await mountSidebar("by-project", "dark", { names: (await import("./support.mjs")).named.elements });
+  try {
+    const find = (n) => (n.name === "organize-button" ? n : (n.children ?? []).map(find).find(Boolean));
+    const button = find(handle.description.root);
+    assert.ok(button?.hover?.text_color, "the organize button changes its text colour on hover");
+    const iconColor = () => {
+      const { kit, handlers } = recordingKit();
+      const record = byId(runtime.describeToGpui(handle.description, kit, handle, files)).get("organize-button");
+      const icons = [];
+      const walk = (r) => { if (r.markup) icons.push(r.color); r.children.forEach((c) => typeof c !== "string" && walk(c.record)); };
+      walk(record);
+      return { color: icons[0], hover: handlers.get("organize-button:on_hover") };
+    };
+    const rest = iconColor();
+    assert.ok(rest.hover, "the button reports the pointer");
+    assert.notEqual(rest.color, button.hover.text_color);
+    rest.hover(true, cx());
+    assert.equal(iconColor().color, button.hover.text_color);
+  } finally {
+    handle.unmount();
+  }
+});
