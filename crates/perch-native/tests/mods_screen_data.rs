@@ -15,7 +15,7 @@ use parity_screens::{Difference, Exception, ScreenFixture};
 use perch_native::mods::perch::Perch;
 use serde_json::{json, Value};
 
-const SCREENS: [&str; 13] = [
+const SCREENS: [&str; 16] = [
     "tabs",
     "status",
     "navigator",
@@ -29,6 +29,9 @@ const SCREENS: [&str; 13] = [
     "launcher",
     "start",
     "folder-browser",
+    "instructions",
+    "memory",
+    "worktree",
 ];
 
 /// The states whose web strip also holds file, review and browser tabs. The native strip holds

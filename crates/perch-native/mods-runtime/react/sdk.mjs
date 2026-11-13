@@ -209,8 +209,14 @@ export const MemoryDialog = overlay("memory");
 /** The app's own stock dialog: drawn from the screen's children in the overlay layer (`document.body`). */
 export const Dialog = StockDialog;
 
-/** A git folder's worktree menu button; the menu itself is Perch's (`worktree` overlay, anchored on the button). */
-export function WorktreeMenu({ hostId, path, className }) {
+/** A git folder's worktree menu: the stock `worktree` screen drawn in place, from the copy the screen drawing it
+ * carries (the sidebar's `main.js` sets it), with the folder's worktrees and every operation the core's `worktree.*`
+ * questions; a screen that carries none opens the window's `worktree` overlay, anchored on its button. */
+let worktreeInPlace = null;
+export const drawWorktreeInPlace = (Component) => { worktreeInPlace = Component; };
+export function WorktreeMenu(props) {
+  if (worktreeInPlace) return createElement(WorktreeInPlace, props);
+  const { hostId, path, className } = props;
   const ref = useRef(null);
   return createElement(
     "button",
@@ -226,6 +232,72 @@ export function WorktreeMenu({ hostId, path, className }) {
     },
     createElement(PlusIcon, null),
   );
+}
+/** A `worktree.*` answer as the screen reads it: the core's refusal (`dirty`: the checkout's guard), or none. */
+const NO_ANSWER = "Perch did not answer.";
+function worktreeAnswer(reply) {
+  if (!reply) return { error: NO_ANSWER };
+  if (reply.type === "worktree.error") return { error: reply.message, dirty: !!reply.dirty };
+  return reply.error ? { error: String(reply.error) } : {};
+}
+/** The web's `components/WorktreeMenu.tsx` on the native host: what the computer can do is its core's
+ * capabilities, the list is what `worktree.list` last answered (the caller's `worktrees` until then), and the
+ * operations are the core's questions, as the web's store asks them. */
+function WorktreeInPlace({ hostId, path: cwd, className, worktrees: given, request = null, parentChoices: parents, emptyAgent, ...rest }) {
+  const [worktrees, setWorktrees] = useState(given);
+  const can = (capability) => !!host().coreCan?.(capability, hostId);
+  const navigation = useNavigation();
+  // The repo's worktrees nested under another (the web's `parentWorkspaceId`), when the computer can nest.
+  const parentChoices = useMemo(() => {
+    if (Array.isArray(parents)) return parents;
+    if (!can("workspace.nest")) return [];
+    const project = navigation?.projects?.find((p) => p.hostId === hostId && p.repoPath === cwd);
+    const out = [];
+    const walk = (list, nested) => {
+      for (const w of list ?? []) {
+        if (nested) out.push({ id: w.id, name: w.name, path: w.path });
+        walk(w.children, true);
+      }
+    };
+    walk(project?.workspaces, false);
+    return out;
+  }, [parents, navigation, hostId, cwd]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The window lists no worktree jobs (the sidebar's `jobs` are empty), so a create is never sent to the background:
+  // it waits in the form (`Creating…`) for the checkout, as on a computer without `worktree.job`.
+  const background = false;
+  const deleteSupported = rest.deleteSupported ?? can("worktree.delete");
+  const startFromSupported = rest.startFromSupported ?? can("worktree.startFrom");
+  const [asked, setAsked] = useState(request);
+  const actions = useMemo(() => {
+    const ask = (kind, args) => host().ask(kind, { hostId, repoPath: cwd, ...args });
+    return {
+      list: async () => {
+        const reply = await ask("worktree.list", {});
+        if (reply?.type === "worktree.list.result") {
+          setWorktrees({ worktrees: reply.worktrees ?? [], defaultRoot: reply.defaultRoot ?? "", baseRef: reply.baseRef, refs: reply.refs ?? [] });
+        }
+        return worktreeAnswer(reply);
+      },
+      create: async ({ branch, newBranch, path, extra, agent }) => {
+        const reply = await ask("worktree.create", { branch, newBranch: !!newBranch, path: path ?? null, name: extra?.name ?? null, startFrom: extra?.startFrom ?? null, parentWorkspaceId: extra?.parentWorkspaceId ?? null });
+        if (reply?.type !== "worktree.done") return { error: worktreeAnswer(reply).error ?? NO_ANSWER };
+        // The checkout exists once the core answers, so the starting pane starts in it.
+        if (agent && reply.path) host().startSession?.(hostId, reply.path, agent);
+        return {};
+      },
+      remove: async (path, force) => {
+        const reply = await ask("worktree.remove", { path, force: !!force, deleteBranch: deleteSupported });
+        return { ...worktreeAnswer(reply), preservedBranch: reply?.type === "worktree.done" ? (reply.preservedBranch ?? undefined) : undefined };
+      },
+      deleteBranch: async (branch, head) => worktreeAnswer(await ask("worktree.branch.delete", { branch, expectedHead: head })),
+      open: (path) => host().startSession?.(hostId, path, "terminal"),
+      takeRequest: () => setAsked(null),
+    };
+  }, [hostId, cwd, deleteSupported]);
+  return createElement(worktreeInPlace, {
+    hostId, cwd, projectKey: `${hostId}:${cwd}`, className, worktrees, background, startFromSupported, deleteSupported,
+    parentChoices, emptyAgent, request: asked, actions,
+  });
 }
 
 /** A row drag: the host follows the pointer and slides the rows (`perch.beginReorderDrag`); without it a press

@@ -31,6 +31,8 @@ const SCREENS: &[&str] = &[
     "session-menu",
     "keybind-help",
     "launcher",
+    "instructions",
+    "memory",
     "tab-drag",
 ];
 

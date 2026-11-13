@@ -1,0 +1,5 @@
+{
+  "name": "Worktrees",
+  "description": "The web app's stock worktree menu (a git project's + and its worktree list), unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

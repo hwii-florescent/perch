@@ -7273,6 +7273,7 @@ impl ShellRuntime {
                 "aria_level",
                 "keep_mounted",
                 "window_layer", // PERCH: a window layer (`materialize::window_layer_of`).
+                "also_named", // PERCH: one more name a test reads the box by (`probe`).
                 "on_item_click",
                 "on_item_secondary_click",
                 "on_change",
@@ -8331,6 +8332,7 @@ impl ShellRuntime {
             | "aria_level"
             | "keep_mounted"
             | "window_layer" // PERCH: a window layer.
+            | "also_named" // PERCH: one more test name.
             | "tab_index"
             | "tab_stop"
             | "href"
@@ -8388,6 +8390,7 @@ impl ShellRuntime {
                     "aria_level" => "aria_level",
                     "keep_mounted" => "keep_mounted",
                     "window_layer" => "window_layer", // PERCH: a window layer.
+                    "also_named" => "also_named", // PERCH: one more test name.
                     "tab_index" => "tab_index",
                     "tab_stop" => "tab_stop",
                     "id" => "id",

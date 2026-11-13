@@ -39,8 +39,6 @@ export const INERT = [
   "shortcutFor",
   "beginReorderDrag",
   "overlay:folder-browser",
-  "overlay:instructions",
-  "overlay:memory",
   "overlay:worktree",
   "overlay:new-file",
 ];
@@ -67,12 +65,30 @@ const OVERLAY_SCREENS = {
       p.onClose?.();
     },
   },
+  // Instructions and Project memory: the screen asks the core itself (`ask`); closing it is the overlay's close.
+  instructions: {
+    screen: "instructions",
+    props: (p) => ({ scope: p.scope, id: p.id, name: p.name }),
+    result: (p) => p.onClose?.(),
+  },
+  memory: {
+    screen: "memory",
+    props: (p) => ({ projectId: p.projectId, name: p.name }),
+    result: (p) => p.onClose?.(),
+  },
   confirm: {
     screen: "confirm",
     props: (p) => ({ message: p.message, confirmLabel: p.confirmLabel, cancelLabel: p.cancelLabel, busy: !!p.busy }),
     result: (p, r) => (r && r.confirmed === true ? p.onConfirm?.() : p.onCancel?.()),
   },
 };
+
+// A clock a test holds (`perch.heldClock()`: its reference page's instant) is the screens' `Date.now`.
+const HELD_CLOCK = perch.heldClock?.();
+if (typeof HELD_CLOCK === "number") Date.now = () => HELD_CLOCK;
+
+/** How long a question for the core waits for its answer, as the web's clients wait. */
+const ASK_TIMEOUT_MS = 5000;
 
 /** An overlay that cannot open: its screen ends as if dismissed, so the screen's own state does not wait on it. */
 function dismiss(kind, props, why) {
@@ -282,7 +298,33 @@ export function copyFor(cx, screen) {
     },
     clearAddProject: () => perch.clearAddProject(),
     /** The folder browser's listing of `path` (absent: home) on `hostId` (`FolderBrowserProps.browse`). */
-    browse: (hostId, path) => perch.ask("fs.browse", { hostId, path: path ?? null }),
+    browse: (hostId, path) =>
+      perch.ask("fs.browse", { hostId, path: path ?? null }).then((listing) => listing ?? Promise.reject(new Error("No core is connected to list folders."))),
+    /**
+     * A question for the core (`perch.ask`: Instructions, Project memory), as the web's clients ask it: the core's
+     * answer, its refusal as `{ error }`, or null when no core answers within `ASK_TIMEOUT_MS`.
+     */
+    ask: (kind, args) =>
+      new Promise((resolve) => {
+        let done = false;
+        const settle = (value) => { if (!done) { done = true; resolve(value); } };
+        const timer = setTimeout(() => settle(null), ASK_TIMEOUT_MS);
+        let asking;
+        try {
+          asking = perch.ask(kind, args);
+        } catch (error) {
+          // No window to ask through (a screen drawn on its own): no answer.
+          console.error(`perch.ask ${kind}: ${error?.message ?? error}`);
+          clearTimeout(timer);
+          return settle(null);
+        }
+        asking.then(
+          answer((value) => { clearTimeout(timer); settle(value ?? null); }),
+          answer((error) => { clearTimeout(timer); settle({ error: String(error?.message ?? error) }); }),
+        );
+      }),
+    /** Whether the connected core has `capability` (`server.info`), as the web's clients check it. */
+    coreCan: (capability, hostId = "local") => snapshot(`coreCan:${hostId}:${capability}`, () => perch.coreCan(capability, hostId)),
     /** One of the folder's own fields has the keyboard, or none does now (`screen.js`). */
     holdKeyboard: (held) => perch.holdKeyboard(!!held),
     shortcutLabel: (id) => perch.shortcutLabel(id),

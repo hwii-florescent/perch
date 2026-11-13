@@ -1091,9 +1091,9 @@ pub fn session_folders(store: &Store, view: &View) -> SessionFolders {
         }
     }
     for (_, list) in &mut groups {
-        list.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        list.sort_by_key(|s| std::cmp::Reverse(s.created_at));
     }
-    groups.sort_by(|a, b| b.1[0].created_at.cmp(&a.1[0].created_at));
+    groups.sort_by_key(|g| std::cmp::Reverse(g.1[0].created_at));
     let shown = view
         .session_id
         .as_deref()

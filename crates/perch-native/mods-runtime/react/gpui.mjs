@@ -109,7 +109,7 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   if (node.kind === "text") return snapped.get(node)?.text ?? node.text;
   const underPointer = UNDER_POINTER.has(node);
   unseen ||= node.style.opacity === 0 || node.style.visibility === "invisible";
-  if (unseen && (node.name || node.range_name)) node = { ...node, name: undefined, range_name: undefined };
+  if (unseen && (node.name || node.range_name)) node = { ...node, name: undefined, range_name: undefined, also: undefined };
   color = node.style.text_color ?? color;
   // An icon takes the colour of its text, hover included: a node whose own `hover:` changes the text colour
   // reports the pointer (`on_hover`), and while it is over the node its icons are drawn in the hover colour.
@@ -125,6 +125,8 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   if (node.markup) el = el.child(files.icon(`~icon-${node.id}`, node.markup, node.kind === "svg" ? color : ""));
   const id = engineId(node, events, overlay);
   if (id) el = el.id(id);
+  // More parity names for the same element (two of the page's selectors find it).
+  if (node.name && el.also_named) for (const name of node.also ?? []) el = el.also_named(name);
   el = applyStyle(el, { ...node.style, ...snapped.get(node) });
   // CSS gives a flex item an automatic minimum width of its min-content width, which for text that can wrap is its
   // longest word, so the item shrinks and its text wraps; GPUI's minimum for text is the whole line. A shrinkable

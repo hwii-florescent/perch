@@ -393,6 +393,8 @@ struct Behavior {
     /// PERCH: whether the element is painted above the rest of the window, over the whole window
     /// from its top left wherever its parent sits (`window_layer`).
     window_layer: bool,
+    /// PERCH: more names a test reads this element's box by, beside its `id` (`also_named`).
+    also_named: Vec<SharedString>,
     /// The key-binding context this element and its subtree sit in.
     ///
     /// What a keymap's `context` predicate is matched against, so a chord can
@@ -867,7 +869,10 @@ fn materialize_node(
 
     // PERCH: a named node records its box, colours and font for tests (`probe`).
     #[cfg(feature = "render-test-support")]
-    let probe = behavior.key.clone().map(|name| (name, Box::new(refinement.clone())));
+    let probe = behavior.key.clone().map(|name| {
+        let also = behavior.also_named.clone();
+        (name, also, Box::new(refinement.clone()))
+    });
     // PERCH: an element in a window layer is drawn over the whole window (`window_layer_of`).
     let window_layer = behavior.window_layer;
     let element = match component {
@@ -896,7 +901,11 @@ fn materialize_node(
     };
     #[cfg(feature = "render-test-support")]
     let element = match probe {
-        Some((name, style)) => crate::probe::wrap(name, *style, element),
+        // PERCH: each further name wraps the element once more; a probe lays out as what it wraps.
+        Some((name, also, style)) => also.into_iter().fold(
+            crate::probe::wrap(name, (*style).clone(), element),
+            |element, name| crate::probe::wrap(name, (*style).clone(), element),
+        ),
         None => element,
     };
     if window_layer {
@@ -3442,6 +3451,12 @@ fn apply_behavior(behavior: &mut Behavior, name: &str, args: &[Bridged]) {
         "keep_mounted" => behavior.keep_mounted = flag.unwrap_or(true),
         // PERCH: a window layer (`window_layer_of`).
         "window_layer" => behavior.window_layer = flag.unwrap_or(true),
+        // PERCH: one more name for the element's box in tests (`probe`).
+        "also_named" => behavior.also_named.extend(
+            args.first()
+                .and_then(|value| value.as_str().ok())
+                .map(SharedString::from),
+        ),
         "key_context" => {
             behavior.key_context = args
                 .first()

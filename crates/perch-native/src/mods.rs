@@ -121,6 +121,45 @@ pub const STOCK: &[(&str, &str)] = &[
         include_str!("../mods/sidebar/folder-browser/main.js"),
     ),
     (
+        "instructions/main.js",
+        include_str!("../mods/instructions/main.js"),
+    ),
+    (
+        "instructions/mod.json",
+        include_str!("../mods/instructions/mod.json"),
+    ),
+    (
+        "instructions/instructions/main.js",
+        include_str!("../mods/instructions/instructions/main.js"),
+    ),
+    ("memory/main.js", include_str!("../mods/memory/main.js")),
+    ("memory/mod.json", include_str!("../mods/memory/mod.json")),
+    (
+        "memory/memory/main.js",
+        include_str!("../mods/memory/memory/main.js"),
+    ),
+    (
+        "memory/confirm/main.js",
+        include_str!("../mods/memory/confirm/main.js"),
+    ),
+    ("worktree/main.js", include_str!("../mods/worktree/main.js")),
+    (
+        "worktree/mod.json",
+        include_str!("../mods/worktree/mod.json"),
+    ),
+    (
+        "worktree/worktree/main.js",
+        include_str!("../mods/worktree/worktree/main.js"),
+    ),
+    (
+        "worktree/confirm/main.js",
+        include_str!("../mods/worktree/confirm/main.js"),
+    ),
+    (
+        "sidebar/worktree/main.js",
+        include_str!("../mods/sidebar/worktree/main.js"),
+    ),
+    (
         "launcher/launcher/main.js",
         include_str!("../mods/launcher/launcher/main.js"),
     ),

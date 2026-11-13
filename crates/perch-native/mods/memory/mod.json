@@ -1,0 +1,5 @@
+{
+  "name": "Memory",
+  "description": "The web app's stock Project memory dialog (the notes agents write for each other and for you), unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

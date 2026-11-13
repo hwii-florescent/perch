@@ -34,7 +34,13 @@ const UA_RULES = [
     padding: "2px 6px 3px 6px", "border-width": "2px", "border-style": "outset", "border-color": "buttonborder", "background-color": "buttonface",
     color: "buttontext", "text-align": "center", cursor: "default", "box-sizing": "border-box",
   }],
+  // A field's own text is the small system size (11 px, as the web reference measures a field that sets no size of
+  // its own); a field that sets its size is unaffected.
+  ["input, select, textarea", { "font-size": "11px" }],
   ["input", { padding: "1px 2px", "border-width": "2px", "border-style": "inset", "border-color": "buttonborder", "background-color": "field", color: "fieldtext" }],
+  // A check box or radio button is WebKit's 12 px control with its margins (the reference's memory switch: 12 x 12,
+  // 2 px from the label's edge, its row 18 px high).
+  ['input[type="checkbox"], input[type="radio"]', { width: "12px", height: "12px", margin: "3px 2px", padding: "0", "border-width": "0", "box-sizing": "border-box" }],
   ["svg", { overflow: "hidden" }],
   ["[hidden]", { display: "none" }],
 ];
