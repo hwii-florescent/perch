@@ -152,6 +152,18 @@ pub const STOCK: &[(&str, &str)] = &[
         include_str!("../mods/pane-menu/pane-menu/main.js"),
     ),
     (
+        "session-split/main.js",
+        include_str!("../mods/session-split/main.js"),
+    ),
+    (
+        "session-split/mod.json",
+        include_str!("../mods/session-split/mod.json"),
+    ),
+    (
+        "session-split/session-split/main.js",
+        include_str!("../mods/session-split/session-split/main.js"),
+    ),
+    (
         "parity-probe/main.js",
         include_str!("../mods/parity-probe/main.js"),
     ),
@@ -249,6 +261,24 @@ pub const STOCK: &[(&str, &str)] = &[
     (
         "tabs/tabs/main.js",
         include_str!("../mods/tabs/tabs/main.js"),
+    ),
+    ("tab-drag/main.js", include_str!("../mods/tab-drag/main.js")),
+    (
+        "tab-drag/mod.json",
+        include_str!("../mods/tab-drag/mod.json"),
+    ),
+    (
+        "tab-drag/tab-drag/main.js",
+        include_str!("../mods/tab-drag/tab-drag/main.js"),
+    ),
+    ("tab-menu/main.js", include_str!("../mods/tab-menu/main.js")),
+    (
+        "tab-menu/mod.json",
+        include_str!("../mods/tab-menu/mod.json"),
+    ),
+    (
+        "tab-menu/tab-menu/main.js",
+        include_str!("../mods/tab-menu/tab-menu/main.js"),
     ),
     ("toast/main.js", include_str!("../mods/toast/main.js")),
     ("toast/mod.json", include_str!("../mods/toast/mod.json")),

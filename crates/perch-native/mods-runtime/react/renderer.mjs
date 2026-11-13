@@ -11,7 +11,7 @@
 import Reconciler from "react-reconciler";
 import { ConcurrentRoot, DefaultEventPriority, DiscreteEventPriority, NoEventPriority } from "react-reconciler/constants";
 import { createElement } from "react";
-import { HostElement, HostText, installGlobals } from "./dom.mjs";
+import { HostElement, HostText, installGlobals, isTextField, submits } from "./dom.mjs";
 import { describe } from "./describe.mjs";
 import { styleSheet } from "./sheet.mjs";
 
@@ -117,6 +117,7 @@ const PROP = {
   click: "onClick", dblclick: "onDoubleClick", contextmenu: "onContextMenu", mousedown: "onMouseDown", mouseup: "onMouseUp", mousemove: "onMouseMove",
   pointerdown: "onPointerDown", pointerup: "onPointerUp", pointermove: "onPointerMove", pointercancel: "onPointerCancel",
   keydown: "onKeyDown", keyup: "onKeyUp", focus: "onFocus", blur: "onBlur", input: "onInput", change: "onChange",
+  submit: "onSubmit",
 };
 
 /** A DOM-shaped event: what a handler in the source reads (`clientX`, `key`, `pointerType`, `currentTarget`). */
@@ -150,10 +151,6 @@ function fire(node, event, capture) {
     if (typeof handler === "function") handler(event);
   }
 }
-
-/** Whether `element` is a field a person types a line of text into. */
-const isTextField = (element) =>
-  element?.tagName === "textarea" || (element?.tagName === "input" && /^(text|search|url|email|tel|password|number|)$/.test(String(element.props.type ?? "")));
 
 /**
  * Mounts `Component` for the `perch` host and returns the engine's handle. `options.container` is the inline style
@@ -228,6 +225,9 @@ export function mount(perch, Component, options = {}) {
         if (!event.propagationStopped) { fire(target, event, true); if (!event.propagationStopped) fire(target, event, false); }
         for (let i = 1; i < path.length && !event.propagationStopped; i++) fire(path[i], event, false);
       });
+      // A browser's default action: a click on a form's submit button submits the form.
+      const form = type === "click" && !event.defaultPrevented ? submits(target) : null;
+      if (form) handle.dispatch(form, "submit", {});
       return !event.defaultPrevented;
     },
     /** A key pressed while the screen has the keyboard (`init`: the DOM's `key`, modifiers, `repeat`), at the
@@ -239,6 +239,8 @@ export function mount(perch, Component, options = {}) {
       const target = document.activeElement && document.activeElement !== document.body ? document.activeElement : document.body;
       const typed = handle.dispatch(target, "keydown", init);
       if (!typed) return true;
+      const form = init.key === "Enter" && !init.isComposing ? submits(target, true) : null;
+      if (form) { handle.dispatch(form, "submit", {}); return true; }
       if (!isTextField(target) || target.props.disabled || target.props.readOnly) return false;
       // Cmd/Ctrl+A selects the whole field: the next character replaces it, Backspace or Delete clears it.
       if ((init.ctrlKey || init.metaKey) && !init.altKey && !init.shiftKey && init.key.toLowerCase() === "a") {

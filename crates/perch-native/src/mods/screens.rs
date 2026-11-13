@@ -8,7 +8,8 @@
 //!   pane, keyed `pane-header#<tab id>`, while the area is split), `start` (the main area while
 //!   nothing is open in it);
 //! - floating, opened by the window over the whole of it, as the web's take the whole page:
-//!   `navigator`, `pane-menu`, `tab-menu`, `confirm`, `dialog`, `new-session`, `keybind-help`, `launcher` (modal) and `toast`
+//!   `navigator`, `pane-menu`, `tab-menu`, `confirm`, `dialog`, `new-session`, `session-split`,
+//!   `keybind-help`, `launcher` (modal), `toast` and `tab-drag`
 //!   (not modal: shown while there are notifications).
 //!
 //! A screen gets its arguments from `perch.props()` (the web's prop names, with each callback
@@ -129,6 +130,18 @@ pub const SCREENS: &[Screen] = &[
     Screen {
         id: "new-session",
         place: MODAL,
+        width: 0.,
+        height: 0.,
+    },
+    Screen {
+        id: "session-split",
+        place: MODAL,
+        width: 0.,
+        height: 0.,
+    },
+    Screen {
+        id: "tab-drag",
+        place: Place::Floating { modal: false },
         width: 0.,
         height: 0.,
     },

@@ -54,6 +54,11 @@ path = "tests/mods_sidebar_window.rs"
 harness = false
 
 [[test]]
+name = "mods_sidebar_actions"
+path = "tests/mods_sidebar_actions.rs"
+harness = false
+
+[[test]]
 name = "mods_chrome_capture"
 path = "tests/mods_chrome_capture.rs"
 harness = false

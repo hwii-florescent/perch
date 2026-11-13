@@ -22,7 +22,7 @@
 //! hover colour does not reach it, as in CSS) or when the inherited value would differ (`line-height: normal`, a
 //! multiplier under a new size). `tokens` names the theme token each colour came from.
 import { Cascade, colorOut, evalLength, familyOut, lineHeightPx, splitTop, THEME_TOKENS } from "./css.mjs";
-import { HostElement, HostText } from "./dom.mjs";
+import { HostElement, HostText, submits } from "./dom.mjs";
 import { closest as closestBy, matchesComplex, parseSelector, querySelectorAll as queryBy } from "./selector.mjs";
 
 export const SCHEMA = "perch-native-description/1";
@@ -451,6 +451,8 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
   // `pointer-events-none` stack): a press on it stops there and does not reach what is beneath the screen.
   if (computed.values["pointer-events"] !== "none" && parentComputed?.values["pointer-events"] === "none") extra.blocks_pointer = true;
   const events = Object.entries(EVENTS).filter(([, props]) => props.some((p) => typeof element.props[p] === "function")).map(([name]) => name);
+  // A form's submit button submits it on a click, with or without a handler of its own.
+  if (!events.includes("click") && submits(element)) events.push("click");
   if (events.length) extra.events = events;
   return { computed, style, tokens, extra, meta: meta(element), reports, childText: inheritText(inheritedText, ownText), where };
 }

@@ -21,10 +21,13 @@
 // reads them again and tells React's subscribers which changed.
 //
 // Overlays: an overlay the web draws over a screen opens as the window's screen of that kind when a mod draws it
-// (`OVERLAY_SCREENS`: the New session menu as `new-session`, a confirmation as `confirm`), and its callbacks get the
-// screen's result. What the `perch` module or the window cannot do yet is an inert default (`INERT`), so a screen
+// (`OVERLAY_SCREENS`: the New session menu as `new-session`, a confirmation as `confirm`, a session row's menu as
+// `tab-menu`), and its callbacks get the screen's result. What the `perch` module or the window cannot do yet is an
+// inert default (`INERT`), so a screen
 // draws and its other actions work: an overlay with no screen (or whose screen no mod draws) closes at once and says
-// so on stderr, session folders are empty, the add-project flow does not run and a row drag stays a press. A
+// so on stderr, session folders are empty, the add-project flow does not run and a row drag stays a press. A tab's
+// press (`beginTabDrag`) is the window's from then on (`tab.beginDrag`, with where the strip's tabs are): it follows
+// the pointer, draws the `tab-drag` screen and moves or splits the tab once it is let go. A
 // workspace line's `workspace.open` runs `workspace.focus` (`STAND_IN`); other commands the module lacks are refused
 // by it and logged.
 import * as perch from "perch";
@@ -39,13 +42,11 @@ export const INERT = [
   "sessionFolders",
   "addProject",
   "beginReorderDrag",
-  "overlay:session-menu",
   "overlay:folder-browser",
   "overlay:instructions",
   "overlay:memory",
   "overlay:worktree",
   "overlay:new-file",
-  "beginTabDrag",
 ];
 
 /** Overlays that open as one of the window's screens: the screen, its props from the overlay's, and what the
@@ -56,6 +57,17 @@ const OVERLAY_SCREENS = {
     props: (p) => ({ hostId: p.hostId, projectCwds: p.projects ?? [], ...(p.cwd ? { fixedCwd: p.cwd } : {}), ...(p.anchorRect ? { anchorRect: p.anchorRect } : {}) }),
     result: (p, r) => {
       if (r && typeof r === "object" && typeof r.agent === "string") p.onSelect?.(r.cwd ?? null, r.agent);
+      p.onClose?.();
+    },
+  },
+  // The sidebar row's menu is the tab menu for that session (`SessionMenu`): the window works out what may be done and
+  // runs the tab's actions and the session's inbound choices; a row of the sidebar's own is its `onSelect`.
+  "session-menu": {
+    screen: "tab-menu",
+    props: (p) => ({ sessionMenu: true, id: p.id, x: p.x, y: p.y, extraItems: (p.extraItems ?? []).map(({ label, testId }) => ({ label, testId })) }),
+    result: (p, r) => {
+      const item = r && typeof r.item === "string" ? (p.extraItems ?? []).find((row) => row.testId === r.item) : null;
+      item?.onSelect?.();
       p.onClose?.();
     },
   },
@@ -309,6 +321,17 @@ export function copyFor(cx, screen) {
     },
     // The native keymap has no `navigator.*` (or other in-screen) bindings: a screen's home-row keys are not matched.
     shortcutFor: () => null,
+    // A press on a tab, which the window turns into a drag after a few pixels. The strip's tabs as laid out now are
+    // where a drop on the strip lands (`slotIndex` in the web).
+    beginTabDrag(event, id, label) {
+      if ((event?.button ?? 0) !== 0) return;
+      const entries = [...(globalThis.document?.querySelectorAll?.("[data-tab-entry]") ?? [])].map((el) => {
+        const box = el.getBoundingClientRect();
+        return { id: el.dataset?.tabEntry ?? el.getAttribute?.("data-tab-entry"), left: box.left, width: box.width };
+      });
+      const args = { id: String(id), label: String(label ?? ""), x: event.clientX, y: event.clientY, entries };
+      perch.run("tab.beginDrag", args).catch(answer((error) => console.error(`perch.run tab.beginDrag: ${error?.message ?? error}`)));
+    },
     render: () => { if (!rendering && !copy.closed) cx.notify(); },
     error: (error) => console.error(`react-runtime: ${error?.stack ?? error}`),
   };

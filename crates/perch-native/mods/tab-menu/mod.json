@@ -1,0 +1,5 @@
+{
+  "name": "Tab menu",
+  "description": "The web app's stock tab menu (a tab's or a sidebar row's actions), unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

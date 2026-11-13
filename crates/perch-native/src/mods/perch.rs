@@ -17,6 +17,7 @@
 //! [`ModHost`] and [`Perch::attach`] to its [`Workspace`], which publishes on every change the
 //! workspace sees and runs commands there.
 
+use super::screens::OnResult;
 use super::theme::{self, Theme};
 use super::ModHost;
 use crate::actions::ACTIONS;
@@ -891,17 +892,17 @@ impl Perch {
                 let answer = tx.clone();
                 let opened = handle.update(cx, |_, _, cx| {
                     workspace.update(cx, |ws, cx| {
-                        ws.open_screen(
-                            &id,
-                            props,
-                            None,
-                            Some(Box::new(move |_, result, _, _| {
-                                if let Some(tx) = answer.borrow_mut().take() {
-                                    let _ = tx.send(Ok(result));
-                                }
-                            })),
-                            cx,
-                        )
+                        let on_result: OnResult = Box::new(move |_, result, _, _| {
+                            if let Some(tx) = answer.borrow_mut().take() {
+                                let _ = tx.send(Ok(result));
+                            }
+                        });
+                        // A sidebar row's menu is the tab menu the window works out for it.
+                        if id == "tab-menu" && props["sessionMenu"] == true {
+                            ws.open_session_menu(&props, on_result, cx)
+                        } else {
+                            ws.open_screen(&id, props, None, Some(on_result), cx)
+                        }
                     })
                 });
                 if !matches!(opened, Ok(true)) {
@@ -1255,7 +1256,7 @@ const OWN: [(&str, &str, &str); 6] = [
 
 /// Window commands beyond the keymap's: the web's ids the window can perform (some under the
 /// name its keys use), and the native ones screens need.
-const WINDOW_COMMANDS: [(&str, &str, &str); 11] = [
+const WINDOW_COMMANDS: [(&str, &str, &str); 12] = [
     (
         "session.start",
         "Start an agent in a folder on a host",
@@ -1277,6 +1278,11 @@ const WINDOW_COMMANDS: [(&str, &str, &str); 11] = [
         "tab.menu",
         "Open a tab's menu at a point of the window",
         "{id, x, y}",
+    ),
+    (
+        "tab.beginDrag",
+        "A press on a tab, which the window follows as a drag (the SDK's beginTabDrag)",
+        "{id, label, x, y, entries: [{id, left, width}]}",
     ),
     (
         "host.enable",
@@ -1367,6 +1373,121 @@ pub fn notice_from(
 }
 
 /// `useNotifications`' item for one of the window's notifications, worded as the web words it.
+/// The capability a core has inbound control with (`inbound.ts`).
+pub const INBOUND_CAPABILITY: &str = "inbound.v1";
+
+/// What a session does with messages from other sessions, as the menu words each choice.
+const INBOUND_CHOICES: [(&str, &str); 3] = [
+    ("accept", "Accept messages from other sessions"),
+    ("hold", "Hold messages for my approval"),
+    ("refuse", "Refuse messages from other sessions"),
+];
+
+/// A session menu's three inbound choices (`inboundMenuItems`), the current one ticked, as
+/// `extraItems` rows (`{label, testId}`); a row picked is `{item: testId}`. Only for an agent session
+/// on the core's own computer, and only when the core can do it.
+pub fn inbound_items(store: &Store, session_id: &str) -> Vec<Value> {
+    let Some(session) = store.sessions.iter().find(|s| s.id == session_id) else {
+        return Vec::new();
+    };
+    let capable = store
+        .local_capabilities
+        .iter()
+        .any(|c| c == INBOUND_CAPABILITY);
+    if session.cli_provider_id.is_none() || session.host_id != LOCAL || !capable {
+        return Vec::new();
+    }
+    let current = session.inbound_mode.as_deref().unwrap_or("accept");
+    INBOUND_CHOICES
+        .iter()
+        .map(|(mode, label)| {
+            let tick = if *mode == current { "\u{2713} " } else { "" };
+            json!({ "label": format!("{tick}{label}"), "testId": format!("session-inbound-{mode}-{session_id}") })
+        })
+        .collect()
+}
+
+/// The inbound choice a tab menu row `item` (its `testId`) makes for `session_id`, when it is one
+/// and not the current mode.
+pub fn inbound_choice(store: &Store, session_id: &str, item: &str) -> Option<&'static str> {
+    let mode = item
+        .strip_prefix("session-inbound-")?
+        .strip_suffix(session_id)?
+        .strip_suffix('-')?;
+    let current = store
+        .sessions
+        .iter()
+        .find(|s| s.id == session_id)?
+        .inbound_mode
+        .as_deref()
+        .unwrap_or("accept");
+    INBOUND_CHOICES
+        .iter()
+        .map(|(m, _)| *m)
+        .find(|m| *m == mode && *m != current)
+}
+
+/// What a session menu for `session_id` offers to show beside it, as the web's strip for that
+/// session's workspace holds them (`SessionMenu`): the workspace's sessions with a tab (in `strip`
+/// order), then the rest of them, oldest first. A session in no workspace offers the strip.
+pub fn workspace_mates(store: &Store, strip: &[String], session_id: &str) -> Vec<String> {
+    let Some(workspace) = store
+        .sessions
+        .iter()
+        .find(|s| s.id == session_id)
+        .and_then(|s| s.workspace_id.as_deref())
+    else {
+        return strip.to_vec();
+    };
+    let mut rest: Vec<&perch_core::protocol::SessionSummary> = store
+        .sessions
+        .iter()
+        .filter(|s| s.workspace_id.as_deref() == Some(workspace))
+        .collect();
+    let mut mates: Vec<String> = strip
+        .iter()
+        .filter(|id| rest.iter().any(|s| s.id == **id))
+        .cloned()
+        .collect();
+    rest.retain(|s| !mates.contains(&s.id));
+    rest.sort_by_key(|s| s.created_at);
+    mates.extend(rest.into_iter().map(|s| s.id.clone()));
+    mates
+}
+
+/// `TabMenuScreenProps` for tab (or session) `id` at `(x, y)`: what may be done with it in
+/// `tabs`, which of `among` a split can take (`label` names each), and `extra` rows after the
+/// split rows (the sidebar's, then the session's inbound choices).
+pub fn tab_menu_props(
+    tabs: &crate::tabs::Tabs,
+    among: &[String],
+    id: &str,
+    (x, y): (f32, f32),
+    label: &dyn Fn(&str) -> String,
+    can_stop: bool,
+    extra: Vec<Value>,
+) -> Value {
+    let title = label(id);
+    let offered: Vec<Value> = tabs
+        .offered(id, among)
+        .iter()
+        .map(|other| json!({ "id": other, "label": label(other) }))
+        .collect();
+    json!({
+        "id": id,
+        "x": x,
+        "y": y,
+        "self": { "id": id, "kind": "session", "label": title, "title": title },
+        // Every native tab is a session, which a new terminal can be split in beside.
+        "canSplitNew": true,
+        "canSplitMore": tabs.room_beside(id),
+        "offered": offered,
+        "inSplit": tabs.in_split(id),
+        "canStopAgent": can_stop,
+        "extraItems": extra,
+    })
+}
+
 pub fn notification_json(note: &crate::workspace::Notification, model: &Model) -> Value {
     use crate::sidebar::Alert;
     let heard = &note.heard;

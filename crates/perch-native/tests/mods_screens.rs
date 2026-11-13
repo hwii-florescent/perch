@@ -111,7 +111,8 @@ export default class extends View {
 }
 "##;
 
-const PANE_MENU: &str = r##"
+/// A tab menu that shows its tab's title as a bar (10 px a character) and renames it.
+const TAB_MENU: &str = r##"
 import { View, div } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import * as perch from "perch";
@@ -122,7 +123,7 @@ export default class extends View {
       .child(v_flex().id("menu-panel").absolute().left(props.x).top(props.y).w(200).h(120)
         .bg("#303030")
         .on_mouse_down_out(() => perch.close())
-        .child(div().id("menu-items").w(10 * (props.items ?? []).length).h(10).bg("#ffffff"))
+        .child(div().id("menu-items").w(10 * (props.self?.title ?? "").length).h(10).bg("#ffffff"))
         .child(div().id("menu-rename").w(100).h(30).bg("#00ff00")
           .on_click(() => perch.close({ action: "rename", args: ["Renamed"] }))));
   }
@@ -570,7 +571,7 @@ fn main() {
     );
 
     // A menu opened at a point returns the action picked, which runs on its tab.
-    rig.write("pane-menu", PANE_MENU);
+    rig.write("tab-menu", TAB_MENU);
     rig.ws(|ws, window, cx| {
         ws.run_command(
             "tab.menu",
@@ -580,7 +581,7 @@ fn main() {
         )
     })
     .unwrap();
-    let items = rig.record("menu-items").expect("the pane menu mod is open");
+    let items = rig.record("menu-items").expect("the tab menu mod is open");
     let root = probe::record("menu-root").unwrap();
     assert_eq!(
         (root.bounds.origin, root.bounds.size),
@@ -592,9 +593,10 @@ fn main() {
         point(px(400.), px(200.)),
         "its panel at the point its props say"
     );
-    assert!(
-        items.bounds.size.width >= px(80.),
-        "the native menu's entries"
+    assert_eq!(
+        items.bounds.size.width,
+        px(50.),
+        "the window's props for the tab: its title, Alpha"
     );
     rig.asked();
     rig.click("menu-rename");

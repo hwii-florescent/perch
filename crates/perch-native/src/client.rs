@@ -783,6 +783,9 @@ pub enum Command {
     UsageGet { force: bool },
     /// Spend one banked reset of an account (`usage.redeemReset`).
     UsageRedeemReset { account_id: String },
+    /// What a session does with messages from other sessions (`inbound.act` `set_mode`): `accept`,
+    /// `hold` or `refuse`. The menu follows the session list's `inboundMode`, not this request.
+    InboundMode { session_id: String, mode: String },
 }
 
 /// What the window learns.
@@ -1036,6 +1039,10 @@ async fn live(
                 Some(Command::UpdateSettings(patch)) => {
                     connection.send(settings_frame(patch)).await?;
                 }
+                Some(Command::InboundMode { session_id, mode }) => {
+                    let id = connection.request_id();
+                    connection.send(inbound_mode_frame(&id, &session_id, &mode)).await?;
+                }
                 Some(Command::UsageGet { force }) => {
                     connection.send(json!({"type": "usage.get", "force": force})).await?;
                 }
@@ -1093,6 +1100,11 @@ fn rename_frame(session_id: &str, title: &str) -> Value {
 fn pin_frame(request_id: &str, workspace_id: &str, pinned: bool) -> Value {
     json!({"type": "workspace.pin", "requestId": request_id, "workspaceId": workspace_id,
            "pinned": pinned})
+}
+
+fn inbound_mode_frame(request_id: &str, session_id: &str, mode: &str) -> Value {
+    json!({"type": "inbound.act", "requestId": request_id, "sessionId": session_id,
+           "action": "set_mode", "mode": mode})
 }
 
 fn delete_frame(session_id: &str) -> Value {
@@ -1224,6 +1236,7 @@ mod tests {
             request_frame("r", &Request::Mods),
             rename_frame("s", "a new title"),
             pin_frame("r", "w", true),
+            inbound_mode_frame("r", "s", "hold"),
             delete_frame("s"),
             settings_frame(json!({"terminalScrollback": 5000})),
             settings_frame(json!({"terminalLoginShell": true, "droppedPathDoubleQuotes": false})),

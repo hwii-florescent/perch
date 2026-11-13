@@ -36,6 +36,7 @@ use crate::settings::{
     MIN_SCROLLBACK, OPACITY, OPTION_AS_ALT, PADDING, TOAST_DELIVERY,
 };
 use crate::sidebar::{Alert, Heard, Provider, LOCAL};
+use crate::tab_drag::{self, Drop, TabDrag};
 use crate::tabs::{Dir, Node, Side, Tabs};
 use crate::terminal::actions::{Action, Scroll};
 use crate::terminal::attach::FromCore;
@@ -49,12 +50,12 @@ use crate::ui::{
 use crate::zoom::Zoom;
 use futures::channel::mpsc::UnboundedSender;
 use gpui::{
-    canvas, div, prelude::*, px, relative, rgb, size, AnyElement, App, Context, Entity, Focusable,
-    KeyDownEvent, Keystroke, MouseButton, Pixels, Point, SharedString, Size, Subscription, Task,
-    Window,
+    canvas, div, point, prelude::*, px, relative, rgb, size, AnyElement, App, Bounds, Context,
+    DispatchPhase, Entity, Focusable, KeyDownEvent, Keystroke, MouseButton, MouseMoveEvent,
+    MouseUpEvent, Pixels, Point, SharedString, Size, Subscription, Task, Window,
 };
 use serde_json::{json, Value};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -181,9 +182,6 @@ pub struct Notice {
     pub timeout: Option<u64>,
 }
 
-/// The pane menu's entry that stops the terminal's process.
-const STOP: &str = "Stop the terminal";
-
 pub struct Workspace {
     sidebar: Entity<Sidebar>,
     locate: Option<Locate>,
@@ -228,9 +226,20 @@ pub struct Workspace {
     new_tab_asks: u64,
     /// The place the start page's picker chose, for the workspace it was chosen in.
     start_place: Option<(String, String)>,
+    /// A press on a tab of the strip, which may become a drag (`tab.beginDrag`).
+    drag: Option<TabDrag>,
+    /// Where the strip and each pane on screen were last drawn, for where a drag would drop.
+    drop_boxes: Rc<RefCell<DropBoxes>>,
     /// Tells the core whether this window is the one being looked at.
     activation: Option<Subscription>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// The strip's box and each shown pane's, as last drawn.
+#[derive(Default)]
+struct DropBoxes {
+    strip: Option<Bounds<Pixels>>,
+    panes: HashMap<String, Bounds<Pixels>>,
 }
 
 impl Workspace {
@@ -285,6 +294,8 @@ impl Workspace {
             next_notification: 0,
             new_tab_asks: 0,
             start_place: None,
+            drag: None,
+            drop_boxes: Rc::default(),
             activation: None,
             _subscriptions: vec![opened, failed, observed],
         }
@@ -531,7 +542,7 @@ impl Workspace {
         }
     }
 
-    /// `PaneMenuScreenProps` for pane `id`, with the native menu's entries as `items`.
+    /// `PaneMenuScreenProps` for pane `id`.
     fn open_pane_menu(
         &mut self,
         id: &str,
@@ -539,23 +550,16 @@ impl Workspace {
         can_stop: bool,
         cx: &mut Context<Self>,
     ) {
-        let items: Vec<Value> = self
-            .menu_items(can_stop)
-            .into_iter()
-            .map(|(label, command)| json!({ "label": label, "command": command }))
-            .collect();
         let props = json!({
             "panelId": id,
             "title": self.title_of(id, cx),
             "x": f32::from(at.x),
             "y": f32::from(at.y),
-            // The web offers "Show beside an open tab" for a session's pane; the native split takes
-            // only a new terminal beside a tab, so the row is not offered.
-            "sessionId": Value::Null,
+            // Every native pane shows a session, so "Show beside an open tab" is offered.
+            "sessionId": id,
             "canClose": true,
             "maximized": self.tabs.zoomed(),
             "canStopAgent": can_stop,
-            "items": items,
         });
         let target = id.to_string();
         self.open_screen(
@@ -563,80 +567,303 @@ impl Workspace {
             props,
             Some(at),
             Some(Box::new(move |this, result, window, cx| {
-                let outcome = this.menu_result(&target, &result, window, cx);
+                let outcome = this.menu_result(&target, at, &result, window, cx);
                 this.finish(outcome, cx);
             })),
             cx,
         );
     }
 
-    /// Tab `id`'s menu at `at`: the tab menu screen when a mod draws one, else the pane menu.
+    /// Tab `id`'s menu at `at`, the `tab-menu` screen (`TabSplitMenu`'s props): what may be done
+    /// with the tab, and the open tabs a split can take.
     fn open_tab_menu(&mut self, id: &str, at: Point<Pixels>, cx: &mut Context<Self>) {
         if !self.screens.has("tab-menu", cx) {
-            self.open_menu(id, at, cx);
+            self.notice = Some(
+                "No mod draws the tab menu. The stock one is restored when the app starts.".into(),
+            );
+            cx.notify();
             return;
         }
-        let shown = self.tabs.shown();
-        let title = self.title_of(id, cx);
-        let can_stop = self
-            .panes
-            .get(id)
-            .and_then(|p| p.view.as_ref())
-            .is_some_and(|view| view.read(cx).can_stop());
-        let props = json!({
-            "id": id,
-            "x": f32::from(at.x),
-            "y": f32::from(at.y),
-            "self": { "id": id, "kind": "session", "label": title, "title": title },
-            "canSplitNew": self.tabs.has_room(),
-            "canSplitMore": self.tabs.has_room(),
-            // The native split takes only a new terminal beside a tab, not another open tab.
-            "offered": [],
-            "inSplit": shown.len() > 1 && shown.iter().any(|s| s == id),
-            "canStopAgent": can_stop,
-            "extraItems": [],
-        });
+        let extra = crate::mods::perch::inbound_items(&self.sidebar.read(cx).model().store, id);
+        let strip = self.tabs.strip().to_vec();
+        let props = self.tab_menu_props(id, &strip, at, extra, cx);
         let target = id.to_string();
         self.open_screen(
             "tab-menu",
             props,
             Some(at),
             Some(Box::new(move |this, result, window, cx| {
-                let outcome = this.menu_result(&target, &result, window, cx);
+                let outcome = this.menu_result(&target, at, &result, window, cx);
                 this.finish(outcome, cx);
             })),
             cx,
         );
     }
 
+    /// A sidebar row's menu (`SessionMenu`: `{id, x, y, extraItems}`), the tab menu for that
+    /// session whether or not it has a tab here. The window runs the tab's actions and the
+    /// session's inbound choices; `on_result` then gets the result, so a row of the caller's own
+    /// (`{item}`) is the caller's. `false` when no mod draws it or the session is unknown.
+    pub fn open_session_menu(
+        &mut self,
+        menu: &Value,
+        on_result: OnResult,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(id) = menu["id"].as_str().map(str::to_string) else {
+            return false;
+        };
+        let store = self.sidebar.read(cx).model().store.clone();
+        if !store.sessions.iter().any(|s| s.id == id) {
+            return false;
+        }
+        let coordinate = |key: &str| px(menu[key].as_f64().unwrap_or(0.) as f32);
+        let at = point(coordinate("x"), coordinate("y"));
+        let mut extra = menu["extraItems"].as_array().cloned().unwrap_or_default();
+        extra.extend(crate::mods::perch::inbound_items(&store, &id));
+        let mates = crate::mods::perch::workspace_mates(&store, self.tabs.strip(), &id);
+        let props = self.tab_menu_props(&id, &mates, at, extra, cx);
+        self.open_screen(
+            "tab-menu",
+            props,
+            Some(at),
+            Some(Box::new(move |this, result, window, cx| {
+                let outcome = this.menu_result(&id, at, &result, window, cx);
+                this.finish(outcome, cx);
+                on_result(this, result, window, cx);
+            })),
+            cx,
+        )
+    }
+
+    /// The tab menu's props for tab (or session) `id` at `at`, offering `among`, with `extra`
+    /// rows.
+    fn tab_menu_props(
+        &self,
+        id: &str,
+        among: &[String],
+        at: Point<Pixels>,
+        extra: Vec<Value>,
+        cx: &App,
+    ) -> Value {
+        let can_stop = self
+            .panes
+            .get(id)
+            .and_then(|p| p.view.as_ref())
+            .is_some_and(|view| view.read(cx).can_stop());
+        crate::mods::perch::tab_menu_props(
+            &self.tabs,
+            among,
+            id,
+            (f32::from(at.x), f32::from(at.y)),
+            &|tab| self.title_of(tab, cx),
+            can_stop,
+            extra,
+        )
+    }
+
+    /// The Split with session picker (`SessionSplitProps`) at `at`, opened from pane `target`'s
+    /// menu: every other session, those with a tab marked open. The one picked shows beside
+    /// `target`, on its right.
+    fn open_session_split(&mut self, target: &str, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let sessions: Vec<Value> = self
+            .sidebar
+            .read(cx)
+            .model()
+            .store
+            .sessions
+            .iter()
+            .filter(|s| s.id != target)
+            .map(|s| {
+                json!({
+                    "id": s.id,
+                    "title": s.title,
+                    "cwd": s.current_cwd.clone().unwrap_or_else(|| s.cwd.clone()),
+                    "open": self.tabs.contains(&s.id),
+                })
+            })
+            .collect();
+        let props = json!({ "sessions": sessions, "x": f32::from(at.x), "y": f32::from(at.y) });
+        let target = target.to_string();
+        let opened = self.open_screen(
+            "session-split",
+            props,
+            Some(at),
+            Some(Box::new(move |this, result, _, cx| {
+                let Some(pick) = result.get("pick").and_then(Value::as_str) else {
+                    return;
+                };
+                let outcome = this.show_beside(&target, pick, Side::Right, cx);
+                this.finish(outcome, cx);
+            })),
+            cx,
+        );
+        if !opened {
+            self.notice = Some("No mod draws the Split with session picker.".into());
+            cx.notify();
+        }
+    }
+
+    /// Opens session `id`'s tab now, shown and active (`show_session` asks the sidebar, which
+    /// opens it a turn later): for an action that goes on to arrange it.
+    fn open_tab(&mut self, id: &str, cx: &mut Context<Self>) -> Result<(), String> {
+        let open = self
+            .sidebar
+            .read(cx)
+            .session_to_open(id)
+            .ok_or("That session is gone.")?;
+        self.ensure_pane(&open, cx);
+        self.tabs.open(id);
+        Ok(())
+    }
+
+    /// The pointer moved during a press on a tab: once it is a drag, where a drop would land,
+    /// drawn by the `tab-drag` screen.
+    fn drag_moved(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(drag) = self.drag.as_mut() else {
+            return;
+        };
+        if !drag.moved(at) {
+            return;
+        }
+        let boxes = self.drop_boxes.borrow();
+        let on_strip = boxes.strip.is_some_and(|b| b.contains(&at))
+            && drag.spans.iter().any(|s| s.id == drag.id);
+        drag.drop = if on_strip {
+            Drop::Strip(drag.slot(f32::from(at.x)))
+        } else {
+            let pane = boxes
+                .panes
+                .iter()
+                .find(|(id, b)| **id != drag.id && b.contains(&at));
+            match pane {
+                Some((target, pane)) => match tab_drag::resolve_zone(*pane, at) {
+                    Some(side) => Drop::Pane {
+                        target: target.clone(),
+                        pane: *pane,
+                        side: self.tabs.can_drop(&drag.id, target).then_some(side),
+                    },
+                    None => Drop::None,
+                },
+                None => Drop::None,
+            }
+        };
+        let props = drag.props();
+        drop(boxes);
+        if !self.screens.update("tab-drag", props.clone(), cx) {
+            self.screens.open("tab-drag", props, None, None, cx);
+        }
+        cx.notify();
+    }
+
+    /// The press on a tab ends: let go (`apply`), the drop it was over is made; Escape, the
+    /// window losing focus or a lost release (`!apply`) changes nothing. A press that never
+    /// became a drag is a click, which the strip handles.
+    fn drag_ended(&mut self, apply: bool, cx: &mut Context<Self>) -> bool {
+        let Some(drag) = self.drag.take() else {
+            return false;
+        };
+        self.screens.take("tab-drag", cx);
+        cx.notify();
+        // The tab (or the pane it was over) may have closed during the drag.
+        if !drag.started || !apply || !self.tabs.contains(&drag.id) {
+            return drag.started;
+        }
+        match drag.drop {
+            Drop::Strip(Some(slot)) => {
+                self.tabs.move_tab(&drag.id, slot + 1);
+            }
+            Drop::Pane {
+                target,
+                side: Some(side),
+                ..
+            } if self.tabs.contains(&target) => {
+                if self.tabs.drop_beside(&drag.id, &target, side) {
+                    self.after_change(cx);
+                }
+            }
+            _ => {}
+        }
+        true
+    }
+
+    /// Show session `id` on the `side` of tab `target`, its tab opened first when it has none;
+    /// it leaves any other split. The keyboard goes to it.
+    fn show_beside(
+        &mut self,
+        target: &str,
+        id: &str,
+        side: Side,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        if !self.tabs.contains(target) {
+            return Err(format!("Tab {target} is gone."));
+        }
+        let full = || Err("A split holds at most four panes.".to_string());
+        if self.tabs.contains(id) {
+            if !self.tabs.drop_beside(id, target, side) {
+                return full();
+            }
+        } else {
+            if !self.tabs.room_beside(target) {
+                return full();
+            }
+            self.open_tab(id, cx)?;
+            self.tabs.drop_beside(id, target, side);
+        }
+        self.after_change(cx);
+        Ok(())
+    }
+
     /// What a pane or tab menu closed with, run on tab `id`: one of the web's `actions`
-    /// (`{action, args}`), or one of its `items` (`{command}`).
+    /// (`{action, args}`), or a row of the tab menu's `extraItems` (`{item}`).
     fn menu_result(
         &mut self,
         id: &str,
+        at: Point<Pixels>,
         result: &Value,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
         let (action, args) = action_of(result);
-        let command = result.get("command").and_then(Value::as_str);
-        if action.is_none() && command.is_none() {
+        // A row of the session's inbound choices (`extraItems`).
+        if let Some(item) = result.get("item").and_then(Value::as_str) {
+            let store = self.sidebar.read(cx).model().store.clone();
+            if let Some(mode) = crate::mods::perch::inbound_choice(&store, id, item) {
+                self.sidebar.read(cx).send(Command::InboundMode {
+                    session_id: id.to_string(),
+                    mode: mode.to_string(),
+                });
+            }
             return Ok(());
         }
+        let Some(action) = action else {
+            return Ok(());
+        };
+        // A session menu's session may have no tab: renaming and closing need none, a split opens
+        // its tab first (the web shows it, then splits); the rest are only offered for a tab.
         if !self.tabs.contains(id) {
-            return Err(format!("Tab {id} is gone."));
+            match action.as_str() {
+                "rename" | "close" => {}
+                "splitNew" | "showBeside" => self.open_tab(id, cx)?,
+                _ => return Err(format!("Tab {id} is gone.")),
+            }
         }
-        self.focus_pane(id, cx);
+        // As the web's menus: an action that works on the focused tab gives it the keyboard first;
+        // the others (rename, close, the pickers) leave the keyboard where it is.
+        let focused = matches!(action.as_str(), "splitNew" | "toggleZoom" | "stopAgent");
+        if focused {
+            self.focus_pane(id, cx);
+        }
         let tab = json!({ "id": id });
-        match (action.as_deref(), command) {
-            (None, Some(command)) => self.run_command(command, Some(&tab), window, cx),
-            (Some("splitNew"), _) => match word(&args, 0).as_deref() {
+        match action.as_str() {
+            "splitNew" => match word(&args, 0).as_deref() {
                 Some("right") => self.split(Side::Right, cx),
                 Some("below") => self.split(Side::Down, cx),
                 _ => Err(r#"splitNew takes "right" or "below"."#.into()),
             },
-            (Some("toggleZoom"), _) => self.run_command("panes.zoom", None, window, cx),
-            (Some("rename"), _) => {
+            "toggleZoom" => self.run_command("panes.zoom", None, window, cx),
+            "rename" => {
                 let name = word(&args, 0).ok_or("rename needs a name.")?;
                 self.run_command(
                     "tab.rename",
@@ -645,11 +872,45 @@ impl Workspace {
                     cx,
                 )
             }
-            (Some("stopAgent"), _) => self.run_command("terminal.kill", None, window, cx),
-            (Some("showFull"), _) => self.run_command("pane.unsplit", Some(&tab), window, cx),
-            (Some("close"), _) => self.run_command("tabs.close", Some(&tab), window, cx),
-            (Some(other), _) => Err(format!("The native window cannot {other} yet.")),
-            (None, None) => Ok(()),
+            "stopAgent" => self.run_command("terminal.kill", None, window, cx),
+            "showFull" => self.run_command("pane.unsplit", Some(&tab), window, cx),
+            "splitSession" => {
+                self.open_session_split(id, at, cx);
+                Ok(())
+            }
+            "showBesideTab" => {
+                let coordinate =
+                    |i: usize| args.get(i).and_then(Value::as_f64).map(|v| px(v as f32));
+                let at = coordinate(0)
+                    .zip(coordinate(1))
+                    .map_or(at, |(x, y)| point(x, y));
+                self.open_tab_menu(id, at, cx);
+                Ok(())
+            }
+            "showBeside" => {
+                let other = word(&args, 0).ok_or("showBeside needs a tab id.")?;
+                // A session menu offers its workspace's sessions, with a tab or not.
+                if !self.tabs.contains(&other) {
+                    self.open_tab(&other, cx)?;
+                }
+                if !self.tabs.join(id, &other) {
+                    return Err("Those tabs cannot be shown together.".into());
+                }
+                self.tabs.show(id);
+                self.after_change(cx);
+                Ok(())
+            }
+            "separateAll" => {
+                self.tabs.untile(id);
+                self.tabs.show(id);
+                self.after_change(cx);
+                Ok(())
+            }
+            "close" if self.tabs.contains(id) => {
+                self.run_command("tabs.close", Some(&tab), window, cx)
+            }
+            "close" => self.run_command("session.request_close", Some(&tab), window, cx),
+            other => Err(format!("The native window cannot {other} yet.")),
         }
     }
 
@@ -984,6 +1245,27 @@ impl Workspace {
         )
     }
 
+    /// The pane for session `event` names, made (its terminal attached) when there is none.
+    fn ensure_pane(&mut self, event: &OpenSession, cx: &mut Context<Self>) {
+        if self.panes.contains_key(&event.session_id) {
+            return;
+        }
+        let view = self.attach(event, cx);
+        self.panes.insert(
+            event.session_id.clone(),
+            Pane {
+                open: event.clone(),
+                view,
+                settle: Settle::default(),
+                retry: None,
+                attempts: 0,
+                closing: None,
+                seen: 0,
+                parked: false,
+            },
+        );
+    }
+
     /// A session was picked in the sidebar, launched, or a tab was chosen: show it.
     fn on_open(&mut self, event: &OpenSession, cx: &mut Context<Self>) {
         let id = event.session_id.clone();
@@ -994,22 +1276,7 @@ impl Workspace {
             .filter(|_| self.sidebar.read(cx).launched() == Some(id.as_str()))
             .filter(|_| !self.tabs.contains(&id))
             .map(|(side, _)| side);
-        if !self.panes.contains_key(&id) {
-            let view = self.attach(event, cx);
-            self.panes.insert(
-                id.clone(),
-                Pane {
-                    open: event.clone(),
-                    view,
-                    settle: Settle::default(),
-                    retry: None,
-                    attempts: 0,
-                    closing: None,
-                    seen: 0,
-                    parked: false,
-                },
-            );
-        }
+        self.ensure_pane(event, cx);
         match side {
             Some(side) if self.tabs.split(&id, side) => {}
             Some(_) => {
@@ -1223,6 +1490,11 @@ impl Workspace {
 
     /// One key press, before the focused terminal sees it. True when it was handled here.
     fn key(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        // Escape ends a tab drag with nothing changed.
+        if keystroke.key == "escape" && self.drag.as_ref().is_some_and(|d| d.started) {
+            self.drag_ended(false, cx);
+            return true;
+        }
         let keymap = self.keymap(cx);
         // A modal screen has the keyboard. Escape dismisses it, here and not in each mod, and so
         // does the Navigator's own key while the Navigator is up; every other key is the mod's.
@@ -1473,6 +1745,30 @@ impl Workspace {
                 }
                 self.tabs.unsplit(&id);
                 self.after_change(cx);
+            }
+            // The SDK's `beginTabDrag`: a press on tab `id`, with where the strip's tabs are.
+            "tab.beginDrag" => {
+                let id = text("id").ok_or("This command needs {id}.")?.to_string();
+                if !self.tabs.contains(&id) {
+                    return Err(format!("No tab {id}."));
+                }
+                let coordinate = |key: &str| {
+                    args.and_then(|a| a.get(key))
+                        .and_then(Value::as_f64)
+                        .map(|v| px(v as f32))
+                };
+                let start = coordinate("x")
+                    .zip(coordinate("y"))
+                    .map(|(x, y)| point(x, y))
+                    .ok_or("This command needs {x, y}.")?;
+                // One drag at a time, as the web's.
+                if self.drag.is_none() {
+                    let spans =
+                        tab_drag::spans_from(&args.map_or(Value::Null, |a| a["entries"].clone()));
+                    let label = text("label").unwrap_or_default().to_string();
+                    self.drag = Some(TabDrag::new(id, label, start, spans));
+                    cx.notify();
+                }
             }
             "tab.menu" => {
                 let id = text("id")
@@ -2049,29 +2345,6 @@ impl Workspace {
         }
     }
 
-    /// The pane menu's entries: their labels and the commands they run.
-    fn menu_items(&self, can_stop: bool) -> Vec<(&'static str, &'static str)> {
-        let mut items = vec![
-            ("Copy", "terminal.copy"),
-            ("Paste", "terminal.paste"),
-            ("Select all", "terminal.selectAll"),
-            ("Find\u{2026}", "terminal.find"),
-            ("Clear", "terminal.clear"),
-            ("Split right", "panes.splitRight"),
-            ("Split down", "panes.splitDown"),
-        ];
-        if self.tabs.zoomed() {
-            items.push(("Restore pane", "panes.zoom"));
-        } else if self.tabs.shown().len() > 1 {
-            items.push(("Zoom pane", "panes.zoom"));
-        }
-        if can_stop {
-            items.push((STOP, "terminal.kill"));
-        }
-        items.push(("Close", "tabs.close"));
-        items
-    }
-
     /// Go to a session's tab, opening one if it has none: a peek of it becomes that tab.
     fn show_session(&mut self, id: &str, cx: &mut Context<Self>) -> Result<(), String> {
         let open = match self.panes.get(id) {
@@ -2354,7 +2627,26 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match node {
-            Node::Pane(id) => self.pane(id, focused == Some(id.as_str()) && split, cx),
+            Node::Pane(id) => {
+                let boxes = self.drop_boxes.clone();
+                let key = id.clone();
+                let measure = canvas(
+                    move |bounds, _, _| {
+                        boxes.borrow_mut().panes.insert(key, bounds);
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full();
+                div()
+                    .relative()
+                    .size_full()
+                    .child(self.pane(id, focused == Some(id.as_str()) && split, cx))
+                    .child(measure)
+                    .into_any_element()
+            }
             Node::Split { dir, kids, sizes } => {
                 let mut row = div().flex().size_full().gap(px(PANE_GAP));
                 row = match dir {
@@ -2866,6 +3158,10 @@ impl gpui::Render for Workspace {
                 window,
                 move |this, window, cx| {
                     send(window.is_window_active(), &this.sidebar, cx);
+                    // As the web's blur: a tab drag ends with nothing changed.
+                    if !window.is_window_active() {
+                        this.drag_ended(false, cx);
+                    }
                 },
             ));
         }
@@ -2905,6 +3201,8 @@ impl gpui::Render for Workspace {
         // switch, a close, a zoom, a split) ends here.
         let shown = self.tabs.shown();
         let room = self.room.get();
+        // Every pane on screen draws its box afresh below.
+        self.drop_boxes.borrow_mut().panes.clear();
         // A blank session's choices follow the computer's launch list as it arrives.
         let choosing: Vec<_> = self
             .panes
@@ -3002,7 +3300,22 @@ impl gpui::Render for Workspace {
                 let bar = match self.screens.inflow("tabs") {
                     Some(view) => {
                         let (_, height) = self.screens.size("tabs", cx);
-                        div().flex_none().h(px(height)).child(view).into_any_element()
+                        let boxes = self.drop_boxes.clone();
+                        let measure = canvas(
+                            move |bounds, _, _| boxes.borrow_mut().strip = Some(bounds),
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full();
+                        div()
+                            .relative()
+                            .flex_none()
+                            .h(px(height))
+                            .child(view)
+                            .child(measure)
+                            .into_any_element()
                     }
                     // The stock `tabs` mod draws the strip; without it its place says why.
                     None => div()
@@ -3082,6 +3395,47 @@ impl gpui::Render for Workspace {
             .filter_map(|open| self.floating_view(open))
             .collect();
         let overlays = self.settings_view(cx).into_iter().chain(self.peek_view(cx));
+        // While a tab is pressed the window follows the pointer wherever it is, before anything
+        // under it: what is under a drag does not react to it.
+        let follow = self.drag.is_some().then(|| {
+            let this = cx.entity().downgrade();
+            canvas(
+                |_, _, _| {},
+                move |_, _, window, _| {
+                    let moved = this.clone();
+                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                        if phase != DispatchPhase::Capture {
+                            return;
+                        }
+                        let _ = moved.update(cx, |this, cx| {
+                            if event.pressed_button == Some(MouseButton::Left) {
+                                this.drag_moved(event.position, cx);
+                            } else {
+                                // The release was not seen: nothing changes.
+                                this.drag_ended(false, cx);
+                            }
+                        });
+                    });
+                    let released = this.clone();
+                    window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                        if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
+                            return;
+                        }
+                        let dragged = released
+                            .update(cx, |this, cx| this.drag_ended(true, cx))
+                            .unwrap_or(false);
+                        // The release after a drag is not a click on what is under it.
+                        if dragged {
+                            cx.stop_propagation();
+                        }
+                    });
+                },
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+        });
         div()
             .relative()
             .flex()
@@ -3098,6 +3452,7 @@ impl gpui::Render for Workspace {
             .child(area.children(overlays))
             // Over the whole window: it opens where the pointer was, in window coordinates.
             .children(floating)
+            .children(follow)
     }
 }
 

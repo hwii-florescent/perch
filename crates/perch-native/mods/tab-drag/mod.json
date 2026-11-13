@@ -1,0 +1,5 @@
+{
+  "name": "Tab drag",
+  "description": "The web app's stock tab drag layer (where a dragged tab would split a pane), unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}
