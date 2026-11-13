@@ -1817,6 +1817,57 @@
           "text": true
         }
       ]
+    },
+    "session-menu": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "tab-menu",
+          "selector": "[data-testid=\"tab-split-menu\"]",
+          "description": "The menu: 280 px wide, on the lighter surface fill with a shadow; its height follows its rows (and is cut at the window's bottom edge)."
+        },
+        {
+          "name": "tab-menu-item",
+          "selector": "[data-testid=\"tab-split-menu\"] > button",
+          "description": "One row: Rename tab, Split right / below with new terminal, a 'Show beside' row, Show this tab full size, Separate all tabs, a sidebar row (Move up, Move down), an inbound choice, Close tab (red); disabled rows are 40% opacity.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-menu-item-label",
+          "selector": "[data-testid=\"tab-split-menu\"] > button > span.block",
+          "description": "The name inside a Show beside row, cut with an ellipsis.",
+          "key": {
+            "closest": "[data-testid=\"tab-split-menu\"] > button",
+            "attr": "data-testid"
+          },
+          "text": true
+        },
+        {
+          "name": "tab-menu-heading",
+          "selector": "[data-testid=\"tab-split-menu\"] > p",
+          "description": "The small line over the Show beside rows.",
+          "text": true
+        },
+        {
+          "name": "tab-menu-empty",
+          "selector": "[data-testid=\"tab-split-menu\"] > div:not(.h-px)",
+          "description": "No other open tab available.",
+          "text": true
+        },
+        {
+          "name": "tab-menu-divider",
+          "selector": "[data-testid=\"tab-split-menu\"] > div.h-px",
+          "description": "A hairline between groups of rows."
+        }
+      ]
     }
   }
 }

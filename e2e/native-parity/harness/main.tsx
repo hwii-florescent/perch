@@ -23,7 +23,7 @@ import { applyTheme } from "../../../packages/web/src/themes";
 import { BrowserIcon, FileIcon } from "../../../packages/web/src/stock-ui/tabs/icons";
 // The app registers its SDK with the package loader before anything renders (App.tsx); a stock source needs it.
 import "../../../packages/web/src/sdk";
-import { useAgentChoices, useHosts, useKeybindings, useNavigation, useNotifications, usePaneLook, usePlanUsage, useStatusLine, useWorkspaceTabs, useZoom } from "@perch/sdk";
+import { SessionMenu, useAgentChoices, useHosts, useKeybindings, useNavigation, useNotifications, usePaneLook, usePlanUsage, useStatusLine, useWorkspaceTabs, useZoom } from "@perch/sdk";
 
 type Json = Record<string, unknown>;
 interface Step { type?: { selector: string; text: string }; key?: { selector?: string; key: string }; click?: string }
@@ -44,6 +44,8 @@ interface Screen {
   storage?: (view: Json) => Record<string, string>;
   /** The props the host gives the screen: the fixture's, plus the callbacks (no-ops: nothing here acts). */
   props?: (fixed: Json) => Json;
+  /** What the screen worked out for itself that only its drawing shows (read from the page once it has settled), added to `sdk`. */
+  after?: () => Json;
   /** Data hooks of the screen, called beside it so the derived shapes can be written to the reference output. */
   Probe?: ComponentType<{ view: Json; props: Json }>;
 }
@@ -52,7 +54,8 @@ const noop = () => {};
 /** The actions a host gives a screen, each a no-op: nothing here acts, so the fixture lists no action. */
 const acts = () => new Proxy({}, { get: () => noop });
 /** The part of what a Probe read that JSON can carry (functions drop out). */
-const record = (value: Json) => ((window as unknown as { __PARITY_SDK__: unknown }).__PARITY_SDK__ = JSON.parse(JSON.stringify({ ...value, ...(state.steps ? { steps: state.steps } : {}) })));
+let extra: Json = {};
+const record = (value: Json) => ((window as unknown as { __PARITY_SDK__: unknown }).__PARITY_SDK__ = JSON.parse(JSON.stringify({ ...value, ...(state.steps ? { steps: state.steps } : {}), ...extra })));
 
 function SidebarProbe({ view }: { view: Json }) {
   record({ navigation: useNavigation({ showTerminals: !!view.showTerminals, sortByAttention: !!view.sortByAttention }), hosts: useHosts() });
@@ -142,6 +145,19 @@ const SCREENS: Record<string, Screen> = {
     mount: "stage",
     props: (fixed) => ({ ...fixed, onClose: noop, actions: acts() }),
     Probe: NewSessionProbe,
+  },
+  "session-menu": {
+    // The menu the SDK draws for a session wherever it is shown (the sidebar opens it on a row): it works out for itself which
+    // rows the session's tab menu offers, so the reference records what it drew.
+    load: async () => ({ default: ((props: Json) => <SessionMenu {...(props as unknown as Parameters<typeof SessionMenu>[0])} />) as unknown as ComponentType<never> }),
+    mount: "stage",
+    props: (fixed) => ({ ...fixed, onClose: noop, extraItems: ((fixed.extraItems ?? []) as Json[]).map((item) => ({ ...item, onSelect: noop })) }),
+    after: () => ({
+      menu: [...(document.querySelector('[data-testid="tab-split-menu"]')?.children ?? [])].map((row) => row.classList.contains("h-px")
+        ? { divider: true }
+        : { testId: row.getAttribute("data-testid"), text: (row.textContent ?? "").trim(), ...(row instanceof HTMLButtonElement && row.disabled ? { disabled: true } : {}) }),
+    }),
+    Probe: PropsProbe,
   },
   "pane-menu": {
     load: () => import("../../../packages/web/src/stock-ui/pane-menu/main"),
@@ -262,6 +278,10 @@ for (const step of state.steps ?? []) {
     button.click();
   }
   await frames();
+}
+if (screen.after) {
+  extra = screen.after();
+  Object.assign((window as unknown as { __PARITY_SDK__: Json }).__PARITY_SDK__, JSON.parse(JSON.stringify(extra)));
 }
 await new Promise<void>((resolve) => setTimeout(resolve, 250));
 await frames();

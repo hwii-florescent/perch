@@ -1,0 +1,76 @@
+{
+  "props": {
+    "id": "s-perch-2",
+    "x": 120,
+    "y": 790,
+    "extraItems": [
+      {
+        "label": "Move up",
+        "testId": "workspace-session-move-up-s-perch-2"
+      },
+      {
+        "label": "Move down",
+        "testId": "workspace-session-move-down-s-perch-2"
+      }
+    ]
+  },
+  "menu": [
+    {
+      "testId": "tab-menu-rename",
+      "text": "Rename tab"
+    },
+    {
+      "testId": "tab-menu-split-right",
+      "text": "Split right with new terminal"
+    },
+    {
+      "testId": "tab-menu-split-below",
+      "text": "Split below with new terminal"
+    },
+    {
+      "divider": true
+    },
+    {
+      "testId": null,
+      "text": "Show an open tab beside this one"
+    },
+    {
+      "testId": "tab-split-with-s-perch-3",
+      "text": "Show beside Review agent mail"
+    },
+    {
+      "testId": "tab-split-with-s-perch-1",
+      "text": "Show beside Port the sidebar to GPUI"
+    },
+    {
+      "divider": true
+    },
+    {
+      "testId": "workspace-session-move-up-s-perch-2",
+      "text": "Move up"
+    },
+    {
+      "testId": "workspace-session-move-down-s-perch-2",
+      "text": "Move down"
+    },
+    {
+      "testId": "session-inbound-accept-s-perch-2",
+      "text": "✓ Accept messages from other sessions"
+    },
+    {
+      "testId": "session-inbound-hold-s-perch-2",
+      "text": "Hold messages for my approval"
+    },
+    {
+      "testId": "session-inbound-refuse-s-perch-2",
+      "text": "Refuse messages from other sessions"
+    },
+    {
+      "divider": true
+    },
+    {
+      "testId": "tab-menu-close",
+      "text": "Close tab"
+    }
+  ]
+}

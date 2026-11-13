@@ -1,0 +1,127 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "session-menu",
+  "note": "Floating screen: it is drawn through a portal into the page body and placed against the window, so the reference is the whole default 1280x800 window on the app's backdrop and every box is in window coordinates. The menu the sidebar opens on a session row (right-click or a long press): @perch/sdk `SessionMenu`, which the app draws as the tab menu (the `tab-menu` stock screen) for any session, shown or not, from the store. The sidebar passes the id, the click position and its own rows after Perch's (Move up / Move down, only while the host lets the person reorder, and only the ones that have a neighbour); everything else is worked out from the store as the strip would for that session's workspace (the tabs that can be shown beside it, whether it is in a split, whether a new terminal can be split in), and, for an agent session on this computer whose core has `inbound.v1`, the three inbound-message choices (the current one ticked). Props are `{id, x, y, extraItems}`; `onSelect` callbacks are no-ops; each output's `sdk.menu` lists the rows the menu drew, in order (dividers included), because the props of the tab menu underneath are not an input here. The Stop agent row needs a live agent terminal with an input lease, which the harness does not have, so no state shows it (the `tab-menu` fixture does, from props). Layout and placement are the tab menu's (280 px wide, moved in to keep 288 px on the right, kept above the bottom).",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1280,
+    "height": 800
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {
+    "serverInfo": {
+      "type": "server.info",
+      "hostname": "studio",
+      "isSsh": false,
+      "platform": "macOS",
+      "capabilities": [
+        "workspace.snapshot",
+        "inbound.v1"
+      ]
+    }
+  },
+  "props": {
+    "id": "s-perch-2",
+    "x": 120,
+    "y": 300,
+    "extraItems": [
+      {
+        "label": "Move up",
+        "testId": "workspace-session-move-up-s-perch-2"
+      },
+      {
+        "label": "Move down",
+        "testId": "workspace-session-move-down-s-perch-2"
+      }
+    ]
+  },
+  "states": [
+    {
+      "id": "agent-row",
+      "title": "A middle agent session of the shown workspace: Rename, both splits, the other tabs of its workspace, its rows (Move up and down), the inbound choices, Close tab"
+    },
+    {
+      "id": "first-row",
+      "title": "The first session of its group: only Move down (no neighbour above)",
+      "props": {
+        "id": "s-perch-3",
+        "extraItems": [
+          {
+            "label": "Move down",
+            "testId": "workspace-session-move-down-s-perch-3"
+          }
+        ]
+      }
+    },
+    {
+      "id": "other-workspace",
+      "title": "A session of another workspace that is not on screen: its own strip has no other tab, so 'No other open tab available'",
+      "props": {
+        "id": "s-api-1",
+        "extraItems": []
+      }
+    },
+    {
+      "id": "remote-session",
+      "title": "A session on a remote SSH host: no inbound choices (this computer only); its sibling can be shown beside it",
+      "props": {
+        "id": "s-infra-1",
+        "extraItems": [
+          {
+            "label": "Move down",
+            "testId": "workspace-session-move-down-s-infra-1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "in-split",
+      "title": "A session already in a split with another: Show this tab full size and Separate all tabs",
+      "patch": {
+        "splitSets": {
+          "sets": [
+            {
+              "ids": [
+                "s-perch-1",
+                "s-perch-2"
+              ],
+              "sizes": [
+                0.5,
+                0.5
+              ]
+            }
+          ],
+          "zoomedId": null
+        }
+      }
+    },
+    {
+      "id": "inbound-hold",
+      "title": "The session holds messages for approval: the second inbound choice is ticked",
+      "patch": {
+        "sessions": {
+          "s-perch-2": {
+            "inboundMode": "hold"
+          }
+        }
+      }
+    },
+    {
+      "id": "no-moves",
+      "title": "The sidebar offers no reordering (a host that cannot): no rows of its own",
+      "props": {
+        "extraItems": []
+      }
+    },
+    {
+      "id": "near-bottom",
+      "title": "Opened low in the window: kept above the bottom edge",
+      "props": {
+        "y": 790
+      }
+    }
+  ]
+}
