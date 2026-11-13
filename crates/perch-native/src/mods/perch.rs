@@ -307,8 +307,10 @@ impl Perch {
         }
     }
 
-    /// Screen `key` is closed: its props go.
+    /// Screen `key` is closed: its props go, and what it read (a view made for the key again
+    /// reads afresh).
     pub fn clear_props(&self, key: &str) {
+        self.0.reads.borrow_mut().remove(key);
         if self.0.data.borrow_mut().props.remove(key).is_some() {
             self.bump(&format!("props:{key}"));
         }
@@ -1612,6 +1614,20 @@ mod tests {
         ] {
             assert!(notice_from(&bad).is_err(), "{bad} is refused");
         }
+    }
+
+    #[test]
+    fn a_screen_that_goes_forgets_what_it_read() {
+        let perch = Perch::new();
+        for key in ["pane-header#a", "pane-header#b"] {
+            perch.set_props(key, json!({ "id": key }));
+            perch.read(key, &format!("props:{key}"));
+            perch.read(key, STORE);
+        }
+        perch.clear_props("pane-header#a");
+        let reads = perch.0.reads.borrow();
+        assert!(!reads.contains_key("pane-header#a"), "the copy that went");
+        assert_eq!(reads["pane-header#b"].len(), 2, "the one still on screen");
     }
 
     #[test]
