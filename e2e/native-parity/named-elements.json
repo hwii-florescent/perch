@@ -1907,6 +1907,99 @@
           "description": "The copy of the dragged tab, at the pointer less the grab offset, the tab's own size, with a drop shadow."
         }
       ]
+    },
+    "start": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "start-panel",
+          "selector": "[data-testid=\"no-session-panel\"], [data-testid=\"cli-start-panel\"]",
+          "description": "The page: fills the box on the panel fill, its content centred and scrolling when too tall (16 px side padding, 32 px top)."
+        },
+        {
+          "name": "start-column",
+          "selector": "[data-testid$=\"-panel\"] > div",
+          "description": "The column holding everything, at most 24 rem wide (26 rem on the connecting page), centred, 16 px between its rows."
+        },
+        {
+          "name": "start-logo",
+          "selector": "[data-testid=\"no-session-panel\"] img",
+          "description": "The perch mark on the home page: 80x80, soft corners."
+        },
+        {
+          "name": "start-name",
+          "selector": "[data-testid$=\"-panel\"] h1, [data-testid=\"no-session-panel\"] h1, [data-testid=\"no-session-panel\"] h2",
+          "description": "The page's name: 'perch' on the home page (2.4rem, bold), the workspace's name (1.6rem, bold, cut with an ellipsis) or the connecting title (1rem, semibold).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-hint",
+          "selector": "[data-testid$=\"-panel\"] p",
+          "description": "A muted line: the path, 'What do you want to open?', the home hint, or the connecting line; 0.85rem.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-target",
+          "selector": "[data-testid=\"workspace-start-target\"], [data-testid=\"cli-start-target\"]",
+          "description": "The 'Where to open' picker (a select field on the darker fill): the chosen place and a chevron.",
+          "text": true
+        },
+        {
+          "name": "start-action",
+          "selector": "[data-testid=\"home-add-project\"], [data-testid=\"no-session-create\"], [data-testid^=\"workspace-start-\"]:not([data-testid=\"workspace-start-target\"]), [data-testid^=\"cli-start-agent-\"]",
+          "description": "A start button: Add project, New session, or one agent; soft, large, 40% opacity when disabled.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-status",
+          "selector": "[role=\"status\"], [role=\"alert\"]",
+          "description": "The agent list's note in the CLI page: Checking providers, no providers, or the error (red), with a Retry link.",
+          "text": true
+        },
+        {
+          "name": "start-status-action",
+          "selector": "[role=\"status\"] > button, [role=\"alert\"] > button",
+          "description": "Retry: underlined, in the accent colour.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-link",
+          "selector": "[data-testid$=\"-panel\"] button.text-subtext-0",
+          "description": "A small muted link under the buttons: 'Open one automatically: Settings → Empty workspace opens' (and Manage agents in the CLI page); underlined on hover.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-shortcut-row",
+          "selector": "[data-testid=\"no-session-panel\"] dl > div",
+          "description": "One line of the home page's keys: the action at the left, its keys at the right."
+        },
+        {
+          "name": "start-shortcut-label",
+          "selector": "[data-testid=\"no-session-panel\"] dl dt",
+          "description": "The action's name (0.8rem, muted).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-shortcut-key",
+          "selector": "[data-testid=\"no-session-panel\"] dl kbd",
+          "description": "One key in a chip on the darker fill, at least 1.5rem wide.",
+          "text": true,
+          "textSized": true
+        }
+      ]
     }
   }
 }

@@ -1,0 +1,88 @@
+{
+  "props": {
+    "kind": "cli",
+    "hostId": "local",
+    "projectCwds": [],
+    "targets": [
+      {
+        "key": "here",
+        "label": "perch (this session)",
+        "name": "perch",
+        "path": "/Users/dev/code/perch"
+      },
+      {
+        "key": "/Users/dev/code/api-server",
+        "label": "api-server",
+        "name": "api-server",
+        "path": "/Users/dev/code/api-server"
+      },
+      {
+        "key": "/Users/dev/notes",
+        "label": "notes",
+        "name": "notes",
+        "path": "/Users/dev/notes"
+      },
+      {
+        "key": "/Users/dev/code/scratch-site",
+        "label": "scratch-site",
+        "name": "scratch-site",
+        "path": "/Users/dev/code/scratch-site"
+      },
+      {
+        "key": "/Users/dev/.perch/scratch",
+        "label": "Quickchat",
+        "name": "Quickchat",
+        "path": "/Users/dev/.perch/scratch"
+      },
+      {
+        "key": "~",
+        "label": "No project (Quickchat)",
+        "name": "Quickchat",
+        "path": "~"
+      }
+    ],
+    "targetKey": "here",
+    "choices": [
+      {
+        "id": "claude",
+        "label": "Claude"
+      },
+      {
+        "id": "codex",
+        "label": "Codex"
+      },
+      {
+        "id": "pi",
+        "label": "Pi"
+      }
+    ],
+    "discovery": {
+      "state": "error",
+      "error": "The host did not answer the agent list.",
+      "hostLabel": "this host"
+    },
+    "disabled": true,
+    "canManageAgents": true
+  },
+  "agentChoices": {
+    "connected": true,
+    "discovery": true,
+    "choices": [
+      {
+        "id": "claude",
+        "label": "Claude",
+        "isDefault": true
+      },
+      {
+        "id": "codex",
+        "label": "Codex"
+      },
+      {
+        "id": "pi",
+        "label": "Pi"
+      }
+    ],
+    "lastChoice": "claude",
+    "state": "ready"
+  }
+}

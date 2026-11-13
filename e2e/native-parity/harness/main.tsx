@@ -20,6 +20,7 @@ import { useFileTabs } from "../../../packages/web/src/fileTabs";
 import { useSplitSets } from "../../../packages/web/src/splitSets";
 import { useBrowserPages } from "../../../packages/web/src/browserPages";
 import { zoneBox } from "../../../packages/web/src/tabDrag";
+import perchLogo from "../../../packages/web/src/assets/perch-logo-texture-medium.webp";
 import { applyTheme } from "../../../packages/web/src/themes";
 import { BrowserIcon, FileIcon } from "../../../packages/web/src/stock-ui/tabs/icons";
 // The app registers its SDK with the package loader before anything renders (App.tsx); a stock source needs it.
@@ -196,6 +197,13 @@ const SCREENS: Record<string, Screen> = {
       return { default: ((props: { drag: DragInput }) => <TabDragDemo Layer={Layer as unknown as ComponentType<Json>} Tabs={Tabs as unknown as ComponentType} drag={props.drag} />) as unknown as ComponentType<never> };
     },
     mount: "stage",
+  },
+  start: {
+    // The main area with nothing open. The logo is the app's own asset (the home page's 80 px mark), not a fixture value.
+    load: () => import("../../../packages/web/src/stock-ui/start/main"),
+    mount: "card",
+    props: (fixed) => ({ ...fixed, logo: perchLogo, actions: acts() }),
+    Probe: NewSessionProbe,
   },
   "pane-menu": {
     load: () => import("../../../packages/web/src/stock-ui/pane-menu/main"),
