@@ -1,0 +1,12 @@
+{
+  "props": {
+    "panelId": "s-perch-2",
+    "title": "Fix terminal slash input",
+    "x": 620,
+    "y": 220,
+    "sessionId": "s-perch-2",
+    "canClose": true,
+    "maximized": false,
+    "canStopAgent": true
+  }
+}

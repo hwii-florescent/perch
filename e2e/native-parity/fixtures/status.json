@@ -1,0 +1,302 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "status",
+  "note": "The status bar (stock-ui/status): the bottom row of the default 1280x800 window, the window's full width and 24px high. Data: the sidebar fixture's store (dataFrom); a state's patch changes it. Derived values are @perch/sdk `useStatusLine()`, `usePlanUsage()` and `useZoom()`, recorded in each output's sdk. The screen takes no props.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1280,
+    "height": 24
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "states": [
+    {
+      "id": "connected",
+      "title": "Connected to the local core: host, folder and branch of the focused session; nothing else to say",
+      "patch": {
+        "status": {
+          "cwd": "/Users/dev/code/perch",
+          "branch": "main"
+        }
+      }
+    },
+    {
+      "id": "context-and-cost",
+      "title": "The focused agent reports its context tokens and cost, shown in the middle",
+      "patch": {
+        "status": {
+          "cwd": "/Users/dev/code/perch",
+          "branch": "main",
+          "contextTokens": 48210,
+          "costUsd": 0.4237
+        }
+      }
+    },
+    {
+      "id": "usage",
+      "title": "Plan usage on the right: one window of each account, tinted yellow from 70% and red from 90%",
+      "patch": {
+        "status": {
+          "cwd": "/Users/dev/code/perch",
+          "branch": "main",
+          "contextTokens": 48210,
+          "costUsd": 0.4237
+        },
+        "usage": [
+          {
+            "provider": "claude",
+            "label": "dev@example.com",
+            "plan": "Max 5x",
+            "windows": [
+              {
+                "label": "5h",
+                "usedPercent": 42,
+                "windowMinutes": 300,
+                "resetsAt": 1767312000
+              },
+              {
+                "label": "7d",
+                "usedPercent": 71,
+                "windowMinutes": 10080,
+                "resetsAt": 1767398400
+              }
+            ]
+          },
+          {
+            "provider": "codex",
+            "label": "dev@example.com",
+            "plan": "Plus",
+            "windows": [
+              {
+                "label": "5h",
+                "usedPercent": 93,
+                "windowMinutes": 300,
+                "resetsAt": 1767312000
+              },
+              {
+                "label": "7d",
+                "usedPercent": 18,
+                "windowMinutes": 10080,
+                "resetsAt": 1767398400
+              }
+            ],
+            "resetCredits": 1,
+            "accountId": "codex:0123456789ab"
+          }
+        ],
+        "usageUpdatedAt": 1767312000000,
+        "spend": {
+          "periods": [
+            {
+              "days": 1,
+              "costUsd": 3.2,
+              "savedUsd": 1.1,
+              "tokens": 820000,
+              "models": [],
+              "providers": [],
+              "projects": []
+            },
+            {
+              "days": 7,
+              "costUsd": 18.4,
+              "savedUsd": 7.7,
+              "tokens": 5200000,
+              "models": [],
+              "providers": [],
+              "projects": []
+            },
+            {
+              "days": 30,
+              "costUsd": 61.9,
+              "savedUsd": 22.3,
+              "tokens": 19800000,
+              "models": [
+                {
+                  "name": "claude-sonnet-5-5",
+                  "provider": "claude",
+                  "costUsd": 40.1,
+                  "tokens": 12000000
+                }
+              ],
+              "providers": [],
+              "projects": []
+            }
+          ],
+          "pricesUpdated": "2026-01-01"
+        }
+      }
+    },
+    {
+      "id": "remote-host",
+      "title": "The focused session lives on a connected SSH host: its name replaces Local, the folder is the host's",
+      "patch": {
+        "sessionId": "s-infra-1",
+        "activeHostId": "buildbox",
+        "activeWorkspaceId": "w-infra-main",
+        "status": {
+          "cwd": "/srv/infra",
+          "branch": "main"
+        },
+        "hostStates": {
+          "buildbox": {
+            "type": "host.info",
+            "hostId": "buildbox",
+            "name": "buildbox",
+            "state": "connected",
+            "hostname": "buildbox",
+            "platform": "linux",
+            "isSsh": true
+          }
+        }
+      }
+    },
+    {
+      "id": "offline-host",
+      "title": "The shown SSH host is unreachable: yellow dot, Reconnecting and an exclamation mark",
+      "patch": {
+        "sessionId": "s-infra-1",
+        "activeHostId": "buildbox",
+        "activeWorkspaceId": "w-infra-main",
+        "status": {
+          "cwd": "/srv/infra",
+          "branch": "main"
+        },
+        "hostStates": {
+          "buildbox": {
+            "type": "host.info",
+            "hostId": "buildbox",
+            "name": "buildbox",
+            "state": "error",
+            "error": "ssh: connect to host buildbox.lan port 22: Operation timed out"
+          }
+        }
+      }
+    },
+    {
+      "id": "disconnected",
+      "title": "The window lost its core: yellow dot, Reconnecting; the last folder stays",
+      "patch": {
+        "connected": false,
+        "status": {
+          "cwd": "/Users/dev/code/perch",
+          "branch": "main"
+        }
+      }
+    },
+    {
+      "id": "long-path",
+      "title": "A deep folder and a long branch are cut with an ellipsis; the branch keeps at most 45% of the left block",
+      "patch": {
+        "status": {
+          "cwd": "/Users/dev/code/perch-wt/ghostty-spike/crates/perch-native/src/terminal/render/glyph-cache",
+          "branch": "spike/ghostty-terminal-renderer-with-a-very-long-branch-name"
+        }
+      }
+    },
+    {
+      "id": "narrow-window",
+      "title": "A window at the 800px minimum: the middle block (zoom, context, cost) is hidden below 900px",
+      "size": {
+        "width": 800,
+        "height": 24
+      },
+      "window": {
+        "width": 800,
+        "height": 600
+      },
+      "patch": {
+        "status": {
+          "cwd": "/Users/dev/code/perch",
+          "branch": "main",
+          "contextTokens": 48210,
+          "costUsd": 0.4237
+        },
+        "usage": [
+          {
+            "provider": "claude",
+            "label": "dev@example.com",
+            "plan": "Max 5x",
+            "windows": [
+              {
+                "label": "5h",
+                "usedPercent": 42,
+                "windowMinutes": 300,
+                "resetsAt": 1767312000
+              },
+              {
+                "label": "7d",
+                "usedPercent": 71,
+                "windowMinutes": 10080,
+                "resetsAt": 1767398400
+              }
+            ]
+          },
+          {
+            "provider": "codex",
+            "label": "dev@example.com",
+            "plan": "Plus",
+            "windows": [
+              {
+                "label": "5h",
+                "usedPercent": 93,
+                "windowMinutes": 300,
+                "resetsAt": 1767312000
+              },
+              {
+                "label": "7d",
+                "usedPercent": 18,
+                "windowMinutes": 10080,
+                "resetsAt": 1767398400
+              }
+            ],
+            "resetCredits": 1,
+            "accountId": "codex:0123456789ab"
+          }
+        ],
+        "usageUpdatedAt": 1767312000000,
+        "spend": {
+          "periods": [
+            {
+              "days": 1,
+              "costUsd": 3.2,
+              "savedUsd": 1.1,
+              "tokens": 820000,
+              "models": [],
+              "providers": [],
+              "projects": []
+            },
+            {
+              "days": 7,
+              "costUsd": 18.4,
+              "savedUsd": 7.7,
+              "tokens": 5200000,
+              "models": [],
+              "providers": [],
+              "projects": []
+            },
+            {
+              "days": 30,
+              "costUsd": 61.9,
+              "savedUsd": 22.3,
+              "tokens": 19800000,
+              "models": [
+                {
+                  "name": "claude-sonnet-5-5",
+                  "provider": "claude",
+                  "costUsd": 40.1,
+                  "tokens": 12000000
+                }
+              ],
+              "providers": [],
+              "projects": []
+            }
+          ],
+          "pricesUpdated": "2026-01-01"
+        }
+      }
+    }
+  ]
+}

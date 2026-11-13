@@ -1,0 +1,18 @@
+{
+  "statusLine": {
+    "connected": true,
+    "hostId": "local",
+    "sessionId": "s-perch-1",
+    "cwd": "/Users/dev/code/perch",
+    "branch": "main",
+    "contextTokens": 48210,
+    "costUsd": 0.4237
+  },
+  "planUsage": {
+    "usage": [],
+    "updatedAt": 0,
+    "spend": null,
+    "redeemResult": null
+  },
+  "zoom": 1
+}

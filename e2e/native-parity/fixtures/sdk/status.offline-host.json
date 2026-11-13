@@ -1,0 +1,18 @@
+{
+  "statusLine": {
+    "connected": true,
+    "hostId": "buildbox",
+    "hostName": "buildbox",
+    "hostState": "error",
+    "sessionId": "s-infra-1",
+    "cwd": "/srv/infra",
+    "branch": "main"
+  },
+  "planUsage": {
+    "usage": [],
+    "updatedAt": 0,
+    "spend": null,
+    "redeemResult": null
+  },
+  "zoom": 1
+}

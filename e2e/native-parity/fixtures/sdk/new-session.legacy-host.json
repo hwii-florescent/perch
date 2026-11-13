@@ -1,0 +1,39 @@
+{
+  "props": {
+    "hostId": "buildbox",
+    "projectCwds": [],
+    "fixedCwd": "/srv/infra",
+    "anchorRect": {
+      "x": 1041,
+      "y": 14,
+      "width": 28,
+      "height": 32
+    },
+    "extras": [
+      {
+        "id": "browser",
+        "label": "New browser"
+      },
+      {
+        "id": "file",
+        "label": "New file"
+      }
+    ]
+  },
+  "agentChoices": {
+    "connected": true,
+    "discovery": false,
+    "choices": [
+      {
+        "id": "claude",
+        "label": "Claude"
+      },
+      {
+        "id": "codex",
+        "label": "Codex"
+      }
+    ],
+    "lastChoice": "claude",
+    "state": "ready"
+  }
+}

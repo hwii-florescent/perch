@@ -1,0 +1,82 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "dialog",
+  "note": "Floating screen: it is drawn through a portal into the page body and placed against the window, so the reference is the whole default 1280x800 window on the app's backdrop and every box is in window coordinates. The modal shell of forms (stock-ui/dialog: a dimmed backdrop and one panel with a title, then whatever the caller puts in). The reference fills it the way a real caller does: the file menu's New file and New folder prompts (stock-ui/file-menu opened at its name prompt; Dialog is drawn by the app's own `Dialog`), so the body is that prompt's field, hints, error line and buttons. `rejects` is what the stubbed create answers, so the prompt's own error line can be shown. Props are FileMenuScreenProps (target and held are null and left out); its callbacks are no-ops.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1280,
+    "height": 800
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "props": {
+    "workspaceId": "w-perch-main",
+    "workspacePath": "/Users/dev/code/perch",
+    "x": 0,
+    "y": 0,
+    "initialStage": "newFile",
+    "nativeAvailable": true,
+    "canAsk": true
+  },
+  "states": [
+    {
+      "id": "new-file",
+      "title": "The New file prompt as it opens: the workspace folder in the field with the caret at its end; Create is disabled until there is a name"
+    },
+    {
+      "id": "new-file-typed",
+      "title": "A full path typed: the Create button is enabled",
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"file-name-input\"]",
+            "text": "/Users/dev/code/perch/notes/todo.md"
+          }
+        }
+      ]
+    },
+    {
+      "id": "new-file-error",
+      "title": "The path submitted and the core refused it: the error shows in red under the field",
+      "props": {
+        "rejects": "notes/todo.md already exists"
+      },
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"file-name-input\"]",
+            "text": "/Users/dev/code/perch/notes/todo.md"
+          }
+        },
+        {
+          "key": {
+            "selector": "[data-testid=\"file-name-input\"]",
+            "key": "Enter"
+          }
+        }
+      ]
+    },
+    {
+      "id": "new-file-invalid",
+      "title": "A relative path typed: the prompt's own hint says to start with /, and Create is disabled",
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"file-name-input\"]",
+            "text": "notes/todo.md"
+          }
+        }
+      ]
+    },
+    {
+      "id": "new-folder",
+      "title": "The New folder prompt: an empty Name field",
+      "props": {
+        "initialStage": "newFolder"
+      }
+    }
+  ]
+}

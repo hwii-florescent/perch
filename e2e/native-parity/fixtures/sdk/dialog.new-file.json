@@ -1,0 +1,11 @@
+{
+  "props": {
+    "workspaceId": "w-perch-main",
+    "workspacePath": "/Users/dev/code/perch",
+    "x": 0,
+    "y": 0,
+    "initialStage": "newFile",
+    "nativeAvailable": true,
+    "canAsk": true
+  }
+}

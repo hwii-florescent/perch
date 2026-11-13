@@ -8,7 +8,8 @@ import * as path from "node:path";
 
 const here = __dirname;
 const OUT = path.resolve(here, "../artifacts-native-parity/web");
-const SCREENS = ["sidebar"];
+/** Every screen with a reference; `PARITY_SCREENS=tabs,status` renders only those while one is being worked on. */
+const SCREENS = (process.env.PARITY_SCREENS ?? "sidebar,tabs,status,navigator,pane-header,pane-menu,confirm,dialog,toast,new-session").split(",");
 const THEMES = ["light", "dark"] as const;
 /** The semantic colour tokens (`--<name>` on `<html>`): `themes.ts` `TOKEN_CSS_VARS`, plus the two derived ones. */
 const TOKENS = ["accent", "panel-bg", "surface-0", "surface-1", "surface-dim", "overlay-0", "overlay-1", "text", "subtext-0", "mauve", "green", "yellow", "red", "blue", "teal", "peach", "backdrop", "card-bg"];
@@ -17,13 +18,18 @@ interface KeySpec { self?: boolean; closest?: string; find?: string; attr: strin
 interface ElementDef {
   name: string; selector: string; description: string; textSized?: boolean; text?: boolean; textRange?: boolean; hoverOnly?: boolean; key?: KeySpec;
 }
-interface NamedScreen { root: string; elements: ElementDef[] }
+/** `root`: the box boxes are measured against. `scope`: where elements are looked for when that is not inside the root
+ * (a floating screen draws through a portal into `<body>`). `overflow`: boxes that must not scroll in the reference.
+ * `minElements`: how many named elements a state must show at least. */
+interface NamedScreen { root: string; scope?: string; overflow?: string[]; minElements?: number; elements: ElementDef[] }
 const named = JSON.parse(fs.readFileSync(path.join(here, "named-elements.json"), "utf8")) as { screens: Record<string, NamedScreen> };
 
 /** Runs in the page: boxes, text, colours with their tokens, and fonts of every named element instance. */
-function measure({ rootSelector, defs, tokens }: { rootSelector: string; defs: ElementDef[]; tokens: string[] }) {
+function measure({ rootSelector, scopeSelector, overflowSelectors, defs, tokens }: { rootSelector: string; scopeSelector: string; overflowSelectors: string[]; defs: ElementDef[]; tokens: string[] }) {
   const root = document.querySelector(rootSelector);
   if (!root) throw new Error(`no ${rootSelector}`);
+  const scope = document.querySelector(scopeSelector);
+  if (!scope) throw new Error(`no ${scopeSelector}`);
   const rootBox = root.getBoundingClientRect();
   const html = document.documentElement;
   const round = (n: number) => Math.round(n * 100) / 100;
@@ -107,7 +113,7 @@ function measure({ rootSelector, defs, tokens }: { rootSelector: string; defs: E
   for (const def of defs) {
     let index = 0;
     for (const el of document.querySelectorAll(def.selector)) {
-      if (!root.contains(el)) continue;
+      if (!scope.contains(el)) continue;
       if (hidden(el)) { hiddenCounts[def.name] = (hiddenCounts[def.name] ?? 0) + 1; continue; }
       found.push({ el, def, index: index++, key: keyOf(el, def.key) });
     }
@@ -147,7 +153,8 @@ function measure({ rootSelector, defs, tokens }: { rootSelector: string; defs: E
       text = collapse(nodes.map((n) => n.data).join(" "));
     } else {
       box = el.getBoundingClientRect();
-      if (def.text || def.textSized) text = collapse(el.textContent ?? "");
+      // A field's words are its value, not its (empty) content.
+      if (def.text || def.textSized) text = collapse(el instanceof HTMLInputElement ? el.value : el.textContent ?? "");
     }
     const cs = getComputedStyle(el);
     const colors: Record<string, { value: string; token: string | null }> = {};
@@ -162,6 +169,7 @@ function measure({ rootSelector, defs, tokens }: { rootSelector: string; defs: E
       textSized: !!def.textSized,
       ...(opacityOf(el) < 1 ? { opacity: opacityOf(el) } : {}),
       ...(text !== undefined ? { text } : {}),
+      ...(el instanceof HTMLInputElement && el.placeholder ? { placeholder: el.placeholder } : {}),
       colors,
       ...(withText ? { font: { family: cs.fontFamily, size: parseFloat(cs.fontSize), weight: parseInt(cs.fontWeight, 10), lineHeight: round(lineHeight.value), lineHeightNormal: lineHeight.normal } } : {}),
     };
@@ -172,7 +180,7 @@ function measure({ rootSelector, defs, tokens }: { rootSelector: string; defs: E
     tokens: realTokens,
     elements,
     hiddenCounts,
-    overflow: scroll('[data-testid="project-list"]') || scroll(`${rootSelector} > div:first-child`),
+    overflow: overflowSelectors.some(scroll),
     sdk: (window as unknown as { __PARITY_SDK__?: unknown }).__PARITY_SDK__ ?? null,
   };
 }
@@ -184,21 +192,24 @@ async function open(page: Page, screen: string, state: string, theme: string) {
   await page.goto(`/?screen=${screen}&state=${state}&theme=${theme}`);
   await page.waitForFunction(() => (window as unknown as { __PARITY_READY__?: boolean }).__PARITY_READY__ === true);
   // Nothing may move while it is measured or photographed.
-  await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; caret-color: transparent !important; }" });
+  // The Mac draws scrollbars as overlays, only while scrolling: a resting screen has none.
+  await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; caret-color: transparent !important; } *::-webkit-scrollbar { display: none; }" });
   return problems;
 }
 
 for (const screen of SCREENS) {
-  const fixture = JSON.parse(fs.readFileSync(path.join(here, "fixtures", `${screen}.json`), "utf8")) as { size: { width: number; height: number }; window: { width: number; height: number }; states: { id: string }[] };
+  const fixture = JSON.parse(fs.readFileSync(path.join(here, "fixtures", `${screen}.json`), "utf8")) as { size: { width: number; height: number }; window: { width: number; height: number }; states: { id: string; size?: { width: number; height: number }; window?: { width: number; height: number } }[] };
   const def = named.screens[screen];
   if (!def) throw new Error(`named-elements.json has no entry for ${screen}`);
   for (const state of fixture.states) {
     for (const theme of THEMES) {
       test(`${screen} ${state.id} ${theme}`, async ({ page, browser }) => {
         fs.mkdirSync(OUT, { recursive: true });
-        await page.setViewportSize(fixture.window);
+        const size = state.size ?? fixture.size;
+        const viewport = state.window ?? fixture.window;
+        await page.setViewportSize(viewport);
         const problems = await open(page, screen, state.id, theme);
-        const result = await page.evaluate(measure, { rootSelector: def.root, defs: def.elements, tokens: TOKENS });
+        const result = await page.evaluate(measure, { rootSelector: def.root, scopeSelector: def.scope ?? def.root, overflowSelectors: def.overflow ?? [], defs: def.elements, tokens: TOKENS });
         const base = path.join(OUT, `${screen}.${state.id}.${theme}`);
         await page.locator("[data-parity-card]").screenshot({ path: `${base}.png`, animations: "disabled", caret: "hide" });
         const doc = {
@@ -207,8 +218,8 @@ for (const screen of SCREENS) {
           state: state.id,
           theme,
           renderer: `webkit ${browser.version()}`,
-          size: { width: fixture.size.width, height: fixture.size.height, scale: 2 },
-          window: fixture.window,
+          size: { width: size.width, height: size.height, scale: 2 },
+          window: viewport,
           tokens: result.tokens,
           elements: result.elements,
           hiddenCounts: result.hiddenCounts,
@@ -217,9 +228,9 @@ for (const screen of SCREENS) {
         fs.writeFileSync(`${base}.json`, `${JSON.stringify(doc, null, 2)}\n`);
 
         expect(problems, "the page logged errors").toEqual([]);
-        expect(result.rootBox).toEqual(fixture.size);
-        expect(result.overflow, "the fixture is taller than the sidebar: it would scroll, which the reference does not show").toBe(false);
-        expect(result.elements.length).toBeGreaterThan(10);
+        expect(result.rootBox).toEqual(size);
+        expect(result.overflow, "the fixture is taller than the screen: it would scroll, which the reference does not show").toBe(false);
+        expect(result.elements.length).toBeGreaterThanOrEqual(def.minElements ?? 1);
         for (const element of result.elements) {
           for (const v of Object.values(element.box)) expect(Number.isFinite(v), `${element.name} box`).toBe(true);
         }

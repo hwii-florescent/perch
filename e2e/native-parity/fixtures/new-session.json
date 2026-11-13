@@ -1,0 +1,230 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "new-session",
+  "note": "Floating screen: it is drawn through a portal into the page body and placed against the window, so the reference is the whole default 1280x800 window on the app's backdrop and every box is in window coordinates. The agent launcher at a button (stock-ui/new-session). The scoped form is the tab strip's \"+\": its anchor is that button as the `tabs` reference places it in the default window (a 28x32 box at 1041,14, below which the popover opens 4px lower), with a browser and a file after the agents. The unscoped form is the home screen's, with project folders. Props are NewSessionScreenProps (the icons of the extras are the tab strip's own; callbacks are no-ops); the agents come from @perch/sdk `useAgentChoices(hostId)`, recorded in sdk.agentChoices, over the store's agent manifests (the harness never asks a core for them).",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1280,
+    "height": 800
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {
+    "serverInfo": {
+      "type": "server.info",
+      "hostname": "studio",
+      "isSsh": false,
+      "platform": "macOS",
+      "capabilities": [
+        "workspace.snapshot",
+        "agent.manifest.list"
+      ]
+    },
+    "agentManifestsByHost": {
+      "local": {
+        "state": "ready",
+        "manifests": [
+          {
+            "id": "claude",
+            "displayName": "Claude",
+            "supportedModes": [
+              "cli"
+            ],
+            "resumability": "none",
+            "capabilities": [
+              "interactiveTerminal"
+            ],
+            "statusDetection": "hooks",
+            "available": true,
+            "enabled": true,
+            "isDefault": true
+          },
+          {
+            "id": "codex",
+            "displayName": "Codex",
+            "supportedModes": [
+              "cli"
+            ],
+            "resumability": "none",
+            "capabilities": [
+              "interactiveTerminal"
+            ],
+            "statusDetection": "hooks",
+            "available": true,
+            "enabled": true
+          },
+          {
+            "id": "pi",
+            "displayName": "Pi",
+            "supportedModes": [
+              "cli"
+            ],
+            "resumability": "none",
+            "capabilities": [
+              "interactiveTerminal"
+            ],
+            "statusDetection": "hooks",
+            "available": true,
+            "enabled": true
+          }
+        ]
+      }
+    }
+  },
+  "props": {
+    "hostId": "local",
+    "projectCwds": [],
+    "fixedCwd": "/Users/dev/code/perch",
+    "anchorRect": {
+      "x": 1041,
+      "y": 14,
+      "width": 28,
+      "height": 32
+    },
+    "extras": [
+      {
+        "id": "browser",
+        "label": "New browser"
+      },
+      {
+        "id": "file",
+        "label": "New file"
+      }
+    ]
+  },
+  "states": [
+    {
+      "id": "agents",
+      "title": "A connected host that lists its agents: Claude, Codex and Pi with their keys 1-3, New browser and New file, then Manage agents; the first row highlighted"
+    },
+    {
+      "id": "filtered",
+      "title": "\"co\" typed: the list is cut to the rows that match and the numbers are gone",
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"new-tab-filter\"]",
+            "text": "co"
+          }
+        }
+      ]
+    },
+    {
+      "id": "legacy-host",
+      "title": "A host without agent discovery offers Claude and Codex only and has no Manage agents row",
+      "props": {
+        "hostId": "buildbox",
+        "fixedCwd": "/srv/infra"
+      }
+    },
+    {
+      "id": "no-agents",
+      "title": "A host whose list is empty: only the extras and Manage agents, with a line saying to enable or install an agent",
+      "patch": {
+        "agentManifestsByHost": {
+          "local": {
+            "state": "ready",
+            "manifests": []
+          }
+        }
+      }
+    },
+    {
+      "id": "loading",
+      "title": "The host's agents are still being listed: the agent rows are disabled (40%) and Checking agents... shows",
+      "patch": {
+        "agentManifestsByHost": {
+          "local": {
+            "state": "loading",
+            "manifests": [
+              {
+                "id": "claude",
+                "displayName": "Claude",
+                "supportedModes": [
+                  "cli"
+                ],
+                "resumability": "none",
+                "capabilities": [
+                  "interactiveTerminal"
+                ],
+                "statusDetection": "hooks",
+                "available": true,
+                "enabled": true,
+                "isDefault": true
+              },
+              {
+                "id": "codex",
+                "displayName": "Codex",
+                "supportedModes": [
+                  "cli"
+                ],
+                "resumability": "none",
+                "capabilities": [
+                  "interactiveTerminal"
+                ],
+                "statusDetection": "hooks",
+                "available": true,
+                "enabled": true
+              },
+              {
+                "id": "pi",
+                "displayName": "Pi",
+                "supportedModes": [
+                  "cli"
+                ],
+                "resumability": "none",
+                "capabilities": [
+                  "interactiveTerminal"
+                ],
+                "statusDetection": "hooks",
+                "available": true,
+                "enabled": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "list-error",
+      "title": "The host refused the list: the agent rows are disabled and the error shows in red",
+      "patch": {
+        "agentManifestsByHost": {
+          "local": {
+            "state": "error",
+            "error": "Could not list agents on this host.",
+            "manifests": []
+          }
+        }
+      }
+    },
+    {
+      "id": "disconnected",
+      "title": "The window lost its core: the agent rows are disabled",
+      "patch": {
+        "connected": false
+      }
+    },
+    {
+      "id": "unscoped",
+      "title": "The home screen's launcher: an agent dropdown, Manage agents, the known project folders and No project (Quickchat)",
+      "props": {
+        "fixedCwd": null,
+        "projectCwds": [
+          "/Users/dev/code/perch",
+          "/Users/dev/code/api-server",
+          "/Users/dev/notes"
+        ],
+        "extras": null,
+        "anchorRect": {
+          "x": 600,
+          "y": 300,
+          "width": 28,
+          "height": 28
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "notifications": [
+    {
+      "id": "t2",
+      "kind": "blocked",
+      "title": "Review agent mail",
+      "heading": "Needs your attention",
+      "detail": "Review agent mail",
+      "sessionId": "s-perch-3",
+      "sessionTitle": "Review agent mail",
+      "hasSession": true,
+      "timeout": 600000
+    }
+  ]
+}

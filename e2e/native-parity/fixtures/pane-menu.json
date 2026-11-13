@@ -1,0 +1,64 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "pane-menu",
+  "note": "Floating screen: it is drawn through a portal into the page body and placed against the window, so the reference is the whole default 1280x800 window on the app's backdrop and every box is in window coordinates. The right-click menu of a docked pane's tab (stock-ui/pane-menu). Props are those of PaneMenuScreenProps, as components/ gives them; its actions are no-ops. It opens at x,y (the click) and is moved in when that is near a window edge.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1280,
+    "height": 800
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "props": {
+    "panelId": "s-perch-2",
+    "title": "Fix terminal slash input",
+    "x": 620,
+    "y": 220,
+    "sessionId": "s-perch-2",
+    "canClose": true,
+    "maximized": false,
+    "canStopAgent": true
+  },
+  "states": [
+    {
+      "id": "agent-pane",
+      "title": "An agent's pane: every row, Stop agent included, Show beside an open tab available"
+    },
+    {
+      "id": "terminal-pane",
+      "title": "A plain terminal's pane: no Show beside row and no Stop agent",
+      "props": {
+        "sessionId": null,
+        "canStopAgent": false
+      }
+    },
+    {
+      "id": "last-pane-zoomed",
+      "title": "The one pane, zoomed: Zoom reads Restore and Close pane is disabled (40% opacity)",
+      "props": {
+        "maximized": true,
+        "canClose": false
+      }
+    },
+    {
+      "id": "near-corner",
+      "title": "Opened at the bottom right corner: the menu is moved in to keep 8px from the window edges",
+      "props": {
+        "x": 1270,
+        "y": 790
+      }
+    },
+    {
+      "id": "renaming",
+      "title": "Rename pane pressed: the rows become a text field holding the title and an OK button",
+      "steps": [
+        {
+          "click": "[data-testid=\"pane-menu-rename\"]"
+        }
+      ]
+    }
+  ]
+}

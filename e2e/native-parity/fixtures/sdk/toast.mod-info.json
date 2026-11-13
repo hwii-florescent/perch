@@ -1,0 +1,17 @@
+{
+  "notifications": [
+    {
+      "id": "t4",
+      "kind": "usage",
+      "level": "info",
+      "title": "Deploy finished",
+      "body": "perch.dev is live",
+      "icon": "✓",
+      "heading": "Deploy finished",
+      "detail": "perch.dev is live",
+      "sessionId": "mod:deploy",
+      "hasSession": false,
+      "timeout": 600000
+    }
+  ]
+}

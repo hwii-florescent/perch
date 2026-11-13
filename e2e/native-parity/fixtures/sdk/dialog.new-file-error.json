@@ -1,0 +1,26 @@
+{
+  "props": {
+    "workspaceId": "w-perch-main",
+    "workspacePath": "/Users/dev/code/perch",
+    "x": 0,
+    "y": 0,
+    "initialStage": "newFile",
+    "nativeAvailable": true,
+    "canAsk": true,
+    "rejects": "notes/todo.md already exists"
+  },
+  "steps": [
+    {
+      "type": {
+        "selector": "[data-testid=\"file-name-input\"]",
+        "text": "/Users/dev/code/perch/notes/todo.md"
+      }
+    },
+    {
+      "key": {
+        "selector": "[data-testid=\"file-name-input\"]",
+        "key": "Enter"
+      }
+    }
+  ]
+}
