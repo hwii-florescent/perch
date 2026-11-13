@@ -126,6 +126,8 @@ pub struct WindowState {
     /// How many times the window asked the tab strip for a new tab (Cmd+T): the strip opens its
     /// New session menu at its "+" on each.
     pub new_tab: u64,
+    /// The open tabs whose terminal is known to be `running` or `exited`; any other is unknown.
+    pub terminals: HashMap<String, &'static str>,
 }
 
 #[derive(Default)]
@@ -222,6 +224,7 @@ impl Perch {
                 zoomed: tabs.zoomed(),
                 zoom: ws.zoom_factor(),
                 new_tab: ws.new_tab_asks(),
+                terminals: ws.terminal_states(cx),
                 notifications: ws
                     .notifications()
                     .iter()
@@ -1198,7 +1201,11 @@ impl Perch {
                     "pinned": false,
                     "order": Value::Null,
                     "focused": data.window.active.as_deref() == Some(s.id.as_str()),
-                    "state": if !reachable { "host-unavailable" } else if open { "running" } else { "unknown" },
+                    "state": if !reachable {
+                        "host-unavailable"
+                    } else {
+                        data.window.terminals.get(&s.id).copied().unwrap_or("unknown")
+                    },
                 });
                 if let Some(w) = &s.workspace_id {
                     record["workspaceId"] = json!(w);

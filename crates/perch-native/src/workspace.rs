@@ -332,6 +332,23 @@ impl Workspace {
             .collect()
     }
 
+    /// What is known of each open tab's terminal (`perch.terminals()`' `state`): `running` while
+    /// it is attached, `exited` once the core said its shell ended. A tab missing here is unknown:
+    /// attaching, reattaching, parked or never attached.
+    pub fn terminal_states(&self, cx: &App) -> HashMap<String, &'static str> {
+        self.panes
+            .iter()
+            .filter_map(|(id, pane)| {
+                let state = match pane.view.as_ref()?.read(cx).status() {
+                    Status::Live => "running",
+                    Status::Exited(_) => "exited",
+                    _ => return None,
+                };
+                Some((id.clone(), state))
+            })
+            .collect()
+    }
+
     /// The session of the tab with the keyboard.
     pub fn open(&self) -> Option<&OpenSession> {
         Some(&self.panes.get(self.tabs.active()?)?.open)
@@ -901,6 +918,10 @@ impl Workspace {
                 self.close_unconfirmed(id, &format!("the core refused: {reason}"), cx)
             }
             _ => {}
+        }
+        // `perch.terminals()` reports each terminal's state, read from the window on a change.
+        if matches!(event, TerminalEvent::Status(_)) {
+            cx.notify();
         }
     }
 

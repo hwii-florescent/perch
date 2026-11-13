@@ -84,6 +84,18 @@ export default class extends View {
 }
 "##;
 
+/// A status line that names each terminal with its state (`term:<session>:<state>`).
+const TERMINALS: &str = r##"
+import { View, div } from "gpui-kit";
+import * as perch from "perch";
+export default class extends View {
+  render() {
+    return div().id("terms").size_full().children(perch.terminals().map((t) =>
+      div().id(`term:${t.sessionId}:${t.state}`).w(10).h(10).bg("#ffffff")));
+  }
+}
+"##;
+
 /// A status line that, once, asks for a confirmation that says it is busy.
 const OPENER: &str = r##"
 import { View, div } from "gpui-kit";
@@ -776,6 +788,44 @@ fn main() {
     assert!(
         rig.ws(|ws, _, _| ws.screens_open()).is_empty(),
         "Escape closed it"
+    );
+
+    // `perch.terminals()` says `running` only while the terminal is attached, `exited` once the
+    // core said its shell ended, and otherwise `unknown`: a tab in the strip is not evidence.
+    rig.write("status", TERMINALS);
+    let state = |rig: &mut Rig, id: &str| {
+        rig.draw();
+        let prefix = format!("term:{id}:");
+        probe::records()
+            .into_keys()
+            .filter_map(|name| name.strip_prefix(prefix.as_str()).map(str::to_string))
+            .collect::<Vec<_>>()
+    };
+    rig.ws(|ws, _, cx| {
+        ws.sidebar().update(cx, |s, cx| {
+            s.open("local".into(), "alpha".into(), Some("claude".into()), cx)
+        })
+    });
+    let (to_core, _asked_core) = unbounded::<ToCore>();
+    let (core, from_core) = unbounded::<FromCore>();
+    rig.ws(|ws, _, cx| {
+        let view = ws.terminal().expect("a terminal").clone();
+        view.update(cx, |view, cx| view.link(to_core, from_core, cx))
+    });
+    assert_eq!(state(&mut rig, "alpha"), ["unknown"], "attaching");
+    core.unbounded_send(FromCore::Attached {
+        replay: String::new(),
+        input: true,
+        resize: true,
+        agent: None,
+    })
+    .unwrap();
+    assert_eq!(state(&mut rig, "alpha"), ["running"], "attached");
+    core.unbounded_send(FromCore::Exited(0)).unwrap();
+    assert_eq!(
+        state(&mut rig, "alpha"),
+        ["exited"],
+        "the core said it ended"
     );
 
     rig.cx
