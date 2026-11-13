@@ -8,6 +8,10 @@
 //! - Pane menu: a right-click in a pane opens it at the press; Rename pane turns it into a field
 //!   that has the keyboard, and Enter or OK renames that pane's session; Escape and a press outside
 //!   close it without anything beneath taking the press.
+//! - New session: the sidebar's New session opens the menu with the keyboard, its agent picker and
+//!   the computer's projects then No project; a project or No project starts the picked agent there
+//!   (a Quickchat for No project); Escape and a press outside close it without anything beneath
+//!   taking the press.
 //! - Confirmation: closing an agent's tab asks through the close guard drawn in the confirmation;
 //!   Escape and a press on the dim backdrop cancel and keep the tab, Keep running puts the tab
 //!   away without ending it, and Enter stops it (with Don't show again, the warning is turned off).
@@ -488,6 +492,68 @@ fn confirm(rig: &mut Rig) {
     println!("confirm: ok");
 }
 
+fn open_new_session(rig: &mut Rig) {
+    rig.ws(|ws, window, cx| ws.run_command("sessions.new", None, window, cx))
+        .unwrap();
+    rig.draw();
+}
+
+fn launched(rig: &mut Rig) -> Vec<(String, Option<String>, String)> {
+    rig.asked()
+        .into_iter()
+        .filter_map(|c| match c {
+            Command::Launch {
+                host_id,
+                cwd,
+                provider,
+            } => Some((host_id, cwd, provider)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn new_session(rig: &mut Rig) {
+    // The sidebar's New session opens the stock menu, unscoped: the agent picker, then the
+    // computer's project and No project.
+    open_new_session(rig);
+    assert_eq!(rig.open_screens(), ["new-session"]);
+    assert!(rig.record("launcher").is_some(), "the menu is drawn");
+    assert!(rig.record("agent-select").is_some());
+    assert_eq!(rig.keys("project-option"), ["0", "none"]);
+
+    // Escape closes it and the terminal has the keyboard again.
+    rig.press("escape");
+    assert!(rig.open_screens().is_empty(), "Escape closed it");
+    assert!(rig.terminal_focused());
+
+    // A press outside closes it, and nothing beneath takes that press.
+    let before = rig.opened.borrow().len();
+    open_new_session(rig);
+    rig.mouse(20., HEIGHT - 20.);
+    assert!(rig.open_screens().is_empty(), "the press outside closed it");
+    assert_eq!(
+        rig.opened.borrow().len(),
+        before,
+        "nothing beneath was pressed"
+    );
+
+    // A project starts the picked agent (the last pick, Claude) in its folder.
+    rig.asked();
+    open_new_session(rig);
+    rig.click("project-option:0");
+    assert!(rig.open_screens().is_empty(), "the pick closed it");
+    assert_eq!(
+        launched(rig),
+        [("local".into(), Some("/work".into()), "claude".into())]
+    );
+
+    // No project starts a Quickchat.
+    open_new_session(rig);
+    rig.click("project-option:none");
+    assert_eq!(launched(rig), [("local".into(), None, "claude".into())]);
+    println!("new-session: ok");
+}
+
 fn main() {
     let scratch: PathBuf =
         std::env::temp_dir().join(format!("perch-floating-window-{}", std::process::id()));
@@ -540,6 +606,7 @@ fn main() {
 
     navigator(&mut rig);
     pane_menu(&mut rig);
+    new_session(&mut rig);
     confirm(&mut rig);
 
     rig.cx

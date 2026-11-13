@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fixture, mountSidebar, THEMES } from "./support.mjs";
-import { breakLines, scrollGutters, shrinkWrapBases, snapColumns, snapRows } from "../gpui.mjs";
+import { breakLines, scrollGutters, shrinkWrapBases, snapColumns, snapRows, toGpui } from "../gpui.mjs";
 
 /** A gpui-kit stand-in that records each call, and keeps the handlers. */
 function recordingKit() {
@@ -237,4 +237,20 @@ test("text that breaks anywhere is broken as a browser does where its box's widt
   const unknown = new Map();
   breakLines([{ ...panel, style: { display: "flex", flex_direction: "col" } }], (t) => t.length * 6, unknown);
   assert.equal(unknown.size, 0, "no width, no breaks");
+});
+
+test("a named text run in a flex column is as wide as its glyphs, where its alignment puts it", () => {
+  const { kit } = recordingKit();
+  const column = (text_align) => ({
+    kind: "div", id: "b", range_name: "name", style: { display: "flex", flex_direction: "col", text_align },
+    children: [{ kind: "text", text: "perch" }, { kind: "div", id: "s", style: {}, children: [{ kind: "text", text: "/work" }] }],
+  });
+  const runBox = (align) => {
+    const built = toGpui(column(align), kit, {}, files, false, false, null, { text_align: align }).record;
+    return built.children.map((c) => c.record).find((c) => c?.id === "name");
+  };
+  assert.deepEqual(runBox("left").styles.map(([name]) => name), ["self_start", "max_w"]);
+  assert.deepEqual(runBox("center").styles.map(([name]) => name), ["self_center", "max_w"]);
+  const row = toGpui({ ...column("left"), style: { display: "flex" } }, kit, {}, files).record;
+  assert.deepEqual(row.children.map((c) => c.record).find((c) => c?.id === "name").styles, [], "a row lays it out as it is");
 });
