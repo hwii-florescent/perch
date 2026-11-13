@@ -525,12 +525,13 @@ fn main() {
         .unwrap();
     rig.draw();
     assert_eq!(rig.ws(|ws, _, _| ws.screens_open()), ["confirm"]);
-    let message = rig
+    // The close guard's props (`CloseGuardProps`): the tab's name.
+    let guard = rig
         .ws(|ws, _, _| ws.screen_props("confirm").cloned())
         .unwrap();
     assert!(
-        message["message"].as_str().unwrap().contains("Alpha"),
-        "{message}"
+        guard["label"].as_str().unwrap().contains("Alpha"),
+        "{guard}"
     );
     rig.press("escape");
     assert_eq!(

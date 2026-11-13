@@ -11,6 +11,7 @@
 //! - `{ kind: "svg", id, markup, style, ... }` (tinted with the text colour) and `{ kind: "image", markup }` (as drawn)
 //! - `{ kind: "input", id, value, placeholder, checked, input_type, style, ... }` (`value`: what the field holds,
 //!   typed text included; `field_w`: a line field's content width when its content sizes it)
+//! - `break_anywhere` on a node whose text breaks a word too long for its line anywhere (`overflow-wrap`)
 //! - `blocks_pointer` on a node that takes pointer events under an ancestor that lets them through; `tabular` on one
 //!   whose digits are tabular; `scrollbar` (its width) on a vertical scroller
 //! - a node `mount` was given a parity table for (`options.names`) carries `name` (`name` or `name:key`, the engine
@@ -314,7 +315,7 @@ function reportDeclarations(computed, report) {
         if (value !== "none") report("unsupported", prop, value, source, "no line clamp in the engine");
         break;
       case "-webkit-box-orient": case "overflow-wrap":
-        if (prop === "overflow-wrap" && value !== "normal") report("unsupported", prop, value, source);
+        if (prop === "overflow-wrap" && value !== "normal") report("approximated", prop, value, source, "lines broken by the translator where the box's width is known (`break_anywhere`)");
         break;
       case "outline-style": case "outline-width": case "outline-color":
         if (v["outline-style"] !== "none" && prop === "outline-style") report("unsupported", "outline", `${length(v["outline-width"])}px ${v["outline-style"]} ${colorOut(v["outline-color"])?.value ?? ""}`.trim(), source, "no outline in the engine (no focus ring)");
@@ -364,6 +365,8 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
   if (ctx.cascade.sheet.tracks(element, "hover")) extra.track_hover = true;
   // Digits drawn at one width (`tabular-nums`, which the engine cannot draw): the text's width is not the engine's.
   if (/tabular/.test(String(computed.values["font-variant-numeric"] ?? ""))) extra.tabular = true;
+  // A word too long for its line is broken anywhere (`overflow-wrap: anywhere` / `break-word`).
+  if (/^(anywhere|break-word)$/.test(String(computed.values["overflow-wrap"] ?? ""))) extra.break_anywhere = true;
   // A vertical scroller draws the app's scrollbar (`::-webkit-scrollbar`, `--scrollbar-size` wide) beside its content
   // when that overflows; the engine's scrollbars take no room, so the width is kept for the translator.
   if (base.overflow_y === "scroll") {
@@ -400,6 +403,7 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
     node.kind = "input";
     node.input_type = tag === "input" ? String(element.props.type ?? "text") : tag;
     for (const key of ["placeholder", "checked", "disabled"]) if (element.props[key] !== undefined) node[key] = element.props[key];
+    if (/^(checkbox|radio)$/.test(node.input_type)) node.checked = element.checked;
     if (tag !== "select") node.value = element.value;
     if (tag === "input" && TEXT_FIELD.test(node.input_type)) node.field_w = FIELD_EMS * computed.values["font-size"];
     return node;
@@ -454,6 +458,8 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
     style.display = "flex";
     style.flex_direction = blockKids ? "col" : "row";
     if (!blockKids) style.items = "baseline";
+    // An inline box among blocks is on a line of its own, as wide as its content, not the column's width.
+    else for (const kid of kids) if (kid.kind !== "text" && /^inline-(block|flex)$/.test(kid[DISPLAY]) && !kid.style.self) kid.style.self = "start";
     report("approximated", "display", `${computed.values.display} with inline content`, "(inline formatting)", blockKids ? "a column of its children" : "a row on the text baseline");
   }
   // Letter spacing: the engine has none. A spaced run keeps its glyphs together and gets the spacing WebKit adds
@@ -483,8 +489,11 @@ function keyOf(element, spec) {
 }
 
 /** Engine names for the elements a parity table names, from its selectors over the host tree: `name`, or
- * `name:key` for one of many. A `textRange` name is the element's own text (`range_name`), not the element. */
+ * `name:key` for one of many. A `textRange` name is the element's own text (`range_name`), not the element. A name
+ * with no key that more than one element takes is `name@n` from the second on (`n` from 1, in document order), so
+ * each has an id of its own; the parity report reads it as `name`. */
 function nameElements(document, defs, nodes) {
+  const taken = new Map();
   // One walk of the tree, each element tried against every selector, rather than a walk per selector: the same
   // names (the first matching definition of a kind wins), a fraction of the visits.
   const parsed = defs.map((def) => [def, parseSelector(def.selector)]);
@@ -496,7 +505,12 @@ function nameElements(document, defs, nodes) {
           const slot = def.textRange ? "range_name" : "name";
           if (node[slot] != null || !list.some((steps) => matchesComplex(element, steps))) continue;
           const key = keyOf(element, def.key);
-          node[slot] = key == null ? def.name : `${def.name}:${key}`;
+          if (key != null) node[slot] = `${def.name}:${key}`;
+          else {
+            const n = taken.get(def.name) ?? 0;
+            taken.set(def.name, n + 1);
+            node[slot] = n ? `${def.name}@${n}` : def.name;
+          }
         }
       }
       walk(element);

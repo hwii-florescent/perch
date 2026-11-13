@@ -134,7 +134,13 @@ function useOverlay(kind, props) {
 const overlay = (kind) => function Overlay(props) { return useOverlay(kind, props); };
 export const SessionMenu = overlay("session-menu");
 export const NewSessionMenu = overlay("new-session-menu");
-export const ConfirmDialog = overlay("confirm");
+const ConfirmOverlay = overlay("confirm");
+/** The confirmation drawn in place in the screen that draws confirmations, where a caller asks with rows of its own
+ * as children (the close guard); elsewhere a confirmation opens the window's `confirm` screen. Native only: the
+ * confirm screen's `main.js` sets it. */
+let confirmInPlace = null;
+export const drawConfirmationsInPlace = (Component) => { confirmInPlace = Component; };
+export function ConfirmDialog(props) { return createElement(confirmInPlace ?? ConfirmOverlay, props); }
 /** A dropdown: the field is the screen's (the stock select's classes), its list Perch's (`select` overlay). */
 export function Select({ value, onChange, options = [], className, ariaLabel, testId, title, disabled, placeholder }) {
   const ref = useRef(null);

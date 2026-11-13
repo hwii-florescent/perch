@@ -94,6 +94,7 @@ pub enum Change {
     OptionAsAlt(&'static str),
     SoundEnabled(bool),
     ToastDelivery(&'static str),
+    WarnCloseAgent(bool),
 }
 
 impl Change {
@@ -113,6 +114,7 @@ impl Change {
             Self::OptionAsAlt(mode) => json!({ "optionAsAlt": mode }),
             Self::SoundEnabled(on) => json!({ "soundEnabled": on }),
             Self::ToastDelivery(how) => json!({ "toastDelivery": how }),
+            Self::WarnCloseAgent(on) => json!({ "warnCloseAgent": on }),
         }
     }
 }

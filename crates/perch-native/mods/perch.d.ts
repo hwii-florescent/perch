@@ -244,6 +244,14 @@ declare module "perch" {
     busy?: boolean;
   }
 
+  /** `confirm`, when the window asks before closing an agent's tab: the web's close guard, which asks through the
+   * confirmation. Close with `{ confirmed: true, never }` (`onStop(never)`: stop it for everyone; `never` turns the
+   * warning off), `{ keepRunning: true }` (`onKeepRunning`: only this window's tab goes) or `{ confirmed: false }`. */
+  export interface CloseGuardProps extends Viewport {
+    sessionId: string;
+    label: string;
+  }
+
   /** `dialog`: the opener's title and fields. Close with `{ value }`. */
   export interface DialogProps extends Viewport {
     title: string;

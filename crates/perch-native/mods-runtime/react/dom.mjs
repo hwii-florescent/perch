@@ -151,6 +151,9 @@ export class HostElement extends Target {
   /** A field's text: what is being typed into it (`edit`, during the change event it causes), else its props'. */
   get value() { return this.edit ?? String(this.props.value ?? this.props.defaultValue ?? ""); }
   set value(text) { this.edit = String(text); }
+  /** A box's tick: what a click just made it (`ticked`, during the change event it causes), else its props'. */
+  get checked() { return this.ticked ?? !!(this.props.checked ?? this.props.defaultChecked); }
+  set checked(on) { this.ticked = !!on; }
   // ponytail: the engine has no scroll offsets a script sets, so a row scrolled into view stays where the list has it.
   scrollIntoView() {}
   select() {}

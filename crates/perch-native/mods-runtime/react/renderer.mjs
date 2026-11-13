@@ -256,6 +256,21 @@ export function mount(perch, Component, options = {}) {
       const node = byId(id);
       if (node) node.bounds = { x: box.x, y: box.y, width: box.width, height: box.height };
     },
+    /** A click on a check box or radio button (`id`): the `click` event, then, unless the source prevented it, the
+     * box ticked as a browser ticks it (a radio button only on), with `input` and `change` events. */
+    toggle(id) {
+      const target = byId(id);
+      if (!target || target.props.disabled || !handle.dispatch(id, "click", { button: 0, detail: 1 })) return;
+      const radio = target.props.type === "radio";
+      if (radio && target.checked) return;
+      target.checked = radio ? true : !target.checked;
+      handle.dispatch(id, "input", {});
+      handle.dispatch(id, "change", {});
+      // A controlled box shows its props' state from now on; an uncontrolled one keeps the tick.
+      if (target.props.checked !== undefined) delete target.ticked;
+      target.touch();
+      render();
+    },
     /** A left click as the engine reports one: press then release on the same node. */
     click(id, init = {}) {
       const at = { button: 0, buttons: 1, pointerType: "mouse", ...init };

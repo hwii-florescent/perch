@@ -10,7 +10,8 @@
 //!   - `agent-icons.js`: the web's agent marks;
 //!   - `host.js` and `screen.js` there are written by hand and left alone.
 //! - `<screen>/<screen>/*.js` for every id in [`SCREENS`]: that stock screen as the app exports it
-//!   (`packages/web/scripts/export-stock-ui.mjs`). `<screen>/main.js` and `<screen>/mod.json` are written by hand.
+//!   (`packages/web/scripts/export-stock-ui.mjs`), and `<screen>/<other>/*.js` for a stock screen drawn inside it
+//!   ([`ALSO`]). `<screen>/main.js` and `<screen>/mod.json` are written by hand.
 //!
 //! A screen's `mod.json` says `"runtime": "react"`, and the mod host writes `react-runtime/` into that screen's
 //! folder when it writes the stock mods out (`mods.rs`), so a written-out screen folder is complete on its own and a
@@ -39,7 +40,11 @@ export const SCREENS = [
   "sidebar",
   "navigator",
   "pane-menu",
+  "confirm",
 ];
+/** Other stock screens a screen's folder carries, by the screen: they draw inside it (the close guard asks its question
+ * through the confirmation, with its own rows in it). */
+export const ALSO = { confirm: ["close-guard"] };
 /** Files under the folders the build writes that it does not write. */
 const HAND_WRITTEN = new Set([`${RUNTIME}/host.js`, `${RUNTIME}/screen.js`, ...SCREENS.flatMap((id) => [`${id}/main.js`, `${id}/mod.json`])]);
 const requireWeb = createRequire(path.join(web, "package.json"));
@@ -178,16 +183,18 @@ async function moduleFiles(code) {
   }
 }
 
-/** The stock screens' code as the app exports it, `<screen>/<file>.js` (their types file and manifest are the web
- * package's). */
+/** The stock screens' code as the app exports it, `<screen>/<screen>/<file>.js` (and `<screen>/<other>/<file>.js` for
+ * the screens in [`ALSO`]; their types files and manifests are the web package's). */
 async function screenFiles() {
   const { exportStockUi } = await import(pathToFileURL(path.join(web, "scripts/export-stock-ui.mjs")).href);
   const files = exportStockUi({ sourceDir: path.join(web, "src/stock-ui"), sdkTypesFile: path.join(web, "src/perch-sdk.d.ts") });
   const out = [];
-  for (const id of SCREENS) {
-    const own = [...files].filter(([rel]) => rel.startsWith(`${id}/`) && rel.endsWith(".js"));
-    if (!own.length) throw new Error(`packages/web/src/stock-ui has no screen ${id}`);
-    for (const [rel, bytes] of own) out.push([rel, Buffer.from(bytes).toString("utf8")]);
+  for (const screen of SCREENS) {
+    for (const id of [screen, ...(ALSO[screen] ?? [])]) {
+      const own = [...files].filter(([rel]) => rel.startsWith(`${id}/`) && rel.endsWith(".js"));
+      if (!own.length) throw new Error(`packages/web/src/stock-ui has no screen ${id}`);
+      for (const [rel, bytes] of own) out.push([`${screen}/${rel}`, Buffer.from(bytes).toString("utf8")]);
+    }
   }
   return out;
 }
@@ -257,7 +264,7 @@ export async function buildFiles() {
   for (const [name, text] of await moduleFiles(code)) files.set(`${RUNTIME}/${name}`, text);
   files.set(`${RUNTIME}/runtime.mjs`, code);
   files.set(`${RUNTIME}/agent-icons.js`, await agentIcons());
-  for (const [rel, text] of await screenFiles()) files.set(`${rel.split("/")[0]}/${rel}`, text);
+  for (const [rel, text] of await screenFiles()) files.set(rel, text);
   return files;
 }
 

@@ -94,7 +94,7 @@ const drawn = (child) => child.style?.display !== "hidden";
 /** One node and its subtree as builder chains. `unseen`: an ancestor is invisible or fully transparent, so its
  * named elements are not shown (the page counts them hidden) and carry no name. */
 export function toGpui(node, kit, handle, files, overlay = false, unseen = false, color = null, text = {}, rowItem = false, snapped = new Map()) {
-  if (node.kind === "text") return node.text;
+  if (node.kind === "text") return snapped.get(node)?.text ?? node.text;
   unseen ||= node.style.opacity === 0 || node.style.visibility === "invisible";
   if (unseen && (node.name || node.range_name)) node = { ...node, name: undefined, range_name: undefined };
   color = node.style.text_color ?? color;
@@ -124,6 +124,9 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
 
   // A press on a text field puts the keyboard in it, as a browser does.
   if (node.kind === "input" && !node.disabled) el = el.on_mouse_down("left", (_event, cx) => { handle.focus(node.id); cx.notify(); });
+  // A click on a check box or radio button ticks it, as a browser does, and so does a click on the label around one.
+  const box = node.kind === "input" ? node : node.meta?.tag === "label" ? tickBox(node) : null;
+  if (box && !box.disabled && /^(checkbox|radio)$/.test(box.input_type)) el = el.on_click((_event, cx) => { cx.stop_propagation?.(); handle.toggle(box.id); cx.notify(); });
   const pointer = ["click", "double_click", "context_menu", "mouse_down", "mouse_up"].some((name) => events.has(name));
   if (pointer) {
     el = el.on_mouse_down("left", (event, cx) => {
@@ -215,6 +218,16 @@ function halfAlpha(color) {
 /** Text with no place a line may break: one word of ASCII letters, digits and punctuation other than a hyphen. */
 const UNBREAKABLE = /^[!-,.-~]+$/;
 
+/** The first check box or radio button under a label. */
+const tickBox = (node) => {
+  for (const child of node.children ?? []) {
+    if (child.kind === "input" && /^(checkbox|radio)$/.test(child.input_type)) return child;
+    const found = child.kind === "text" ? null : tickBox(child);
+    if (found) return found;
+  }
+  return null;
+};
+
 /** Whether `node` or a node under it draws an icon. */
 const hasIcon = (node) => !!node.markup || (node.children ?? []).some((child) => child.kind !== "text" && hasIcon(child));
 
@@ -233,6 +246,7 @@ export function describeToGpui(description, kit, handle, files, scale = 0) {
   if (scale > 0 && files.measure) snapRows(roots, scale, files.measure, snapped);
   scrollGutters(roots, snapped);
   shrinkWrapBases(roots, snapped);
+  if (files.measure) breakLines(roots, files.measure, snapped);
   let layer = kit.div().relative().size_full().child(toGpui(description.root, kit, handle, files, false, false, null, {}, false, snapped));
   for (const overlay of description.overlays) layer = layer.child(toGpui(overlay, kit, handle, files, true, false, null, {}, false, snapped));
   return layer;
@@ -342,6 +356,69 @@ export function snapRows(roots, scale, measure, overrides) {
     width(root, {}, false);
     visit(root);
   }
+}
+
+// ---- line breaks ----------------------------------------------------------------------------------------------
+
+/** Where a line may break inside a run of text: after spaces, and after a hyphen between letters or digits. */
+const BREAK_AFTER = /(?<= +)(?=[^ ])|(?<=[\p{L}\p{N}]-)(?=[\p{L}\p{N}])/u;
+
+/**
+ * The lines of text a browser lays out where a word too long for its line is broken anywhere (`break_anywhere`):
+ * GPUI breaks such a word where the word starts and around punctuation a browser keeps together (a `/` in a path),
+ * so where the box's content width is known the translator breaks the lines itself, as CSS does (at spaces and after
+ * a hyphen inside a word, filling each line; a word longer than a line broken at the last character that fits), and
+ * the text node's override `text` holds them, one per line, and the box is as tall as those lines in CSS. The width is known from authored widths down the tree:
+ * a box's own number, or the content width of the column it is stretched across.
+ */
+export function breakLines(roots, measure, overrides) {
+  const FONT_KEYS = ["text_size", "font_weight", "font_family", "italic", "line_height"];
+  const n = (v) => (typeof v === "number" ? v : 0);
+  const stretched = (node, parent) =>
+    parent && isColumn(parent) && !isRow(parent) && node.style.position !== "absolute" && !["start", "center", "end"].includes(node.style.self) && !["start", "center", "end"].includes(parent.style.items);
+  const walk = (node, parent, room, font) => {
+    if (!node || node.kind === "text" || !drawn(node)) return;
+    const s = node.style;
+    let own = typeof s.w === "number" ? s.w : s.w === "100%" ? room : stretched(node, parent) ? room - n(s.ml) - n(s.mr) : NaN;
+    if (typeof s.max_w === "number") own = Math.min(own, s.max_w);
+    const content = own - n(s.pl) - n(s.pr) - n(s.border_l) - n(s.border_r);
+    const mine = { ...font };
+    for (const key of FONT_KEYS) if (s[key] !== undefined) mine[key] = s[key];
+    const kids = node.children ?? [];
+    if (node.break_anywhere && Number.isFinite(content) && content > 0 && typeof mine.text_size === "number" && kids.length && kids.every((kid) => kid.kind === "text")) {
+      const style = { size: mine.text_size, weight: mine.font_weight ?? 400, family: mine.font_family ?? ".SystemUIFont", italic: !!mine.italic };
+      const fits = (line) => measure(line.trimEnd(), style) <= content + 0.01;
+      let count = 0;
+      for (const kid of kids) {
+        const lines = [];
+        for (const paragraph of kid.text.split("\n")) {
+          let line = "";
+          for (const word of paragraph.split(BREAK_AFTER)) {
+            if (fits(line + word)) { line += word; continue; }
+            if (line) lines.push(line.trimEnd());
+            line = "";
+            for (const ch of word) {
+              if (line && !fits(line + ch)) { lines.push(line); line = ""; }
+              line += ch;
+            }
+          }
+          lines.push(line.trimEnd());
+        }
+        const text = lines.join("\n");
+        // A measure that fails (NaN) fits nothing: the text is left to GPUI.
+        if (!lines.every((line) => !line || fits(line))) count = NaN;
+        else if (text !== kid.text) overrides.set(kid, { ...overrides.get(kid), text });
+        count += lines.length;
+      }
+      // GPUI rounds the line height it lays text out with; the box keeps the CSS height of its lines.
+      const line = lineHeightPx(mine);
+      if (Number.isFinite(count) && line && s.h === undefined && kids.length === 1) {
+        overrides.set(node, { ...overrides.get(node), h: count * line + n(s.pt) + n(s.pb) + n(s.border_t) + n(s.border_b) });
+      }
+    }
+    for (const kid of kids) walk(kid, node, isRow(node) ? NaN : content, mine);
+  };
+  for (const root of roots) walk(root, null, NaN, {});
 }
 
 // ---- shrink-to-fit ----------------------------------------------------------------------------------------------

@@ -1537,9 +1537,10 @@ fn ends(rx: &mut UnboundedReceiver<ToCore>) -> usize {
     asked(rx).iter().filter(|m| **m == ToCore::End).count()
 }
 
-/// Closing a tab ends its session as the web does: a terminal at once, an agent after a second
-/// close while the warning is on (and a shell with an agent typed into it counts as one), at once
-/// when it is off. The ask is taken back after a while.
+/// Closing a tab ends its session as the web does: a terminal at once, an agent only through the
+/// close guard while the warning is on (and a shell with an agent typed into it counts as one), at
+/// once when it is off. No mod draws the close guard here, so an agent is not ended and the window
+/// says so; the stock close guard's answers are `mods_floating_window`'s.
 fn closing_a_tab_ends_its_session() {
     let sessions = [
         ("plain", json!({"cliProviderId": "terminal"})),
@@ -1570,28 +1571,13 @@ fn closing_a_tab_ends_its_session() {
     for id in ["agent", "typed"] {
         h.open_as(id, None);
         h.draw();
-        let (mut rx, core) = h.live();
-        assert_eq!(h.run("tabs.close", json!({})), Ok(()));
-        assert_eq!(ends(&mut rx), 0, "{id}: the first close only asks");
-        assert!(h.notice().unwrap().starts_with("Closing ends"), "{id}");
-        assert!(h.ws(|ws| ws.tabs().contains(id)));
-        if id == "typed" {
-            // Left alone, the ask is taken back, and the next close asks again.
-            h.cx.advance_clock(std::time::Duration::from_secs(9));
-            h.cx.run_until_parked();
-            assert_eq!(h.notice(), None);
+        let (mut rx, _core) = h.live();
+        for _ in 0..2 {
             assert_eq!(h.run("tabs.close", json!({})), Ok(()));
-            assert_eq!(ends(&mut rx), 0, "{id}: it asks again");
+            assert_eq!(ends(&mut rx), 0, "{id}: not ended without the close guard");
+            assert!(h.notice().unwrap().contains("confirmation"), "{id}");
+            assert!(h.ws(|ws| ws.tabs().contains(id)));
         }
-        assert_eq!(h.run("tabs.close", json!({})), Ok(()));
-        assert_eq!(ends(&mut rx), 1, "{id}: the second ends");
-        assert!(
-            h.ws(|ws| ws.tabs().contains(id)),
-            "{id}: until the core says"
-        );
-        core.unbounded_send(FromCore::Ended).unwrap();
-        h.cx.run_until_parked();
-        assert!(!h.ws(|ws| ws.tabs().contains(id)), "{id}");
     }
 
     // With the warning off an agent ends at once; a core that does not confirm it keeps the tab.

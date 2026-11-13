@@ -290,14 +290,17 @@ fn openers_give_the_web_fields(scratch: &Path) {
     rig.ws(|ws, window, cx| ws.run_command("tabs.close", None, window, cx))
         .unwrap();
     let native = rig.props("confirm");
-    let web = ScreenFixture::load("confirm").expected("run-busy")["props"].clone();
-    // `cancelLabel`: `ConfirmProps` has it; every web state leaves it at its default.
+    // The close guard's props (`CloseGuardProps`), as its web state opens it; the confirmation's
+    // own states are for other callers. `sessionId`: `CloseGuardProps` has it; the fixture,
+    // which draws no session, leaves it out.
+    let web = ScreenFixture::load("confirm").expected("close-agent")["props"].clone();
     check(
         "confirm (close guard)",
         &web,
         &native,
-        &["cancelLabel", VIEWPORT],
+        &["sessionId", VIEWPORT],
     );
+    assert_eq!(native["sessionId"], "s-perch-2");
     rig.close_all();
 
     // A notification puts up the toast, with no props but the window's size: it reads

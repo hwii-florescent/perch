@@ -48,6 +48,16 @@ pub const POLL: Duration = Duration::from_millis(250);
 /// The stock mods: path under `crates/perch-native/mods/`, and the file. Every file in that folder
 /// must be listed here (a unit test checks).
 pub const STOCK: &[(&str, &str)] = &[
+    (
+        "confirm/close-guard/main.js",
+        include_str!("../mods/confirm/close-guard/main.js"),
+    ),
+    (
+        "confirm/confirm/main.js",
+        include_str!("../mods/confirm/confirm/main.js"),
+    ),
+    ("confirm/main.js", include_str!("../mods/confirm/main.js")),
+    ("confirm/mod.json", include_str!("../mods/confirm/mod.json")),
     ("example/main.js", include_str!("../mods/example/main.js")),
     ("example/mod.json", include_str!("../mods/example/mod.json")),
     (

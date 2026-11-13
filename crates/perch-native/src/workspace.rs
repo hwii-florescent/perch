@@ -69,10 +69,6 @@ const MAX_PARKED: usize = 12;
 const TOAST_FOR: Duration = Duration::from_secs(8);
 /// How long the core has to confirm that a session ended before the tab says it is still running.
 const END_WAIT: Duration = Duration::from_secs(5);
-/// How long a first close of an agent's tab waits for the second that confirms it. The notice
-/// that asks starts with [`CLOSE_ASKS`].
-const CLOSE_CONFIRM_WITHIN: Duration = Duration::from_secs(8);
-const CLOSE_ASKS: &str = "Closing ends";
 /// How long to wait before attaching a dropped terminal to the core again: it doubles from the
 /// first wait to the last, and stays there for as long as the core is away.
 const REATTACH_FIRST: Duration = Duration::from_millis(250);
@@ -205,8 +201,8 @@ pub struct Workspace {
     leader: Option<Task<()>>,
     /// What the last command could not do, or did instead.
     notice: Option<String>,
-    /// The tab whose first close asked to end its agent, and the timer that takes the ask back.
-    armed_close: Option<(String, Task<()>)>,
+    /// The tab whose close the close guard confirmed: the next close of it ends it.
+    armed_close: Option<String>,
     /// The room a lone pane has in the main area, as of the last draw: what a hidden pane is
     /// sized for.
     room: Rc<Cell<Option<Size<Pixels>>>>,
@@ -1505,9 +1501,11 @@ impl Workspace {
 
     /// Close a tab, which ends its session as in the web (`requestCloseSession`). A tab that only
     /// watches a session another view controls just leaves the view. An agent's tab asks first
-    /// while Settings > Warn before closing an agent is on (it is until the core says otherwise):
-    /// the first close arms, a second within [`CLOSE_CONFIRM_WITHIN`] ends it. Everything else
-    /// is ended at once. Ending asks the core to delete the session over the terminal's own
+    /// while Settings > Warn before closing an agent is on (it is until the core says otherwise),
+    /// with the web's close guard drawn by the `confirm` screen (`CloseGuardProps`): stop for
+    /// everyone ends it (and may turn the warning off), keep running only puts the tab away, and
+    /// cancel keeps it. With no mod to ask through it is not ended. Everything else is ended at
+    /// once. Ending asks the core to delete the session over the terminal's own
     /// connection, the one that holds the keyboard, because the core refuses to end a session
     /// another connection controls; the tab goes only when the core confirms it is deleted. If
     /// the core refuses, does not answer in time, or the connection drops, the tab stays and says
@@ -1526,68 +1524,44 @@ impl Workspace {
         let watching = view.as_ref().is_some_and(|view| view.read(cx).watching());
         let can_end = view.as_ref().is_some_and(|view| view.read(cx).can_end());
         if watching || !can_end {
-            self.tabs.close(id);
-            self.panes.remove(id);
             let why = if watching {
                 "Another view controls this session, so it keeps running."
             } else {
                 "This window is not attached to the session, so it was not ended and keeps running."
             };
-            let again = if is_plain(&open) {
-                "Turn on Show terminals in the sidebar to open it again."
-            } else {
-                "It is still in the sidebar."
-            };
-            self.notice = Some(format!("Closed the tab. {why} {again}"));
-            self.after_change(cx);
+            self.put_away(id, why, cx);
             return;
         }
-        let armed = self
-            .armed_close
-            .take()
-            .is_some_and(|(armed, _)| armed == id);
-        if !armed && self.warns_before_ending(&open, cx) && self.screens.has("confirm", cx) {
+        let armed = self.armed_close.take().is_some_and(|armed| armed == id);
+        if !armed && self.warns_before_ending(&open, cx) {
+            if !self.screens.has("confirm", cx) {
+                self.notice = Some(
+                    "No mod draws the confirmation, so the agent was not stopped. The stock one is \
+                     restored when the app starts."
+                        .into(),
+                );
+                cx.notify();
+                return;
+            }
             let target = id.to_string();
+            let label = self.title_of(id, cx);
             self.open_screen(
                 "confirm",
-                json!({
-                    "message": format!("{CLOSE_ASKS} {} and its agent.", open.title),
-                    "confirmLabel": "Close",
-                    "cancelLabel": "Cancel",
-                    "busy": false,
-                }),
+                json!({ "sessionId": id, "label": label }),
                 None,
                 Some(Box::new(move |this, result, _, cx| {
-                    if result.get("confirmed").and_then(Value::as_bool) == Some(true) {
-                        this.armed_close = Some((target.clone(), Task::ready(())));
+                    if result.get("keepRunning").and_then(Value::as_bool) == Some(true) {
+                        this.put_away(&target, "It keeps running.", cx);
+                    } else if result.get("confirmed").and_then(Value::as_bool) == Some(true) {
+                        if result.get("never").and_then(Value::as_bool) == Some(true) {
+                            this.change(Change::WarnCloseAgent(false), cx);
+                        }
+                        this.armed_close = Some(target.clone());
                         this.close(&target, cx);
                     }
                 })),
                 cx,
             );
-            return;
-        }
-        if !armed && self.warns_before_ending(&open, cx) {
-            let timer = cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(CLOSE_CONFIRM_WITHIN).await;
-                let _ = this.update(cx, |this, cx| {
-                    this.armed_close = None;
-                    if this
-                        .notice
-                        .as_deref()
-                        .is_some_and(|n| n.starts_with(CLOSE_ASKS))
-                    {
-                        this.notice = None;
-                    }
-                    cx.notify();
-                });
-            });
-            self.armed_close = Some((id.to_string(), timer));
-            self.notice = Some(format!(
-                "{CLOSE_ASKS} {} and its agent. Close the tab again to confirm.",
-                open.title
-            ));
-            cx.notify();
             return;
         }
         let id = id.to_string();
@@ -1608,6 +1582,21 @@ impl Workspace {
         }
         self.notice = Some("Ending the session\u{2026}".into());
         cx.notify();
+    }
+
+    /// Take tab `id` out of this window without ending its session, saying `why` it keeps running.
+    fn put_away(&mut self, id: &str, why: &str, cx: &mut Context<Self>) {
+        let Some(pane) = self.panes.remove(id) else {
+            return;
+        };
+        self.tabs.close(id);
+        let again = if is_plain(&pane.open) {
+            "Turn on Show terminals in the sidebar to open it again."
+        } else {
+            "It is still in the sidebar."
+        };
+        self.notice = Some(format!("Closed the tab. {why} {again}"));
+        self.after_change(cx);
     }
 
     /// Whether ending this tab's session asks first: it runs an agent (what the core sees in it,
