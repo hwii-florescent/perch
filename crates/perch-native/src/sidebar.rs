@@ -9,7 +9,11 @@
 //! is ever marked exited.
 //!
 //! The rules mirror the web client's `attention.ts`, `statusView.ts`, `sidebarOrder.ts` and
-//! `navigation.ts`.
+//! `navigation.ts`. [`Model::store`] carries the facts themselves, from which [`navigation`]
+//! derives the web's `Navigation` and `Hosts` exactly as `navigation.ts` does (what native mods
+//! read); [`Model::hosts`] is the older, coarser tree the Rust sidebar view draws.
+
+pub mod navigation;
 
 use crate::settings::TerminalSettings;
 use perch_core::agent_fleet::TERMINAL_PROVIDER;
@@ -19,6 +23,7 @@ use perch_core::protocol::{
 };
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 /// The host id of the computer the core runs on.
 pub const LOCAL: &str = "local";
@@ -266,13 +271,25 @@ pub struct Model {
     pub keys_file: Option<Value>,
     /// The terminal settings, once the core has sent them.
     pub terminal: Option<Box<TerminalSettings>>,
+    /// The facts as the core sent them, for [`navigation`].
+    pub store: Arc<navigation::Store>,
 }
 
 /// What `host.info` said about a remote computer.
-#[derive(Default)]
-struct HostFacts {
-    state: String,
-    error: Option<String>,
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct HostFacts {
+    /// `connected`, `connecting`, `error` or `disabled`.
+    pub state: String,
+    pub error: Option<String>,
+}
+
+/// Where a computer's `workspace.snapshot` is (`workspaceSnapshotByHost`): asked for, answered,
+/// or lost with the computer (`error` says why).
+#[derive(Clone, Debug, PartialEq)]
+pub enum SnapshotState {
+    Loading,
+    Ready,
+    Error(String),
 }
 
 #[derive(Default)]
@@ -312,6 +329,17 @@ pub struct State {
     keybindings: BTreeMap<String, String>,
     keys_file: Option<Value>,
     terminal: Option<Box<TerminalSettings>>,
+    /// This computer as `server.info` names it: hostname, platform, reached over SSH.
+    server: Option<(String, String, bool)>,
+    /// The focused folder and branch (`status.update`).
+    status: Option<(String, String)>,
+    /// What each remote computer's `host.info` said it can do.
+    host_capabilities: HashMap<String, Vec<String>>,
+    snapshots: HashMap<String, SnapshotState>,
+    /// `settings.theme`, once the core has sent it.
+    theme: Option<String>,
+    /// Counts the changes to the facts, so a [`navigation::Store`] compares cheaply.
+    revision: u64,
 }
 
 /// `statusDot.sessionDotState`: what the session itself reports, before the core's attention facts.
@@ -400,6 +428,7 @@ impl State {
         self.host_facts.clear();
         // A change seen against a list from before the drop would be a guess.
         self.listed = false;
+        self.revision += 1;
     }
 
     /// The socket is gone, or never came up (`reason`). Rows stay, with no state claimed.
@@ -407,6 +436,7 @@ impl State {
         self.connected = false;
         self.offline_reason = reason;
         self.core_url = None;
+        self.revision += 1;
     }
 
     /// The session the window shows. It is read: the core clears its Done mark when asked, and
@@ -414,6 +444,7 @@ impl State {
     pub fn view(&mut self, session_id: &str) {
         self.viewing = Some(session_id.to_string());
         self.track_viewed();
+        self.revision += 1;
     }
 
     pub fn viewing(&self) -> Option<&str> {
@@ -446,12 +477,14 @@ impl State {
                 capabilities,
                 hostname,
                 platform,
+                is_ssh,
                 ..
             } => {
                 // An older core sends no attention events: only the sessions' own flags speak.
                 self.needs.clear();
                 self.needs_events.clear();
                 self.machine = Some(format!("{hostname} · {platform}"));
+                self.server = Some((hostname.clone(), platform.clone(), *is_ssh));
                 self.local_capabilities.clone_from(capabilities);
                 if has(capabilities, ATTENTION_CAPABILITY) {
                     asks.push(Request::Attention);
@@ -459,6 +492,9 @@ impl State {
                 if has(capabilities, WORKSPACE_CAPABILITY) {
                     asks.push(Request::Workspaces(LOCAL.into()));
                 }
+            }
+            ServerMessage::StatusUpdate { cwd, branch, .. } => {
+                self.status = Some((cwd.clone(), branch.clone()));
             }
             ServerMessage::SessionList { sessions } => {
                 self.sessions = sessions.clone();
@@ -497,6 +533,7 @@ impl State {
             } => {
                 self.workspaces.retain(|w| w.host_id != *host_id);
                 self.workspaces.extend(workspaces.iter().cloned());
+                self.snapshots.insert(host_id.clone(), SnapshotState::Ready);
             }
             ServerMessage::WorkspaceUpdated { workspace, .. } => {
                 match self.workspaces.iter_mut().find(|w| w.id == workspace.id) {
@@ -534,6 +571,20 @@ impl State {
                         error: error.clone(),
                     },
                 );
+                // As the web's store: the capabilities this message names (none when it names
+                // none), and a computer that is not connected keeps its last inventory, marked
+                // as not current.
+                self.host_capabilities
+                    .insert(host_id.clone(), capabilities.clone().unwrap_or_default());
+                if state != "connected" {
+                    self.snapshots.insert(
+                        host_id.clone(),
+                        SnapshotState::Error(
+                            "Remote disconnected. Showing the last known workspace inventory."
+                                .into(),
+                        ),
+                    );
+                }
                 if state == "connected" && was.is_none_or(|was| was.state != "connected") {
                     asks.push(Request::Projects(host_id.clone()));
                     asks.push(Request::Providers(host_id.clone()));
@@ -547,6 +598,7 @@ impl State {
             }
             ServerMessage::SettingsCurrent { settings } => {
                 self.sound_enabled = settings.sound_enabled;
+                self.theme = Some(settings.theme.clone());
                 self.keybindings.clone_from(&settings.keybindings);
                 self.terminal = Some(Box::new(TerminalSettings::from_wire(settings)));
             }
@@ -578,6 +630,13 @@ impl State {
             _ => return asks,
         }
         self.track_viewed();
+        for ask in &asks {
+            if let Request::Workspaces(host_id) = ask {
+                self.snapshots
+                    .insert(host_id.clone(), SnapshotState::Loading);
+            }
+        }
+        self.revision += 1;
         asks
     }
 
@@ -704,6 +763,34 @@ impl State {
             keybindings: self.keybindings.clone(),
             keys_file: self.keys_file.clone(),
             terminal: self.terminal.clone(),
+            store: Arc::new(self.store()),
+        }
+    }
+
+    /// The facts as they stand, for [`navigation`].
+    pub fn store(&self) -> navigation::Store {
+        let server = self.server.clone();
+        navigation::Store {
+            revision: self.revision,
+            connected: self.connected,
+            hostname: server.as_ref().map(|s| s.0.clone()),
+            platform: server.as_ref().map(|s| s.1.clone()),
+            is_ssh: server.map(|s| s.2),
+            status: self.status.clone(),
+            local_capabilities: self.local_capabilities.clone(),
+            host_capabilities: self.host_capabilities.clone(),
+            host_entries: self.host_entries.clone(),
+            host_states: self.host_facts.clone(),
+            snapshots: self.snapshots.clone(),
+            projects: self.projects.clone(),
+            workspaces: self.workspaces.clone(),
+            sessions: self.sessions.clone(),
+            order: self.order.clone(),
+            needs_events: self.needs_events.clone(),
+            viewing: self.viewing.clone(),
+            held: self.held.clone(),
+            theme: self.theme.clone(),
+            providers: self.providers.clone(),
         }
     }
 
