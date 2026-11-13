@@ -1,0 +1,355 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "navigator",
+  "note": "Floating screen: it is drawn through a portal into the page body and placed against the window, so the reference is the whole default 1280x800 window on the app's backdrop and every box is in window coordinates. The command palette (stock-ui/navigator, Cmd+P). Props are what components/Navigator.tsx gives it, written out here (sessions as the host's status dot would class them, the shown workspace, the host's agents); its callbacks are no-ops. The typed query is the screen's own state, so a state types it with `steps` (events on the page's elements) before it is measured; the steps are recorded in each output's sdk.steps.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1280,
+    "height": 800
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "props": {
+    "open": true,
+    "sessions": [
+      {
+        "id": "s-perch-1",
+        "title": "Port the sidebar to GPUI",
+        "cwd": "/Users/dev/code/perch",
+        "hostId": "local",
+        "createdAt": 1767268800000,
+        "state": "working"
+      },
+      {
+        "id": "s-perch-2",
+        "title": "Fix terminal slash input",
+        "cwd": "/Users/dev/code/perch",
+        "hostId": "local",
+        "createdAt": 1767265200000,
+        "state": "done"
+      },
+      {
+        "id": "s-perch-3",
+        "title": "Review agent mail",
+        "cwd": "/Users/dev/code/perch",
+        "hostId": "local",
+        "createdAt": 1767261600000,
+        "state": "idle"
+      },
+      {
+        "id": "s-api-1",
+        "title": "Add rate limiting",
+        "cwd": "/Users/dev/code/api-server-wt/rate-limit",
+        "hostId": "local",
+        "createdAt": 1767254400000,
+        "state": "working"
+      },
+      {
+        "id": "s-api-2",
+        "title": "Load test the gateway",
+        "cwd": "/Users/dev/code/api-server",
+        "hostId": "local",
+        "createdAt": 1767250800000,
+        "state": "working"
+      },
+      {
+        "id": "s-notes-1",
+        "title": "Trip planning",
+        "cwd": "/Users/dev/notes",
+        "hostId": "local",
+        "createdAt": 1767247200000,
+        "state": "idle"
+      },
+      {
+        "id": "s-chat-1",
+        "title": "Explain git rebase",
+        "cwd": "/Users/dev/.perch/scratch",
+        "hostId": "local",
+        "createdAt": 1767243600000,
+        "state": "idle"
+      },
+      {
+        "id": "s-chat-2",
+        "title": "Regex for ISO dates",
+        "cwd": "/Users/dev/.perch/scratch",
+        "hostId": "local",
+        "createdAt": 1767240000000,
+        "state": "done"
+      },
+      {
+        "id": "s-infra-1",
+        "title": "Rotate the CI runners",
+        "cwd": "/srv/infra",
+        "hostId": "buildbox",
+        "createdAt": 1767268800000,
+        "state": "working"
+      },
+      {
+        "id": "s-infra-2",
+        "title": "Audit open ports",
+        "cwd": "/srv/infra",
+        "hostId": "buildbox",
+        "createdAt": 1767265200000,
+        "state": "idle"
+      },
+      {
+        "id": "s-jobs-1",
+        "title": "Why did the export fail",
+        "cwd": "/srv/nightly-jobs",
+        "hostId": "buildbox",
+        "createdAt": 1767261600000,
+        "state": "done"
+      }
+    ],
+    "currentSessionId": "s-perch-1",
+    "connected": true,
+    "workspace": {
+      "id": "w-perch-main",
+      "path": "/Users/dev/code/perch"
+    },
+    "supportsSearch": true,
+    "supportsRun": true,
+    "agents": [
+      {
+        "id": "claude",
+        "label": "Claude"
+      },
+      {
+        "id": "codex",
+        "label": "Codex"
+      },
+      {
+        "id": "pi",
+        "label": "Pi"
+      }
+    ],
+    "agentCwd": "/Users/dev/code/perch",
+    "terminalCwd": "/Users/dev/code/perch"
+  },
+  "states": [
+    {
+      "id": "empty-query",
+      "title": "Opened with nothing typed: the chips, then New Terminal and the agents, then every session newest first; the first row is highlighted"
+    },
+    {
+      "id": "query-matches",
+      "title": "\"term\" typed and the highlight moved down once: matching files from the workspace search, commands and sessions, the second row highlighted, the search note under the list",
+      "props": {
+        "search": {
+          "query": "term",
+          "state": "ready",
+          "truncated": false,
+          "entries": [
+            {
+              "name": "terminal.rs",
+              "path": "crates/perch-core/src/terminal.rs",
+              "kind": "file",
+              "size": 1200,
+              "readonly": false,
+              "executable": false
+            },
+            {
+              "name": "xtermSetup.ts",
+              "path": "packages/web/src/xtermSetup.ts",
+              "kind": "file",
+              "size": 1200,
+              "readonly": false,
+              "executable": false
+            },
+            {
+              "name": "terminalScope.ts",
+              "path": "packages/web/src/terminalScope.ts",
+              "kind": "file",
+              "size": 1200,
+              "readonly": false,
+              "executable": false
+            }
+          ]
+        }
+      },
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"navigator-input\"]",
+            "text": "term"
+          }
+        },
+        {
+          "key": {
+            "key": "ArrowDown"
+          }
+        }
+      ]
+    },
+    {
+      "id": "searching",
+      "title": "\"perch\" typed and the search not answered yet: Searching files... above the matching sessions",
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"navigator-input\"]",
+            "text": "perch"
+          }
+        }
+      ]
+    },
+    {
+      "id": "filter-blocked",
+      "title": "The Blocked chip pressed: it is lit, commands are gone and only the session that waits for the person is listed",
+      "patch": {
+        "sessions": {
+          "s-perch-3": {
+            "blocked": true
+          }
+        }
+      },
+      "props": {
+        "sessions": [
+          {
+            "id": "s-perch-1",
+            "title": "Port the sidebar to GPUI",
+            "cwd": "/Users/dev/code/perch",
+            "hostId": "local",
+            "createdAt": 1767268800000,
+            "state": "working"
+          },
+          {
+            "id": "s-perch-2",
+            "title": "Fix terminal slash input",
+            "cwd": "/Users/dev/code/perch",
+            "hostId": "local",
+            "createdAt": 1767265200000,
+            "state": "done"
+          },
+          {
+            "id": "s-perch-3",
+            "title": "Review agent mail",
+            "cwd": "/Users/dev/code/perch",
+            "hostId": "local",
+            "createdAt": 1767261600000,
+            "state": "blocked"
+          },
+          {
+            "id": "s-api-1",
+            "title": "Add rate limiting",
+            "cwd": "/Users/dev/code/api-server-wt/rate-limit",
+            "hostId": "local",
+            "createdAt": 1767254400000,
+            "state": "working"
+          },
+          {
+            "id": "s-api-2",
+            "title": "Load test the gateway",
+            "cwd": "/Users/dev/code/api-server",
+            "hostId": "local",
+            "createdAt": 1767250800000,
+            "state": "working"
+          },
+          {
+            "id": "s-notes-1",
+            "title": "Trip planning",
+            "cwd": "/Users/dev/notes",
+            "hostId": "local",
+            "createdAt": 1767247200000,
+            "state": "idle"
+          },
+          {
+            "id": "s-chat-1",
+            "title": "Explain git rebase",
+            "cwd": "/Users/dev/.perch/scratch",
+            "hostId": "local",
+            "createdAt": 1767243600000,
+            "state": "idle"
+          },
+          {
+            "id": "s-chat-2",
+            "title": "Regex for ISO dates",
+            "cwd": "/Users/dev/.perch/scratch",
+            "hostId": "local",
+            "createdAt": 1767240000000,
+            "state": "done"
+          },
+          {
+            "id": "s-infra-1",
+            "title": "Rotate the CI runners",
+            "cwd": "/srv/infra",
+            "hostId": "buildbox",
+            "createdAt": 1767268800000,
+            "state": "working"
+          },
+          {
+            "id": "s-infra-2",
+            "title": "Audit open ports",
+            "cwd": "/srv/infra",
+            "hostId": "buildbox",
+            "createdAt": 1767265200000,
+            "state": "idle"
+          },
+          {
+            "id": "s-jobs-1",
+            "title": "Why did the export fail",
+            "cwd": "/srv/nightly-jobs",
+            "hostId": "buildbox",
+            "createdAt": 1767261600000,
+            "state": "done"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"navigator-filter-blocked\"]"
+        }
+      ]
+    },
+    {
+      "id": "no-matches",
+      "title": "A query nothing matches: the search answered with no files, so No matches shows with the note",
+      "props": {
+        "search": {
+          "query": "zzzq",
+          "state": "ready",
+          "truncated": false,
+          "entries": []
+        }
+      },
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"navigator-input\"]",
+            "text": "zzzq"
+          }
+        }
+      ]
+    },
+    {
+      "id": "run-command",
+      "title": "\"> npm test\": shell mode lists one Run row for the shown workspace and explains the confirmation",
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"navigator-input\"]",
+            "text": "> npm test"
+          }
+        }
+      ]
+    },
+    {
+      "id": "disconnected",
+      "title": "The window lost its core and the person starts a shell command: only Manage agents and the sessions remain; the hint says to reconnect",
+      "props": {
+        "connected": false
+      },
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"navigator-input\"]",
+            "text": "> ls"
+          }
+        }
+      ]
+    }
+  ]
+}

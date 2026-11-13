@@ -4,6 +4,11 @@
   "screens": {
     "sidebar": {
       "root": "aside.sidebar",
+      "overflow": [
+        "[data-testid=\"project-list\"]",
+        "aside.sidebar > div:first-child"
+      ],
+      "minElements": 11,
       "elements": [
         {
           "name": "sidebar-root",
@@ -669,6 +674,833 @@
           "name": "settings-gear-icon",
           "selector": "[data-testid=\"settings-gear\"] > svg",
           "description": "Its cog glyph."
+        }
+      ]
+    },
+    "tabs": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 3,
+      "elements": [
+        {
+          "name": "tab-strip",
+          "selector": "[data-testid=\"tab-bar\"]",
+          "description": "The strip: a row of tabs and the + button, scrolling sideways when they do not fit; 8px side and 6px top and bottom padding, 3px between tabs."
+        },
+        {
+          "name": "tab-slot",
+          "selector": "[data-tab-entry]",
+          "description": "One tab's slot: the room for the tab and its x (7rem to 16rem wide, sharing the strip equally).",
+          "key": {
+            "self": true,
+            "attr": "data-tab-entry"
+          }
+        },
+        {
+          "name": "tab-separator",
+          "selector": "[data-testid=\"tab-separator\"]",
+          "description": "The hairline in the gap between two tabs that are neither focused.",
+          "key": {
+            "closest": "[data-tab-entry]",
+            "attr": "data-tab-entry"
+          }
+        },
+        {
+          "name": "tab",
+          "selector": "button.tab-bar__tab",
+          "description": "The tab button: filled when focused, plain otherwise; soft corners (square) or a pill (round).",
+          "key": {
+            "closest": "[data-tab-entry]",
+            "attr": "data-tab-entry"
+          },
+          "text": true
+        },
+        {
+          "name": "tab-icon",
+          "selector": "button.tab-bar__tab > span[aria-hidden=\"true\"]",
+          "description": "The slot of the tab's mark, drawn at 80% opacity.",
+          "key": {
+            "closest": "[data-tab-entry]",
+            "attr": "data-tab-entry"
+          }
+        },
+        {
+          "name": "tab-icon-glyph",
+          "selector": "button.tab-bar__tab > span[aria-hidden=\"true\"] > *",
+          "description": "The mark: the agent's icon, a file, the review, or a page's icon or a globe.",
+          "key": {
+            "closest": "[data-tab-entry]",
+            "attr": "data-tab-entry"
+          }
+        },
+        {
+          "name": "tab-label",
+          "selector": "button.tab-bar__tab > span.truncate",
+          "description": "The tab's name, cut with an ellipsis when the tab is narrower (italic for a previewed file).",
+          "key": {
+            "closest": "[data-tab-entry]",
+            "attr": "data-tab-entry"
+          },
+          "text": true
+        },
+        {
+          "name": "tab-dirty",
+          "selector": "button.tab-bar__tab > span[aria-label=\"unsaved changes\"]",
+          "description": "The dot after a file's name while it has unsaved changes.",
+          "key": {
+            "closest": "[data-tab-entry]",
+            "attr": "data-tab-entry"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-close",
+          "selector": "[data-tab-entry] > button[aria-label^=\"Close\"]",
+          "description": "The x at the tab's right edge.",
+          "key": {
+            "closest": "[data-tab-entry]",
+            "attr": "data-tab-entry"
+          }
+        },
+        {
+          "name": "tab-close-glyph",
+          "selector": "[data-tab-entry] > button[aria-label^=\"Close\"] > svg",
+          "description": "Its cross.",
+          "key": {
+            "closest": "[data-tab-entry]",
+            "attr": "data-tab-entry"
+          }
+        },
+        {
+          "name": "tab-new",
+          "selector": "[data-testid=\"tab-new\"]",
+          "description": "The + button after the last tab: a 28px segment."
+        },
+        {
+          "name": "tab-new-glyph",
+          "selector": "[data-testid=\"tab-new\"] > svg",
+          "description": "Its plus mark."
+        }
+      ]
+    },
+    "status": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 5,
+      "elements": [
+        {
+          "name": "status-bar",
+          "selector": "footer.status-bar",
+          "description": "The bar: 24px high, window wide, 12px side padding, 12px between its three blocks."
+        },
+        {
+          "name": "status-location",
+          "selector": ".status-bar__location",
+          "description": "The left block: dot, host, folder and branch; takes the room the others leave."
+        },
+        {
+          "name": "status-dot",
+          "selector": ".status-bar__location > span:first-child",
+          "description": "The connection dot: green when the focused host is online, yellow when reconnecting."
+        },
+        {
+          "name": "status-host",
+          "selector": "[data-testid=\"status-host\"]",
+          "description": "The host's name (Local on this machine), at most 6rem.",
+          "text": true
+        },
+        {
+          "name": "status-cwd",
+          "selector": ".status-item--cwd",
+          "description": "The folder of the focused session, cut with an ellipsis.",
+          "text": true
+        },
+        {
+          "name": "status-branch",
+          "selector": ".status-bar__branch",
+          "description": "The branch block: its mark and name, at most 45% of the left block."
+        },
+        {
+          "name": "status-branch-icon",
+          "selector": ".status-bar__branch > svg",
+          "description": "The branch mark."
+        },
+        {
+          "name": "status-branch-name",
+          "selector": ".status-bar__branch > span",
+          "description": "The branch name, cut with an ellipsis.",
+          "text": true
+        },
+        {
+          "name": "status-details",
+          "selector": ".status-bar__details",
+          "description": "The middle block (zoom, context, cost), right aligned; hidden when the window is under 900px wide."
+        },
+        {
+          "name": "zoom-indicator",
+          "selector": "[data-testid=\"zoom-indicator\"]",
+          "description": "The zoom percentage button, present while the zoom is not 100%.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "status-detail",
+          "selector": ".status-bar__details > span",
+          "description": "One of the focused agent's context tokens (ctx 48.2k) or cost ($0.424), in that order.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "status-usage",
+          "selector": ".status-bar__usage",
+          "description": "The right block: plan usage, pulled 8px left to align its button's text."
+        },
+        {
+          "name": "usage-summary",
+          "selector": "[data-testid=\"usage-summary\"]",
+          "description": "The button that lists every account's windows and opens the details."
+        },
+        {
+          "name": "usage-unavailable",
+          "selector": "[data-testid=\"usage-summary\"] > span:only-child",
+          "description": "Usage unavailable: shown when the core has reported no account.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "usage-account",
+          "selector": "[data-testid=\"usage-summary\"] > span.flex",
+          "description": "One account's group: its name, then its windows."
+        },
+        {
+          "name": "usage-account-name",
+          "selector": "[data-testid=\"usage-summary\"] > span.flex > span:first-child",
+          "description": "The provider (and the account's label when there are several of that provider).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "usage-window",
+          "selector": "[data-testid=\"usage-summary\"] > span.flex > span:not(:first-child)",
+          "description": "One window's label and percent; the first of an account is full text colour, 70% and over yellow, 90% and over red.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "status-connection",
+          "selector": "[data-testid=\"status-connection\"]",
+          "description": "The connection check at the right end: a tick when online, an exclamation mark otherwise."
+        },
+        {
+          "name": "status-connection-glyph",
+          "selector": "[data-testid=\"status-connection\"] > svg",
+          "description": "Its glyph."
+        }
+      ]
+    },
+    "navigator": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 5,
+      "elements": [
+        {
+          "name": "navigator-scrim",
+          "selector": "body > div.fixed.inset-0",
+          "description": "The dimming layer over the whole window (55% black); a press on it closes the palette."
+        },
+        {
+          "name": "navigator-panel",
+          "selector": "[data-testid=\"navigator\"]",
+          "description": "The palette: at most 560px wide and 480px high, centred, its top 12% of the window down; rounded, on the panel fill with a shadow."
+        },
+        {
+          "name": "navigator-input",
+          "selector": "[data-testid=\"navigator-input\"]",
+          "description": "The search field across the top (surface fill, 0.95rem); `text` is what was typed, `placeholder` what shows while it is empty.",
+          "text": true
+        },
+        {
+          "name": "navigator-chips",
+          "selector": "[data-testid=\"navigator\"] > div:nth-child(2)",
+          "description": "The row of state chips under the field."
+        },
+        {
+          "name": "navigator-chip",
+          "selector": "[data-testid^=\"navigator-filter-\"]",
+          "description": "One chip (All, Working, Blocked, Done, Idle); the chosen one is on the lighter fill in the accent colour.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "navigator-filter-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "navigator-list",
+          "selector": "[data-testid=\"navigator\"] > div:nth-child(3)",
+          "description": "The scrolling list of notices, commands and sessions."
+        },
+        {
+          "name": "navigator-notice",
+          "selector": "[data-testid=\"navigator\"] > div:nth-child(3) > p[role]",
+          "description": "A line of status or error text: Searching files, the shell-mode hint, a search error (red).",
+          "text": true
+        },
+        {
+          "name": "navigator-empty",
+          "selector": "[data-testid=\"navigator\"] div.text-center",
+          "description": "No matches, centred.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "navigator-command",
+          "selector": "[data-testid^=\"navigator-command-\"]",
+          "description": "One command row: New Terminal, an agent to start, Manage agents, or Run <command>; the highlighted one is on the lighter fill.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "navigator-command-"
+          }
+        },
+        {
+          "name": "navigator-command-title",
+          "selector": "[data-testid^=\"navigator-command-\"] > span:first-child",
+          "description": "Its name.",
+          "key": {
+            "closest": "[data-testid^=\"navigator-command-\"]",
+            "attr": "data-testid",
+            "strip": "navigator-command-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "navigator-command-detail",
+          "selector": "[data-testid^=\"navigator-command-\"] > span:last-child",
+          "description": "Its folder or help, right aligned, small, in the muted colour.",
+          "key": {
+            "closest": "[data-testid^=\"navigator-command-\"]",
+            "attr": "data-testid",
+            "strip": "navigator-command-"
+          },
+          "text": true
+        },
+        {
+          "name": "navigator-row",
+          "selector": "[data-testid^=\"navigator-row-\"]",
+          "description": "One session row; the highlighted one is on the lighter fill.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "navigator-row-"
+          }
+        },
+        {
+          "name": "navigator-row-dot",
+          "selector": "[data-testid^=\"navigator-row-\"] > :first-child",
+          "description": "The session's status mark: its agent's icon in a ring of its state's colour.",
+          "key": {
+            "closest": "[data-testid^=\"navigator-row-\"]",
+            "attr": "data-testid",
+            "strip": "navigator-row-"
+          }
+        },
+        {
+          "name": "navigator-row-title",
+          "selector": "[data-testid^=\"navigator-row-\"] > span:nth-child(2)",
+          "description": "The session's title (bold for the one on screen).",
+          "key": {
+            "closest": "[data-testid^=\"navigator-row-\"]",
+            "attr": "data-testid",
+            "strip": "navigator-row-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "navigator-row-detail",
+          "selector": "[data-testid^=\"navigator-row-\"] > span:last-child",
+          "description": "Its folder, with the host's name before it when it is not this machine.",
+          "key": {
+            "closest": "[data-testid^=\"navigator-row-\"]",
+            "attr": "data-testid",
+            "strip": "navigator-row-"
+          },
+          "text": true
+        },
+        {
+          "name": "navigator-note",
+          "selector": "[data-testid=\"navigator\"] > p:last-child",
+          "description": "The footnote under the list while files are searched: where, and what is skipped.",
+          "text": true
+        }
+      ]
+    },
+    "pane-menu": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "pane-menu",
+          "selector": "[data-testid=\"pane-context-menu\"]",
+          "description": "The menu: at least 180px wide, on the lighter surface fill with a shadow, placed at its corner (moved in near an edge)."
+        },
+        {
+          "name": "pane-menu-item",
+          "selector": "[data-testid=\"pane-context-menu\"] > button",
+          "description": "One row: Split right, Split below, Add session inside this tab, Show beside an open tab, Zoom or Restore, Rename pane, Stop agent (red), Close pane (red; 40% opacity when disabled).",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "pane-menu-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "pane-menu-divider",
+          "selector": "[data-testid=\"pane-context-menu\"] > div.h-px",
+          "description": "The hairline before the red rows."
+        },
+        {
+          "name": "pane-menu-rename-row",
+          "selector": "[data-testid=\"pane-context-menu\"] > div.flex",
+          "description": "The rename row: the field and OK, replacing the rows."
+        },
+        {
+          "name": "pane-menu-rename-input",
+          "selector": "[data-testid=\"pane-menu-rename-input\"]",
+          "description": "The rename field (surface fill), holding the pane's title.",
+          "text": true
+        },
+        {
+          "name": "pane-menu-rename-confirm",
+          "selector": "[data-testid=\"pane-menu-rename-confirm\"]",
+          "description": "Its OK button (primary).",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "confirm": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 5,
+      "elements": [
+        {
+          "name": "confirm-scrim",
+          "selector": "body > div.fixed.inset-0",
+          "description": "The dimming layer over the whole window (55% black); a press on it cancels."
+        },
+        {
+          "name": "confirm-panel",
+          "selector": "[data-testid=\"confirm-dialog\"]",
+          "description": "The panel: 360px wide (less 2rem of the window), centred, 16px inside, on the panel fill with a shadow."
+        },
+        {
+          "name": "confirm-message",
+          "selector": ".confirm-dialog__message",
+          "description": "The message: line breaks kept, long words broken anywhere; 0.88rem on a 1.4 line.",
+          "text": true
+        },
+        {
+          "name": "confirm-extra",
+          "selector": "[data-testid=\"confirm-dialog\"] > :not(.confirm-dialog__message):not(div.flex)",
+          "description": "What the caller adds under the message: the close warning's keep-running link and its do-not-warn-again box.",
+          "text": true
+        },
+        {
+          "name": "confirm-buttons",
+          "selector": "[data-testid=\"confirm-dialog\"] > div.flex",
+          "description": "The row of buttons, right aligned, 8px apart."
+        },
+        {
+          "name": "confirm-cancel",
+          "selector": "[data-testid=\"confirm-cancel\"]",
+          "description": "The Cancel button.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "confirm-accept",
+          "selector": "[data-testid=\"confirm-accept\"]",
+          "description": "The confirm button (primary): the caller's label, or Starting... while busy.",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "dialog": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 5,
+      "elements": [
+        {
+          "name": "dialog-scrim",
+          "selector": "body > div.fixed.inset-0",
+          "description": "The dimming layer over the whole window (55% black); a press on it closes the dialog."
+        },
+        {
+          "name": "dialog-panel",
+          "selector": "[data-testid=\"file-name-dialog\"]",
+          "description": "The panel: 30rem wide (92% of a narrower window), centred, 16px inside, on the panel fill with a shadow; rows 0.6rem apart."
+        },
+        {
+          "name": "dialog-title",
+          "selector": "[data-testid=\"file-name-dialog\"] > h2",
+          "description": "The title, 0.9rem semibold.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "dialog-input",
+          "selector": "[data-testid=\"file-name-input\"]",
+          "description": "The caller's field: surface fill, 0.85rem; `text` is its value.",
+          "text": true
+        },
+        {
+          "name": "dialog-hint",
+          "selector": "[data-testid=\"file-name-dialog\"] > p:not([role])",
+          "description": "The caller's hint under the field (red).",
+          "text": true
+        },
+        {
+          "name": "dialog-error",
+          "selector": "[data-testid=\"file-name-dialog\"] > p[role=\"alert\"]",
+          "description": "The caller's error line (red).",
+          "text": true
+        },
+        {
+          "name": "dialog-buttons",
+          "selector": "[data-testid=\"file-name-dialog\"] > div.flex",
+          "description": "The caller's row of buttons, right aligned."
+        },
+        {
+          "name": "dialog-cancel",
+          "selector": "[data-testid=\"file-name-dialog\"] > div.flex > button:first-child",
+          "description": "Cancel.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "dialog-confirm",
+          "selector": "[data-testid=\"file-name-confirm\"]",
+          "description": "Create (primary); 55% opacity while the field is not valid.",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "toast": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 4,
+      "elements": [
+        {
+          "name": "toast-stack",
+          "selector": "[data-testid=\"toast\"]",
+          "description": "The column of toasts: top right, 12px from the window edges, 320px wide, 8px between toasts, the newest first."
+        },
+        {
+          "name": "toast-card",
+          "selector": "[data-testid=\"toast\"] .animate-toast-in",
+          "description": "One toast: the lighter surface fill, rounded, with a shadow."
+        },
+        {
+          "name": "toast-open",
+          "selector": "[data-testid^=\"toast-\"]:not([data-testid^=\"toast-dismiss-\"])",
+          "description": "The button that fills the card (a click opens what the toast is about)."
+        },
+        {
+          "name": "toast-mark",
+          "selector": "[data-testid^=\"toast-\"]:not([data-testid^=\"toast-dismiss-\"]) > :first-child",
+          "description": "The mark at the left: the session's status mark, a mod's own character, or a plain ring (teal; yellow for a usage alert or a warning; red for an error or a blocked session)."
+        },
+        {
+          "name": "toast-heading",
+          "selector": "[data-testid^=\"toast-\"]:not([data-testid^=\"toast-dismiss-\"]) > span.min-w-0 > span:first-child",
+          "description": "The first line: what happened, bold 0.82rem.",
+          "text": true
+        },
+        {
+          "name": "toast-detail",
+          "selector": "[data-testid^=\"toast-\"]:not([data-testid^=\"toast-dismiss-\"]) > span.min-w-0 > span:nth-child(2)",
+          "description": "The second line: to what, in the muted colour.",
+          "text": true
+        },
+        {
+          "name": "toast-dismiss",
+          "selector": "[data-testid^=\"toast-dismiss-\"]",
+          "description": "The x at the card's right edge."
+        },
+        {
+          "name": "toast-dismiss-glyph",
+          "selector": "[data-testid^=\"toast-dismiss-\"] > svg",
+          "description": "Its cross."
+        }
+      ]
+    },
+    "pane-header": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 3,
+      "elements": [
+        {
+          "name": "pane-header",
+          "selector": "[data-testid^=\"pane-header-\"]",
+          "description": "The header row: 28px high, on the panel fill, 6px each side, 6px between its parts; 12px muted text.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "pane-header-"
+          }
+        },
+        {
+          "name": "pane-header-icon",
+          "selector": "[data-testid^=\"pane-header-\"] > span.shrink-0:not([data-testid])",
+          "description": "The slot of the agent's icon (the name and state take the room the controls leave).",
+          "key": {
+            "closest": "[data-testid^=\"pane-header-\"]",
+            "attr": "data-testid",
+            "strip": "pane-header-"
+          }
+        },
+        {
+          "name": "pane-header-icon-glyph",
+          "selector": "[data-testid^=\"pane-header-\"] > span.shrink-0:not([data-testid]) > *",
+          "description": "The agent's icon, 12px.",
+          "key": {
+            "closest": "[data-testid^=\"pane-header-\"]",
+            "attr": "data-testid",
+            "strip": "pane-header-"
+          }
+        },
+        {
+          "name": "pane-header-name",
+          "selector": "[data-testid^=\"pane-header-\"] > span.truncate",
+          "description": "The tab's name, cut with an ellipsis.",
+          "key": {
+            "closest": "[data-testid^=\"pane-header-\"]",
+            "attr": "data-testid",
+            "strip": "pane-header-"
+          },
+          "text": true
+        },
+        {
+          "name": "pane-header-state",
+          "selector": "[data-testid^=\"pane-header-\"] > span.flex[title]",
+          "description": "The state group: its dot and its word.",
+          "key": {
+            "closest": "[data-testid^=\"pane-header-\"]",
+            "attr": "data-testid",
+            "strip": "pane-header-"
+          }
+        },
+        {
+          "name": "pane-header-state-dot",
+          "selector": "[data-testid^=\"pane-header-\"] > span.flex[title] > span.rounded-full",
+          "description": "The 5px dot in the state's colour.",
+          "key": {
+            "closest": "[data-testid^=\"pane-header-\"]",
+            "attr": "data-testid",
+            "strip": "pane-header-"
+          }
+        },
+        {
+          "name": "pane-header-state-word",
+          "selector": "[data-testid^=\"pane-header-\"] > span.flex[title] > span.truncate",
+          "description": "Working, Waiting for you, Done or Idle.",
+          "key": {
+            "closest": "[data-testid^=\"pane-header-\"]",
+            "attr": "data-testid",
+            "strip": "pane-header-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "pane-controls",
+          "selector": "[data-testid^=\"tile-controls-\"]",
+          "description": "The two buttons at the right (or alone in the corner).",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "tile-controls-"
+          }
+        },
+        {
+          "name": "pane-expand",
+          "selector": "[data-testid^=\"tile-expand-\"]",
+          "description": "Leave the split: a 24px ghost button.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "tile-expand-"
+          }
+        },
+        {
+          "name": "pane-expand-glyph",
+          "selector": "[data-testid^=\"tile-expand-\"] > svg",
+          "description": "Its four corners.",
+          "key": {
+            "closest": "[data-testid^=\"tile-expand-\"]",
+            "attr": "data-testid",
+            "strip": "tile-expand-"
+          }
+        },
+        {
+          "name": "pane-close",
+          "selector": "[data-testid^=\"tile-close-\"]",
+          "description": "Close the tab: a 24px ghost button.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "tile-close-"
+          }
+        },
+        {
+          "name": "pane-close-glyph",
+          "selector": "[data-testid^=\"tile-close-\"] > svg",
+          "description": "Its cross.",
+          "key": {
+            "closest": "[data-testid^=\"tile-close-\"]",
+            "attr": "data-testid",
+            "strip": "tile-close-"
+          }
+        },
+        {
+          "name": "pane-corner",
+          "selector": "div.pointer-events-auto.absolute",
+          "description": "The corner variant's box: top right, 4px in, on the panel fill, rounded."
+        }
+      ]
+    },
+    "new-session": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 3,
+      "elements": [
+        {
+          "name": "launcher",
+          "selector": ".new-session-popover",
+          "description": "The popover: 200px to 320px wide, 4px below its anchor, left aligned (12px from the window edge at least), on the lighter surface fill with a shadow."
+        },
+        {
+          "name": "launcher-filter",
+          "selector": "[data-testid=\"new-tab-filter\"]",
+          "description": "The filter field at the top (scoped form); `text` is what was typed, `placeholder` what shows while it is empty.",
+          "text": true
+        },
+        {
+          "name": "launcher-list",
+          "selector": "#new-tab-launcher-list",
+          "description": "The list of agents and extras."
+        },
+        {
+          "name": "launcher-option",
+          "selector": "[role=\"option\"]",
+          "description": "One row: an agent, New browser, New file, or Manage agents (muted); the highlighted one is on the lighter fill; disabled while the host's agents are not ready (40% opacity).",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "launcher-option-icon",
+          "selector": "[role=\"option\"] > :first-child:not(span.flex-1):not(kbd)",
+          "description": "The row's mark: the agent's icon or the extra's.",
+          "key": {
+            "closest": "[role=\"option\"]",
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "launcher-option-label",
+          "selector": "[role=\"option\"] > span.flex-1",
+          "description": "The row's name.",
+          "key": {
+            "closest": "[role=\"option\"]",
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "launcher-option-key",
+          "selector": "[role=\"option\"] > kbd",
+          "description": "The row's number key, 1 to 9, while nothing is typed.",
+          "key": {
+            "closest": "[role=\"option\"]",
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "launcher-note",
+          "selector": ".new-session-popover p[role]",
+          "description": "A line under the list: No match, Checking agents, the host's error (red), or Enable or install an agent.",
+          "text": true
+        },
+        {
+          "name": "agent-select",
+          "selector": "[data-testid=\"new-session-popover-agent\"]",
+          "description": "The agent dropdown at the top of the unscoped form.",
+          "text": true
+        },
+        {
+          "name": "agent-manage",
+          "selector": ".new-session-popover > div:first-child > button:not([data-testid])",
+          "description": "Manage agents, under the dropdown (unscoped form).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "project-option",
+          "selector": "[data-testid^=\"project-option-\"]",
+          "description": "One known project folder (unscoped form).",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "project-option-"
+          }
+        },
+        {
+          "name": "project-option-name",
+          "selector": "[data-testid^=\"project-option-\"]",
+          "description": "Its folder's name (the text node only).",
+          "key": {
+            "closest": "[data-testid^=\"project-option-\"]",
+            "attr": "data-testid",
+            "strip": "project-option-"
+          },
+          "textRange": true,
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "project-option-path",
+          "selector": "[data-testid^=\"project-option-\"] > span",
+          "description": "Its full path, small and muted.",
+          "key": {
+            "closest": "[data-testid^=\"project-option-\"]",
+            "attr": "data-testid",
+            "strip": "project-option-"
+          },
+          "text": true
         }
       ]
     }

@@ -1,0 +1,138 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "pane-header",
+  "note": "The header row of a pane while the canvas is split (stock-ui/pane-header). Size: one of two panes side by side, half of the 1016px main card less the 6px gap between panes (505px), and the stock layout's header height of 28px (`usePaneLook().headerHeight`); the corner variant sits over a 505x120 pane. The pane is named by `id` (a session of the shown workspace, or a file tab's key); its derived values are @perch/sdk `useWorkspaceTabs()` and `usePaneLook()`, recorded in each output's sdk. Whether the pane is focused, in a split or zoomed does not change what the stock header draws (it passes it to a mod's slot only), so those are the same picture; the split state is kept so sdk.workspaceTabs records each tab's pane state.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 505,
+    "height": 28
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "states": [
+    {
+      "id": "working",
+      "title": "An agent that is working: its icon, name, a yellow dot and Working, then the two controls",
+      "props": {
+        "id": "s-perch-1"
+      },
+      "patch": {
+        "splitSets": {
+          "sets": [
+            {
+              "ids": [
+                "s-perch-1",
+                "s-perch-2"
+              ],
+              "sizes": [
+                0.5,
+                0.5
+              ]
+            }
+          ],
+          "zoomedId": null
+        }
+      }
+    },
+    {
+      "id": "done-unfocused",
+      "title": "The other pane of the split, not the focused one: a finished agent (teal dot, Done); drawn the same as a focused one",
+      "props": {
+        "id": "s-perch-2"
+      },
+      "patch": {
+        "splitSets": {
+          "sets": [
+            {
+              "ids": [
+                "s-perch-1",
+                "s-perch-2"
+              ],
+              "sizes": [
+                0.5,
+                0.5
+              ]
+            }
+          ],
+          "zoomedId": null
+        }
+      }
+    },
+    {
+      "id": "blocked",
+      "title": "An agent that waits for the person: a red dot and Waiting for you",
+      "props": {
+        "id": "s-perch-3"
+      },
+      "patch": {
+        "sessions": {
+          "s-perch-3": {
+            "blocked": true
+          }
+        },
+        "splitSets": {
+          "sets": [
+            {
+              "ids": [
+                "s-perch-1",
+                "s-perch-3"
+              ],
+              "sizes": [
+                0.5,
+                0.5
+              ]
+            }
+          ],
+          "zoomedId": null
+        }
+      }
+    },
+    {
+      "id": "idle",
+      "title": "A seen, idle agent: a green dot and Idle",
+      "props": {
+        "id": "s-perch-3"
+      }
+    },
+    {
+      "id": "long-title",
+      "title": "A title longer than the room: the name is cut with an ellipsis and the state keeps its width",
+      "props": {
+        "id": "s-perch-2"
+      },
+      "patch": {
+        "sessions": {
+          "s-perch-2": {
+            "title": "Fix the terminal slash input when the IME is composing a long phrase"
+          }
+        }
+      }
+    },
+    {
+      "id": "corner",
+      "title": "A file pane in the split: only the two controls, top right, on the panel fill",
+      "props": {
+        "id": "w-perch-main\npackages/web/src/sdk.ts",
+        "corner": true
+      },
+      "size": {
+        "width": 505,
+        "height": 120
+      },
+      "patch": {
+        "fileTabs": {
+          "tabs": [
+            {
+              "workspaceId": "w-perch-main",
+              "path": "packages/web/src/sdk.ts"
+            }
+          ],
+          "active": "w-perch-main\npackages/web/src/sdk.ts"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "confirm",
+  "note": "Floating screen: it is drawn through a portal into the page body and placed against the window, so the reference is the whole default 1280x800 window on the app's backdrop and every box is in window coordinates. The confirmation (stock-ui/confirm). Props are ConfirmProps; onConfirm and onCancel are no-ops. `via: close-guard` opens it the way the close warning of an agent's tab does (stock-ui/close-guard, which passes its own message, the Stop for everyone label and two extra rows as children); the other states are the dialog as other callers give it.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1280,
+    "height": 800
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "states": [
+    {
+      "id": "close-agent",
+      "title": "The warning before closing an agent's tab: its message, a link to keep it running, a do-not-warn-again box, Cancel and Stop for everyone",
+      "via": "close-guard",
+      "props": {
+        "label": "Fix terminal slash input"
+      }
+    },
+    {
+      "id": "delete",
+      "title": "The default labels: Cancel and Delete; the confirm button has the focus",
+      "props": {
+        "message": "Delete notes.md?\nThis cannot be undone."
+      }
+    },
+    {
+      "id": "run-in-terminal",
+      "title": "The palette's run confirmation: a multi-line message and a Run button",
+      "props": {
+        "message": "Run in a new terminal?\n\nHost: This computer\nFolder: /Users/dev/code/perch\n\nnpm test",
+        "confirmLabel": "Run"
+      }
+    },
+    {
+      "id": "run-busy",
+      "title": "The confirmed action is in flight: both buttons disabled, the confirm one reads Starting...",
+      "props": {
+        "message": "Run in a new terminal?\n\nHost: This computer\nFolder: /Users/dev/code/perch\n\nnpm test",
+        "confirmLabel": "Run",
+        "busy": true
+      }
+    },
+    {
+      "id": "long-message",
+      "title": "A message with a path that has no break: it wraps anywhere inside the 360px panel",
+      "props": {
+        "message": "Discard all changes in /Users/dev/code/perch-wt/ghostty-spike/crates/perch-native/src/terminal/render/glyph-cache/atlas-pages-0001.bin?",
+        "confirmLabel": "Discard"
+      }
+    }
+  ]
+}
