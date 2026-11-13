@@ -1,0 +1,136 @@
+//! The unchanged stock sidebar on the native runtime, against the web reference: for every fixture state in light
+//! and dark, the description has every named element instance the page has (and hides the same ones), with the
+//! same text, colours (value and theme token), font size, weight and line height and opacity; and its events work.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { fixture, lineHeightPx, mountSidebar, namedInstances, opacity, THEMES, tree } from "./support.mjs";
+
+const COLOUR_KEYS = { backgroundColor: "bg", borderTopColor: "border_t", borderRightColor: "border_r", borderBottomColor: "border_b", borderLeftColor: "border_l" };
+const round = (n) => Math.round(n * 100) / 100;
+
+for (const { id: state } of fixture.states) {
+  for (const theme of THEMES) {
+    test(`sidebar ${state} ${theme} matches the web reference`, async () => {
+      const { ref, handle } = await mountSidebar(state, theme);
+      try {
+        assert.deepEqual(handle.errors, []);
+        const { instances, hiddenCounts } = namedInstances(tree(handle.description));
+        const id = (name, key, index) => `${name}#${key ?? index}`;
+        const got = new Map(instances.map((i) => [id(i.def.name, i.key, i.index), i]));
+        assert.deepEqual([...got.keys()].sort(), ref.elements.map((e) => id(e.name, e.key, e.index)).sort(), "named element instances");
+        assert.deepEqual(hiddenCounts, ref.hiddenCounts, "hidden instances");
+
+        const problems = [];
+        for (const want of ref.elements) {
+          const { el, def } = got.get(id(want.name, want.key, want.index));
+          const where = id(want.name, want.key, want.index);
+          if (want.text !== undefined) {
+            const text = el.text(!!def.textRange);
+            if (text !== want.text) problems.push(`${where} text ${JSON.stringify(text)}, web ${JSON.stringify(want.text)}`);
+          }
+          if (opacity(el) !== (want.opacity ?? 1)) problems.push(`${where} opacity ${opacity(el)}, web ${want.opacity ?? 1}`);
+          const colours = {};
+          if (def.text || el.tagName === "svg") colours.color = el.inherited("text_color");
+          for (const [prop, side] of Object.entries(COLOUR_KEYS)) {
+            if (prop === "backgroundColor") { if (el.node.style.bg) colours[prop] = { value: el.node.style.bg, token: el.node.tokens.bg ?? null }; continue; }
+            if (el.node.style[side]) colours[prop] = { value: el.node.style.border_color, token: el.node.tokens.border_color ?? null };
+          }
+          for (const prop of new Set([...Object.keys(colours), ...Object.keys(want.colors)])) {
+            if (JSON.stringify(colours[prop]) !== JSON.stringify(want.colors[prop])) problems.push(`${where} ${prop} ${JSON.stringify(colours[prop])}, web ${JSON.stringify(want.colors[prop])}`);
+          }
+          if (want.font) {
+            const font = { size: round(el.inherited("text_size").value), weight: el.inherited("font_weight").value, lineHeight: round(lineHeightPx(el)) };
+            const web = { size: want.font.size, weight: want.font.weight, lineHeight: want.font.lineHeight };
+            if (JSON.stringify(font) !== JSON.stringify(web)) problems.push(`${where} font ${JSON.stringify(font)}, web ${JSON.stringify(web)}`);
+            if (el.inherited("font_family").value !== ".SystemUIFont") problems.push(`${where} family ${el.inherited("font_family").value}`);
+          }
+        }
+        assert.deepEqual(problems, []);
+        for (const entry of handle.description.unsupported) assert.ok(entry.class && entry.elements.length, `an unsupported entry names its class and element: ${JSON.stringify(entry)}`);
+      } finally {
+        handle.unmount();
+      }
+    });
+  }
+}
+
+/** The description node of a named element instance. */
+function find(handle, name, key) {
+  const { instances } = namedInstances(tree(handle.description));
+  const hit = instances.find((i) => i.def.name === name && (key === undefined || i.key === key));
+  assert.ok(hit, `no ${name} ${key ?? ""}`);
+  return hit.el;
+}
+
+test("a project header click folds the project, and again unfolds it", async () => {
+  const { handle, perch } = await mountSidebar("by-project", "dark");
+  try {
+    assert.ok(find(handle, "project-workspaces", "p-perch"));
+    handle.click(find(handle, "project-header", "p-perch").node.id);
+    const { instances } = namedInstances(tree(handle.description));
+    assert.equal(instances.some((i) => i.def.name === "project-workspaces" && i.key === "p-perch"), false, "folded: its workspaces are gone");
+    assert.equal(find(handle, "project-toggle", "p-perch").getAttribute("aria-expanded"), "false");
+    assert.deepEqual(JSON.parse(perch.storage.getItem("perch.sidebar.collapsedProjects")), ["p-perch"], "kept per viewer");
+    handle.click(find(handle, "project-toggle", "p-perch").node.id);
+    assert.ok(find(handle, "project-workspaces", "p-perch"), "unfolded again from the toggle button");
+    assert.deepEqual(perch.commands, [], "folding is arrangement, not a command");
+  } finally {
+    handle.unmount();
+  }
+});
+
+test("a session row click opens the session through the host", async () => {
+  const { handle, perch } = await mountSidebar("by-project", "dark");
+  try {
+    handle.click(find(handle, "session-button", "s-perch-3").node.id);
+    assert.deepEqual(perch.commands, [["session.open", { id: "s-perch-3" }]]);
+  } finally {
+    handle.unmount();
+  }
+});
+
+test("hovering a project header reveals its row actions (a group variant)", async () => {
+  const { handle } = await mountSidebar("by-project", "dark");
+  try {
+    const header = find(handle, "project-header", "p-api");
+    assert.equal(header.node.track_hover, true, "the engine reports hover on the group");
+    const before = namedInstances(tree(handle.description)).hiddenCounts["project-menu-button"];
+    handle.hover(header.node.id, true);
+    const after = namedInstances(tree(handle.description)).hiddenCounts["project-menu-button"];
+    assert.equal(after, before - 1, "the hovered project's menu button shows");
+    handle.hover(header.node.id, false);
+    assert.equal(namedInstances(tree(handle.description)).hiddenCounts["project-menu-button"], before);
+  } finally {
+    handle.unmount();
+  }
+});
+
+test("a button's own hover colour is an engine hover style, with its token", async () => {
+  const { handle } = await mountSidebar("by-project", "dark");
+  try {
+    const add = find(handle, "add-project-button");
+    assert.deepEqual(add.node.hover, { bg: "#262626ff", text_color: "#d8d8d8ff" });
+    assert.deepEqual(add.node.hover_tokens, { bg: "surface-0", text_color: "text" });
+  } finally {
+    handle.unmount();
+  }
+});
+
+test("the organize menu opens in the overlay layer and switches the view", async () => {
+  const { handle, perch } = await mountSidebar("by-project", "dark");
+  try {
+    handle.click(find(handle, "organize-button").node.id);
+    const [menu] = handle.description.overlays;
+    assert.equal(menu?.meta.attrs["data-testid"], "row-menu", "the menu is portalled into the overlay layer");
+    assert.equal(menu.style.position, "absolute");
+    assert.ok(handle.description.document_events.includes("mouse_down"), "an outside press closes it: the host reports presses");
+    const item = (testId) => menu.children.find((child) => child.meta?.attrs["data-testid"] === testId);
+    assert.equal(item("workspace-organize-project").children[0].text, "✓ By project");
+    handle.click(item("workspace-organize-status").id);
+    assert.equal(handle.description.overlays.length, 0, "choosing closes the menu");
+    assert.equal(find(handle, "overview-title").text(), "Sessions");
+    assert.equal(perch.storage.getItem("perch.sidebar.organize"), "status");
+  } finally {
+    handle.unmount();
+  }
+});

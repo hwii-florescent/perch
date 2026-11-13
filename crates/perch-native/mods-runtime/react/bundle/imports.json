@@ -1,0 +1,7 @@
+{
+  "react": "react.mjs",
+  "react/jsx-runtime": "react-jsx-runtime.mjs",
+  "react-dom": "react-dom.mjs",
+  "@perch/sdk": "perch-sdk.mjs",
+  "@perch/runtime": "runtime.mjs"
+}
