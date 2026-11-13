@@ -2606,6 +2606,158 @@
           "textSized": true
         }
       ]
+    },
+    "terminal-search": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 3,
+      "elements": [
+        {
+          "name": "terminal-frame",
+          "selector": "[data-testid=\"persistent-agent-terminal\"]",
+          "description": "The terminal pane the bar floats over (the card fill here; the terminal's own picture is not drawn)."
+        },
+        {
+          "name": "term-search",
+          "selector": "[data-testid=\"term-search\"]",
+          "description": "The bar: the lighter surface fill, soft corners, a shadow, 8 px down and 12 px from the right edge of the pane; 0.3rem between its parts."
+        },
+        {
+          "name": "term-search-input",
+          "selector": "[data-testid=\"term-search-input\"]",
+          "description": "The field (11 rem wide, the darker fill, 0.8rem); `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        },
+        {
+          "name": "term-search-button",
+          "selector": "[data-testid=\"term-search\"] > button",
+          "description": "Previous (up arrow), Next (down arrow) and Close (cross): 1.4 rem squares on the lighter fill, muted; the cross is larger.",
+          "key": {
+            "self": true,
+            "attr": "title"
+          },
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "agent-control": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "terminal-frame",
+          "selector": "[data-testid=\"persistent-agent-terminal\"]",
+          "description": "The terminal pane the controls float over."
+        },
+        {
+          "name": "agent-control-chip",
+          "selector": "[data-testid=\"agent-control-chip\"]",
+          "description": "The chip: the glass surface (translucent, blurred), 8 px down and 12 px from the right; its text then its buttons."
+        },
+        {
+          "name": "agent-control-label",
+          "selector": "[data-testid=\"agent-control-chip\"] > span",
+          "description": "How this view stands.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "agent-control-button",
+          "selector": "[data-testid=\"agent-control-chip\"] > button",
+          "description": "Retry CLI or Take control (soft, medium); 40% opacity while pending or disabled.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "agent-control-error",
+          "selector": ".terminal__cli-error",
+          "description": "The red notice: centred, 12 px above the bottom, at most 90% wide, on a reddish fill.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "agent-control-ended",
+          "selector": ".terminal__exited",
+          "description": "The banner: centred in the pane, the lighter panel fill with a shadow, a column of its text then its buttons.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "agent-control-ended-text",
+          "selector": ".terminal__exited-text",
+          "description": "What happened to the agent.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "agent-control-ended-button",
+          "selector": ".terminal__exited-actions > button",
+          "description": "Restart CLI / Resume agent (primary) and Close session (soft).",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "phone-size": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "terminal-frame",
+          "selector": "[data-testid=\"persistent-agent-terminal\"]",
+          "description": "The terminal pane the notice floats over."
+        },
+        {
+          "name": "phone-size-notice",
+          "selector": "[data-testid=\"phone-size-notice\"]",
+          "description": "The open notice: a glass panel (translucent, blurred, pane-rounded corners, a shadow), 12 px padding, 8 px between its rows."
+        },
+        {
+          "name": "phone-size-chip",
+          "selector": "[data-testid=\"phone-size-chip\"]",
+          "description": "The folded chip at the same corner."
+        },
+        {
+          "name": "phone-size-heading",
+          "selector": "[data-testid=\"phone-size-notice\"] span.font-semibold",
+          "description": "'Your phone is sizing this terminal' (semibold, the text colour).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "phone-size-text",
+          "selector": "[data-testid=\"phone-size-notice\"] span:not(.font-semibold)",
+          "description": "The explanation (0.8rem, muted).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "phone-size-fold",
+          "selector": "[aria-label=\"Keep phone size and hide this\"]",
+          "description": "The cross that folds the notice.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "phone-size-button",
+          "selector": "[data-testid=\"phone-size-notice\"] div.flex.flex-wrap > button, [data-testid=\"phone-size-chip\"] > button",
+          "description": "Take back this tab (primary), Take back all tabs (soft), or the folded chip's 'Phone size'; 40% opacity while pending.",
+          "text": true,
+          "textSized": true
+        }
+      ]
     }
   }
 }

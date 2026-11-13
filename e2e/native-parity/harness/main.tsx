@@ -160,6 +160,29 @@ function WorktreeHost({ Menu, at, listAnswer, listLoading, createAnswer, removeP
   }).current;
   return <div style={{ position: "absolute", left: at.x, top: at.y }}><Menu {...rest} actions={actions} /></div>;
 }
+/**
+ * The box a terminal's own chrome floats over: `.terminal` (position: relative, a column) holding the surface the terminal
+ * draws on. The terminal's picture itself (xterm) is not drawn, so the surface is blank; the chrome is placed against this box.
+ */
+function TerminalFrame({ children }: { children: ReactNode }) {
+  return <div className="terminal terminal--persistent" data-testid="persistent-agent-terminal">{children}<div className="terminal__surface" /></div>;
+}
+/** The find bar the way the terminal holds it: the query is the terminal's, the finds and the close are no-ops. */
+function TerminalSearchDemo({ Bar, query: first }: { Bar: ComponentType<Json>; query: string }) {
+  const [query, setQuery] = useState(first);
+  return <TerminalFrame><Bar query={query} setQuery={setQuery} findNext={noop} findPrevious={noop} close={noop} /></TerminalFrame>;
+}
+/** The agent's controls in both places the terminal draws them (`part` top, before the surface; bottom, after it). */
+interface ControlInput { agent: string; label: string | null; connected: boolean; pending: boolean; retry: boolean; control: { label: string; disabled: boolean } | null; error: string | null; ended: { sleeping: boolean; exitCode: number | null; close: boolean } | null; state: Json }
+function AgentControlDemo({ Control, ac }: { Control: ComponentType<Json>; ac: ControlInput }) {
+  const shared = {
+    agent: ac.agent, label: ac.label, connected: ac.connected, pending: ac.pending, state: ac.state, error: ac.error,
+    onRetry: ac.retry ? noop : null,
+    control: ac.control ? { ...ac.control, onClick: noop } : null,
+    ended: ac.ended ? { sleeping: ac.ended.sleeping, exitCode: ac.ended.exitCode, onRestart: noop, onClose: ac.ended.close ? noop : null } : null,
+  };
+  return <div className="terminal terminal--persistent" data-testid="persistent-agent-terminal"><Control {...shared} part="top" /><div className="terminal__surface" /><Control {...shared} part="bottom" /></div>;
+}
 /** A screen that is given everything as props and reads nothing else: the props are the whole story. */
 function PropsProbe({ props }: { props: Json }) {
   record({ props });
@@ -290,6 +313,30 @@ const SCREENS: Record<string, Screen> = {
     },
     mount: "stage",
     Probe: NewSessionProbe,
+  },
+  "terminal-search": {
+    load: async () => {
+      const { default: Bar } = await import("../../../packages/web/src/stock-ui/terminal-search/main");
+      return { default: ((props: { query: string }) => <TerminalSearchDemo Bar={Bar as unknown as ComponentType<Json>} query={props.query} />) as unknown as ComponentType<never> };
+    },
+    mount: "card",
+    Probe: PropsProbe,
+  },
+  "agent-control": {
+    load: async () => {
+      const { default: Control } = await import("../../../packages/web/src/stock-ui/agent-control/main");
+      return { default: ((props: { ac: ControlInput }) => <AgentControlDemo Control={Control as unknown as ComponentType<Json>} ac={props.ac} />) as unknown as ComponentType<never> };
+    },
+    mount: "card",
+    Probe: PropsProbe,
+  },
+  "phone-size": {
+    load: async () => {
+      const { default: Notice } = await import("../../../packages/web/src/stock-ui/phone-size/main");
+      return { default: ((props: Json) => <TerminalFrame><Notice {...props} onThisTab={noop} onAllTabs={noop} /></TerminalFrame>) as unknown as ComponentType<never> };
+    },
+    mount: "card",
+    Probe: PropsProbe,
   },
   "pane-menu": {
     load: () => import("../../../packages/web/src/stock-ui/pane-menu/main"),
