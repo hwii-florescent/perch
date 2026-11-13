@@ -11,7 +11,8 @@
 //! - New session: the sidebar's New session opens the menu with the keyboard, its agent picker and
 //!   the computer's projects then No project; a project or No project starts the picked agent there
 //!   (a Quickchat for No project); Escape and a press outside close it without anything beneath
-//!   taking the press. Cmd+T opens the tab strip's launcher below its "+".
+//!   taking the press. Cmd+T opens the tab strip's launcher below its "+". The agent dropdown
+//!   lists the agents below it, and the one picked is the one started.
 //! - Dialog: a script opens it with the file menu's New file prompt; a path typed (or typed over
 //!   all of the field after Cmd+A) and Enter close it with the create action; Escape and a press on
 //!   the dim backdrop close it with nothing.
@@ -597,6 +598,39 @@ fn new_session(rig: &mut Rig) {
     rig.press("escape");
     assert!(rig.open_screens().is_empty());
     assert!(rig.terminal_focused());
+
+    // The agent dropdown is the web's: a press lists the agents under it, a pick is what starts.
+    // Its rows match the parity table's launcher rows, so they carry those names here.
+    open_new_session(rig);
+    let trigger = rig.record("agent-select").expect("the dropdown").bounds;
+    assert!(rig.record("launcher-option").is_none(), "closed at first");
+    rig.click("agent-select");
+    let rows: Vec<_> = ["launcher-option", "launcher-option@1"]
+        .iter()
+        .map(|name| {
+            rig.record(name)
+                .expect("Claude and Codex are listed")
+                .bounds
+        })
+        .collect();
+    assert!(
+        rows[0].origin.y >= trigger.origin.y + trigger.size.height,
+        "below the dropdown"
+    );
+    assert!(rig.record("launcher-option@2").is_none(), "two agents");
+    assert_eq!(rig.open_screens(), ["new-session"], "the menu stays");
+    rig.asked();
+    rig.click("launcher-option@1");
+    assert!(
+        rig.record("launcher-option").is_none(),
+        "a pick closes the list"
+    );
+    rig.click("project-option:0");
+    assert_eq!(
+        launched(rig),
+        [("local".into(), Some("/work".into()), "codex".into())],
+        "Codex, as picked"
+    );
     println!("new-session: ok");
 }
 

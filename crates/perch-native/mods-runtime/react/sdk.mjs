@@ -16,6 +16,9 @@ import { GHOST_BUTTON, ICON_BUTTON } from "../../../../packages/web/src/componen
 import { CloseIcon, EllipsisIcon, GearIcon, PlusIcon } from "../../../../packages/web/src/components/ui/icons.tsx";
 import { HostStateDot } from "../../../../packages/web/src/components/HostStateDot.tsx";
 import StockDialog from "../../../../packages/web/src/stock-ui/dialog/main.tsx";
+import StockSelect from "../../../../packages/web/src/stock-ui/select/main.tsx";
+import { SELECT } from "../../../../packages/web/src/components/ui/settings.ts";
+import { Chevron } from "../../../../packages/web/src/components/ui/chevron.tsx";
 import { DOT_GLYPH, sessionDotState } from "../../../../packages/web/src/statusDot.ts";
 import { isNestedIn, nestUnderLeads } from "../../../../packages/web/src/sidebarOrder.ts";
 import { computeAnchoredPopoverStyle, useDismissOnOutsideClick } from "../../../../packages/web/src/components/popoverPosition.ts";
@@ -39,7 +42,7 @@ function host() {
 }
 const subscribe = (listener) => host().subscribe?.(listener) ?? (() => {});
 
-export { cn, menuPanel, CloseIcon, EllipsisIcon, GearIcon, PlusIcon, HostStateDot, PageIcon, useDismissOnOutsideClick };
+export { Chevron, cn, menuPanel, CloseIcon, EllipsisIcon, GearIcon, PlusIcon, HostStateDot, PageIcon, useDismissOnOutsideClick };
 export const anchoredPopoverStyle = computeAnchoredPopoverStyle;
 /** Read once: the host (`globalThis.perch`) is set before the runtime is evaluated. */
 export const isMac = globalThis.perch?.isMac !== false;
@@ -186,20 +189,9 @@ const ConfirmOverlay = overlay("confirm");
 let confirmInPlace = null;
 export const drawConfirmationsInPlace = (Component) => { confirmInPlace = Component; };
 export function ConfirmDialog(props) { return createElement(confirmInPlace ?? ConfirmOverlay, props); }
-/** A dropdown: the field is the screen's (the stock select's classes), its list Perch's (`select` overlay). */
-export function Select({ value, onChange, options = [], className, ariaLabel, testId, title, disabled, placeholder }) {
-  const ref = useRef(null);
-  const selected = options.find((option) => option.value === value);
-  return createElement(
-    "button",
-    {
-      type: "button", ref, title, disabled, "aria-label": ariaLabel, "data-testid": testId, "aria-haspopup": "listbox",
-      className: cn("inline-flex items-center justify-between gap-2 text-left [font-family:inherit] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50", className),
-      onClick: () => host().openOverlay?.("select", { value, options, onChange: (next) => onChange?.(next), anchor: ref.current?.getBoundingClientRect() }),
-    },
-    createElement("span", { className: "min-w-0 flex-1 truncate" }, selected ? selected.label : (placeholder ?? "")),
-  );
-}
+/** A dropdown: the web's stock select, its list drawn in place over the screen (a portal), with the app's field
+ * look unless the caller gives its own. */
+export function Select({ className = SELECT, ...props }) { return createElement(StockSelect, { ...props, className }); }
 export const FolderBrowser = overlay("folder-browser");
 export const InstructionsDialog = overlay("instructions");
 export const MemoryDialog = overlay("memory");

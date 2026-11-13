@@ -212,6 +212,8 @@ export class HostDocument extends Target {
   }
   querySelectorAll(selector) { return queryBy(this.documentElement, selector); }
   querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; }
+  /** The element whose `id` prop is `id` (React's `useId` ids are not selectors). */
+  getElementById(id) { return queryBy(this.documentElement, "*").find((el) => el.props?.id === id) ?? null; }
 }
 
 export class HostWindow extends Target {

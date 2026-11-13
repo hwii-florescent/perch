@@ -26,7 +26,6 @@ export const INERT = [
   "addProject",
   "beginReorderDrag",
   "overlay:session-menu",
-  "overlay:select",
   "overlay:folder-browser",
   "overlay:instructions",
   "overlay:memory",
