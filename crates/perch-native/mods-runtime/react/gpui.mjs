@@ -122,6 +122,8 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   if (rowItem && wraps && node.style.flex_shrink !== 0 && node.style.min_w === undefined && (node.children ?? []).some((c) => c.kind === "text")) el = el.min_w(0);
   for (const variant of ["hover", "focus", "active"]) if (node[variant]) el = el[variant]((s) => applyStyle(s, node[variant]));
 
+  // A press on a text field puts the keyboard in it, as a browser does.
+  if (node.kind === "input" && !node.disabled) el = el.on_mouse_down("left", (_event, cx) => { handle.focus(node.id); cx.notify(); });
   const pointer = ["click", "double_click", "context_menu", "mouse_down", "mouse_up"].some((name) => events.has(name));
   if (pointer) {
     el = el.on_mouse_down("left", (event, cx) => {
@@ -150,6 +152,11 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
       cx.notify();
     });
   }
+  // A press on an element that takes pointer events in a stack that lets them through stops here, as on the web;
+  // anywhere else in that stack it reaches what is beneath the screen.
+  if (node.blocks_pointer && !pointer) {
+    for (const button of ["left", "right"]) el = el.on_mouse_down(button, (_event, cx) => cx.stop_propagation?.());
+  }
   if (events.has("mouse_move")) el = el.on_mouse_move((event, cx) => { handle.dispatch(node.id, "pointermove", { ...point(event), pointerType: "mouse" }); cx.notify(); });
   if (node.track_hover || hoverIcons) el = el.on_hover((on, cx) => { handle.hover(node.id, on); cx.notify(); });
   if (overlay) el = el.on_mouse_down_out((event, cx) => { handle.dispatch(handle.document.body.id, "pointerdown", { ...point(event), pointerType: "mouse" }); handle.dispatch(handle.document.body.id, "mousedown", point(event)); cx.notify(); });
@@ -157,16 +164,36 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   // text that cannot wrap sits in a box of the CSS line height: GPUI rounds a line height to whole pixels when it
   // lays text out, so without the box every line would add up to half a pixel. (Wrapping text keeps GPUI's height,
   // as its line count is not known here.)
+  // A text field shows what it holds on one line, or its placeholder (the app's: its text colour at half strength).
+  if (node.kind === "input" && !/^(checkbox|radio|range|color|file|select)$/.test(node.input_type)) {
+    const shown = node.value ? String(node.value) : String(node.placeholder ?? "");
+    let line = kit.div().whitespace_nowrap().overflow_x_hidden();
+    const lineHeight = lineHeightPx(text);
+    if (lineHeight) line = line.h(lineHeight);
+    if (!node.value && color) line = line.text_color(halfAlpha(color));
+    if (shown) el = el.child(line.child(node.input_type === "password" && node.value ? "•".repeat([...shown].length) : shown));
+  }
   const line = text.whitespace === "nowrap" ? lineHeightPx(text) : null;
   const row = node.style.display === "flex" && !String(node.style.flex_direction ?? "row").startsWith("col");
   let ranged = !node.range_name;
+  // A column with a maximum height and none of its own (a palette that grows with its list up to a limit) is as tall
+  // as its children's content, and a growing child with a zero or percentage basis (`flex-1`) shares out what the
+  // limit leaves; GPUI would size the column from the zero basis, so such a child keeps its content size as its basis.
+  // (A column stretched by its parent has a definite height, where the zero basis is right.)
+  const indefinite = node.style.display === "flex" && String(node.style.flex_direction ?? "row").startsWith("col") && (node.style.h === undefined || node.style.h === "auto") && typeof node.style.max_h === "number";
   for (const child of (node.children ?? []).filter(drawn)) {
+    const basis = child.style?.flex_basis;
+    if (indefinite && child.style.flex_grow > 0 && (basis === 0 || (typeof basis === "string" && basis.endsWith("%")))) snapped.set(child, { ...snapped.get(child), flex_basis: "auto" });
     let built = toGpui(child, kit, handle, files, false, unseen, color, text, row && child.style?.position !== "absolute", snapped);
     const own = !ranged && (child.kind === "text" || !child.meta);
-    if (own || (child.kind === "text" && line)) {
+    const lineBox = child.kind === "text" ? (snapped.get(child)?.h ?? line) : null;
+    // A line laid on the row's device pixels (`snapRows`) has the width it was given and does not wrap in it.
+    const lineWidth = child.kind === "text" ? snapped.get(child)?.w : undefined;
+    if (own || lineBox || lineWidth !== undefined) {
       let box = kit.div();
       if (own) box = box.id(node.range_name);
-      if (child.kind === "text" && line) box = box.h(snapped.get(child)?.h ?? line);
+      if (lineBox) box = box.h(lineBox);
+      if (lineWidth !== undefined) box = box.w(lineWidth).flex_none().whitespace_nowrap();
       built = box.child(built);
       ranged ||= own;
     }
@@ -174,6 +201,17 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   }
   return el;
 }
+
+/** `#rrggbb(aa)` at half its alpha. */
+function halfAlpha(color) {
+  const hex = String(color);
+  if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(hex)) return color;
+  const alpha = hex.length === 9 ? Number.parseInt(hex.slice(7), 16) : 255;
+  return `${hex.slice(0, 7)}${Math.round(alpha / 2).toString(16).padStart(2, "0")}`;
+}
+
+/** Text with no place a line may break: one word of ASCII letters, digits and punctuation other than a hyphen. */
+const UNBREAKABLE = /^[!-,.-~]+$/;
 
 /** Whether `node` or a node under it draws an icon. */
 const hasIcon = (node) => !!node.markup || (node.children ?? []).some((child) => child.kind !== "text" && hasIcon(child));
@@ -188,10 +226,178 @@ export function lineHeightPx(text) {
 
 /** The whole description: the screen, then its overlays (absolute) above it, outside the screen's clip. */
 export function describeToGpui(description, kit, handle, files, scale = 0) {
-  const snapped = scale > 0 ? snapColumns([description.root, ...description.overlays], scale) : new Map();
+  const roots = [description.root, ...description.overlays];
+  const snapped = scale > 0 ? snapColumns(roots, scale) : new Map();
+  if (scale > 0 && files.measure) snapRows(roots, scale, files.measure, snapped);
+  scrollGutters(roots, snapped);
   let layer = kit.div().relative().size_full().child(toGpui(description.root, kit, handle, files, false, false, null, {}, false, snapped));
   for (const overlay of description.overlays) layer = layer.child(toGpui(overlay, kit, handle, files, true, false, null, {}, false, snapped));
   return layer;
+}
+
+// ---- device-pixel rows -----------------------------------------------------------------------------------------
+
+/**
+ * Device-pixel widths along rows, as `snapColumns` does for heights: GPUI rounds every authored length to a device
+ * pixel and a text's width up to a whole pixel, so a row of chips (each `px-[0.55rem]` around a word) drifts from the
+ * page by up to a pixel an item. An item's exact CSS width is known when it is content-sized and follows from text
+ * that cannot wrap (`measure(text, font)`, its exact width) and authored lengths: a row sums its items with their
+ * margins and gap, a block or column takes its widest child, inside padding and border; an explicit width is itself.
+ * A row (`flex`, `row`, not wrapping, packed at its start) lays its padding, its items' margins and gap and its items'
+ * widths on a running total, each the device-pixel value that keeps the total nearest the exact one; an item whose
+ * width is not known (it grows, shrinks to fit, has an `auto` margin, holds wrapping or truncated text) keeps GPUI's
+ * layout and the total restarts after it. Results go into `overrides` (`pl`, `pr`, `ml`, `mr`, `gap_x`, `w`; a text
+ * line's `w`).
+ */
+export function snapRows(roots, scale, measure, overrides) {
+  const set = (node, values) => overrides.set(node, { ...overrides.get(node), ...values });
+  const widths = new Map();
+  const fonts = new Map();
+  const FONT_KEYS = ["text_size", "font_weight", "font_family", "italic", "whitespace", "text_ellipsis"];
+
+  /** The exact CSS width of `node` when its content sizes it (NaN when not known), in font `font` around it. */
+  function width(node, font, tabular) {
+    if (node.kind === "text") {
+      const one = font.whitespace === "nowrap" || UNBREAKABLE.test(node.text);
+      if (!one || font.text_ellipsis || tabular || typeof font.text_size !== "number") return NaN;
+      const w = measure(node.text, { size: font.text_size, weight: font.font_weight ?? 400, family: font.font_family ?? ".SystemUIFont", italic: !!font.italic });
+      return Number.isFinite(w) ? w : NaN;
+    }
+    if (!drawn(node) || node.kind === "input" || node.markup) return explicitWidth(node);
+    const own = { ...font };
+    for (const key of FONT_KEYS) if (node.style[key] !== undefined) own[key] = node.style[key];
+    fonts.set(node, own);
+    const s = node.style;
+    const kids = (node.children ?? []).filter(inFlow);
+    const kidWidths = kids.map((kid) => width(kid, own, tabular || !!node.tabular));
+    let w = explicitWidth(node);
+    if (!Number.isFinite(w) && s.w === undefined) {
+      const outer = kids.map((kid, i) => kidWidths[i] + (kid.kind === "text" ? 0 : px(kid.style.ml) + px(kid.style.mr)));
+      let content;
+      if (!kids.length) content = 0;
+      else if (isRow(node)) content = kids.some((kid) => kid.kind !== "text" && kid.style.flex_grow > 0) || s.flex_wrap === "wrap" ? NaN : outer.reduce((a, b) => a + b, 0) + px(s.gap_x) * (kids.length - 1);
+      else content = Math.max(...outer);
+      w = content + px(s.pl) + px(s.pr) + px(s.border_l) + px(s.border_r);
+      if (typeof s.min_w === "number") w = Math.max(w, s.min_w);
+      if (typeof s.max_w === "number") w = Math.min(w, s.max_w);
+    }
+    widths.set(node, w);
+    return w;
+  }
+  const explicitWidth = (node) => (typeof node.style?.w === "number" ? node.style.w : NaN);
+
+  const fresh = () => ({ exact: 0, laid: 0 });
+  const stack = (flow, length) => {
+    if (!Number.isFinite(length)) {
+      Object.assign(flow, fresh());
+      return NaN;
+    }
+    flow.exact += length;
+    const total = Math.round(flow.exact * scale + 1e-9) / scale;
+    const step = total - flow.laid;
+    flow.laid = total;
+    return step;
+  };
+  const isPackedRow = (node) => isRow(node) && node.style.flex_wrap !== "wrap" && (node.style.justify ?? "start") === "start";
+
+  /** Lays `node`'s row out on device pixels, then every row under it. */
+  function visit(node) {
+    if (!node || node.kind === "text" || !drawn(node)) return;
+    const kids = (node.children ?? []).filter(inFlow);
+    if (isPackedRow(node) && kids.length > 1) {
+      const gap = px(node.style.gap_x);
+      const flow = fresh();
+      // A gap goes into the items' margins, which a line of text has not: such a row keeps GPUI's gap.
+      const carry = !(gap && kids.some((kid) => kid.kind === "text"));
+      set(node, { border_l: stack(flow, px(node.style.border_l)), pl: stack(flow, px(node.style.pl)) });
+      if (carry && gap) set(node, { gap_x: 0 });
+      kids.forEach((kid, i) => {
+        const before = (i && carry ? gap : 0) + (kid.kind === "text" ? 0 : px(kid.style.ml));
+        if (kid.kind === "text") {
+          if (before) Object.assign(flow, fresh());
+        } else {
+          const ml = stack(flow, before);
+          if (Number.isFinite(ml)) set(kid, { ml });
+        }
+        // An item that grows, or shrinks with its content cut (overflow), fills what is left: its width is the row's.
+        const own = kid.kind === "text" ? fonts.get(node) ?? {} : null;
+        const w = kid.kind === "text" ? width(kid, own, !!node.tabular) : widths.get(kid);
+        const fixed = kid.kind === "text" || !(kid.style.flex_grow > 0);
+        if (fixed && Number.isFinite(w)) set(kid, { w: stack(flow, w) });
+        else Object.assign(flow, fresh());
+        if (kid.kind !== "text") {
+          const mr = stack(flow, px(kid.style.mr));
+          if (Number.isFinite(mr)) set(kid, { mr });
+        }
+      });
+    }
+    for (const kid of node.children ?? []) if (kid.kind !== "text") visit(kid);
+  }
+
+  for (const root of roots) {
+    if (!root) continue;
+    width(root, {}, false);
+    visit(root);
+  }
+}
+
+// ---- scrollbars ----------------------------------------------------------------------------------------------
+
+/**
+ * Room for the app's scrollbar in a vertical scroller whose content overflows (`node.scrollbar`, its width): the web
+ * lays the content out beside the bar, so it is narrower by that much; the engine's bar takes no room. Whether the
+ * content overflows is worked out from the CSS heights `snapColumns` knows: the scroller's content against the height
+ * it can have (its own height or maximum, else what a column with a maximum or height leaves it beside its other
+ * children). When either is not known the scroller is left alone. The room goes into its right padding, in
+ * `overrides` (the per-node styles `snapColumns` returned).
+ */
+export function scrollGutters(roots, overrides) {
+  const heights = overrides.heights ?? new Map();
+  const known = (node) => heights.get(node);
+  /** The height of `node`'s content and padding, unclamped. */
+  const contentOf = (node) => {
+    const s = node.style;
+    const kids = (node.children ?? []).filter(inFlow);
+    if (!kids.length || isRow(node)) return NaN;
+    let sum = 0;
+    for (const kid of kids) {
+      const h = known(kid);
+      if (!Number.isFinite(h)) return NaN;
+      sum += h + (kid.kind === "text" ? 0 : px(kid.style.mt) + px(kid.style.mb));
+    }
+    return sum + (s.display === "flex" ? px(s.gap_y) * (kids.length - 1) : 0) + px(s.pt) + px(s.pb);
+  };
+  /** The height `node` may have, from its own lengths or its column parent's. */
+  const roomOf = (node, parent) => {
+    const s = node.style;
+    if (typeof s.h === "number") return s.h;
+    if (typeof s.max_h === "number") return s.max_h;
+    if (!parent || !isColumn(parent) || isRow(parent)) return NaN;
+    const ps = parent.style;
+    const limit = typeof ps.h === "number" ? ps.h : typeof ps.max_h === "number" ? ps.max_h : NaN;
+    const siblings = (parent.children ?? []).filter(inFlow);
+    let others = 0;
+    for (const sibling of siblings) {
+      if (sibling === node) continue;
+      const h = known(sibling);
+      if (!Number.isFinite(h)) return NaN;
+      others += h + (sibling.kind === "text" ? 0 : px(sibling.style.mt) + px(sibling.style.mb));
+    }
+    const gaps = ps.display === "flex" ? px(ps.gap_y) * Math.max(0, siblings.length - 1) : 0;
+    return limit - px(ps.pt) - px(ps.pb) - px(ps.border_t) - px(ps.border_b) - others - gaps - px(s.mt) - px(s.mb);
+  };
+  const walk = (node, parent) => {
+    if (!node || node.kind === "text" || !drawn(node)) return;
+    if (node.scrollbar > 0 && node.style.overflow_y === "scroll") {
+      const content = contentOf(node);
+      const room = roomOf(node, parent);
+      if (Number.isFinite(content) && Number.isFinite(room) && content > room + 0.01) {
+        overrides.set(node, { ...overrides.get(node), pr: px(node.style.pr) + node.scrollbar });
+      }
+    }
+    for (const child of node.children ?? []) walk(child, node);
+  };
+  for (const root of roots) walk(root, null);
 }
 
 // ---- device-pixel columns -------------------------------------------------------------------------------------
@@ -224,7 +430,8 @@ export function snapColumns(roots, scale) {
 
   /** The exact CSS height of `node` (NaN when not known), for text styled `text` around it. */
   function height(node, text) {
-    if (node.kind === "text") return text.whitespace === "nowrap" ? (lineHeightPx(text) ?? NaN) : NaN;
+    // A line that cannot wrap: `nowrap`, or text with no place to break.
+    if (node.kind === "text") return text.whitespace === "nowrap" || UNBREAKABLE.test(node.text) ? (lineHeightPx(text) ?? NaN) : NaN;
     const own = { ...text };
     for (const key of TEXT_KEYS) if (node.style[key] !== undefined) own[key] = node.style[key];
     texts.set(node, own);
@@ -233,7 +440,11 @@ export function snapColumns(roots, scale) {
     const kidHeights = kids.map((kid) => height(kid, own));
     let h;
     if (s.h !== undefined && s.h !== "auto") h = px(s.h);
-    else {
+    else if (node.kind === "input") {
+      // A one-line field is its line box inside its padding and border.
+      h = (node.input_type === "textarea" || node.input_type === "select" ? NaN : (lineHeightPx(own) ?? NaN)) + px(s.pt) + px(s.pb) + px(s.border_t) + px(s.border_b);
+      if (s.min_h !== undefined) h = Math.max(h, px(s.min_h));
+    } else {
       const outer = kids.map((kid, i) => (kid.kind === "text" ? 0 : px(kid.style.mt) + px(kid.style.mb)) + kidHeights[i]);
       let content;
       if (isRow(node)) content = s.flex_wrap === "wrap" ? NaN : s.items === "baseline" ? baselineRow(kids, kidHeights, own) : Math.max(0, ...outer);
@@ -332,7 +543,10 @@ export function snapColumns(roots, scale) {
     set(node, { border_t: stack(flow, px(s.border_t)), pt: stack(flow, px(s.pt)) });
     const explicit = s.h !== undefined && s.h !== "auto";
     const content = heights.get(node) - px(s.pt) - px(s.pb) - px(s.border_t) - px(s.border_b);
-    if (isRow(node) || (explicit && (s.justify ?? "start") !== "start")) {
+    if (node.kind === "input") {
+      // A field's line is drawn inside it, not described as a child.
+      if (!explicit) stack(flow, content);
+    } else if (isRow(node) || (explicit && (s.justify ?? "start") !== "start")) {
       for (const child of (node.children ?? []).filter(inFlow)) if (child.kind !== "text") visit(child);
       if (!explicit) stack(flow, content);
     } else if (!column(node, flow) && !explicit) stack(flow, content);
@@ -351,5 +565,7 @@ export function snapColumns(roots, scale) {
     height(root, {});
     visit(root);
   }
+  // The exact CSS heights, for the scrollbar pass.
+  Object.defineProperty(out, "heights", { value: heights });
   return out;
 }

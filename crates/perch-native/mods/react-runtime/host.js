@@ -14,13 +14,14 @@
 // workspace line's `workspace.open` runs `workspace.focus` (`STAND_IN`); other commands the module lacks are refused
 // by it and logged.
 import * as perch from "perch";
-import { Icon } from "perch-react";
+import { Icon, textWidth } from "perch-react";
 import { ICONS, LETTERS, LETTER } from "./agent-icons.js";
 
 /** Commands the module does not run yet, and the one it does that comes closest. */
 const STAND_IN = { "workspace.open": "workspace.focus" };
 
 export const INERT = [
+  "shortcutFor",
   "sessionFolders",
   "addProject",
   "beginReorderDrag",
@@ -168,9 +169,15 @@ export const host = {
   storage,
   clipboard: { writeText: async (text) => ambient?.write_to_clipboard(String(text)) },
   theme: () => perch.theme(),
-  // ponytail: the sidebar sits in the desktop layout, so its media queries (`min-[701px]:`) take a desktop window;
-  // a host call for the window's size would let a narrow window use the phone rules.
-  viewport: () => ({ width: 1000, height: 800 }),
+  // A floating screen has the window's size in its props (`viewport`), kept current by the window.
+  // ponytail: an in-flow screen (the sidebar) sits in the desktop layout, so its media queries (`min-[701px]:`) take a
+  // desktop window; a host call for the window's size would let a narrow window use the phone rules.
+  viewport: () => {
+    const size = perch.props()?.viewport;
+    return size && size.width > 0 && size.height > 0 ? { width: size.width, height: size.height } : { width: 1000, height: 800 };
+  },
+  /** The source focused `element`: the screen takes the keyboard (`screen.js`). */
+  focused: () => { for (const listener of [...focusListeners]) listener(); },
   subscribe(listener) {
     listeners.add(listener);
     return () => listeners.delete(listener);
@@ -180,7 +187,16 @@ export const host = {
     return snapshot(`navigation:${JSON.stringify(opts)}`, () => perch.navigation(opts));
   },
   hosts: () => snapshot("hosts", () => perch.hosts()),
-  session: (id) => sessionsOf(host.navigation({})).get(id) ?? null,
+  // A session on any computer (the web's store has them all): the shown computer's first, then the others'.
+  session: (id) => {
+    const shown = sessionsOf(host.navigation({})).get(id);
+    if (shown) return shown;
+    for (const other of host.hosts().list ?? []) {
+      const found = sessionsOf(snapshot(`navigation:host:${other.id}`, () => perch.navigation({ hostId: other.id }))).get(id);
+      if (found) return found;
+    }
+    return null;
+  },
   sessionFolders: () => snapshot("sessionFolders", () => ({ hostId: perch.navigation().hostId, folders: [] })),
   addProject: () => NO_ADD,
   addProjectFolder: () => {},
@@ -224,9 +240,15 @@ export const host = {
   closeOverlay(id) {
     if (openOverlays.delete(id)) perch.run("overlay.close").catch(() => {});
   },
+  // The native keymap has no `navigator.*` (or other in-screen) bindings: a screen's home-row keys are not matched.
+  shortcutFor: () => null,
   render: () => { if (!rendering) ambient?.notify(); },
   error: (error) => console.error(`react-runtime: ${error?.stack ?? error}`),
 };
+
+const focusListeners = new Set();
+/** Calls `listener` whenever the source focuses one of its elements. */
+export const onFocus = (listener) => { focusListeners.add(listener); return () => focusListeners.delete(listener); };
 
 /** Runs `fn` as the mod's `render()`: a commit inside it needs no extra frame. */
 export function asRender(fn) {
@@ -234,7 +256,23 @@ export function asRender(fn) {
   try { return fn(); } finally { rendering = false; }
 }
 
-/** Icons: `perch-react` draws an icon's markup (gpui-kit's `svg()` reads files this window does not serve). */
-export const files = { icon: (id, markup, color) => Icon.new(id, { markup, color: color ?? "" }) };
+/** Icons: `perch-react` draws an icon's markup (gpui-kit's `svg()` reads files this window does not serve), and
+ * measures text. */
+export const files = {
+  icon: (id, markup, color) => Icon.new(id, { markup, color: color ?? "" }),
+  // The exact width of a line of text (`perch-react` shapes it), for laying rows out on device pixels.
+  measure: (text, font) => {
+    const key = `${font.size}|${font.weight}|${font.family}|${font.italic ? 1 : 0}|${text}`;
+    let width = widths.get(key);
+    if (width === undefined) {
+      if (widths.size >= 4096) widths.clear();
+      // A host without the app's fonts measures nothing: rows keep the engine's own layout.
+      try { width = textWidth(text, font); } catch { width = NaN; }
+      widths.set(key, width);
+    }
+    return width;
+  },
+};
+const widths = new Map();
 
 globalThis.perch = host;

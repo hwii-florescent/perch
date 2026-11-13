@@ -61,7 +61,8 @@ const hostConfig = {
   createInstance: (type, props, root) => new HostElement(type, props, root.ownerDocument),
   createTextInstance: (text, root) => new HostText(text),
   appendInitialChild: (parent, child) => { parent.appendChild(child); },
-  finalizeInitialChildren: () => false,
+  // `autoFocus` focuses the element once it is in the tree, as React DOM does.
+  finalizeInitialChildren: (instance, type, props) => !!props.autoFocus,
   shouldSetTextContent: () => false,
   appendChild: (parent, child) => { parent.appendChild(child); },
   appendChildToContainer: (container, child) => { container.appendChild(child); },
@@ -75,7 +76,7 @@ const hostConfig = {
     if (styleRelevantChange(oldProps, newProps)) instance.touch();
   },
   commitTextUpdate: (text, oldText, newText) => { text.data = String(newText); },
-  commitMount: () => {},
+  commitMount: (instance) => { instance.focus(); },
   resetTextContent: () => {},
   hideInstance: (instance) => { instance.hidden = true; instance.touch(); },
   unhideInstance: (instance) => { instance.hidden = false; instance.touch(); },
@@ -120,7 +121,7 @@ const PROP = {
 /** A DOM-shaped event: what a handler in the source reads (`clientX`, `key`, `pointerType`, `currentTarget`). */
 class HostEvent {
   constructor(type, init, target) {
-    Object.assign(this, { clientX: 0, clientY: 0, button: 0, buttons: 0, pointerType: "mouse", key: "", code: "", shiftKey: false, metaKey: false, ctrlKey: false, altKey: false }, init);
+    Object.assign(this, { clientX: 0, clientY: 0, button: 0, buttons: 0, pointerType: "mouse", key: "", code: "", shiftKey: false, metaKey: false, ctrlKey: false, altKey: false, repeat: false, isComposing: false, keyCode: 0 }, init);
     this.type = type;
     this.target = target;
     this.currentTarget = null;
@@ -148,6 +149,10 @@ function fire(node, event, capture) {
     if (typeof handler === "function") handler(event);
   }
 }
+
+/** Whether `element` is a field a person types a line of text into. */
+const isTextField = (element) =>
+  element?.tagName === "textarea" || (element?.tagName === "input" && /^(text|search|url|email|tel|password|number|)$/.test(String(element.props.type ?? "")));
 
 /**
  * Mounts `Component` for the `perch` host and returns the engine's handle. `options.container` is the inline style
@@ -221,6 +226,30 @@ export function mount(perch, Component, options = {}) {
         for (let i = 1; i < path.length && !event.propagationStopped; i++) fire(path[i], event, false);
       });
       return !event.defaultPrevented;
+    },
+    /** A key pressed while the screen has the keyboard (`init`: the DOM's `key`, modifiers, `repeat`), at the
+     * focused element. When nothing prevented it and that element is a text field, the key edits the field as a
+     * browser would: a character is typed at the end, Backspace deletes the last one, and the field gets `input` and
+     * `change` events with its new `value`. Returns whether the source took the key (prevented it, or a field
+     * changed). */
+    key(init) {
+      const target = document.activeElement && document.activeElement !== document.body ? document.activeElement : document.body;
+      const typed = handle.dispatch(target, "keydown", init);
+      if (!typed) return true;
+      if (!isTextField(target) || target.props.disabled || target.props.readOnly || init.ctrlKey || init.metaKey) return false;
+      // ponytail: the caret is always at the end and there is no selection; a field that edits in the middle needs
+      // the engine's input element.
+      const before = target.value;
+      const after = init.key === "Backspace" ? before.slice(0, -1) : [...init.key].length === 1 ? before + init.key : before;
+      if (after === before) return false;
+      target.value = after;
+      handle.dispatch(target, "input", { data: init.key });
+      handle.dispatch(target, "change", {});
+      // A controlled field shows its props' value from now on; an uncontrolled one keeps what was typed.
+      if (target.props.value !== undefined) delete target.edit;
+      target.touch();
+      render();
+      return true;
     },
     /** The engine's box for node `id` (window coordinates, logical px), for `getBoundingClientRect`. */
     setBounds(id, box) {

@@ -8,6 +8,7 @@
 //! `5` on the way. The core applies the login shell to terminals it starts afterwards. Line
 //! height, ligatures and scroll speed are not here: the core has no such fields.
 
+use gpui::Keystroke;
 use perch_core::protocol::SettingsData;
 use serde_json::{json, Value};
 
@@ -137,9 +138,70 @@ pub fn scrollback_from_text(text: &str) -> Option<u32> {
         .filter(|n| (MIN_SCROLLBACK..=MAX_SCROLLBACK).contains(n))
 }
 
+/// What a key did to the scrollback being typed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Edit {
+    Changed,
+    Enter,
+    Escape,
+    Ignored,
+}
+
+/// Type into `text`: printable characters, Backspace, Enter and Escape. Commands and the
+/// control keys are left alone.
+pub fn edit(text: &mut String, keystroke: &Keystroke) -> Edit {
+    let m = keystroke.modifiers;
+    match keystroke.key.as_str() {
+        "enter" if !m.platform && !m.control && !m.alt => return Edit::Enter,
+        "escape" => return Edit::Escape,
+        "backspace" if !m.platform && !m.control && !m.alt => {
+            return if text.pop().is_some() {
+                Edit::Changed
+            } else {
+                Edit::Ignored
+            };
+        }
+        _ => {}
+    }
+    match &keystroke.key_char {
+        Some(typed) if !m.platform && !m.control && typed.chars().all(|c| !c.is_control()) => {
+            text.push_str(typed);
+            Edit::Changed
+        }
+        _ => Edit::Ignored,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn commands_are_not_typed_into_the_field() {
+        let mut text = String::new();
+        let mut cmd_t = Keystroke::parse("cmd-t").unwrap();
+        cmd_t.key_char = None;
+        assert_eq!(edit(&mut text, &cmd_t), Edit::Ignored);
+        let mut five = Keystroke::parse("5").unwrap();
+        five.key_char = Some("5".into());
+        assert_eq!(edit(&mut text, &five), Edit::Changed);
+        assert_eq!(
+            edit(&mut text, &Keystroke::parse("backspace").unwrap()),
+            Edit::Changed
+        );
+        assert_eq!(
+            edit(&mut text, &Keystroke::parse("backspace").unwrap()),
+            Edit::Ignored
+        );
+        assert_eq!(
+            edit(&mut text, &Keystroke::parse("enter").unwrap()),
+            Edit::Enter
+        );
+        assert_eq!(
+            edit(&mut text, &Keystroke::parse("escape").unwrap()),
+            Edit::Escape
+        );
+    }
 
     #[test]
     fn only_a_number_in_range_is_saved() {

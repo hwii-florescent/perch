@@ -354,7 +354,11 @@ impl Perch {
     /// The navigation's view: the active ids, and the sidebar's options unless `options` names
     /// them (`useNavigation`'s, which default to off).
     fn view(&self, options: Option<&Value>) -> View {
-        let host_id = self.host_id();
+        // Another computer's sessions when the options name it, else the shown computer's.
+        let host_id = options
+            .and_then(|o| o.get("hostId"))
+            .and_then(Value::as_str)
+            .map_or_else(|| self.host_id(), str::to_string);
         let data = self.0.data.borrow();
         let flag = |key: &str| {
             options

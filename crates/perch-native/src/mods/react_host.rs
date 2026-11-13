@@ -2,19 +2,24 @@
 //! do in JavaScript. A React screen draws its icons as SVG markup, while gpui-kit's `svg()` and `image()` read a file
 //! through the app's asset source, which this window does not give mods. `Icon.new(id, { markup, color })` draws
 //! the markup itself, `currentColor` taken as `color` (`#rrggbb` or `#rrggbbaa`), filling its box, rasterised
-//! when the frame asks for it. Everything else
-//! the runtime needs (timers, jobs, boxes, storage) the engine already gives.
+//! when the frame asks for it. `textWidth(text, font)` is the exact width of a line of text, which the runtime lays
+//! rows out with: GPUI rounds a text element's width up to a whole pixel and every authored length to a device
+//! pixel, so a row of words (a strip of chips) would drift from the page's, which lays text at its exact width.
+//! Everything else the runtime needs (timers, jobs, boxes, storage) the engine already gives.
 
 use super::ModHost;
-use gpui::{prelude::*, AnyElement, App, RenderImage};
-use gpui_shell::{HostModule, HostValue};
+use gpui::{
+    prelude::*, px, AnyElement, App, Font, FontStyle, FontWeight, Hsla, RenderImage, TextRun,
+    WindowTextSystem,
+};
+use gpui_shell::{HostArguments, HostModule, HostResult, HostValue};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 /// The module's TypeScript face.
-const DECLARATIONS: &str =
-    "export const Icon: { new(id: string, props: { markup: string; color?: string }): any };";
+const DECLARATIONS: &str = "export const Icon: { new(id: string, props: { markup: string; color?: string }): any };
+export function textWidth(text: string, font: { size: number; weight?: number; family?: string; italic?: boolean }): number;";
 
 /// The largest icon markup drawn.
 const MAX_MARKUP: usize = 256 * 1024;
@@ -22,8 +27,19 @@ const MAX_MARKUP: usize = 256 * 1024;
 /// Icons kept decoded, by markup and colour; cleared whole when it grows past this.
 const CACHE: usize = 512;
 
+/// Text measured before the shaper's cache is started afresh (it keeps every line it laid out).
+const MEASURED: usize = 4096;
+
 thread_local! {
     static ICONS: RefCell<HashMap<(String, String, u32), Arc<RenderImage>>> = RefCell::default();
+    /// The app's text system, for `textWidth`, with how many lines it has measured.
+    static TEXT: RefCell<Option<(Arc<gpui::TextSystem>, WindowTextSystem, usize)>> = const { RefCell::new(None) };
+}
+
+/// Gives `textWidth` the app's fonts. Call once per app (`mods::init`).
+pub fn init(cx: &App) {
+    let system = cx.text_system().clone();
+    TEXT.with(|text| *text.borrow_mut() = Some((system.clone(), WindowTextSystem::new(system), 0)));
 }
 
 /// Lends `perch-react` to every mod `host` loads.
@@ -37,6 +53,7 @@ fn module() -> HostModule {
         .component("Icon", |args, window, cx| {
             icon(args.props(), window.scale_factor(), cx)
         })
+        .function("textWidth", text_width)
 }
 
 /// The icon `props` names, or an empty box when the markup is not one. Rasterised here, at the window's scale, so
@@ -50,6 +67,56 @@ fn icon(props: &HostValue, scale: f32, cx: &App) -> AnyElement {
             gpui::div().size_full().into_any_element()
         }
     }
+}
+
+/// `textWidth(text, font)`: the width in logical pixels of `text` on one line in `font` (`size`, `weight`, `family`,
+/// `italic`), as GPUI shapes it, not rounded.
+fn text_width(args: &HostArguments) -> HostResult {
+    let words = args
+        .get(0)
+        .and_then(HostValue::as_str)
+        .unwrap_or("")
+        .replace('\n', " ");
+    let font = args.get(1);
+    let field = |key: &str| font.and_then(|f| f.get(key));
+    let number = |key: &str| field(key).and_then(HostValue::as_number);
+    let size = number("size").filter(|s| *s > 0.).unwrap_or(14.) as f32;
+    let run = TextRun {
+        len: words.len(),
+        font: Font {
+            family: field("family")
+                .and_then(HostValue::as_str)
+                .unwrap_or(".SystemUIFont")
+                .to_string()
+                .into(),
+            weight: FontWeight(number("weight").unwrap_or(400.) as f32),
+            style: if field("italic").and_then(HostValue::as_bool) == Some(true) {
+                FontStyle::Italic
+            } else {
+                FontStyle::Normal
+            },
+            ..Font::default()
+        },
+        color: Hsla::default(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let width = TEXT.with(|text| {
+        let mut text = text.borrow_mut();
+        let (system, shaper, count) = text
+            .as_mut()
+            .ok_or("textWidth: the app's text system is not set (mods::init)")?;
+        *count += 1;
+        if *count > MEASURED {
+            *shaper = WindowTextSystem::new(system.clone());
+            *count = 1;
+        }
+        Ok::<_, String>(f32::from(
+            shaper.layout_line(&words, px(size), &[run], None).width,
+        ))
+    })?;
+    Ok(HostValue::Number(f64::from(width)))
 }
 
 /// The markup rasterised, `currentColor` drawn in `color`.

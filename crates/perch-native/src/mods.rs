@@ -51,6 +51,18 @@ pub const STOCK: &[(&str, &str)] = &[
     ("example/main.js", include_str!("../mods/example/main.js")),
     ("example/mod.json", include_str!("../mods/example/mod.json")),
     (
+        "navigator/main.js",
+        include_str!("../mods/navigator/main.js"),
+    ),
+    (
+        "navigator/mod.json",
+        include_str!("../mods/navigator/mod.json"),
+    ),
+    (
+        "navigator/navigator/main.js",
+        include_str!("../mods/navigator/navigator/main.js"),
+    ),
+    (
         "parity-probe/main.js",
         include_str!("../mods/parity-probe/main.js"),
     ),
@@ -136,6 +148,7 @@ pub fn user_dir() -> PathBuf {
 /// Starts the engine. Call once per app, before any [`ModHost`].
 pub fn init(cx: &mut App) {
     gpui_shell::init(cx);
+    react_host::init(cx);
 }
 
 /// The window's mods and the `perch` module they import, kept for whoever places a mod view

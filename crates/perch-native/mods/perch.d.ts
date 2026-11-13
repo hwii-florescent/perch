@@ -110,6 +110,8 @@ declare module "perch" {
   export interface NavigationOptions {
     showTerminals?: boolean;
     sortByAttention?: boolean;
+    /** The computer whose sessions to list (default: the one shown). */
+    hostId?: string;
   }
 
   export interface HostInfo {

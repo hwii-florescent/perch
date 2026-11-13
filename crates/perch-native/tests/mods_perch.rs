@@ -220,12 +220,19 @@ fn main() {
     );
 
     // `run` runs the window's command; an unknown one is refused before anything runs.
-    assert!(!cx.update(|cx| workspace.read(cx).palette_open()));
+    // With no mod drawing the Navigator, the window says so.
+    assert_eq!(
+        cx.update(|cx| workspace.read(cx).notice().map(str::to_string)),
+        None
+    );
     let runner = open(&mut cx, &host, "runner");
     draw(&mut cx, runner, "root");
     assert!(
-        cx.update(|cx| workspace.read(cx).palette_open()),
-        "perch.run(\"app.palette\") opened the Navigator"
+        cx.update(|cx| workspace
+            .read(cx)
+            .notice()
+            .is_some_and(|n| n.contains("Navigator"))),
+        "perch.run(\"app.palette\") ran the Navigator's command"
     );
     let refused = perch.module("runner").begin(
         "run",

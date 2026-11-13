@@ -249,11 +249,16 @@ fn window(rig: &mut Rig) {
         h.has_row(&second, "pasted-10")
     });
 
-    // A new terminal from the palette is a tab; the one it covers is kept and hidden. When the
-    // room changes (the sidebar goes), the hidden shell is still given the size its pane would
-    // have, without anyone looking at it.
-    h.press("cmd-p");
-    h.type_text("new terminal");
+    // A new terminal (the Navigator's "New Terminal") is a tab; the one it covers is kept and
+    // hidden. When the room changes (the sidebar goes), the hidden shell is still given the size
+    // its pane would have, without anyone looking at it.
+    h.window
+        .update(&mut h.cx, |ws, _, cx| {
+            ws.sidebar()
+                .update(cx, |sidebar, cx| sidebar.launch("terminal", cx))
+        })
+        .unwrap()
+        .unwrap();
     h.wait("the new tab", |h| {
         h.ws(|ws, _| ws.tabs().strip().len() == 2)
     });
@@ -274,9 +279,13 @@ fn window(rig: &mut Rig) {
     );
     assert_eq!(h.shown(), std::slice::from_ref(&third));
 
-    // Stopping a shell from the palette: its process ends and the view says so.
-    h.press("cmd-p");
-    h.type_text("stop the terminal");
+    // Stopping a shell by its command: its process ends and the view says so.
+    h.window
+        .update(&mut h.cx, |ws, window, cx| {
+            ws.run_command("terminal.kill", None, window, cx)
+        })
+        .unwrap()
+        .unwrap();
     h.wait("the shell to end", |h| {
         h.view(&third, |v| matches!(v.status(), Status::Exited(_)))
             .unwrap_or(false)

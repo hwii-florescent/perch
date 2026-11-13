@@ -1,7 +1,8 @@
 //! The window: the [`Sidebar`] beside the main area, which holds the tab strip, the terminals of
-//! the tabs and their splits, the command palette and the terminal settings.
+//! the tabs and their splits and the terminal settings; the Navigator and the other floating
+//! screens are mods'.
 //!
-//! What a tab, a split and a key mean is decided elsewhere (`tabs`, `keymap`, `palette`,
+//! What a tab, a split and a key mean is decided elsewhere (`tabs`, `keymap`,
 //! `settings`); this draws it and runs the commands. A tab is a session shown as a
 //! [`TerminalView`]. Only the tabs on screen are drawn: a terminal that is not drawn is not laid
 //! out, so it never asks the core for a size, and it keeps the size it last had and keeps
@@ -30,10 +31,9 @@ use crate::client::{Command, Core};
 use crate::handoff::{open_in_perch, perch_url, Place};
 use crate::keymap::{Context as KeyContext, Hit, Keymap};
 use crate::mods::screens::{self, OnResult, Screens, PANE_HEADER_HEIGHT};
-use crate::palette::{self, Entry, Kind, Outcome, Palette, SessionRef};
 use crate::settings::{
-    next_choice, scrollback_from_text, stepped, Change, CONTRAST, MAX_SCROLLBACK, MIN_SCROLLBACK,
-    OPACITY, OPTION_AS_ALT, PADDING, TOAST_DELIVERY,
+    self, next_choice, scrollback_from_text, stepped, Change, CONTRAST, MAX_SCROLLBACK,
+    MIN_SCROLLBACK, OPACITY, OPTION_AS_ALT, PADDING, TOAST_DELIVERY,
 };
 use crate::sidebar::{Attention, Heard, Provider, LOCAL};
 use crate::tabs::{Dir, Node, Side, Tabs};
@@ -98,7 +98,6 @@ const TAB_BAR_BG: u32 = 0x19191c;
 const OVERLAY_BORDER: u32 = 0x3a3a42;
 const PANE_FOCUS: u32 = 0x4a4a55;
 const PANE_GAP: f32 = 6.;
-const PALETTE_ROWS: usize = 10;
 
 /// Finds the core to attach a terminal to, each time one is opened: the core may have
 /// restarted, and a restart changes its address and credential.
@@ -200,7 +199,6 @@ pub struct Workspace {
     panes: HashMap<String, Pane>,
     /// A split that was asked for and waits for its new terminal to be opened.
     pending_split: Option<(Side, Instant)>,
-    palette: Option<Palette>,
     settings: Option<SettingsPanel>,
     /// The zoom every terminal in the window is at.
     zoom: Zoom,
@@ -272,7 +270,6 @@ impl Workspace {
             tabs: Tabs::default(),
             panes: HashMap::new(),
             pending_split: None,
-            palette: None,
             settings: None,
             zoom: Zoom::default(),
             tick: 0,
@@ -364,10 +361,6 @@ impl Workspace {
     /// The session peeked at, when there is one.
     pub fn peeked(&self) -> Option<&str> {
         self.peek.as_deref()
-    }
-
-    pub fn palette_open(&self) -> bool {
-        self.palette.is_some()
     }
 
     pub fn settings_open(&self) -> bool {
@@ -836,8 +829,8 @@ impl Workspace {
         Some(view)
     }
 
-    /// The providers a session on `host_id` can start with: the list the palette and the New
-    /// session panel offer for that computer.
+    /// The providers a session on `host_id` can start with: the list the Navigator and the New
+    /// session menu offer for that computer.
     fn launch_choices(&self, host_id: &str, cx: &App) -> Vec<Provider> {
         self.sidebar
             .read(cx)
@@ -1024,10 +1017,6 @@ impl Workspace {
             }
             return false;
         }
-        if self.palette.is_some() {
-            self.palette_key(keystroke, &keymap, window, cx);
-            return true;
-        }
         // A menu closes on any key; Escape is only that.
         if self.menu.take().is_some() {
             cx.notify();
@@ -1049,20 +1038,20 @@ impl Workspace {
             }
         }
         if let Some(text) = self.settings.as_mut().and_then(|p| p.editing.as_mut()) {
-            match palette::edit(text, keystroke) {
-                palette::Edit::Ignored => {}
-                palette::Edit::Changed => {
+            match settings::edit(text, keystroke) {
+                settings::Edit::Ignored => {}
+                settings::Edit::Changed => {
                     cx.notify();
                     return true;
                 }
-                palette::Edit::Escape => {
+                settings::Edit::Escape => {
                     if let Some(panel) = self.settings.as_mut() {
                         panel.editing = None;
                     }
                     cx.notify();
                     return true;
                 }
-                palette::Edit::Enter => {
+                settings::Edit::Enter => {
                     self.commit_scrollback(cx);
                     return true;
                 }
@@ -1153,58 +1142,6 @@ impl Workspace {
         view.update(cx, |view, cx| view.send_text(text, cx))
     }
 
-    fn palette_key(
-        &mut self,
-        keystroke: &Keystroke,
-        keymap: &Keymap,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let m = keystroke.modifiers;
-        let navigates = m.control && matches!(keystroke.key.as_str(), "n" | "p" | "j" | "k");
-        let toggles = !navigates
-            && matches!(
-                keymap.resolve(
-                    keystroke,
-                    KeyContext {
-                        typing: true,
-                        ..Default::default()
-                    }
-                ),
-                Some(Hit::Run { name, .. }) if matches!(name.as_str(), "global.navigator" | "global.navigatorAlt")
-            );
-        let Some(palette) = self.palette.as_mut() else {
-            return;
-        };
-        let outcome = if toggles {
-            Outcome::Close
-        } else {
-            palette.key(keystroke)
-        };
-        match outcome {
-            Outcome::Nothing => {}
-            Outcome::Close => self.palette = None,
-            Outcome::Submit { command, text } => {
-                self.palette = None;
-                let args = serde_json::json!({ "name": text });
-                let result = self.run_command(&command, Some(&args), window, cx);
-                self.finish(result, cx);
-            }
-            Outcome::Run(entry) if entry.kind == Kind::Prompt => {
-                let current = self.active_title(cx);
-                if let Some(palette) = self.palette.as_mut() {
-                    palette.ask(&entry.id, "Rename tab", &current);
-                }
-            }
-            Outcome::Run(entry) => {
-                self.palette = None;
-                let result = self.run_entry(&entry, window, cx);
-                self.finish(result, cx);
-            }
-        }
-        cx.notify();
-    }
-
     fn finish(&mut self, result: Result<(), String>, cx: &mut Context<Self>) {
         if let Err(error) = result {
             self.notice = Some(error);
@@ -1212,55 +1149,10 @@ impl Workspace {
         cx.notify();
     }
 
-    fn run_entry(
-        &mut self,
-        entry: &Entry,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Result<(), String> {
-        match entry.kind {
-            Kind::Command | Kind::Prompt => self.run_command(&entry.id, None, window, cx),
-            Kind::Session => {
-                let id = entry.id.trim_start_matches("session:").to_string();
-                let (host, provider) = self
-                    .sidebar
-                    .read(cx)
-                    .find_session(&id)
-                    .map(|s| (s.host_id.clone(), s.provider_id.clone()))
-                    .ok_or("That session is gone.")?;
-                self.sidebar
-                    .update(cx, |sidebar, cx| sidebar.open(host, id, provider, cx));
-                Ok(())
-            }
-            Kind::Launch => {
-                let provider = entry.id.trim_start_matches("launch:").to_string();
-                self.sidebar
-                    .update(cx, |sidebar, cx| sidebar.launch(&provider, cx))
-            }
-            Kind::HandOff => {
-                let place = match entry.id.trim_start_matches("handoff:") {
-                    "files" => Place::Files,
-                    "changes" => Place::Changes,
-                    "browser" => Place::Browser,
-                    "chat" => Place::Chat,
-                    _ => Place::Settings,
-                };
-                self.hand_off(place)
-            }
-        }
-    }
-
     /// Only a person's choice calls this: it brings the Perch app forward.
     fn hand_off(&self, place: Place) -> Result<(), String> {
         let session = self.tabs.active();
         open_in_perch(&perch_url(session, place)).map_err(|e| e.to_string())
-    }
-
-    fn active_title(&self, cx: &App) -> String {
-        self.tabs
-            .active()
-            .map(|id| self.title_of(id, cx))
-            .unwrap_or_default()
     }
 
     /// A tab's name: the session's title now (a plain terminal is not listed), else the title its
@@ -1390,10 +1282,7 @@ impl Workspace {
             "overlay.close" => {
                 if let Some(top) = self.screens.top_modal() {
                     self.screen_closed(top, Value::Null, window, cx);
-                } else if self.palette.take().is_some()
-                    || self.menu.take().is_some()
-                    || self.settings.take().is_some()
-                {
+                } else if self.menu.take().is_some() || self.settings.take().is_some() {
                     cx.notify();
                 } else {
                     return Err("Nothing is open to close.".into());
@@ -1581,10 +1470,6 @@ impl Workspace {
     }
 
     fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.palette.take().is_some() {
-            cx.notify();
-            return;
-        }
         if self.screens.is_open("navigator") {
             self.screen_closed("navigator", Value::Null, window, cx);
             return;
@@ -1603,32 +1488,9 @@ impl Workspace {
             );
             return;
         }
-        let keymap = self.keymap(cx);
-        let sidebar = self.sidebar.read(cx);
-        let sessions: Vec<SessionRef> = sidebar
-            .model()
-            .hosts
-            .iter()
-            .flat_map(|h| &h.projects)
-            .flat_map(|p| {
-                p.sessions
-                    .iter()
-                    .chain(p.workspaces.iter().flat_map(|w| &w.sessions))
-            })
-            .map(|s| SessionRef {
-                id: s.id.clone(),
-                title: s.title.clone(),
-            })
-            .collect();
-        let providers = self.launch_choices(LOCAL, cx);
-        let pinned = sidebar.pinned();
-        self.palette = Some(Palette::new(palette::entries(
-            &keymap,
-            &sessions,
-            &providers,
-            self.tabs.active().is_some(),
-            pinned,
-        )));
+        self.notice = Some(
+            "No mod draws the Navigator. The stock one is restored when the app starts.".into(),
+        );
         cx.notify();
     }
 
@@ -2206,7 +2068,7 @@ impl Workspace {
     }
 
     /// A terminal's named action (`terminal.find`, `terminal.scroll {pages: -1}`, ...) on the tab
-    /// on screen. The key dispatcher and the palette both end here.
+    /// on screen. The key dispatcher and the Navigator both end here.
     fn terminal_command(
         &mut self,
         name: &str,
@@ -2471,101 +2333,6 @@ impl Workspace {
                 .child(self.title_of(id, cx))
                 .into_any_element(),
         }
-    }
-
-    fn palette_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let palette = self.palette.as_ref()?;
-        let mut list = div().flex().flex_col();
-        let header = |text: String| {
-            div()
-                .px_3()
-                .py_2()
-                .border_b_1()
-                .border_color(rgb(OVERLAY_BORDER))
-                .text_color(rgb(TITLE_COLOR))
-                .child(text)
-        };
-        if let Some(prompt) = &palette.prompt {
-            list = list
-                .child(
-                    div()
-                        .px_3()
-                        .pt_2()
-                        .text_xs()
-                        .text_color(rgb(DIM_COLOR))
-                        .child(prompt.label.clone()),
-                )
-                .child(header(format!("{}▏", prompt.text)));
-        } else {
-            list = list.child(header(if palette.query.is_empty() {
-                "Type a command, a session or an agent▏".to_string()
-            } else {
-                format!("{}▏", palette.query)
-            }));
-            let shown = palette.shown();
-            let start = palette.selected.saturating_sub(PALETTE_ROWS - 1);
-            for (i, entry) in shown.iter().enumerate().skip(start).take(PALETTE_ROWS) {
-                let picked = i == palette.selected;
-                let entry_owned = (*entry).clone();
-                let mut row = div()
-                    .id(format!("palette-{i}"))
-                    .cursor_pointer()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .px_3()
-                    .py_1()
-                    .text_sm()
-                    .text_color(rgb(if picked { TITLE_COLOR } else { 0xb0b0b8 }))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.palette = None;
-                        let result = this.run_entry(&entry_owned, window, cx);
-                        this.finish(result, cx);
-                    }))
-                    .child(div().truncate().child(entry.title.clone()))
-                    .child(
-                        div()
-                            .flex_1()
-                            .truncate()
-                            .text_xs()
-                            .text_color(rgb(DIM_COLOR))
-                            .child(entry.id.clone()),
-                    );
-                if let Some(keys) = &entry.keys {
-                    row = row.child(
-                        div()
-                            .flex_none()
-                            .text_xs()
-                            .text_color(rgb(DIM_COLOR))
-                            .child(keys.clone()),
-                    );
-                }
-                if picked {
-                    row = row.bg(rgb(SELECTED_BG));
-                }
-                list = list.child(row);
-            }
-            if shown.is_empty() {
-                list = list.child(
-                    div()
-                        .px_3()
-                        .py_2()
-                        .text_sm()
-                        .text_color(rgb(DIM_COLOR))
-                        .child("Nothing matches"),
-                );
-            }
-        }
-        Some(self.overlay(
-            "palette",
-            560.,
-            list,
-            |this, cx| {
-                this.palette = None;
-                cx.notify();
-            },
-            cx,
-        ))
     }
 
     fn settings_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -3030,7 +2797,7 @@ impl gpui::Render for Workspace {
         self.screens.place(wanted, window, cx);
         // A terminal that attaches takes the keyboard when it first draws; the tab that has it in
         // the layout keeps it. A modal screen has the keyboard while it is up.
-        if self.palette.is_none() && self.settings.is_none() && self.screens.top_modal().is_none() {
+        if self.settings.is_none() && self.screens.top_modal().is_none() {
             let peeked = self
                 .peek
                 .as_ref()
@@ -3208,8 +2975,7 @@ impl gpui::Render for Workspace {
             .filter_map(|open| self.floating_view(open))
             .collect();
         let overlays = self
-            .palette_view(cx)
-            .or_else(|| self.settings_view(cx))
+            .settings_view(cx)
             .into_iter()
             .chain(self.peek_view(cx))
             .chain(self.toast_view(cx));

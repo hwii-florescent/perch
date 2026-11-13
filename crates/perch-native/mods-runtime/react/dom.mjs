@@ -148,6 +148,12 @@ export class HostElement extends Target {
   getClientRects() { return [this.getBoundingClientRect()]; }
   focus() { this.ownerDocument?.focus(this); }
   blur() { this.ownerDocument?.blur(this); }
+  /** A field's text: what is being typed into it (`edit`, during the change event it causes), else its props'. */
+  get value() { return this.edit ?? String(this.props.value ?? this.props.defaultValue ?? ""); }
+  set value(text) { this.edit = String(text); }
+  // ponytail: the engine has no scroll offsets a script sets, so a row scrolled into view stays where the list has it.
+  scrollIntoView() {}
+  select() {}
 }
 
 /** An in-memory `Storage` (the engine's own per-copy storage replaces it when it has one). */
@@ -181,6 +187,8 @@ export class HostDocument extends Target {
     this.activeElement = element;
     element.state.focus = true;
     touchChain(element);
+    // The engine moves the keyboard onto the screen when the source focuses one of its elements.
+    this.perch?.focused?.(element);
   }
   blur(element) {
     element.state.focus = false;
@@ -230,6 +238,9 @@ export function installGlobals(perch, target = globalThis) {
     define(target, "clearTimeout", timers.clearTimeout);
   }
   if (typeof target.queueMicrotask !== "function") define(target, "queueMicrotask", (fn) => { Promise.resolve().then(fn); });
+  // A frame is the next turn of the host's clock (the engine draws after each).
+  define(target, "requestAnimationFrame", (fn) => target.setTimeout(() => fn(Date.now()), 0));
+  define(target, "cancelAnimationFrame", (id) => target.clearTimeout(id));
   define(target, "document", document);
   define(target, "window", window);
   define(target, "localStorage", storage);

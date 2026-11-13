@@ -673,10 +673,7 @@ fn main() {
         rig.record("nav-sessions").unwrap().bounds.size.width,
         px(10.)
     );
-    assert!(
-        !rig.ws(|ws, _, _| ws.palette_open()),
-        "not the Rust palette"
-    );
+    assert_eq!(rig.ws(|ws, _, _| ws.screens_open()), ["navigator"]);
     rig.press("cmd-p");
     assert!(rig.ws(|ws, _, _| ws.screens_open()).is_empty());
 

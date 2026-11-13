@@ -43,6 +43,11 @@ export const ghostButton = GHOST_BUTTON;
 export const iconButton = ICON_BUTTON;
 export const agentStateColor = (state) => DOT_GLYPH[state].color;
 
+/** The key binding `event` triggers in `scope` (1.7), from the host (`perch.shortcutFor`); null where the host has
+ * no bindings for that scope (the native keymap has no `navigator.*` keys yet, so the Navigator moves with the arrows
+ * only). */
+export const shortcutFor = (event, scope) => host().shortcutFor?.(event, scope) ?? null;
+
 /** A typed command (`session.open`, `project.move`, ...) for the host to run; false when it refused it. */
 export const runCommand = (command, args) => host().command(command, args ?? {}) !== false;
 export const startSession = (hostId, cwd, agent) => host().startSession?.(hostId, cwd, agent);

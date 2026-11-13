@@ -9,7 +9,10 @@
 //! - `{ kind: "div", id, style, hover?, focus?, active?, tokens, events, track_hover?, meta, children }`
 //! - `{ kind: "text", text, source? }` (`source`: the text before `text-transform`)
 //! - `{ kind: "svg", id, markup, style, ... }` (tinted with the text colour) and `{ kind: "image", markup }` (as drawn)
-//! - `{ kind: "input", id, value, placeholder, checked, input_type, style, ... }`
+//! - `{ kind: "input", id, value, placeholder, checked, input_type, style, ... }` (`value`: what the field holds,
+//!   typed text included)
+//! - `blocks_pointer` on a node that takes pointer events under an ancestor that lets them through; `tabular` on one
+//!   whose digits are tabular; `scrollbar` (its width) on a vertical scroller
 //! - a node `mount` was given a parity table for (`options.names`) carries `name` (`name` or `name:key`, the engine
 //!   id tests find it by) and, for a name that is the element's own text, `range_name`.
 //! - letter-spaced text is a `div` (no `id`) around the run with the spacing as room after it.
@@ -347,6 +350,17 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
     }
   }
   if (ctx.cascade.sheet.tracks(element, "hover")) extra.track_hover = true;
+  // Digits drawn at one width (`tabular-nums`, which the engine cannot draw): the text's width is not the engine's.
+  if (/tabular/.test(String(computed.values["font-variant-numeric"] ?? ""))) extra.tabular = true;
+  // A vertical scroller draws the app's scrollbar (`::-webkit-scrollbar`, `--scrollbar-size` wide) beside its content
+  // when that overflows; the engine's scrollbars take no room, so the width is kept for the translator.
+  if (base.overflow_y === "scroll") {
+    const size = Number.parseFloat(computed.customs?.["--scrollbar-size"] ?? "");
+    if (size > 0) extra.scrollbar = size;
+  }
+  // An element that takes pointer events again under one that lets them through (`pointer-events-auto` in a
+  // `pointer-events-none` stack): a press on it stops there and does not reach what is beneath the screen.
+  if (computed.values["pointer-events"] !== "none" && parentComputed?.values["pointer-events"] === "none") extra.blocks_pointer = true;
   const events = Object.entries(EVENTS).filter(([, props]) => props.some((p) => typeof element.props[p] === "function")).map(([name]) => name);
   if (events.length) extra.events = events;
   return { computed, style, tokens, extra, meta: meta(element), reports, childText: inheritText(inheritedText, ownText), where };
@@ -373,7 +387,8 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
   if (tag === "input" || tag === "textarea" || tag === "select") {
     node.kind = "input";
     node.input_type = tag === "input" ? String(element.props.type ?? "text") : tag;
-    for (const key of ["value", "defaultValue", "placeholder", "checked", "disabled"]) if (element.props[key] !== undefined) node[key === "defaultValue" ? "value" : key] = element.props[key];
+    for (const key of ["placeholder", "checked", "disabled"]) if (element.props[key] !== undefined) node[key] = element.props[key];
+    if (tag !== "select") node.value = element.value;
     return node;
   }
   if (tag === "img") {

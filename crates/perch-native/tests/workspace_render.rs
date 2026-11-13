@@ -1,5 +1,5 @@
 //! Draws the window offscreen with several sessions open and checks what it shows: tabs, a split
-//! with different content in each pane, the command palette, the terminal settings and an
+//! with different content in each pane, the terminal settings and an
 //! attention mark on a tab. Keys go through the window's own key path (`dispatch_keystroke`), so
 //! the dispatcher that runs before the terminal is what is tested. No window is created, shown or
 //! focused, and no core is involved: the terminals are fed what a core would send.
@@ -341,19 +341,13 @@ impl Harness {
         self.cx.run_until_parked();
     }
 
-    /// A named command, as a key or the palette runs it.
+    /// A named command, as a key or the Navigator runs it.
     fn run(&mut self, name: &str, args: Value) -> Result<(), String> {
         self.window
             .update(&mut self.cx, |ws, window, cx| {
                 ws.run_command(name, Some(&args), window, cx)
             })
             .unwrap()
-    }
-
-    fn type_text(&mut self, text: &str) {
-        for c in text.chars() {
-            self.press(&c.to_string());
-        }
     }
 
     fn ws<R>(&mut self, f: impl FnOnce(&Workspace) -> R) -> R {
@@ -595,53 +589,6 @@ fn a_split_shows_each_pane() {
     println!("workspace_render: split ok");
 }
 
-fn the_palette_lists_and_runs_commands() {
-    let mut h = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
-    h.open("alpha");
-    h.open("bravo");
-    let before = h.draw();
-    let overlay = |shot: &Shot| shot.count(0x1c1c1f, SIDEBAR_WIDTH, WIDTH, 0.0, HEIGHT);
-    assert!(!h.ws(|ws| ws.palette_open()));
-    assert!(h.press("cmd-p"), "global.navigator is taken");
-    assert!(h.ws(|ws| ws.palette_open()));
-    let open = h.draw();
-    open.save("palette");
-    assert!(
-        overlay(&open) > overlay(&before) + 20_000,
-        "the palette is drawn over the main area"
-    );
-    assert!(
-        open.bright(SIDEBAR_WIDTH + 100.0, WIDTH - 100.0, 40.0, 200.0) > 50,
-        "with its rows"
-    );
-
-    // Typing narrows it and does not reach the terminal; Enter runs the command.
-    h.type_text("restore");
-    assert!(h.press("enter"));
-    assert!(!h.ws(|ws| ws.palette_open()));
-    assert!(
-        !h.ws(|ws| ws.tabs().zoomed()),
-        "a lone pane has nothing to zoom"
-    );
-    assert_eq!(h.ws(|ws| ws.notice().map(str::to_string)), None);
-
-    // A session is a row too: going to it shows its tab.
-    h.press("cmd-p");
-    h.type_text("go to alpha");
-    h.press("enter");
-    assert_eq!(h.active().as_deref(), Some("alpha"));
-
-    // Escape and the same key close it; Enter on nothing does nothing.
-    h.press("cmd-p");
-    assert!(h.press("escape"));
-    assert!(!h.ws(|ws| ws.palette_open()));
-    h.press("cmd-p");
-    assert!(h.press("cmd-p"));
-    assert!(!h.ws(|ws| ws.palette_open()));
-    // The alternate key opens it outside a terminal only; in a terminal the program keeps cmd-k.
-    println!("workspace_render: palette ok");
-}
-
 fn terminal_settings_show_what_the_core_sent() {
     let mut h = Harness::new(model(&[("alpha", json!({}))]));
     h.open("alpha");
@@ -879,11 +826,16 @@ fn plain(key: &str, text: &str) -> Keystroke {
     }
 }
 
-/// The palette is the web's Navigator and opens on its key, Command-P. Command-Shift-P is not
-/// bound in the web or here: the window leaves it to the terminal, which sends a Command chord
-/// nothing. A person who wants it chooses it in Settings or `keys.json`, and the window then
-/// opens the palette from a terminal that has the keyboard.
-fn the_palette_opens_on_the_webs_key() {
+/// The Navigator opens on the web's key, Command-P. Command-Shift-P is not bound in the web or
+/// here: the window leaves it to the terminal, which sends a Command chord nothing. A person who
+/// wants it chooses it in Settings or `keys.json`, and the window then runs the Navigator's
+/// command from a terminal that has the keyboard. No mod draws the Navigator here, so the window
+/// says so: that notice is how this sees the command ran.
+fn navigator_asked(h: &mut Harness) -> bool {
+    h.notice().is_some_and(|n| n.contains("Navigator"))
+}
+
+fn the_navigator_opens_on_the_webs_key() {
     let mut h = Harness::new(model(&[("alpha", json!({}))]));
     h.open("alpha");
     h.draw();
@@ -891,15 +843,14 @@ fn the_palette_opens_on_the_webs_key() {
     h.draw();
     typed(&mut rx);
     assert!(!h.press("cmd-shift-p"), "nothing binds Command-Shift-P");
-    assert!(!h.ws(|ws| ws.palette_open()));
+    assert_eq!(h.notice(), None);
     assert_eq!(
         typed(&mut rx),
         Vec::<Vec<u8>>::new(),
         "and the shell gets nothing"
     );
     assert!(h.press("cmd-p"));
-    assert!(h.ws(|ws| ws.palette_open()));
-    assert!(h.press("escape"));
+    assert!(navigator_asked(&mut h));
 
     for chosen in [
         // Settings > Keyboard replaces the default key.
@@ -925,11 +876,10 @@ fn the_palette_opens_on_the_webs_key() {
             h.press("cmd-shift-p"),
             "{chosen:?}: the chosen key is taken"
         );
-        assert!(h.ws(|ws| ws.palette_open()), "{chosen:?}");
-        assert!(h.press("escape"));
+        assert!(navigator_asked(&mut h), "{chosen:?}");
         assert_eq!(typed(&mut rx), Vec::<Vec<u8>>::new());
     }
-    println!("workspace_render: palette key ok");
+    println!("workspace_render: navigator key ok");
 }
 
 /// `/` goes through the window's keymap and the terminal like any letter and types `/`, however
@@ -1113,15 +1063,11 @@ fn terminal_commands_run_from_keys_and_the_palette() {
     assert!(h.press("cmd-down"), "terminal.scrollBottom is taken");
     assert!(has(&mut h, "line 200"));
 
-    // A page at a time, from the palette.
-    h.press("cmd-p");
-    h.type_text("scroll up a page");
-    assert!(h.press("enter"));
+    // A page at a time, by the commands that have no key by default.
+    h.run("terminal.scrollPageUp", json!({})).unwrap();
     assert!(!has(&mut h, "line 200"), "a page up left the bottom");
     let paged = top(&mut h);
-    h.press("cmd-p");
-    h.type_text("scroll down a page");
-    h.press("enter");
+    h.run("terminal.scrollPageDown", json!({})).unwrap();
     assert!(has(&mut h, "line 200"), "and a page down came back");
     assert_ne!(paged, top(&mut h));
     assert_eq!(h.notice(), None);
@@ -1963,7 +1909,7 @@ fn a_blank_session_offers_the_launch_choices() {
 }
 
 fn main() {
-    the_palette_opens_on_the_webs_key();
+    the_navigator_opens_on_the_webs_key();
     a_slash_types_a_slash();
     posted_characters_type_as_they_are();
     a_click_needs_no_move_before_it();
@@ -1981,7 +1927,6 @@ fn main() {
     two_tabs();
     attention_on_a_tab();
     a_split_shows_each_pane();
-    the_palette_lists_and_runs_commands();
     terminal_settings_show_what_the_core_sent();
     a_settings_control_sends_the_changed_value();
     a_clicked_link_reaches_the_windows_opener();

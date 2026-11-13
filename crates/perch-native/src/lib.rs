@@ -8,7 +8,6 @@ pub mod handoff;
 pub mod keymap;
 pub mod mods;
 pub mod notify;
-pub mod palette;
 pub mod settings;
 pub mod sidebar;
 pub mod sound;
