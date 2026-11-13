@@ -12,7 +12,7 @@
 //!   header). The box has the size the fixture names; boxes are measured against it.
 //! - `stage`: a screen that floats over the window (a menu, a dialog, the palette, the toasts: they render through a
 //!   portal into `<body>` and are placed against the viewport). The stage is the whole window on the app's backdrop.
-import type { ComponentType, ReactNode } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import "../../../packages/web/src/styles/index.css";
 import { usePerchStore } from "../../../packages/web/src/store";
@@ -23,7 +23,7 @@ import { applyTheme } from "../../../packages/web/src/themes";
 import { BrowserIcon, FileIcon } from "../../../packages/web/src/stock-ui/tabs/icons";
 // The app registers its SDK with the package loader before anything renders (App.tsx); a stock source needs it.
 import "../../../packages/web/src/sdk";
-import { useAgentChoices, useHosts, useNavigation, useNotifications, usePaneLook, usePlanUsage, useStatusLine, useWorkspaceTabs, useZoom } from "@perch/sdk";
+import { useAgentChoices, useHosts, useKeybindings, useNavigation, useNotifications, usePaneLook, usePlanUsage, useStatusLine, useWorkspaceTabs, useZoom } from "@perch/sdk";
 
 type Json = Record<string, unknown>;
 interface Step { type?: { selector: string; text: string }; key?: { selector?: string; key: string }; click?: string }
@@ -49,6 +49,8 @@ interface Screen {
 }
 
 const noop = () => {};
+/** The actions a host gives a screen, each a no-op: nothing here acts, so the fixture lists no action. */
+const acts = () => new Proxy({}, { get: () => noop });
 /** The part of what a Probe read that JSON can carry (functions drop out). */
 const record = (value: Json) => ((window as unknown as { __PARITY_SDK__: unknown }).__PARITY_SDK__ = JSON.parse(JSON.stringify({ ...value, ...(state.steps ? { steps: state.steps } : {}) })));
 
@@ -75,6 +77,15 @@ function ToastProbe() {
 function NewSessionProbe({ props }: { props: Json }) {
   record({ props, agentChoices: useAgentChoices(String(props.hostId)) });
   return null;
+}
+function KeybindProbe({ props }: { props: Json }) {
+  record({ props, keybindings: useKeybindings() });
+  return null;
+}
+/** The stock select the way a caller holds it: it keeps the value, the field sits at `at` in the window. */
+function SelectDemo({ Select, at, ...props }: { Select: ComponentType<Json>; at: { x: number; y: number; width: number } } & Json) {
+  const [value, setValue] = useState(String(props.value));
+  return <div style={{ position: "absolute", left: at.x, top: at.y, width: at.width }}><Select {...props} value={value} onChange={(next: string) => setValue(next)} /></div>;
 }
 /** A screen that is given everything as props and reads nothing else: the props are the whole story. */
 function PropsProbe({ props }: { props: Json }) {
@@ -105,6 +116,26 @@ const SCREENS: Record<string, Screen> = {
       actions: { switchTo: noop, searchFiles: noop, openFile: noop, newTerminal: noop, startAgent: noop, manageAgents: noop, run: async () => {} },
     }),
     Probe: PropsProbe,
+  },
+  "tab-menu": {
+    load: () => import("../../../packages/web/src/stock-ui/tab-menu/main"),
+    mount: "stage",
+    props: (fixed) => ({ ...fixed, onClose: noop, extraItems: ((fixed.extraItems ?? []) as Json[]).map((item) => ({ ...item, onSelect: noop })), actions: acts() }),
+    Probe: PropsProbe,
+  },
+  select: {
+    load: async () => {
+      const { default: Select } = await import("../../../packages/web/src/stock-ui/select/main");
+      return { default: ((props: Json) => <SelectDemo Select={Select as unknown as ComponentType<Json>} {...(props as { at: { x: number; y: number; width: number } })} />) as unknown as ComponentType<never> };
+    },
+    mount: "stage",
+    Probe: PropsProbe,
+  },
+  "keybind-help": {
+    load: () => import("../../../packages/web/src/stock-ui/keybind-help/main"),
+    mount: "stage",
+    props: (fixed) => ({ ...fixed, open: true, onClose: noop }),
+    Probe: KeybindProbe,
   },
   "pane-menu": {
     load: () => import("../../../packages/web/src/stock-ui/pane-menu/main"),

@@ -1,0 +1,19 @@
+{
+  "props": {
+    "id": "s-perch-3",
+    "x": 400,
+    "y": 60,
+    "self": {
+      "id": "s-perch-3",
+      "kind": "session",
+      "label": "Review agent mail",
+      "title": "Review agent mail"
+    },
+    "canSplitNew": true,
+    "canSplitMore": true,
+    "offered": [],
+    "inSplit": false,
+    "canStopAgent": false,
+    "extraItems": []
+  }
+}

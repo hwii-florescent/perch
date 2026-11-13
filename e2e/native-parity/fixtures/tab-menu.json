@@ -1,0 +1,156 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "tab-menu",
+  "note": "Floating screen: it is drawn through a portal into the page body and placed against the window, so the reference is the whole default 1280x800 window on the app's backdrop and every box is in window coordinates. A tab's right-click menu (stock-ui/tab-menu), opened from the tab strip (`tab.menu`), a sidebar row or a pane. Props are TabMenuScreenProps as components/TabSplitMenu.tsx works them out (what may be done: `canSplitNew`, `offered`, `inSplit`, `canStopAgent`; `extraItems` are the opener's rows: for an agent session on this computer, the three inbound-message choices with the current one ticked); actions are no-ops. The menu is 280 px wide (`maxWidth: 100vw - 16px`), fixed at x,y moved in to keep 288 px on the right and room below.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1280,
+    "height": 800
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "props": {
+    "id": "s-perch-2",
+    "x": 400,
+    "y": 60,
+    "self": {
+      "id": "s-perch-2",
+      "kind": "session",
+      "label": "Fix terminal slash input",
+      "title": "Fix terminal slash input"
+    },
+    "canSplitNew": true,
+    "canSplitMore": true,
+    "offered": [
+      {
+        "id": "s-perch-1",
+        "label": "Port the sidebar to GPUI"
+      },
+      {
+        "id": "s-perch-3",
+        "label": "Review agent mail"
+      }
+    ],
+    "inSplit": false,
+    "canStopAgent": true,
+    "extraItems": [
+      {
+        "label": "✓ Accept messages from other sessions",
+        "testId": "session-inbound-accept-s-perch-2"
+      },
+      {
+        "label": "Hold messages for my approval",
+        "testId": "session-inbound-hold-s-perch-2"
+      },
+      {
+        "label": "Refuse messages from other sessions",
+        "testId": "session-inbound-refuse-s-perch-2"
+      }
+    ]
+  },
+  "states": [
+    {
+      "id": "agent-tab",
+      "title": "An agent's tab in the strip: Rename, both splits, the open tabs to show beside, the inbound choices, Stop agent and Close tab"
+    },
+    {
+      "id": "terminal-tab",
+      "title": "A plain terminal with no other tab open: both splits, 'No other open tab available', Close tab only",
+      "props": {
+        "self": {
+          "id": "s-perch-3",
+          "kind": "session",
+          "label": "Review agent mail",
+          "title": "Review agent mail"
+        },
+        "id": "s-perch-3",
+        "offered": [],
+        "canStopAgent": false,
+        "extraItems": []
+      }
+    },
+    {
+      "id": "in-split",
+      "title": "A tab that is in a split: Show full size and Separate all tabs follow the open tabs",
+      "props": {
+        "inSplit": true,
+        "offered": [
+          {
+            "id": "s-perch-3",
+            "label": "Review agent mail"
+          }
+        ],
+        "extraItems": []
+      }
+    },
+    {
+      "id": "split-full",
+      "title": "The split has no room (four panes): both split rows are disabled (40% opacity)",
+      "props": {
+        "canSplitMore": false,
+        "inSplit": true,
+        "offered": [],
+        "extraItems": []
+      }
+    },
+    {
+      "id": "file-tab",
+      "title": "A file tab: no Rename row. NOT PRODUCIBLE BY THE NATIVE CLIENT YET (it has no file tabs); kept so the layout is on record",
+      "props": {
+        "id": "w-perch-main\npackages/web/src/sdk.ts",
+        "self": {
+          "id": "w-perch-main\npackages/web/src/sdk.ts",
+          "kind": "resource",
+          "label": "sdk.ts"
+        },
+        "canStopAgent": false,
+        "extraItems": []
+      }
+    },
+    {
+      "id": "long-labels",
+      "title": "Four open tabs with long names: each 'Show beside' row is cut with an ellipsis at the menu width",
+      "props": {
+        "offered": [
+          {
+            "id": "a",
+            "label": "Fix the terminal slash input when the IME composes"
+          },
+          {
+            "id": "b",
+            "label": "Draft the release notes for the native client"
+          },
+          {
+            "id": "c",
+            "label": "packages/web/src/stock-ui/navigator/main.tsx"
+          },
+          {
+            "id": "d",
+            "label": "Profile the terminal redraw on a 4k display"
+          }
+        ],
+        "extraItems": []
+      }
+    },
+    {
+      "id": "renaming",
+      "title": "Rename tab pressed: the rows become a field holding the title and a Save button",
+      "steps": [
+        {
+          "click": "[data-testid=\"tab-menu-rename\"]"
+        }
+      ]
+    },
+    {
+      "id": "near-corner",
+      "title": "Opened at the bottom right corner: moved in to 992 px from the left and up so it stays on the window",
+      "props": {
+        "x": 1270,
+        "y": 790
+      }
+    }
+  ]
+}

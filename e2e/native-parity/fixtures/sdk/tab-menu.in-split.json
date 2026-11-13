@@ -1,0 +1,24 @@
+{
+  "props": {
+    "id": "s-perch-2",
+    "x": 400,
+    "y": 60,
+    "self": {
+      "id": "s-perch-2",
+      "kind": "session",
+      "label": "Fix terminal slash input",
+      "title": "Fix terminal slash input"
+    },
+    "canSplitNew": true,
+    "canSplitMore": true,
+    "offered": [
+      {
+        "id": "s-perch-3",
+        "label": "Review agent mail"
+      }
+    ],
+    "inSplit": true,
+    "canStopAgent": true,
+    "extraItems": []
+  }
+}

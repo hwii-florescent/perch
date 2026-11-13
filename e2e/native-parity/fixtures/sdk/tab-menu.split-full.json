@@ -1,0 +1,19 @@
+{
+  "props": {
+    "id": "s-perch-2",
+    "x": 400,
+    "y": 60,
+    "self": {
+      "id": "s-perch-2",
+      "kind": "session",
+      "label": "Fix terminal slash input",
+      "title": "Fix terminal slash input"
+    },
+    "canSplitNew": true,
+    "canSplitMore": false,
+    "offered": [],
+    "inSplit": true,
+    "canStopAgent": true,
+    "extraItems": []
+  }
+}

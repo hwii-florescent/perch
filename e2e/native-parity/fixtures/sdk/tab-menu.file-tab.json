@@ -1,0 +1,27 @@
+{
+  "props": {
+    "id": "w-perch-main\npackages/web/src/sdk.ts",
+    "x": 400,
+    "y": 60,
+    "self": {
+      "id": "w-perch-main\npackages/web/src/sdk.ts",
+      "kind": "resource",
+      "label": "sdk.ts"
+    },
+    "canSplitNew": true,
+    "canSplitMore": true,
+    "offered": [
+      {
+        "id": "s-perch-1",
+        "label": "Port the sidebar to GPUI"
+      },
+      {
+        "id": "s-perch-3",
+        "label": "Review agent mail"
+      }
+    ],
+    "inSplit": false,
+    "canStopAgent": false,
+    "extraItems": []
+  }
+}
