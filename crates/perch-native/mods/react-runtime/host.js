@@ -414,8 +414,15 @@ export function copyFor(cx, screen) {
       }),
     /** Whether the connected core has `capability` (`server.info`), as the web's clients check it. */
     coreCan: (capability, hostId = "local") => snapshot(`coreCan:${hostId}:${capability}`, () => perch.coreCan(capability, hostId)),
-    /** One of the folder's own fields has the keyboard, or none does now (`screen.js`). */
-    holdKeyboard: (held) => perch.holdKeyboard(!!held),
+    /** One of the folder's own fields has the keyboard, or none does now (`screen.js`). A screen drawn on its own
+     * (no window) has no keyboard to hold: its field keeps the focus it took. */
+    holdKeyboard: (held) => {
+      try {
+        perch.holdKeyboard(!!held);
+      } catch (error) {
+        console.error(`react-runtime: holdKeyboard: ${error?.message ?? error}`);
+      }
+    },
     shortcutLabel: (id) => perch.shortcutLabel(id),
     startSession: (hostId, cwd, agent) => {
       perch.startSession(hostId, cwd ?? undefined, agent).catch(answer((error) => console.error(`perch.startSession: ${error?.message ?? error}`)));

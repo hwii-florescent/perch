@@ -1124,26 +1124,8 @@ fn the_size_is_taken_back_from_a_phone_for_one_terminal_or_all() {
     assert_eq!(asked(&mut rxs[2]), vec![ToCore::Resize(94, 31)]);
     say(&mut h, 2, info(false, true));
 
-    // The pane's own buttons: the second of the two asks the window to take back all.
+    // The pane's choices are the phone-size stock screen's, which runs these same commands.
     h.open_as("a", Some("terminal"));
-    h.draw();
-    h.click(
-        WIDTH - 12. - 30.,
-        HEIGHT - 8. - 9.,
-        MouseButton::Left,
-        Modifiers::default(),
-    );
-    assert_eq!(taken(&mut rxs[0]), vec![ToCore::TakeSize]);
-    assert_eq!(taken(&mut rxs[2]), vec![ToCore::TakeSize]);
-    assert_eq!(taken(&mut rxs[1]), vec![]);
-    h.click(
-        WIDTH - 12. - 140.,
-        HEIGHT - 8. - 9.,
-        MouseButton::Left,
-        Modifiers::default(),
-    );
-    assert_eq!(taken(&mut rxs[0]), vec![ToCore::TakeControl]);
-
     // Once the core says this window has the size, the choices go and the commands refuse.
     say(&mut h, 0, info(true, false));
     assert!(!h.view(|v| v.offers_take_back()));

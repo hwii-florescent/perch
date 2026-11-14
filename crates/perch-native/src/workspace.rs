@@ -1401,11 +1401,33 @@ impl Workspace {
         }
         let shown = self.tabs.shown();
         if shown.len() > 1 {
-            for id in shown {
+            for id in &shown {
                 want(
                     "pane-header",
                     format!("pane-header#{id}"),
                     json!({ "id": id, "corner": false }),
+                );
+            }
+        }
+        // Over each terminal on screen: its find bar while find is open, and the phone-size
+        // notice while a phone holds its size and this window may take it back.
+        for id in shown {
+            let Some(view) = self.panes.get(&id).and_then(|p| p.view.as_ref()) else {
+                continue;
+            };
+            let view = view.read(cx);
+            if view.find_open() {
+                want(
+                    "terminal-search",
+                    format!("terminal-search#{id}"),
+                    json!({ "id": id, "query": view.find_query() }),
+                );
+            }
+            if view.offers_take_back() {
+                want(
+                    "phone-size",
+                    format!("phone-size#{id}"),
+                    json!({ "id": id, "generation": view.phone_holds(), "pending": false }),
                 );
             }
         }
@@ -1557,12 +1579,8 @@ impl Workspace {
             TerminalEvent::OpenLink(target) => (self.opener)(target),
             TerminalEvent::MenuAsked(at) => self.open_menu(id, *at, cx),
             TerminalEvent::Chose(provider) => self.start_chosen(id, provider, cx),
-            TerminalEvent::TakeBackAll => {
-                if let Err(error) = self.take_back_all(cx) {
-                    self.notice = Some(error);
-                    cx.notify();
-                }
-            }
+            // Its find bar or phone-size notice comes or goes (`inflow_wanted`).
+            TerminalEvent::Chrome => cx.notify(),
             TerminalEvent::Status(Status::Live) => {
                 if let Some(pane) = self.panes.get_mut(id) {
                     pane.attempts = 0;
@@ -2392,6 +2410,25 @@ impl Workspace {
                 cx.notify();
             }
             "terminal.takeBackAll" => self.take_back_all(cx)?,
+            // The find bar's own (`terminal-search`): the query it holds, find again, close.
+            "terminal.findQuery"
+            | "terminal.findNext"
+            | "terminal.findPrevious"
+            | "terminal.findClose" => {
+                let view = self.terminal_named(text("id"))?;
+                view.update(cx, |view, cx| match name {
+                    "terminal.findQuery" => {
+                        view.set_find_query(text("query").unwrap_or_default(), cx);
+                    }
+                    "terminal.findNext" => {
+                        view.find_next(cx);
+                    }
+                    "terminal.findPrevious" => {
+                        view.find_previous(cx);
+                    }
+                    _ => view.close_find(cx),
+                });
+            }
             _ if name.starts_with("terminal.") => self.terminal_command(name, args, cx)?,
             _ if name.starts_with("tabs.jump") => {
                 let n = name["tabs.jump".len()..].parse().ok();
@@ -2917,6 +2954,21 @@ impl Workspace {
         Ok(())
     }
 
+    /// Tab `id`'s terminal, else the one on screen.
+    fn terminal_named(&self, id: Option<&str>) -> Result<Entity<TerminalView>, String> {
+        match id {
+            Some(id) => self
+                .panes
+                .get(id)
+                .and_then(|p| p.view.clone())
+                .ok_or_else(|| format!("Tab {id} has no terminal.")),
+            None => self
+                .terminal()
+                .cloned()
+                .ok_or("No terminal is on screen.".into()),
+        }
+    }
+
     /// A terminal's named action (`terminal.find`, `terminal.scroll {pages: -1}`, ...) on the tab
     /// on screen. The key dispatcher and the Navigator both end here.
     fn terminal_command(
@@ -2925,10 +2977,8 @@ impl Workspace {
         args: Option<&Value>,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
-        let view = self
-            .terminal()
-            .cloned()
-            .ok_or("No terminal is on screen.")?;
+        let id = args.and_then(|a| a.get("id")).and_then(Value::as_str);
+        let view = self.terminal_named(id)?;
         // The action, and what to say if the view did nothing.
         let (action, nothing) = match name {
             "terminal.find" => (Action::Find, ""),
@@ -3078,8 +3128,17 @@ impl Workspace {
                 MouseButton::Left,
                 cx.listener(move |this, _, _, cx| this.focus_pane(&target, cx)),
             );
+        // What a mod draws over the terminal, in the pane's box: the find bar, the phone-size notice.
+        let over = ["terminal-search", "phone-size"]
+            .into_iter()
+            .filter_map(|screen| self.screens.inflow(&format!("{screen}#{id}")))
+            .map(|view| div().absolute().inset_0().child(view));
         match self.panes.get(id).and_then(|p| p.view.clone()) {
-            Some(view) => frame.child(view).into_any_element(),
+            Some(view) => frame
+                .relative()
+                .child(view)
+                .children(over)
+                .into_any_element(),
             None => frame
                 .flex()
                 .items_center()

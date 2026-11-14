@@ -100,6 +100,13 @@ function engineId(node, events, overlay) {
   return testId ? `~${node.id}:${testId}` : `~${node.id}`;
 }
 
+/** Whether `node` holds text of its own, or text with a space in a column inside it, that the row it is in could
+ * wrap. A single word in a column is the web's min-content width, so that item keeps it (a sidebar title). */
+const holdsWrappingText = (node, nested = false) =>
+  (node.children ?? []).some((c) =>
+    c.kind === "text" ? !nested || /\s/.test(String(c.text ?? "").trim())
+      : c.kind === "div" && c.style?.flex_direction !== "row" && c.style?.whitespace !== "nowrap" && holdsWrappingText(c, true));
+
 /** A node the engine draws (display none is left out, so it is neither laid out nor recorded). */
 const drawn = (child) => child.style?.display !== "hidden";
 
@@ -132,11 +139,12 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   el = applyStyle(el, { ...node.style, ...snapped.get(node) });
   // CSS gives a flex item an automatic minimum width of its min-content width, which for text that can wrap is its
   // longest word, so the item shrinks and its text wraps; GPUI's minimum for text is the whole line. A shrinkable
-  // row item holding wrappable text of its own therefore gets no minimum width.
+  // row item holding wrappable text, its own or in the columns inside it (a heading over a line), therefore gets no
+  // minimum width.
   // ponytail: zero rather than the longest word (not measured here), so in a row too narrow for one word the item
   // can shrink further than on the web; measuring the longest word through the text system would close that.
   const wraps = text.whitespace !== "nowrap" && !text.text_ellipsis;
-  if (rowItem && wraps && node.style.flex_shrink !== 0 && node.style.min_w === undefined && (node.children ?? []).some((c) => c.kind === "text")) el = el.min_w(0);
+  if (rowItem && wraps && node.style.flex_shrink !== 0 && node.style.min_w === undefined && holdsWrappingText(node)) el = el.min_w(0);
   for (const variant of ["hover", "focus", "active"]) if (node[variant]) el = el[variant]((s) => applyStyle(s, node[variant]));
   // `scrollIntoView()`: the scroll area holding the element shows the child it is in. ponytail: the kit's one
   // `ScrollHandle` (`kit.scroll`) serves the first scroll area asked; a second one would need a handle per area.

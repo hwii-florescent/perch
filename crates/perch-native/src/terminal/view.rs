@@ -10,10 +10,12 @@
 //!   it, so it always matches what the program draws for.
 //! - Typing, and anything else the program is told (the mouse, answers to its queries, focus),
 //!   needs the input lease.
-//! - A phone can hold the size. Where typing is shared the pane's note then offers the web's two
-//!   choices, "Take back this tab" (the input and the size) and "Take back all tabs" (the window
-//!   takes the size alone of each terminal a phone holds, see [`TerminalEvent::TakeBackAll`]);
-//!   without shared typing it offers Take control.
+//! - A phone can hold the size. Where typing is shared the window draws the web's phone-size
+//!   notice over the pane ([`TerminalView::offers_take_back`]), with its two choices, "Take back
+//!   this tab" (the input and the size) and "Take back all tabs" (the window takes the size alone
+//!   of each terminal a phone holds); without shared typing the pane's note offers Take control.
+//! - Find is the view's (the query, the matches, the highlights); its bar is the window's
+//!   `terminal-search` screen over the pane, which [`TerminalEvent::Chrome`] says to draw.
 //! - A dropped connection leaves the screen as it was and says so. It is never taken for the end
 //!   of the shell, and nothing here reattaches, which would start the session again.
 //! - A session the core lists as blank (no provider, nothing ever started in it) has no shell to
@@ -115,9 +117,9 @@ pub enum TerminalEvent {
     /// window, which sees the session's row, says it is still blank ([`TerminalView::start_with`])
     /// or not ([`TerminalView::refuse_choice`]).
     Chose(String),
-    /// A person chose "Take back all tabs" in the pane's note: the window takes back the size of
-    /// every terminal a phone holds ([`TerminalView::perform`] with [`Action::TakeSize`], on each).
-    TakeBackAll,
+    /// What the window draws over the pane changed: find opened or closed, or a phone began or
+    /// stopped holding the size ([`TerminalView::find_open`], [`TerminalView::offers_take_back`]).
+    Chrome,
 }
 
 impl EventEmitter<TerminalEvent> for TerminalView {}
@@ -280,6 +282,8 @@ pub struct TerminalView {
     /// The pane is not on screen: it holds no focus and draws nothing.
     hidden: bool,
     find: Find,
+    /// See [`Self::phone_holds`].
+    phone_holds: u64,
     _find_timer: Option<Task<()>>,
     clipboard: Rc<dyn Clipboard>,
     /// A left-button drag is selecting text.
@@ -361,6 +365,7 @@ impl TerminalView {
             marked: None,
             hidden: false,
             find: Find::default(),
+            phone_holds: 0,
             _find_timer: None,
             clipboard: Rc::new(MemoryClipboard::default()),
             selecting: false,
@@ -746,6 +751,7 @@ impl TerminalView {
                 resize,
                 agent,
             } => {
+                let offered = self.offers_take_back();
                 self.input_lease = input;
                 self.resize_lease = resize;
                 self.agent = agent;
@@ -761,6 +767,7 @@ impl TerminalView {
                 self.backlog.push_back(Work::Replay(false));
                 self.flush(cx);
                 self.set_status(Status::Live, cx);
+                self.holds_changed(offered, cx);
             }
             FromCore::Output(data) => self.output(&data, cx),
             FromCore::Profile(profile) => self.apply_core(Some(profile), None, cx),
@@ -789,9 +796,11 @@ impl TerminalView {
                         self.send(ToCore::Resize(fit.cols, fit.rows));
                     }
                 }
+                let offered = self.offers_take_back();
                 self.input_lease = agent.input;
                 self.resize_lease = agent.resize;
                 self.agent = Some(agent);
+                self.holds_changed(offered, cx);
                 cx.notify();
             }
             FromCore::Exited(code) => self.set_status(Status::Exited(code), cx),
@@ -1559,6 +1568,7 @@ impl TerminalView {
                 }
             }
         }));
+        cx.emit(TerminalEvent::Chrome);
         cx.notify();
     }
 
@@ -1567,7 +1577,25 @@ impl TerminalView {
         self.find.open = false;
         self._find_timer = None;
         self.vt.search("");
+        cx.emit(TerminalEvent::Chrome);
         cx.notify();
+    }
+
+    /// How many times a phone began holding this terminal's size where it can be taken back: a
+    /// new hold shows the phone-size notice again after it was folded (the web's `generation`).
+    pub fn phone_holds(&self) -> u64 {
+        self.phone_holds
+    }
+
+    /// Counts a phone's new hold on the size and tells the window when the notice comes or goes.
+    fn holds_changed(&mut self, offered: bool, cx: &mut Context<Self>) {
+        let now = self.offers_take_back();
+        if now != offered {
+            if now {
+                self.phone_holds += 1;
+            }
+            cx.emit(TerminalEvent::Chrome);
+        }
     }
 
     /// Replace the query.
@@ -2328,80 +2356,6 @@ impl TerminalView {
     }
 }
 
-impl TerminalView {
-    /// The find bar over the pane's top right: the query, the match counter and the buttons.
-    /// A click on it never reaches the terminal underneath.
-    fn find_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let button = |id: &'static str, label: &'static str| {
-            div()
-                .id(id)
-                .w(px(22.))
-                .h(px(22.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_sm()
-                .bg(rgb(0x3a3a40))
-                .text_color(rgb(0xd8d8de))
-                .hover(|style| style.bg(rgb(0x4a4a52)))
-                .child(label)
-        };
-        let query = if self.find.query.is_empty() {
-            SharedString::from("Find…")
-        } else {
-            SharedString::from(self.find.query.clone())
-        };
-        div()
-            .id("terminal-find")
-            .absolute()
-            .top_2()
-            .right_3()
-            .flex()
-            .items_center()
-            .gap_1()
-            .px_2()
-            .py_1()
-            .rounded_md()
-            .bg(rgb(0x2a2a2e))
-            .text_xs()
-            .text_color(rgb(0xd8d8de))
-            .on_mouse_down(GpuiButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(
-                div()
-                    .w(px(150.))
-                    .px_1()
-                    .overflow_hidden()
-                    .text_color(if self.find.query.is_empty() {
-                        rgb(NOTE_COLOR)
-                    } else {
-                        rgb(0xd8d8de)
-                    })
-                    .child(query),
-            )
-            .child(
-                div()
-                    .min_w(px(56.))
-                    .text_color(rgb(NOTE_COLOR))
-                    .child(self.find_label()),
-            )
-            .child(
-                button("find-previous", "↑").on_click(cx.listener(|this, _, _, cx| {
-                    this.find_previous(cx);
-                })),
-            )
-            .child(
-                button("find-next", "↓").on_click(cx.listener(|this, _, _, cx| {
-                    this.find_next(cx);
-                })),
-            )
-            .child(
-                button("find-close", "×").on_click(cx.listener(|this, _, _, cx| {
-                    this.close_find(cx);
-                })),
-            )
-    }
-}
-
 impl Focusable for TerminalView {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
@@ -2854,8 +2808,9 @@ impl gpui::Render for TerminalView {
         let focused = self.focus.is_focused(window);
         let mut bg = color(self.vt.background());
         bg.a = self.settings.opacity;
-        let note = self.note();
         let take_back = self.offers_take_back();
+        // The phone-size notice says it, with its choices (the window's `phone-size` screen).
+        let note = self.note().filter(|_| !take_back);
         let take_control = self.can_take_control() && self.status == Status::Live && !take_back;
         let mut pane = div()
             .id("terminal")
@@ -2928,7 +2883,6 @@ impl gpui::Render for TerminalView {
             )
             .size_full(),
         )
-        .when(self.find.open, |pane| pane.child(self.find_bar(cx)))
         .when_some(self.choice.as_ref(), |pane, choice| {
             pane.child(
                 div()
@@ -2975,20 +2929,6 @@ impl gpui::Render for TerminalView {
                                 this.perform(Action::TakeControl, cx);
                             }),
                         ))
-                    })
-                    .when(take_back, |row| {
-                        row.child(
-                            note_button("take-back-this", "Take back this tab").on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    this.perform(Action::TakeBack, cx);
-                                }),
-                            ),
-                        )
-                        .child(
-                            note_button("take-back-all", "Take back all tabs").on_click(
-                                cx.listener(|_, _, _, cx| cx.emit(TerminalEvent::TakeBackAll)),
-                            ),
-                        )
                     }),
             )
         })

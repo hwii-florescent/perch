@@ -1562,7 +1562,7 @@ const OWN: [(&str, &str, &str); 10] = [
 
 /// Window commands beyond the keymap's: the web's ids the window can perform (some under the
 /// name its keys use), and the native ones screens need.
-const WINDOW_COMMANDS: [(&str, &str, &str); 24] = [
+const WINDOW_COMMANDS: [(&str, &str, &str); 28] = [
     (
         "session.start",
         "Start an agent in a folder on a host",
@@ -1645,6 +1645,26 @@ const WINDOW_COMMANDS: [(&str, &str, &str); 24] = [
     (
         "host.refresh",
         "Ask a host for its projects and workspaces again",
+        "{id}",
+    ),
+    (
+        "terminal.findQuery",
+        "Set what a tab's terminal finds (its find bar's field)",
+        "{id, query}",
+    ),
+    (
+        "terminal.findNext",
+        "Select a tab's terminal's next match",
+        "{id}",
+    ),
+    (
+        "terminal.findPrevious",
+        "Select a tab's terminal's previous match",
+        "{id}",
+    ),
+    (
+        "terminal.findClose",
+        "Close a tab's terminal's find and give it the keyboard",
         "{id}",
     ),
 ];

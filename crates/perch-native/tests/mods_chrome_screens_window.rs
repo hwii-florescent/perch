@@ -22,6 +22,9 @@
 //!   core; a create the core refuses stays with the reason, one it makes closes the form; Remove
 //!   asks first and a dirty checkout is asked again, forced; Open starts a terminal there;
 //!   Escape and a press outside close it.
+//! - Terminal find: the terminal's find key opens the find bar over its pane with the keyboard in
+//!   it; what is typed is the terminal's query (and never reaches the shell); Escape and × close
+//!   it, the keyboard back in the terminal.
 //! - Start: the main area with nothing open; New session, `?`, a workspace's agent buttons and the
 //!   connecting page.
 //!
@@ -992,6 +995,45 @@ fn worktree(rig: &mut Rig) {
     println!("worktree: ok");
 }
 
+const FIND_KEY: &str = if cfg!(target_os = "macos") {
+    "cmd-f"
+} else {
+    "ctrl-f"
+};
+
+/// The query the terminal on screen holds, and whether its find is open.
+fn find_state(rig: &mut Rig) -> (String, bool) {
+    rig.ws(|ws, _, cx| {
+        let view = ws.terminal().expect("a terminal").read(cx);
+        (view.find_query().to_string(), view.find_open())
+    })
+}
+
+fn terminal_find(rig: &mut Rig) {
+    // The find key opens the bar over the pane, its field with the keyboard.
+    rig.press(FIND_KEY);
+    assert!(rig.record("term-search").is_some(), "the find bar is drawn");
+    assert!(!rig.terminal_focused(), "the bar's field has the keyboard");
+    rig.type_text("needle");
+    assert_eq!(
+        find_state(rig),
+        ("needle".to_string(), true),
+        "the terminal's query"
+    );
+    // Escape closes it and gives the terminal the keyboard back.
+    rig.press("escape");
+    assert!(!find_state(rig).1, "find closed");
+    assert!(rig.record("term-search").is_none(), "the bar went");
+    assert!(rig.terminal_focused(), "the keyboard is back");
+    // Opened again it holds the query; × closes it.
+    rig.press(FIND_KEY);
+    assert!(rig.record("term-search-input").is_some());
+    rig.click("term-search-button:Close (Escape)");
+    assert!(!find_state(rig).1, "× closed it");
+    assert!(rig.terminal_focused());
+    println!("terminal-find: ok");
+}
+
 fn main() {
     let scratch: PathBuf = std::env::temp_dir().join(format!(
         "perch-chrome-screens-window-{}",
@@ -1020,6 +1062,7 @@ fn main() {
     instructions(&mut rig);
     memory(&mut rig);
     worktree(&mut rig);
+    terminal_find(&mut rig);
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())
         .unwrap();
