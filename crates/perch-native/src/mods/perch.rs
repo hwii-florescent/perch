@@ -130,6 +130,8 @@ pub struct WindowState {
     pub terminals: HashMap<String, &'static str>,
     /// A tab drag in flight (`tabSlide()`, `TabDrag::slide`); null when none.
     pub slide: Value,
+    /// The pointer as last forwarded for a press a mod follows (`pointerFollow()`), null before any.
+    pub pointer: Value,
     /// The last Add project request (`useAddProject`), null before any.
     pub add_project: Value,
     /// How many times the window asked the sidebar for its Add project form, and when last.
@@ -251,6 +253,7 @@ impl Perch {
                 add_project_at: ws.add_project_asks().1,
                 terminals: ws.terminal_states(cx),
                 slide: ws.tab_slide(),
+                pointer: ws.pointer_follow().clone(),
                 notifications: ws
                     .notifications()
                     .iter()
@@ -850,6 +853,12 @@ impl Perch {
                 "tabSlide",
                 reader(WINDOW, |perch, _| {
                     perch.0.data.borrow().window.slide.clone()
+                }),
+            )
+            .function(
+                "pointerFollow",
+                reader(WINDOW, |perch, _| {
+                    perch.0.data.borrow().window.pointer.clone()
                 }),
             )
             .function("workspaceTabs", both(|perch, _| perch.workspace_tabs()))
@@ -1553,7 +1562,7 @@ const OWN: [(&str, &str, &str); 10] = [
 
 /// Window commands beyond the keymap's: the web's ids the window can perform (some under the
 /// name its keys use), and the native ones screens need.
-const WINDOW_COMMANDS: [(&str, &str, &str); 23] = [
+const WINDOW_COMMANDS: [(&str, &str, &str); 24] = [
     (
         "session.start",
         "Start an agent in a folder on a host",
@@ -1580,6 +1589,11 @@ const WINDOW_COMMANDS: [(&str, &str, &str); 23] = [
         "tab.beginDrag",
         "A press on a tab, which the window follows as a drag (the SDK's beginTabDrag)",
         "{id, label, x, y, entries: [{id, left, width}]}",
+    ),
+    (
+        "pointer.follow",
+        "Forward the pointer to this mod until the press it began with ends (the SDK's beginReorderDrag)",
+        "{token, x, y}",
     ),
     (
         "host.enable",

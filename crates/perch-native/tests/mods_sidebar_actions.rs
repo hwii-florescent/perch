@@ -2,15 +2,17 @@
 //! own screens. A session row's menu (right-click) is the stock tab menu for that session, whether
 //! or not it has a tab: the window works out what may be done, runs the tab's actions (rename,
 //! show beside an open tab, split) and the session's inbound choices, and a row of the sidebar's
-//! own (Move up, Move down) runs the sidebar's command.
+//! own (Move up, Move down) runs the sidebar's command. A row's drag is the web's own, with the
+//! pointer forwarded to the sidebar only while the press lasts.
 //!
 //! Offscreen, as the other render tests: no window is shown or focused, no core runs, and every event
 //! goes through the window's own dispatch.
 
 use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 use gpui::{
-    point, px, size, AppContext as _, HeadlessAppContext, Keystroke, Modifiers, MouseButton,
-    MouseDownEvent, MouseUpEvent, PlatformInput, Window, WindowHandle,
+    div, point, px, size, AnyWindowHandle, AppContext as _, HeadlessAppContext, IntoElement,
+    Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PlatformInput,
+    Render, Window, WindowHandle,
 };
 use gpui_shell::probe::{self, ProbeRecord};
 use perch_core::protocol::ServerMessage;
@@ -221,10 +223,184 @@ impl Rig {
             )
         })
     }
+
+    /// A left press, a move with it held, a move with no button (its release was not seen) or
+    /// its release at `(x, y)`, through the window's dispatch.
+    fn down(&mut self, (x, y): (f32, f32)) {
+        self.input(PlatformInput::MouseDown(MouseDownEvent {
+            button: MouseButton::Left,
+            position: point(px(x), px(y)),
+            modifiers: Modifiers::default(),
+            click_count: 1,
+            first_mouse: false,
+        }));
+    }
+
+    fn moved(&mut self, (x, y): (f32, f32), held: bool) {
+        self.input(PlatformInput::MouseMove(MouseMoveEvent {
+            position: point(px(x), px(y)),
+            pressed_button: held.then_some(MouseButton::Left),
+            modifiers: Modifiers::default(),
+        }));
+    }
+
+    fn up(&mut self, (x, y): (f32, f32)) {
+        self.input(PlatformInput::MouseUp(MouseUpEvent {
+            button: MouseButton::Left,
+            position: point(px(x), px(y)),
+            modifiers: Modifiers::default(),
+            click_count: 1,
+        }));
+    }
+
+    fn input(&mut self, input: PlatformInput) {
+        self.cx
+            .update_window(self.window.into(), |_, window: &mut Window, cx| {
+                window.dispatch_event(input, cx);
+            })
+            .unwrap();
+        self.cx.run_until_parked();
+        self.draw();
+    }
+
+    /// The pointer the window last forwarded to a mod following a press.
+    fn forwarded(&mut self) -> Value {
+        self.ws(|ws, _, _| ws.pointer_follow().clone())
+    }
+}
+
+/// A window with nothing in it.
+struct Blank;
+
+impl Render for Blank {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        div()
+    }
 }
 
 fn strings(list: &[&str]) -> Vec<String> {
     list.iter().map(|s| s.to_string()).collect()
+}
+
+/// The orders the window asked the core to keep for sessions.
+fn session_orders(asked: Vec<Command>) -> Vec<Vec<String>> {
+    asked
+        .into_iter()
+        .filter_map(|c| match c {
+            Command::SetOrder {
+                sessions: Some(sessions),
+                ..
+            } => Some(sessions),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A session row's drag is the web's own (`beginReorderDrag`): the window forwards the pointer to
+/// the sidebar only while the press lasts, the rows slide as the web's do, and the order goes to
+/// the core once, on the release. Escape, the window losing focus and a lost release end the
+/// drag with nothing changed, the rows back in their places.
+fn row_drag(rig: &mut Rig, elsewhere: AnyWindowHandle) {
+    let y = |rig: &mut Rig, id: &str| rig.center(&format!("session-button:{id}")).1;
+    let bravo = rig.center("session-button:bravo");
+    let charlie = rig.center("session-button:charlie");
+    let alpha_y = y(rig, "alpha");
+    let step = charlie.1 - bravo.1;
+    assert!(step > 10., "rows a row apart: {step}");
+    let below = (bravo.0, charlie.1 + step / 2.);
+    let near = |a: f32, b: f32| (a - b).abs() < 1.;
+    let in_place = |rig: &mut Rig| {
+        near(y(rig, "alpha"), alpha_y)
+            && near(y(rig, "bravo"), bravo.1)
+            && near(y(rig, "charlie"), charlie.1)
+    };
+
+    // Without a press nothing is forwarded, wherever the pointer goes.
+    let before = rig.forwarded();
+    rig.moved(charlie, false);
+    rig.moved(bravo, true);
+    assert_eq!(rig.forwarded(), before, "no press, nothing forwarded");
+
+    // Bravo dragged below charlie: under a few pixels it is still a press; past them it follows
+    // the pointer (kept inside the list) and charlie slides up into its place.
+    rig.asked();
+    rig.down(bravo);
+    rig.moved((bravo.0, bravo.1 + 2.), true);
+    assert_eq!(rig.forwarded()["phase"], "move", "the press is followed");
+    assert!(in_place(rig), "a few pixels move nothing");
+    rig.moved((below.0, below.1 - 1.), true);
+    rig.moved(below, true);
+    assert!(
+        near(y(rig, "bravo"), charlie.1) && near(y(rig, "charlie"), bravo.1),
+        "bravo follows the pointer, charlie slides into its place: {} {}",
+        y(rig, "bravo"),
+        y(rig, "charlie")
+    );
+    assert!(
+        session_orders(rig.asked()).is_empty(),
+        "nothing is asked while dragging"
+    );
+    rig.up(below);
+    assert_eq!(
+        session_orders(rig.asked()),
+        [strings(&["alpha", "charlie", "bravo"])],
+        "the order goes to the core once, on the release"
+    );
+    assert_eq!(rig.forwarded()["phase"], "up");
+    assert!(
+        in_place(rig),
+        "the slide is undone (the core keeps the order)"
+    );
+    assert_eq!(rig.tabs().0, strings(&["alpha"]), "the release is no click");
+    let ended = rig.forwarded();
+    rig.moved(charlie, true);
+    rig.moved(bravo, false);
+    assert_eq!(
+        rig.forwarded(),
+        ended,
+        "nothing is forwarded after the release"
+    );
+
+    // Each way out that is not a release: the rows go back and a later release sends nothing.
+    let drag = |rig: &mut Rig| {
+        rig.down(bravo);
+        rig.moved((below.0, below.1 - 1.), true);
+        rig.moved(below, true);
+        assert!(near(y(rig, "charlie"), bravo.1), "the drag is under way");
+    };
+    let nothing_changed = |rig: &mut Rig, how: &str| {
+        assert_eq!(rig.forwarded()["phase"], "cancel", "{how}");
+        assert!(in_place(rig), "{how}: the rows are back");
+        rig.up(below);
+        rig.draw();
+        assert!(
+            session_orders(rig.asked()).is_empty(),
+            "{how}: no order is sent"
+        );
+        assert!(in_place(rig), "{how}");
+    };
+    drag(rig);
+    rig.press("escape");
+    nothing_changed(rig, "Escape");
+
+    drag(rig);
+    rig.moved((below.0 + 3., below.1), false);
+    nothing_changed(rig, "a lost release");
+
+    let activate = |rig: &mut Rig, window: AnyWindowHandle| {
+        rig.cx
+            .update_window(window, |_, window, _| window.activate_window())
+            .unwrap();
+        rig.cx.run_until_parked();
+        rig.draw();
+    };
+    let home: AnyWindowHandle = rig.window.into();
+    activate(rig, home);
+    drag(rig);
+    activate(rig, elsewhere);
+    assert_eq!(rig.forwarded()["phase"], "cancel", "losing focus");
+    activate(rig, home);
+    nothing_changed(rig, "losing focus");
 }
 
 fn session_menu(rig: &mut Rig) {
@@ -460,6 +636,11 @@ fn main() {
             })
         })
         .unwrap();
+    // Another window, to take the focus from this one.
+    let elsewhere: AnyWindowHandle = cx
+        .open_window(size(px(100.), px(100.)), |_, cx| cx.new(|_| Blank))
+        .unwrap()
+        .into();
     let workspace = window.entity(&cx).unwrap();
     cx.update(|cx| mods::start_in(user, &workspace, window.into(), cx));
     let mut rig = Rig { cx, window, asked };
@@ -478,6 +659,7 @@ fn main() {
     perch.set_sidebar(settings);
     rig.cx.update(|cx| perch.flush(cx));
     rig.draw();
+    row_drag(&mut rig, elsewhere);
     session_menu(&mut rig);
     sidebar_commands(&mut rig);
 

@@ -190,6 +190,15 @@ export function mount(perch, Component, options = {}) {
   let drawn = -1;
   document.measureKey = (element) => prefix + element.id;
   document.stale = () => drawn !== version;
+  // `getComputedStyle`: the cascade the last description used, from the body down to `element`.
+  document.computed = (element) => {
+    if (!kept.cascade || !kept.top) return null;
+    const chain = [];
+    for (let node = element; node instanceof HostElement && node !== document.body; node = node.parentNode) chain.unshift(node);
+    let style = kept.top;
+    for (const node of chain) style = kept.cascade.compute(node, style);
+    return style.values;
+  };
   const render = () => {
     version += 1;
     description = describe(document, perch, styleSheet(), kept, options.names);

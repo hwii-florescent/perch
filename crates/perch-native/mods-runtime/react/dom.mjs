@@ -4,10 +4,11 @@
 //! `document` (with `body`, the portal target) and `window` keep listeners for the capture and bubble phases the
 //! source registers; `localStorage`, timers, `window.location` and `navigator.clipboard` go to the `perch` host.
 //!
-//! `installGlobals(perch)` puts `window`, `document`, `localStorage`, `HTMLElement`, `DOMRect` and (where the engine
-//! has none) `setTimeout`/`clearTimeout`/`queueMicrotask` on `globalThis`, so a module that names them as globals
-//! runs unchanged. `window`, `document` and `localStorage` read the record at `globalThis[GLOBALS]`, which each
-//! mount sets to its own and a host running several screens in one script context sets to the running screen's.
+//! `installGlobals(perch)` puts `window`, `document`, `localStorage`, `HTMLElement`, `DOMRect`, `getComputedStyle`
+//! and (where the engine has none) `setTimeout`/`clearTimeout`/`queueMicrotask` on `globalThis`, so a module that
+//! names them as globals runs unchanged. `window`, `document`, `localStorage` and `HTMLElement` read the record at
+//! `globalThis[GLOBALS]`, which each mount sets to its own and a host running several screens in one script context
+//! sets to the running screen's.
 import { closest as closestBy, matches as matchesBy, querySelectorAll as queryBy } from "./selector.mjs";
 
 let nextId = 1;
@@ -423,14 +424,15 @@ export function installGlobals(perch, target = globalThis) {
   // A frame is the next turn of the host's clock (the engine draws after each).
   define(target, "requestAnimationFrame", (fn) => target.setTimeout(() => fn(Date.now()), 0));
   define(target, "cancelAnimationFrame", (id) => target.clearTimeout(id));
-  const globals = { document, window, localStorage: storage };
+  // `HTMLElement` too: each mod folder evaluates its own copy of this runtime, so a source's `instanceof HTMLElement`
+  // must name the class of the copy that made its elements.
+  const globals = { document, window, localStorage: storage, HTMLElement: HostElement, Element: HostElement };
   for (const name of Object.keys(globals)) {
     Object.defineProperty(target, name, { get: () => target[GLOBALS]?.[name], configurable: true, enumerable: false });
   }
   target[GLOBALS] = globals;
-  define(target, "HTMLElement", HostElement);
-  define(target, "Element", HostElement);
   define(target, "DOMRect", DOMRect);
+  define(target, "getComputedStyle", computedStyle);
   if (typeof target.ResizeObserver !== "function") define(target, "ResizeObserver", HostResizeObserver);
   const navigator = target.navigator && typeof target.navigator === "object" ? target.navigator : {};
   if (!navigator.clipboard && perch.clipboard) {
@@ -438,6 +440,24 @@ export function installGlobals(perch, target = globalThis) {
   }
   if (!target.navigator) define(target, "navigator", navigator);
   return { document, window, globals };
+}
+
+/** `getComputedStyle(element)`: the cascade's values for it (`HostDocument.computed`, which a mount gives), by their
+ * DOM names (`overflowY`, `position`) or through `getPropertyValue`. A keyword or number reads as its text; a value
+ * the cascade keeps parsed (a length, a colour) and one it has not computed read as "". */
+export function computedStyle(element) {
+  const values = element?.ownerDocument?.computed?.(element) ?? {};
+  const text = (name) => {
+    const value = values[name];
+    return typeof value === "string" || typeof value === "number" ? String(value) : "";
+  };
+  return new Proxy({}, {
+    get: (_, key) => {
+      if (typeof key !== "string") return undefined;
+      if (key === "getPropertyValue") return (name) => text(String(name));
+      return text(key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`));
+    },
+  });
 }
 
 /** The form `element` submits, as a browser's default action does: a submit button's (a `<button>` whose type is not
