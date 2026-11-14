@@ -14089,7 +14089,7 @@ function Av(n, l, o, c) {
     if (!ze(z) || z.kind === "input" || z.markup) return x(z);
     const O = { ...w };
     for (const S of m) z.style[S] !== void 0 && (O[S] = z.style[S]);
-    p.set(z, O);
+    O.text_ellipsis = !!z.style.text_ellipsis, p.set(z, O);
     const E = z.style, j = (z.children ?? []).filter(Ye), G = j.map((S) => b(S, O, y || !!z.tabular));
     let U = x(z);
     if (!Number.isFinite(U) && E.w === void 0) {

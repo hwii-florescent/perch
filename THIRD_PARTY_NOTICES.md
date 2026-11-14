@@ -307,6 +307,8 @@ it from its upstreams. Each copy keeps its upstream licence file and herdr's
     `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
     `vendor/gpui-kit/crates/shell/src/typings.rs`: `also_named`, more names a test reads an
     element's box by, beside its `id`.
+  - `vendor/gpui-kit/crates/shell/src/materialize.rs`: an `image` whose source is an absolute
+    path reads that file from disk.
 - `vendor/quickjs-jit-runtime/`: the `jit` crate of
   [longbridge/quickjs-jit](https://github.com/longbridge/quickjs-jit) at `96593cd` with
   herdr's fix for longbridge/quickjs-jit#38, MIT (Copyright (c) 2020 Mees Delzenne,

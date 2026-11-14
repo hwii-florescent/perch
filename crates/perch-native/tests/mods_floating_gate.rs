@@ -16,7 +16,6 @@ mod parity;
 #[path = "common/parity_screens.rs"]
 mod parity_screens;
 
-use perch_native::mods;
 use std::time::Instant;
 
 /// The floating screens a stock React mod draws.
@@ -46,7 +45,6 @@ fn main() {
 
     let only = std::env::var("PERCH_GATE_SCREENS").ok();
     let mut cx = parity_screens::headless();
-    cx.update(mods::init);
     let out = parity::native_dir();
     for screen in SCREENS {
         if only

@@ -175,6 +175,24 @@ test("a packed row lays its items on device pixels by their measured text widths
   assert.equal(left.get(wraps.children[0])?.w, undefined);
 });
 
+test("a line that ends in an ellipsis lays the boxes inside it on device pixels; its own text is left to GPUI", () => {
+  const box = (style, children = []) => ({ kind: "div", style, children });
+  const text = (t) => ({ kind: "text", text: t });
+  const measure = (t) => t.length * 6.3;
+  const row = { display: "flex" };
+  // A path's crumbs: "/" then one span per folder holding its button and a "/".
+  const crumb = (name) => box(row, [box({}, [text(name)]), text("/")]);
+  const crumbs = [crumb("Users"), crumb("dev")];
+  const line = box({ ...row, text_ellipsis: true, whitespace: "nowrap", text_size: 11.52, flex_grow: 1 }, [text("/"), ...crumbs]);
+  const overrides = new Map();
+  snapRows([box(row, [line])], 2, measure, overrides);
+  assert.equal(overrides.get(line.children[0])?.w, undefined, "the line's own text may be cut");
+  for (const c of crumbs) {
+    assert.ok(Number.isFinite(overrides.get(c)?.w), "a crumb's width is known");
+    assert.ok(Number.isFinite(overrides.get(c.children[0])?.w), "its button's too");
+  }
+});
+
 test("a scroller whose known content overflows its room makes room for the scrollbar", () => {
   const box = (style, children = []) => ({ kind: "div", style, children });
   const rows = Array.from({ length: 5 }, () => box({ h: 30 }));

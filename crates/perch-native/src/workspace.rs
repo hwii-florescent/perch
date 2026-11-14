@@ -1122,9 +1122,13 @@ impl Workspace {
                     .collect()
             })
             .unwrap_or_default();
+        // The app's logo, from the start mod's folder (written out with it).
+        let logo = screens::mods(cx)
+            .and_then(|(host, _)| host.file("start", "perch-logo.webp"))
+            .map_or(String::new(), |p| p.to_string_lossy().into_owned());
         let base = |kind: &str| {
             json!({
-                "kind": kind, "hostId": host_id, "logo": "", "projectCwds": [],
+                "kind": kind, "hostId": host_id, "logo": logo, "projectCwds": [],
                 "targets": [], "targetKey": "", "choices": [], "discovery": null,
                 "disabled": kind == "connecting", "canManageAgents": false,
             })

@@ -367,6 +367,13 @@ pub const STOCK: &[(&str, &str)] = &[
     ),
 ];
 
+/// Stock files that are not text, written out beside a stock mod's scripts as [`STOCK`]'s are: the
+/// start page's logo is the app's own (`packages/web/src/assets`).
+pub const STOCK_BYTES: &[(&str, &[u8])] = &[(
+    "start/perch-logo.webp",
+    include_bytes!("../../../packages/web/src/assets/perch-logo-texture-medium.webp"),
+)];
+
 /// Where user mods live: `native-mods/` in the folder that holds the core's database
 /// (`PERCH_DB`'s folder, else `~/.perch`), the folder whose `mods/` the core serves to the web.
 pub fn user_dir() -> PathBuf {
@@ -495,6 +502,18 @@ impl ModHost {
     /// The mod `id`: the user's folder when it has a `main.js`, else the stock one.
     pub fn find(&self, id: &str) -> Option<ModInfo> {
         find_mod(&self.0.user_dir, id)
+    }
+
+    /// The file `name` of mod `id` ([`STOCK_BYTES`]): the user's copy of the mod's when it has one,
+    /// else the stock one, so a folder copied before the file shipped still finds it.
+    pub fn file(&self, id: &str, name: &str) -> Option<PathBuf> {
+        let own = self
+            .find(id)
+            .map(|m| m.dir.join(name))
+            .filter(|p| p.is_file());
+        own.or_else(|| {
+            Some(self.0.user_dir.join(".stock").join(id).join(name)).filter(|p| p.is_file())
+        })
     }
 
     /// The mod `id` as a view, loaded now and watched from then on. A mod that is missing or
@@ -847,6 +866,14 @@ fn write_stock(dir: &Path, files: &[(&str, &str)]) -> Result<()> {
         }
         std::fs::write(&file, text).with_context(|| format!("writing {}", file.display()))?;
     }
+    for (path, bytes) in STOCK_BYTES {
+        let file = dir.join(path);
+        if let Some(parent) = file.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating {}", parent.display()))?;
+        }
+        std::fs::write(&file, bytes).with_context(|| format!("writing {}", file.display()))?;
+    }
     Ok(())
 }
 
@@ -873,6 +900,19 @@ mod tests {
         let mut listed: Vec<String> = STOCK.iter().map(|(path, _)| path.to_string()).collect();
         listed.sort();
         assert_eq!(on_disk, listed, "list each file under mods/ in STOCK");
+    }
+
+    #[test]
+    fn a_stock_picture_is_written_out_as_its_bytes() {
+        let dir = scratch("bytes");
+        write_stock(&dir.join(".stock"), STOCK).unwrap();
+        for (path, bytes) in STOCK_BYTES {
+            assert_eq!(
+                std::fs::read(dir.join(".stock").join(path)).unwrap(),
+                *bytes
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

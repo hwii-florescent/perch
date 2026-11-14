@@ -549,13 +549,17 @@ pub fn shape(path: &str, value: &Value, out: &mut std::collections::BTreeSet<Str
     }
 }
 
-/// A headless app that draws with the platform's text system, as the window does.
+/// A headless app that draws with the platform's text system, with the mod engine started as the
+/// window starts it (`mods::init`): without it `textWidth` measures nothing and a screen's rows
+/// keep GPUI's whole-pixel widths, which the window does not draw.
 pub fn headless() -> HeadlessAppContext {
-    HeadlessAppContext::with_platform(
+    let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
         Arc::new(()),
         gpui_platform::current_headless_renderer,
-    )
+    );
+    cx.update(perch_native::mods::init);
+    cx
 }
 
 /// One screen rendering to make.
@@ -1181,6 +1185,16 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
     }
     let floating = matches!(screen.place, Place::Floating { .. });
     let mut props = fixture.props(capture.state);
+    if screen_id == "start" {
+        // The app's logo, as the window gives it (the reference draws the same asset).
+        let logo = host
+            .file("start", "perch-logo.webp")
+            .expect("the start mod's logo");
+        if let Some(p) = props.as_mut().and_then(Value::as_object_mut) {
+            p.insert("logo".into(), json!(logo.to_string_lossy()));
+        }
+        perch.set_props(screen.id, props.clone().unwrap_or_else(|| json!({})));
+    }
     if screen_id == "session-menu" {
         let menu = props.take().unwrap_or_else(|| json!({}));
         props = Some(session_menu_props(&fixture.data(capture.state), &menu));
@@ -1260,6 +1274,15 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
     })
     .unwrap();
     draw(cx, handle);
+    if screen_id == "start" {
+        // GPUI reads and decodes a picture on a background thread and draws it a frame later,
+        // which `run_until_parked` does not wait for. ponytail: a fixed bound (the logo is one
+        // small file); a capture with many pictures would wait on the image cache instead.
+        for _ in 0..20 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            draw(cx, handle);
+        }
+    }
     let (image, scale) = cx
         .update_window(handle, |_, window: &mut Window, _| {
             (

@@ -361,6 +361,9 @@ export function snapRows(roots, scale, measure, overrides) {
     if (!drawn(node) || node.kind === "input" || node.markup) return explicitWidth(node);
     const own = { ...font };
     for (const key of FONT_KEYS) if (node.style[key] !== undefined) own[key] = node.style[key];
+    // `text-overflow` is not inherited: an ellipsis cuts the text of the box that asks for it, not the text of the
+    // boxes inside it (a path's crumbs, each a button, in a line that ends in an ellipsis).
+    own.text_ellipsis = !!node.style.text_ellipsis;
     fonts.set(node, own);
     const s = node.style;
     const kids = (node.children ?? []).filter(inFlow);
