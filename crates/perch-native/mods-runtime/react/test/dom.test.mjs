@@ -156,3 +156,31 @@ test("a box comes from the last frame's layout, and an effect that measures wait
   assert.deepEqual([runs, frames], [[0], 3]);
   assert.equal(forgotten.length, 2, "a tree's boxes are let go when it unmounts");
 });
+
+test("a form control's bare system-ui and the app's system stack are asked for under different names", async () => {
+  const { runtime } = await loadSidebar();
+  const { createElement: h } = await import("react");
+  const perch = { isMac: true, render() {}, error: (e) => { throw e; } };
+  const APP = "-apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif";
+  function Probe() {
+    return h("div", { style: { fontFamily: "Times" } },
+      h("button", { type: "button", "data-testid": "control" }, "Delete"),
+      h("span", { "data-testid": "stack", style: { fontFamily: APP } }, "Title"),
+      h("span", { "data-testid": "bare", style: { fontFamily: "system-ui" } }, "Bare"),
+      h("span", { "data-testid": "mono", style: { fontFamily: "ui-monospace, Menlo, monospace" } }, "x"));
+  }
+  const handle = runtime.mount(perch, Probe, { container: { width: 200, height: 100 } });
+  try {
+    await settle();
+    const family = (id) => {
+      const walk = (n) => (n.meta?.attrs?.["data-testid"] === id ? n : (n.children ?? []).map(walk).find(Boolean));
+      return walk(handle.description.root)?.style?.font_family;
+    };
+    assert.equal(family("control"), ".AppleSystemUIFont", "a button's own face, WebKit's -webkit-small-control");
+    assert.equal(family("bare"), ".AppleSystemUIFont");
+    assert.equal(family("stack"), ".SystemUIFont");
+    assert.equal(family("mono"), "Menlo");
+  } finally {
+    handle.unmount();
+  }
+});

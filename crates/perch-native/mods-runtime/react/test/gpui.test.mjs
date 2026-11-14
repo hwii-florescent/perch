@@ -195,6 +195,27 @@ test("a scroller whose known content overflows its room makes room for the scrol
   assert.equal(fits.get(short), undefined, "content that fits takes no room");
 });
 
+test("rows whose wrapping text has no known height still overflow by what is known of them", () => {
+  const box = (style, children = []) => ({ kind: "div", style, children });
+  // Each row: a 20 px key chip beside a description that may wrap (its height is not known).
+  const row = () => box({ display: "flex", pt: 2, pb: 2 }, [box({ h: 20 }), box({}, [{ kind: "text", text: "may wrap here" }])]);
+  const chips = (rows) => rows.map((r) => r.children[0]);
+  const many = Array.from({ length: 10 }, row);
+  const list = box({ overflow_y: "scroll" }, many);
+  list.scrollbar = 8;
+  const panel = box({ display: "flex", flex_direction: "col", max_h: 200 }, [list]);
+  const overrides = Object.assign(new Map(), { heights: new Map(chips(many).map((n) => [n, 20])) });
+  scrollGutters([panel], overrides);
+  assert.equal(overrides.get(list)?.pr, 8, "at least 240 of content in 200 of room");
+
+  const few = Array.from({ length: 5 }, row);
+  const short = box({ overflow_y: "scroll" }, few);
+  short.scrollbar = 8;
+  const fits = Object.assign(new Map(), { heights: new Map(chips(few).map((n) => [n, 20])) });
+  scrollGutters([box({ display: "flex", flex_direction: "col", max_h: 200 }, [short])], fits);
+  assert.equal(fits.get(short), undefined, "at least 120 may fit in 200: left alone");
+});
+
 test("boxes of wrapping text in whole-pixel lines keep the column's running total", () => {
   const box = (style, children = []) => ({ kind: "div", style, children });
   const items = Array.from({ length: 8 }, () => box({ pt: 7.2, pb: 7.2, line_height: "16px", text_size: 13.12 }, [{ kind: "text", text: "may wrap here" }]));

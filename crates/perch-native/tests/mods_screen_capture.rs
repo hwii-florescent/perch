@@ -466,6 +466,24 @@ fn captures_a_screen_as_the_window_places_it(scratch: &Path) {
     );
 }
 
+/// The capture names a face the way the web asks for it, one name for one request: the app's
+/// stack, a form control's bare `system-ui` and the monospace stack stay apart, and any other
+/// family is reported as GPUI drew it, so a wrong face still fails the family check.
+fn family_names_are_exact() {
+    assert_eq!(
+        parity::web_family(".SystemUIFont"),
+        "-apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif"
+    );
+    assert_eq!(parity::web_family(".AppleSystemUIFont"), "system-ui");
+    assert_eq!(
+        parity::web_family("Menlo"),
+        "ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace"
+    );
+    for other in ["Helvetica", "system-ui", "IBM Plex Sans", ""] {
+        assert_eq!(parity::web_family(other), other, "{other:?} is not renamed");
+    }
+}
+
 fn main() {
     let scratch: PathBuf =
         std::env::temp_dir().join(format!("perch-mods-screen-capture-{}", std::process::id()));
@@ -473,6 +491,7 @@ fn main() {
     std::fs::create_dir_all(scratch.join("home")).unwrap();
     std::env::set_var("HOME", scratch.join("home"));
 
+    family_names_are_exact();
     openers_give_the_web_fields(&scratch);
     captures_a_screen_as_the_window_places_it(&scratch);
 

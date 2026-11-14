@@ -147,11 +147,6 @@ const WEB_ONLY_BINDINGS: &[&str] = &[
     "Next project's most recent session",
     "Back to where you were",
     "Forward",
-    // The Navigator moves with the arrows only.
-    "Next Navigator result",
-    "Next Navigator result (alternate)",
-    "Previous Navigator result",
-    "Previous Navigator result (alternate)",
     // No key yet for adding a project or a worktree.
     "Add project",
     "New workspace (worktree)",

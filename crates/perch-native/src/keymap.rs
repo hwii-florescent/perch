@@ -40,6 +40,8 @@ pub enum Scope {
     /// The folder browser's own keys: the screen asks for them (`shortcutFor(event, "directory")`),
     /// the window never runs them.
     Directory,
+    /// The Navigator's result keys, asked for by its screen as `Directory`'s are.
+    Navigator,
 }
 
 /// A named command and its default keys, by the web's id and wording.
@@ -337,6 +339,30 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Scope::Leader,
     ),
     scoped(
+        "navigator.next",
+        "Next Navigator result",
+        &["ctrl+j"],
+        Scope::Navigator,
+    ),
+    scoped(
+        "navigator.nextAlt",
+        "Next Navigator result (alternate)",
+        &["ctrl+n"],
+        Scope::Navigator,
+    ),
+    scoped(
+        "navigator.previous",
+        "Previous Navigator result",
+        &["ctrl+k"],
+        Scope::Navigator,
+    ),
+    scoped(
+        "navigator.previousAlt",
+        "Previous Navigator result (alternate)",
+        &["ctrl+p"],
+        Scope::Navigator,
+    ),
+    scoped(
         "directory.use",
         "Use this folder",
         &["cmd+enter"],
@@ -380,6 +406,7 @@ fn help_group(id: &str) -> &'static str {
         "terminal" => "terminal",
         "leader" => "leader",
         "directory" => "directory",
+        "navigator" => "navigator",
         _ => "global",
     }
 }
@@ -900,7 +927,9 @@ impl Keymap {
                         Scope::Any => true,
                         Scope::OutsideTerminal => !context.in_terminal,
                         Scope::OutsideEditable => !context.in_terminal && !context.typing,
-                        Scope::Leader | Scope::Terminal | Scope::Directory => false,
+                        Scope::Leader | Scope::Terminal | Scope::Directory | Scope::Navigator => {
+                            false
+                        }
                     })
                     .find(bound)
             })
@@ -925,6 +954,7 @@ impl Keymap {
     pub fn screen_shortcut(&self, event: &Value, scope: &str) -> Option<&'static str> {
         let scope = match scope {
             "directory" => Scope::Directory,
+            "navigator" => Scope::Navigator,
             _ => return None,
         };
         let flag = |name: &str| event[name].as_bool().unwrap_or(false);

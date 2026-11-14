@@ -398,9 +398,11 @@ const WEB_SYSTEM_FONT: &str = "-apple-system, BlinkMacSystemFont, Segoe UI, syst
 const WEB_MONO_FONT: &str =
     "ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace";
 
-fn web_family(family: &str) -> String {
+pub fn web_family(family: &str) -> String {
     match family {
         ".SystemUIFont" => WEB_SYSTEM_FONT.into(),
+        // The runtime's name for a bare `system-ui` (a form control's own face): the same face.
+        ".AppleSystemUIFont" => "system-ui".into(),
         "Menlo" => WEB_MONO_FONT.into(),
         _ => family.into(),
     }

@@ -268,7 +268,6 @@ function WorktreeInPlace({ hostId, path: cwd, className, worktrees: given, reque
   const background = false;
   const deleteSupported = rest.deleteSupported ?? can("worktree.delete");
   const startFromSupported = rest.startFromSupported ?? can("worktree.startFrom");
-  const [asked, setAsked] = useState(request);
   const actions = useMemo(() => {
     const ask = (kind, args) => host().ask(kind, { hostId, repoPath: cwd, ...args });
     return {
@@ -292,12 +291,16 @@ function WorktreeInPlace({ hostId, path: cwd, className, worktrees: given, reque
       },
       deleteBranch: async (branch, head) => worktreeAnswer(await ask("worktree.branch.delete", { branch, expectedHead: head })),
       open: (path) => host().startSession?.(hostId, path, "terminal"),
-      takeRequest: () => setAsked(null),
+      // The request stays as given: clearing it re-renders the menu while its opening effect waits for the "+"'s
+      // box (`measured`), and that new render drops the wait, so the menu never opens. The effect runs once per
+      // mount, so the request is taken once. ponytail: a caller that sends a request to a mounted menu (the leader
+      // key's) needs a new object per request, which this keeps working with.
+      takeRequest: () => {},
     };
   }, [hostId, cwd, deleteSupported]);
   return createElement(worktreeInPlace, {
     hostId, cwd, projectKey: `${hostId}:${cwd}`, className, worktrees, background, startFromSupported, deleteSupported,
-    parentChoices, emptyAgent, request: asked, actions,
+    parentChoices, emptyAgent, request, actions,
   });
 }
 

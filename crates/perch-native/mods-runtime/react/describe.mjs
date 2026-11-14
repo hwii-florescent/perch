@@ -51,7 +51,13 @@ const OUTLINE = ["outline-style", "outline-width", "outline-color"];
 /** Engine families for the CSS stacks the app uses. */
 const SYSTEM = /(-apple-system|blinkmacsystemfont|system-ui|segoe ui|sans-serif|times)/i;
 const MONO = /(ui-monospace|sfmono|sf mono|menlo|monospace)/i;
-const ENGINE_FAMILY = (family) => (MONO.test(family) ? "Menlo" : SYSTEM.test(family) ? ".SystemUIFont" : familyOut(family).split(",")[0].trim());
+/** A bare `system-ui` (a form control's own face, WebKit's `-webkit-small-control`) is CoreText's
+ * `.AppleSystemUIFont`: the face `.SystemUIFont` resolves to, kept under its own name so a capture tells the two
+ * requests apart. CoreText has no family named `system-ui`. */
+const ENGINE_FAMILY = (family) =>
+  MONO.test(family) ? "Menlo"
+    : /^\s*system-ui\s*$/i.test(family ?? "") ? ".AppleSystemUIFont"
+    : SYSTEM.test(family) ? ".SystemUIFont" : familyOut(family).split(",")[0].trim();
 
 /** React's prop for each engine event a node asks for. */
 const EVENTS = {
@@ -570,7 +576,7 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
     // block's own font and line height, which lowers it under a larger font. The engine has no line boxes: the box
     // is moved down by the strut's ascent less its own baseline.
     const child = ctx.cache.get(element.childNodes.find((n) => n.id === only.id))?.part.computed;
-    const drop = child ? strutAscent(computed.values, ctx.measure) - ownBaseline(child.values, ctx.measure) : 0;
+    const drop = child ? strutAscent(computed.values, ctx.measure) - ownBaseline(child.values, ctx.measure, only) : 0;
     style.display = "flex";
     style.flex_direction = "col";
     style.items = "start";
@@ -660,11 +666,16 @@ export const ASCENT = 0.9521;
 export const DESCENT = 0.2256;
 /** How far the baseline of a line in `values`' font sits below the line's top (half the leading, then the ascent). */
 const strutAscent = (values, measure) => (lineHeightPx(values, measure) - (ASCENT + DESCENT) * values["font-size"]) / 2 + ASCENT * values["font-size"];
-/** How far an inline box's first baseline sits below its top: its top padding and border, then its line's. */
-function ownBaseline(values, measure) {
+/** How far an inline box's first baseline sits below its top: its top padding and border, then its line's. A box
+ * holding one icon (a "+" button) has the icon's bottom as its baseline, which is lower than its strut's when the
+ * icon is the taller (`described`: the box as described, its icon already on its line). */
+function ownBaseline(values, measure, described) {
   const px = (v) => (v && typeof v === "object" && "px" in v ? v.px : 0);
   const border = values["border-top-style"] === "none" ? 0 : px(values["border-top-width"]);
-  return px(values["padding-top"]) + border + strutAscent(values, measure);
+  const kids = described?.children ?? [];
+  const icon = kids.length === 1 && (kids[0].kind === "svg" || kids[0].kind === "image") && typeof kids[0].style.h === "number" ? kids[0] : null;
+  const line = icon ? Math.max(strutAscent(values, measure), (icon.style.mt ?? 0) + icon.style.h) : strutAscent(values, measure);
+  return px(values["padding-top"]) + border + line;
 }
 
 const applyTransform =(text, transform) => (transform === "uppercase" ? text.toUpperCase() : transform === "lowercase" ? text.toLowerCase() : transform === "capitalize" ? text.replace(/\b\p{L}/gu, (c) => c.toUpperCase()) : text);

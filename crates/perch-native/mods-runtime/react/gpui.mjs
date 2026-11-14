@@ -529,26 +529,34 @@ export function shrinkWrapBases(roots, overrides) {
 /**
  * Room for the app's scrollbar in a vertical scroller whose content overflows (`node.scrollbar`, its width): the web
  * lays the content out beside the bar, so it is narrower by that much; the engine's bar takes no room. Whether the
- * content overflows is worked out from the CSS heights `snapColumns` knows: the scroller's content against the height
- * it can have (its own height or maximum, else what a column with a maximum or height leaves it beside its other
- * children). When either is not known the scroller is left alone. The room goes into its right padding, in
+ * content overflows is worked out from the CSS heights `snapColumns` knows: at least the scroller's content (a part
+ * whose height is not known, wrapping text, counts as what is known of it) against the height it can have (its own
+ * height or maximum, else what a column with a maximum or height leaves it beside its other children). When the room
+ * is not known, or the content may fit, the scroller is left alone. The room goes into its right padding, in
  * `overrides` (the per-node styles `snapColumns` returned).
  */
 export function scrollGutters(roots, overrides) {
   const heights = overrides.heights ?? new Map();
   const known = (node) => heights.get(node);
-  /** The height of `node`'s content and padding, unclamped. */
-  const contentOf = (node) => {
+  /** At least how high `node` is: its known height, else what its known parts add up to (a wrapping text, whose
+   * height is not known, counts as nothing). A lower bound is enough to tell that content overflows. */
+  const least = (node) => {
+    const h = known(node);
+    if (Number.isFinite(h)) return h;
+    if (node.kind === "text" || !drawn(node)) return 0;
     const s = node.style;
+    const own = typeof s.min_h === "number" ? s.min_h : 0;
+    const kids = (node.children ?? []).filter(inFlow);
+    const outer = kids.map((kid) => least(kid) + (kid.kind === "text" ? 0 : Math.max(0, px(kid.style.mt) || 0) + Math.max(0, px(kid.style.mb) || 0)));
+    const inner = !kids.length ? 0 : isRow(node) ? Math.max(...outer) : outer.reduce((a, b) => a + b, 0) + (s.display === "flex" ? (px(s.gap_y) || 0) * (kids.length - 1) : 0);
+    const edges = [s.pt, s.pb, s.border_t, s.border_b].reduce((a, v) => a + (px(v) || 0), 0);
+    return Math.max(own, inner + edges);
+  };
+  /** At least how high `node`'s content and padding are, unclamped. */
+  const contentOf = (node) => {
     const kids = (node.children ?? []).filter(inFlow);
     if (!kids.length || isRow(node)) return NaN;
-    let sum = 0;
-    for (const kid of kids) {
-      const h = known(kid);
-      if (!Number.isFinite(h)) return NaN;
-      sum += h + (kid.kind === "text" ? 0 : px(kid.style.mt) + px(kid.style.mb));
-    }
-    return sum + (s.display === "flex" ? px(s.gap_y) * (kids.length - 1) : 0) + px(s.pt) + px(s.pb);
+    return least({ ...node, style: { ...node.style, h: undefined, max_h: undefined, min_h: undefined } });
   };
   /** The height `node` may have, from its own lengths or its column parent's. */
   const roomOf = (node, parent) => {
