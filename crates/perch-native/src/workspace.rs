@@ -3010,12 +3010,14 @@ impl Workspace {
             // apart. Another project listed meanwhile is never taken for it.
             let unlisted = || failed("The core added the project but has not listed it or its workspace".into());
             let tries = if added.is_ok() { 100 } else { 0 };
+            // The core lists the folder by its real path (`~` expanded, links resolved).
+            let listed_at = perch_core::db::canonical_path_for_host(&host, &folder);
             let mut workspace = added.and_then(|()| Err(unlisted()));
             for _ in 0..tries {
                 let found = this.update(cx, |this, cx| {
                     let store = this.sidebar.read(cx).model().store.clone();
                     let at_folder =
-                        |p: &&perch_core::protocol::ProjectSummary| p.host_id == host && p.path == folder;
+                        |p: &&perch_core::protocol::ProjectSummary| p.host_id == host && p.path == listed_at;
                     let created = store
                         .projects
                         .iter()

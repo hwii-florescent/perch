@@ -478,7 +478,8 @@ fn running(more: &[Value]) -> perch_native::sidebar::Model {
 }
 
 fn new_project_running(rig: &mut Rig) {
-    let args = json!({"folder": "/new", "argv": ["claude", "--model", "x"], "task": "go"});
+    // Asked for with a trailing slash; the core lists the folder by its real path, `/new`.
+    let args = json!({"folder": "/new/", "argv": ["claude", "--model", "x"], "task": "go"});
     let run = |rig: &mut Rig| {
         rig.asked();
         let result =
@@ -508,7 +509,7 @@ fn new_project_running(rig: &mut Rig) {
             _ => None,
         });
         let (path, reply) = added.expect("the folder is added through the core");
-        assert_eq!(path, "/new");
+        assert_eq!(path, "/new/");
         reply
     };
     let asked_run = |rig: &mut Rig| {
@@ -526,7 +527,7 @@ fn new_project_running(rig: &mut Rig) {
     assert!(asked_run(rig).is_none(), "nothing runs");
     assert!(rig
         .ws(|ws, _, _| ws.notice().map(str::to_string))
-        .is_some_and(|n| n.contains("not a folder") && n.contains("/new was not started")));
+        .is_some_and(|n| n.contains("not a folder") && n.contains("/new/ was not started")));
 
     // The folder is added, answered before the core lists it, while another device adds
     // `/b`, listed first. The program runs in the folder's own workspace, once listed.
