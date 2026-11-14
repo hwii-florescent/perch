@@ -8,8 +8,10 @@
 //! - The leader's `w`: the newest session of the next folder, folders ordered by their newest.
 //! - Add project (Cmd+O): the sidebar's form, with the folder browser listing through the core.
 //! - Closing an agent's session that has no tab here asks first, as its tab's × does.
+//! - Closing a session the sidebar does not show, as a hidden terminal, ends it through the core.
 //! - A new project with a program (`project.new` with `argv`): added, then the program run in
-//!   its workspace through the core, and its terminal shown once listed.
+//!   the workspace of the folder asked for once the core lists it, never in another project
+//!   listed meanwhile, and its terminal shown once listed. A refused add runs nothing.
 //! - A field of an in-flow screen that holds the keyboard lets go of it when its screen is no
 //!   longer drawn or loads again, so the terminal takes the keyboard back.
 //!
@@ -436,6 +438,30 @@ fn close_untabbed(rig: &mut Rig) {
     assert!(rig.ws(|ws, _, _| ws.screens_open()).is_empty());
     assert!(rig.terminal_focused());
     assert!(close(rig, "nope").is_err());
+
+    // A terminal the sidebar does not show is still the core's: it is ended at once.
+    let mut more = state();
+    more.apply(&message(
+        json!({"type": "session.updated", "session": {"id": "foxtrot",
+        "title": "", "cwd": "/loose", "createdAt": 9, "status": "idle", "hostId": "local",
+        "cliProviderId": "terminal", "cliStarted": true}}),
+    ));
+    rig.ws(|ws, _, cx| {
+        ws.sidebar()
+            .update(cx, |s, cx| s.apply(Update::Model(more.model()), cx))
+    });
+    rig.draw();
+    assert!(
+        rig.ws(|ws, _, cx| ws.sidebar().read(cx).session_to_open("foxtrot"))
+            .is_none(),
+        "not in the sidebar"
+    );
+    close(rig, "foxtrot").unwrap();
+    let asked = rig.asked();
+    assert!(
+        matches!(&asked[..], [Command::DeleteSession { session_id }] if session_id == "foxtrot"),
+        "ended through the core: {asked:?}"
+    );
     println!("close untabbed: ok");
 }
 
@@ -475,35 +501,63 @@ fn new_project_running(rig: &mut Rig) {
         .ws(|ws, window, cx| ws.run_command("project.new", Some(&bad), window, cx))
         .is_err());
 
-    // The folder is added; once the core lists it, the program runs in its workspace.
-    run(rig).unwrap();
-    let added = rig.asked().into_iter().find_map(|c| match c {
-        Command::AddProject { path, reply, .. } => Some((path, reply)),
-        _ => None,
-    });
-    let (path, reply) = added.expect("the folder is added through the core");
-    assert_eq!(path, "/new");
+    let add = |rig: &mut Rig| {
+        run(rig).unwrap();
+        let added = rig.asked().into_iter().find_map(|c| match c {
+            Command::AddProject { path, reply, .. } => Some((path, reply)),
+            _ => None,
+        });
+        let (path, reply) = added.expect("the folder is added through the core");
+        assert_eq!(path, "/new");
+        reply
+    };
+    let asked_run = |rig: &mut Rig| {
+        rig.asked().into_iter().find_map(|c| match c {
+            Command::Ask { frame, reply } if frame["type"] == "workspace.run" => {
+                Some((frame, reply))
+            }
+            _ => None,
+        })
+    };
+
+    // The core refuses the folder: nothing runs, and the window says why.
+    add(rig).send(Err("not a folder".into())).unwrap();
+    rig.draw();
+    assert!(asked_run(rig).is_none(), "nothing runs");
+    assert!(rig
+        .ws(|ws, _, _| ws.notice().map(str::to_string))
+        .is_some_and(|n| n.contains("not a folder") && n.contains("/new was not started")));
+
+    // The folder is added, answered before the core lists it, while another device adds
+    // `/b`, listed first. The program runs in the folder's own workspace, once listed.
+    let reply = add(rig);
+    reply.send(Ok(Value::Null)).unwrap();
+    rig.draw();
+    assert!(asked_run(rig).is_none(), "not before the folder is listed");
+    let other = json!({"id": "pb", "hostId": "local", "name": "B", "path": "/b",
+        "favorite": false, "createdAt": 0, "updatedAt": 0});
     let project = json!({"id": "p2", "hostId": "local", "name": "New", "path": "/new",
         "favorite": false, "createdAt": 0, "updatedAt": 0});
+    let workspace = |id: &str, project: &str, path: &str| {
+        json!({"id": id, "projectId": project, "hostId": "local", "path": path, "name": "main",
+            "dirty": false, "state": "active", "createdAt": 0, "updatedAt": 0, "pinned": false})
+    };
     let listed = [
         json!({"type": "project.list", "requestId": "r", "hostId": "local", "snapshotEpoch": "e",
             "snapshotRevision": 2, "projects": [{"id": "p", "hostId": "local", "name": "Work",
-            "path": "/work", "favorite": false, "createdAt": 0, "updatedAt": 0}, project]}),
+            "path": "/work", "favorite": false, "createdAt": 0, "updatedAt": 0}, other, project]}),
         json!({"type": "workspace.snapshot", "requestId": "r", "hostId": "local",
-            "snapshotEpoch": "e", "snapshotRevision": 2, "projects": [project],
-            "workspaces": [{"id": "w2", "projectId": "p2", "hostId": "local", "path": "/new",
-            "name": "main", "dirty": false, "state": "active", "createdAt": 0, "updatedAt": 0,
-            "pinned": false}]}),
+            "snapshotEpoch": "e", "snapshotRevision": 2, "projects": [other, project],
+            "workspaces": [workspace("wb", "pb", "/b"), workspace("w2", "p2", "/new")]}),
     ];
     apply(rig, model(&listed));
-    reply.send(Ok(Value::Null)).unwrap();
+    rig.cx.advance_clock(Duration::from_millis(200));
     rig.draw();
-    let ran = rig.asked().into_iter().find_map(|c| match c {
-        Command::Ask { frame, reply } if frame["type"] == "workspace.run" => Some((frame, reply)),
-        _ => None,
-    });
-    let (frame, reply) = ran.expect("the program is run through the core");
-    assert_eq!(frame["workspaceId"], "w2");
+    let (frame, reply) = asked_run(rig).expect("the program is run through the core");
+    assert_eq!(
+        frame["workspaceId"], "w2",
+        "the folder's, not the other device's"
+    );
     assert_eq!(frame["command"], "'claude' '--model' 'x' 'go'");
     reply.send(Ok(json!({"sessionId": "run1"}))).unwrap();
     rig.draw();

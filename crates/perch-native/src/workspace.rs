@@ -2172,7 +2172,6 @@ impl Workspace {
             }
             "session.move" => {
                 let id = self.known_session(text("id"), cx)?;
-                let target = self.known_session(text("target"), cx)?;
                 let siblings: Vec<String> = args
                     .and_then(|a| a.get("siblings"))
                     .and_then(Value::as_array)
@@ -2196,6 +2195,12 @@ impl Workspace {
                     .filter(|s| s.host_id == host)
                     .map(|s| s.id.clone())
                     .collect();
+                let target = self.known_session(text("target"), cx)?;
+                if !live.contains(&target) {
+                    return Err(format!(
+                        "{target} is on another computer, so {id} was not moved."
+                    ));
+                }
                 // ponytail: the group is the sidebar's siblings, not also each workspace's strip
                 // order as the web's `moveChat` refills; the native strip keeps no order of its own.
                 // Only this computer's sessions go into its order: an unknown id is left out.
@@ -3000,29 +3005,45 @@ impl Workspace {
                 Ok(Err(error)) => Err(failed(error)),
                 Err(_) => Err(failed("The core did not answer".into())),
             };
-            // The new project, shown, and its workspace: the one that was not listed before, or
-            // the one at the folder, as the web finds it.
-            let workspace = this.update(cx, |this, cx| {
-                added?;
-                let store = this.sidebar.read(cx).model().store.clone();
-                let created = store
-                    .projects
-                    .iter()
-                    .find(|p| p.host_id == host && !known.contains(&p.id))
-                    .or_else(|| store.projects.iter().find(|p| p.host_id == host && p.path == folder))
-                    .ok_or_else(|| failed("The project could not be added".into()))?;
-                if let Some((_, perch)) = screens::mods(cx) {
-                    if let Some(Err(error)) = perch.run_own("project.focus", &json!({ "id": created.id })) {
-                        return Err(failed(error));
+            // The project at the folder on this computer, as the web finds it, and its workspace,
+            // waited for up to 10 s: the add's answer and the listing that shows the project come
+            // apart. Another project listed meanwhile is never taken for it.
+            let unlisted = || failed("The core added the project but has not listed it or its workspace".into());
+            let tries = if added.is_ok() { 100 } else { 0 };
+            let mut workspace = added.and_then(|()| Err(unlisted()));
+            for _ in 0..tries {
+                let found = this.update(cx, |this, cx| {
+                    let store = this.sidebar.read(cx).model().store.clone();
+                    let at_folder =
+                        |p: &&perch_core::protocol::ProjectSummary| p.host_id == host && p.path == folder;
+                    let created = store
+                        .projects
+                        .iter()
+                        .filter(at_folder)
+                        .find(|p| !known.contains(&p.id))
+                        .or_else(|| store.projects.iter().find(at_folder))?;
+                    let (landing, _) = navigation::landing_workspace(&store, &created.id, None)?;
+                    if let Some((_, perch)) = screens::mods(cx) {
+                        if let Some(Err(error)) =
+                            perch.run_own("project.focus", &json!({ "id": created.id }))
+                        {
+                            return Some(Err(failed(error)));
+                        }
+                        perch.flush(cx);
                     }
-                    perch.flush(cx);
+                    Some(Ok(landing))
+                });
+                match found {
+                    Err(_) => return,
+                    Ok(Some(result)) => {
+                        workspace = result;
+                        break;
+                    }
+                    Ok(None) => cx.background_executor().timer(Duration::from_millis(100)).await,
                 }
-                navigation::landing_workspace(&store, &created.id, None)
-                    .map(|(id, _)| id)
-                    .ok_or_else(|| failed("The new project has no workspace".into()))
-            });
+            }
             let started = match workspace {
-                Ok(Ok(workspace)) => {
+                Ok(workspace) => {
                     let frame = json!({ "type": "workspace.run", "workspaceId": workspace, "command": command });
                     let asked = this.update(cx, |this, cx| this.ask(frame, cx));
                     match asked {
@@ -3039,8 +3060,7 @@ impl Workspace {
                         Err(_) => return,
                     }
                 }
-                Ok(Err(error)) => Err(error),
-                Err(_) => return,
+                Err(error) => Err(error),
             };
             let session = match started {
                 Ok(session) => session,
@@ -3077,11 +3097,23 @@ impl Workspace {
     /// anything else is ended at once. Ending is the core's: the sidebar row goes when it says
     /// the session is deleted. Keep running leaves it as it is, having no view here to dismiss.
     fn close_untabbed(&mut self, id: &str, cx: &mut Context<Self>) -> Result<(), String> {
-        let open = self
-            .sidebar
-            .read(cx)
-            .session_to_open(id)
-            .ok_or_else(|| format!("No session {id}."))?;
+        // Wherever the core lists it, also outside any project.
+        let open = {
+            let sidebar = self.sidebar.read(cx);
+            let model = sidebar.model();
+            let session = model.store.sessions.iter().find(|s| s.id == id);
+            sidebar.session_to_open(id).or_else(|| {
+                session.map(|s| OpenSession {
+                    host_id: s.host_id.clone(),
+                    session_id: s.id.clone(),
+                    title: s.title.clone(),
+                    provider_id: s.current_provider_id.clone().or(s.cli_provider_id.clone()),
+                    blank: false,
+                    core_url: model.core_url.clone(),
+                })
+            })
+        }
+        .ok_or_else(|| format!("No session {id}."))?;
         let delete = Command::DeleteSession {
             session_id: id.to_string(),
         };
@@ -3096,7 +3128,9 @@ impl Workspace {
                     .into(),
             );
         }
-        let label = self.title_of(id, cx);
+        let label = Some(open.title.clone())
+            .filter(|t| !t.trim().is_empty())
+            .unwrap_or_else(|| self.title_of(id, cx));
         self.open_screen(
             "confirm",
             json!({ "sessionId": id, "label": label }),

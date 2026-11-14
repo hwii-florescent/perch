@@ -16,7 +16,7 @@ use gpui::{
 };
 use gpui_shell::probe::{self, ProbeRecord};
 use perch_core::protocol::ServerMessage;
-use perch_native::client::Command;
+use perch_native::client::{Command, Update};
 use perch_native::mods::{self, WindowMods, POLL};
 use perch_native::sidebar::State;
 use perch_native::ui::Workspace;
@@ -563,6 +563,34 @@ fn sidebar_commands(rig: &mut Rig) {
         ),
         "{written:?}"
     );
+    // Nor does a target on another computer: the move is refused.
+    let with_remote = |rig: &mut Rig, remote: bool| {
+        let mut state = state();
+        if remote {
+            state.apply(&message(
+                json!({"type": "session.updated", "session": {"id": "far",
+                "title": "far", "cwd": "/work", "createdAt": 9, "status": "idle",
+                "hostId": "buildbox", "cliProviderId": "claude"}}),
+            ));
+        }
+        let model = state.model();
+        rig.ws(|ws, _, cx| {
+            ws.sidebar()
+                .update(cx, |s, cx| s.apply(Update::Model(model), cx))
+        });
+        rig.draw();
+    };
+    with_remote(rig, true);
+    let (refused, asked) = run(
+        rig,
+        "session.move",
+        json!({"id": "alpha", "target": "far", "siblings": ["alpha", "bravo"]}),
+    );
+    assert!(
+        refused.is_err() && asked.is_empty(),
+        "another computer's target is refused: {asked:?}"
+    );
+    with_remote(rig, false);
 
     // Deleting a session asks the core; its tab stays until the core says it is gone.
     let (result, asked) = run(rig, "session.close", json!({"id": "bravo"}));

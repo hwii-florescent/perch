@@ -932,11 +932,8 @@ const ASKS: &[(&str, &[(&str, Field)])] = &[
             ("parentWorkspaceId", Field::MaybeText),
         ],
     ),
-    // A program in a new terminal of a workspace on this computer (`workspace.run.v1`).
-    (
-        "workspace.run",
-        &[("workspaceId", Field::Text), ("command", Field::Text)],
-    ),
+    // Not `workspace.run`: it runs any program, so only the window asks it, for a project the
+    // person adds with one (`project.new`), never a mod.
     // This computer's own background create (`worktree.job`): it names no other computer.
     (
         "worktree.job.start",
@@ -1693,6 +1690,14 @@ mod tests {
         );
         // Only the questions listed, with their fields as the core takes them.
         assert!(ask_frame("session.delete", &json!({"sessionId": "s"})).is_err());
+        assert!(
+            ask_frame(
+                "workspace.run",
+                &json!({"workspaceId": "w", "command": "sh"})
+            )
+            .is_err(),
+            "a screen never runs a program"
+        );
         assert!(ask_frame("instructions.get", &json!({"scope": "host", "id": "p"})).is_err());
         assert!(ask_frame("memory.enable", &json!({"projectId": "p", "enabled": "no"})).is_err());
         assert!(ask_frame(
