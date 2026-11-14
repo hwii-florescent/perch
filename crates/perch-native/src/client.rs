@@ -932,6 +932,11 @@ const ASKS: &[(&str, &[(&str, Field)])] = &[
             ("parentWorkspaceId", Field::MaybeText),
         ],
     ),
+    // A program in a new terminal of a workspace on this computer (`workspace.run.v1`).
+    (
+        "workspace.run",
+        &[("workspaceId", Field::Text), ("command", Field::Text)],
+    ),
     // This computer's own background create (`worktree.job`): it names no other computer.
     (
         "worktree.job.start",
@@ -1067,6 +1072,10 @@ fn answer_of(message: &ServerMessage) -> Option<(&str, Result<Value, String>)> {
             }
             Some((request_id, Ok(answer)))
         }
+        ServerMessage::WorkspaceRunStarted {
+            request_id,
+            session_id,
+        } => Some((request_id, Ok(json!({ "sessionId": session_id })))),
         // The core sends the project's snapshot to the connection that created it only.
         ServerMessage::WorkspaceSnapshot { request_id, .. } => Some((request_id, Ok(Value::Null))),
         ServerMessage::Error {

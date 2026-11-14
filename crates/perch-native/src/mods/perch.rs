@@ -1616,7 +1616,7 @@ const WINDOW_COMMANDS: [(&str, &str, &str); 34] = [
     ("session.rename", "Rename a session", "{id, name}"),
     (
         "session.request_close",
-        "Close a session's tab as its × does (an agent asks first)",
+        "Close a session as its × does, with a tab here or not (an agent asks first)",
         "{id}",
     ),
     ("agent.focus", "Show an agent's session", "{id}"),
@@ -1690,8 +1690,8 @@ const WINDOW_COMMANDS: [(&str, &str, &str); 34] = [
     ("project.rename", "Rename a project", "{id, name}"),
     (
         "project.new",
-        "Add a folder as a project",
-        "{folder, name?, hostId?}",
+        "Add a folder as a project; with `argv` (and `task`), run that program in it once added (this computer)",
+        "{folder, name?, hostId?, argv?: string[], task?}",
     ),
     (
         "workspace.open",

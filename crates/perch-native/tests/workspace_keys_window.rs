@@ -7,6 +7,9 @@
 //! - Back and Forward: the tabs shown before and after, by when they were shown.
 //! - The leader's `w`: the newest session of the next folder, folders ordered by their newest.
 //! - Add project (Cmd+O): the sidebar's form, with the folder browser listing through the core.
+//! - Closing an agent's session that has no tab here asks first, as its tab's × does.
+//! - A new project with a program (`project.new` with `argv`): added, then the program run in
+//!   its workspace through the core, and its terminal shown once listed.
 //! - A field of an in-flow screen that holds the keyboard lets go of it when its screen is no
 //!   longer drawn or loads again, so the terminal takes the keyboard back.
 //!
@@ -37,7 +40,8 @@ fn message(value: Value) -> ServerMessage {
     serde_json::from_value(value).unwrap()
 }
 
-/// Project `p` in `/work` with `alpha` and `bravo`, and `charlie` alone in `/other`, newest last.
+/// Project `p` in `/work` with `alpha` and `bravo`, and `charlie` alone in `/other`, newest last;
+/// `echo`, in `/work` as old as `alpha`, is never opened.
 fn state() -> State {
     let project = json!({"id": "p", "hostId": "local", "name": "Work", "path": "/work",
         "favorite": false, "createdAt": 0, "updatedAt": 0});
@@ -69,6 +73,10 @@ fn state() -> State {
         }
         session
     })
+    .chain([
+        json!({"id": "echo", "title": "echo", "cwd": "/work", "createdAt": 0,
+        "status": "idle", "hostId": "local", "projectId": "p", "cliProviderId": "claude"}),
+    ])
     .collect();
     state.apply(&message(
         json!({"type": "session.list", "sessions": sessions}),
@@ -357,6 +365,168 @@ fn held_keyboard(rig: &mut Rig) {
     println!("held keyboard: ok");
 }
 
+/// A left press and release at `at`, through the window's dispatch.
+fn click_at(rig: &mut Rig, at: gpui::Point<gpui::Pixels>) {
+    let (button, modifiers) = (gpui::MouseButton::Left, gpui::Modifiers::default());
+    rig.cx
+        .update_window(rig.window.into(), |_, window: &mut Window, cx| {
+            window.dispatch_event(
+                gpui::PlatformInput::MouseDown(gpui::MouseDownEvent {
+                    button,
+                    position: at,
+                    modifiers,
+                    click_count: 1,
+                    first_mouse: false,
+                }),
+                cx,
+            );
+            window.dispatch_event(
+                gpui::PlatformInput::MouseUp(gpui::MouseUpEvent {
+                    button,
+                    position: at,
+                    modifiers,
+                    click_count: 1,
+                }),
+                cx,
+            );
+        })
+        .unwrap();
+    rig.draw();
+}
+
+fn close_untabbed(rig: &mut Rig) {
+    rig.asked();
+    let close = |rig: &mut Rig, id: &str| {
+        let result = rig.ws(|ws, window, cx| {
+            ws.run_command(
+                "session.request_close",
+                Some(&json!({"id": id})),
+                window,
+                cx,
+            )
+        });
+        rig.draw();
+        result
+    };
+    assert!(!rig.ws(|ws, _, _| ws.tabs().contains("echo")), "no tab");
+    close(rig, "echo").unwrap();
+    assert_eq!(
+        rig.ws(|ws, _, _| ws.screens_open()),
+        ["confirm"],
+        "asked first"
+    );
+    assert!(rig.asked().is_empty(), "nothing before the answer");
+    rig.press("escape");
+    assert!(rig.asked().is_empty(), "cancelled: nothing ended");
+    assert!(rig.terminal_focused());
+    close(rig, "echo").unwrap();
+    let accept = rig
+        .draw()
+        .into_iter()
+        .find(|r| r.name == "confirm-accept")
+        .expect("the guard's Stop")
+        .bounds
+        .center();
+    click_at(rig, accept);
+    let asked = rig.asked();
+    assert!(
+        matches!(&asked[..], [Command::DeleteSession { session_id }] if session_id == "echo"),
+        "the answer ends it through the core: {asked:?}"
+    );
+    assert!(rig.ws(|ws, _, _| ws.screens_open()).is_empty());
+    assert!(rig.terminal_focused());
+    assert!(close(rig, "nope").is_err());
+    println!("close untabbed: ok");
+}
+
+/// `state()` with a core that runs programs, and `more` of what it said.
+fn running(more: &[Value]) -> perch_native::sidebar::Model {
+    let mut state = state();
+    state.apply(&message(json!({
+        "type": "server.info", "hostname": "studio", "isSsh": false, "platform": "macOS",
+        "capabilities": ["workspace.snapshot", "workspace.run.v1"]})));
+    for m in more {
+        state.apply(&message(m.clone()));
+    }
+    state.model()
+}
+
+fn new_project_running(rig: &mut Rig) {
+    let args = json!({"folder": "/new", "argv": ["claude", "--model", "x"], "task": "go"});
+    let run = |rig: &mut Rig| {
+        rig.asked();
+        let result =
+            rig.ws(|ws, window, cx| ws.run_command("project.new", Some(&args), window, cx));
+        rig.draw();
+        result
+    };
+    // A core that cannot run a program is refused before anything is added.
+    assert!(run(rig).unwrap_err().contains("updated core"));
+    assert!(rig.asked().is_empty());
+    let model = |more: &[Value]| Update::Model(running(more));
+    let apply = |rig: &mut Rig, update: Update| {
+        rig.ws(|ws, _, cx| ws.sidebar().update(cx, |s, cx| s.apply(update, cx)));
+        rig.draw();
+    };
+    apply(rig, model(&[]));
+    // A bad argv is refused too.
+    let bad = json!({"folder": "/new", "argv": []});
+    assert!(rig
+        .ws(|ws, window, cx| ws.run_command("project.new", Some(&bad), window, cx))
+        .is_err());
+
+    // The folder is added; once the core lists it, the program runs in its workspace.
+    run(rig).unwrap();
+    let added = rig.asked().into_iter().find_map(|c| match c {
+        Command::AddProject { path, reply, .. } => Some((path, reply)),
+        _ => None,
+    });
+    let (path, reply) = added.expect("the folder is added through the core");
+    assert_eq!(path, "/new");
+    let project = json!({"id": "p2", "hostId": "local", "name": "New", "path": "/new",
+        "favorite": false, "createdAt": 0, "updatedAt": 0});
+    let listed = [
+        json!({"type": "project.list", "requestId": "r", "hostId": "local", "snapshotEpoch": "e",
+            "snapshotRevision": 2, "projects": [{"id": "p", "hostId": "local", "name": "Work",
+            "path": "/work", "favorite": false, "createdAt": 0, "updatedAt": 0}, project]}),
+        json!({"type": "workspace.snapshot", "requestId": "r", "hostId": "local",
+            "snapshotEpoch": "e", "snapshotRevision": 2, "projects": [project],
+            "workspaces": [{"id": "w2", "projectId": "p2", "hostId": "local", "path": "/new",
+            "name": "main", "dirty": false, "state": "active", "createdAt": 0, "updatedAt": 0,
+            "pinned": false}]}),
+    ];
+    apply(rig, model(&listed));
+    reply.send(Ok(Value::Null)).unwrap();
+    rig.draw();
+    let ran = rig.asked().into_iter().find_map(|c| match c {
+        Command::Ask { frame, reply } if frame["type"] == "workspace.run" => Some((frame, reply)),
+        _ => None,
+    });
+    let (frame, reply) = ran.expect("the program is run through the core");
+    assert_eq!(frame["workspaceId"], "w2");
+    assert_eq!(frame["command"], "'claude' '--model' 'x' 'go'");
+    reply.send(Ok(json!({"sessionId": "run1"}))).unwrap();
+    rig.draw();
+    assert_ne!(
+        rig.active().as_deref(),
+        Some("run1"),
+        "not before it is listed"
+    );
+    // Listed: its terminal is shown, with the keyboard.
+    let mut more = listed.to_vec();
+    more.push(
+        json!({"type": "session.list", "sessions": [{"id": "run1", "title": "claude",
+        "cwd": "/new", "createdAt": 9, "status": "idle", "hostId": "local", "projectId": "p2",
+        "workspaceId": "w2"}]}),
+    );
+    apply(rig, model(&more));
+    rig.cx.advance_clock(Duration::from_millis(200));
+    rig.draw();
+    assert_eq!(rig.active().as_deref(), Some("run1"));
+    assert!(rig.terminal_focused());
+    println!("new project running: ok");
+}
+
 fn main() {
     let scratch: PathBuf =
         std::env::temp_dir().join(format!("perch-keys-window-{}", std::process::id()));
@@ -371,6 +541,8 @@ fn main() {
     resize(&mut rig);
     add_project(&mut rig);
     held_keyboard(&mut rig);
+    close_untabbed(&mut rig);
+    new_project_running(&mut rig);
 
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())

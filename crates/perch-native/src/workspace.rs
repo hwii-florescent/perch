@@ -56,7 +56,7 @@ use gpui::{
 };
 use serde_json::{json, Value};
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -2155,10 +2155,11 @@ impl Workspace {
             }
             "session.request_close" => {
                 let id = text("id").ok_or("This command needs {id}.")?.to_string();
-                if !self.tabs.contains(&id) {
-                    return Err(format!("Session {id} has no tab in this window."));
+                if self.tabs.contains(&id) {
+                    self.close(&id, cx);
+                } else {
+                    self.close_untabbed(&id, cx)?;
                 }
-                self.close(&id, cx);
             }
             // The sidebar's actions on what the core keeps: each names its target, and one the
             // core does not know is refused, so a command never acts on another.
@@ -2189,7 +2190,7 @@ impl Workspace {
                     .find(|s| s.id == id)
                     .map(|s| s.host_id.clone())
                     .unwrap_or_else(|| LOCAL.into());
-                let live: std::collections::HashSet<String> = store
+                let live: HashSet<String> = store
                     .sessions
                     .iter()
                     .filter(|s| s.host_id == host)
@@ -2276,17 +2277,19 @@ impl Workspace {
                 let folder = text("folder")
                     .ok_or(r#"This command needs {folder: "/path"}."#)?
                     .to_string();
-                if args.is_some_and(|a| a.get("argv").is_some() || a.get("task").is_some()) {
-                    return Err(
-                        "The native window cannot run a program in a new project yet.".into(),
-                    );
-                }
                 let host = text("hostId").unwrap_or(LOCAL).to_string();
-                self.sidebar.read(cx).send(Command::CreateProject {
-                    host_id: host,
-                    path: folder,
-                    name: text("name").map(str::to_string),
-                });
+                let name = text("name").map(str::to_string);
+                match args.and_then(|a| a.get("argv")) {
+                    None => self.sidebar.read(cx).send(Command::CreateProject {
+                        host_id: host,
+                        path: folder,
+                        name,
+                    }),
+                    Some(argv) => {
+                        let command = program_in(argv, text("task"))?;
+                        self.new_project_running(host, folder, name, command, cx)?;
+                    }
+                }
             }
             "workspace.open" => {
                 let id = self.known_workspace(text("id"), cx)?;
@@ -2959,6 +2962,162 @@ impl Workspace {
         }
         self.notice = Some("Ending the session\u{2026}".into());
         cx.notify();
+    }
+
+    /// The web's `project.new` with `argv`: add `folder` as a project on this computer, show it,
+    /// then run `command` in a new terminal of its workspace (`workspace.run`) and show that once
+    /// the core lists it. Each step waits for the core's answer; a refusal, or no answer, stops
+    /// there and says so. Nothing is retried.
+    fn new_project_running(
+        &mut self,
+        host: String,
+        folder: String,
+        name: Option<String>,
+        command: String,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let model = self.sidebar.read(cx).model();
+        let store = &model.store;
+        let can_run = store
+            .local_capabilities
+            .iter()
+            .any(|c| c == "workspace.run.v1");
+        if host != LOCAL || !model.connected || !can_run {
+            return Err("Run needs a connected local workspace and an updated core.".into());
+        }
+        let known: HashSet<String> = store.projects.iter().map(|p| p.id.clone()).collect();
+        let (reply, answer) = futures::channel::oneshot::channel();
+        self.sidebar.read(cx).send(Command::AddProject {
+            host_id: host.clone(),
+            path: folder.clone(),
+            name,
+            reply,
+        });
+        cx.spawn(async move |this, cx| {
+            let failed = |why: String| format!("{why}: {folder} was not started.");
+            let added = match answer.await {
+                Ok(Ok(_)) => Ok(()),
+                Ok(Err(error)) => Err(failed(error)),
+                Err(_) => Err(failed("The core did not answer".into())),
+            };
+            // The new project, shown, and its workspace: the one that was not listed before, or
+            // the one at the folder, as the web finds it.
+            let workspace = this.update(cx, |this, cx| {
+                added?;
+                let store = this.sidebar.read(cx).model().store.clone();
+                let created = store
+                    .projects
+                    .iter()
+                    .find(|p| p.host_id == host && !known.contains(&p.id))
+                    .or_else(|| store.projects.iter().find(|p| p.host_id == host && p.path == folder))
+                    .ok_or_else(|| failed("The project could not be added".into()))?;
+                if let Some((_, perch)) = screens::mods(cx) {
+                    if let Some(Err(error)) = perch.run_own("project.focus", &json!({ "id": created.id })) {
+                        return Err(failed(error));
+                    }
+                    perch.flush(cx);
+                }
+                navigation::landing_workspace(&store, &created.id, None)
+                    .map(|(id, _)| id)
+                    .ok_or_else(|| failed("The new project has no workspace".into()))
+            });
+            let started = match workspace {
+                Ok(Ok(workspace)) => {
+                    let frame = json!({ "type": "workspace.run", "workspaceId": workspace, "command": command });
+                    let asked = this.update(cx, |this, cx| this.ask(frame, cx));
+                    match asked {
+                        Ok(answer) => match answer.await {
+                            Ok(Ok(started)) => started["sessionId"]
+                                .as_str()
+                                .map(str::to_string)
+                                .ok_or_else(|| failed("The core did not say which terminal".into())),
+                            Ok(Err(error)) => Err(failed(error)),
+                            Err(_) => Err(failed(
+                                "The run's outcome is unknown; check the workspace's terminals before running again".into(),
+                            )),
+                        },
+                        Err(_) => return,
+                    }
+                }
+                Ok(Err(error)) => Err(error),
+                Err(_) => return,
+            };
+            let session = match started {
+                Ok(session) => session,
+                Err(error) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.notice = Some(error);
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+            // Shown once the core lists it, as the web's `showWhenListed`, for up to 10 s.
+            for _ in 0..100 {
+                let shown = this.update(cx, |this, cx| {
+                    let listed = this.sidebar.read(cx).session_to_open(&session);
+                    listed.map(|open| {
+                        this.sidebar.update(cx, |sidebar, cx| {
+                            sidebar.open(open.host_id, open.session_id, Some(perch_core::agent_fleet::TERMINAL_PROVIDER.into()), cx)
+                        })
+                    })
+                });
+                match shown {
+                    Ok(Some(())) | Err(_) => return,
+                    Ok(None) => cx.background_executor().timer(Duration::from_millis(100)).await,
+                }
+            }
+        })
+        .detach();
+        Ok(())
+    }
+
+    /// End session `id`, which has no tab here, as the web's `requestCloseSession`: an agent asks
+    /// first through the close guard while Settings > Warn before closing an agent is on, and
+    /// anything else is ended at once. Ending is the core's: the sidebar row goes when it says
+    /// the session is deleted. Keep running leaves it as it is, having no view here to dismiss.
+    fn close_untabbed(&mut self, id: &str, cx: &mut Context<Self>) -> Result<(), String> {
+        let open = self
+            .sidebar
+            .read(cx)
+            .session_to_open(id)
+            .ok_or_else(|| format!("No session {id}."))?;
+        let delete = Command::DeleteSession {
+            session_id: id.to_string(),
+        };
+        if !self.warns_before_ending(&open, cx) {
+            self.sidebar.read(cx).send(delete);
+            return Ok(());
+        }
+        if !self.screens.has("confirm", cx) {
+            return Err(
+                "No mod draws the confirmation, so the agent was not stopped. The stock \
+                        one is restored when the app starts."
+                    .into(),
+            );
+        }
+        let label = self.title_of(id, cx);
+        self.open_screen(
+            "confirm",
+            json!({ "sessionId": id, "label": label }),
+            None,
+            Some(Box::new(move |this, result, _, cx| {
+                if result.get("confirmed").and_then(Value::as_bool) != Some(true) {
+                    return;
+                }
+                if result.get("never").and_then(Value::as_bool) == Some(true) {
+                    this.change(Change::WarnCloseAgent(false), cx);
+                }
+                let sidebar = this.sidebar.read(cx);
+                sidebar.send(delete);
+                if sidebar.take_refused() {
+                    this.notice = Some(crate::client::NOT_CONNECTED.into());
+                    cx.notify();
+                }
+            })),
+            cx,
+        );
+        Ok(())
     }
 
     /// Take tab `id` out of this window without ending its session, saying `why` it keeps running.
@@ -3881,6 +4040,27 @@ fn action_of(result: &Value) -> (Option<String>, Vec<Value>) {
 }
 
 /// Argument `at` of an action, as text.
+/// The web's `programIn`: `argv` and `task` as one shell command, each part single-quoted.
+fn program_in(argv: &Value, task: Option<&str>) -> Result<String, String> {
+    let parts = argv
+        .as_array()
+        .filter(|parts| !parts.is_empty())
+        .and_then(|parts| {
+            parts
+                .iter()
+                .map(|p| p.as_str().filter(|p| !p.is_empty()))
+                .collect::<Option<Vec<_>>>()
+        })
+        .ok_or("argv is a list of strings: [program, ...arguments].")?;
+    let quote = |part: &str| format!("'{}'", part.replace('\'', "'\\''"));
+    Ok(parts
+        .into_iter()
+        .chain(task.filter(|t| !t.is_empty()))
+        .map(quote)
+        .collect::<Vec<_>>()
+        .join(" "))
+}
+
 fn word(args: &[Value], at: usize) -> Option<String> {
     args.get(at).and_then(Value::as_str).map(str::to_string)
 }
@@ -4250,7 +4430,25 @@ impl gpui::Render for Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::Settle;
+    use super::{program_in, Settle};
+    use serde_json::json;
+
+    #[test]
+    fn a_program_is_quoted_as_the_web_quotes_it() {
+        assert_eq!(
+            program_in(&json!(["claude", "--model", "x"]), Some("fix it's bug")),
+            Ok("'claude' '--model' 'x' 'fix it'\\''s bug'".to_string())
+        );
+        assert_eq!(program_in(&json!(["sh"]), Some("")), Ok("'sh'".to_string()));
+        for bad in [
+            json!([]),
+            json!("claude"),
+            json!(["claude", ""]),
+            json!([1]),
+        ] {
+            assert!(program_in(&bad, None).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn a_size_is_applied_once_it_holds_for_two_draws() {
