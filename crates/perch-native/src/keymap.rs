@@ -93,6 +93,7 @@ impl From<&Action> for Shortcut {
 /// The commands the window runs besides the sidebar's (`actions::ACTIONS`).
 pub const SHORTCUTS: &[Shortcut] = &[
     s("global.navigator", "Open Navigator", &["mod+p"]),
+    s("nests.new", "New workspace (worktree)", &["mod+n"]),
     scoped(
         "global.navigatorAlt",
         "Open Navigator (outside terminals)",
@@ -301,6 +302,12 @@ pub const SHORTCUTS: &[Shortcut] = &[
     scoped("leader.jump8", "Jump to tab 8", &["8"], Scope::Leader),
     scoped("leader.jump9", "Jump to tab 9", &["9"], Scope::Leader),
     scoped(
+        "leader.worktree",
+        "Open this project's worktree menu",
+        &["shift+w"],
+        Scope::Leader,
+    ),
+    scoped(
         "leader.newSession",
         "New session in this project",
         &["c"],
@@ -403,6 +410,8 @@ pub fn leader_target(id: &str) -> Option<&'static str> {
         "focus.up" => "panes.focus.up",
         "focus.right" => "panes.focus.right",
         "newSession" => "sessions.new",
+        // The window runs it itself: the shown project's worktree menu.
+        "worktree" => "leader.worktree",
         "jump1" => "tabs.jump1",
         "jump2" => "tabs.jump2",
         "jump3" => "tabs.jump3",
@@ -1107,6 +1116,7 @@ mod tests {
             run(m.resolve(&press("cmd-alt-left"), IN_TERMINAL)),
             "panes.focus.left"
         );
+        assert_eq!(run(m.resolve(&press("cmd-n"), IN_TERMINAL)), "nests.new");
         // On another system `mod` is Control+Shift and the second default applies.
         let other = keymap(&[], None).with_platform(false);
         assert_eq!(

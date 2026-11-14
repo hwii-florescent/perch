@@ -19,7 +19,7 @@ use crate::settings::TerminalSettings;
 use perch_core::agent_fleet::TERMINAL_PROVIDER;
 use perch_core::protocol::{
     AttentionEvent, ProjectSummary, ServerMessage, SessionStatus, SessionSummary, SshHostEntry,
-    WorkspaceState, WorkspaceSummary,
+    WorkspaceState, WorkspaceSummary, WorktreeJob,
 };
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -356,6 +356,10 @@ pub struct State {
     snapshots: HashMap<String, SnapshotState>,
     /// `settings.theme`, once the core has sent it.
     theme: Option<String>,
+    /// `settings.emptyWorkspaceAgent`: the pane a new workspace starts with ("" for none).
+    empty_agent: Option<String>,
+    /// This computer's background worktree creates, as the last `worktree.jobs` listed them.
+    worktree_jobs: Vec<WorktreeJob>,
     /// Counts the changes to the facts, so a [`navigation::Store`] compares cheaply.
     revision: u64,
 }
@@ -637,6 +641,7 @@ impl State {
                     None => self.workspaces.push(workspace.clone()),
                 }
             }
+            ServerMessage::WorktreeJobs { jobs } => self.worktree_jobs.clone_from(jobs),
             ServerMessage::WorkspaceOrder {
                 host_id,
                 projects,
@@ -695,6 +700,7 @@ impl State {
             ServerMessage::SettingsCurrent { settings } => {
                 self.sound_enabled = settings.sound_enabled;
                 self.theme = Some(settings.theme.clone());
+                self.empty_agent = Some(settings.empty_workspace_agent.clone());
                 self.keybindings.clone_from(&settings.keybindings);
                 self.terminal = Some(Box::new(TerminalSettings::from_wire(settings)));
             }
@@ -915,6 +921,8 @@ impl State {
             viewing: self.viewing.clone(),
             held: self.held.clone(),
             theme: self.theme.clone(),
+            empty_agent: self.empty_agent.clone(),
+            worktree_jobs: self.worktree_jobs.clone(),
             providers: self.providers.clone(),
             provider_defaults: self.provider_defaults.clone(),
             agent_lists: self.agent_lists.clone(),

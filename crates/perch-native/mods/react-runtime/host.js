@@ -424,6 +424,17 @@ export function copyFor(cx, screen) {
       }
     },
     shortcutLabel: (id) => perch.shortcutLabel(id),
+    /** Settings' "Empty workspace opens" ("" for none), null until the core sent its settings. */
+    emptyWorkspaceAgent: () => snapshot("emptyWorkspaceAgent", () => perch.emptyWorkspaceAgent()),
+    /** The window's last request for a project's worktree menu, null once taken (`takeWorktreeRequest`). */
+    worktreeMenuRequest: () => snapshot("worktreeMenuRequest", () => perch.worktreeMenuRequest()),
+    takeWorktreeRequest: () => {
+      try {
+        perch.takeWorktreeRequest();
+      } catch (error) {
+        console.error(`perch.takeWorktreeRequest: ${error?.message ?? error}`);
+      }
+    },
     startSession: (hostId, cwd, agent) => {
       perch.startSession(hostId, cwd ?? undefined, agent).catch(answer((error) => console.error(`perch.startSession: ${error?.message ?? error}`)));
     },

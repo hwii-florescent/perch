@@ -156,3 +156,56 @@ test("a box comes from the last frame's layout, and an effect that measures wait
   assert.deepEqual([runs, frames], [[0], 3]);
   assert.equal(forgotten.length, 2, "a tree's boxes are let go when it unmounts");
 });
+
+test("a disabled control gets no click, as in a browser, and an enabled one does", async () => {
+  const { runtime } = await loadSidebar();
+  const { createElement: h } = await import("react");
+  const perch = { isMac: true, render() {}, error: (e) => { throw e; } };
+  const clicks = [];
+  function Probe() {
+    return h("div", null,
+      h("button", { type: "button", "data-testid": "off", disabled: true, onClick: () => clicks.push("off") }, h("span", { "data-testid": "inner" }, "Off")),
+      h("button", { type: "button", "data-testid": "on", onClick: () => clicks.push("on") }, "On"));
+  }
+  const handle = runtime.mount(perch, Probe, { container: { width: 100, height: 40 } });
+  try {
+    const document = handle.globals.document;
+    const by = (id) => document.querySelector(`[data-testid="${id}"]`);
+    handle.click(by("off").id);
+    handle.click(by("inner").id);
+    handle.click(by("on").id);
+    assert.deepEqual(clicks, ["on"]);
+  } finally {
+    handle.unmount();
+  }
+});
+
+test("a content-sized box moved by a percentage of itself is moved by its laid-out size", async () => {
+  const { runtime } = await loadSidebar();
+  const { React } = runtime;
+  const h = React.createElement;
+  const boxes = new Map();
+  const perch = { isMac: true, render() {}, error: (e) => { throw e; }, bounds: (key) => boxes.get(key) ?? null, forgetBounds() {} };
+  const centred = { position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)" };
+  const Probe = () => h("div", { style: { position: "relative", width: 200, height: 100 } }, h("div", { "data-testid": "c", style: centred }, "centred"));
+  const handle = runtime.mount(perch, Probe, { container: { width: 200, height: 100 } });
+  const find = () => {
+    const walk = (n) => (n.meta?.attrs?.["data-testid"] === "c" ? n : (n.children ?? []).map(walk).find(Boolean));
+    return walk(handle.description.root);
+  };
+  try {
+    await settle();
+    assert.equal(find().style.ml, undefined, "no box yet: not moved");
+    assert.equal(handle.drawing(), true, "described again after the frame");
+    boxes.set(find().measure, { x: 100, y: 50, width: 60, height: 20 });
+    handle.retry();
+    assert.deepEqual([find().style.ml, find().style.mt], [-30, -10]);
+    // The same size the next frame: settled, nothing waits.
+    handle.drawing();
+    handle.retry();
+    assert.deepEqual([find().style.ml, find().style.mt], [-30, -10]);
+    assert.equal(handle.drawing(), false);
+  } finally {
+    handle.unmount();
+  }
+});

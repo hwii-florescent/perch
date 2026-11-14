@@ -22,7 +22,7 @@
 //! hover colour does not reach it, as in CSS) or when the inherited value would differ (`line-height: normal`, a
 //! multiplier under a new size). `tokens` names the theme token each colour came from.
 import { Cascade, colorOut, evalLength, familyOut, lineHeightPx, splitTop, THEME_TOKENS } from "./css.mjs";
-import { HostElement, HostText, submits } from "./dom.mjs";
+import { HostElement, HostText, MEASURE_TRIES, submits } from "./dom.mjs";
 import { closest as closestBy, matchesComplex, parseSelector, querySelectorAll as queryBy } from "./selector.mjs";
 
 export const SCHEMA = "perch-native-description/1";
@@ -154,6 +154,13 @@ function shiftByTranslate(computed, s, report, inFlow = false) {
   };
   const dx = shift ? of(shift[0], s.w) : undefined, dy = shift ? of(shift[1], s.h) : undefined;
   if (dx === undefined || dy === undefined) {
+    // An absolutely placed box sized by its content (`left: 50%; transform: translate(-50%)`, the way CSS centres
+    // one): the percentage is of the box as laid out, which the description reads back (`laidOutShift`).
+    const parts = !inFlow && shift ? shift.map((text) => evalLength(text, ctx)) : null;
+    if (parts?.every((e) => e && !(e.unitless && e.num))) {
+      s[SHIFT] = parts.map((e) => [e.px, e.pct ?? 0]);
+      return;
+    }
     report("unsupported", prop, v[prop], computed.sources[prop]);
     return;
   }
@@ -164,6 +171,31 @@ function shiftByTranslate(computed, s, report, inFlow = false) {
   }
   if (dx) s.ml = (s.ml ?? 0) + dx;
   if (dy) s.mt = (s.mt ?? 0) + dy;
+}
+
+/** Where `shiftByTranslate` leaves a translation that is a percentage of a content-sized box. */
+const SHIFT = Symbol("perch.shift");
+
+/** A translation by a percentage of `element`'s own size (`SHIFT`), as margins from the box the engine last laid it
+ * out in (`HostDocument.measure`). Until there is one, or while its size moves, the tree is described again after the
+ * next frame, at most `MEASURE_TRIES` times in a row; a box whose size held resets that count. */
+function laidOutShift(element, style, shift) {
+  const document = element.ownerDocument;
+  const box = document?.measure?.(element) ?? null;
+  if (box) {
+    const [[xPx, xPct], [yPx, yPct]] = shift;
+    const dx = xPx + (xPct / 100) * box.width, dy = yPx + (yPct / 100) * box.height;
+    if (dx) style.ml = (typeof style.ml === "number" ? style.ml : 0) + dx;
+    if (dy) style.mt = (typeof style.mt === "number" ? style.mt : 0) + dy;
+  }
+  const seen = box ? `${box.width}x${box.height}` : "";
+  if (seen === element.shiftSeen) {
+    element.shiftTries = 0;
+  } else if ((element.shiftTries ?? 0) < MEASURE_TRIES && document?.retries) {
+    element.shiftSeen = seen;
+    element.shiftTries = (element.shiftTries ?? 0) + 1;
+    document.retries.push(() => document.afterCommit?.());
+  }
 }
 
 /** The non-text engine styles of one computed style, plus what could not be expressed. */
@@ -446,6 +478,7 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
   const computed = ctx.cascade.compute(element, parentComputed);
   const tokens = {};
   const base = boxStyle(computed, report, ctx.viewport);
+  const shift = base[SHIFT];
   reportDeclarations(computed, report);
   const wanted = textWanted(computed, ctx.measure);
   const ownText = textStyle(computed, wanted, inheritedText);
@@ -484,7 +517,7 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
   // A form's submit button submits it on a click, with or without a handler of its own.
   if (!events.includes("click") && submits(element)) events.push("click");
   if (events.length) extra.events = events;
-  return { computed, style, tokens, extra, meta: meta(element), reports, childText: inheritText(inheritedText, ownText), where };
+  return { computed, style, tokens, extra, meta: meta(element), reports, childText: inheritText(inheritedText, ownText), where, shift };
 }
 
 /** One described subtree. `chain` names the element's ancestors with their versions. */
@@ -496,6 +529,7 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
   for (const args of reports) ctx.findings.add(...args);
   const report = (kind, property, value, source, note) => ctx.findings.add(kind, property, value, source ?? "(user agent)", where, note);
   const style = { ...entry.part.style };
+  if (entry.part.shift) laidOutShift(element, style, entry.part.shift);
   const node = { kind: "div", id: element.id, style, tokens, meta: entry.part.meta, ...extra };
   Object.defineProperty(node, DISPLAY, { value: computed.values.display });
   // An element the source measured keeps its laid-out box for it (`HostDocument.measure`).

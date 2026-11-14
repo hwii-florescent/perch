@@ -334,14 +334,14 @@ fn view(core_process: &mut Child, scratch: &Path) {
     h.wait("the lease to be lost", |h| !h.view(|v, _| v.can_stop()));
     // This core lets a view type without the keyboard, so typing goes on and stopping does not.
     assert!(h.can_type());
-    assert_eq!(h.view(|v, _| v.note()), None);
+    assert!(h.view(|v, _| v.agent_control()["label"].is_null()));
     // A core that does not offer shared typing leaves a view without the lease read-only.
     let capabilities = h.view(|v, _| v.capabilities().to_vec());
     h.view(|v, cx| v.core_said(FromCore::Capabilities(Vec::new()), cx));
     assert!(!h.can_type());
     assert_eq!(
-        h.view(|v, _| v.note()).as_deref(),
-        Some("Another view is typing in this agent")
+        h.view(|v, _| v.agent_control()["label"].clone()),
+        "Another view is typing in this agent"
     );
     assert!(
         h.view(|v, cx| !v.key_down(&key_event("x"), cx)),
@@ -351,7 +351,7 @@ fn view(core_process: &mut Child, scratch: &Path) {
     h.wait("control to come back", |h| h.view(|v, _| v.can_stop()));
     h.view(|v, cx| v.core_said(FromCore::Capabilities(capabilities), cx));
     assert!(h.can_type());
-    assert_eq!(h.view(|v, _| v.note()), None);
+    assert!(h.view(|v, _| v.agent_control()["label"].is_null()));
     h.type_text("echo mine-again");
     h.wait("the shell to answer the view that took control back", |h| {
         h.rows().iter().any(|row| row == "mine-again")

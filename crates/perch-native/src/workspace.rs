@@ -230,6 +230,11 @@ pub struct Workspace {
     add_project: Value,
     /// How many times the sidebar was asked to open its Add project form, and when last.
     add_project_asks: (u64, Option<Instant>),
+    /// The last request for a project's worktree menu (the web's `worktreeMenuRequest`):
+    /// `{projectKey, nonce, remove?, create?}`, null once the menu took it.
+    worktree_request: Value,
+    /// How many worktree menu requests were made, each one's `nonce`.
+    worktree_requests: u64,
     /// The in-flow mod whose own field has the keyboard (the sidebar's Add project form): the
     /// window leaves the keyboard there and types into it rather than running plain keys.
     keyboard_held: Option<String>,
@@ -307,6 +312,8 @@ impl Workspace {
             start_place: None,
             add_project: json!({ "status": "idle" }),
             add_project_asks: (0, None),
+            worktree_request: Value::Null,
+            worktree_requests: 0,
             keyboard_held: None,
             drag: None,
             follow: None,
@@ -439,6 +446,68 @@ impl Workspace {
         self.add_project_asks = (self.add_project_asks.0 + 1, Some(Instant::now()));
         cx.notify();
         Ok(())
+    }
+
+    /// The last request for a project's worktree menu, null once taken.
+    pub fn worktree_request(&self) -> &Value {
+        &self.worktree_request
+    }
+
+    /// The worktree menu took its request.
+    pub fn take_worktree_request(&mut self, cx: &mut Context<Self>) {
+        if !self.worktree_request.is_null() {
+            self.worktree_request = Value::Null;
+            cx.notify();
+        }
+    }
+
+    /// Asks the worktree menu of `project_key` (`host:repoPath`) to open (on its create form with
+    /// `create`), or to ask before removing `remove`, showing a hidden sidebar first.
+    fn request_worktree_menu(
+        &mut self,
+        project_key: String,
+        remove: Option<Value>,
+        create: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.sidebar.read(cx).visible() {
+            self.sidebar
+                .update(cx, |sidebar, cx| sidebar.run_action("global.sidebar", cx));
+        }
+        self.worktree_requests += 1;
+        let mut request = json!({ "projectKey": project_key, "nonce": self.worktree_requests });
+        if let Some(remove) = remove {
+            request["remove"] = remove;
+        }
+        if create {
+            request["create"] = json!(true);
+        }
+        self.worktree_request = request;
+        cx.notify();
+    }
+
+    /// The git checkout on screen as its worktree menu is keyed (`host:repoPath`): the shown
+    /// workspace's project, else the shown session's folder (the web's `activeRepoKey`).
+    fn active_repo_key(&self, cx: &App) -> Option<String> {
+        let model = self.sidebar.read(cx).model();
+        let store = &model.store;
+        let session = self
+            .tabs
+            .active()
+            .and_then(|id| store.sessions.iter().find(|s| s.id == id));
+        let workspace = screens::mods(cx)
+            .and_then(|(_, perch)| perch.shown_place().1)
+            .or_else(|| session.and_then(|s| s.workspace_id.clone()))
+            .and_then(|id| store.workspaces.iter().find(|w| w.id == id));
+        let owner = workspace.and_then(|w| store.projects.iter().find(|p| p.id == w.project_id));
+        if let Some(project) = owner {
+            if let Some(repo) = project.repo_path.as_deref().filter(|r| !r.is_empty()) {
+                return Some(format!("{}:{repo}", project.host_id));
+            }
+        }
+        session
+            .filter(|s| !s.cwd.is_empty())
+            .map(|s| format!("{}:{}", s.host_id, s.cwd))
     }
 
     /// Puts a screen's question `frame` ([`crate::client::ask_frame`]) to the core: a folder
@@ -1409,13 +1478,22 @@ impl Workspace {
                 );
             }
         }
-        // Over each terminal on screen: its find bar while find is open, and the phone-size
-        // notice while a phone holds its size and this window may take it back.
+        // Over each terminal on screen: the agent's chip, error line and ended banner while it
+        // has one, its find bar while find is open, and the phone-size notice while a phone
+        // holds its size and this window may take it back.
         for id in shown {
             let Some(view) = self.panes.get(&id).and_then(|p| p.view.as_ref()) else {
                 continue;
             };
             let view = view.read(cx);
+            let mut control = view.agent_control();
+            if ["label", "error", "ended"]
+                .iter()
+                .any(|key| !control[key].is_null())
+            {
+                control["id"] = json!(id);
+                want("agent-control", format!("agent-control#{id}"), control);
+            }
             if view.find_open() {
                 want(
                     "terminal-search",
@@ -1427,7 +1505,7 @@ impl Workspace {
                 want(
                     "phone-size",
                     format!("phone-size#{id}"),
-                    json!({ "id": id, "generation": view.phone_holds(), "pending": false }),
+                    json!({ "id": id, "generation": view.phone_holds(), "pending": view.taking() }),
                 );
             }
         }
@@ -2230,6 +2308,83 @@ impl Workspace {
                 self.sidebar
                     .update(cx, |sidebar, cx| sidebar.open(host, session, provider, cx));
             }
+            // The web's leader W and New workspace: the shown project's worktree menu. A folder
+            // that is not a git repo has no menu, so the request is left for none to take.
+            "leader.worktree" | "nests.new" => {
+                if let Some(key) = self.active_repo_key(cx) {
+                    self.request_worktree_menu(key, None, name == "nests.new", cx);
+                }
+            }
+            // Only asks: the menu confirms and guards the removal, as the web's does.
+            "worktree.remove" => {
+                let id = text("id").ok_or("This command needs {id}.")?;
+                let model = self.sidebar.read(cx).model();
+                let store = &model.store;
+                let workspace = store
+                    .workspaces
+                    .iter()
+                    .find(|w| w.id == id)
+                    .ok_or_else(|| format!("No workspace {id}."))?;
+                let key = store
+                    .projects
+                    .iter()
+                    .find(|p| p.id == workspace.project_id)
+                    .and_then(|p| Some((p.host_id.clone(), p.repo_path.clone()?)))
+                    .filter(|(_, repo)| !repo.is_empty() && workspace.parent_workspace_id.is_some())
+                    .map(|(host, repo)| format!("{host}:{repo}"))
+                    .ok_or("Only a linked worktree of a git project can be deleted.")?;
+                let mut remove = json!({ "path": workspace.path });
+                if let Some(branch) = workspace.branch.as_deref().filter(|b| !b.is_empty()) {
+                    remove["branch"] = json!(branch);
+                }
+                self.request_worktree_menu(key, Some(remove), false, cx);
+            }
+            "worktree.cancel" | "worktree.retry" | "worktree.dismiss" => {
+                let id = text("id").ok_or("This command needs {id}.")?.to_string();
+                let sidebar = self.sidebar.read(cx);
+                if !sidebar
+                    .model()
+                    .store
+                    .worktree_jobs
+                    .iter()
+                    .any(|j| j.job_id == id)
+                {
+                    return Err(format!("There is no worktree job {id}."));
+                }
+                let verb = match name {
+                    "worktree.cancel" => "cancel",
+                    "worktree.retry" => "retry",
+                    _ => "dismiss",
+                };
+                sidebar.send(Command::WorktreeJob { verb, job_id: id });
+            }
+            // The web pins the folder as the active project and leaves the shown session; here
+            // the active folder is the shown session's, so the folder's newest session is shown.
+            "folder.select" => {
+                let cwd = text("cwd")
+                    .filter(|c| !c.is_empty())
+                    .ok_or(r#"This command needs {cwd: "/path"}."#)?
+                    .to_string();
+                let host = match text("host") {
+                    Some(host) => host.to_string(),
+                    None => screens::mods(cx)
+                        .map_or_else(|| LOCAL.to_string(), |(_, perch)| perch.shown_place().0),
+                };
+                let session = self
+                    .sidebar
+                    .read(cx)
+                    .model()
+                    .store
+                    .sessions
+                    .iter()
+                    .filter(|s| s.host_id == host && s.cwd == cwd)
+                    .max_by_key(|s| s.created_at)
+                    .map(|s| (s.id.clone(), s.cli_provider_id.clone()))
+                    .ok_or_else(|| format!("No sessions in {cwd} on {host}."))?;
+                self.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.open(host, session.0, session.1, cx)
+                });
+            }
             "notification.open" | "notification.dismiss" => {
                 let id = text("id").ok_or("This command needs {id}.")?;
                 let at = self
@@ -2410,6 +2565,20 @@ impl Workspace {
                 cx.notify();
             }
             "terminal.takeBackAll" => self.take_back_all(cx)?,
+            // The agent-control screen's Retry CLI, Restart CLI and Resume agent: the agent of
+            // tab `id` starts again, only after the core said its attach failed or its shell
+            // ended. A drop is never started over (the window reattaches it instead).
+            "terminal.restart" => {
+                let view = self.terminal_named(text("id"))?;
+                let core = self
+                    .locate
+                    .as_ref()
+                    .ok_or("There is no core to start the agent on.")?()
+                .map_err(|error| format!("The core is not reachable: {error:#}"))?;
+                if !view.update(cx, |view, cx| view.restart(core, cx)) {
+                    return Err("That terminal's agent has not ended or failed to start.".into());
+                }
+            }
             // The find bar's own (`terminal-search`): the query it holds, find again, close.
             "terminal.findQuery"
             | "terminal.findNext"
@@ -3128,8 +3297,9 @@ impl Workspace {
                 MouseButton::Left,
                 cx.listener(move |this, _, _, cx| this.focus_pane(&target, cx)),
             );
-        // What a mod draws over the terminal, in the pane's box: the find bar, the phone-size notice.
-        let over = ["terminal-search", "phone-size"]
+        // What a mod draws over the terminal, in the pane's box: the agent's controls, the find
+        // bar, the phone-size notice.
+        let over = ["agent-control", "terminal-search", "phone-size"]
             .into_iter()
             .filter_map(|screen| self.screens.inflow(&format!("{screen}#{id}")))
             .map(|view| div().absolute().inset_0().child(view));

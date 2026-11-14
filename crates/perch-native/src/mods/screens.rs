@@ -8,9 +8,10 @@
 //!   pane, keyed `pane-header#<tab id>`, while the area is split), `start` (the main area while
 //!   nothing is open in it), `folder-browser` (the sidebar draws its own copy in its Add project
 //!   dialog) and `worktree` (the sidebar draws its own copy on each git project's row), which the
-//!   window places nowhere yet, and over each terminal on screen `terminal-search` (keyed
-//!   `terminal-search#<tab id>`, while its find is open) and `phone-size` (`phone-size#<tab id>`,
-//!   while a phone holds its size and this window may take it back);
+//!   window places nowhere yet, and over each terminal on screen `agent-control` (keyed
+//!   `agent-control#<tab id>`, while the agent has a chip, an error or an ended banner),
+//!   `terminal-search` (`terminal-search#<tab id>`, while its find is open) and `phone-size`
+//!   (`phone-size#<tab id>`, while a phone holds its size and this window may take it back);
 //! - floating, opened by the window over the whole of it, as the web's take the whole page:
 //!   `navigator`, `pane-menu`, `tab-menu`, `confirm`, `dialog`, `new-session`, `session-split`,
 //!   `keybind-help`, `launcher`, `instructions`, `memory` (modal), `toast` and `tab-drag`
@@ -187,6 +188,12 @@ pub const SCREENS: &[Screen] = &[
     },
     Screen {
         id: "phone-size",
+        place: Place::InFlow,
+        width: 0.,
+        height: 0.,
+    },
+    Screen {
+        id: "agent-control",
         place: Place::InFlow,
         width: 0.,
         height: 0.,

@@ -184,6 +184,18 @@ pub const STOCK: &[(&str, &str)] = &[
         include_str!("../mods/phone-size/phone-size/main.js"),
     ),
     (
+        "agent-control/main.js",
+        include_str!("../mods/agent-control/main.js"),
+    ),
+    (
+        "agent-control/mod.json",
+        include_str!("../mods/agent-control/mod.json"),
+    ),
+    (
+        "agent-control/agent-control/main.js",
+        include_str!("../mods/agent-control/agent-control/main.js"),
+    ),
+    (
         "launcher/launcher/main.js",
         include_str!("../mods/launcher/launcher/main.js"),
     ),

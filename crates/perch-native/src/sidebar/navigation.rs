@@ -4,9 +4,9 @@
 //! [`Hosts`] the web sidebar draws. The shapes serialise to `@perch/sdk`'s (`perch-sdk.d.ts`):
 //! camelCase names, an absent optional field left out, `null` where the web says null.
 //!
-//! What this client does not have is empty, never guessed: no worktree jobs (`jobs` is `[]`), no
-//! per-viewer tab drag order (a strip is the core's order over creation order), no remembered
-//! harness per session, no workspace key hints (`shortcut` is never set).
+//! What this client does not have is empty, never guessed: no per-viewer tab drag order (a strip
+//! is the core's order over creation order), no remembered harness per session, no workspace key
+//! hints (`shortcut` is never set).
 //!
 //! The view (which computer is shown, the session and workspace on screen, the sidebar's options)
 //! is the caller's ([`View`]); the facts are the core's ([`Store`]).
@@ -14,7 +14,7 @@
 use super::{dot, section, Attention, Dot, HostFacts, SnapshotState, LOCAL};
 use perch_core::protocol::{
     AttentionEvent, ProjectSummary, SessionStatus, SessionSummary, SshHostEntry, WorkspaceState,
-    WorkspaceSummary,
+    WorkspaceSummary, WorktreeJob,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -58,6 +58,10 @@ pub struct Store {
     pub held: Option<String>,
     /// `settings.theme`.
     pub theme: Option<String>,
+    /// `settings.emptyWorkspaceAgent`, once the core has sent it.
+    pub empty_agent: Option<String>,
+    /// This computer's background worktree creates (`worktree.jobs`).
+    pub worktree_jobs: Vec<WorktreeJob>,
     /// The agents each computer can start (`agent.manifest.list`), by host id.
     pub providers: HashMap<String, Vec<super::Provider>>,
     /// Per computer, `isDefault` of each agent whose manifest says.
@@ -815,7 +819,24 @@ impl<'a> Builder<'a> {
                 .filter(|w| w.hidden)
                 .map(|w| self.workspace_info(w, &HashMap::new(), 0))
                 .collect(),
-            jobs: Vec::new(),
+            jobs: if local {
+                let repo = project.repo_path.as_deref().unwrap_or_default();
+                self.store
+                    .worktree_jobs
+                    .iter()
+                    .filter(|j| j.repo_path == repo || j.repo_path == project.path)
+                    .map(|j| WorktreeJobInfo {
+                        id: j.job_id.clone(),
+                        branch: j.branch.clone(),
+                        path: j.path.clone(),
+                        status: j.status.clone(),
+                        phase: j.phase.clone(),
+                        error: j.error.clone(),
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            },
             sessions: own.iter().map(|s| self.info(s)).collect(),
             has_chats: self
                 .sessions

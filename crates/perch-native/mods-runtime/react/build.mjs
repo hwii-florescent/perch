@@ -59,6 +59,7 @@ export const SCREENS = [
   "worktree",
   "terminal-search",
   "phone-size",
+  "agent-control",
 ];
 /** Other stock screens a screen's folder carries, by the screen: they draw inside it (the close guard asks its question
  * through the confirmation, with its own rows in it; the New session menu draws the tab strip's icons; the dialog draws

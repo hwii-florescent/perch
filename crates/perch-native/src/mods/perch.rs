@@ -137,6 +137,8 @@ pub struct WindowState {
     /// How many times the window asked the sidebar for its Add project form, and when last.
     pub add_project_asks: u64,
     pub add_project_at: Option<std::time::Instant>,
+    /// The last request for a project's worktree menu, null when none is waiting.
+    pub worktree_request: Value,
 }
 
 /// Answers a screen's question for the core (`kind` and its `args`, as
@@ -251,6 +253,7 @@ impl Perch {
                 add_project: ws.add_project_state().clone(),
                 add_project_asks: ws.add_project_asks().0,
                 add_project_at: ws.add_project_asks().1,
+                worktree_request: ws.worktree_request().clone(),
                 terminals: ws.terminal_states(cx),
                 slide: ws.tab_slide(),
                 pointer: ws.pointer_follow().clone(),
@@ -335,6 +338,11 @@ impl Perch {
             drop(data);
             self.bump(&format!("props:{key}"));
         }
+    }
+
+    /// The props screen copy `key` was last given, while it has any.
+    pub fn props_of(&self, key: &str) -> Option<Value> {
+        self.0.data.borrow().props.get(key).cloned()
     }
 
     /// Screen `key` is closed: its props go, and what it read (a view made for the key again
@@ -983,6 +991,27 @@ impl Perch {
                     json!(capabilities.is_some_and(|c| c.iter().any(|c| c == capability)))
                 }),
             )
+            // Settings' "Empty workspace opens": the pane a new workspace starts with ("" for
+            // none), null until the core has sent its settings.
+            .function(
+                "emptyWorkspaceAgent",
+                reader(STORE, |perch, _| json!(perch.store().empty_agent)),
+            )
+            // The window's last request for a project's worktree menu (leader W, New workspace,
+            // `worktree.remove`): `{projectKey, nonce, remove?, create?}`, null once taken.
+            .function(
+                "worktreeMenuRequest",
+                reader(WINDOW, |perch, _| {
+                    perch.0.data.borrow().window.worktree_request.clone()
+                }),
+            )
+            .function("takeWorktreeRequest", {
+                let perch = self.clone();
+                move |_| {
+                    perch.in_workspace(|ws, cx| ws.take_worktree_request(cx))?;
+                    Ok(HostValue::Null)
+                }
+            })
             // Whether a screen sits in a region of the window (a sidebar) rather than over all of it.
             .function("inRegion", |args| {
                 let id = args.get(0).and_then(HostValue::as_str).unwrap_or("");
@@ -1562,7 +1591,7 @@ const OWN: [(&str, &str, &str); 10] = [
 
 /// Window commands beyond the keymap's: the web's ids the window can perform (some under the
 /// name its keys use), and the native ones screens need.
-const WINDOW_COMMANDS: [(&str, &str, &str); 28] = [
+const WINDOW_COMMANDS: [(&str, &str, &str); 34] = [
     (
         "session.start",
         "Start an agent in a folder on a host",
@@ -1589,6 +1618,24 @@ const WINDOW_COMMANDS: [(&str, &str, &str); 28] = [
         "tab.beginDrag",
         "A press on a tab, which the window follows as a drag (the SDK's beginTabDrag)",
         "{id, label, x, y, entries: [{id, left, width}]}",
+    ),
+    (
+        "worktree.remove",
+        "Ask to delete a linked worktree (its worktree menu confirms and guards the removal)",
+        "{id}",
+    ),
+    ("worktree.cancel", "Stop making a worktree", "{id}"),
+    ("worktree.retry", "Try a failed worktree again", "{id}"),
+    ("worktree.dismiss", "Forget a failed worktree", "{id}"),
+    (
+        "folder.select",
+        "Show a folder's newest session, on a host without projects",
+        "{cwd, host?}",
+    ),
+    (
+        "terminal.restart",
+        "Start a tab's agent again after it ended or could not start (Retry CLI, Restart CLI, Resume agent)",
+        "{id}",
     ),
     (
         "pointer.follow",

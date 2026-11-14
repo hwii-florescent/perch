@@ -825,6 +825,8 @@ pub enum Command {
     RestoreWorkspace { workspace_id: String },
     /// Ask a computer for its projects and workspaces again (`workspace.snapshot`).
     RefreshHost(String),
+    /// Cancel, retry or dismiss a background worktree create (`worktree.job.<verb>`).
+    WorktreeJob { verb: &'static str, job_id: String },
 }
 
 /// Where the answer to one request goes.
@@ -884,6 +886,19 @@ const ASKS: &[(&str, &[(&str, Field)])] = &[
         "worktree.create",
         &[
             ("hostId", Field::Host),
+            ("repoPath", Field::Text),
+            ("branch", Field::Text),
+            ("newBranch", Field::Flag),
+            ("path", Field::MaybeText),
+            ("name", Field::MaybeText),
+            ("startFrom", Field::MaybeText),
+            ("parentWorkspaceId", Field::MaybeText),
+        ],
+    ),
+    // This computer's own background create (`worktree.job`): it names no other computer.
+    (
+        "worktree.job.start",
+        &[
             ("repoPath", Field::Text),
             ("branch", Field::Text),
             ("newBranch", Field::Flag),
@@ -1006,6 +1021,7 @@ fn answer_of(message: &ServerMessage) -> Option<(&str, Result<Value, String>)> {
         // A worktree answer keeps its kind: a refusal (`worktree.error`, `dirty` for the checkout's
         // guard) is an answer the screen reads, not a failure of the question.
         ServerMessage::WorktreeListResult { request_id, .. }
+        | ServerMessage::WorktreeJobStarted { request_id, .. }
         | ServerMessage::WorktreeDone { request_id, .. }
         | ServerMessage::WorktreeError { request_id, .. } => {
             let mut answer = serde_json::to_value(message).unwrap_or(Value::Null);
@@ -1321,6 +1337,9 @@ async fn live(
                     let id = connection.request_id();
                     connection.send(id_frame("workspace.restore", &id, "workspaceId", &workspace_id, json!({}))).await?;
                 }
+                Some(Command::WorktreeJob { verb, job_id }) => {
+                    connection.send(json!({"type": format!("worktree.job.{verb}"), "jobId": job_id})).await?;
+                }
                 Some(Command::RefreshHost(host_id)) => {
                     let ask = Request::Workspaces(host_id);
                     let id = connection.request(&ask).await?;
@@ -1580,6 +1599,11 @@ mod tests {
                     "name": "Fix it", "startFrom": null, "path": null, "parentWorkspaceId": "w"}),
             ),
             (
+                "worktree.job.start",
+                json!({"repoPath": "/r", "branch": "a", "newBranch": false, "path": "/wt/a",
+                    "name": "Task", "startFrom": null, "parentWorkspaceId": null}),
+            ),
+            (
                 "worktree.remove",
                 json!({"hostId": "local", "repoPath": "/r", "path": "/wt/a", "force": true,
                     "deleteBranch": false}),
@@ -1609,7 +1633,16 @@ mod tests {
             &json!({"repoPath": "/r", "path": "/wt/a", "force": "yes", "deleteBranch": false})
         )
         .is_err());
-        // A background create is not asked: the window lists no worktree jobs.
+        // A background create is this computer's own: it takes no computer.
+        let frame = ask_frame(
+            "worktree.job.start",
+            &json!({"hostId": "buildbox", "repoPath": "/r", "branch": "a", "newBranch": true}),
+        )
+        .unwrap();
+        assert_eq!(
+            frame,
+            json!({"type": "worktree.job.start", "repoPath": "/r", "branch": "a", "newBranch": true})
+        );
         assert!(ask_frame("worktree.job.start", &json!({"repoPath": "/r"})).is_err());
         assert!(ask_frame(
             "instructions.set",
@@ -1662,6 +1695,17 @@ mod tests {
             json!({"type": "worktree.error", "hostId": "local", "message": "contains modified files",
                 "dirty": true})
         );
+        // A background create's acceptance answers its start, with the job.
+        let started = message(
+            json!({"type": "worktree.job.started", "requestId": "j1", "job": {"jobId": "job-1",
+            "repoPath": "/r", "branch": "a", "path": "/wt/a", "status": "running",
+            "phase": "Checking out", "startedAt": 1}}),
+        );
+        let (id, answer) = answer_of(&started).expect("an acceptance answers");
+        assert_eq!(id, "j1");
+        let answer = answer.unwrap();
+        assert_eq!(answer["type"], "worktree.job.started");
+        assert_eq!(answer["job"]["path"], "/wt/a");
     }
 
     #[test]
