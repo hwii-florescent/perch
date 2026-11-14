@@ -134,3 +134,50 @@ test("the organize menu opens in the overlay layer and switches the view", async
     handle.unmount();
   }
 });
+
+test("a session row's drag is the web's: it slides with the forwarded pointer and moves the row once, on release", async () => {
+  const { handle, perch } = await mountSidebar("by-project", "dark");
+  const navigation = { ...perch.navigation(), reorderable: true };
+  perch.navigation = () => navigation;
+  const follows = [];
+  perch.followPointer = (event) => { follows.push([event.clientX, event.clientY]); return true; };
+  try {
+    handle.update({});
+    const zones = handle.document.querySelectorAll("[data-reorder-id]");
+    const groups = new Map();
+    for (const zone of zones) {
+      const group = zone.dataset.reorderGroup;
+      groups.set(group, [...(groups.get(group) ?? []), zone]);
+    }
+    const rows = [...groups.values()].find((list) => list.length >= 3 && list[0].querySelector("button[data-testid^='workspace-session-']:not([data-testid^='workspace-session-close-'])"));
+    assert.ok(rows, `a group of three session rows: ${JSON.stringify([...groups].map(([g, l]) => [g, l.map((z) => z.dataset.reorderId)]))}`);
+    // Where the engine laid the rows out, a row every 30 px.
+    rows.forEach((row, i) => handle.setBounds(row.id, { x: 0, y: 100 + i * 30, width: 240, height: 28 }));
+    handle.setBounds(rows[0].parentElement.id, { x: 0, y: 100, width: 240, height: 30 * rows.length });
+    const ids = rows.map((row) => row.dataset.reorderId);
+    const button = rows[1].querySelector("button[data-testid^='workspace-session-']:not([data-testid^='workspace-session-close-'])");
+    const at = (y, buttons = 1) => ({ clientX: 100, clientY: y, button: 0, buttons, pointerType: "mouse", pointerId: 1 });
+    handle.dispatch(button, "pointerdown", at(114));
+    assert.deepEqual(follows, [[100, 114]], "the press asks the window to forward the pointer");
+    handle.dispatch(handle.document.body, "pointermove", at(116));
+    assert.equal(rows[1].style.transform, "", "a few pixels are still a press");
+    handle.dispatch(handle.document.body, "pointermove", at(190));
+    assert.equal(rows[2].style.transform, "translateY(-30px)", "the next row slides up into its place");
+    assert.equal(rows[1].style.transform, "translateY(30px)", "the dragged row follows the pointer, kept inside the list");
+    assert.deepEqual(perch.commands, [], "nothing is written while dragging");
+    handle.dispatch(handle.document.body, "pointerup", at(190, 0));
+    assert.deepEqual(perch.commands.map(([name, args]) => [name, args.id, args.target, args.after]), [["session.move", ids[1], ids[2], true]]);
+    assert.equal(rows[1].style.transform, "", "the styles are put back");
+
+    // Escape ends a drag with nothing written.
+    perch.commands.length = 0;
+    handle.dispatch(button, "pointerdown", at(114));
+    handle.dispatch(handle.document.body, "pointermove", at(190));
+    handle.dispatch(handle.document.body, "pointercancel", at(190, 0));
+    handle.dispatch(handle.document.body, "pointerup", at(190, 0));
+    assert.deepEqual(perch.commands, [], "a cancelled drag writes nothing");
+    assert.equal(rows[2].style.transform, "");
+  } finally {
+    handle.unmount();
+  }
+});

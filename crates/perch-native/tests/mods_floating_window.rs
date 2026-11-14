@@ -768,6 +768,66 @@ fn tab_drag(rig: &mut Rig) {
     println!("tab-drag: ok");
 }
 
+/// Layout readback in the window: the SDK's `Select` near the window's right edge (a user mod in
+/// the keybind help's slot) opens a list wider than its field, and the web's own layout effect,
+/// which reads the list's laid-out box, slides it back inside the window.
+fn readback(rig: &mut Rig, user: &std::path::Path) {
+    let slot = user.join("keybind-help");
+    let status = std::process::Command::new("cp")
+        .arg("-R")
+        .arg(user.join(".stock/keybind-help"))
+        .arg(&slot)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    std::fs::write(
+        slot.join("main.js"),
+        format!(
+            r#"import {{ screen }} from "./screen.js";
+import {{ jsx }} from "react/jsx-runtime";
+import {{ useState }} from "react";
+import {{ Select }} from "@perch/sdk";
+const OPTIONS = [{{ value: "a", label: "Catppuccin Macchiato with a long name" }}, {{ value: "b", label: "Perch" }}];
+function Demo() {{
+  const [value, setValue] = useState("b");
+  return jsx("div", {{ style: {{ position: "absolute", left: {left}, top: 200, width: 92 }},
+    children: jsx(Select, {{ value, options: OPTIONS, testId: "select-demo", onChange: setValue }}) }});
+}}
+export default screen("select", Demo, {{ container: {{ width: "100%", height: "100%" }} }});
+"#,
+            left = WIDTH - 100.
+        ),
+    )
+    .unwrap();
+    // The window picks the user folder up on its next look at the mods.
+    rig.cx.advance_clock(POLL * 2);
+    rig.ws(|ws, window, cx| ws.run_command("global.help", None, window, cx))
+        .unwrap();
+    rig.draw();
+    let field = rig.record("select-field").expect("the field is drawn");
+    rig.click("select-field");
+    rig.draw();
+    let list = rig.record("select-list").expect("the list is open");
+    let (left, right) = (
+        f32::from(list.bounds.origin.x),
+        f32::from(list.bounds.origin.x + list.bounds.size.width),
+    );
+    assert!(
+        list.bounds.size.width > field.bounds.size.width,
+        "as wide as its longest label: {:?}",
+        list.bounds
+    );
+    assert!(
+        right <= WIDTH - 8. + 0.5 && left < f32::from(field.bounds.origin.x),
+        "slid back inside the window: {:?}",
+        list.bounds
+    );
+    rig.press("escape");
+    rig.press("escape");
+    let _ = std::fs::remove_dir_all(&slot);
+    println!("readback: ok");
+}
+
 fn link(
     rig: &mut Rig,
 ) -> (
@@ -1272,6 +1332,7 @@ fn main() {
     dialog(&mut rig);
     toast(&mut rig);
     confirm(&mut rig);
+    readback(&mut rig, &scratch.join("native-mods"));
 
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())

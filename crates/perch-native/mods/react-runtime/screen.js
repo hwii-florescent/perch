@@ -184,6 +184,14 @@ export function screen(id, Component, options = {}) {
         // Vertical lengths are laid on the window's device pixels (`snapColumns` in the runtime).
         // A screen in a region of the window (a sidebar, a status bar) portals into the window's layer.
         const drawn = describeToGpui(this.handle.description, this.kit, this.handle, files, scale(), inRegion);
+        // Effects that measured a box older than the tree run again once this frame has laid it out.
+        if (this.handle.drawing?.()) {
+          cx.timer.after(0, () => {
+            if (copy.closed) return;
+            copy.enter();
+            this.handle.retry();
+          });
+        }
         if (!this.keys) return drawn;
         // Nothing of its own is focused any more (its form closed), or the keyboard went elsewhere: it lets go.
         if (this.held && (!focusedHere(this.handle.document) || (this.armed && !this.keys.is_focused()))) this.hold(false);

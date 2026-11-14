@@ -7,6 +7,7 @@
 //! instructions, memory) open through `perch.openOverlay(kind, props)`; their callbacks are plain functions.
 import { createElement, Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { cn } from "../../../../packages/web/src/lib/cn.ts";
+import { beginSlideDrag } from "../../../../packages/web/src/slideDrag.ts";
 import { formatCombo } from "../../../../packages/web/src/keyCombo.ts";
 import { segment } from "../../../../packages/web/src/components/ui/segment.ts";
 import { rowAction } from "../../../../packages/web/src/components/ui/row-action.ts";
@@ -300,9 +301,17 @@ function WorktreeInPlace({ hostId, path: cwd, className, worktrees: given, reque
   });
 }
 
-/** A row drag: the host follows the pointer and slides the rows (`perch.beginReorderDrag`); without it a press
- * stays a press. */
-export const beginReorderDrag = (event, options) => host().beginReorderDrag?.(event, options);
+/** A row drag, the web's own (`beginSlideDrag`: it picks the slot, slides the rows and hands the slot to `onEnd`), with
+ * the pointer's moves and its release forwarded by the window while the press lasts (`host.followPointer`); without
+ * that a press stays a press. The rows are asked for their boxes now, so they are measured by the time the press
+ * becomes a drag. */
+export const beginReorderDrag = (event, options) => {
+  if (!host().followPointer?.(event)) return;
+  const items = options.items();
+  for (const item of items) item.getBoundingClientRect();
+  items[0]?.parentElement?.getBoundingClientRect();
+  beginSlideDrag(event, options);
+};
 
 // ---- chrome (1.2: tabs, status bar, pane header) ------------------------------------------------------------------
 

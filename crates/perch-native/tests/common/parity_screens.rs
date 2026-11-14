@@ -662,15 +662,23 @@ fn named(screen: &str, selector: &str) -> String {
         .unwrap_or_else(|| panic!("no named element of {screen} is {selector}"))
 }
 
+/// Draws `window` until what its screen measured has settled: an effect that measures waits for
+/// the next frame's layout, and a measure-then-move takes a frame per step (`measured` in the
+/// runtime), so a few frames, each after the screen's work is done.
 fn draw(cx: &mut HeadlessAppContext, window: gpui::AnyWindowHandle) {
-    cx.run_until_parked();
-    cx.update_window(window, |_, window: &mut Window, cx| {
-        probe::clear();
-        window.refresh();
-        let _ = window.draw(cx);
-    })
-    .unwrap();
+    for _ in 0..SETTLE_FRAMES {
+        cx.run_until_parked();
+        cx.update_window(window, |_, window: &mut Window, cx| {
+            probe::clear();
+            window.refresh();
+            let _ = window.draw(cx);
+        })
+        .unwrap();
+    }
 }
+
+/// Frames drawn for a screen to settle (`draw`).
+const SETTLE_FRAMES: usize = 4;
 
 fn click(cx: &mut HeadlessAppContext, window: gpui::AnyWindowHandle, name: &str) {
     draw(cx, window);

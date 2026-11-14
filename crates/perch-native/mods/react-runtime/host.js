@@ -25,19 +25,19 @@
 // `tab-menu`), and its callbacks get the screen's result. What the `perch` module or the window cannot do yet is an
 // inert default (`INERT`), so a screen
 // draws and its other actions work: an overlay with no screen (or whose screen no mod draws) closes at once and says
-// so on stderr, and a row drag stays a press. Add project is the window's (`addProjectFolder`, through the core's
+// so on stderr. A row's drag (`beginReorderDrag`) is the web's own, with the pointer forwarded by the window while
+// the press lasts (`followPointer`). Add project is the window's (`addProjectFolder`, through the core's
 // `project.create`), and so are the folder browser's listing (`browse`) and the sessions by folder. A tab's
 // press (`beginTabDrag`) is the window's from then on (`tab.beginDrag`, with where the strip's tabs are): it follows
 // the pointer, draws the `tab-drag` screen and moves or splits the tab once it is let go. Commands the module and the
 // window lack are refused by it and logged.
 import * as perch from "perch";
-import { Icon, textWidth } from "perch-react";
+import { Icon, bounds, forgetBounds, textWidth } from "perch-react";
 import { ICONS, LETTERS, LETTER } from "./agent-icons.js";
 
 export const INERT = [
   // Only a screen's own scope (`directory`) is matched; the window's own keys are the window's.
   "shortcutFor",
-  "beginReorderDrag",
   "overlay:folder-browser",
   "overlay:worktree",
   "overlay:new-file",
@@ -272,12 +272,56 @@ export function copyFor(cx, screen) {
     read();
   }
 
+  // A row drag (`beginReorderDrag`): the web's own drag listens on `window` for the pointer's moves, its release and
+  // its cancel. While the press lasts the window forwards them (`pointer.follow`, read back as `perch.pointerFollow()`,
+  // the latest of them with a count), and each new one is dispatched here as the DOM event the web listens for. A
+  // release is the move to where it was let go, then `pointerup`; Escape, the window losing focus and a lost release
+  // are `pointercancel`. A press the window would not follow is cancelled too, so the drag never waits on it.
+  let nextFollow = 0;
+  function followPointer(event) {
+    if ((event?.button ?? 0) !== 0 || !handle) return false;
+    const token = `${screen}:${++nextFollow}:${Math.random().toString(36).slice(2, 10)}`;
+    const read = () => snapshot("pointerFollow", () => perch.pointerFollow?.() ?? null);
+    let seq = -1;
+    let at = { x: event.clientX, y: event.clientY };
+    const send = (type, x, y) => {
+      handle.dispatch(handle.document.body, type, { clientX: x, clientY: y, button: 0, buttons: type === "pointermove" ? 1 : 0, pointerType: "mouse", pointerId: 1 });
+    };
+    function check() {
+      const p = read();
+      if (p?.token !== token || p.seq === seq) return;
+      seq = p.seq;
+      if (p.phase === "cancel") {
+        listeners.delete(check);
+        send("pointercancel", p.x, p.y);
+        return;
+      }
+      if (p.phase !== "up" || p.x !== at.x || p.y !== at.y) send("pointermove", p.x, p.y);
+      at = { x: p.x, y: p.y };
+      if (p.phase === "up") {
+        listeners.delete(check);
+        send("pointerup", p.x, p.y);
+      }
+    }
+    listeners.add(check);
+    read();
+    perch.run("pointer.follow", { token, x: event.clientX, y: event.clientY }).catch(answer((error) => {
+      console.error(`perch.run pointer.follow: ${error?.message ?? error}`);
+      if (!listeners.delete(check)) return;
+      send("pointercancel", at.x, at.y);
+    }));
+    return true;
+  }
+
   const host = {
     isMac: true,
     hostname: "localhost",
     storage,
     clipboard: { writeText: async (text) => cx.write_to_clipboard(String(text)) },
     theme: () => perch.theme(),
+    // Where an element the runtime measures was last laid out, and letting a tree's boxes go (`HostDocument.measure`).
+    bounds: (key) => bounds(key),
+    forgetBounds: (prefix) => forgetBounds(prefix),
     // The window's logical size (`window.innerWidth`/`innerHeight`, media rules, `vw`/`vh`); a resize re-renders.
     // Before a window has drawn the mod there is none: a desktop window's size.
     viewport: () => snapshot("viewport", () => perch.viewport() ?? DESKTOP),
@@ -455,6 +499,7 @@ export function copyFor(cx, screen) {
       slideWith(items, String(id));
       perch.run("tab.beginDrag", args).catch(answer((error) => console.error(`perch.run tab.beginDrag: ${error?.message ?? error}`)));
     },
+    followPointer,
     render: () => { if (!rendering && !copy.closed) cx.notify(); },
     error: (error) => console.error(`react-runtime: ${error?.stack ?? error}`),
   };

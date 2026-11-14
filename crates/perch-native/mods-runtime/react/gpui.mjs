@@ -132,6 +132,8 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   if (node.markup) el = el.child(files.icon(`~icon-${node.id}`, node.markup, node.kind === "svg" ? color : ""));
   const id = engineId(node, events, overlay);
   if (id) el = el.id(id);
+  // Its laid-out box is kept for the source, which measured it (`HostDocument.measure`).
+  if (node.measure) el = el.measure(node.measure);
   // More parity names for the same element (two of the page's selectors find it).
   if (node.name && el.also_named) for (const name of node.also ?? []) el = el.also_named(name);
   el = applyStyle(el, { ...node.style, ...snapped.get(node) });

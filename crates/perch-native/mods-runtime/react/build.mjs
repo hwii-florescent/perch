@@ -168,7 +168,11 @@ async function bundleRuntime(table) {
         { find: /^@perch\/sdk$/, replacement: path.join(here, "sdk.mjs") },
       ],
     },
-    plugins: [{ name: "perch-virtual", resolveId: (source) => (source in virtual ? `\0${source}` : null), load: (source) => (source.startsWith("\0virtual:") ? `export default ${JSON.stringify(virtual[source.slice(1)])};` : null) }],
+    plugins: [
+      // `react` is the runtime's own (`react.mjs`, React with measured effects), except inside that file.
+      { name: "perch-react", enforce: "pre", resolveId: (source, importer) => (source === "react" && importer !== path.join(here, "react.mjs") ? path.join(here, "react.mjs") : null) },
+      { name: "perch-virtual", resolveId: (source) => (source in virtual ? `\0${source}` : null), load: (source) => (source.startsWith("\0virtual:") ? `export default ${JSON.stringify(virtual[source.slice(1)])};` : null) },
+    ],
     build: {
       write: false,
       target: "es2022",

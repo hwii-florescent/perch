@@ -298,6 +298,11 @@ it from its upstreams. Each copy keeps its upstream licence file and herdr's
     `vendor/gpui-kit/crates/shell/src/typings.rs`: `window_layer`, an element painted over the
     whole window from its top left wherever its parent sits, for what a screen in a region of the
     window portals (CSS `position: fixed`).
+  - `vendor/gpui-kit/crates/shell/src/measure.rs` (new), the `measure` module in
+    `vendor/gpui-kit/crates/shell/src/lib.rs`, `vendor/gpui-kit/crates/shell/src/materialize.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
+    `vendor/gpui-kit/crates/shell/src/typings.rs`: `measure`, the box an element was last laid
+    out in, kept for a script that asked about it (`getBoundingClientRect`).
   - `vendor/gpui-kit/crates/shell/src/materialize.rs`,
     `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
     `vendor/gpui-kit/crates/shell/src/typings.rs`: `also_named`, more names a test reads an

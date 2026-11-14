@@ -183,7 +183,24 @@ export function mount(perch, Component, options = {}) {
   const listening = () => [document, window].map((target) => target.listeners.map((l) => `${l.type}:${l.capture}`).sort().join(",")).join("|");
   let described = "";
   const kept = {};
+  // Layout readback (`HostDocument.measure`): a measured element's box is kept under this tree's prefix and its id.
+  // The boxes are as fresh as the tree when the last description handed to the engine (`drawing`) is the latest.
+  const prefix = `m${Math.random().toString(36).slice(2, 10)}:`;
+  let version = 0;
+  let drawn = -1;
+  document.measureKey = (element) => prefix + element.id;
+  document.stale = () => drawn !== version;
+  // `getComputedStyle`: the cascade the last description used, from the body down to `element`.
+  document.computed = (element) => {
+    if (!kept.cascade || !kept.top) return null;
+    const chain = [];
+    for (let node = element; node instanceof HostElement && node !== document.body; node = node.parentNode) chain.unshift(node);
+    let style = kept.top;
+    for (const node of chain) style = kept.cascade.compute(node, style);
+    return style.values;
+  };
   const render = () => {
+    version += 1;
     description = describe(document, perch, styleSheet(), kept, options.names);
     described = listening();
     perch.render?.(description);
@@ -345,6 +362,17 @@ export function mount(perch, Component, options = {}) {
       node.touch();
       render();
     },
+    /** The engine is drawing the latest description: the boxes measured in this frame's layout are the tree's.
+     * Returns whether effects wait for that layout (`measured`); run them with `retry` once the frame is drawn. */
+    drawing() {
+      drawn = version;
+      return document.retries.length > 0;
+    },
+    /** Runs the effects that waited for a fresh layout. */
+    retry() {
+      const waiting = document.retries.splice(0);
+      for (const run of waiting) run();
+    },
     /** Runs effects React has scheduled (the engine calls it after a frame). */
     flush: settle,
     update(props) {
@@ -357,6 +385,8 @@ export function mount(perch, Component, options = {}) {
       reconciler.flushSyncWork();
       reconciler.flushPassiveEffects();
       document.afterCommit = null;
+      document.retries.length = 0;
+      perch.forgetBounds?.(prefix);
     },
   };
   return handle;

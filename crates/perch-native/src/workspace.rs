@@ -51,8 +51,8 @@ use crate::zoom::Zoom;
 use futures::channel::mpsc::UnboundedSender;
 use gpui::{
     canvas, div, point, prelude::*, px, relative, rgb, size, AnyElement, App, Bounds, Context,
-    DispatchPhase, Entity, Focusable, KeyDownEvent, Keystroke, MouseButton, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, SharedString, Size, Subscription, Task, Window,
+    DispatchPhase, Entity, Focusable, KeyDownEvent, Keystroke, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, Size, Subscription, Task, Window,
 };
 use serde_json::{json, Value};
 use std::cell::{Cell, RefCell};
@@ -235,6 +235,10 @@ pub struct Workspace {
     keyboard_held: Option<String>,
     /// A press on a tab of the strip, which may become a drag (`tab.beginDrag`).
     drag: Option<TabDrag>,
+    /// A press a mod follows (`pointer.follow`): its token while the press lasts, and the
+    /// pointer last forwarded for it (`pointerFollow()`), which stays after the press ends.
+    follow: Option<String>,
+    pointer: Value,
     /// Where the strip and each pane on screen were last drawn, for where a drag would drop.
     drop_boxes: Rc<RefCell<DropBoxes>>,
     /// Tells the core whether this window is the one being looked at.
@@ -305,6 +309,8 @@ impl Workspace {
             add_project_asks: (0, None),
             keyboard_held: None,
             drag: None,
+            follow: None,
+            pointer: Value::Null,
             drop_boxes: Rc::default(),
             activation: None,
             _subscriptions: vec![opened, failed, observed],
@@ -866,6 +872,43 @@ impl Workspace {
     /// The tab drag in flight as the strip slides its tabs for it (`TabDrag::slide`).
     pub fn tab_slide(&self) -> Value {
         self.drag.as_ref().map_or(Value::Null, TabDrag::slide)
+    }
+
+    /// The pointer as last forwarded for a press a mod follows (`pointerFollow()`).
+    pub fn pointer_follow(&self) -> &Value {
+        &self.pointer
+    }
+
+    /// Forwards the pointer to the mod following the press: `move` while it lasts, then `up`
+    /// where it was let go or `cancel`, after which nothing more is forwarded. False when no
+    /// press is followed.
+    fn forward_pointer(&mut self, phase: &str, at: Point<Pixels>, cx: &mut Context<Self>) -> bool {
+        let Some(token) = self.follow.clone() else {
+            return false;
+        };
+        if phase != "move" {
+            self.follow = None;
+        }
+        let seq = self.pointer["seq"].as_u64().map_or(0, |n| n + 1);
+        self.pointer = json!({
+            "token": token,
+            "seq": seq,
+            "phase": phase,
+            "x": f32::from(at.x),
+            "y": f32::from(at.y),
+        });
+        cx.notify();
+        true
+    }
+
+    /// A followed press ends with nothing changed (Escape, the window losing focus), where the
+    /// pointer last was.
+    fn cancel_follow(&mut self, cx: &mut Context<Self>) -> bool {
+        let at = point(
+            px(self.pointer["x"].as_f64().unwrap_or(0.) as f32),
+            px(self.pointer["y"].as_f64().unwrap_or(0.) as f32),
+        );
+        self.forward_pointer("cancel", at, cx)
     }
 
     fn drag_moved(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
@@ -1651,9 +1694,12 @@ impl Workspace {
 
     /// One key press, before the focused terminal sees it. True when it was handled here.
     fn key(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        // Escape ends a tab drag with nothing changed.
+        // Escape ends a tab drag, or a press a mod follows, with nothing changed.
         if keystroke.key == "escape" && self.drag.as_ref().is_some_and(|d| d.started) {
             self.drag_ended(false, cx);
+            return true;
+        }
+        if keystroke.key == "escape" && self.cancel_follow(cx) {
             return true;
         }
         let keymap = self.keymap(cx);
@@ -2106,6 +2152,23 @@ impl Workspace {
                     self.drag = Some(drag);
                     cx.notify();
                 }
+            }
+            // The SDK's `beginReorderDrag`: a press a mod's own code drags with, which needs the
+            // pointer wherever it goes until the press ends. One at a time, and not beside a tab
+            // drag.
+            "pointer.follow" => {
+                let token = text("token")
+                    .ok_or("This command needs {token}.")?
+                    .to_string();
+                let coordinate = |key: &str| args.and_then(|a| a.get(key)).and_then(Value::as_f64);
+                let (x, y) = coordinate("x")
+                    .zip(coordinate("y"))
+                    .ok_or("This command needs {x, y}.")?;
+                if self.follow.is_some() || self.drag.is_some() {
+                    return Err("The pointer is already followed for another press.".into());
+                }
+                self.follow = Some(token);
+                self.forward_pointer("move", point(px(x as f32), px(y as f32)), cx);
             }
             "tab.menu" => {
                 let id = text("id")
@@ -3536,9 +3599,11 @@ impl gpui::Render for Workspace {
                 window,
                 move |this, window, cx| {
                     send(window.is_window_active(), &this.sidebar, cx);
-                    // As the web's blur: a tab drag ends with nothing changed.
+                    // As the web's blur: a tab drag, or a press a mod follows, ends with nothing
+                    // changed.
                     if !window.is_window_active() {
                         this.drag_ended(false, cx);
+                        this.cancel_follow(cx);
                     }
                 },
             ));
@@ -3777,8 +3842,9 @@ impl gpui::Render for Workspace {
             .collect();
         let overlays = self.settings_view(cx).into_iter().chain(self.peek_view(cx));
         // While a tab is pressed the window follows the pointer wherever it is, before anything
-        // under it: what is under a drag does not react to it.
-        let follow = self.drag.is_some().then(|| {
+        // under it: what is under a drag does not react to it. While a press a mod follows lasts,
+        // the pointer is forwarded to that mod, and only then.
+        let follow = (self.drag.is_some() || self.follow.is_some()).then(|| {
             let this = cx.entity().downgrade();
             canvas(
                 |_, _, _| {},
@@ -3791,11 +3857,21 @@ impl gpui::Render for Workspace {
                         let _ = moved.update(cx, |this, cx| {
                             if event.pressed_button == Some(MouseButton::Left) {
                                 this.drag_moved(event.position, cx);
+                                this.forward_pointer("move", event.position, cx);
                             } else {
                                 // The release was not seen: nothing changes.
                                 this.drag_ended(false, cx);
+                                this.forward_pointer("cancel", event.position, cx);
                             }
                         });
+                    });
+                    // A new press while one is still followed (its release was never seen): the
+                    // followed one ends with nothing changed.
+                    let pressed = this.clone();
+                    window.on_mouse_event(move |_: &MouseDownEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Capture {
+                            let _ = pressed.update(cx, |this, cx| this.cancel_follow(cx));
+                        }
                     });
                     let released = this.clone();
                     window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
@@ -3803,7 +3879,10 @@ impl gpui::Render for Workspace {
                             return;
                         }
                         let dragged = released
-                            .update(cx, |this, cx| this.drag_ended(true, cx))
+                            .update(cx, |this, cx| {
+                                this.forward_pointer("up", event.position, cx);
+                                this.drag_ended(true, cx)
+                            })
                             .unwrap_or(false);
                         // The release after a drag is not a click on what is under it.
                         if dragged {

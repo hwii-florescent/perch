@@ -492,6 +492,10 @@ declare module "perch" {
    * tab, whether the pointer is over the strip, and each tab's offset along it (`slideOffsets`); null when no tab
    * is dragged. */
   export function tabSlide(): { id: string; overStrip: boolean; offsets: { id: string; px: number }[] } | null;
+  /** The pointer the window last forwarded for a press a mod follows (`run("pointer.follow", {token, x, y})`):
+   * `seq` counts the forwards, `phase` is `move` while the press lasts, then `up` where it was let go or `cancel`
+   * (Escape, the window losing focus, a lost release). Null before any; the last one stays after it ends. */
+  export function pointerFollow(): { token: string; seq: number; phase: "move" | "up" | "cancel"; x: number; y: number } | null;
   /** `usePaneLook`. */
   export function paneLook(): PaneLook;
   /** `usePlanUsage`: plan usage as the core last answered `usage.get` (`run("usage.get")` asks), with the last

@@ -1506,6 +1506,12 @@ const ELEMENT_METHODS: &str = r#"    /**
      */
     window_layer<Self extends Element>(this: Self, value?: boolean): Self;
     /**
+     * PERCH: keeps the box this element is laid out in under `key`, for the
+     * host to read after the frame (`measure::bounds`). Only elements given a
+     * key are measured.
+     */
+    measure<Self extends Element>(this: Self, key: string): Self;
+    /**
      * PERCH: one more name a test reads the element's box by, beside its `id`
      * (two parity names for one element). Recorded only in test builds.
      */
@@ -4024,7 +4030,8 @@ mod tests {
         "aria_level",
         "keep_mounted",
         "window_layer", // PERCH: a window layer (`materialize::window_layer_of`).
-        "also_named", // PERCH: one more name a test reads the box by (`probe`).
+        "measure",      // PERCH: an element's box for the host (`measure`).
+        "also_named",   // PERCH: one more name a test reads the box by (`probe`).
         "on_item_click",
         "on_item_secondary_click",
         "on_change",
