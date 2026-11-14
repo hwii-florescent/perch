@@ -73,6 +73,8 @@ pub use input_tokens::{
 pub(crate) mod dependencies;
 pub mod dock;
 pub(crate) mod engine;
+// PERCH: a script's own picture by absolute path, under its read grant.
+pub(crate) mod file_image;
 pub(crate) mod entities;
 pub(crate) mod error;
 pub mod host;

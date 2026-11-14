@@ -57,6 +57,37 @@ export default class extends View {
 }
 "##;
 
+/// A mod that names pictures by absolute path, each in its own black box.
+const PICTURES: &str = r##"
+import { View, div, image } from "gpui-kit";
+const at = {paths};
+export default class extends View {
+  render() {
+    return div().id("pictures-root").size_full().bg("#000000").flex().children(
+      Object.entries(at).map(([k, path]) =>
+        div().id(`picture-${k}`).w(40).h(40).bg("#000000").child(image(path).size_full())));
+  }
+}
+"##;
+
+/// A mod that measures a box under a key every copy uses, and names a box for what it reads
+/// back under that key (and, when told, forgets every key it has).
+const MEASURES: &str = r##"
+import { View, div } from "gpui-kit";
+import { bounds, forgetBounds } from "perch-react";
+export default class extends View {
+  // Drawn again every few frames, so what it reads follows the last layout.
+  init(_props, cx) { const again = () => { cx.notify(); cx.timer.after(10, again); }; again(); }
+  render() {
+    if ("{forget}" === "yes") forgetBounds("");
+    const box = bounds("shared");
+    return div().id("measures-root").size_full().flex()
+      .child(div().w({width}).h(10).measure("shared"))
+      .child(div().id(`read-{name}-${box ? box.width : "none"}`).w(1).h(1));
+  }
+}
+"##;
+
 fn draw_any(cx: &mut HeadlessAppContext, window: gpui::AnyWindowHandle) {
     cx.update_window(window, |_, window: &mut Window, cx| {
         probe::clear();
@@ -393,6 +424,142 @@ export default class extends View {
         "mine"
     );
 
+    // A picture named by absolute path is drawn only from a regular file inside the mod's own
+    // grant: not a file elsewhere, not a link inside the folder that leads out, not a device.
+    let pictures = user.join("pictures");
+    std::fs::create_dir_all(&pictures).unwrap();
+    let logo = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packages/web/src/assets/perch-logo-texture-medium.webp");
+    std::fs::copy(&logo, pictures.join("logo.webp")).unwrap();
+    std::fs::copy(&logo, scratch.join("home/elsewhere.webp")).unwrap();
+    std::os::unix::fs::symlink(
+        scratch.join("home/elsewhere.webp"),
+        pictures.join("link.webp"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink("/dev/zero", pictures.join("zero.webp")).unwrap();
+    let paths = serde_json::json!({
+        "own": pictures.join("logo.webp"),
+        "outside": scratch.join("home/elsewhere.webp"),
+        "link": pictures.join("link.webp"),
+        "linked-device": pictures.join("zero.webp"),
+        "device": "/dev/zero",
+    });
+    write(&pictures, &PICTURES.replace("{paths}", &paths.to_string()));
+    let pictured = cx
+        .open_window(size(px(WIDTH), px(HEIGHT)), |window, cx| {
+            host.view("pictures", window, cx)
+        })
+        .unwrap();
+    // Device pixels in a named box that are not the black fill.
+    let lit = |frame: &Frame, name: &str| {
+        let bounds = probe::record(name).expect(name).bounds;
+        let edge = |a: Pixels, b: Pixels| {
+            (f32::from(b) * frame.scale) as usize - (f32::from(a) * frame.scale) as usize
+        };
+        edge(bounds.origin.x, bounds.right()) * edge(bounds.origin.y, bounds.bottom())
+            - frame.count(bounds, 0x000000)
+    };
+    let mut drawn = 0;
+    for _ in 0..40 {
+        cx.advance_clock(POLL);
+        cx.run_until_parked();
+        let (image, scale) = cx
+            .update_window(pictured.into(), |_, window: &mut Window, cx| {
+                probe::clear();
+                window.refresh();
+                let _ = window.draw(cx);
+                (window.render_to_image().unwrap(), window.scale_factor())
+            })
+            .unwrap();
+        let frame = Frame {
+            width: image.width() as usize,
+            raw: image.into_raw(),
+            scale,
+        };
+        if probe::record("picture-own").is_some() {
+            drawn = lit(&frame, "picture-own");
+            if drawn > 100 {
+                for refused in ["outside", "link", "linked-device", "device"] {
+                    assert_eq!(
+                        lit(&frame, &format!("picture-{refused}")),
+                        0,
+                        "{refused} is not drawn"
+                    );
+                }
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    assert!(
+        drawn > 100,
+        "the mod's own picture is drawn ({drawn} points)"
+    );
+
+    // Laid-out boxes are each copy's own: two mods measuring under the same key read their own
+    // box, one forgetting every key it has leaves the other's, and a closed copy's boxes go.
+    let measurer = |name: &str, width: u32, forget: &str| {
+        let dir = user.join(format!("measures-{name}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        write(
+            &dir,
+            &MEASURES
+                .replace("{name}", name)
+                .replace("{width}", &width.to_string())
+                .replace("{forget}", forget),
+        );
+    };
+    measurer("a", 30, "no");
+    measurer("b", 60, "no");
+    let open = |cx: &mut HeadlessAppContext, id: &'static str| {
+        let host = host.clone();
+        cx.open_window(size(px(WIDTH), px(HEIGHT)), move |window, cx| {
+            host.view(id, window, cx)
+        })
+        .unwrap()
+    };
+    let (a, b) = (open(&mut cx, "measures-a"), open(&mut cx, "measures-b"));
+    let reads = |cx: &mut HeadlessAppContext, want: &[&str]| {
+        (0..40).any(|_| {
+            cx.advance_clock(POLL);
+            cx.run_until_parked();
+            draw_any(cx, a.into());
+            let mut seen: Vec<String> = probe::records()
+                .into_keys()
+                .filter(|n| n.starts_with("read-"))
+                .map(|n| n.to_string())
+                .collect();
+            draw_any(cx, b.into());
+            seen.extend(
+                probe::records()
+                    .into_keys()
+                    .filter(|n| n.starts_with("read-"))
+                    .map(|n| n.to_string()),
+            );
+            std::thread::sleep(Duration::from_millis(25));
+            want.iter().all(|w| seen.iter().any(|s| s == w))
+        })
+    };
+    assert!(
+        reads(&mut cx, &["read-a-30", "read-b-60"]),
+        "each copy reads its own box"
+    );
+    measurer("b", 60, "yes");
+    assert!(
+        reads(&mut cx, &["read-a-30", "read-b-none"]),
+        "forgetting its keys leaves another copy's"
+    );
+    let with_both = gpui_shell::measure::kept();
+    cx.update_window(b.into(), |_, window, _| window.remove_window())
+        .unwrap();
+    cx.run_until_parked();
+    draw_any(&mut cx, a.into());
+    assert!(
+        gpui_shell::measure::kept() < with_both,
+        "a closed copy's boxes go ({with_both} kept before)"
+    );
+
     // A folder with the engine's own manifest is refused before the engine reads it (it would
     // clone the manifest's git dependencies), and says why where a load failure is shown. This
     // manifest lacks the engine's required `id`, so even unrefused nothing would be cloned.
@@ -421,7 +588,14 @@ export default class extends View {
         "{error:?}"
     );
 
-    for window in [window.into(), stock.into(), reached.into(), refused.into()] {
+    for window in [
+        window.into(),
+        stock.into(),
+        reached.into(),
+        pictured.into(),
+        a.into(),
+        refused.into(),
+    ] {
         cx.update_window(window, |_, window, _| window.remove_window())
             .unwrap();
     }

@@ -228,7 +228,11 @@ let strict = false;
  * the layout of the tree it was committed with; here the engine lays the tree out after the commit, in the next frame.
  * So when the effect measures a box whose layout is older than the tree (`HostDocument.measure`), the effect stops
  * where it measured and runs again after the next frame has laid the tree out, up to `MEASURE_TRIES` times; after that
- * it runs with the boxes there are. Its cleanup is the run that finished. */
+ * it runs with the boxes there are. Its cleanup is the run that finished.
+ *
+ * The rule for a screen's effect: measure first, then act. A put-off run stops at the measurement and the effect runs
+ * again from its top, so whatever it did before measuring (a listener added, a question asked) is done once per run
+ * and the put-off runs leave no cleanup. An effect that measures before it does anything runs its actions once. */
 export function measured(effect) {
   return () => {
     let cleanup;

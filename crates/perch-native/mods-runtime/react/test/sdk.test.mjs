@@ -75,3 +75,44 @@ test("a tab's classes by pane state are the app's", () => {
   assert.deepEqual(Object.keys(app).sort(), ["focused", "hidden", "visible"]);
   assert.deepEqual(pairs("crates/perch-native/mods-runtime/react/sdk.mjs", "export const tabStateClass"), app);
 });
+
+test("a create's agent starts once its workspace is listed, and never once the wait is over", async (t) => {
+  await loadSidebar();
+  const sdk = await import("@perch/sdk");
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+  const double = () => {
+    const listeners = new Set();
+    const host = {
+      listed: false, started: [],
+      navigation: () => ({ projects: [{ hostId: "local", workspaces: host.listed ? [{ path: "/w/new" }] : [] }] }),
+      subscribe: (l) => { listeners.add(l); return () => listeners.delete(l); },
+      startSession: (...args) => host.started.push(args),
+      listeners,
+      move: () => { for (const l of [...listeners]) l(); },
+    };
+    return host;
+  };
+  const soon = double();
+  sdk.startPaneWhenReady("local", "/w/new", "claude", soon);
+  soon.move();
+  assert.deepEqual(soon.started, [], "not listed yet");
+  soon.listed = true;
+  soon.move();
+  soon.move();
+  assert.deepEqual(soon.started, [["local", "/w/new", "claude"]], "started once");
+  assert.equal(soon.listeners.size, 0, "and stops listening");
+
+  const late = double();
+  sdk.startPaneWhenReady("local", "/w/new", "claude", late);
+  t.mock.timers.tick(5 * 60_000);
+  assert.equal(late.listeners.size, 0, "the give-up stops listening");
+  // A copy whose give-up timer never ran (it closed, which cancels its timers) still starts nothing past the limit:
+  // the mocked clock starts at 0, so the real one is far past this wait, and the mocked timer goes with the mock.
+  const closed = double();
+  sdk.startPaneWhenReady("local", "/w/new", "claude", closed);
+  const [held] = closed.listeners;
+  t.mock.timers.reset();
+  closed.listed = true;
+  held();
+  assert.deepEqual([late.started, closed.started], [[], []]);
+});

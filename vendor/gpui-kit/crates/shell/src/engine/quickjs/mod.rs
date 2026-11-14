@@ -7392,7 +7392,14 @@ impl ShellRuntime {
                 }),
             )?;
             text_constructor(&globals, "__svg", runtime.clone(), Component::Svg)?;
-            text_constructor(&globals, "__image", runtime.clone(), Component::Image)?;
+            // PERCH: an absolute path is read now, under the calling script's read grant.
+            text_constructor(&globals, "__image", runtime.clone(), |source| {
+                if std::path::Path::new(&source).is_absolute() {
+                    Component::FileImage(crate::file_image::FileImage::named(source))
+                } else {
+                    Component::Image(source)
+                }
+            })?;
             text_constructor(
                 &globals,
                 "__accordion",

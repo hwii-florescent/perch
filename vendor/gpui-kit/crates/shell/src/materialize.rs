@@ -1530,18 +1530,26 @@ fn materialize_component(
         ),
         Component::AvatarImage(_) => components::avatar::orphan("AvatarImage"),
         Component::AvatarFallback => components::avatar::orphan("AvatarFallback"),
+        // PERCH: a picture read under the script's grant (`file_image`), or an empty box.
+        Component::FileImage(file) => {
+            warn_unhonoured_a11y(&behavior, "image", &[]);
+            match &file.image {
+                Some(picture) => {
+                    let mut image = gpui::img(picture.clone()).id(element_id(id, behavior.key.clone()));
+                    image.style().refine(&refinement);
+                    image.into_any_element()
+                }
+                None => {
+                    let mut empty = gpui::div();
+                    empty.style().refine(&refinement);
+                    empty.into_any_element()
+                }
+            }
+        }
         Component::Image(path) => {
             warn_unhonoured_a11y(&behavior, "image", &[]);
             // HERDR: animated images need an identity to retain their frame state.
-            // PERCH: an absolute path is a file on disk, read as it is (a stock mod's own picture,
-            // written out beside its scripts); anything else is an asset or a URI as before.
-            let mut source = if std::path::Path::new(path.as_str()).is_absolute() {
-                gpui::ImageSource::Resource(gpui::Resource::Path(
-                    std::path::PathBuf::from(path.as_str()).into(),
-                ))
-            } else {
-                gpui::ImageSource::from(path)
-            };
+            let mut source = gpui::ImageSource::from(path);
             if let gpui::ImageSource::Resource(gpui::Resource::Embedded(path)) = &mut source {
                 *path = crate::AppAssets::cache_key(path);
             }

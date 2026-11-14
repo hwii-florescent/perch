@@ -157,6 +157,28 @@ test("a box comes from the last frame's layout, and an effect that measures wait
   assert.equal(forgotten.length, 2, "a tree's boxes are let go when it unmounts");
 });
 
+test("a put-off effect runs again from its top: what it does before measuring is repeated, after it once", async () => {
+  const { runtime } = await loadSidebar();
+  const { React } = runtime;
+  const h = React.createElement;
+  const perch = { isMac: true, render() {}, error: (e) => { throw e; }, bounds: () => null, forgetBounds() {} };
+  const before = [];
+  const after = [];
+  function Probe() {
+    const ref = React.useRef(null);
+    React.useLayoutEffect(() => {
+      before.push("acted");
+      ref.current.getBoundingClientRect();
+      after.push("acted");
+    }, []);
+    return h("div", { ref });
+  }
+  const handle = runtime.mount(perch, Probe, { container: { width: 10, height: 10 } });
+  while (handle.drawing()) handle.retry();
+  handle.unmount();
+  assert.deepEqual([before.length, after.length], [4, 1], "three put-off runs, then the one that finished");
+});
+
 test("a form control's bare system-ui and the app's system stack are asked for under different names", async () => {
   const { runtime } = await loadSidebar();
   const { createElement: h } = await import("react");

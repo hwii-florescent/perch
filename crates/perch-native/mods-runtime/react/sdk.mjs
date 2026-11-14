@@ -244,7 +244,7 @@ function worktreeAnswer(reply) {
   return reply.error ? { error: String(reply.error) } : {};
 }
 /** The workspace at `path` on `hostId` as the navigation lists it, or null. */
-function workspaceAt(hostId, path) {
+function workspaceAt(hostId, path, perch = host()) {
   const walk = (list) => {
     for (const w of list ?? []) {
       if (w.path === path) return w;
@@ -253,27 +253,33 @@ function workspaceAt(hostId, path) {
     }
     return null;
   };
-  for (const project of host().navigation({})?.projects ?? []) {
+  for (const project of perch.navigation({})?.projects ?? []) {
     if (project.hostId !== hostId) continue;
     const found = walk(project.workspaces) ?? walk(project.hidden);
     if (found) return found;
   }
   return null;
 }
+/** How long a create's agent waits for its workspace before it is given up, as the web's. */
+const START_PANE_WAIT = 5 * 60_000;
 /** The web's `startPaneWhenReady`: starts `agent` in the checkout at `path` once the core lists its workspace (a
- * background create reports the path before the workspace exists); given up after 5 minutes, as the web does. */
-function startPaneWhenReady(hostId, path, agent) {
+ * background create reports the path before the workspace exists); given up after `START_PANE_WAIT`, as the web does.
+ * It waits on the copy that asked (`perch`), whose listeners and timers go when it closes, and a listing seen past the
+ * limit starts nothing even if the give-up timer never ran. */
+export function startPaneWhenReady(hostId, path, agent, perch = host()) {
+  const deadline = Date.now() + START_PANE_WAIT;
   let finished = false;
   let stop = () => {};
+  const finish = () => { finished = true; stop(); clearTimeout(timer); };
   const check = () => {
-    if (finished || !workspaceAt(hostId, path)) return;
-    finished = true;
-    stop();
-    clearTimeout(timer);
-    host().startSession?.(hostId, path, agent);
+    if (finished) return;
+    if (Date.now() >= deadline) return finish();
+    if (!workspaceAt(hostId, path, perch)) return;
+    finish();
+    perch.startSession?.(hostId, path, agent);
   };
-  const timer = setTimeout(() => { finished = true; stop(); }, 5 * 60_000);
-  stop = subscribe(check);
+  const timer = setTimeout(finish, START_PANE_WAIT);
+  stop = perch.subscribe?.(check) ?? (() => {});
   check();
 }
 /** The web's `components/WorktreeMenu.tsx` on the native host: what the computer can do is its core's

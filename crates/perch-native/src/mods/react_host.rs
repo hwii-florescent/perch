@@ -7,7 +7,8 @@
 //! pixel, so a row of words (a strip of chips) would drift from the page's, which lays text at its exact width.
 //! `bounds(key)` is where an element the runtime marked `.measure(key)` was last laid out (`{x, y, width, height}`,
 //! logical pixels from the window's top left, or null before its first layout), for `getBoundingClientRect` and the
-//! DOM's measurement properties; `forgetBounds(prefix)` lets a tree's keys go when it unmounts.
+//! DOM's measurement properties; `forgetBounds(prefix)` lets a tree's keys go when it unmounts. Both see only the
+//! calling mod copy's boxes (`gpui_shell::measure`).
 //! Everything else the runtime needs (timers, jobs, storage) the engine already gives.
 
 use super::ModHost;

@@ -314,6 +314,9 @@ pub(crate) enum Component {
     AvatarFallback,
     /// A full-color image, loaded from the application's own directory.
     Image(String),
+    /// PERCH: an image the script named by absolute path, read under its own read grant
+    /// (`file_image`); nothing is drawn when the grant does not reach it.
+    FileImage(crate::file_image::FileImage),
     /// A native GPUI path. Its geometry is retained in method operations and
     /// resolved against final element bounds during prepaint.
     Path {
@@ -691,7 +694,7 @@ impl Component {
             Component::NumberInput(_) => "NumberInput",
             Component::OtpInput(_) => "OtpInput",
             Component::Svg(_) => "svg",
-            Component::Image(_) => "image",
+            Component::Image(_) | Component::FileImage(_) => "image",
             Component::Accordion(_) => "Accordion",
             Component::AccordionItem => "AccordionItem",
             Component::AccordionHeader => "AccordionHeader",
@@ -1374,6 +1377,7 @@ impl SpecArena {
             // The path is what an avatar image *is*; without it the dump says
             // an image is there but not which one.
             Component::AvatarImage(path) => out.push_str(&format!(" {path:?}")),
+            Component::FileImage(file) => out.push_str(&format!(" {:?}", file.path)),
             // The item count, not the item sizes: a dump of a hundred thousand
             // extents is not something a test reads, and the count is the part
             // that says what the list is.

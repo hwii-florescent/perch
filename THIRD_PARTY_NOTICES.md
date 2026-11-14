@@ -307,8 +307,15 @@ it from its upstreams. Each copy keeps its upstream licence file and herdr's
     `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
     `vendor/gpui-kit/crates/shell/src/typings.rs`: `also_named`, more names a test reads an
     element's box by, beside its `id`.
-  - `vendor/gpui-kit/crates/shell/src/materialize.rs`: an `image` whose source is an absolute
-    path reads that file from disk.
+  - `vendor/gpui-kit/crates/shell/src/file_image.rs` (new), the `file_image` module in
+    `vendor/gpui-kit/crates/shell/src/lib.rs`, `vendor/gpui-kit/crates/shell/src/spec.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
+    `vendor/gpui-kit/crates/shell/src/materialize.rs`: an `image` whose source is an absolute
+    path draws that file only when it is a regular file of at most 8 MiB inside the calling
+    script's read grant, links resolved; anything else draws nothing and reads nothing.
+  - `vendor/gpui-kit/crates/shell/src/measure.rs` and `vendor/gpui-kit/crates/shell/src/view.rs`:
+    the boxes `measure` keeps are each script copy's own (by the policy it runs under), and go
+    once the copy closes.
 - `vendor/quickjs-jit-runtime/`: the `jit` crate of
   [longbridge/quickjs-jit](https://github.com/longbridge/quickjs-jit) at `96593cd` with
   herdr's fix for longbridge/quickjs-jit#38, MIT (Copyright (c) 2020 Mees Delzenne,

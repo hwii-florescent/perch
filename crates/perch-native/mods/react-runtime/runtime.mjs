@@ -28,7 +28,7 @@ function Wo(n, l) {
 //! (elements only). State pseudo-classes ask `options.state(element, name, isSubject)`; without it they never match.
 class ke extends Error {
 }
-const hh = /* @__PURE__ */ new Set(["hover", "focus", "focus-visible", "focus-within", "active", "disabled", "enabled", "checked"]), gh = /* @__PURE__ */ new Set(["not", "is", "where", "nth-child"]), bh = /* @__PURE__ */ new Set(["first-child", "last-child", "only-child", "root", ...hh]);
+const gh = /* @__PURE__ */ new Set(["hover", "focus", "focus-visible", "focus-within", "active", "disabled", "enabled", "checked"]), bh = /* @__PURE__ */ new Set(["not", "is", "where", "nth-child"]), vh = /* @__PURE__ */ new Set(["first-child", "last-child", "only-child", "root", ...gh]);
 function Ro(n) {
   return n.replace(/\\(?:([0-9a-fA-F]{1,6})\s?|([\s\S]))/g, (l, o, c) => o ? String.fromCodePoint(parseInt(o, 16)) : c);
 }
@@ -49,7 +49,7 @@ function hi(n, l) {
   if (o === l) throw new ke(`expected a name at ${l} in ${JSON.stringify(n)}`);
   return [Ro(n.slice(l, o)), o];
 }
-function vh(n, l) {
+function yh(n, l) {
   let o = 1;
   for (let c = l; c < n.length; c++) {
     const s = n[c];
@@ -83,7 +83,7 @@ function Fo(n) {
   }
   return l.push(n.slice(c).trim()), l.filter(Boolean);
 }
-function yh(n, l) {
+function xh(n, l) {
   const o = { tag: null, id: null, classes: [], attrs: [], pseudos: [] };
   let c = !1;
   for (; l < n.length; ) {
@@ -117,15 +117,15 @@ function yh(n, l) {
       l = p;
       const f = d.toLowerCase();
       if (n[l] === "(") {
-        if (!gh.has(f)) throw new ke(`:${f}() is not supported`);
-        const b = vh(n, l + 1), x = n.slice(l + 1, b).trim();
+        if (!bh.has(f)) throw new ke(`:${f}() is not supported`);
+        const b = yh(n, l + 1), y = n.slice(l + 1, b).trim();
         if (l = b + 1, f === "nth-child") {
-          if (!/^\d+$/.test(x)) throw new ke(`:nth-child(${x}) is not supported (only a number)`);
-          o.pseudos.push({ name: f, n: Number(x) });
+          if (!/^\d+$/.test(y)) throw new ke(`:nth-child(${y}) is not supported (only a number)`);
+          o.pseudos.push({ name: f, n: Number(y) });
         } else
-          o.pseudos.push({ name: f, list: Fo(x).map(Io) });
+          o.pseudos.push({ name: f, list: Fo(y).map(Io) });
       } else {
-        if (!bh.has(f)) throw new ke(`:${f} is not supported`);
+        if (!vh.has(f)) throw new ke(`:${f} is not supported`);
         o.pseudos.push({ name: f });
       }
       c = !0;
@@ -145,7 +145,7 @@ function Io(n) {
   const l = [];
   let o = 0, c = null;
   for (n = n.trim(); o < n.length; ) {
-    const [s, d] = yh(n, o);
+    const [s, d] = xh(n, o);
     l.push({ compound: s, combinator: c }), o = d;
     let p = !1;
     for (; n[o] === " " || n[o] === `
@@ -169,7 +169,7 @@ function Di(n) {
   let l = td.get(n);
   return l || (l = Fo(n).map(Io), td.set(n, l)), l;
 }
-function Zd(n) {
+function Jd(n) {
   const l = [0, 0, 0], o = (c) => {
     l[0] += c[0], l[1] += c[1], l[2] += c[2];
   };
@@ -178,13 +178,13 @@ function Zd(n) {
     for (const s of c.pseudos)
       if (s.name !== "where")
         if (s.list) {
-          const d = s.list.map(Zd).sort((p, f) => f[0] - p[0] || f[1] - p[1] || f[2] - p[2])[0];
+          const d = s.list.map(Jd).sort((p, f) => f[0] - p[0] || f[1] - p[1] || f[2] - p[2])[0];
           o(d);
         } else l[1]++;
   }
   return l;
 }
-function xh(n, { name: l, op: o, value: c }) {
+function wh(n, { name: l, op: o, value: c }) {
   const s = n.getAttribute(l);
   if (s == null) return !1;
   if (o === null) return !0;
@@ -208,13 +208,13 @@ function xh(n, { name: l, op: o, value: c }) {
 function gi(n) {
   return n.parentElement ? n.parentElement.children : [n];
 }
-function wh(n, l, o, c) {
+function _h(n, l, o, c) {
   if (l.tag && l.tag !== "*" && n.tagName !== l.tag || l.id && n.getAttribute("id") !== l.id) return !1;
   if (l.classes.length) {
     const s = n.classList ?? [];
     for (const d of l.classes) if (!s.includes(d)) return !1;
   }
-  for (const s of l.attrs) if (!xh(n, s)) return !1;
+  for (const s of l.attrs) if (!wh(n, s)) return !1;
   for (const s of l.pseudos)
     switch (s.name) {
       case "first-child":
@@ -248,19 +248,19 @@ function wh(n, l, o, c) {
 }
 function Rn(n, l, o, c = !0) {
   const s = (d, p, f) => {
-    const { compound: b, combinator: x } = l[p];
-    if (!wh(d, b, o, f)) return !1;
+    const { compound: b, combinator: y } = l[p];
+    if (!_h(d, b, o, f)) return !1;
     if (p === 0) return !0;
-    if (x === ">") return !!d.parentElement && s(d.parentElement, p - 1, !1);
+    if (y === ">") return !!d.parentElement && s(d.parentElement, p - 1, !1);
     for (let C = d.parentElement; C; C = C.parentElement) if (s(C, p - 1, !1)) return !0;
     return !1;
   };
   return s(n, l.length - 1, c);
 }
-function _h(n, l, o = {}) {
+function Sh(n, l, o = {}) {
   return (typeof l == "string" ? Di(l) : l).some((s) => Rn(n, s, o));
 }
-function Jd(n, l, o = {}) {
+function Ld(n, l, o = {}) {
   return Rn(n, l, o);
 }
 function pl(n, l, o = {}) {
@@ -270,7 +270,7 @@ function pl(n, l, o = {}) {
   };
   return d(n), s;
 }
-function Ld(n, l, o = {}) {
+function Wd(n, l, o = {}) {
   const c = Di(l);
   for (let s = n; s; s = s.parentElement) if (c.some((d) => Rn(s, d, o))) return s;
   return null;
@@ -286,7 +286,7 @@ function Ld(n, l, o = {}) {
 //! names them as globals runs unchanged. `window`, `document`, `localStorage` and `HTMLElement` read the record at
 //! `globalThis[GLOBALS]`, which each mount sets to its own and a host running several screens in one script context
 //! sets to the running screen's.
-let Sh = 1;
+let kh = 1;
 class Ho {
   constructor(l = 0, o = 0, c = 0, s = 0) {
     this.x = l, this.y = o, this.width = c, this.height = s;
@@ -333,7 +333,7 @@ class Ui {
 }
 class It extends $o {
   constructor(l, o = {}, c = null) {
-    super(), this.nodeType = 1, this.id = `n${Sh++}`, this.tagName = l.toLowerCase(), this.props = o, this.childNodes = [], this.parentNode = null, this.ownerDocument = c, this.hidden = !1, this.state = { hover: !1, focus: !1, active: !1 }, this.bounds = null, this.version = 0;
+    super(), this.nodeType = 1, this.id = `n${kh++}`, this.tagName = l.toLowerCase(), this.props = o, this.childNodes = [], this.parentNode = null, this.ownerDocument = c, this.hidden = !1, this.state = { hover: !1, focus: !1, active: !1 }, this.bounds = null, this.version = 0;
   }
   touch() {
     this.version++;
@@ -402,10 +402,10 @@ class It extends $o {
     return !1;
   }
   matches(l) {
-    return _h(this, l);
+    return Sh(this, l);
   }
   closest(l) {
-    return Ld(this, l);
+    return Wd(this, l);
   }
   querySelectorAll(l) {
     return pl(this, l);
@@ -499,9 +499,9 @@ class It extends $o {
     return this.styleView = new Proxy({}, {
       get: (p, f) => {
         if (typeof f == "string")
-          return f === "setProperty" ? (b, x) => d(o(b), x) : f === "removeProperty" ? (b) => {
-            const x = s(o(b));
-            return d(o(b), ""), x;
+          return f === "setProperty" ? (b, y) => d(o(b), y) : f === "removeProperty" ? (b) => {
+            const y = s(o(b));
+            return d(o(b), ""), y;
           } : f === "getPropertyValue" ? (b) => s(o(b)) : s(f);
       },
       set: (p, f, b) => (typeof f == "string" && d(f, b), !0)
@@ -520,18 +520,18 @@ class It extends $o {
     return ed(this, l);
   }
 }
-const Wd = Symbol("perch.stale-layout"), Fd = 3;
+const Fd = Symbol("perch.stale-layout"), Id = 3;
 let zi = !1;
-function Id(n) {
+function $d(n) {
   return () => {
     let l, o = !1;
     const c = (s) => {
       const d = zi;
-      zi = s < Fd;
+      zi = s < Id;
       try {
         l = n();
       } catch (p) {
-        const f = p?.[Wd];
+        const f = p?.[Fd];
         if (!f) throw p;
         f.retries.push(() => {
           o || c(s + 1);
@@ -545,18 +545,18 @@ function Id(n) {
     };
   };
 }
-const Do = "perch-dom:", kh = /* @__PURE__ */ new Set(["children", "key", "ref", "dangerouslySetInnerHTML"]), zh = { class: "className", for: "htmlFor", tabindex: "tabIndex" };
+const Do = "perch-dom:", zh = /* @__PURE__ */ new Set(["children", "key", "ref", "dangerouslySetInnerHTML"]), Eh = { class: "className", for: "htmlFor", tabindex: "tabIndex" };
 function ed(n, l = []) {
-  const o = new Set(l.map((s) => zh[s] ?? s)), c = (s) => {
+  const o = new Set(l.map((s) => Eh[s] ?? s)), c = (s) => {
     if (!(s instanceof It)) return { x: s.data, ...s.hidden ? { h: 1 } : {} };
     const d = {};
     for (const [p, f] of Object.entries(s.props))
-      kh.has(p) || o.has(p) || f == null || typeof f == "function" || typeof f == "symbol" || (d[p] = f);
+      zh.has(p) || o.has(p) || f == null || typeof f == "function" || typeof f == "symbol" || (d[p] = f);
     return { t: s.tagName, p: d, c: s.childNodes.map(c), ...s.hidden ? { h: 1 } : {} };
   };
   return Do + JSON.stringify(c(n));
 }
-function Eh(n, l) {
+function Nh(n, l) {
   if (typeof n != "string" || !n.startsWith(Do)) return null;
   let o;
   try {
@@ -581,7 +581,7 @@ function Eh(n, l) {
     return null;
   }
 }
-class Nh {
+class Th {
   observe() {
   }
   unobserve() {
@@ -589,7 +589,7 @@ class Nh {
   disconnect() {
   }
 }
-class Th {
+class Ch {
   constructor(l = {}) {
     this.map = new Map(Object.entries(l));
   }
@@ -615,7 +615,7 @@ class Th {
 function ad(n) {
   for (let l = n; l instanceof It; l = l.parentElement) l.touch();
 }
-class Ch extends $o {
+class jh extends $o {
   constructor(l) {
     super(), this.perch = l, this.documentElement = new It("html", {}, this), this.body = new It("body", {}, this), this.documentElement.appendChild(this.body), this.activeElement = this.body, this.retries = [];
   }
@@ -630,7 +630,7 @@ class Ch extends $o {
     if (typeof o != "function" || !this.measureKey) return null;
     l.measured || (l.measured = !0, l.touch(), this.restyled());
     const c = o(this.measureKey(l));
-    if (zi && (!c || this.stale?.())) throw { [Wd]: this };
+    if (zi && (!c || this.stale?.())) throw { [Fd]: this };
     return c ?? null;
   }
   /** An element's `style` was written: the tree is described again once the writing script is done. */
@@ -656,7 +656,7 @@ class Ch extends $o {
     return pl(this.documentElement, "*").find((o) => o.props?.id === l) ?? null;
   }
 }
-class jh extends $o {
+class Mh extends $o {
   constructor(l, o) {
     super(), this.perch = l, this.document = o, this.location = { get hostname() {
       return l.hostname ?? "localhost";
@@ -675,7 +675,7 @@ class jh extends $o {
     return globalThis.clearTimeout(l);
   }
 }
-function $d(n) {
+function Pd(n) {
   return {
     setTimeout: (l, o = 0, ...c) => n.setTimeout(() => l(...c), Math.max(0, Number(o) || 0)),
     clearTimeout: (l) => {
@@ -687,13 +687,13 @@ const nd = Symbol.for("perch.react.globals");
 function Ze(n, l, o) {
   Object.defineProperty(n, l, { value: o, configurable: !0, writable: !0, enumerable: !1 });
 }
-function Mh(n, l = globalThis) {
-  const o = new Ch(n), c = new jh(n, o);
+function Ah(n, l = globalThis) {
+  const o = new jh(n), c = new Mh(n, o);
   o.defaultView = c;
-  const s = n.storage ?? new Th();
+  const s = n.storage ?? new Ch();
   if (typeof l.setTimeout != "function") {
     if (typeof n.setTimeout != "function") throw new Error("the engine has no setTimeout and the perch host gives none (perch.setTimeout)");
-    const f = $d(n);
+    const f = Pd(n);
     Ze(l, "setTimeout", f.setTimeout), Ze(l, "clearTimeout", f.clearTimeout);
   }
   typeof l.queueMicrotask != "function" && Ze(l, "queueMicrotask", (f) => {
@@ -702,7 +702,7 @@ function Mh(n, l = globalThis) {
   const d = { document: o, window: c, localStorage: s, HTMLElement: It, Element: It };
   for (const f of Object.keys(d))
     Object.defineProperty(l, f, { get: () => l[nd]?.[f], configurable: !0, enumerable: !1 });
-  l[nd] = d, Ze(l, "DOMRect", Ho), Ze(l, "getComputedStyle", Ah), typeof l.ResizeObserver != "function" && Ze(l, "ResizeObserver", Nh);
+  l[nd] = d, Ze(l, "DOMRect", Ho), Ze(l, "getComputedStyle", Oh), typeof l.ResizeObserver != "function" && Ze(l, "ResizeObserver", Th);
   const p = l.navigator && typeof l.navigator == "object" ? l.navigator : {};
   if (!p.clipboard && n.clipboard)
     try {
@@ -711,7 +711,7 @@ function Mh(n, l = globalThis) {
     }
   return l.navigator || Ze(l, "navigator", p), { document: o, window: c, globals: d };
 }
-function Ah(n) {
+function Oh(n) {
   const l = n?.ownerDocument?.computed?.(n) ?? {}, o = (c) => {
     const s = l[c];
     return typeof s == "string" || typeof s == "number" ? String(s) : "";
@@ -724,16 +724,16 @@ function Ah(n) {
   });
 }
 function Uo(n, l = !1) {
-  if (!(l ? n?.tagName === "input" && Pd(n) : n?.tagName === "button" && !/^(button|reset)$/.test(String(n.props.type ?? "submit")) && !n.props.disabled)) return null;
+  if (!(l ? n?.tagName === "input" && tf(n) : n?.tagName === "button" && !/^(button|reset)$/.test(String(n.props.type ?? "submit")) && !n.props.disabled)) return null;
   for (let c = n.parentElement; c; c = c.parentElement) if (c.tagName === "form") return c;
   return null;
 }
-const Pd = (n) => n?.tagName === "textarea" || n?.tagName === "input" && /^(text|search|url|email|tel|password|number|)$/.test(String(n.props.type ?? ""));
+const tf = (n) => n?.tagName === "textarea" || n?.tagName === "input" && /^(text|search|url|email|tel|password|number|)$/.test(String(n.props.type ?? ""));
 //! Evaluated before anything else in the runtime bundle: React's scheduler reads `setTimeout` and `queueMicrotask`
 //! once, when it loads, so an engine without them (QuickJS) gets the host's (`perch.setTimeout`) first.
 const ld = globalThis.perch;
 if (typeof globalThis.setTimeout != "function" && typeof ld?.setTimeout == "function") {
-  const n = $d(ld);
+  const n = Pd(ld);
   globalThis.setTimeout = n.setTimeout, globalThis.clearTimeout = n.clearTimeout;
 }
 typeof globalThis.queueMicrotask != "function" && (globalThis.queueMicrotask = (n) => {
@@ -742,7 +742,7 @@ typeof globalThis.queueMicrotask != "function" && (globalThis.queueMicrotask = (
 function Po(n) {
   return n && n.__esModule && Object.prototype.hasOwnProperty.call(n, "default") ? n.default : n;
 }
-function Oh(n) {
+function Rh(n) {
   if (Object.prototype.hasOwnProperty.call(n, "__esModule")) return n;
   var l = n.default;
   if (typeof l == "function") {
@@ -772,14 +772,14 @@ var zo = { exports: {} }, ct = {};
  * LICENSE file in the root directory of this source tree.
  */
 var id;
-function Rh() {
+function Hh() {
   if (id) return ct;
   id = 1;
-  var n = Symbol.for("react.transitional.element"), l = Symbol.for("react.portal"), o = Symbol.for("react.fragment"), c = Symbol.for("react.strict_mode"), s = Symbol.for("react.profiler"), d = Symbol.for("react.consumer"), p = Symbol.for("react.context"), f = Symbol.for("react.forward_ref"), b = Symbol.for("react.suspense"), x = Symbol.for("react.memo"), C = Symbol.for("react.lazy"), j = Symbol.for("react.activity"), E = Symbol.iterator;
+  var n = Symbol.for("react.transitional.element"), l = Symbol.for("react.portal"), o = Symbol.for("react.fragment"), c = Symbol.for("react.strict_mode"), s = Symbol.for("react.profiler"), d = Symbol.for("react.consumer"), p = Symbol.for("react.context"), f = Symbol.for("react.forward_ref"), b = Symbol.for("react.suspense"), y = Symbol.for("react.memo"), C = Symbol.for("react.lazy"), j = Symbol.for("react.activity"), E = Symbol.iterator;
   function v(_) {
     return _ === null || typeof _ != "object" ? null : (_ = E && _[E] || _["@@iterator"], typeof _ == "function" ? _ : null);
   }
-  var y = {
+  var x = {
     isMounted: function() {
       return !1;
     },
@@ -791,7 +791,7 @@ function Rh() {
     }
   }, S = Object.assign, w = {};
   function O(_, Y, nt) {
-    this.props = _, this.context = Y, this.refs = w, this.updater = nt || y;
+    this.props = _, this.context = Y, this.refs = w, this.updater = nt || x;
   }
   O.prototype.isReactComponent = {}, O.prototype.setState = function(_, Y) {
     if (typeof _ != "object" && typeof _ != "function" && _ != null)
@@ -806,7 +806,7 @@ function Rh() {
   }
   N.prototype = O.prototype;
   function M(_, Y, nt) {
-    this.props = _, this.context = Y, this.refs = w, this.updater = nt || y;
+    this.props = _, this.context = Y, this.refs = w, this.updater = nt || x;
   }
   var K = M.prototype = new N();
   K.constructor = M, S(K, O.prototype), K.isPureReactComponent = !0;
@@ -1070,7 +1070,7 @@ function Rh() {
     };
   }, ct.memo = function(_, Y) {
     return {
-      $$typeof: x,
+      $$typeof: y,
       type: _,
       compare: Y === void 0 ? null : Y
     };
@@ -1131,27 +1131,27 @@ function Rh() {
   }, ct.version = "19.2.8", ct;
 }
 var rd;
-function Hh() {
-  return rd || (rd = 1, zo.exports = Rh()), zo.exports;
+function Dh() {
+  return rd || (rd = 1, zo.exports = Hh()), zo.exports;
 }
-var ft = Hh();
-const tf = /* @__PURE__ */ Po(ft), Dh = /* @__PURE__ */ Wo({
+var ft = Dh();
+const ef = /* @__PURE__ */ Po(ft), Uh = /* @__PURE__ */ Wo({
   __proto__: null,
-  default: tf
+  default: ef
 }, [ft]);
 //! "react" as the runtime bundles it, for its own code, the stock screens and every screen's `react` import: React
 //! itself, with `useEffect` and `useLayoutEffect` run through `measured` (`dom.mjs`), so an effect that measures a
 //! box the engine has not laid out yet runs again once it has (layout readback).
-const Uh = tf ?? Dh;
+const Bh = ef ?? Uh;
 function Le(n, l) {
-  return ft.useEffect(Id(n), l);
+  return ft.useEffect($d(n), l);
 }
 function Bo(n, l) {
-  return ft.useLayoutEffect(Id(n), l);
+  return ft.useLayoutEffect($d(n), l);
 }
-const Bh = /* @__PURE__ */ Wo({
+const qh = /* @__PURE__ */ Wo({
   __proto__: null,
-  default: Uh,
+  default: Bh,
   useEffect: Le,
   useLayoutEffect: Bo
 }, [ft]);
@@ -1166,7 +1166,7 @@ var Eo = { exports: {} }, dl = {};
  * LICENSE file in the root directory of this source tree.
  */
 var od;
-function qh() {
+function Yh() {
   if (od) return dl;
   od = 1;
   var n = Symbol.for("react.transitional.element"), l = Symbol.for("react.fragment");
@@ -1188,16 +1188,16 @@ function qh() {
   return dl.Fragment = l, dl.jsx = o, dl.jsxs = o, dl;
 }
 var sd;
-function Yh() {
-  return sd || (sd = 1, Eo.exports = qh()), Eo.exports;
+function Gh() {
+  return sd || (sd = 1, Eo.exports = Yh()), Eo.exports;
 }
-var Nt = Yh();
-const Gh = /* @__PURE__ */ Po(Nt), Lv = /* @__PURE__ */ Wo({
+var Nt = Gh();
+const Kh = /* @__PURE__ */ Po(Nt), Wv = /* @__PURE__ */ Wo({
   __proto__: null,
-  default: Gh
+  default: Kh
 }, [Nt]);
 var No = { exports: {} }, To = { exports: {} };
-const Kh = /* @__PURE__ */ Oh(Bh);
+const Qh = /* @__PURE__ */ Rh(qh);
 var Co = { exports: {} }, jo = {};
 /**
  * @license React
@@ -1209,7 +1209,7 @@ var Co = { exports: {} }, jo = {};
  * LICENSE file in the root directory of this source tree.
  */
 var cd;
-function Qh() {
+function Vh() {
   return cd || (cd = 1, (function(n) {
     function l(V, et) {
       var lt = V.length;
@@ -1255,22 +1255,22 @@ function Qh() {
         return p.now() - f;
       };
     }
-    var b = [], x = [], C = 1, j = null, E = 3, v = !1, y = !1, S = !1, w = !1, O = typeof setTimeout == "function" ? setTimeout : null, N = typeof clearTimeout == "function" ? clearTimeout : null, M = typeof setImmediate < "u" ? setImmediate : null;
+    var b = [], y = [], C = 1, j = null, E = 3, v = !1, x = !1, S = !1, w = !1, O = typeof setTimeout == "function" ? setTimeout : null, N = typeof clearTimeout == "function" ? clearTimeout : null, M = typeof setImmediate < "u" ? setImmediate : null;
     function K(V) {
-      for (var et = o(x); et !== null; ) {
-        if (et.callback === null) c(x);
+      for (var et = o(y); et !== null; ) {
+        if (et.callback === null) c(y);
         else if (et.startTime <= V)
-          c(x), et.sortIndex = et.expirationTime, l(b, et);
+          c(y), et.sortIndex = et.expirationTime, l(b, et);
         else break;
-        et = o(x);
+        et = o(y);
       }
     }
     function U(V) {
-      if (S = !1, K(V), !y)
+      if (S = !1, K(V), !x)
         if (o(b) !== null)
-          y = !0, z || (z = !0, L());
+          x = !0, z || (z = !0, L());
         else {
-          var et = o(x);
+          var et = o(y);
           et !== null && wt(U, et.startTime - V);
         }
     }
@@ -1285,7 +1285,7 @@ function Qh() {
         var et = !0;
         try {
           t: {
-            y = !1, S && (S = !1, N(g), g = -1), v = !0;
+            x = !1, S && (S = !1, N(g), g = -1), v = !0;
             var lt = E;
             try {
               e: {
@@ -1306,7 +1306,7 @@ function Qh() {
                 }
                 if (j !== null) et = !0;
                 else {
-                  var _ = o(x);
+                  var _ = o(y);
                   _ !== null && wt(
                     U,
                     _.startTime - V
@@ -1413,7 +1413,7 @@ function Qh() {
         startTime: lt,
         expirationTime: q,
         sortIndex: -1
-      }, lt > B ? (V.sortIndex = lt, l(x, V), o(b) === null && V === o(x) && (S ? (N(g), g = -1) : S = !0, wt(U, lt - B))) : (V.sortIndex = q, l(b, V), y || v || (y = !0, z || (z = !0, L()))), V;
+      }, lt > B ? (V.sortIndex = lt, l(y, V), o(b) === null && V === o(y) && (S ? (N(g), g = -1) : S = !0, wt(U, lt - B))) : (V.sortIndex = q, l(b, V), x || v || (x = !0, z || (z = !0, L()))), V;
     }, n.unstable_shouldYield = Q, n.unstable_wrapCallback = function(V) {
       var et = E;
       return function() {
@@ -1429,8 +1429,8 @@ function Qh() {
   })(jo)), jo;
 }
 var ud;
-function Vh() {
-  return ud || (ud = 1, Co.exports = Qh()), Co.exports;
+function Xh() {
+  return ud || (ud = 1, Co.exports = Vh()), Co.exports;
 }
 /**
  * @license React
@@ -1442,11 +1442,11 @@ function Vh() {
  * LICENSE file in the root directory of this source tree.
  */
 var dd;
-function Xh() {
+function Zh() {
   return dd || (dd = 1, (function(n) {
     n.exports = function(l) {
       function o(t, e, a, i) {
-        return new xm(t, e, a, i);
+        return new wm(t, e, a, i);
       }
       function c() {
       }
@@ -1541,11 +1541,11 @@ function Xh() {
         }
         return null;
       }
-      function x(t) {
+      function y(t) {
         var e = t.tag;
         if (e === 5 || e === 26 || e === 27 || e === 6) return t;
         for (t = t.child; t !== null; ) {
-          if (t.tag !== 4 && (e = x(t), e !== null))
+          if (t.tag !== 4 && (e = y(t), e !== null))
             return e;
           t = t.sibling;
         }
@@ -1557,7 +1557,7 @@ function Xh() {
       function j(t) {
         if (t == null) return null;
         if (typeof t == "function")
-          return t.$$typeof === zm ? null : t.displayName || t.name || null;
+          return t.$$typeof === Em ? null : t.displayName || t.name || null;
         if (typeof t == "string") return t;
         switch (t) {
           case mn:
@@ -1601,11 +1601,11 @@ function Xh() {
       function v(t) {
         0 > gn || (t.current = eo[gn], eo[gn] = null, gn--);
       }
-      function y(t, e) {
+      function x(t, e) {
         gn++, eo[gn] = t.current, t.current = e;
       }
       function S(t) {
-        return t >>>= 0, t === 0 ? 32 : 31 - (Pp(t) / th | 0) | 0;
+        return t >>>= 0, t === 0 ? 32 : 31 - (th(t) / eh | 0) | 0;
       }
       function w(t) {
         var e = t & 42;
@@ -1801,7 +1801,7 @@ function Xh() {
         return t &= -t, 2 < t ? 8 < t ? (t & 134217727) !== 0 ? 32 : 268435456 : 8 : 2;
       }
       function pt(t) {
-        if (typeof ih == "function" && rh(t), ve && typeof ve.setStrictMode == "function")
+        if (typeof rh == "function" && oh(t), ve && typeof ve.setStrictMode == "function")
           try {
             ve.setStrictMode(Pn, t);
           } catch {
@@ -1994,15 +1994,15 @@ Error generating stack: ` + i.message + `
         Ee[Ne++] = Ve, Ee[Ne++] = Xe, Ee[Ne++] = wa, Ve = e.id, Xe = e.overflow, wa = t;
       }
       function at(t, e) {
-        y(_a, e), y(el, t), y(te, null), t = Tm(e), v(te), y(te, t);
+        x(_a, e), x(el, t), x(te, null), t = Cm(e), v(te), x(te, t);
       }
       function it() {
         v(te), v(el), v(_a);
       }
       function St(t) {
-        t.memoizedState !== null && y(Pl, t);
-        var e = te.current, a = Cm(e, t.type);
-        e !== a && (y(el, t), y(te, a));
+        t.memoizedState !== null && x(Pl, t);
+        var e = te.current, a = jm(e, t.type);
+        e !== a && (x(el, t), x(te, a));
       }
       function Jt(t) {
         el.current === t && (v(te), v(el)), Pl.current === t && (v(Pl), ea ? Xa._currentValue = pn : Xa._currentValue2 = pn);
@@ -2019,7 +2019,7 @@ Error generating stack: ` + i.message + `
       }
       function Ha(t, e) {
         if (!re) throw Error(s(175));
-        Cp(
+        jp(
           t.stateNode,
           t.type,
           t.memoizedProps,
@@ -2050,12 +2050,12 @@ Error generating stack: ` + i.message + `
         if (Vt ? e !== 3 && e !== 27 && (e !== 5 || Au(t.type) && !Jl(t.type, t.memoizedProps)) && Ot && ut(t) : e !== 3 && (e !== 5 || Au(t.type) && !Jl(t.type, t.memoizedProps)) && Ot && ut(t), Da(t), e === 13) {
           if (!re) throw Error(s(316));
           if (t = t.memoizedState, t = t !== null ? t.dehydrated : null, !t) throw Error(s(317));
-          Ot = Rp(t);
+          Ot = Hp(t);
         } else if (e === 31) {
           if (t = t.memoizedState, t = t !== null ? t.dehydrated : null, !t) throw Error(s(317));
-          Ot = Op(t);
+          Ot = Rp(t);
         } else
-          Ot = Vt && e === 27 ? yp(
+          Ot = Vt && e === 27 ? xp(
             t.type,
             Ot
           ) : ee ? Mu(t.stateNode) : null;
@@ -2075,7 +2075,7 @@ Error generating stack: ` + i.message + `
         Sa === null ? Sa = [t] : Sa.push(t);
       }
       function fa(t, e, a) {
-        ea ? (y(ti, e._currentValue), e._currentValue = a) : (y(ti, e._currentValue2), e._currentValue2 = a);
+        ea ? (x(ti, e._currentValue), e._currentValue = a) : (x(ti, e._currentValue2), e._currentValue2 = a);
       }
       function We(t) {
         var e = ti.current;
@@ -2187,20 +2187,20 @@ Error generating stack: ` + i.message + `
       }
       function Qi() {
         return {
-          controller: new sh(),
+          controller: new ch(),
           data: /* @__PURE__ */ new Map(),
           refCount: 0
         };
       }
       function Dn(t) {
-        t.refCount--, t.refCount === 0 && ch(uh, function() {
+        t.refCount--, t.refCount === 0 && uh(dh, function() {
           t.controller.abort();
         });
       }
       function vl() {
       }
       function Ge(t) {
-        t !== xn && t.next === null && (xn === null ? ei = xn = t : xn = xn.next = t), ai = !0, oo || (oo = !0, Ff());
+        t !== xn && t.next === null && (xn === null ? ei = xn = t : xn = xn.next = t), ai = !0, oo || (oo = !0, If());
       }
       function on(t, e) {
         if (!so && ai) {
@@ -2233,7 +2233,7 @@ Error generating stack: ` + i.message + `
       function os() {
         ai = oo = !1;
         var t = 0;
-        Ja !== 0 && Bm() && (t = Ja);
+        Ja !== 0 && qm() && (t = Ja);
         for (var e = de(), a = null, i = ei; i !== null; ) {
           var r = i.next, u = ss(i, e);
           u === 0 ? (i.next = null, a === null ? ei = r : a.next = r, r === null && (xn = a)) : (a = i, (t !== 0 || (u & 3) !== 0) && (ai = !0)), i = r;
@@ -2256,13 +2256,13 @@ Error generating stack: ` + i.message + `
           switch (i !== null && ao(i), L(a)) {
             case 2:
             case 8:
-              a = nh;
+              a = lh;
               break;
             case 32:
               a = no;
               break;
             case 268435456:
-              a = lh;
+              a = ih;
               break;
             default:
               a = no;
@@ -2288,8 +2288,8 @@ Error generating stack: ` + i.message + `
         if (Wn()) return null;
         Zc(t, e, !0);
       }
-      function Ff() {
-        Xm ? Zm(function() {
+      function If() {
+        Zm ? Jm(function() {
           (vt & 6) !== 0 ? Il(
             Qu,
             rs
@@ -2306,7 +2306,7 @@ Error generating stack: ` + i.message + `
         }
         return Ja;
       }
-      function If(t, e) {
+      function $f(t, e) {
         if (al === null) {
           var a = al = [];
           co = 0, wn = Vi(), _n = {
@@ -2327,7 +2327,7 @@ Error generating stack: ` + i.message + `
           for (var e = 0; e < t.length; e++) (0, t[e])();
         }
       }
-      function $f(t, e) {
+      function Pf(t, e) {
         var a = [], i = {
           status: "pending",
           value: null,
@@ -2352,7 +2352,7 @@ Error generating stack: ` + i.message + `
         return t !== null ? t : Mt.pooledCache;
       }
       function yl(t, e) {
-        e === null ? y(La, La.current) : y(La, e.pool);
+        e === null ? x(La, La.current) : x(La, e.pool);
       }
       function fs() {
         var t = Xi();
@@ -2369,7 +2369,7 @@ Error generating stack: ` + i.message + `
         if (a.length !== i.length) return !1;
         for (i = 0; i < a.length; i++) {
           var r = a[i];
-          if (!oh.call(e, r) || !ye(t[r], e[r]))
+          if (!sh.call(e, r) || !ye(t[r], e[r]))
             return !1;
         }
         return !0;
@@ -2437,7 +2437,7 @@ Error generating stack: ` + i.message + `
         e = e.props.ref, t.ref = e !== void 0 ? e : null;
       }
       function _l(t, e) {
-        throw e.$$typeof === Sm ? Error(s(525)) : (t = Object.prototype.toString.call(e), Error(
+        throw e.$$typeof === km ? Error(s(525)) : (t = Object.prototype.toString.call(e), Error(
           s(
             31,
             t === "[object Object]" ? "object with keys {" + Object.keys(e).join(", ") + "}" : t
@@ -2699,8 +2699,8 @@ Error generating stack: ` + i.message + `
               Et.value,
               Z
             ), Et !== null && (t && Et.alternate !== null && st.delete(Et.key === null ? zt : Et.key), T = u(Et, T, zt), Ht === null ? ot = Et : Ht.sibling = Et, Ht = Et);
-          return t && st.forEach(function(ph) {
-            return e(A, ph);
+          return t && st.forEach(function(hh) {
+            return e(A, hh);
           }), _t && q(A, zt), ot;
         }
         function Pa(A, T, R, Z) {
@@ -3023,26 +3023,26 @@ Error generating stack: ` + i.message + `
             ys(a[t], e);
       }
       function ws(t, e) {
-        t = ra, y(ii, t), y(En, e), ra = t | e.baseLanes;
+        t = ra, x(ii, t), x(En, e), ra = t | e.baseLanes;
       }
       function Fi() {
-        y(ii, ra), y(En, En.current);
+        x(ii, ra), x(En, En.current);
       }
       function Ii() {
         ra = ii.current, v(En), v(ii);
       }
       function ha(t) {
         var e = t.alternate;
-        y(qt, qt.current & 1), y(xe, t), je === null && (e === null || En.current !== null || e.memoizedState !== null) && (je = t);
+        x(qt, qt.current & 1), x(xe, t), je === null && (e === null || En.current !== null || e.memoizedState !== null) && (je = t);
       }
       function $i(t) {
-        y(qt, qt.current), y(xe, t), je === null && (je = t);
+        x(qt, qt.current), x(xe, t), je === null && (je = t);
       }
       function _s(t) {
-        t.tag === 22 ? (y(qt, qt.current), y(xe, t), je === null && (je = t)) : ga();
+        t.tag === 22 ? (x(qt, qt.current), x(xe, t), je === null && (je = t)) : ga();
       }
       function ga() {
-        y(qt, qt.current), y(xe, xe.current);
+        x(qt, qt.current), x(xe, xe.current);
       }
       function pe(t) {
         v(xe), je === t && (je = null), v(qt);
@@ -3104,7 +3104,7 @@ Error generating stack: ` + i.message + `
         } while (Nn);
         return u;
       }
-      function Pf() {
+      function tm() {
         var t = rt.H, e = t.useState()[0];
         return e = typeof e.then == "function" ? Gn(e) : e, t = t.useState()[0], (jt !== null ? jt.memoizedState : null) !== t && (mt.flags |= 1024), e;
       }
@@ -3183,7 +3183,7 @@ Error generating stack: ` + i.message + `
         }
         if (e == null && (e = { data: [], index: 0 }), a === null && (a = Nl(), mt.updateQueue = a), a.memoCache = e, a = e.data[e.index], a === void 0)
           for (a = e.data[e.index] = Array(t), i = 0; i < t; i++)
-            a[i] = km;
+            a[i] = zm;
         return e.index++, a;
       }
       function Fe(t, e) {
@@ -3353,7 +3353,7 @@ Error generating stack: ` + i.message + `
           typeof i == "function" ? i : Fe
         );
       }
-      function tm(t, e, a, i, r) {
+      function em(t, e, a, i, r) {
         if (Al(t)) throw Error(s(485));
         if (t = e.action, t !== null) {
           var u = {
@@ -3430,12 +3430,12 @@ Error generating stack: ` + i.message + `
               var i = mt;
               if (_t) {
                 if (Ot) {
-                  var r = bp(
+                  var r = vp(
                     Ot,
                     Te
                   );
                   if (r) {
-                    Ot = Mu(r), i = vp(r);
+                    Ot = Mu(r), i = yp(r);
                     break t;
                   }
                 }
@@ -3468,7 +3468,7 @@ Error generating stack: ` + i.message + `
           dispatch: null,
           action: t,
           pending: null
-        }, i.queue = r, a = tm.bind(
+        }, i.queue = r, a = em.bind(
           null,
           mt,
           r,
@@ -3497,11 +3497,11 @@ Error generating stack: ` + i.message + `
         return a !== e.memoizedState && (mt.flags |= 2048, sn(
           9,
           { destroy: void 0 },
-          em.bind(null, r, a),
+          am.bind(null, r, a),
           null
         )), [i, u, t];
       }
-      function em(t, e) {
+      function am(t, e) {
         t.action = e;
       }
       function Ys(t) {
@@ -3544,7 +3544,7 @@ Error generating stack: ` + i.message + `
       function cr(t, e) {
         Ml(2048, 8, t, e);
       }
-      function am(t) {
+      function nm(t) {
         mt.flags |= 4;
         var e = mt.updateQueue;
         if (e === null)
@@ -3556,7 +3556,7 @@ Error generating stack: ` + i.message + `
       }
       function Qs(t) {
         var e = Bt().memoizedState;
-        return am({ ref: e, nextImpl: t }), function() {
+        return nm({ ref: e, nextImpl: t }), function() {
           if ((vt & 2) !== 0)
             throw Error(s(440));
           return e.impl.apply(void 0, arguments);
@@ -3629,7 +3629,7 @@ Error generating stack: ` + i.message + `
         try {
           var H = r(), G = rt.S;
           if (G !== null && G(k, H), H !== null && typeof H == "object" && typeof H.then == "function") {
-            var J = $f(
+            var J = Pf(
               H,
               i
             );
@@ -3698,7 +3698,7 @@ Error generating stack: ` + i.message + `
       function tc() {
         return Bt().memoizedState;
       }
-      function nm(t) {
+      function lm(t) {
         for (var e = t.return; e !== null; ) {
           switch (e.tag) {
             case 24:
@@ -3712,7 +3712,7 @@ Error generating stack: ` + i.message + `
           e = e.return;
         }
       }
-      function lm(t, e, a) {
+      function im(t, e, a) {
         var i = he();
         a = {
           lane: i,
@@ -3861,7 +3861,7 @@ Error generating stack: ` + i.message + `
           });
         });
       }
-      function im(t, e, a, i, r) {
+      function rm(t, e, a, i, r) {
         if (a.flags |= 32768, i !== null && typeof i == "object" && typeof i.then == "function") {
           if (e = a.alternate, e !== null && rn(
             e,
@@ -4058,13 +4058,13 @@ Error generating stack: ` + i.message + `
           e.pendingProps
         ), t.flags |= 2, pe(e), e.memoizedState = null, t;
       }
-      function rm(t, e, a) {
+      function om(t, e, a) {
         var i = e.pendingProps, r = (e.flags & 128) !== 0;
         if (e.flags &= -129, t === null) {
           if (_t) {
             if (i.mode === "hidden")
               return t = Rl(e, i), e.lanes = 536870912, Qn(null, t);
-            if ($i(e), (t = Ot) ? (t = Np(
+            if ($i(e), (t = Ot) ? (t = Tp(
               t,
               Te
             ), t !== null && (e.memoizedState = {
@@ -4104,7 +4104,7 @@ Error generating stack: ` + i.message + `
               a
             );
           } else
-            t = u.treeContext, re && (Ot = _p(m), ee = e, _t = !0, Sa = null, Te = !1, t !== null && tt(e, t)), e = Rl(e, i), e.flags |= 4096;
+            t = u.treeContext, re && (Ot = Sp(m), ee = e, _t = !0, Sa = null, Te = !1, t !== null && tt(e, t)), e = Rl(e, i), e.flags |= 4096;
           return e;
         }
         return t = ta(t.child, {
@@ -4237,7 +4237,7 @@ Error generating stack: ` + i.message + `
         var i = e.pendingProps, r = !1, u = (e.flags & 128) !== 0, m;
         if ((m = u) || (m = t !== null && t.memoizedState === null ? !1 : (qt.current & 2) !== 0), m && (r = !0, e.flags &= -129), m = (e.flags & 32) !== 0, e.flags &= -33, t === null) {
           if (_t) {
-            if (r ? ha(e) : ga(), (t = Ot) ? (t = Tp(
+            if (r ? ha(e) : ga(), (t = Ot) ? (t = Cp(
               t,
               Te
             ), t !== null && (e.memoizedState = {
@@ -4289,7 +4289,7 @@ Error generating stack: ` + i.message + `
               a
             ), e.memoizedState = bo, e = Qn(null, i));
           else if (ha(e), Pr(k))
-            m = hp(k).digest, i = Error(s(419)), i.stack = "", i.digest = m, Hn({ value: i, source: null, stack: null }), e = xr(
+            m = gp(k).digest, i = Error(s(419)), i.stack = "", i.digest = m, Hn({ value: i, source: null, stack: null }), e = xr(
               t,
               e,
               a
@@ -4311,7 +4311,7 @@ Error generating stack: ` + i.message + `
               a
             );
           } else
-            $r(k) ? (e.flags |= 192, e.child = t.child, e = null) : (t = H.treeContext, re && (Ot = Sp(
+            $r(k) ? (e.flags |= 192, e.child = t.child, e = null) : (t = H.treeContext, re && (Ot = kp(
               k
             ), ee = e, _t = !0, Sa = null, Te = !1, t !== null && tt(e, t)), e = yr(
               e,
@@ -4378,7 +4378,7 @@ Error generating stack: ` + i.message + `
         var i = e.pendingProps, r = i.revealOrder, u = i.tail;
         i = i.children;
         var m = qt.current, k = (m & 2) !== 0;
-        if (k ? (m = m & 1 | 2, e.flags |= 128) : m &= 1, y(qt, m), Pt(t, e, i, a), i = _t ? tl : 0, !k && t !== null && (t.flags & 128) !== 0)
+        if (k ? (m = m & 1 | 2, e.flags |= 128) : m &= 1, x(qt, m), Pt(t, e, i, a), i = _t ? tl : 0, !k && t !== null && (t.flags & 128) !== 0)
           t: for (t = e.child; t !== null; ) {
             if (t.tag === 13)
               t.memoizedState !== null && yc(t, a, e);
@@ -4465,7 +4465,7 @@ Error generating stack: ` + i.message + `
       function _r(t, e) {
         return (t.lanes & e) !== 0 ? !0 : (t = t.dependencies, !!(t !== null && gl(t)));
       }
-      function om(t, e, a) {
+      function sm(t, e, a) {
         switch (e.tag) {
           case 3:
             at(
@@ -4524,7 +4524,7 @@ Error generating stack: ` + i.message + `
                 );
               e.flags |= 128;
             }
-            if (r = e.memoizedState, r !== null && (r.rendering = null, r.tail = null, r.lastEffect = null), y(qt, qt.current), i) break;
+            if (r = e.memoizedState, r !== null && (r.rendering = null, r.tail = null, r.lastEffect = null), x(qt, qt.current), i) break;
             return null;
           case 22:
             return e.lanes = 0, fc(
@@ -4544,7 +4544,7 @@ Error generating stack: ` + i.message + `
             Gt = !0;
           else {
             if (!_r(t, a) && (e.flags & 128) === 0)
-              return Gt = !1, om(
+              return Gt = !1, sm(
                 t,
                 e,
                 a
@@ -4656,7 +4656,7 @@ Error generating stack: ` + i.message + `
                   );
                   break t;
                 } else
-                  for (re && (Ot = wp(
+                  for (re && (Ot = _p(
                     e.stateNode.containerInfo
                   ), ee = e, _t = !0, Sa = null, Te = !0), a = Lu(
                     e,
@@ -4686,7 +4686,7 @@ Error generating stack: ` + i.message + `
                 null,
                 e.pendingProps,
                 null
-              )) ? e.memoizedState = a : _t || (e.stateNode = Lp(
+              )) ? e.memoizedState = a : _t || (e.stateNode = Wp(
                 e.type,
                 e.pendingProps,
                 _a.current,
@@ -4705,7 +4705,7 @@ Error generating stack: ` + i.message + `
                 _a.current,
                 te.current,
                 !1
-              ), ee = e, Te = !0, Ot = kp(
+              ), ee = e, Te = !0, Ot = zp(
                 e.type,
                 i,
                 Ot
@@ -4716,28 +4716,28 @@ Error generating stack: ` + i.message + `
                 a
               ), Hl(t, e), t === null && (e.flags |= 4194304), e.child;
           case 5:
-            return t === null && _t && (Xp(
+            return t === null && _t && (Zp(
               e.type,
               e.pendingProps,
               te.current
-            ), (r = i = Ot) && (i = zp(
+            ), (r = i = Ot) && (i = Ep(
               i,
               e.type,
               e.pendingProps,
               Te
-            ), i !== null ? (e.stateNode = i, ee = e, Ot = xp(i), Te = !1, r = !0) : r = !1), r || ut(e)), St(e), r = e.type, u = e.pendingProps, m = t !== null ? t.memoizedProps : null, i = u.children, Jl(r, u) ? i = null : m !== null && Jl(r, m) && (e.flags |= 32), e.memoizedState !== null && (r = tr(
+            ), i !== null ? (e.stateNode = i, ee = e, Ot = wp(i), Te = !1, r = !0) : r = !1), r || ut(e)), St(e), r = e.type, u = e.pendingProps, m = t !== null ? t.memoizedProps : null, i = u.children, Jl(r, u) ? i = null : m !== null && Jl(r, m) && (e.flags |= 32), e.memoizedState !== null && (r = tr(
               t,
               e,
-              Pf,
+              tm,
               null,
               null,
               a
             ), ea ? Xa._currentValue = r : Xa._currentValue2 = r), Hl(t, e), Pt(t, e, i, a), e.child;
           case 6:
-            return t === null && _t && (Zp(
+            return t === null && _t && (Jp(
               e.pendingProps,
               te.current
-            ), (t = a = Ot) && (a = Ep(
+            ), (t = a = Ot) && (a = Np(
               a,
               e.pendingProps,
               Te
@@ -4815,7 +4815,7 @@ Error generating stack: ` + i.message + `
               a
             );
           case 31:
-            return rm(t, e, a);
+            return om(t, e, a);
           case 22:
             return fc(
               t,
@@ -4945,7 +4945,7 @@ Error generating stack: ` + i.message + `
         if (Qe && _c(t, e)) {
           t = e.stateNode;
           var a = t.containerInfo, i = Eu();
-          Sc(i, e, !1, !1), t.pendingChildren = i, He(e), pp(a, i);
+          Sc(i, e, !1, !1), t.pendingChildren = i, He(e), hp(a, i);
         }
       }
       function kr(t, e, a, i) {
@@ -4955,7 +4955,7 @@ Error generating stack: ` + i.message + `
           var r = t.stateNode, u = t.memoizedProps;
           if ((t = _c(t, e)) || u !== i) {
             var m = te.current;
-            u = mp(
+            u = pp(
               r,
               a,
               u,
@@ -4972,7 +4972,7 @@ Error generating stack: ` + i.message + `
         }
       }
       function zr(t, e, a, i, r) {
-        if ((t.mode & 32) !== 0 && (a === null ? Ym(e, i) : Gm(e, a, i))) {
+        if ((t.mode & 32) !== 0 && (a === null ? Gm(e, i) : Km(e, a, i))) {
           if (t.flags |= 16777216, (r & 335544128) === r || Ir(e, i))
             if (Su(t.stateNode, e, i))
               t.flags |= 8192;
@@ -4982,7 +4982,7 @@ Error generating stack: ` + i.message + `
         } else t.flags &= -16777217;
       }
       function zc(t, e) {
-        if (Fp(e)) {
+        if (Ip(e)) {
           if (t.flags |= 16777216, !qu(e))
             if (Fc()) t.flags |= 8192;
             else
@@ -5018,7 +5018,7 @@ Error generating stack: ` + i.message + `
             a |= r.lanes | r.childLanes, i |= r.subtreeFlags, i |= r.flags, r.return = t, r = r.sibling;
         return t.subtreeFlags |= i, t.childLanes = a, e;
       }
-      function sm(t, e, a) {
+      function cm(t, e, a) {
         var i = e.pendingProps;
         switch (nt(e), e.tag) {
           case 16:
@@ -5093,14 +5093,14 @@ Error generating stack: ` + i.message + `
                 return At(e), null;
               }
               if (u = te.current, Oe(e))
-                Ha(e, u), qp(
+                Ha(e, u), Yp(
                   e.stateNode,
                   r,
                   i,
                   u
                 ) && (e.flags |= 64);
               else {
-                var m = Am(
+                var m = Om(
                   r,
                   i,
                   _a.current,
@@ -5141,7 +5141,7 @@ Error generating stack: ` + i.message + `
                     case 5:
                       i = r.memoizedProps;
                   }
-                jp(
+                Mp(
                   t,
                   a,
                   e,
@@ -5163,7 +5163,7 @@ Error generating stack: ` + i.message + `
                   if (!i) throw Error(s(318));
                   if (!re) throw Error(s(556));
                   if (t = e.memoizedState, t = t !== null ? t.dehydrated : null, !t) throw Error(s(557));
-                  Mp(t, e);
+                  Ap(t, e);
                 } else
                   Re(), (e.flags & 128) === 0 && (e.memoizedState = null), e.flags |= 4;
                 At(e), t = !1;
@@ -5182,7 +5182,7 @@ Error generating stack: ` + i.message + `
                   if (!r) throw Error(s(318));
                   if (!re) throw Error(s(344));
                   if (r = e.memoizedState, r = r !== null ? r.dehydrated : null, !r) throw Error(s(317));
-                  Ap(r, e);
+                  Op(r, e);
                 } else
                   Re(), (e.flags & 128) === 0 && (e.memoizedState = null), e.flags |= 4;
                 At(e), r = !1;
@@ -5193,7 +5193,7 @@ Error generating stack: ` + i.message + `
             }
             return pe(e), (e.flags & 128) !== 0 ? (e.lanes = a, e) : (a = i !== null, t = t !== null && t.memoizedState !== null, a && (i = e.child, r = null, i.alternate !== null && i.alternate.memoizedState !== null && i.alternate.memoizedState.cachePool !== null && (r = i.alternate.memoizedState.cachePool.pool), u = null, i.memoizedState !== null && i.memoizedState.cachePool !== null && (u = i.memoizedState.cachePool.pool), u !== r && (i.flags |= 2048)), a !== t && a && (e.child.flags |= 8192), Bl(e, e.updateQueue), At(e), null);
           case 4:
-            return it(), kc(t, e), t === null && Dm(e.stateNode.containerInfo), At(e), null;
+            return it(), kc(t, e), t === null && Um(e.stateNode.containerInfo), At(e), null;
           case 10:
             return We(e.type), At(e), null;
           case 19:
@@ -5206,7 +5206,7 @@ Error generating stack: ` + i.message + `
                     if (u = El(t), u !== null) {
                       for (e.flags |= 128, Vn(i, !1), t = u.updateQueue, e.updateQueue = t, Bl(e, t), e.subtreeFlags = 0, t = a, a = e.child; a !== null; )
                         uu(a, t), a = a.sibling;
-                      return y(
+                      return x(
                         qt,
                         qt.current & 1 | 2
                       ), _t && q(e, i.treeForkCount), e.child;
@@ -5224,7 +5224,7 @@ Error generating stack: ` + i.message + `
                   2 * de() - i.renderingStartTime > sl && a !== 536870912 && (e.flags |= 128, r = !0, Vn(i, !1), e.lanes = 4194304);
               i.isBackwards ? (u.sibling = e.child, e.child = u) : (t = i.last, t !== null ? t.sibling = u : e.child = u, i.last = u);
             }
-            return i.tail !== null ? (t = i.tail, i.rendering = t, i.tail = t.sibling, i.renderingStartTime = de(), t.sibling = null, a = qt.current, y(
+            return i.tail !== null ? (t = i.tail, i.rendering = t, i.tail = t.sibling, i.renderingStartTime = de(), t.sibling = null, a = qt.current, x(
               qt,
               r ? a & 1 | 2 : a & 1
             ), _t && q(e, i.treeForkCount), t) : (At(e), null);
@@ -5240,7 +5240,7 @@ Error generating stack: ` + i.message + `
         }
         throw Error(s(156, e.tag));
       }
-      function cm(t, e) {
+      function um(t, e) {
         switch (nt(e), e.tag) {
           case 1:
             return t = e.flags, t & 65536 ? (e.flags = t & -65537 | 128, e) : null;
@@ -5429,14 +5429,14 @@ Error generating stack: ` + i.message + `
       function Cc(t) {
         var e = t.type, a = t.memoizedProps, i = t.stateNode;
         try {
-          ap(i, e, a, t);
+          np(i, e, a, t);
         } catch (r) {
           kt(t, t.return, r);
         }
       }
       function Er(t, e, a) {
         try {
-          np(
+          lp(
             t.stateNode,
             t.type,
             a,
@@ -5466,7 +5466,7 @@ Error generating stack: ` + i.message + `
       function Tr(t, e, a) {
         var i = t.tag;
         if (i === 5 || i === 6)
-          t = t.stateNode, e ? ip(a, t, e) : tp(a, t);
+          t = t.stateNode, e ? rp(a, t, e) : ep(a, t);
         else if (i !== 4 && (Vt && i === 27 && hn(t.type) && (a = t.stateNode, e = null), t = t.child, t !== null))
           for (Tr(t, e, a), t = t.sibling; t !== null; )
             Tr(t, e, a), t = t.sibling;
@@ -5474,7 +5474,7 @@ Error generating stack: ` + i.message + `
       function ql(t, e, a) {
         var i = t.tag;
         if (i === 5 || i === 6)
-          t = t.stateNode, e ? lp(a, t, e) : Pm(a, t);
+          t = t.stateNode, e ? ip(a, t, e) : tp(a, t);
         else if (i !== 4 && (Vt && i === 27 && hn(t.type) && (a = t.stateNode), t = t.child, t !== null))
           for (ql(t, e, a), t = t.sibling; t !== null; )
             ql(t, e, a), t = t.sibling;
@@ -5490,7 +5490,7 @@ Error generating stack: ` + i.message + `
       function Ac(t) {
         var e = t.stateNode, a = t.memoizedProps;
         try {
-          $p(
+          Pp(
             t.type,
             a,
             e,
@@ -5500,8 +5500,8 @@ Error generating stack: ` + i.message + `
           kt(t, t.return, i);
         }
       }
-      function um(t, e) {
-        for (jm(t.containerInfo), Wt = e; Wt !== null; )
+      function dm(t, e) {
+        for (Mm(t.containerInfo), Wt = e; Wt !== null; )
           if (t = Wt, e = t.child, (t.subtreeFlags & 1028) !== 0 && e !== null)
             e.return = t, Wt = e;
           else
@@ -5538,7 +5538,7 @@ Error generating stack: ` + i.message + `
                   }
                   break;
                 case 3:
-                  (e & 1024) !== 0 && ie && fp(t.stateNode.containerInfo);
+                  (e & 1024) !== 0 && ie && mp(t.stateNode.containerInfo);
                   break;
                 case 5:
                 case 26:
@@ -5623,7 +5623,7 @@ Error generating stack: ` + i.message + `
               else if (i & 64) {
                 t = a.type, e = a.memoizedProps, r = a.stateNode;
                 try {
-                  Hp(
+                  Dp(
                     r,
                     t,
                     e,
@@ -5643,10 +5643,10 @@ Error generating stack: ` + i.message + `
             $e(t, a), i & 4 && Hc(t, a);
             break;
           case 13:
-            $e(t, a), i & 4 && Dc(t, a), i & 64 && (i = a.memoizedState, i !== null && (i = i.dehydrated, i !== null && (a = bm.bind(
+            $e(t, a), i & 4 && Dc(t, a), i & 64 && (i = a.memoizedState, i !== null && (i = i.dehydrated, i !== null && (a = vm.bind(
               null,
               a
-            ), gp(i, a))));
+            ), bp(i, a))));
             break;
           case 22:
             if (i = a.memoizedState !== null || ia, !i) {
@@ -5667,7 +5667,7 @@ Error generating stack: ` + i.message + `
       }
       function Rc(t) {
         var e = t.alternate;
-        e !== null && (t.alternate = null, Rc(e)), t.child = null, t.deletions = null, t.sibling = null, t.tag === 5 && (e = t.stateNode, e !== null && qm(e)), t.stateNode = null, t.return = null, t.dependencies = null, t.memoizedProps = null, t.memoizedState = null, t.pendingProps = null, t.stateNode = null, t.updateQueue = null;
+        e !== null && (t.alternate = null, Rc(e)), t.child = null, t.deletions = null, t.sibling = null, t.tag === 5 && (e = t.stateNode, e !== null && Ym(e)), t.stateNode = null, t.return = null, t.dependencies = null, t.memoizedProps = null, t.memoizedState = null, t.pendingProps = null, t.stateNode = null, t.updateQueue = null;
       }
       function De(t, e, a) {
         for (a = a.child; a !== null; )
@@ -5715,7 +5715,7 @@ Error generating stack: ` + i.message + `
               ), Qt = i, fe = r, Qt !== null)
                 if (fe)
                   try {
-                    op(Qt, a.stateNode);
+                    sp(Qt, a.stateNode);
                   } catch (u) {
                     kt(
                       a,
@@ -5725,7 +5725,7 @@ Error generating stack: ` + i.message + `
                   }
                 else
                   try {
-                    rp(Qt, a.stateNode);
+                    op(Qt, a.stateNode);
                   } catch (u) {
                     kt(
                       a,
@@ -5741,10 +5741,10 @@ Error generating stack: ` + i.message + `
               );
             break;
           case 18:
-            ie && Qt !== null && (fe ? Kp(
+            ie && Qt !== null && (fe ? Qp(
               Qt,
               a.stateNode
-            ) : Gp(Qt, a.stateNode));
+            ) : Kp(Qt, a.stateNode));
             break;
           case 4:
             ie ? (i = Qt, r = fe, Qt = a.stateNode.containerInfo, fe = !0, De(
@@ -5808,7 +5808,7 @@ Error generating stack: ` + i.message + `
         if (re && e.memoizedState === null && (t = e.alternate, t !== null && (t = t.memoizedState, t !== null))) {
           t = t.dehydrated;
           try {
-            Up(t);
+            Bp(t);
           } catch (a) {
             kt(e, e.return, a);
           }
@@ -5817,12 +5817,12 @@ Error generating stack: ` + i.message + `
       function Dc(t, e) {
         if (re && e.memoizedState === null && (t = e.alternate, t !== null && (t = t.memoizedState, t !== null && (t = t.dehydrated, t !== null))))
           try {
-            Bp(t);
+            qp(t);
           } catch (a) {
             kt(e, e.return, a);
           }
       }
-      function dm(t) {
+      function fm(t) {
         switch (t.tag) {
           case 31:
           case 13:
@@ -5836,11 +5836,11 @@ Error generating stack: ` + i.message + `
         }
       }
       function Yl(t, e) {
-        var a = dm(t);
+        var a = fm(t);
         e.forEach(function(i) {
           if (!a.has(i)) {
             a.add(i);
-            var r = vm.bind(null, t, i);
+            var r = ym.bind(null, t, i);
             i.then(r, r);
           }
         });
@@ -5899,7 +5899,7 @@ Error generating stack: ` + i.message + `
               if (le(e, t), ce(t), i & 512 && (Kt || a === null || Ke(a, a.return)), i & 4) {
                 i = a !== null ? a.memoizedState : null;
                 var u = t.memoizedState;
-                a === null ? u === null ? t.stateNode === null ? t.stateNode = Jp(
+                a === null ? u === null ? t.stateNode === null ? t.stateNode = Lp(
                   r,
                   t.type,
                   t.memoizedProps,
@@ -5961,17 +5961,17 @@ Error generating stack: ` + i.message + `
                 throw Error(s(162));
               i = t.memoizedProps, a = a !== null ? a.memoizedProps : i, r = t.stateNode;
               try {
-                ep(r, a, i);
+                ap(r, a, i);
               } catch (X) {
                 kt(t, t.return, X);
               }
             }
             break;
           case 3:
-            if (Be ? (Wp(), r = qe, qe = to(e.containerInfo), le(e, t), qe = r) : le(e, t), ce(t), i & 4) {
+            if (Be ? (Fp(), r = qe, qe = to(e.containerInfo), le(e, t), qe = r) : le(e, t), ce(t), i & 4) {
               if (ie && re && a !== null && a.memoizedState.isDehydrated)
                 try {
-                  Dp(e.containerInfo);
+                  Up(e.containerInfo);
                 } catch (X) {
                   kt(t, t.return, X);
                 }
@@ -6014,7 +6014,7 @@ Error generating stack: ` + i.message + `
                     if (a === null) {
                       m = a = e;
                       try {
-                        u = m.stateNode, r ? sp(u) : up(
+                        u = m.stateNode, r ? cp(u) : dp(
                           m.stateNode,
                           m.memoizedProps
                         );
@@ -6027,7 +6027,7 @@ Error generating stack: ` + i.message + `
                       m = e;
                       try {
                         var G = m.stateNode;
-                        r ? cp(G) : dp(G, m.memoizedProps);
+                        r ? up(G) : fp(G, m.memoizedProps);
                       } catch (X) {
                         kt(m, m.return, X);
                       }
@@ -6037,7 +6037,7 @@ Error generating stack: ` + i.message + `
                       m = e;
                       try {
                         var J = m.stateNode;
-                        r ? Qp(J) : Vp(m.stateNode);
+                        r ? Vp(J) : Xp(m.stateNode);
                       } catch (X) {
                         kt(m, m.return, X);
                       }
@@ -6118,7 +6118,7 @@ Error generating stack: ` + i.message + `
         if (t.subtreeFlags & 1024)
           for (t = t.child; t !== null; ) {
             var e = t;
-            Bc(e), e.tag === 5 && e.flags & 1024 && Vm(e.stateNode), t = t.sibling;
+            Bc(e), e.tag === 5 && e.flags & 1024 && Xm(e.stateNode), t = t.sibling;
           }
       }
       function $e(t, e) {
@@ -6481,7 +6481,7 @@ Error generating stack: ` + i.message + `
               a
             ), t.flags & Cn)
               if (t.memoizedState !== null)
-                Ip(
+                $p(
                   a,
                   qe,
                   t.memoizedState,
@@ -6645,13 +6645,13 @@ Error generating stack: ` + i.message + `
         }
       }
       function Ar(t) {
-        var e = Hm(t);
+        var e = Dm(t);
         if (e != null) {
           if (typeof e.memoizedProps["data-testname"] != "string")
             throw Error(s(364));
           return e;
         }
-        if (t = Jm(t), t === null) throw Error(s(362));
+        if (t = Lm(t), t === null) throw Error(s(362));
         return t.stateNode.current;
       }
       function Or(t, e) {
@@ -6679,11 +6679,11 @@ Error generating stack: ` + i.message + `
             }
             return e;
           case ui:
-            if ((a === 5 || a === 26 || a === 27) && Fm(t.stateNode, e.value))
+            if ((a === 5 || a === 26 || a === 27) && Im(t.stateNode, e.value))
               return !0;
             break;
           case fi:
-            if ((a === 5 || a === 6 || a === 26 || a === 27) && (t = Wm(t), t !== null && 0 <= t.indexOf(e.value)))
+            if ((a === 5 || a === 6 || a === 26 || a === 27) && (t = Fm(t), t !== null && 0 <= t.indexOf(e.value)))
               return !0;
             break;
           case di:
@@ -6741,7 +6741,7 @@ Error generating stack: ` + i.message + `
         return e;
       }
       function he() {
-        return (vt & 2) !== 0 && xt !== 0 ? xt & -xt : rt.T !== null ? Vi() : Um();
+        return (vt & 2) !== 0 && xt !== 0 ? xt & -xt : rt.T !== null ? Vi() : Bm();
       }
       function Xc() {
         if (_e === 0)
@@ -6766,13 +6766,13 @@ Error generating stack: ` + i.message + `
       }
       function Zc(t, e, a) {
         if ((vt & 6) !== 0) throw Error(s(327));
-        var i = !a && (e & 127) === 0 && (e & t.expiredLanes) === 0 || N(t, e), r = i ? pm(t, e) : Ur(t, e, !0), u = i;
+        var i = !a && (e & 127) === 0 && (e & t.expiredLanes) === 0 || N(t, e), r = i ? hm(t, e) : Ur(t, e, !0), u = i;
         do {
           if (r === 0) {
             jn && !i && va(t, e, 0, !1);
             break;
           } else {
-            if (a = t.current.alternate, u && !fm(a)) {
+            if (a = t.current.alternate, u && !mm(a)) {
               r = Ur(t, e, !1), u = !1;
               continue;
             }
@@ -6841,7 +6841,7 @@ Error generating stack: ` + i.message + `
                   _e,
                   !za
                 ), O(i, 0, !0) !== 0) break t;
-                oa = e, i.timeoutHandle = Om(
+                oa = e, i.timeoutHandle = Rm(
                   Jc.bind(
                     null,
                     i,
@@ -6887,13 +6887,13 @@ Error generating stack: ` + i.message + `
       }
       function Jc(t, e, a, i, r, u, m, k, H, G, J, X, F, dt) {
         if (t.timeoutHandle = Va, X = e.subtreeFlags, X & 8192 || (X & 16785408) === 16785408) {
-          X = Km(), Yc(
+          X = Qm(), Yc(
             e,
             u,
             X
           );
           var ae = (u & 62914560) === u ? mi - de() : (u & 4194048) === u ? $u - de() : 0;
-          if (ae = Qm(
+          if (ae = Vm(
             X,
             ae
           ), ae !== null) {
@@ -6931,7 +6931,7 @@ Error generating stack: ` + i.message + `
           H
         );
       }
-      function fm(t) {
+      function mm(t) {
         for (var e = t; ; ) {
           var a = e.tag;
           if ((a === 0 || a === 11 || a === 15) && e.flags & 16384 && (a = e.updateQueue, a !== null && (a = a.stores, a !== null)))
@@ -6981,7 +6981,7 @@ Error generating stack: ` + i.message + `
       }
       function un(t, e) {
         var a = t.timeoutHandle;
-        a !== Va && (t.timeoutHandle = Va, Rm(a)), a = t.cancelPendingCommit, a !== null && (t.cancelPendingCommit = null, a()), oa = 0, Dr(), Mt = t, yt = a = ta(t.current, null), xt = e, Ct = 0, we = null, za = !1, jn = N(t, e), yo = !1, Mn = _e = xo = $a = Ea = Ut = 0, me = ol = null, wo = !1, (e & 8) !== 0 && (e |= e & 32);
+        a !== Va && (t.timeoutHandle = Va, Hm(a)), a = t.cancelPendingCommit, a !== null && (t.cancelPendingCommit = null, a()), oa = 0, Dr(), Mt = t, yt = a = ta(t.current, null), xt = e, Ct = 0, we = null, za = !1, jn = N(t, e), yo = !1, Mn = _e = xo = $a = Ea = Ut = 0, me = ol = null, wo = !1, (e & 8) !== 0 && (e |= e & 32);
         var i = t.entangledLanes;
         if (i !== 0)
           for (t = t.entanglements, i &= e; 0 < i; ) {
@@ -7006,7 +7006,7 @@ Error generating stack: ` + i.message + `
       }
       function $c() {
         var t = rt.A;
-        return rt.A = fh, t;
+        return rt.A = mh, t;
       }
       function Kl() {
         Ut = 4, za || (xt & 4194048) !== xt && xe.current !== null || (jn = !0), (Ea & 134217727) === 0 && ($a & 134217727) === 0 || Mt === null || va(
@@ -7045,7 +7045,7 @@ Error generating stack: ` + i.message + `
                   G = Ct, Ct = 0, we = null, dn(t, k, H, G);
               }
             }
-            mm(), m = Ut;
+            pm(), m = Ut;
             break;
           } catch (J) {
             Wc(t, J);
@@ -7053,10 +7053,10 @@ Error generating stack: ` + i.message + `
         while (!0);
         return e && t.shellSuspendCounter++, na = Za = null, vt = i, rt.H = r, rt.A = u, yt === null && (Mt = null, xt = 0, Sl()), m;
       }
-      function mm() {
+      function pm() {
         for (; yt !== null; ) Pc(yt);
       }
-      function pm(t, e) {
+      function hm(t, e) {
         var a = vt;
         vt |= 2;
         var i = Ic(), r = $c();
@@ -7123,7 +7123,7 @@ Error generating stack: ` + i.message + `
                   throw Error(s(462));
               }
             }
-            hm();
+            gm();
             break;
           } catch (F) {
             Wc(t, F);
@@ -7131,8 +7131,8 @@ Error generating stack: ` + i.message + `
         while (!0);
         return na = Za = null, rt.H = i, rt.A = r, vt = a, yt !== null ? 0 : (Mt = null, xt = 0, Sl(), Ut);
       }
-      function hm() {
-        for (; yt !== null && !eh(); )
+      function gm() {
+        for (; yt !== null && !ah(); )
           Pc(yt);
       }
       function Pc(t) {
@@ -7178,7 +7178,7 @@ Error generating stack: ` + i.message + `
         na = Za = null, nr(e), kn = null, nl = 0;
         var r = e.return;
         try {
-          if (im(
+          if (rm(
             t,
             r,
             e,
@@ -7212,7 +7212,7 @@ Error generating stack: ` + i.message + `
             return;
           }
           t = e.return;
-          var a = sm(
+          var a = cm(
             e.alternate,
             e,
             ra
@@ -7231,7 +7231,7 @@ Error generating stack: ` + i.message + `
       }
       function eu(t, e) {
         do {
-          var a = cm(t.alternate, t);
+          var a = um(t.alternate, t);
           if (a !== null) {
             a.flags &= 32767, yt = a;
             return;
@@ -7260,12 +7260,12 @@ Error generating stack: ` + i.message + `
             m,
             k,
             H
-          ), t === Mt && (yt = Mt = null, xt = 0), An = e, Ta = t, oa = a, _o = u, So = r, Pu = i, (e.subtreeFlags & 10256) !== 0 || (e.flags & 10256) !== 0 ? (t.callbackNode = null, t.callbackPriority = 0, ym(no, function() {
+          ), t === Mt && (yt = Mt = null, xt = 0), An = e, Ta = t, oa = a, _o = u, So = r, Pu = i, (e.subtreeFlags & 10256) !== 0 || (e.flags & 10256) !== 0 ? (t.callbackNode = null, t.callbackPriority = 0, xm(no, function() {
             return ou(), null;
           })) : (t.callbackNode = null, t.callbackPriority = 0), i = (e.flags & 13878) !== 0, (e.subtreeFlags & 13878) !== 0 || i) {
             i = rt.T, rt.T = null, r = aa(), Lt(2), m = vt, vt |= 4;
             try {
-              um(t, e, a);
+              dm(t, e, a);
             } finally {
               vt = m, Lt(r), rt.T = i;
             }
@@ -7284,7 +7284,7 @@ Error generating stack: ` + i.message + `
             var r = vt;
             vt |= 4;
             try {
-              Uc(e, t), Mm(t.containerInfo);
+              Uc(e, t), Am(t.containerInfo);
             } finally {
               vt = r, Lt(i), rt.T = a;
             }
@@ -7313,7 +7313,7 @@ Error generating stack: ` + i.message + `
       }
       function iu() {
         if (Xt === 4 || Xt === 3) {
-          Xt = 0, ah();
+          Xt = 0, nh();
           var t = Ta, e = An, a = oa, i = Pu;
           (e.subtreeFlags & 10256) !== 0 || (e.flags & 10256) !== 0 ? Xt = 5 : (Xt = 0, An = Ta = null, ru(t, t.pendingLanes));
           var r = t.pendingLanes;
@@ -7340,7 +7340,7 @@ Error generating stack: ` + i.message + `
               rt.T = e, Lt(r);
             }
           }
-          (oa & 3) !== 0 && Wn(), Ge(t), r = t.pendingLanes, (a & 261930) !== 0 && (r & 42) !== 0 ? t === ko ? cl++ : (cl = 0, ko = t) : cl = 0, re && Yp(), on(0);
+          (oa & 3) !== 0 && Wn(), Ge(t), r = t.pendingLanes, (a & 261930) !== 0 && (r & 42) !== 0 ? t === ko ? cl++ : (cl = 0, ko = t) : cl = 0, re && Gp(), on(0);
         }
       }
       function ru(t, e) {
@@ -7410,25 +7410,25 @@ Error generating stack: ` + i.message + `
       function Br(t, e, a) {
         var i = t.pingCache;
         if (i === null) {
-          i = t.pingCache = new mh();
+          i = t.pingCache = new ph();
           var r = /* @__PURE__ */ new Set();
           i.set(e, r);
         } else
           r = i.get(e), r === void 0 && (r = /* @__PURE__ */ new Set(), i.set(e, r));
-        r.has(a) || (yo = !0, r.add(a), t = gm.bind(null, t, e, a), e.then(t, t));
+        r.has(a) || (yo = !0, r.add(a), t = bm.bind(null, t, e, a), e.then(t, t));
       }
-      function gm(t, e, a) {
+      function bm(t, e, a) {
         var i = t.pingCache;
         i !== null && i.delete(e), t.pingedLanes |= t.suspendedLanes & a, t.warmLanes &= ~a, Mt === t && (xt & a) === a && (Ut === 4 || Ut === 3 && (xt & 62914560) === xt && 300 > de() - mi ? (vt & 2) === 0 && un(t, 0) : xo |= a, Mn === xt && (Mn = 0)), Ge(t);
       }
       function cu(t, e) {
         e === 0 && (e = K()), t = qa(t, e), t !== null && (z(t, e), Ge(t));
       }
-      function bm(t) {
+      function vm(t) {
         var e = t.memoizedState, a = 0;
         e !== null && (a = e.retryLane), cu(t, a);
       }
-      function vm(t, e) {
+      function ym(t, e) {
         var a = 0;
         switch (t.tag) {
           case 31:
@@ -7447,10 +7447,10 @@ Error generating stack: ` + i.message + `
         }
         i !== null && i.delete(e), cu(t, a);
       }
-      function ym(t, e) {
+      function xm(t, e) {
         return Il(t, e);
       }
-      function xm(t, e, a, i) {
+      function wm(t, e, a, i) {
         this.tag = t, this.key = a, this.sibling = this.child = this.return = this.stateNode = this.type = this.elementType = null, this.index = 0, this.refCleanup = this.ref = null, this.pendingProps = e, this.dependencies = this.memoizedState = this.updateQueue = this.memoizedProps = null, this.mode = i, this.subtreeFlags = this.flags = 0, this.deletions = null, this.childLanes = this.lanes = 0, this.alternate = null;
       }
       function qr(t) {
@@ -7556,11 +7556,11 @@ Error generating stack: ` + i.message + `
           implementation: t.implementation
         }, e;
       }
-      function wm(t, e, a, i, r, u, m, k, H) {
+      function _m(t, e, a, i, r, u, m, k, H) {
         this.tag = 1, this.containerInfo = t, this.pingCache = this.current = this.pendingChildren = null, this.timeoutHandle = Va, this.callbackNode = this.next = this.pendingContext = this.context = this.cancelPendingCommit = null, this.callbackPriority = 0, this.expirationTimes = U(-1), this.entangledLanes = this.shellSuspendCounter = this.errorRecoveryDisabledLanes = this.expiredLanes = this.warmLanes = this.pingedLanes = this.suspendedLanes = this.pendingLanes = 0, this.entanglements = U(0), this.hiddenUpdates = U(null), this.identifierPrefix = i, this.onUncaughtError = r, this.onCaughtError = u, this.onRecoverableError = m, this.pooledCache = null, this.pooledCacheLanes = 0, this.formState = H, this.incompleteTransitions = /* @__PURE__ */ new Map();
       }
       function fu(t, e, a, i, r, u, m, k, H, G, J, X) {
-        return t = new wm(
+        return t = new _m(
           t,
           e,
           a,
@@ -7597,37 +7597,37 @@ Error generating stack: ` + i.message + `
       function Kr(t, e) {
         gu(t, e), (t = t.alternate) && gu(t, e);
       }
-      var bt = {}, _m = Kh, ge = Vh(), Qr = Object.assign, Sm = Symbol.for("react.element"), Xl = Symbol.for("react.transitional.element"), fn = Symbol.for("react.portal"), mn = Symbol.for("react.fragment"), bu = Symbol.for("react.strict_mode"), Vr = Symbol.for("react.profiler"), vu = Symbol.for("react.consumer"), ya = Symbol.for("react.context"), Xr = Symbol.for("react.forward_ref"), Zr = Symbol.for("react.suspense"), Jr = Symbol.for("react.suspense_list"), Lr = Symbol.for("react.memo"), xa = Symbol.for("react.lazy"), Wr = Symbol.for("react.activity"), km = Symbol.for("react.memo_cache_sentinel"), yu = Symbol.iterator, zm = Symbol.for("react.client.reference"), Zl = Array.isArray, rt = _m.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, Em = l.rendererVersion, Nm = l.rendererPackageName, xu = l.extraDevToolsConfig, Fn = l.getPublicInstance, Tm = l.getRootHostContext, Cm = l.getChildHostContext, jm = l.prepareForCommit, Mm = l.resetAfterCommit, Am = l.createInstance;
+      var bt = {}, Sm = Qh, ge = Xh(), Qr = Object.assign, km = Symbol.for("react.element"), Xl = Symbol.for("react.transitional.element"), fn = Symbol.for("react.portal"), mn = Symbol.for("react.fragment"), bu = Symbol.for("react.strict_mode"), Vr = Symbol.for("react.profiler"), vu = Symbol.for("react.consumer"), ya = Symbol.for("react.context"), Xr = Symbol.for("react.forward_ref"), Zr = Symbol.for("react.suspense"), Jr = Symbol.for("react.suspense_list"), Lr = Symbol.for("react.memo"), xa = Symbol.for("react.lazy"), Wr = Symbol.for("react.activity"), zm = Symbol.for("react.memo_cache_sentinel"), yu = Symbol.iterator, Em = Symbol.for("react.client.reference"), Zl = Array.isArray, rt = Sm.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, Nm = l.rendererVersion, Tm = l.rendererPackageName, xu = l.extraDevToolsConfig, Fn = l.getPublicInstance, Cm = l.getRootHostContext, jm = l.getChildHostContext, Mm = l.prepareForCommit, Am = l.resetAfterCommit, Om = l.createInstance;
       l.cloneMutableInstance;
       var Fr = l.appendInitialChild, wu = l.finalizeInitialChildren, Jl = l.shouldSetTextContent, _u = l.createTextInstance;
       l.cloneMutableTextInstance;
-      var Om = l.scheduleTimeout, Rm = l.cancelTimeout, Va = l.noTimeout, ea = l.isPrimaryRenderer;
+      var Rm = l.scheduleTimeout, Hm = l.cancelTimeout, Va = l.noTimeout, ea = l.isPrimaryRenderer;
       l.warnsIfNotActing;
-      var ie = l.supportsMutation, Qe = l.supportsPersistence, re = l.supportsHydration, Hm = l.getInstanceFromNode;
+      var ie = l.supportsMutation, Qe = l.supportsPersistence, re = l.supportsHydration, Dm = l.getInstanceFromNode;
       l.beforeActiveInstanceBlur;
-      var Dm = l.preparePortalMount;
+      var Um = l.preparePortalMount;
       l.prepareScopeUpdate, l.getInstanceFromScope;
-      var Lt = l.setCurrentUpdatePriority, aa = l.getCurrentUpdatePriority, Um = l.resolveUpdatePriority;
+      var Lt = l.setCurrentUpdatePriority, aa = l.getCurrentUpdatePriority, Bm = l.resolveUpdatePriority;
       l.trackSchedulerEvent, l.resolveEventType, l.resolveEventTimeStamp;
-      var Bm = l.shouldAttemptEagerTransition, qm = l.detachDeletedInstance;
+      var qm = l.shouldAttemptEagerTransition, Ym = l.detachDeletedInstance;
       l.requestPostPaintCallback;
-      var Ym = l.maySuspendCommit, Gm = l.maySuspendCommitOnUpdate, Ir = l.maySuspendCommitInSyncRender, Su = l.preloadInstance, Km = l.startSuspendingCommit, ku = l.suspendInstance;
+      var Gm = l.maySuspendCommit, Km = l.maySuspendCommitOnUpdate, Ir = l.maySuspendCommitInSyncRender, Su = l.preloadInstance, Qm = l.startSuspendingCommit, ku = l.suspendInstance;
       l.suspendOnActiveViewTransition;
-      var Qm = l.waitForCommitToBeReady;
+      var Vm = l.waitForCommitToBeReady;
       l.getSuspendedCommitReason;
-      var pn = l.NotPendingTransition, Xa = l.HostTransitionContext, Vm = l.resetFormInstance;
+      var pn = l.NotPendingTransition, Xa = l.HostTransitionContext, Xm = l.resetFormInstance;
       l.bindToConsole;
-      var Xm = l.supportsMicrotasks, Zm = l.scheduleMicrotask, In = l.supportsTestSelectors, Jm = l.findFiberRoot, Lm = l.getBoundingRect, Wm = l.getTextContent, $n = l.isHiddenSubtree, Fm = l.matchAccessibilityRole, Im = l.setFocusIfFocusable, $m = l.setupIntersectionObserver, Pm = l.appendChild, tp = l.appendChildToContainer, ep = l.commitTextUpdate, ap = l.commitMount, np = l.commitUpdate, lp = l.insertBefore, ip = l.insertInContainerBefore, rp = l.removeChild, op = l.removeChildFromContainer, zu = l.resetTextContent, sp = l.hideInstance, cp = l.hideTextInstance, up = l.unhideInstance, dp = l.unhideTextInstance;
+      var Zm = l.supportsMicrotasks, Jm = l.scheduleMicrotask, In = l.supportsTestSelectors, Lm = l.findFiberRoot, Wm = l.getBoundingRect, Fm = l.getTextContent, $n = l.isHiddenSubtree, Im = l.matchAccessibilityRole, $m = l.setFocusIfFocusable, Pm = l.setupIntersectionObserver, tp = l.appendChild, ep = l.appendChildToContainer, ap = l.commitTextUpdate, np = l.commitMount, lp = l.commitUpdate, ip = l.insertBefore, rp = l.insertInContainerBefore, op = l.removeChild, sp = l.removeChildFromContainer, zu = l.resetTextContent, cp = l.hideInstance, up = l.hideTextInstance, dp = l.unhideInstance, fp = l.unhideTextInstance;
       l.cancelViewTransitionName, l.cancelRootViewTransitionName, l.restoreRootViewTransitionName, l.cloneRootViewTransitionContainer, l.removeRootViewTransitionClone, l.measureClonedInstance, l.hasInstanceChanged, l.hasInstanceAffectedParent, l.startViewTransition, l.startGestureTransition, l.stopViewTransition, l.getCurrentGestureOffset, l.createViewTransitionInstance;
-      var fp = l.clearContainer;
+      var mp = l.clearContainer;
       l.createFragmentInstance, l.updateFragmentInstanceFiber, l.commitNewChildToFragmentInstance, l.deleteChildFromFragmentInstance;
-      var mp = l.cloneInstance, Eu = l.createContainerChildSet, Nu = l.appendChildToContainerChildSet, pp = l.finalizeContainerChildren, Tu = l.replaceContainerChildren, Cu = l.cloneHiddenInstance, ju = l.cloneHiddenTextInstance, $r = l.isSuspenseInstancePending, Pr = l.isSuspenseInstanceFallback, hp = l.getSuspenseInstanceFallbackErrorDetails, gp = l.registerSuspenseInstanceRetry, bp = l.canHydrateFormStateMarker, vp = l.isFormStateMarkerMatching, Mu = l.getNextHydratableSibling, yp = l.getNextHydratableSiblingAfterSingleton, xp = l.getFirstHydratableChild, wp = l.getFirstHydratableChildWithinContainer, _p = l.getFirstHydratableChildWithinActivityInstance, Sp = l.getFirstHydratableChildWithinSuspenseInstance, kp = l.getFirstHydratableChildWithinSingleton, zp = l.canHydrateInstance, Ep = l.canHydrateTextInstance, Np = l.canHydrateActivityInstance, Tp = l.canHydrateSuspenseInstance, Cp = l.hydrateInstance, jp = l.hydrateTextInstance, Mp = l.hydrateActivityInstance, Ap = l.hydrateSuspenseInstance, Op = l.getNextHydratableInstanceAfterActivityInstance, Rp = l.getNextHydratableInstanceAfterSuspenseInstance, Hp = l.commitHydratedInstance, Dp = l.commitHydratedContainer, Up = l.commitHydratedActivityInstance, Bp = l.commitHydratedSuspenseInstance, qp = l.finalizeHydratedChildren, Yp = l.flushHydrationEvents;
+      var pp = l.cloneInstance, Eu = l.createContainerChildSet, Nu = l.appendChildToContainerChildSet, hp = l.finalizeContainerChildren, Tu = l.replaceContainerChildren, Cu = l.cloneHiddenInstance, ju = l.cloneHiddenTextInstance, $r = l.isSuspenseInstancePending, Pr = l.isSuspenseInstanceFallback, gp = l.getSuspenseInstanceFallbackErrorDetails, bp = l.registerSuspenseInstanceRetry, vp = l.canHydrateFormStateMarker, yp = l.isFormStateMarkerMatching, Mu = l.getNextHydratableSibling, xp = l.getNextHydratableSiblingAfterSingleton, wp = l.getFirstHydratableChild, _p = l.getFirstHydratableChildWithinContainer, Sp = l.getFirstHydratableChildWithinActivityInstance, kp = l.getFirstHydratableChildWithinSuspenseInstance, zp = l.getFirstHydratableChildWithinSingleton, Ep = l.canHydrateInstance, Np = l.canHydrateTextInstance, Tp = l.canHydrateActivityInstance, Cp = l.canHydrateSuspenseInstance, jp = l.hydrateInstance, Mp = l.hydrateTextInstance, Ap = l.hydrateActivityInstance, Op = l.hydrateSuspenseInstance, Rp = l.getNextHydratableInstanceAfterActivityInstance, Hp = l.getNextHydratableInstanceAfterSuspenseInstance, Dp = l.commitHydratedInstance, Up = l.commitHydratedContainer, Bp = l.commitHydratedActivityInstance, qp = l.commitHydratedSuspenseInstance, Yp = l.finalizeHydratedChildren, Gp = l.flushHydrationEvents;
       l.clearActivityBoundary;
-      var Gp = l.clearSuspenseBoundary;
+      var Kp = l.clearSuspenseBoundary;
       l.clearActivityBoundaryFromContainer;
-      var Kp = l.clearSuspenseBoundaryFromContainer, Qp = l.hideDehydratedBoundary, Vp = l.unhideDehydratedBoundary, Au = l.shouldDeleteUnhydratedTailInstances;
+      var Qp = l.clearSuspenseBoundaryFromContainer, Vp = l.hideDehydratedBoundary, Xp = l.unhideDehydratedBoundary, Au = l.shouldDeleteUnhydratedTailInstances;
       l.diffHydratedPropsForDevWarnings, l.diffHydratedTextForDevWarnings, l.describeHydratableInstanceForDevWarnings;
-      var Xp = l.validateHydratableInstance, Zp = l.validateHydratableTextInstance, Be = l.supportsResources, Ou = l.isHostHoistableType, to = l.getHoistableRoot, Ru = l.getResource, Hu = l.acquireResource, Du = l.releaseResource, Jp = l.hydrateHoistable, Uu = l.mountHoistable, Bu = l.unmountHoistable, Lp = l.createHoistableInstance, Wp = l.prepareToCommitHoistables, Fp = l.mayResourceSuspendCommit, qu = l.preloadResource, Ip = l.suspendResource, Vt = l.supportsSingletons, Yu = l.resolveSingletonInstance, $p = l.acquireSingletonInstance, Gu = l.releaseSingletonInstance, Ku = l.isHostSingletonType, hn = l.isSingletonScope, eo = [], gn = -1, bn = {}, be = Math.clz32 ? Math.clz32 : S, Pp = Math.log, th = Math.LN2, Ll = 256, Wl = 262144, Fl = 4194304, Il = ge.unstable_scheduleCallback, ao = ge.unstable_cancelCallback, eh = ge.unstable_shouldYield, ah = ge.unstable_requestPaint, de = ge.unstable_now, Qu = ge.unstable_ImmediatePriority, nh = ge.unstable_UserBlockingPriority, no = ge.unstable_NormalPriority, lh = ge.unstable_IdlePriority, ih = ge.log, rh = ge.unstable_setDisableYieldValue, Pn = null, ve = null, ye = typeof Object.is == "function" ? Object.is : gt, Vu = typeof reportError == "function" ? reportError : function(t) {
+      var Zp = l.validateHydratableInstance, Jp = l.validateHydratableTextInstance, Be = l.supportsResources, Ou = l.isHostHoistableType, to = l.getHoistableRoot, Ru = l.getResource, Hu = l.acquireResource, Du = l.releaseResource, Lp = l.hydrateHoistable, Uu = l.mountHoistable, Bu = l.unmountHoistable, Wp = l.createHoistableInstance, Fp = l.prepareToCommitHoistables, Ip = l.mayResourceSuspendCommit, qu = l.preloadResource, $p = l.suspendResource, Vt = l.supportsSingletons, Yu = l.resolveSingletonInstance, Pp = l.acquireSingletonInstance, Gu = l.releaseSingletonInstance, Ku = l.isHostSingletonType, hn = l.isSingletonScope, eo = [], gn = -1, bn = {}, be = Math.clz32 ? Math.clz32 : S, th = Math.log, eh = Math.LN2, Ll = 256, Wl = 262144, Fl = 4194304, Il = ge.unstable_scheduleCallback, ao = ge.unstable_cancelCallback, ah = ge.unstable_shouldYield, nh = ge.unstable_requestPaint, de = ge.unstable_now, Qu = ge.unstable_ImmediatePriority, lh = ge.unstable_UserBlockingPriority, no = ge.unstable_NormalPriority, ih = ge.unstable_IdlePriority, rh = ge.log, oh = ge.unstable_setDisableYieldValue, Pn = null, ve = null, ye = typeof Object.is == "function" ? Object.is : gt, Vu = typeof reportError == "function" ? reportError : function(t) {
         if (typeof window == "object" && typeof window.ErrorEvent == "function") {
           var e = new window.ErrorEvent("error", {
             bubbles: !0,
@@ -7641,7 +7641,7 @@ Error generating stack: ` + i.message + `
           return;
         }
         console.error(t);
-      }, oh = Object.prototype.hasOwnProperty, lo, Xu, io = !1, Zu = /* @__PURE__ */ new WeakMap(), vn = [], yn = 0, $l = null, tl = 0, Ee = [], Ne = 0, wa = null, Ve = 1, Xe = "", te = E(null), el = E(null), _a = E(null), Pl = E(null), ee = null, Ot = null, _t = !1, Sa = null, Te = !1, ro = Error(s(519)), ti = E(null), Za = null, na = null, sh = typeof AbortController < "u" ? AbortController : function() {
+      }, sh = Object.prototype.hasOwnProperty, lo, Xu, io = !1, Zu = /* @__PURE__ */ new WeakMap(), vn = [], yn = 0, $l = null, tl = 0, Ee = [], Ne = 0, wa = null, Ve = 1, Xe = "", te = E(null), el = E(null), _a = E(null), Pl = E(null), ee = null, Ot = null, _t = !1, Sa = null, Te = !1, ro = Error(s(519)), ti = E(null), Za = null, na = null, ch = typeof AbortController < "u" ? AbortController : function() {
         var t = [], e = this.signal = {
           aborted: !1,
           addEventListener: function(a, i) {
@@ -7653,7 +7653,7 @@ Error generating stack: ` + i.message + `
             return a();
           });
         };
-      }, ch = ge.unstable_scheduleCallback, uh = ge.unstable_NormalPriority, Rt = {
+      }, uh = ge.unstable_scheduleCallback, dh = ge.unstable_NormalPriority, Rt = {
         $$typeof: ya,
         Consumer: null,
         Provider: null,
@@ -7662,10 +7662,10 @@ Error generating stack: ` + i.message + `
         _threadCount: 0
       }, ei = null, xn = null, oo = !1, ai = !1, so = !1, Ja = 0, al = null, co = 0, wn = 0, _n = null, Ju = rt.S;
       rt.S = function(t, e) {
-        $u = de(), typeof e == "object" && e !== null && typeof e.then == "function" && If(t, e), Ju !== null && Ju(t, e);
+        $u = de(), typeof e == "object" && e !== null && typeof e.then == "function" && $f(t, e), Ju !== null && Ju(t, e);
       };
       var La = E(null), Sn = Error(s(460)), uo = Error(s(474)), ni = Error(s(542)), li = { then: function() {
-      } }, Wa = null, kn = null, nl = 0, Fa = bs(!0), Lu = bs(!1), Ce = [], zn = 0, fo = 0, ka = !1, mo = !1, En = E(null), ii = E(0), xe = E(null), je = null, qt = E(0), la = 0, mt = null, jt = null, Yt = null, ri = !1, Nn = !1, Ia = !1, oi = 0, ll = 0, Tn = null, dh = 0, il = {
+      } }, Wa = null, kn = null, nl = 0, Fa = bs(!0), Lu = bs(!1), Ce = [], zn = 0, fo = 0, ka = !1, mo = !1, En = E(null), ii = E(0), xe = E(null), je = null, qt = E(0), la = 0, mt = null, jt = null, Yt = null, ri = !1, Nn = !1, Ia = !1, oi = 0, ll = 0, Tn = null, fh = 0, il = {
         readContext: $t,
         use: Tl,
         useCallback: Dt,
@@ -7749,7 +7749,7 @@ Error generating stack: ` + i.message + `
             dispatch: null,
             lastRenderedReducer: t,
             lastRenderedState: r
-          }, i.queue = t, t = t.dispatch = lm.bind(
+          }, i.queue = t, t = t.dispatch = im.bind(
             null,
             mt,
             t
@@ -7817,7 +7817,7 @@ Error generating stack: ` + i.message + `
             var a = Xe, i = Ve;
             a = (i & ~(1 << 32 - be(i) - 1)).toString(32) + a, e = "_" + e + "R_" + a, a = oi++, 0 < a && (e += "H" + a.toString(32)), e += "_";
           } else
-            a = dh++, e = "_" + e + "r_" + a.toString(32) + "_";
+            a = fh++, e = "_" + e + "r_" + a.toString(32) + "_";
           return t.memoizedState = e;
         },
         useHostTransitionStatus: fr,
@@ -7842,7 +7842,7 @@ Error generating stack: ` + i.message + `
         },
         useMemoCache: lr,
         useCacheRefresh: function() {
-          return se().memoizedState = nm.bind(
+          return se().memoizedState = lm.bind(
             null,
             mt
           );
@@ -7966,7 +7966,7 @@ Error generating stack: ` + i.message + `
         treeContext: null,
         retryLane: 0,
         hydrationErrors: null
-      }, ia = !1, Kt = !1, vo = !1, Iu = typeof WeakSet == "function" ? WeakSet : Set, Wt = null, Qt = null, fe = !1, qe = null, Cn = 8192, fh = {
+      }, ia = !1, Kt = !1, vo = !1, Iu = typeof WeakSet == "function" ? WeakSet : Set, Wt = null, Qt = null, fe = !1, qe = null, Cn = 8192, mh = {
         getCacheForType: function(t) {
           var e = $t(Rt), a = e.data.get(t);
           return a === void 0 && (a = t(), e.data.set(t, a)), a;
@@ -7979,7 +7979,7 @@ Error generating stack: ` + i.message + `
         var rl = Symbol.for;
         si = rl("selector.component"), ci = rl("selector.has_pseudo_class"), ui = rl("selector.role"), di = rl("selector.test_id"), fi = rl("selector.text");
       }
-      var mh = typeof WeakMap == "function" ? WeakMap : Map, vt = 0, Mt = null, yt = null, xt = 0, Ct = 0, we = null, za = !1, jn = !1, yo = !1, ra = 0, Ut = 0, Ea = 0, $a = 0, xo = 0, _e = 0, Mn = 0, ol = null, me = null, wo = !1, mi = 0, $u = 0, sl = 1 / 0, pi = null, Na = null, Xt = 0, Ta = null, An = null, oa = 0, _o = 0, So = null, Pu = null, cl = 0, ko = null;
+      var ph = typeof WeakMap == "function" ? WeakMap : Map, vt = 0, Mt = null, yt = null, xt = 0, Ct = 0, we = null, za = !1, jn = !1, yo = !1, ra = 0, Ut = 0, Ea = 0, $a = 0, xo = 0, _e = 0, Mn = 0, ol = null, me = null, wo = !1, mi = 0, $u = 0, sl = 1 / 0, pi = null, Na = null, Xt = 0, Ta = null, An = null, oa = 0, _o = 0, So = null, Pu = null, cl = 0, ko = null;
       return bt.attemptContinuousHydration = function(t) {
         if (t.tag === 13 || t.tag === 31) {
           var e = qa(t, 67108864);
@@ -8085,7 +8085,7 @@ Error generating stack: ` + i.message + `
         if (!In) throw Error(s(363));
         e = Hr(t, e), t = [];
         for (var a = 0; a < e.length; a++)
-          t.push(Lm(e[a]));
+          t.push(Wm(e[a]));
         for (e = t.length - 1; 0 < e; e--) {
           a = t[e];
           for (var i = a.x, r = i + a.width, u = a.y, m = u + a.height, k = e - 1; 0 <= k; k--)
@@ -8107,7 +8107,7 @@ Error generating stack: ` + i.message + `
         }
         return t;
       }, bt.findHostInstance = pu, bt.findHostInstanceWithNoPortals = function(t) {
-        return t = f(t), t = t !== null ? x(t) : null, t === null ? null : Fn(t.stateNode);
+        return t = f(t), t = t !== null ? y(t) : null, t === null ? null : Fn(t.stateNode);
       }, bt.findHostInstanceWithWarning = function(t) {
         return pu(t);
       }, bt.flushPassiveEffects = Wn, bt.flushSyncFromReconciler = function(t) {
@@ -8125,7 +8125,7 @@ Error generating stack: ` + i.message + `
         for (t = Ar(t), e = Vc(t, e), e = Array.from(e), t = 0; t < e.length; ) {
           var a = e[t++], i = a.tag;
           if (!$n(a)) {
-            if ((i === 5 || i === 26 || i === 27) && Im(a.stateNode))
+            if ((i === 5 || i === 26 || i === 27) && $m(a.stateNode))
               return !0;
             for (a = a.child; a !== null; )
               e.push(a), a = a.sibling;
@@ -8164,8 +8164,8 @@ No matching component was found for:
       }, bt.injectIntoDevTools = function() {
         var t = {
           bundleType: 0,
-          version: Em,
-          rendererPackageName: Nm,
+          version: Nm,
+          rendererPackageName: Tm,
           currentDispatcherRef: rt,
           reconcilerVersion: "19.2.0"
         };
@@ -8187,7 +8187,7 @@ No matching component was found for:
       }, bt.observeVisibleRects = function(t, e, a, i) {
         if (!In) throw Error(s(363));
         t = Hr(t, e);
-        var r = $m(
+        var r = Pm(
           t,
           a,
           i
@@ -8243,11 +8243,11 @@ No matching component was found for:
   })(To)), To.exports;
 }
 var fd;
-function Zh() {
-  return fd || (fd = 1, No.exports = Xh()), No.exports;
+function Jh() {
+  return fd || (fd = 1, No.exports = Zh()), No.exports;
 }
-var Jh = Zh();
-const Lh = /* @__PURE__ */ Po(Jh);
+var Lh = Jh();
+const Wh = /* @__PURE__ */ Po(Lh);
 var Mo = { exports: {} }, sa = {};
 /**
  * @license React
@@ -8259,14 +8259,14 @@ var Mo = { exports: {} }, sa = {};
  * LICENSE file in the root directory of this source tree.
  */
 var md;
-function Wh() {
+function Fh() {
   return md || (md = 1, sa.ConcurrentRoot = 1, sa.ContinuousEventPriority = 8, sa.DefaultEventPriority = 32, sa.DiscreteEventPriority = 2, sa.IdleEventPriority = 268435456, sa.LegacyRoot = 0, sa.NoEventPriority = 0), sa;
 }
 var pd;
-function Fh() {
-  return pd || (pd = 1, Mo.exports = Wh()), Mo.exports;
+function Ih() {
+  return pd || (pd = 1, Mo.exports = Fh()), Mo.exports;
 }
-var hl = Fh();
+var hl = Ih();
 //! The cascade: the computed style of a host element from the app's own compiled stylesheet (`css-table.json`,
 //! written at build time from Vite + Tailwind's output by `build.mjs`), WebKit's user-agent defaults for the tags a
 //! stock screen uses, the element's inline `style`, and the theme tokens the `perch` host gives (set on the root as
@@ -8277,7 +8277,7 @@ var hl = Fh();
 //! properties with `var()` fallbacks and `@property` initial values, `calc()`/`min()`/`max()`, the shorthands the
 //! utilities write, `color-mix()` and inheritance. A colour keeps the theme token it came from (`token`), as the web
 //! reference's provenance does. Nothing here knows GPUI; `translate.mjs` turns a computed style into engine styles.
-const ef = ["accent", "panel-bg", "surface-0", "surface-1", "surface-dim", "overlay-0", "overlay-1", "text", "subtext-0", "mauve", "green", "yellow", "red", "blue", "teal", "peach", "backdrop", "card-bg"], qo = 16, af = /* @__PURE__ */ new Set(["hover", "focus", "focus-visible", "focus-within", "active"]), Ih = [
+const af = ["accent", "panel-bg", "surface-0", "surface-1", "surface-dim", "overlay-0", "overlay-1", "text", "subtext-0", "mauve", "green", "yellow", "red", "blue", "teal", "peach", "backdrop", "card-bg"], qo = 16, nf = /* @__PURE__ */ new Set(["hover", "focus", "focus-visible", "focus-within", "active"]), $h = [
   ["html", { display: "block", "font-size": "16px", "font-family": "Times", color: "#000000", "line-height": "normal" }],
   ["body", { display: "block", margin: "8px" }],
   ["div, section, aside, p, nav, header, footer, main, ul, ol, li, form, label[hidden]", { display: "block" }],
@@ -8330,7 +8330,7 @@ const ef = ["accent", "panel-bg", "surface-0", "surface-1", "surface-dim", "over
   white: [255, 255, 255, 1],
   red: [255, 0, 0, 1],
   transparent: [0, 0, 0, 0]
-}, $h = /* @__PURE__ */ new Set([
+}, Ph = /* @__PURE__ */ new Set([
   "color",
   "font-family",
   "font-size",
@@ -8355,7 +8355,7 @@ const ef = ["accent", "panel-bg", "surface-0", "surface-1", "surface-dim", "over
   "color-scheme",
   "-webkit-tap-highlight-color",
   "accent-color"
-]), nf = {
+]), lf = {
   display: "inline",
   position: "static",
   top: "auto",
@@ -8423,7 +8423,7 @@ const ef = ["accent", "panel-bg", "surface-0", "surface-1", "surface-dim", "over
   "-webkit-line-clamp": "none",
   "-webkit-box-orient": "horizontal",
   "container-type": "normal"
-}, lf = {
+}, rf = {
   color: "canvastext",
   "font-family": "Times",
   "font-size": "16px",
@@ -8448,7 +8448,7 @@ const ef = ["accent", "panel-bg", "surface-0", "surface-1", "surface-dim", "over
   "color-scheme": "normal",
   "-webkit-tap-highlight-color": "transparent",
   "accent-color": "auto"
-}, Yo = ["font-size", "color", ...new Set([...Object.keys(nf), ...Object.keys(lf)].filter((n) => n !== "font-size" && n !== "color"))], Ph = new Set(Yo);
+}, Yo = ["font-size", "color", ...new Set([...Object.keys(lf), ...Object.keys(rf)].filter((n) => n !== "font-size" && n !== "color"))], tg = new Set(Yo);
 function ne(n, l = " ") {
   const o = [];
   let c = 0, s = "";
@@ -8473,7 +8473,7 @@ function Go(n, l, o = 0) {
     let p = 1, f = d + 4;
     for (; f < n.length && p; f++)
       n[f] === "(" ? p++ : n[f] === ")" && p--;
-    const b = n.slice(d + 4, f - 1), x = ne(b, ","), C = x[0].trim(), j = x.length > 1 ? b.slice(b.indexOf(",") + 1).trim() : null;
+    const b = n.slice(d + 4, f - 1), y = ne(b, ","), C = y[0].trim(), j = y.length > 1 ? b.slice(b.indexOf(",") + 1).trim() : null;
     let E = l(C);
     if ((E == null || E === "initial") && (E = j), E == null) return null;
     const v = Go(E, l, o + 1);
@@ -8481,7 +8481,7 @@ function Go(n, l, o = 0) {
     c += v, s = f;
   }
 }
-function tg(n) {
+function eg(n) {
   const l = [], o = /\s*(?:(-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(%|[a-z]+)?|([a-z-]+)\(|(infinity)|([()+*/,])|(-)(?=\s))/giy;
   let c, s = 0;
   for (; s < n.length; ) {
@@ -8494,7 +8494,7 @@ function tg(n) {
   return l;
 }
 function Oa(n, l) {
-  const o = tg(n.trim().replace(/env\(\s*safe-area-inset-(?:top|right|bottom|left)\s*(?:,[^()]*)?\)/gi, "0px"));
+  const o = eg(n.trim().replace(/env\(\s*safe-area-inset-(?:top|right|bottom|left)\s*(?:,[^()]*)?\)/gi, "0px"));
   if (!o) return null;
   let c = 0;
   const s = ({ num: E, unit: v }) => {
@@ -8524,7 +8524,7 @@ function Oa(n, l) {
       default:
         return null;
     }
-  }, d = (E, v, y) => E && v ? { px: E.px + y * v.px, pct: E.pct + y * v.pct, num: E.num + y * v.num, unitless: E.unitless && v.unitless } : null, p = (E, v) => E ? { px: E.px * v, pct: E.pct * v, num: E.num * v, unitless: E.unitless } : null, f = (E) => E && E.unitless;
+  }, d = (E, v, x) => E && v ? { px: E.px + x * v.px, pct: E.pct + x * v.pct, num: E.num + x * v.num, unitless: E.unitless && v.unitless } : null, p = (E, v) => E ? { px: E.px * v, pct: E.pct * v, num: E.num * v, unitless: E.unitless } : null, f = (E) => E && E.unitless;
   function b() {
     const E = o[c++];
     if (!E) return null;
@@ -8554,20 +8554,20 @@ function Oa(n, l) {
     }
     return null;
   }
-  function x() {
+  function y() {
     let E = b();
     for (; o[c] && (o[c].op === "*" || o[c].op === "/"); ) {
-      const v = o[c++].op, y = b();
-      if (!E || !y) return null;
-      v === "*" ? E = f(y) ? p(E, y.num) : f(E) ? p(y, E.num) : null : E = f(y) && y.num !== 0 ? p(E, 1 / y.num) : null;
+      const v = o[c++].op, x = b();
+      if (!E || !x) return null;
+      v === "*" ? E = f(x) ? p(E, x.num) : f(E) ? p(x, E.num) : null : E = f(x) && x.num !== 0 ? p(E, 1 / x.num) : null;
     }
     return E;
   }
   function C() {
-    let E = x();
+    let E = y();
     for (; o[c] && (o[c].op === "+" || o[c].op === "-"); ) {
       const v = o[c++].op;
-      E = d(E, x(), v === "-" ? -1 : 1);
+      E = d(E, y(), v === "-" ? -1 : 1);
     }
     return E;
   }
@@ -8579,9 +8579,9 @@ function Ko(n, l) {
   if (/^(auto|none|normal|fit-content|max-content|min-content|medium|thin|thick)$/.test(o))
     return o === "thin" ? { px: 1 } : o === "medium" ? { px: 3 } : o === "thick" ? { px: 5 } : o;
   const c = Oa(o, l);
-  return c ? c.unitless ? c.num === 0 ? { px: 0 } : { expr: n.trim() } : c.pct && (c.px || c.num) ? { expr: n.trim() } : c.pct ? { pct: c.pct } : { px: eg(c.px) } : { expr: n.trim() };
+  return c ? c.unitless ? c.num === 0 ? { px: 0 } : { expr: n.trim() } : c.pct && (c.px || c.num) ? { expr: n.trim() } : c.pct ? { pct: c.pct } : { px: ag(c.px) } : { expr: n.trim() };
 }
-const eg = (n) => Number.isFinite(n) ? n : n > 0 ? 34e37 : -34e37, bi = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0"), ag = ([n, l, o, c]) => `#${bi(n)}${bi(l)}${bi(o)}${bi(c * 255)}`;
+const ag = (n) => Number.isFinite(n) ? n : n > 0 ? 34e37 : -34e37, bi = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0"), ng = ([n, l, o, c]) => `#${bi(n)}${bi(l)}${bi(o)}${bi(c * 255)}`;
 function gd(n) {
   const l = n.slice(1), o = l.length <= 4 ? l.split("").map((s) => s + s).join("") : l;
   if (!/^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(o)) return null;
@@ -8593,37 +8593,37 @@ function Ni(n, l) {
   if (o === "currentcolor") return "currentcolor";
   const c = /^perchtoken\(([a-z0-9-]+)\)$/.exec(o);
   if (c) {
-    const x = l(c[1]), C = x && gd(x);
+    const y = l(c[1]), C = y && gd(y);
     return C ? { rgba: C, token: c[1] } : null;
   }
   if (o.startsWith("#")) {
-    const x = gd(o);
-    return x ? { rgba: x, token: null } : null;
+    const y = gd(o);
+    return y ? { rgba: y, token: null } : null;
   }
   if (hd[o]) return { rgba: [...hd[o]], token: null };
   const s = /^(rgba?|color-mix)\((.*)\)$/s.exec(o);
   if (!s) return null;
   if (s[1] === "color-mix") {
-    const x = ne(s[2], ",");
-    if (x.length !== 3 || !/^in\s+(srgb|srgb-linear|oklab|lab|oklch|lch|hsl|xyz)/.test(x[0])) return null;
+    const y = ne(s[2], ",");
+    if (y.length !== 3 || !/^in\s+(srgb|srgb-linear|oklab|lab|oklch|lch|hsl|xyz)/.test(y[0])) return null;
     const C = (pt) => {
       const gt = ne(pt), wt = gt.findIndex((lt) => /%$/.test(lt)), V = wt >= 0 ? parseFloat(gt[wt]) / 100 : null;
       return { color: Ni(gt.filter((lt, B) => B !== wt).join(" "), l), pct: V };
-    }, j = C(x[1]), E = C(x[2]);
+    }, j = C(y[1]), E = C(y[2]);
     if (!j.color || !E.color || j.color === "currentcolor" || E.color === "currentcolor") return null;
-    let v = j.pct, y = E.pct;
-    v === null && y === null ? (v = 0.5, y = 0.5) : v === null ? v = 1 - y : y === null && (y = 1 - v);
-    const S = v + y, w = S < 1 ? S : 1;
-    v /= S, y /= S;
-    const [O, N, M, K] = j.color.rgba, [U, z, g, h] = E.color.rgba, D = K * v + h * y, Q = (pt, gt) => D === 0 ? 0 : (pt * K * v + gt * h * y) / D, W = [Q(O, U), Q(N, z), Q(M, g), D * w], L = h === 0 ? j.color.token : K === 0 ? E.color.token : null;
+    let v = j.pct, x = E.pct;
+    v === null && x === null ? (v = 0.5, x = 0.5) : v === null ? v = 1 - x : x === null && (x = 1 - v);
+    const S = v + x, w = S < 1 ? S : 1;
+    v /= S, x /= S;
+    const [O, N, M, K] = j.color.rgba, [U, z, g, h] = E.color.rgba, D = K * v + h * x, Q = (pt, gt) => D === 0 ? 0 : (pt * K * v + gt * h * x) / D, W = [Q(O, U), Q(N, z), Q(M, g), D * w], L = h === 0 ? j.color.token : K === 0 ? E.color.token : null;
     return { rgba: W, token: L };
   }
-  const d = s[2].includes(",") ? ne(s[2], ",") : ne(s[2].replace("/", " / ")).filter((x) => x !== "/");
+  const d = s[2].includes(",") ? ne(s[2], ",") : ne(s[2].replace("/", " / ")).filter((y) => y !== "/");
   if (d.length < 3) return null;
-  const p = (x) => x.endsWith("%") ? parseFloat(x) / 100 * 255 : parseFloat(x), f = d[3] === void 0 ? 1 : d[3].endsWith("%") ? parseFloat(d[3]) / 100 : parseFloat(d[3]), b = [p(d[0]), p(d[1]), p(d[2]), f];
-  return b.some((x) => Number.isNaN(x)) ? null : { rgba: b, token: null };
+  const p = (y) => y.endsWith("%") ? parseFloat(y) / 100 * 255 : parseFloat(y), f = d[3] === void 0 ? 1 : d[3].endsWith("%") ? parseFloat(d[3]) / 100 : parseFloat(d[3]), b = [p(d[0]), p(d[1]), p(d[2]), f];
+  return b.some((y) => Number.isNaN(y)) ? null : { rgba: b, token: null };
 }
-const ml = ["top", "right", "bottom", "left"], ng = ["top-left", "top-right", "bottom-right", "bottom-left"], vi = (n) => [n[0], n[1] ?? n[0], n[2] ?? n[0], n[3] ?? n[1] ?? n[0]], bd = /* @__PURE__ */ new Set(["none", "hidden", "solid", "dashed", "dotted", "double", "groove", "ridge", "inset", "outset"]);
+const ml = ["top", "right", "bottom", "left"], lg = ["top-left", "top-right", "bottom-right", "bottom-left"], vi = (n) => [n[0], n[1] ?? n[0], n[2] ?? n[0], n[3] ?? n[1] ?? n[0]], bd = /* @__PURE__ */ new Set(["none", "hidden", "solid", "dashed", "dotted", "double", "groove", "ridge", "inset", "outset"]);
 function Qo(n, l) {
   const o = l.trim(), c = () => ne(o);
   switch (n) {
@@ -8711,7 +8711,7 @@ function Qo(n, l) {
     }
     case "border-radius": {
       const s = vi(ne(o.split("/")[0]));
-      return ng.map((d, p) => [`border-${d}-radius`, s[p]]);
+      return lg.map((d, p) => [`border-${d}-radius`, s[p]]);
     }
     case "border-start-start-radius":
       return [["border-top-left-radius", o]];
@@ -8782,7 +8782,7 @@ function Qo(n, l) {
       return [[n, o]];
   }
 }
-function lg(n, l) {
+function ig(n, l) {
   return n ? ne(n, ",").some((o) => {
     let c = o.trim().toLowerCase(), s = !1;
     c.startsWith("not ") && (s = !0, c = c.slice(4)), c.startsWith("only ") && (c = c.slice(5));
@@ -8791,10 +8791,10 @@ function lg(n, l) {
       if (p === "print") return !1;
       const f = /^\((.+)\)$/.exec(p);
       if (!f) return !1;
-      const b = f[1].trim(), x = /^([a-z-]+)\s*:\s*(.+)$/.exec(b);
-      if (x) {
-        const [, j, E] = x, v = (y) => {
-          const S = Ko(y, { viewport: l });
+      const b = f[1].trim(), y = /^([a-z-]+)\s*:\s*(.+)$/.exec(b);
+      if (y) {
+        const [, j, E] = y, v = (x) => {
+          const S = Ko(x, { viewport: l });
           return typeof S == "object" && "px" in S ? S.px : NaN;
         };
         switch (j) {
@@ -8841,16 +8841,16 @@ function lg(n, l) {
     return s ? !d : d;
   }) : !0;
 }
-function ig(n, l) {
+function rg(n, l) {
   const o = l[l.length - 1].compound;
   return ts(o)[0] ?? n;
 }
-function rg(n) {
+function og(n) {
   const l = /* @__PURE__ */ new Set(), o = /* @__PURE__ */ new Set(), c = (s, d) => {
     s.forEach(({ compound: p }, f) => {
       const b = d && f === s.length - 1;
-      for (const x of p.pseudos)
-        if (af.has(x.name) && (b ? l : o).add(x.name), x.list && x.name !== "not") for (const C of x.list) c(C, b);
+      for (const y of p.pseudos)
+        if (nf.has(y.name) && (b ? l : o).add(y.name), y.list && y.name !== "not") for (const C of y.list) c(C, b);
     });
   };
   return c(n, !0), { subject: l, ancestor: o };
@@ -8862,17 +8862,17 @@ function ts(n) {
       for (const c of o.list) c.length === 1 && l.push(...ts(c[0].compound));
   return l;
 }
-function og(n, l) {
+function sg(n, l) {
   const o = (c, s) => {
     c.forEach(({ compound: d }, p) => {
-      const f = s && p === c.length - 1, b = d.pseudos.filter((x) => af.has(x.name)).map((x) => x.name);
-      if (!f) for (const x of b) for (const C of ts(d)) l.add(`${x}:${C}`);
-      for (const x of d.pseudos) if (x.list && x.name !== "not") for (const C of x.list) o(C, f);
+      const f = s && p === c.length - 1, b = d.pseudos.filter((y) => nf.has(y.name)).map((y) => y.name);
+      if (!f) for (const y of b) for (const C of ts(d)) l.add(`${y}:${C}`);
+      for (const y of d.pseudos) if (y.list && y.name !== "not") for (const C of y.list) o(C, f);
     });
   };
   o(n, !0);
 }
-class sg {
+class cg {
   constructor(l) {
     this.properties = l.properties ?? {}, this.rules = [], this.skipped = 0, this.index = /* @__PURE__ */ new Map(), this.trackedStates = /* @__PURE__ */ new Set();
     const o = (d, p) => {
@@ -8881,7 +8881,7 @@ class sg {
     };
     let c = 0;
     const s = (d, p) => {
-      for (const [f, b, x, C] of d)
+      for (const [f, b, y, C] of d)
         for (const j of Fo(f)) {
           let E;
           try {
@@ -8893,13 +8893,13 @@ class sg {
             }
             throw S;
           }
-          const v = rg(E);
-          og(E, this.trackedStates);
-          const y = { steps: E, media: b, layer: x, origin: p, order: c++, specificity: Zd(E), decls: C, states: v, source: p === 0 ? `ua:${E[E.length - 1].compound.tag ?? "*"}` : ig(j, E) };
-          this.rules.push(y), o(y, E);
+          const v = og(E);
+          sg(E, this.trackedStates);
+          const x = { steps: E, media: b, layer: y, origin: p, order: c++, specificity: Jd(E), decls: C, states: v, source: p === 0 ? `ua:${E[E.length - 1].compound.tag ?? "*"}` : rg(j, E) };
+          this.rules.push(x), o(x, E);
         }
     };
-    s(Ih.map(([d, p]) => [d, null, 0, Object.entries(p)]), 0), s(l.rules, 1);
+    s($h.map(([d, p]) => [d, null, 0, Object.entries(p)]), 0), s(l.rules, 1);
   }
   /** Rules that may match `element` (by its classes, its tag, and the universal ones). */
   candidates(l) {
@@ -8915,18 +8915,18 @@ class sg {
     return !1;
   }
 }
-const cg = /* @__PURE__ */ new Set(["opacity", "z-index", "flex-grow", "flex-shrink", "font-weight", "line-height", "flex", "order", "-webkit-line-clamp", "zoom"]);
-function ug(n) {
+const ug = /* @__PURE__ */ new Set(["opacity", "z-index", "flex-grow", "flex-shrink", "font-weight", "line-height", "flex", "order", "-webkit-line-clamp", "zoom"]);
+function dg(n) {
   if (!n || typeof n != "object") return [];
   const l = [];
   for (const [o, c] of Object.entries(n)) {
     if (c == null || c === "" || typeof c == "boolean") continue;
-    const s = o.startsWith("--") ? o : o.replace(/[A-Z]/g, (p) => `-${p.toLowerCase()}`).replace(/^(webkit|moz|ms)-/, "-$1-"), d = typeof c == "number" && c !== 0 && !cg.has(s) && !s.startsWith("--") ? `${c}px` : String(c);
+    const s = o.startsWith("--") ? o : o.replace(/[A-Z]/g, (p) => `-${p.toLowerCase()}`).replace(/^(webkit|moz|ms)-/, "-$1-"), d = typeof c == "number" && c !== 0 && !ug.has(s) && !s.startsWith("--") ? `${c}px` : String(c);
     l.push([s, d]);
   }
   return l;
 }
-function dg(n) {
+function fg(n) {
   if (n.tagName !== "svg") return [];
   const l = [];
   for (const o of ["width", "height"]) {
@@ -8935,8 +8935,8 @@ function dg(n) {
   }
   return l;
 }
-const fg = (n, l) => n.important - l.important || n.origin - l.origin || n.layer - l.layer || n.specificity[0] - l.specificity[0] || n.specificity[1] - l.specificity[1] || n.specificity[2] - l.specificity[2] || n.order - l.order;
-class mg {
+const mg = (n, l) => n.important - l.important || n.origin - l.origin || n.layer - l.layer || n.specificity[0] - l.specificity[0] || n.specificity[1] - l.specificity[1] || n.specificity[2] - l.specificity[2] || n.order - l.order;
+class pg {
   constructor(l, { theme: o, viewport: c }) {
     this.sheet = l, this.theme = o, this.viewport = c, this.parsed = /* @__PURE__ */ new Map();
   }
@@ -8957,30 +8957,30 @@ class mg {
       }
       return p ? o.has(d) : d === "focus-visible" ? !!s.state?.focus && !s.state?.pointerFocus : !!s.state?.[d];
     };
-    return this.sheet.candidates(l).filter((s) => (!s.media || s.media.every((d) => lg(d, this.viewport))) && Jd(l, s.steps, { state: c }));
+    return this.sheet.candidates(l).filter((s) => (!s.media || s.media.every((d) => ig(d, this.viewport))) && Ld(l, s.steps, { state: c }));
   }
   compute(l, o, c = /* @__PURE__ */ new Set()) {
     const s = this.matching(l, c), d = [];
     for (const g of s)
       for (const [h, D, Q] of g.decls) d.push({ prop: h, value: D, important: Q ? 1 : 0, origin: g.origin === 0 ? 0 : 2, layer: g.layer, specificity: g.specificity, order: g.order, source: g.source });
-    for (const [g, h] of dg(l)) d.push({ prop: g, value: h, important: 0, origin: 1, layer: 0, specificity: [0, 0, 0], order: 0, source: `attr:${g}` });
-    for (const [g, h] of ug(l.inlineStyle ?? l.props?.style)) d.push({ prop: g, value: h, important: 0, origin: 3, layer: 0, specificity: [1, 0, 0], order: 0, source: "style" });
-    d.sort(fg);
-    const p = this.sheet.properties, f = Object.create(o?.customs ?? null), b = /* @__PURE__ */ new Map(), x = /* @__PURE__ */ new Map();
-    for (const g of d) g.prop.startsWith("--") && x.set(g.prop, g.value);
-    if (!o && this.theme) for (const g of ef) this.theme[g] && x.set(`--${g}`, `perchtoken(${g})`);
+    for (const [g, h] of fg(l)) d.push({ prop: g, value: h, important: 0, origin: 1, layer: 0, specificity: [0, 0, 0], order: 0, source: `attr:${g}` });
+    for (const [g, h] of dg(l.inlineStyle ?? l.props?.style)) d.push({ prop: g, value: h, important: 0, origin: 3, layer: 0, specificity: [1, 0, 0], order: 0, source: "style" });
+    d.sort(mg);
+    const p = this.sheet.properties, f = Object.create(o?.customs ?? null), b = /* @__PURE__ */ new Map(), y = /* @__PURE__ */ new Map();
+    for (const g of d) g.prop.startsWith("--") && y.set(g.prop, g.value);
+    if (!o && this.theme) for (const g of af) this.theme[g] && y.set(`--${g}`, `perchtoken(${g})`);
     const C = (g) => {
       if (b.has(g)) return b.get(g);
       const h = p[g];
       return h && !h.inherits ? h.initial ?? null : g in f ? f[g] : h?.initial ?? null;
     }, j = /* @__PURE__ */ new Set(), E = (g) => {
-      if (!x.has(g)) return C(g);
+      if (!y.has(g)) return C(g);
       if (j.has(g)) return null;
       j.add(g);
-      const h = Go(x.get(g), E);
-      return j.delete(g), x.delete(g), b.set(g, h), (!p[g] || p[g].inherits) && (f[g] = h), h;
+      const h = Go(y.get(g), E);
+      return j.delete(g), y.delete(g), b.set(g, h), (!p[g] || p[g].inherits) && (f[g] = h), h;
     };
-    for (const g of [...x.keys()]) E(g);
+    for (const g of [...y.keys()]) E(g);
     const v = /* @__PURE__ */ new Map();
     for (const g of d) {
       if (g.prop.startsWith("--")) continue;
@@ -8991,29 +8991,29 @@ class mg {
       }
       for (const [D, Q] of Qo(g.prop, h)) v.set(D, { value: Q, source: g.source, origin: g.origin });
     }
-    const y = {}, S = {}, w = /* @__PURE__ */ new Set(), O = /* @__PURE__ */ new Set(), N = o?.values, M = { fontSize: N?.["font-size"] ?? qo, viewport: this.viewport }, K = (g, h) => {
-      if (/currentcolor/i.test(h)) return this.parseValue(g, h, M, y, N);
+    const x = {}, S = {}, w = /* @__PURE__ */ new Set(), O = /* @__PURE__ */ new Set(), N = o?.values, M = { fontSize: N?.["font-size"] ?? qo, viewport: this.viewport }, K = (g, h) => {
+      if (/currentcolor/i.test(h)) return this.parseValue(g, h, M, x, N);
       const D = `${g}\0${h}\0${M.fontSize}`;
       let Q = this.parsed.get(D);
-      return Q === void 0 && this.parsed.set(D, Q = this.parseValue(g, h, M, y, N)), Q;
-    }, U = v.size ? [...Yo, ...[...v.keys()].filter((g) => !Ph.has(g))] : Yo;
+      return Q === void 0 && this.parsed.set(D, Q = this.parseValue(g, h, M, x, N)), Q;
+    }, U = v.size ? [...Yo, ...[...v.keys()].filter((g) => !tg.has(g))] : Yo;
     for (const g of U) {
       const h = v.get(g);
       let D = h?.value;
-      const Q = $h.has(g);
+      const Q = Ph.has(g);
       if ((D === void 0 || D === "unset" || D === "revert" || D === "revert-layer") && (D = Q ? "inherit" : "initial"), h && (S[g] = h.source, h.origin !== 0 && w.add(g)), D === "inherit" && N && g in N) {
-        y[g] = N[g], O.add(g);
+        x[g] = N[g], O.add(g);
         continue;
       }
-      (D === "inherit" || D === "initial") && (D = Q ? lf[g] : nf[g]), y[g] = K(g, D), g === "font-size" && (M.fontSize = y["font-size"]);
+      (D === "inherit" || D === "initial") && (D = Q ? rf[g] : lf[g]), x[g] = K(g, D), g === "font-size" && (M.fontSize = x["font-size"]);
     }
     for (const g of ml) {
-      const h = y[`border-${g}-style`];
-      (h === "none" || h === "hidden") && (y[`border-${g}-width`] = { px: 0 });
+      const h = x[`border-${g}-style`];
+      (h === "none" || h === "hidden") && (x[`border-${g}-width`] = { px: 0 });
     }
-    y["outline-style"] === "none" && (y["outline-width"] = { px: 0 });
+    x["outline-style"] === "none" && (x["outline-width"] = { px: 0 });
     const z = N?.display;
-    return (z === "flex" || z === "inline-flex" || z === "grid" || z === "inline-grid") && y.position !== "absolute" && y.position !== "fixed" && (y.display = vd(y.display)), (y.position === "absolute" || y.position === "fixed") && (y.display = vd(y.display)), { values: y, sources: S, own: w, inherited: O, customs: f, rules: s, element: l };
+    return (z === "flex" || z === "inline-flex" || z === "grid" || z === "inline-grid") && x.position !== "absolute" && x.position !== "fixed" && (x.display = vd(x.display)), (x.position === "absolute" || x.position === "fixed") && (x.display = vd(x.display)), { values: x, sources: S, own: w, inherited: O, customs: f, rules: s, element: l };
   }
   parseValue(l, o, c, s, d) {
     const p = String(o).trim();
@@ -9023,8 +9023,8 @@ class mg {
         if (b[f]) return b[f];
         if (f === "smaller") return c.fontSize / 1.2;
         if (f === "larger") return c.fontSize * 1.2;
-        const x = Oa(f, { fontSize: c.fontSize, viewport: c.viewport });
-        return !x || x.num ? c.fontSize : x.px + x.pct / 100 * c.fontSize;
+        const y = Oa(f, { fontSize: c.fontSize, viewport: c.viewport });
+        return !y || y.num ? c.fontSize : y.px + y.pct / 100 * c.fontSize;
       }
       case "font-weight": {
         const f = p.toLowerCase();
@@ -9105,18 +9105,18 @@ class mg {
 function vd(n) {
   return n === "inline" || n === "inline-block" || n === "contents" ? "block" : n === "inline-flex" ? "flex" : n === "inline-grid" ? "grid" : n;
 }
-const Ti = (n) => n && n.rgba ? { value: ag(n.rgba), token: n.token ?? null } : null, pg = { 9.28: 11, 9.92: 12, 10.4: 12, 10.88: 13, 11: 13, 11.2: 13, 11.52: 13, 12: 15, 12.5: 15, 13: 16, 14: 17, 16: 19 };
-function hg(n, l) {
+const Ti = (n) => n && n.rgba ? { value: ng(n.rgba), token: n.token ?? null } : null, hg = { 9.28: 11, 9.92: 12, 10.4: 12, 10.88: 13, 11: 13, 11.2: 13, 11.52: 13, 12: 15, 12.5: 15, 13: 16, 14: 17, 16: 19 };
+function gg(n, l) {
   const o = l?.(n);
   if (Number.isFinite(o)) return o;
   const c = Math.round(n * 100) / 100;
-  return pg[c] ?? Math.round(n * 1.2);
+  return hg[c] ?? Math.round(n * 1.2);
 }
 function Ci(n, l) {
   const o = n["line-height"], c = n["font-size"];
-  return o.normal ? hg(c, l) : o.factor !== void 0 ? o.factor * c : o.px;
+  return o.normal ? gg(c, l) : o.factor !== void 0 ? o.factor * c : o.px;
 }
-const gg = (n) => ne(n, ",").map((l) => l.trim().replace(/^["']|["']$/g, "")).join(", ");
+const bg = (n) => ne(n, ",").map((l) => l.trim().replace(/^["']|["']$/g, "")).join(", ");
 //! The description: the host tree after a commit, as the engine draws it. Each element's computed style
 //! (`css.mjs`) becomes engine styles in the vocabulary of the GPUI kit (`div()` with `.flex()`, `.px(8)`,
 //! `.text_color(...)`, `.hover(|s| ...)`), keyed so the engine maps each key to one builder call; a key's value says
@@ -9140,7 +9140,7 @@ const gg = (n) => ne(n, ",").map((l) => l.trim().replace(/^["']|["']$/g, "")).jo
 //! Text styles follow GPUI's inheritance: a node carries a text style when it sets one itself (so an ancestor's
 //! hover colour does not reach it, as in CSS) or when the inherited value would differ (`line-height: normal`, a
 //! multiplier under a new size). `tokens` names the theme token each colour came from.
-const bg = "perch-native-description/1", On = Symbol("display"), ji = {
+const vg = "perch-native-description/1", On = Symbol("display"), ji = {
   display: "block",
   flex_direction: "row",
   flex_wrap: "nowrap",
@@ -9161,10 +9161,10 @@ const bg = "perch-native-description/1", On = Symbol("display"), ji = {
   border_color: "#00000000",
   text_ellipsis: !1,
   underline: !1
-}, vg = ["w", "h", "min_w", "min_h", "max_w", "max_h", "top", "right", "bottom", "left", "pt", "pr", "pb", "pl", "mt", "mr", "mb", "ml", "gap_x", "gap_y", "border_t", "border_r", "border_b", "border_l", "rounded_tl", "rounded_tr", "rounded_br", "rounded_bl"];
-for (const n of vg) ji[n] = /^(w|h|min_|max_|top|right|bottom|left)/.test(n) ? "auto" : 0;
+}, yg = ["w", "h", "min_w", "min_h", "max_w", "max_h", "top", "right", "bottom", "left", "pt", "pr", "pb", "pl", "mt", "mr", "mb", "ml", "gap_x", "gap_y", "border_t", "border_r", "border_b", "border_l", "rounded_tl", "rounded_tr", "rounded_br", "rounded_bl"];
+for (const n of yg) ji[n] = /^(w|h|min_|max_|top|right|bottom|left)/.test(n) ? "auto" : 0;
 ji.rounded = 0;
-const yg = /* @__PURE__ */ new Set([
+const xg = /* @__PURE__ */ new Set([
   "box-sizing",
   "-webkit-tap-highlight-color",
   "color-scheme",
@@ -9189,7 +9189,7 @@ const yg = /* @__PURE__ */ new Set([
   "align-content",
   "outline-offset",
   "background-image"
-]), xg = /(-apple-system|blinkmacsystemfont|system-ui|segoe ui|sans-serif|times)/i, wg = /(ui-monospace|sfmono|sf mono|menlo|monospace)/i, _g = (n) => wg.test(n) ? "Menlo" : /^\s*system-ui\s*$/i.test(n ?? "") ? ".AppleSystemUIFont" : xg.test(n) ? ".SystemUIFont" : gg(n).split(",")[0].trim(), Sg = {
+]), wg = /(-apple-system|blinkmacsystemfont|system-ui|segoe ui|sans-serif|times)/i, _g = /(ui-monospace|sfmono|sf mono|menlo|monospace)/i, Sg = (n) => _g.test(n) ? "Menlo" : /^\s*system-ui\s*$/i.test(n ?? "") ? ".AppleSystemUIFont" : wg.test(n) ? ".SystemUIFont" : bg(n).split(",")[0].trim(), kg = {
   click: ["onClick", "onClickCapture"],
   double_click: ["onDoubleClick"],
   context_menu: ["onContextMenu"],
@@ -9199,16 +9199,16 @@ const yg = /* @__PURE__ */ new Set([
   key_down: ["onKeyDown", "onKeyUp"],
   focus: ["onFocus", "onBlur"],
   input: ["onChange", "onInput"]
-}, yd = { pointerdown: "mouse_down", mousedown: "mouse_down", click: "click", keydown: "key_down", pointerup: "mouse_up", mouseup: "mouse_up" }, rf = (n) => {
+}, yd = { pointerdown: "mouse_down", mousedown: "mouse_down", click: "click", keydown: "key_down", pointerup: "mouse_up", mouseup: "mouse_up" }, of = (n) => {
   const l = n.props["data-testid"];
   if (l) return `${n.tagName}[data-testid="${l}"]`;
   if (n.props.id) return `${n.tagName}#${n.props.id}`;
   const o = n.classList.find((s) => !s.includes(":") && !s.includes("[")) ?? n.classList[0];
   if (o) return `${n.tagName}.${o}`;
   const c = n.parentElement;
-  return c && c.tagName !== "body" ? `${rf(c)} > ${n.tagName}` : n.tagName;
+  return c && c.tagName !== "body" ? `${of(c)} > ${n.tagName}` : n.tagName;
 };
-class kg {
+class zg {
   constructor() {
     this.map = /* @__PURE__ */ new Map();
   }
@@ -9230,19 +9230,19 @@ const ua = (n) => {
     if ("px" in n) return Math.round(Math.min(Math.max(n.px, -9999), 9999) * 100) / 100;
     if ("pct" in n) return `${Math.round(n.pct * 1e3) / 1e3}%`;
   }
-}, zg = /^(text|search|url|email|tel|password|number)$/, Eg = 162.13 / 12.8;
-function Ng(n, l) {
+}, Eg = /^(text|search|url|email|tel|password|number)$/, Ng = 162.13 / 12.8;
+function Tg(n, l) {
   const o = typeof n == "object" && /^min\((.*)\)$/.exec(String(n?.expr ?? "").trim());
   if (!o) return;
   const c = ne(o[1], ",").map((s) => Oa(s.trim(), { fontSize: l })).filter((s) => s && !s.pct && !s.num).map((s) => s.px);
   return c.length ? Math.min(...c) : void 0;
 }
-function Tg(n, l) {
+function Cg(n, l) {
   if (typeof n != "object" || !n?.expr) return !1;
   const o = Oa(n.expr, { fontSize: l["font-size"] }), c = (l["margin-left"]?.px ?? NaN) + (l["margin-right"]?.px ?? NaN);
   return !!o && !o.num && o.pct === 100 && Math.abs(o.px + c) < 0.01;
 }
-function of(n) {
+function sf(n) {
   const l = n.transform;
   if (l && l !== "none") {
     const c = /^\s*translate(X|Y)?\(([^]*)\)\s*$/.exec(l), s = c && ne(c[2], ",").map((d) => d.trim());
@@ -9256,37 +9256,37 @@ function of(n) {
   return [];
 }
 function xd(n, l, o, c = !1) {
-  const s = n.values, d = of(s);
+  const s = n.values, d = sf(s);
   if (d?.length === 0) return;
   const p = s.transform && s.transform !== "none" ? "transform" : "translate", f = { fontSize: s["font-size"] }, b = (j, E) => {
     const v = Oa(j, f);
     if (!(!v || v.unitless && v.num))
       return v.pct ? typeof E == "number" ? v.px + v.pct / 100 * E : void 0 : v.px;
-  }, x = d ? b(d[0], l.w) : void 0, C = d ? b(d[1], l.h) : void 0;
-  if (x === void 0 || C === void 0) {
+  }, y = d ? b(d[0], l.w) : void 0, C = d ? b(d[1], l.h) : void 0;
+  if (y === void 0 || C === void 0) {
     const j = !c && d ? d.map((E) => Oa(E, f)) : null;
     if (j?.every((E) => E && !(E.unitless && E.num))) {
-      l[sf] = j.map((E) => [E.px, E.pct ?? 0]);
+      l[cf] = j.map((E) => [E.px, E.pct ?? 0]);
       return;
     }
     o("unsupported", p, s[p], n.sources[p]);
     return;
   }
   if (c) {
-    x && (l.left = x), C && (l.top = C);
+    y && (l.left = y), C && (l.top = C);
     return;
   }
-  x && (l.ml = (l.ml ?? 0) + x), C && (l.mt = (l.mt ?? 0) + C);
+  y && (l.ml = (l.ml ?? 0) + y), C && (l.mt = (l.mt ?? 0) + C);
 }
-const sf = Symbol("perch.shift");
-function Cg(n, l, o) {
+const cf = Symbol("perch.shift");
+function jg(n, l, o) {
   const c = n.ownerDocument, s = c?.measure?.(n) ?? null;
   if (s) {
-    const [[p, f], [b, x]] = o, C = p + f / 100 * s.width, j = b + x / 100 * s.height;
+    const [[p, f], [b, y]] = o, C = p + f / 100 * s.width, j = b + y / 100 * s.height;
     C && (l.ml = (typeof l.ml == "number" ? l.ml : 0) + C), j && (l.mt = (typeof l.mt == "number" ? l.mt : 0) + j);
   }
   const d = s ? `${s.width}x${s.height}` : "";
-  d === n.shiftSeen ? n.shiftTries = 0 : (n.shiftTries ?? 0) < Fd && c?.retries && (n.shiftSeen = d, n.shiftTries = (n.shiftTries ?? 0) + 1, c.retries.push(() => c.afterCommit?.()));
+  d === n.shiftSeen ? n.shiftTries = 0 : (n.shiftTries ?? 0) < Id && c?.retries && (n.shiftSeen = d, n.shiftTries = (n.shiftTries ?? 0) + 1, c.retries.push(() => c.afterCommit?.()));
 }
 function wd(n, l, o = null) {
   const c = n.values, s = {}, d = (N) => n.sources[N], p = (N) => n.sources[N] !== void 0, f = c.display;
@@ -9310,17 +9310,17 @@ function wd(n, l, o = null) {
     typeof U == "number" && U && (s.gap_y = U), typeof z == "number" && z && !N && (s.gap_x = z);
   }
   c["flex-grow"] && (s.flex_grow = c["flex-grow"]), c["flex-shrink"] !== 1 && (s.flex_shrink = c["flex-shrink"]);
-  const x = ua(c["flex-basis"]);
-  x !== void 0 && x !== "auto" && (s.flex_basis = x);
+  const y = ua(c["flex-basis"]);
+  y !== void 0 && y !== "auto" && (s.flex_basis = y);
   const C = { "flex-start": "start", start: "start", "flex-end": "end", end: "end", center: "center", baseline: "baseline", stretch: "stretch" }[c["align-self"]];
   C && (s.self = C);
   for (const [N, M] of [["w", "width"], ["h", "height"], ["min_w", "min-width"], ["min_h", "min-height"], ["max_w", "max-width"], ["max_h", "max-height"]]) {
     const K = c[M], U = ua(K);
-    if (U === void 0 && M === "width" && Tg(K, c)) {
+    if (U === void 0 && M === "width" && Cg(K, c)) {
       s.self = "stretch", l("approximated", M, K.expr, d(M), "stretched across its parent, inside its margins");
       continue;
     }
-    const z = U === void 0 && /^max-/.test(M) ? Ng(K, c["font-size"]) : void 0;
+    const z = U === void 0 && /^max-/.test(M) ? Tg(K, c["font-size"]) : void 0;
     if (z !== void 0) {
       s[N] = z, l("approximated", M, K.expr, d(M), "the fixed bound of min()");
       continue;
@@ -9355,7 +9355,7 @@ function wd(n, l, o = null) {
       s.max_w = typeof s.max_w == "number" ? Math.min(s.max_w, N) : N;
     }
     xd(n, s, l);
-  } else E === "sticky" ? l("unsupported", "position", "sticky", d("position")) : of(c)?.length !== 0 && (s.position = "relative", xd(n, s, l, !0));
+  } else E === "sticky" ? l("unsupported", "position", "sticky", d("position")) : sf(c)?.length !== 0 && (s.position = "relative", xd(n, s, l, !0));
   c["z-index"] !== "auto" && p("z-index") && l("unsupported", "z-index", c["z-index"], d("z-index"), "paint order is tree order");
   for (const [N, M] of [["overflow_x", "overflow-x"], ["overflow_y", "overflow-y"]]) {
     const K = c[M];
@@ -9364,10 +9364,10 @@ function wd(n, l, o = null) {
   (c.visibility === "hidden" || c.visibility === "collapse") && (s.visibility = "invisible");
   const v = c["background-color"];
   v?.unreadable ? l("unsupported", "background-color", v.unreadable, d("background-color")) : v?.rgba && v.rgba[3] > 0 && (s.bg = Ti(v)), c["background-image"] && c["background-image"] !== "none" && l("unsupported", "background-image", c["background-image"], d("background-image"));
-  const y = j.map((N) => ua(c[`border-${N}-width`]) || 0), S = [];
+  const x = j.map((N) => ua(c[`border-${N}-width`]) || 0), S = [];
   j.forEach((N, M) => {
-    if (!y[M]) return;
-    s[`border_${N[0]}`] = y[M];
+    if (!x[M]) return;
+    s[`border_${N[0]}`] = x[M];
     const K = c[`border-${N}-style`];
     K !== "solid" && l("approximated", `border-${N}-style`, K, d(`border-${N}-style`), "drawn solid");
     const U = Ti(c[`border-${N}-color`]);
@@ -9384,10 +9384,10 @@ function wd(n, l, o = null) {
   }
   return c["text-overflow"] === "ellipsis" && (s.text_ellipsis = !0), c["text-decoration-line"] === "underline" ? s.underline = !0 : c["text-decoration-line"] && c["text-decoration-line"] !== "none" && l("unsupported", "text-decoration-line", c["text-decoration-line"], d("text-decoration-line")), s;
 }
-const jg = { "tabular-nums": "tnum", "proportional-nums": "pnum", "lining-nums": "lnum", "oldstyle-nums": "onum", "slashed-zero": "zero", "diagonal-fractions": "frac", "stacked-fractions": "afrc", ordinal: "ordn" };
-function cf(n) {
+const Mg = { "tabular-nums": "tnum", "proportional-nums": "pnum", "lining-nums": "lnum", "oldstyle-nums": "onum", "slashed-zero": "zero", "diagonal-fractions": "frac", "stacked-fractions": "afrc", ordinal: "ordn" };
+function uf(n) {
   if (!n || n === "normal") return "";
-  const l = String(n).trim().split(/\s+/).map((o) => jg[o]);
+  const l = String(n).trim().split(/\s+/).map((o) => Mg[o]);
   return l.every(Boolean) ? l.join(",") : null;
 }
 function _d(n, l) {
@@ -9395,49 +9395,49 @@ function _d(n, l) {
   return {
     text_color: Ti(o.color),
     text_size: Math.round(o["font-size"] * 1e3) / 1e3,
-    font_features: cf(o["font-variant-numeric"]) ?? "",
+    font_features: uf(o["font-variant-numeric"]) ?? "",
     font_weight: o["font-weight"],
     line_height: c.factor !== void 0 ? { factor: c.factor } : { px: Math.round(Ci(o, l) * 1e3) / 1e3 },
-    font_family: _g(o["font-family"]),
+    font_family: Sg(o["font-family"]),
     italic: o["font-style"] === "italic" || o["font-style"] === "oblique",
     whitespace: o["white-space"] === "nowrap" || o["white-space"] === "pre" ? "nowrap" : "normal",
     text_align: { center: "center", right: "right", end: "right" }[o["text-align"]] ?? "left"
   };
 }
-const Sd = (n, l) => n.factor !== void 0 ? n.factor * l : n.px, uf = (n, l) => JSON.stringify(n) === JSON.stringify(l);
+const Sd = (n, l) => n.factor !== void 0 ? n.factor * l : n.px, df = (n, l) => JSON.stringify(n) === JSON.stringify(l);
 function kd(n, l, o) {
-  const c = {}, s = (f, b) => b.some((x) => !n.inherited.has(x));
+  const c = {}, s = (f, b) => b.some((y) => !n.inherited.has(y));
   for (const [f, b] of [["text_color", ["color"]], ["text_size", ["font-size"]], ["font_weight", ["font-weight"]], ["font_family", ["font-family"]], ["italic", ["font-style"]], ["whitespace", ["white-space"]], ["text_align", ["text-align"]], ["font_features", ["font-variant-numeric"]]])
-    (s(f, b) || !uf(l[f], o[f])) && (c[f] = l[f]);
+    (s(f, b) || !df(l[f], o[f])) && (c[f] = l[f]);
   const d = Sd(l.line_height, l.text_size), p = o.line_height ? Sd(o.line_height, l.text_size) : NaN;
   return (s("line_height", ["line-height"]) || !(Math.abs(d - p) <= 1e-3)) && (c.line_height = l.line_height), c;
 }
-const Mg = (n, l) => ({ ...n, ...l });
+const Ag = (n, l) => ({ ...n, ...l });
 function zd(n, l) {
   const o = {};
   for (const [c, s] of Object.entries(n))
     s && typeof s == "object" && "value" in s ? (o[c] = s.value, s.token && (l[c] = s.token)) : c === "line_height" ? o[c] = s.factor !== void 0 ? Math.round(s.factor * 1e3) / 1e3 : `${s.px}px` : c === "italic" ? s && (o.italic = !0) : o[c] = s;
   return o.italic === !1 && delete o.italic, o;
 }
-function Ag(n, l) {
+function Og(n, l) {
   const o = {};
   for (const c of /* @__PURE__ */ new Set([...Object.keys(n), ...Object.keys(l)])) {
     const s = n[c], d = l[c];
-    uf(s, d) || (o[c] = d === void 0 ? c in ji ? ji[c] : null : d);
+    df(s, d) || (o[c] = d === void 0 ? c in ji ? ji[c] : null : d);
   }
   return o;
 }
 function Ed(n, l) {
   const o = n.values;
   for (const [c, s] of Object.entries(n.sources)) {
-    if (c.startsWith("--") || yg.has(c) || s.startsWith("ua:")) continue;
+    if (c.startsWith("--") || xg.has(c) || s.startsWith("ua:")) continue;
     const d = o[c];
     switch (c) {
       case "letter-spacing":
         d !== "normal" && d?.px !== 0 && l("approximated", c, d?.px !== void 0 ? `${Math.round(d.px * 1e3) / 1e3}px` : d, s, "the run is as wide as with the spacing (room after it), the letters are not spread");
         break;
       case "font-variant-numeric":
-        d !== "normal" && cf(d) === null && l("unsupported", c, d, s);
+        d !== "normal" && uf(d) === null && l("unsupported", c, d, s);
         break;
       case "text-transform":
         d !== "none" && l("approximated", c, d, s, "applied to the text in JS");
@@ -9504,49 +9504,49 @@ function Ed(n, l) {
     }
   }
 }
-function Og(n, l, o, c) {
-  const s = rf(n), d = [], p = (O, N, M, K, U) => d.push([O, N, M, K ?? "(user agent)", s, U]), f = c.cascade.compute(n, l), b = {}, x = wd(f, p, c.viewport), C = x[sf];
+function Rg(n, l, o, c) {
+  const s = of(n), d = [], p = (O, N, M, K, U) => d.push([O, N, M, K ?? "(user agent)", s, U]), f = c.cascade.compute(n, l), b = {}, y = wd(f, p, c.viewport), C = y[cf];
   Ed(f, p);
-  const j = _d(f, c.measure), E = kd(f, j, o), v = zd({ ...x, ...E }, b), y = {}, S = c.cascade.matching(n, "*").filter((O) => O.states.subject.size);
+  const j = _d(f, c.measure), E = kd(f, j, o), v = zd({ ...y, ...E }, b), x = {}, S = c.cascade.matching(n, "*").filter((O) => O.states.subject.size);
   for (const [O, N] of [["hover", ["hover"]], ["focus", ["focus", "focus-visible"]], ["active", ["active", "hover"]]]) {
     if (!S.some((g) => N.some((h) => g.states.subject.has(h)))) continue;
     const M = c.cascade.compute(n, l, new Set(N)), K = {}, U = zd({ ...wd(M, () => {
     }), ...kd(M, _d(M, c.measure), o) }, K);
     O === "focus" && Ed(M, p);
-    const z = Ag(v, U);
+    const z = Og(v, U);
     if (Object.keys(z).length) {
-      y[O] = z;
+      x[O] = z;
       const g = Object.fromEntries(Object.entries(K).filter(([h]) => h in z));
-      Object.keys(g).length && (y[`${O}_tokens`] = g);
+      Object.keys(g).length && (x[`${O}_tokens`] = g);
     }
   }
-  if (c.cascade.sheet.tracks(n, "hover") && (y.track_hover = !0), /tabular/.test(String(f.values["font-variant-numeric"] ?? "")) && (y.tabular = !0), /^(anywhere|break-word)$/.test(String(f.values["overflow-wrap"] ?? "")) && (y.break_anywhere = !0), x.overflow_y === "scroll") {
+  if (c.cascade.sheet.tracks(n, "hover") && (x.track_hover = !0), /tabular/.test(String(f.values["font-variant-numeric"] ?? "")) && (x.tabular = !0), /^(anywhere|break-word)$/.test(String(f.values["overflow-wrap"] ?? "")) && (x.break_anywhere = !0), y.overflow_y === "scroll") {
     const O = Number.parseFloat(f.customs?.["--scrollbar-size"] ?? "");
-    O > 0 && (y.scrollbar = O);
+    O > 0 && (x.scrollbar = O);
   }
-  f.values["pointer-events"] !== "none" && l?.values["pointer-events"] === "none" && (y.blocks_pointer = !0);
-  const w = Object.entries(Sg).filter(([, O]) => O.some((N) => typeof n.props[N] == "function")).map(([O]) => O);
-  return !w.includes("click") && Uo(n) && w.push("click"), w.length && (y.events = w), { computed: f, style: v, tokens: b, extra: y, meta: Ug(n), reports: d, childText: Mg(o, E), where: s, shift: C };
+  f.values["pointer-events"] !== "none" && l?.values["pointer-events"] === "none" && (x.blocks_pointer = !0);
+  const w = Object.entries(kg).filter(([, O]) => O.some((N) => typeof n.props[N] == "function")).map(([O]) => O);
+  return !w.includes("click") && Uo(n) && w.push("click"), w.length && (x.events = w), { computed: f, style: v, tokens: b, extra: x, meta: Bg(n), reports: d, childText: Ag(o, E), where: s, shift: C };
 }
-function df(n, l, o, c, s = "") {
+function ff(n, l, o, c, s = "") {
   const d = `${s}/${n.id}.${n.version}`;
   let p = c.cache.get(n);
-  (!p || p.key !== d) && c.cache.set(n, p = { key: d, part: Og(n, l, o, c) });
-  const { computed: f, tokens: b, extra: x, reports: C, childText: j, where: E } = p.part;
+  (!p || p.key !== d) && c.cache.set(n, p = { key: d, part: Rg(n, l, o, c) });
+  const { computed: f, tokens: b, extra: y, reports: C, childText: j, where: E } = p.part;
   for (const h of C) c.findings.add(...h);
-  const v = (h, D, Q, W, L) => c.findings.add(h, D, Q, W, E, L), y = { ...p.part.style };
-  p.part.shift && Cg(n, y, p.part.shift);
-  const S = { kind: "div", id: n.id, style: y, tokens: b, meta: p.part.meta, ...x };
+  const v = (h, D, Q, W, L) => c.findings.add(h, D, Q, W, E, L), x = { ...p.part.style };
+  p.part.shift && jg(n, x, p.part.shift);
+  const S = { kind: "div", id: n.id, style: x, tokens: b, meta: p.part.meta, ...y };
   Object.defineProperty(S, On, { value: f.values.display }), n.measured && n.ownerDocument?.measureKey && (S.measure = n.ownerDocument.measureKey(n));
   const w = n.tagName;
   if (w === "svg")
-    return S.kind = n.props["data-perch-image"] ? "image" : "svg", S.markup = qg(n), S;
+    return S.kind = n.props["data-perch-image"] ? "image" : "svg", S.markup = Yg(n), S;
   if (w === "input" || w === "textarea" || w === "select") {
     S.kind = "input", S.input_type = w === "input" ? String(n.props.type ?? "text") : w;
     for (const h of ["placeholder", "checked", "disabled"]) n.props[h] !== void 0 && (S[h] = n.props[h]);
-    if (/^(checkbox|radio)$/.test(S.input_type) && (S.checked = n.checked), w !== "select" && (S.value = n.value), w === "input" && zg.test(S.input_type) && (S.field_w = Eg * f.values["font-size"]), w === "textarea" && y.h === void 0) {
+    if (/^(checkbox|radio)$/.test(S.input_type) && (S.checked = n.checked), w !== "select" && (S.value = n.value), w === "input" && Eg.test(S.input_type) && (S.field_w = Ng * f.values["font-size"]), w === "textarea" && x.h === void 0) {
       const h = f.values, D = (L) => L && typeof L == "object" && "px" in L ? L.px : 0, Q = (L) => h[`border-${L}-style`] === "none" ? 0 : D(h[`border-${L}-width`]), W = Number(n.props.rows) > 0 ? Math.floor(Number(n.props.rows)) : 2;
-      y.h = W * Ci(h, c.measure) + D(h["padding-top"]) + D(h["padding-bottom"]) + Q("top") + Q("bottom");
+      x.h = W * Ci(h, c.measure) + D(h["padding-top"]) + D(h["padding-bottom"]) + Q("top") + Q("bottom");
     }
     return S;
   }
@@ -9554,7 +9554,7 @@ function df(n, l, o, c, s = "") {
     S.kind = "image", S.src = n.props.src ?? null;
     for (const [h, D] of [["width", "w"], ["height", "h"]]) {
       const Q = Number(n.props[h]);
-      y[D] === void 0 && n.props[h] != null && Number.isFinite(Q) && (y[D] = Q);
+      x[D] === void 0 && n.props[h] != null && Number.isFinite(Q) && (x[D] = Q);
     }
     return S;
   }
@@ -9574,18 +9574,18 @@ function df(n, l, o, c, s = "") {
       continue;
     }
     if (!(h instanceof It)) continue;
-    const D = df(h, f, j, c, d), Q = D[On];
+    const D = ff(h, f, j, c, d), Q = D[On];
     Q === "inline" || Q === "inline-block" || Q === "inline-flex" ? M = !0 : Q !== "none" && (K = !0), N.push(D);
   }
   const U = N.some((h) => h.kind !== "text"), z = N.length === 1 && N[0].kind !== "text" && /^inline-(block|flex)$/.test(N[0][On]) ? N[0] : null;
-  if (!y.display && z) {
-    const h = c.cache.get(n.childNodes.find((Q) => Q.id === z.id))?.part.computed, D = h ? Ai(f.values, c.measure) - Dg(h.values, c.measure, z) : 0;
-    y.display = "flex", y.flex_direction = "col", y.items = "start", D > 0 && (z.style.mt = Math.round(((z.style.mt ?? 0) + D) * 100) / 100), v("approximated", "display", `${f.values.display} holding one ${z[On]} box`, "(inline formatting)", "a column, the box lowered to the line's baseline");
-  } else if (!y.display && N.length === 1 && (N[0].kind === "svg" || N[0].kind === "image") && N[0][On] === "inline" && typeof N[0].style.h == "number") {
+  if (!x.display && z) {
+    const h = c.cache.get(n.childNodes.find((Q) => Q.id === z.id))?.part.computed, D = h ? Ai(f.values, c.measure) - Ug(h.values, c.measure, z) : 0;
+    x.display = "flex", x.flex_direction = "col", x.items = "start", D > 0 && (z.style.mt = Math.round(((z.style.mt ?? 0) + D) * 100) / 100), v("approximated", "display", `${f.values.display} holding one ${z[On]} box`, "(inline formatting)", "a column, the box lowered to the line's baseline");
+  } else if (!x.display && N.length === 1 && (N[0].kind === "svg" || N[0].kind === "image") && N[0][On] === "inline" && typeof N[0].style.h == "number") {
     const h = N[0], D = Ai(f.values, c.measure), Q = Ci(f.values, c.measure) - D, W = (L) => Math.round(L * 100) / 100;
-    y.display = "flex", y.flex_direction = "col", y.items = "start", D > h.style.h && (h.style.mt = W((h.style.mt ?? 0) + D - h.style.h)), Q > 0 && (h.style.mb = W((h.style.mb ?? 0) + Q)), v("approximated", "display", `${f.values.display} holding one inline image`, "(inline formatting)", "a column, the image on the line's baseline");
-  } else if (!y.display && M && U) {
-    if (y.display = "flex", y.flex_direction = K ? "col" : "row", !K) y.items = "baseline";
+    x.display = "flex", x.flex_direction = "col", x.items = "start", D > h.style.h && (h.style.mt = W((h.style.mt ?? 0) + D - h.style.h)), Q > 0 && (h.style.mb = W((h.style.mb ?? 0) + Q)), v("approximated", "display", `${f.values.display} holding one inline image`, "(inline formatting)", "a column, the image on the line's baseline");
+  } else if (!x.display && M && U) {
+    if (x.display = "flex", x.flex_direction = K ? "col" : "row", !K) x.items = "baseline";
     else for (const h of N) h.kind !== "text" && /^inline-(block|flex)$/.test(h[On]) && !h.style.self && (h.style.self = "start");
     v("approximated", "display", `${f.values.display} with inline content`, "(inline formatting)", K ? "a column of its children" : "a row on the text baseline");
   }
@@ -9599,39 +9599,39 @@ function df(n, l, o, c, s = "") {
     }
   return S.children = N, S;
 }
-function Rg(n, l) {
+function Hg(n, l) {
   if (!l) return null;
-  let c = (l.self ? n : l.closest ? Ld(n, l.closest) : l.find ? pl(n, l.find)[0] : null)?.getAttribute(l.attr) ?? null;
+  let c = (l.self ? n : l.closest ? Wd(n, l.closest) : l.find ? pl(n, l.find)[0] : null)?.getAttribute(l.attr) ?? null;
   return c && l.strip && c.startsWith(l.strip) && (c = c.slice(l.strip.length)), c;
 }
-function Hg(n, l, o) {
+function Dg(n, l, o) {
   const c = l.map((p) => [p, Di(p.selector)]), s = /* @__PURE__ */ new Map(), d = (p) => {
     for (const f of p.children) {
       const b = o.get(f.id);
       if (b)
-        for (const [x, C] of c) {
-          const j = x.textRange ? "range_name" : "name";
-          if (x.textRange && b[j] != null || !C.some((S) => Jd(f, S))) continue;
-          const E = Rg(f, x.key), v = E == null ? s.get(x.name) ?? 0 : 0;
-          E == null && s.set(x.name, v + 1);
-          const y = E != null ? `${x.name}:${E}` : v ? `${x.name}@${v}` : x.name;
-          b[j] == null ? b[j] = y : (b.also ??= []).push(y);
+        for (const [y, C] of c) {
+          const j = y.textRange ? "range_name" : "name";
+          if (y.textRange && b[j] != null || !C.some((S) => Ld(f, S))) continue;
+          const E = Hg(f, y.key), v = E == null ? s.get(y.name) ?? 0 : 0;
+          E == null && s.set(y.name, v + 1);
+          const x = E != null ? `${y.name}:${E}` : v ? `${y.name}@${v}` : y.name;
+          b[j] == null ? b[j] = x : (b.also ??= []).push(x);
         }
       d(f);
     }
   };
   d(n.documentElement);
 }
-const Mi = 0.9521, ff = 0.2256, Ai = (n, l) => (Ci(n, l) - (Mi + ff) * n["font-size"]) / 2 + Mi * n["font-size"];
-function Dg(n, l, o) {
+const Mi = 0.9521, mf = 0.2256, Ai = (n, l) => (Ci(n, l) - (Mi + mf) * n["font-size"]) / 2 + Mi * n["font-size"];
+function Ug(n, l, o) {
   const c = (b) => b && typeof b == "object" && "px" in b ? b.px : 0, s = n["border-top-style"] === "none" ? 0 : c(n["border-top-width"]), d = o?.children ?? [], p = d.length === 1 && (d[0].kind === "svg" || d[0].kind === "image") && typeof d[0].style.h == "number" ? d[0] : null, f = p ? Math.max(Ai(n, l), (p.style.mt ?? 0) + p.style.h) : Ai(n, l);
   return c(n["padding-top"]) + s + f;
 }
-const Nd = (n, l) => l === "uppercase" ? n.toUpperCase() : l === "lowercase" ? n.toLowerCase() : l === "capitalize" ? n.replace(/\b\p{L}/gu, (o) => o.toUpperCase()) : n, mf = /* @__PURE__ */ new Set(["children", "style", "className", "key", "ref", "dangerouslySetInnerHTML"]);
-function Ug(n) {
+const Nd = (n, l) => l === "uppercase" ? n.toUpperCase() : l === "lowercase" ? n.toLowerCase() : l === "capitalize" ? n.replace(/\b\p{L}/gu, (o) => o.toUpperCase()) : n, pf = /* @__PURE__ */ new Set(["children", "style", "className", "key", "ref", "dangerouslySetInnerHTML"]);
+function Bg(n) {
   const l = {};
   for (const [o, c] of Object.entries(n.props)) {
-    if (mf.has(o) || typeof c == "function" || c === void 0 || c === null || typeof c == "object") continue;
+    if (pf.has(o) || typeof c == "function" || c === void 0 || c === null || typeof c == "object") continue;
     const s = o.startsWith("aria-") || o.startsWith("data-");
     if (c === !1 && !s) continue;
     const d = o === "htmlFor" ? "for" : o === "tabIndex" ? "tabindex" : o;
@@ -9639,49 +9639,49 @@ function Ug(n) {
   }
   return { tag: n.tagName, classes: n.classList, attrs: l };
 }
-const Bg = (n) => n === "className" ? "class" : /^(viewBox|preserveAspectRatio|gradientUnits|gradientTransform|patternUnits|xmlns)$/.test(n) ? n : n.replace(/[A-Z]/g, (l) => `-${l.toLowerCase()}`), Td = (n) => String(n).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-function qg(n) {
+const qg = (n) => n === "className" ? "class" : /^(viewBox|preserveAspectRatio|gradientUnits|gradientTransform|patternUnits|xmlns)$/.test(n) ? n : n.replace(/[A-Z]/g, (l) => `-${l.toLowerCase()}`), Td = (n) => String(n).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+function Yg(n) {
   if (n.props["data-perch-markup"]) return String(n.props["data-perch-markup"]);
   const l = (o) => {
     const c = [];
     for (const [d, p] of Object.entries(o.props))
-      mf.has(d) || typeof p == "function" || p === void 0 || p === null || p === !1 || typeof p == "object" || d.startsWith("data-") || d.startsWith("aria-") || d === "focusable" || d === "role" || d === "title" || c.push(`${Bg(d)}="${Td(p === !0 ? "" : p)}"`);
+      pf.has(d) || typeof p == "function" || p === void 0 || p === null || p === !1 || typeof p == "object" || d.startsWith("data-") || d.startsWith("aria-") || d === "focusable" || d === "role" || d === "title" || c.push(`${qg(d)}="${Td(p === !0 ? "" : p)}"`);
     o.tagName === "svg" && !o.props.xmlns && c.unshift('xmlns="http://www.w3.org/2000/svg"');
     const s = o.childNodes.map((d) => d instanceof Ui ? Td(d.data) : l(d)).join("");
     return `<${o.tagName}${c.length ? ` ${c.join(" ")}` : ""}>${s}</${o.tagName}>`;
   };
   return l(n);
 }
-function Yg(n) {
+function Gg(n) {
   const l = n.theme?.() ?? {}, o = {};
-  for (const c of ef) l[c] && (o[c] = l[c]);
+  for (const c of af) l[c] && (o[c] = l[c]);
   return o;
 }
-const Gg = { font_features: "" };
-function Kg(n, l, o, c = {}, s = null) {
-  const d = Yg(l), p = l.viewport?.() ?? { width: 1e3, height: 800 }, f = JSON.stringify([d, p]);
-  (c.look !== f || c.sheet !== o) && Object.assign(c, { look: f, sheet: o, cache: /* @__PURE__ */ new WeakMap(), cascade: new mg(o, { theme: d, viewport: p }), top: null });
-  const { cascade: b, cache: x } = c, C = { cascade: b, cache: x, viewport: p, findings: new kg(), measure: l.lineHeight ? (v) => l.lineHeight(v) : null };
+const Kg = { font_features: "" };
+function Qg(n, l, o, c = {}, s = null) {
+  const d = Gg(l), p = l.viewport?.() ?? { width: 1e3, height: 800 }, f = JSON.stringify([d, p]);
+  (c.look !== f || c.sheet !== o) && Object.assign(c, { look: f, sheet: o, cache: /* @__PURE__ */ new WeakMap(), cascade: new pg(o, { theme: d, viewport: p }), top: null });
+  const { cascade: b, cache: y } = c, C = { cascade: b, cache: y, viewport: p, findings: new zg(), measure: l.lineHeight ? (v) => l.lineHeight(v) : null };
   c.top ??= b.compute(n.body, b.compute(n.documentElement, null));
-  const j = n.body.children.map((v) => df(v, c.top, Gg, C));
+  const j = n.body.children.map((v) => ff(v, c.top, Kg, C));
   if (s?.length) {
-    const v = /* @__PURE__ */ new Map(), y = (S) => {
+    const v = /* @__PURE__ */ new Map(), x = (S) => {
       S.id && v.set(S.id, S);
-      for (const w of S.children ?? []) y(w);
+      for (const w of S.children ?? []) x(w);
     };
-    j.forEach(y), Hg(n, s, v);
+    j.forEach(x), Dg(n, s, v);
   }
   const E = /* @__PURE__ */ new Set();
   for (const v of [n, n.defaultView])
-    for (const { type: y } of v?.listeners ?? []) yd[y] && E.add(yd[y]);
-  return { schema: bg, root: j[0] ?? null, overlays: j.slice(1), document_events: [...E].sort(), unsupported: C.findings.list() };
+    for (const { type: x } of v?.listeners ?? []) yd[x] && E.add(yd[x]);
+  return { schema: vg, root: j[0] ?? null, overlays: j.slice(1), document_events: [...E].sort(), unsupported: C.findings.list() };
 }
-const Qg = { layers: ["properties", "theme", "base", "utilities"], properties: { "--tw-translate-x": { inherits: !1, initial: "0" }, "--tw-translate-y": { inherits: !1, initial: "0" }, "--tw-translate-z": { inherits: !1, initial: "0" }, "--tw-rotate-x": { inherits: !1, initial: null }, "--tw-rotate-y": { inherits: !1, initial: null }, "--tw-rotate-z": { inherits: !1, initial: null }, "--tw-skew-x": { inherits: !1, initial: null }, "--tw-skew-y": { inherits: !1, initial: null }, "--tw-space-y-reverse": { inherits: !1, initial: "0" }, "--tw-border-style": { inherits: !1, initial: "solid" }, "--tw-leading": { inherits: !1, initial: null }, "--tw-font-weight": { inherits: !1, initial: null }, "--tw-tracking": { inherits: !1, initial: null }, "--tw-ordinal": { inherits: !1, initial: null }, "--tw-slashed-zero": { inherits: !1, initial: null }, "--tw-numeric-figure": { inherits: !1, initial: null }, "--tw-numeric-spacing": { inherits: !1, initial: null }, "--tw-numeric-fraction": { inherits: !1, initial: null }, "--tw-shadow": { inherits: !1, initial: "0 0 #0000" }, "--tw-shadow-color": { inherits: !1, initial: null }, "--tw-shadow-alpha": { inherits: !1, initial: "100%" }, "--tw-inset-shadow": { inherits: !1, initial: "0 0 #0000" }, "--tw-inset-shadow-color": { inherits: !1, initial: null }, "--tw-inset-shadow-alpha": { inherits: !1, initial: "100%" }, "--tw-ring-color": { inherits: !1, initial: null }, "--tw-ring-shadow": { inherits: !1, initial: "0 0 #0000" }, "--tw-inset-ring-color": { inherits: !1, initial: null }, "--tw-inset-ring-shadow": { inherits: !1, initial: "0 0 #0000" }, "--tw-ring-inset": { inherits: !1, initial: null }, "--tw-ring-offset-width": { inherits: !1, initial: "0" }, "--tw-ring-offset-color": { inherits: !1, initial: "#fff" }, "--tw-ring-offset-shadow": { inherits: !1, initial: "0 0 #0000" }, "--tw-outline-style": { inherits: !1, initial: "solid" }, "--tw-blur": { inherits: !1, initial: null }, "--tw-brightness": { inherits: !1, initial: null }, "--tw-contrast": { inherits: !1, initial: null }, "--tw-grayscale": { inherits: !1, initial: null }, "--tw-hue-rotate": { inherits: !1, initial: null }, "--tw-invert": { inherits: !1, initial: null }, "--tw-opacity": { inherits: !1, initial: null }, "--tw-saturate": { inherits: !1, initial: null }, "--tw-sepia": { inherits: !1, initial: null }, "--tw-drop-shadow": { inherits: !1, initial: null }, "--tw-drop-shadow-color": { inherits: !1, initial: null }, "--tw-drop-shadow-alpha": { inherits: !1, initial: "100%" }, "--tw-drop-shadow-size": { inherits: !1, initial: null }, "--tw-backdrop-blur": { inherits: !1, initial: null }, "--tw-backdrop-brightness": { inherits: !1, initial: null }, "--tw-backdrop-contrast": { inherits: !1, initial: null }, "--tw-backdrop-grayscale": { inherits: !1, initial: null }, "--tw-backdrop-hue-rotate": { inherits: !1, initial: null }, "--tw-backdrop-invert": { inherits: !1, initial: null }, "--tw-backdrop-opacity": { inherits: !1, initial: null }, "--tw-backdrop-saturate": { inherits: !1, initial: null }, "--tw-backdrop-sepia": { inherits: !1, initial: null }, "--tw-duration": { inherits: !1, initial: null }, "--tw-ease": { inherits: !1, initial: null }, "--tw-content": { inherits: !1, initial: '""' } }, rules: [[":root, :host", null, 2, [["--spacing", ".25rem"], ["--text-xs", ".75rem"], ["--text-xs--line-height", "calc(1 / .75)"], ["--text-sm", ".875rem"], ["--text-sm--line-height", "calc(1.25 / .875)"], ["--font-weight-normal", "400"], ["--font-weight-medium", "500"], ["--font-weight-semibold", "600"], ["--font-weight-bold", "700"], ["--tracking-normal", "0em"], ["--tracking-wide", ".025em"], ["--leading-tight", "1.25"], ["--leading-relaxed", "1.625"], ["--ease-out", "cubic-bezier(0, 0, .2, 1)"], ["--animate-pulse", "pulse 2s cubic-bezier(.4, 0, .6, 1) infinite"], ["--blur-xl", "24px"], ["--default-transition-duration", ".15s"], ["--default-transition-timing-function", "cubic-bezier(.4, 0, .2, 1)"], ["--animate-toast-in", "toast-in .2s cubic-bezier(.22, 1, .36, 1)"], ["--animate-host-pulse", "host-connecting-pulse 1.4s ease-in-out infinite"], ["--animate-drop-zone", "drop-zone-in .14s ease-out, drop-zone-pulse 1.2s ease-in-out .14s infinite"]]], ["::selection", null, 3, [["background", "var(--accent)"], ["color", "var(--panel-bg)"]]], [":where(input, textarea)::placeholder", null, 3, [["color", "var(--subtext-0)"], ["opacity", "1"]]], [":where(button, input, select, textarea)", null, 3, [["border", "0"]]], [':where(button, a[href], select, summary, [role="button"], [role="menuitem"]):focus-visible', null, 3, [["outline", "2px solid var(--accent)"], ["outline-offset", "-2px"]]], ["::-webkit-scrollbar", null, 3, [["width", "var(--scrollbar-size)"], ["height", "var(--scrollbar-size)"]]], ["::-webkit-scrollbar-track", null, 3, [["background", "none"]]], ["::-webkit-scrollbar-corner", null, 3, [["background", "none"]]], ["::-webkit-scrollbar-thumb", null, 3, [["background", "var(--text)"]]], ["::-webkit-scrollbar-thumb", null, 3, [["background", "color-mix(in srgb, var(--text) 20%, transparent)"]]], ["::-webkit-scrollbar-thumb", null, 3, [["border-radius", "var(--scrollbar-size)"]]], ["::-webkit-scrollbar-thumb:hover", null, 3, [["background", "var(--text)"]]], ["::-webkit-scrollbar-thumb:hover", null, 3, [["background", "color-mix(in srgb, var(--text) 40%, transparent)"]]], [".xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider", null, 3, [["border-radius", "var(--scrollbar-size)"]]], [".\\@container, .\\[container-type\\:inline-size\\]", null, 4, [["container-type", "inline-size"]]], [".pointer-events-auto", null, 4, [["pointer-events", "auto"]]], [".pointer-events-none", null, 4, [["pointer-events", "none"]]], [".collapse", null, 4, [["visibility", "collapse"]]], [".invisible", null, 4, [["visibility", "hidden"]]], [".visible", null, 4, [["visibility", "visible"]]], [".sr-only", null, 4, [["clip-path", "inset(50%)"], ["white-space", "nowrap"], ["border-width", "0"], ["width", "1px"], ["height", "1px"], ["margin", "-1px"], ["padding", "0"], ["position", "absolute"], ["overflow", "hidden"]]], [".absolute", null, 4, [["position", "absolute"]]], [".fixed", null, 4, [["position", "fixed"]]], [".relative", null, 4, [["position", "relative"]]], [".static", null, 4, [["position", "static"]]], [".sticky", null, 4, [["position", "sticky"]]], [".inset-0", null, 4, [["inset", "0"]]], [".inset-x-0", null, 4, [["inset-inline", "0"]]], [".inset-x-2", null, 4, [["inset-inline", "calc(var(--spacing) * 2)"]]], [".-top-1", null, 4, [["top", "calc(var(--spacing) * -1)"]]], [".-top-1\\.5", null, 4, [["top", "calc(var(--spacing) * -1.5)"]]], [".top-0", null, 4, [["top", "0"]]], [".top-1", null, 4, [["top", "var(--spacing)"]]], [".top-1\\.5", null, 4, [["top", "calc(var(--spacing) * 1.5)"]]], [".top-1\\/2", null, 4, [["top", "50%"]]], [".top-2", null, 4, [["top", "calc(var(--spacing) * 2)"]]], [".top-4", null, 4, [["top", "calc(var(--spacing) * 4)"]]], [".top-\\[0\\.1rem\\]", null, 4, [["top", ".1rem"]]], [".top-\\[7px\\]", null, 4, [["top", "7px"]]], [".top-\\[max\\(0\\.75rem\\,env\\(safe-area-inset-top\\)\\)\\]", null, 4, [["top", "max(.75rem, env(safe-area-inset-top))"]]], [".top-full", null, 4, [["top", "100%"]]], [".top-px", null, 4, [["top", "1px"]]], [".-right-1", null, 4, [["right", "calc(var(--spacing) * -1)"]]], [".-right-1\\.5", null, 4, [["right", "calc(var(--spacing) * -1.5)"]]], [".right-0", null, 4, [["right", "0"]]], [".right-1", null, 4, [["right", "var(--spacing)"]]], [".right-3", null, 4, [["right", "calc(var(--spacing) * 3)"]]], [".right-4", null, 4, [["right", "calc(var(--spacing) * 4)"]]], [".right-\\[0\\.8rem\\]", null, 4, [["right", ".8rem"]]], [".right-\\[0\\.25rem\\]", null, 4, [["right", ".25rem"]]], [".right-\\[max\\(0\\.75rem\\,env\\(safe-area-inset-right\\)\\)\\]", null, 4, [["right", "max(.75rem, env(safe-area-inset-right))"]]], [".bottom-0", null, 4, [["bottom", "0"]]], [".bottom-2", null, 4, [["bottom", "calc(var(--spacing) * 2)"]]], [".bottom-3", null, 4, [["bottom", "calc(var(--spacing) * 3)"]]], [".bottom-\\[0\\.8rem\\]", null, 4, [["bottom", ".8rem"]]], [".bottom-full", null, 4, [["bottom", "100%"]]], [".-left-8", null, 4, [["left", "calc(var(--spacing) * -8)"]]], [".-left-\\[2px\\]", null, 4, [["left", "-2px"]]], [".left-0", null, 4, [["left", "0"]]], [".left-2", null, 4, [["left", "calc(var(--spacing) * 2)"]]], [".left-\\[0\\.1rem\\]", null, 4, [["left", ".1rem"]]], [".left-\\[max\\(0\\.75rem\\,env\\(safe-area-inset-left\\)\\)\\]", null, 4, [["left", "max(.75rem, env(safe-area-inset-left))"]]], [".left-px", null, 4, [["left", "1px"]]], [".isolate", null, 4, [["isolation", "isolate"]]], [".z-4", null, 4, [["z-index", "4"]]], [".z-5", null, 4, [["z-index", "5"]]], [".z-10", null, 4, [["z-index", "10"]]], [".z-20", null, 4, [["z-index", "20"]]], [".z-30", null, 4, [["z-index", "30"]]], [".z-40", null, 4, [["z-index", "40"]]], [".z-50", null, 4, [["z-index", "50"]]], [".z-\\[2\\]", null, 4, [["z-index", "2"]]], [".z-\\[3\\]", null, 4, [["z-index", "3"]]], [".z-\\[5\\]", null, 4, [["z-index", "5"]]], [".z-\\[1000\\]", null, 4, [["z-index", "1000"]]], [".z-\\[2000\\]", null, 4, [["z-index", "2000"]]], [".z-\\[2100\\]", null, 4, [["z-index", "2100"]]], [".z-\\[2200\\]", null, 4, [["z-index", "2200"]]], [".z-\\[3000\\]", null, 4, [["z-index", "3000"]]], [".z-\\[3100\\]", null, 4, [["z-index", "3100"]]], [".z-\\[4000\\]", null, 4, [["z-index", "4000"]]], [".z-\\[9998\\]", null, 4, [["z-index", "9998"]]], [".z-\\[9999\\]", null, 4, [["z-index", "9999"]]], [".z-\\[10000\\]", null, 4, [["z-index", "10000"]]], [".z-auto", null, 4, [["z-index", "auto"]]], [".order-last", null, 4, [["order", "9999"]]], [".col-\\[1\\/-1\\]", null, 4, [["grid-column", "1 / -1"]]], [".container", null, 4, [["width", "100%"]]], [".container", ["(min-width: 40rem)"], 4, [["max-width", "40rem"]]], [".container", ["(min-width: 48rem)"], 4, [["max-width", "48rem"]]], [".container", ["(min-width: 64rem)"], 4, [["max-width", "64rem"]]], [".container", ["(min-width: 80rem)"], 4, [["max-width", "80rem"]]], [".container", ["(min-width: 96rem)"], 4, [["max-width", "96rem"]]], [".m-0", null, 4, [["margin", "0"]]], [".m-2", null, 4, [["margin", "calc(var(--spacing) * 2)"]]], [".m-\\[0\\.7rem\\]", null, 4, [["margin", ".7rem"]]], [".m-auto", null, 4, [["margin", "auto"]]], [".mx-0", null, 4, [["margin-inline", "0"]]], [".mx-0\\.5", null, 4, [["margin-inline", "calc(var(--spacing) * .5)"]]], [".mx-2", null, 4, [["margin-inline", "calc(var(--spacing) * 2)"]]], [".mx-3", null, 4, [["margin-inline", "calc(var(--spacing) * 3)"]]], [".mx-4", null, 4, [["margin-inline", "calc(var(--spacing) * 4)"]]], [".mx-\\[0\\.3rem\\]", null, 4, [["margin-inline", ".3rem"]]], [".mx-\\[0\\.7rem\\]", null, 4, [["margin-inline", ".7rem"]]], [".mx-\\[0\\.65rem\\]", null, 4, [["margin-inline", ".65rem"]]], [".mx-\\[3px\\]", null, 4, [["margin-inline", "3px"]]], [".mx-\\[11px\\]", null, 4, [["margin-inline", "11px"]]], [".mx-auto", null, 4, [["margin-inline", "auto"]]], [".my-0\\.5", null, 4, [["margin-block", "calc(var(--spacing) * .5)"]]], [".my-1", null, 4, [["margin-block", "var(--spacing)"]]], [".my-2", null, 4, [["margin-block", "calc(var(--spacing) * 2)"]]], [".my-\\[0\\.2rem\\]", null, 4, [["margin-block", ".2rem"]]], [".my-\\[0\\.3rem\\]", null, 4, [["margin-block", ".3rem"]]], [".my-\\[0\\.6rem\\]", null, 4, [["margin-block", ".6rem"]]], [".my-\\[0\\.28rem\\]", null, 4, [["margin-block", ".28rem"]]], [".my-\\[0\\.45rem\\]", null, 4, [["margin-block", ".45rem"]]], [".my-\\[0\\.55rem\\]", null, 4, [["margin-block", ".55rem"]]], [".my-\\[3px\\]", null, 4, [["margin-block", "3px"]]], [".mt-0", null, 4, [["margin-top", "0"]]], [".mt-0\\.5", null, 4, [["margin-top", "calc(var(--spacing) * .5)"]]], [".mt-1", null, 4, [["margin-top", "var(--spacing)"]]], [".mt-1\\.5", null, 4, [["margin-top", "calc(var(--spacing) * 1.5)"]]], [".mt-2", null, 4, [["margin-top", "calc(var(--spacing) * 2)"]]], [".mt-3", null, 4, [["margin-top", "calc(var(--spacing) * 3)"]]], [".mt-4", null, 4, [["margin-top", "calc(var(--spacing) * 4)"]]], [".mt-\\[0\\.1rem\\]", null, 4, [["margin-top", ".1rem"]]], [".mt-\\[0\\.2rem\\]", null, 4, [["margin-top", ".2rem"]]], [".mt-\\[0\\.3rem\\]", null, 4, [["margin-top", ".3rem"]]], [".mt-\\[0\\.4rem\\]", null, 4, [["margin-top", ".4rem"]]], [".mt-\\[0\\.5rem\\]", null, 4, [["margin-top", ".5rem"]]], [".mt-\\[0\\.15rem\\]", null, 4, [["margin-top", ".15rem"]]], [".mt-\\[0\\.18rem\\]", null, 4, [["margin-top", ".18rem"]]], [".mt-\\[0\\.35rem\\]", null, 4, [["margin-top", ".35rem"]]], [".mr-1", null, 4, [["margin-right", "var(--spacing)"]]], [".mr-1\\.5", null, 4, [["margin-right", "calc(var(--spacing) * 1.5)"]]], [".mr-\\[0\\.3rem\\]", null, 4, [["margin-right", ".3rem"]]], [".mr-\\[0\\.7rem\\]", null, 4, [["margin-right", ".7rem"]]], [".mr-auto", null, 4, [["margin-right", "auto"]]], [".mb-0", null, 4, [["margin-bottom", "0"]]], [".mb-0\\.5", null, 4, [["margin-bottom", "calc(var(--spacing) * .5)"]]], [".mb-1", null, 4, [["margin-bottom", "var(--spacing)"]]], [".mb-2", null, 4, [["margin-bottom", "calc(var(--spacing) * 2)"]]], [".mb-3", null, 4, [["margin-bottom", "calc(var(--spacing) * 3)"]]], [".mb-4", null, 4, [["margin-bottom", "calc(var(--spacing) * 4)"]]], [".mb-8", null, 4, [["margin-bottom", "calc(var(--spacing) * 8)"]]], [".mb-\\[0\\.2rem\\]", null, 4, [["margin-bottom", ".2rem"]]], [".mb-\\[0\\.3rem\\]", null, 4, [["margin-bottom", ".3rem"]]], [".mb-\\[0\\.4rem\\]", null, 4, [["margin-bottom", ".4rem"]]], [".mb-\\[0\\.6rem\\]", null, 4, [["margin-bottom", ".6rem"]]], [".mb-\\[0\\.7rem\\]", null, 4, [["margin-bottom", ".7rem"]]], [".mb-\\[0\\.9rem\\]", null, 4, [["margin-bottom", ".9rem"]]], [".mb-\\[0\\.35rem\\]", null, 4, [["margin-bottom", ".35rem"]]], [".mb-\\[0\\.55rem\\]", null, 4, [["margin-bottom", ".55rem"]]], [".mb-\\[1\\.1rem\\]", null, 4, [["margin-bottom", "1.1rem"]]], [".-ml-1", null, 4, [["margin-left", "calc(var(--spacing) * -1)"]]], [".-ml-2", null, 4, [["margin-left", "calc(var(--spacing) * -2)"]]], [".ml-1", null, 4, [["margin-left", "var(--spacing)"]]], [".ml-2", null, 4, [["margin-left", "calc(var(--spacing) * 2)"]]], [".ml-4", null, 4, [["margin-left", "calc(var(--spacing) * 4)"]]], [".ml-\\[0\\.4rem\\]", null, 4, [["margin-left", ".4rem"]]], [".ml-\\[0\\.5rem\\]", null, 4, [["margin-left", ".5rem"]]], [".ml-\\[0\\.9rem\\]", null, 4, [["margin-left", ".9rem"]]], [".ml-\\[0\\.35rem\\]", null, 4, [["margin-left", ".35rem"]]], [".ml-\\[0\\.55rem\\]", null, 4, [["margin-left", ".55rem"]]], [".ml-\\[1\\.45rem\\]", null, 4, [["margin-left", "1.45rem"]]], [".ml-\\[6\\.1rem\\]", null, 4, [["margin-left", "6.1rem"]]], [".ml-auto", null, 4, [["margin-left", "auto"]]], [".box-border", null, 4, [["box-sizing", "border-box"]]], [".\\!hidden", null, 4, [["display", "none", 1]]], [".\\[display\\:-webkit-box\\]", null, 4, [["display", "-webkit-box"]]], [".\\[display\\:var\\(--pane-grip\\,flex\\)\\]", null, 4, [["display", "var(--pane-grip, flex)"]]], [".block", null, 4, [["display", "block"]]], [".contents", null, 4, [["display", "contents"]]], [".flex", null, 4, [["display", "flex"]]], [".grid", null, 4, [["display", "grid"]]], [".hidden", null, 4, [["display", "none"]]], [".inline", null, 4, [["display", "inline"]]], [".inline-block", null, 4, [["display", "inline-block"]]], [".inline-flex", null, 4, [["display", "inline-flex"]]], [".table", null, 4, [["display", "table"]]], [".size-1", null, 4, [["width", "var(--spacing)"], ["height", "var(--spacing)"]]], [".size-1\\.5", null, 4, [["width", "calc(var(--spacing) * 1.5)"], ["height", "calc(var(--spacing) * 1.5)"]]], [".size-2", null, 4, [["width", "calc(var(--spacing) * 2)"], ["height", "calc(var(--spacing) * 2)"]]], [".size-3", null, 4, [["width", "calc(var(--spacing) * 3)"], ["height", "calc(var(--spacing) * 3)"]]], [".size-5", null, 4, [["width", "calc(var(--spacing) * 5)"], ["height", "calc(var(--spacing) * 5)"]]], [".size-6", null, 4, [["width", "calc(var(--spacing) * 6)"], ["height", "calc(var(--spacing) * 6)"]]], [".size-7", null, 4, [["width", "calc(var(--spacing) * 7)"], ["height", "calc(var(--spacing) * 7)"]]], [".size-8", null, 4, [["width", "calc(var(--spacing) * 8)"], ["height", "calc(var(--spacing) * 8)"]]], [".size-11", null, 4, [["width", "calc(var(--spacing) * 11)"], ["height", "calc(var(--spacing) * 11)"]]], [".size-14", null, 4, [["width", "calc(var(--spacing) * 14)"], ["height", "calc(var(--spacing) * 14)"]]], [".size-\\[0\\.6rem\\]", null, 4, [["width", ".6rem"], ["height", ".6rem"]]], [".size-\\[1\\.2rem\\]", null, 4, [["width", "1.2rem"], ["height", "1.2rem"]]], [".size-\\[5px\\]", null, 4, [["width", "5px"], ["height", "5px"]]], [".size-\\[14px\\]", null, 4, [["width", "14px"], ["height", "14px"]]], [".size-\\[calc\\(14px\\*var\\(--zoom\\,1\\)\\)\\]", null, 4, [["width", "calc(14px * var(--zoom, 1))"], ["height", "calc(14px * var(--zoom, 1))"]]], [".size-full", null, 4, [["width", "100%"], ["height", "100%"]]], [".h-1", null, 4, [["height", "var(--spacing)"]]], [".h-1\\.5", null, 4, [["height", "calc(var(--spacing) * 1.5)"]]], [".h-2", null, 4, [["height", "calc(var(--spacing) * 2)"]]], [".h-3", null, 4, [["height", "calc(var(--spacing) * 3)"]]], [".h-4", null, 4, [["height", "calc(var(--spacing) * 4)"]]], [".h-5", null, 4, [["height", "calc(var(--spacing) * 5)"]]], [".h-6", null, 4, [["height", "calc(var(--spacing) * 6)"]]], [".h-7", null, 4, [["height", "calc(var(--spacing) * 7)"]]], [".h-8", null, 4, [["height", "calc(var(--spacing) * 8)"]]], [".h-9", null, 4, [["height", "calc(var(--spacing) * 9)"]]], [".h-11", null, 4, [["height", "calc(var(--spacing) * 11)"]]], [".h-12", null, 4, [["height", "calc(var(--spacing) * 12)"]]], [".h-44", null, 4, [["height", "calc(var(--spacing) * 44)"]]], [".h-\\[1\\.1rem\\]", null, 4, [["height", "1.1rem"]]], [".h-\\[1\\.3rem\\]", null, 4, [["height", "1.3rem"]]], [".h-\\[1\\.4rem\\]", null, 4, [["height", "1.4rem"]]], [".h-\\[1\\.25rem\\]", null, 4, [["height", "1.25rem"]]], [".h-\\[2px\\]", null, 4, [["height", "2px"]]], [".h-\\[14px\\]", null, 4, [["height", "14px"]]], [".h-\\[18px\\]", null, 4, [["height", "18px"]]], [".h-\\[43px\\]", null, 4, [["height", "43px"]]], [".h-\\[calc\\(100\\%-max\\(0\\.5rem\\,env\\(safe-area-inset-top\\)\\)\\)\\]", null, 4, [["height", "calc(100% - max(.5rem, env(safe-area-inset-top)))"]]], [".h-full", null, 4, [["height", "100%"]]], [".h-px", null, 4, [["height", "1px"]]], [".max-h-40", null, 4, [["max-height", "calc(var(--spacing) * 40)"]]], [".max-h-56", null, 4, [["max-height", "calc(var(--spacing) * 56)"]]], [".max-h-72", null, 4, [["max-height", "calc(var(--spacing) * 72)"]]], [".max-h-\\[8rem\\]", null, 4, [["max-height", "8rem"]]], [".max-h-\\[13rem\\]", null, 4, [["max-height", "13rem"]]], [".max-h-\\[30\\%\\]", null, 4, [["max-height", "30%"]]], [".max-h-\\[30vh\\]", null, 4, [["max-height", "30vh"]]], [".max-h-\\[35vh\\]", null, 4, [["max-height", "35vh"]]], [".max-h-\\[40\\%\\]", null, 4, [["max-height", "40%"]]], [".max-h-\\[50dvh\\]", null, 4, [["max-height", "50dvh"]]], [".max-h-\\[60\\%\\]", null, 4, [["max-height", "60%"]]], [".max-h-\\[70\\%\\]", null, 4, [["max-height", "70%"]]], [".max-h-\\[85vh\\]", null, 4, [["max-height", "85vh"]]], [".max-h-\\[90\\%\\]", null, 4, [["max-height", "90%"]]], [".max-h-\\[190px\\]", null, 4, [["max-height", "190px"]]], [".max-h-\\[240px\\]", null, 4, [["max-height", "240px"]]], [".max-h-\\[260px\\]", null, 4, [["max-height", "260px"]]], [".max-h-\\[calc\\(85vh-4rem\\)\\]", null, 4, [["max-height", "calc(85vh - 4rem)"]]], [".max-h-\\[calc\\(100dvh_-_4rem\\)\\]", null, 4, [["max-height", "calc(100dvh - 4rem)"]]], [".max-h-\\[min\\(420px\\,calc\\(100dvh_-_16vh_-_2rem\\)\\)\\]", null, 4, [["max-height", "min(420px, 100dvh - 16vh - 2rem)"]]], [".max-h-\\[min\\(480px\\,calc\\(100dvh_-_16vh_-_2rem\\)\\)\\]", null, 4, [["max-height", "min(480px, 100dvh - 16vh - 2rem)"]]], [".max-h-full", null, 4, [["max-height", "100%"]]], [".min-h-0", null, 4, [["min-height", "0"]]], [".min-h-6", null, 4, [["min-height", "calc(var(--spacing) * 6)"]]], [".min-h-7", null, 4, [["min-height", "calc(var(--spacing) * 7)"]]], [".min-h-8", null, 4, [["min-height", "calc(var(--spacing) * 8)"]]], [".min-h-9", null, 4, [["min-height", "calc(var(--spacing) * 9)"]]], [".min-h-10", null, 4, [["min-height", "calc(var(--spacing) * 10)"]]], [".min-h-11", null, 4, [["min-height", "calc(var(--spacing) * 11)"]]], [".min-h-20", null, 4, [["min-height", "calc(var(--spacing) * 20)"]]], [".min-h-40", null, 4, [["min-height", "calc(var(--spacing) * 40)"]]], [".min-h-\\[1\\.5em\\]", null, 4, [["min-height", "1.5em"]]], [".min-h-\\[1\\.8rem\\]", null, 4, [["min-height", "1.8rem"]]], [".min-h-\\[2\\.5rem\\]", null, 4, [["min-height", "2.5rem"]]], [".min-h-\\[3\\.2rem\\]", null, 4, [["min-height", "3.2rem"]]], [".min-h-\\[3\\.25rem\\]", null, 4, [["min-height", "3.25rem"]]], [".min-h-\\[6rem\\]", null, 4, [["min-height", "6rem"]]], [".min-h-\\[8rem\\]", null, 4, [["min-height", "8rem"]]], [".min-h-\\[10rem\\]", null, 4, [["min-height", "10rem"]]], [".min-h-\\[12rem\\]", null, 4, [["min-height", "12rem"]]], [".min-h-\\[13rem\\]", null, 4, [["min-height", "13rem"]]], [".min-h-\\[32px\\]", null, 4, [["min-height", "32px"]]], [".min-h-\\[44px\\]", null, 4, [["min-height", "44px"]]], [".min-h-\\[60px\\]", null, 4, [["min-height", "60px"]]], [".min-h-\\[100dvh\\]", null, 4, [["min-height", "100dvh"]]], [".min-h-\\[calc\\(22px\\*var\\(--zoom\\,1\\)\\)\\]", null, 4, [["min-height", "calc(22px * var(--zoom, 1))"]]], [".min-h-full", null, 4, [["min-height", "100%"]]], [".w-2", null, 4, [["width", "calc(var(--spacing) * 2)"]]], [".w-3", null, 4, [["width", "calc(var(--spacing) * 3)"]]], [".w-4", null, 4, [["width", "calc(var(--spacing) * 4)"]]], [".w-5", null, 4, [["width", "calc(var(--spacing) * 5)"]]], [".w-7", null, 4, [["width", "calc(var(--spacing) * 7)"]]], [".w-8", null, 4, [["width", "calc(var(--spacing) * 8)"]]], [".w-9", null, 4, [["width", "calc(var(--spacing) * 9)"]]], [".w-10", null, 4, [["width", "calc(var(--spacing) * 10)"]]], [".w-20", null, 4, [["width", "calc(var(--spacing) * 20)"]]], [".w-40", null, 4, [["width", "calc(var(--spacing) * 40)"]]], [".w-44", null, 4, [["width", "calc(var(--spacing) * 44)"]]], [".w-\\[1\\.1rem\\]", null, 4, [["width", "1.1rem"]]], [".w-\\[1\\.4rem\\]", null, 4, [["width", "1.4rem"]]], [".w-\\[1\\.6rem\\]", null, 4, [["width", "1.6rem"]]], [".w-\\[1\\.25rem\\]", null, 4, [["width", "1.25rem"]]], [".w-\\[2\\.4rem\\]", null, 4, [["width", "2.4rem"]]], [".w-\\[2\\.25rem\\]", null, 4, [["width", "2.25rem"]]], [".w-\\[6rem\\]", null, 4, [["width", "6rem"]]], [".w-\\[7rem\\]", null, 4, [["width", "7rem"]]], [".w-\\[11rem\\]", null, 4, [["width", "11rem"]]], [".w-\\[15rem\\]", null, 4, [["width", "15rem"]]], [".w-\\[16rem\\]", null, 4, [["width", "16rem"]]], [".w-\\[18px\\]", null, 4, [["width", "18px"]]], [".w-\\[100cqi\\]", null, 4, [["width", "100cqi"]]], [".w-\\[calc\\(\\(100\\%-0\\.875rem\\)\\/8\\)\\]", null, 4, [["width", "calc(12.5% - .109375rem)"]]], [".w-\\[calc\\(100\\%_-_0\\.6rem\\)\\]", null, 4, [["width", "calc(100% - .6rem)"]]], [".w-\\[calc\\(100\\%_-_1rem\\)\\]", null, 4, [["width", "calc(100% - 1rem)"]]], [".w-\\[min\\(22rem\\,calc\\(100vw-3rem\\)\\)\\]", null, 4, [["width", "min(22rem, 100vw - 3rem)"]]], [".w-\\[min\\(26rem\\,100\\%\\)\\]", null, 4, [["width", "min(26rem, 100%)"]]], [".w-\\[min\\(28rem\\,calc\\(100vw-2\\.5rem\\)\\)\\]", null, 4, [["width", "min(28rem, 100vw - 2.5rem)"]]], [".w-\\[min\\(30rem\\,92vw\\)\\]", null, 4, [["width", "min(30rem, 92vw)"]]], [".w-\\[min\\(32rem\\,100\\%\\)\\]", null, 4, [["width", "min(32rem, 100%)"]]], [".w-\\[min\\(340px\\,calc\\(100vw-16px\\)\\)\\]", null, 4, [["width", "min(340px, 100vw - 16px)"]]], [".w-\\[min\\(360px\\,calc\\(100vw_-_2rem\\)\\)\\]", null, 4, [["width", "min(360px, 100vw - 2rem)"]]], [".w-\\[min\\(420px\\,calc\\(100vw_-_16px\\)\\)\\]", null, 4, [["width", "min(420px, 100vw - 16px)"]]], [".w-\\[min\\(480px\\,calc\\(100vw_-_2rem\\)\\)\\]", null, 4, [["width", "min(480px, 100vw - 2rem)"]]], [".w-\\[min\\(560px\\,calc\\(100vw_-_2rem\\)\\)\\]", null, 4, [["width", "min(560px, 100vw - 2rem)"]]], [".w-\\[var\\(--sidebar-width\\,240px\\)\\]", null, 4, [["width", "var(--sidebar-width, 240px)"]]], [".w-\\[var\\(--tools-width\\)\\]", null, 4, [["width", "var(--tools-width)"]]], [".w-auto", null, 4, [["width", "auto"]]], [".w-full", null, 4, [["width", "100%"]]], [".w-px", null, 4, [["width", "1px"]]], [".max-w-24", null, 4, [["max-width", "calc(var(--spacing) * 24)"]]], [".max-w-32", null, 4, [["max-width", "calc(var(--spacing) * 32)"]]], [".max-w-\\[9rem\\]", null, 4, [["max-width", "9rem"]]], [".max-w-\\[10rem\\]", null, 4, [["max-width", "10rem"]]], [".max-w-\\[14rem\\]", null, 4, [["max-width", "14rem"]]], [".max-w-\\[16rem\\]", null, 4, [["max-width", "16rem"]]], [".max-w-\\[24rem\\]", null, 4, [["max-width", "24rem"]]], [".max-w-\\[25\\%\\]", null, 4, [["max-width", "25%"]]], [".max-w-\\[26rem\\]", null, 4, [["max-width", "26rem"]]], [".max-w-\\[28rem\\]", null, 4, [["max-width", "28rem"]]], [".max-w-\\[35\\%\\]", null, 4, [["max-width", "35%"]]], [".max-w-\\[38\\%\\]", null, 4, [["max-width", "38%"]]], [".max-w-\\[45\\%\\]", null, 4, [["max-width", "45%"]]], [".max-w-\\[46rem\\]", null, 4, [["max-width", "46rem"]]], [".max-w-\\[55\\%\\]", null, 4, [["max-width", "55%"]]], [".max-w-\\[56rem\\]", null, 4, [["max-width", "56rem"]]], [".max-w-\\[85\\%\\]", null, 4, [["max-width", "85%"]]], [".max-w-\\[140px\\]", null, 4, [["max-width", "140px"]]], [".max-w-\\[320px\\]", null, 4, [["max-width", "320px"]]], [".max-w-\\[min\\(22rem\\,calc\\(100\\%-1\\.5rem\\)\\)\\]", null, 4, [["max-width", "min(22rem, 100% - 1.5rem)"]]], [".max-w-\\[min\\(30rem\\,calc\\(100\\%-1\\.6rem\\)\\)\\]", null, 4, [["max-width", "min(30rem, 100% - 1.6rem)"]]], [".max-w-\\[min\\(34rem\\,calc\\(100\\%-1\\.5rem\\)\\)\\]", null, 4, [["max-width", "min(34rem, 100% - 1.5rem)"]]], [".max-w-\\[min\\(320px\\,calc\\(100vw_-_24px\\)\\)\\]", null, 4, [["max-width", "min(320px, 100vw - 24px)"]]], [".max-w-full", null, 4, [["max-width", "100%"]]], [".max-w-none", null, 4, [["max-width", "none"]]], [".min-w-0", null, 4, [["min-width", "0"]]], [".min-w-6", null, 4, [["min-width", "calc(var(--spacing) * 6)"]]], [".min-w-8", null, 4, [["min-width", "calc(var(--spacing) * 8)"]]], [".min-w-12", null, 4, [["min-width", "calc(var(--spacing) * 12)"]]], [".min-w-24", null, 4, [["min-width", "calc(var(--spacing) * 24)"]]], [".min-w-36", null, 4, [["min-width", "calc(var(--spacing) * 36)"]]], [".min-w-56", null, 4, [["min-width", "calc(var(--spacing) * 56)"]]], [".min-w-\\[5\\.5rem\\]", null, 4, [["min-width", "5.5rem"]]], [".min-w-\\[7rem\\]", null, 4, [["min-width", "7rem"]]], [".min-w-\\[12rem\\]", null, 4, [["min-width", "12rem"]]], [".min-w-\\[14px\\]", null, 4, [["min-width", "14px"]]], [".min-w-\\[200px\\]", null, 4, [["min-width", "200px"]]], [".min-w-fit", null, 4, [["min-width", "fit-content"]]], [".min-w-max", null, 4, [["min-width", "max-content"]]], [".flex-1", null, 4, [["flex", "1"]]], [".flex-\\[0_0_5rem\\]", null, 4, [["flex", "0 0 5rem"]]], [".flex-\\[0_0_8px\\]", null, 4, [["flex", "0 0 8px"]]], [".flex-\\[0_1_40\\%\\]", null, 4, [["flex", "0 40%"]]], [".flex-\\[1_1_100\\%\\]", null, 4, [["flex", "100%"]]], [".flex-\\[2\\]", null, 4, [["flex", "2"]]], [".flex-none", null, 4, [["flex", "none"]]], [".shrink", null, 4, [["flex-shrink", "1"]]], [".shrink-0", null, 4, [["flex-shrink", "0"]]], [".shrink-\\[0\\.001\\]", null, 4, [["flex-shrink", ".001"]]], [".shrink-\\[2\\]", null, 4, [["flex-shrink", "2"]]], [".shrink-\\[3\\]", null, 4, [["flex-shrink", "3"]]], [".grow", null, 4, [["flex-grow", "1"]]], [".basis-0", null, 4, [["flex-basis", "0"]]], [".basis-\\[14rem\\]", null, 4, [["flex-basis", "14rem"]]], [".-translate-y-1\\/2", null, 4, [["--tw-translate-y", "calc(calc(1 / 2 * 100%) * -1)"], ["translate", "var(--tw-translate-x) var(--tw-translate-y)"]]], [".\\[transform\\:translateY\\(-50\\%\\)\\]", null, 4, [["transform", "translateY(-50%)"]]], [".transform", null, 4, [["transform", "var(--tw-rotate-x, ) var(--tw-rotate-y, ) var(--tw-rotate-z, ) var(--tw-skew-x, ) var(--tw-skew-y, )"]]], [".animate-drop-zone", null, 4, [["animation", "var(--animate-drop-zone)"]]], [".animate-host-pulse", null, 4, [["animation", "var(--animate-host-pulse)"]]], [".animate-pulse", null, 4, [["animation", "var(--animate-pulse)"]]], [".animate-toast-in", null, 4, [["animation", "var(--animate-toast-in)"]]], [".cursor-col-resize", null, 4, [["cursor", "col-resize"]]], [".cursor-default", null, 4, [["cursor", "default"]]], [".cursor-grab", null, 4, [["cursor", "grab"]]], [".cursor-grabbing", null, 4, [["cursor", "grabbing"]]], [".cursor-pointer", null, 4, [["cursor", "pointer"]]], [".cursor-row-resize", null, 4, [["cursor", "row-resize"]]], [".touch-none", null, 4, [["touch-action", "none"]]], [".resize", null, 4, [["resize", "both"]]], [".resize-none", null, 4, [["resize", "none"]]], [".resize-y", null, 4, [["resize", "vertical"]]], [".\\[scrollbar-width\\:none\\]", null, 4, [["scrollbar-width", "none"]]], [".list-disc", null, 4, [["list-style-type", "disc"]]], [".list-none", null, 4, [["list-style-type", "none"]]], [".appearance-none", null, 4, [["appearance", "none"]]], [".grid-cols-8", null, 4, [["grid-template-columns", "repeat(8, minmax(0, 1fr))"]]], [".grid-cols-\\[1fr_auto_1fr\\]", null, 4, [["grid-template-columns", "1fr auto 1fr"]]], [".grid-cols-\\[2\\.5rem_2\\.5rem_0\\.9rem_minmax\\(0\\,1fr\\)\\]", null, 4, [["grid-template-columns", "2.5rem 2.5rem .9rem minmax(0, 1fr)"]]], [".grid-cols-\\[auto_minmax\\(0\\,1fr\\)\\]", null, 4, [["grid-template-columns", "auto minmax(0, 1fr)"]]], [".grid-cols-\\[minmax\\(4rem\\,10rem\\)_1fr_auto\\]", null, 4, [["grid-template-columns", "minmax(4rem, 10rem) 1fr auto"]]], [".grid-cols-\\[repeat\\(2\\,minmax\\(0\\,1fr\\)\\)\\]", null, 4, [["grid-template-columns", "repeat(2, minmax(0, 1fr))"]]], [".grid-cols-\\[repeat\\(auto-fit\\,minmax\\(8rem\\,1fr\\)\\)\\]", null, 4, [["grid-template-columns", "repeat(auto-fit, minmax(8rem, 1fr))"]]], [".flex-col", null, 4, [["flex-direction", "column"]]], [".flex-row", null, 4, [["flex-direction", "row"]]], [".flex-wrap", null, 4, [["flex-wrap", "wrap"]]], [".place-items-center", null, 4, [["place-items", "center"]]], [".content-center", null, 4, [["align-content", "center"]]], [".items-baseline", null, 4, [["align-items", "baseline"]]], [".items-center", null, 4, [["align-items", "center"]]], [".items-end", null, 4, [["align-items", "flex-end"]]], [".items-start", null, 4, [["align-items", "flex-start"]]], [".items-stretch", null, 4, [["align-items", "stretch"]]], [".justify-between", null, 4, [["justify-content", "space-between"]]], [".justify-center", null, 4, [["justify-content", "center"]]], [".justify-end", null, 4, [["justify-content", "flex-end"]]], [".justify-start", null, 4, [["justify-content", "flex-start"]]], [".justify-items-center", null, 4, [["justify-items", "center"]]], [".justify-items-start", null, 4, [["justify-items", "start"]]], [".gap-0", null, 4, [["gap", "0"]]], [".gap-0\\.5", null, 4, [["gap", "calc(var(--spacing) * .5)"]]], [".gap-1", null, 4, [["gap", "var(--spacing)"]]], [".gap-1\\.5", null, 4, [["gap", "calc(var(--spacing) * 1.5)"]]], [".gap-2", null, 4, [["gap", "calc(var(--spacing) * 2)"]]], [".gap-3", null, 4, [["gap", "calc(var(--spacing) * 3)"]]], [".gap-4", null, 4, [["gap", "calc(var(--spacing) * 4)"]]], [".gap-6", null, 4, [["gap", "calc(var(--spacing) * 6)"]]], [".gap-\\[0\\.1rem\\]", null, 4, [["gap", ".1rem"]]], [".gap-\\[0\\.3rem\\]", null, 4, [["gap", ".3rem"]]], [".gap-\\[0\\.4rem\\]", null, 4, [["gap", ".4rem"]]], [".gap-\\[0\\.05rem\\]", null, 4, [["gap", ".05rem"]]], [".gap-\\[0\\.6rem\\]", null, 4, [["gap", ".6rem"]]], [".gap-\\[0\\.8rem\\]", null, 4, [["gap", ".8rem"]]], [".gap-\\[0\\.16rem\\]", null, 4, [["gap", ".16rem"]]], [".gap-\\[0\\.32rem\\]", null, 4, [["gap", ".32rem"]]], [".gap-\\[0\\.35rem\\]", null, 4, [["gap", ".35rem"]]], [".gap-\\[0\\.45rem\\]", null, 4, [["gap", ".45rem"]]], [".gap-\\[0\\.55rem\\]", null, 4, [["gap", ".55rem"]]], [".gap-\\[0\\.65rem\\]", null, 4, [["gap", ".65rem"]]], [".gap-\\[0\\.85rem\\]", null, 4, [["gap", ".85rem"]]], [".gap-\\[1px\\]", null, 4, [["gap", "1px"]]], [".gap-\\[2px\\]", null, 4, [["gap", "2px"]]], [".gap-\\[3px\\]", null, 4, [["gap", "3px"]]], [".gap-\\[7px\\]", null, 4, [["gap", "7px"]]], [".gap-\\[13px\\]", null, 4, [["gap", "13px"]]], [":where(.space-y-0\\.5 > :not(:last-child))", null, 4, [["--tw-space-y-reverse", "0"], ["margin-block-start", "calc(calc(var(--spacing) * .5) * var(--tw-space-y-reverse))"], ["margin-block-end", "calc(calc(var(--spacing) * .5) * calc(1 - var(--tw-space-y-reverse)))"]]], [".gap-x-3", null, 4, [["column-gap", "calc(var(--spacing) * 3)"]]], [".gap-x-4", null, 4, [["column-gap", "calc(var(--spacing) * 4)"]]], [".gap-x-\\[0\\.7rem\\]", null, 4, [["column-gap", ".7rem"]]], [".gap-x-\\[0\\.9rem\\]", null, 4, [["column-gap", ".9rem"]]], [".gap-y-1", null, 4, [["row-gap", "var(--spacing)"]]], [".gap-y-\\[0\\.3rem\\]", null, 4, [["row-gap", ".3rem"]]], [".self-center", null, 4, [["align-self", "center"]]], [".self-end", null, 4, [["align-self", "flex-end"]]], [".self-start", null, 4, [["align-self", "flex-start"]]], [".self-stretch", null, 4, [["align-self", "stretch"]]], [".justify-self-start", null, 4, [["justify-self", "flex-start"]]], [".truncate", null, 4, [["text-overflow", "ellipsis"], ["white-space", "nowrap"], ["overflow", "hidden"]]], [".overflow-auto", null, 4, [["overflow", "auto"]]], [".overflow-hidden", null, 4, [["overflow", "hidden"]]], [".overflow-visible", null, 4, [["overflow", "visible"]]], [".overflow-x-auto", null, 4, [["overflow-x", "auto"]]], [".overflow-y-auto", null, 4, [["overflow-y", "auto"]]], [".overscroll-contain", null, 4, [["overscroll-behavior", "contain"]]], [".rounded, .rounded-\\[0\\.25rem\\]", null, 4, [["border-radius", ".25rem"]]], [".rounded-\\[1\\.5rem\\]", null, 4, [["border-radius", "1.5rem"]]], [".rounded-\\[2px\\]", null, 4, [["border-radius", "2px"]]], [".rounded-\\[3px\\]", null, 4, [["border-radius", "3px"]]], [".rounded-\\[12px\\]", null, 4, [["border-radius", "12px"]]], [".rounded-\\[50\\%\\]", null, 4, [["border-radius", "50%"]]], [".rounded-\\[999px\\]", null, 4, [["border-radius", "999px"]]], [".rounded-\\[calc\\(var\\(--radius\\)\\*2\\)\\]", null, 4, [["border-radius", "calc(var(--radius) * 2)"]]], [".rounded-\\[var\\(--card-radius\\,8px\\)\\]", null, 4, [["border-radius", "var(--card-radius, 8px)"]]], [".rounded-\\[var\\(--card-radius\\,12px\\)\\]", null, 4, [["border-radius", "var(--card-radius, 12px)"]]], [".rounded-full", null, 4, [["border-radius", "3.40282e38px"]]], [".rounded-none", null, 4, [["border-radius", "0"]]], [".rounded-soft", null, 4, [["border-radius", "var(--radius-pane)"]]], [".rounded-ui", null, 4, [["border-radius", "var(--radius)"]]], [".rounded-t-\\[12px\\]", null, 4, [["border-top-left-radius", "12px"], ["border-top-right-radius", "12px"]]], [".rounded-t-none", null, 4, [["border-top-left-radius", "0"], ["border-top-right-radius", "0"]]], [".border", null, 4, [["border-style", "var(--tw-border-style)"], ["border-width", "1px"]]], [".border-0", null, 4, [["border-style", "var(--tw-border-style)"], ["border-width", "0"]]], [".border-\\[1\\.5px\\]", null, 4, [["border-style", "var(--tw-border-style)"], ["border-width", "1.5px"]]], [".border-b", null, 4, [["border-bottom-style", "var(--tw-border-style)"], ["border-bottom-width", "1px"]]], [".border-l", null, 4, [["border-left-style", "var(--tw-border-style)"], ["border-left-width", "1px"]]], [".border-l-\\[3px\\]", null, 4, [["border-left-style", "var(--tw-border-style)"], ["border-left-width", "3px"]]], [".border-solid", null, 4, [["--tw-border-style", "solid"], ["border-style", "solid"]]], [".border-accent", null, 4, [["border-color", "var(--accent)"]]], [".border-overlay-0", null, 4, [["border-color", "var(--overlay-0)"]]], [".border-overlay-1", null, 4, [["border-color", "var(--overlay-1)"]]], [".border-red", null, 4, [["border-color", "var(--red)"]]], [".border-subtext-0", null, 4, [["border-color", "var(--subtext-0)"]]], [".border-surface-1", null, 4, [["border-color", "var(--surface-1)"]]], [".border-teal", null, 4, [["border-color", "var(--teal)"]]], [".border-yellow", null, 4, [["border-color", "var(--yellow)"]]], [".border-l-accent", null, 4, [["border-left-color", "var(--accent)"]]], [".border-l-green", null, 4, [["border-left-color", "var(--green)"]]], [".border-l-red", null, 4, [["border-left-color", "var(--red)"]]], [".border-l-yellow", null, 4, [["border-left-color", "var(--yellow)"]]], [".bg-\\[\\#161616\\]", null, 4, [["background-color", "#161616"]]], [".bg-\\[\\#fff\\]", null, 4, [["background-color", "#fff"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_8\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "var(--accent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_8\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--accent) 8%,var(--panel-bg))"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_12\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--accent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_12\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--accent) 12%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--accent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--accent) 15%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--blue\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--blue)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--blue\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--blue) 15%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--green\\)_9\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--green)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--green\\)_9\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--green) 9%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--red\\)_7\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--red)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--red\\)_7\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--red) 7%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--red\\)_9\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--red)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--red\\)_9\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--red) 9%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--surface-1\\)_42\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--surface-1\\)_42\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--surface-1) 42%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--surface-1\\)_70\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--surface-1\\)_70\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--surface-1) 70%,var(--panel-bg))"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--text\\)_10\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "var(--text)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--text\\)_10\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--text) 10%,var(--panel-bg))"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--yellow\\)_8\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--yellow)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--yellow\\)_8\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--yellow) 8%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--yellow\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--yellow)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--yellow\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--yellow) 15%,transparent)"]]], [".bg-\\[rgba\\(0\\,0\\,0\\,0\\.5\\)\\]", null, 4, [["background-color", "#00000080"]]], [".bg-\\[rgba\\(0\\,0\\,0\\,0\\.7\\)\\]", null, 4, [["background-color", "#000000b3"]]], [".bg-\\[rgba\\(0\\,0\\,0\\,0\\.55\\)\\]", null, 4, [["background-color", "#0000008c"]]], [".bg-\\[rgba\\(0\\,0\\,0\\,0\\.62\\)\\]", null, 4, [["background-color", "#0000009e"]]], [".bg-\\[var\\(--accent\\)\\]", null, 4, [["background-color", "var(--accent)"]]], [".bg-\\[var\\(--backdrop\\)\\]", null, 4, [["background-color", "var(--backdrop)"]]], [".bg-\\[var\\(--bg\\)\\]", null, 4, [["background-color", "var(--bg)"]]], [".bg-\\[var\\(--card-bg\\)\\]", null, 4, [["background-color", "var(--card-bg)"]]], [".bg-\\[var\\(--picker-bg\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "var(--picker-bg, var(--panel-bg))"]]], [".bg-\\[var\\(--surface-1\\)\\]", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-\\[var\\(--workspace-tools-bg\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "var(--workspace-tools-bg, var(--panel-bg))"]]], [".bg-accent, .bg-accent\\/10", null, 4, [["background-color", "var(--accent)"]]], [".bg-accent\\/10", null, 4, [["background-color", "color-mix(in oklab, var(--accent) 10%, transparent)"]]], [".bg-accent\\/35", null, 4, [["background-color", "var(--accent)"]]], [".bg-accent\\/35", null, 4, [["background-color", "color-mix(in oklab, var(--accent) 35%, transparent)"]]], [".bg-fg", null, 4, [["background-color", "var(--text)"]]], [".bg-green, .bg-green\\/15", null, 4, [["background-color", "var(--green)"]]], [".bg-green\\/15", null, 4, [["background-color", "color-mix(in oklab, var(--green) 15%, transparent)"]]], [".bg-overlay-0", null, 4, [["background-color", "var(--overlay-0)"]]], [".bg-overlay-1", null, 4, [["background-color", "var(--overlay-1)"]]], [".bg-panel-bg", null, 4, [["background-color", "var(--panel-bg)"]]], [".bg-red, .bg-red\\/15", null, 4, [["background-color", "var(--red)"]]], [".bg-red\\/15", null, 4, [["background-color", "color-mix(in oklab, var(--red) 15%, transparent)"]]], [".bg-subtext-0", null, 4, [["background-color", "var(--subtext-0)"]]], [".bg-surface-0", null, 4, [["background-color", "var(--surface-0)"]]], [".bg-surface-1, .bg-surface-1\\/30", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-surface-1\\/30", null, 4, [["background-color", "color-mix(in oklab, var(--surface-1) 30%, transparent)"]]], [".bg-surface-1\\/60", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-surface-1\\/60", null, 4, [["background-color", "color-mix(in oklab, var(--surface-1) 60%, transparent)"]]], [".bg-surface-1\\/70", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-surface-1\\/70", null, 4, [["background-color", "color-mix(in oklab, var(--surface-1) 70%, transparent)"]]], [".bg-transparent", null, 4, [["background-color", "#0000"]]], [".bg-yellow", null, 4, [["background-color", "var(--yellow)"]]], [".object-contain", null, 4, [["object-fit", "contain"]]], [".object-cover", null, 4, [["object-fit", "cover"]]], [".p-0", null, 4, [["padding", "0"]]], [".p-0\\.5", null, 4, [["padding", "calc(var(--spacing) * .5)"]]], [".p-1", null, 4, [["padding", "var(--spacing)"]]], [".p-2", null, 4, [["padding", "calc(var(--spacing) * 2)"]]], [".p-3", null, 4, [["padding", "calc(var(--spacing) * 3)"]]], [".p-4", null, 4, [["padding", "calc(var(--spacing) * 4)"]]], [".p-5", null, 4, [["padding", "calc(var(--spacing) * 5)"]]], [".p-6", null, 4, [["padding", "calc(var(--spacing) * 6)"]]], [".p-\\[0\\.2rem\\]", null, 4, [["padding", ".2rem"]]], [".p-\\[0\\.4rem\\]", null, 4, [["padding", ".4rem"]]], [".p-\\[0\\.5rem\\]", null, 4, [["padding", ".5rem"]]], [".p-\\[0\\.9rem\\]", null, 4, [["padding", ".9rem"]]], [".p-\\[0\\.45rem\\]", null, 4, [["padding", ".45rem"]]], [".p-\\[0\\.55rem\\]", null, 4, [["padding", ".55rem"]]], [".p-\\[0\\.65rem\\]", null, 4, [["padding", ".65rem"]]], [".p-\\[2px\\]", null, 4, [["padding", "2px"]]], [".px-0", null, 4, [["padding-inline", "0"]]], [".px-1", null, 4, [["padding-inline", "var(--spacing)"]]], [".px-1\\.5", null, 4, [["padding-inline", "calc(var(--spacing) * 1.5)"]]], [".px-2", null, 4, [["padding-inline", "calc(var(--spacing) * 2)"]]], [".px-3", null, 4, [["padding-inline", "calc(var(--spacing) * 3)"]]], [".px-3\\.5", null, 4, [["padding-inline", "calc(var(--spacing) * 3.5)"]]], [".px-4", null, 4, [["padding-inline", "calc(var(--spacing) * 4)"]]], [".px-8", null, 4, [["padding-inline", "calc(var(--spacing) * 8)"]]], [".px-\\[0\\.2rem\\]", null, 4, [["padding-inline", ".2rem"]]], [".px-\\[0\\.3rem\\]", null, 4, [["padding-inline", ".3rem"]]], [".px-\\[0\\.4rem\\]", null, 4, [["padding-inline", ".4rem"]]], [".px-\\[0\\.5rem\\]", null, 4, [["padding-inline", ".5rem"]]], [".px-\\[0\\.6rem\\]", null, 4, [["padding-inline", ".6rem"]]], [".px-\\[0\\.7rem\\]", null, 4, [["padding-inline", ".7rem"]]], [".px-\\[0\\.8rem\\]", null, 4, [["padding-inline", ".8rem"]]], [".px-\\[0\\.9rem\\]", null, 4, [["padding-inline", ".9rem"]]], [".px-\\[0\\.26rem\\]", null, 4, [["padding-inline", ".26rem"]]], [".px-\\[0\\.28rem\\]", null, 4, [["padding-inline", ".28rem"]]], [".px-\\[0\\.35rem\\]", null, 4, [["padding-inline", ".35rem"]]], [".px-\\[0\\.42rem\\]", null, 4, [["padding-inline", ".42rem"]]], [".px-\\[0\\.45rem\\]", null, 4, [["padding-inline", ".45rem"]]], [".px-\\[0\\.48rem\\]", null, 4, [["padding-inline", ".48rem"]]], [".px-\\[0\\.55rem\\]", null, 4, [["padding-inline", ".55rem"]]], [".px-\\[0\\.65rem\\]", null, 4, [["padding-inline", ".65rem"]]], [".px-\\[0\\.75rem\\]", null, 4, [["padding-inline", ".75rem"]]], [".px-\\[0\\.85rem\\]", null, 4, [["padding-inline", ".85rem"]]], [".px-\\[1\\.4rem\\]", null, 4, [["padding-inline", "1.4rem"]]], [".px-\\[3px\\]", null, 4, [["padding-inline", "3px"]]], [".px-\\[10px\\]", null, 4, [["padding-inline", "10px"]]], [".py-0", null, 4, [["padding-block", "0"]]], [".py-0\\.5", null, 4, [["padding-block", "calc(var(--spacing) * .5)"]]], [".py-1", null, 4, [["padding-block", "var(--spacing)"]]], [".py-1\\.5", null, 4, [["padding-block", "calc(var(--spacing) * 1.5)"]]], [".py-2", null, 4, [["padding-block", "calc(var(--spacing) * 2)"]]], [".py-3", null, 4, [["padding-block", "calc(var(--spacing) * 3)"]]], [".py-4", null, 4, [["padding-block", "calc(var(--spacing) * 4)"]]], [".py-8", null, 4, [["padding-block", "calc(var(--spacing) * 8)"]]], [".py-\\[0\\.1rem\\]", null, 4, [["padding-block", ".1rem"]]], [".py-\\[0\\.2rem\\]", null, 4, [["padding-block", ".2rem"]]], [".py-\\[0\\.3rem\\]", null, 4, [["padding-block", ".3rem"]]], [".py-\\[0\\.4rem\\]", null, 4, [["padding-block", ".4rem"]]], [".py-\\[0\\.05rem\\]", null, 4, [["padding-block", ".05rem"]]], [".py-\\[0\\.6rem\\]", null, 4, [["padding-block", ".6rem"]]], [".py-\\[0\\.8rem\\]", null, 4, [["padding-block", ".8rem"]]], [".py-\\[0\\.12rem\\]", null, 4, [["padding-block", ".12rem"]]], [".py-\\[0\\.14rem\\]", null, 4, [["padding-block", ".14rem"]]], [".py-\\[0\\.15rem\\]", null, 4, [["padding-block", ".15rem"]]], [".py-\\[0\\.18rem\\]", null, 4, [["padding-block", ".18rem"]]], [".py-\\[0\\.25rem\\]", null, 4, [["padding-block", ".25rem"]]], [".py-\\[0\\.28rem\\]", null, 4, [["padding-block", ".28rem"]]], [".py-\\[0\\.32rem\\]", null, 4, [["padding-block", ".32rem"]]], [".py-\\[0\\.35rem\\]", null, 4, [["padding-block", ".35rem"]]], [".py-\\[0\\.42rem\\]", null, 4, [["padding-block", ".42rem"]]], [".py-\\[0\\.45rem\\]", null, 4, [["padding-block", ".45rem"]]], [".py-\\[0\\.55rem\\]", null, 4, [["padding-block", ".55rem"]]], [".py-\\[0\\.65rem\\]", null, 4, [["padding-block", ".65rem"]]], [".py-\\[1\\.1rem\\]", null, 4, [["padding-block", "1.1rem"]]], [".py-\\[2px\\]", null, 4, [["padding-block", "2px"]]], [".py-\\[3px\\]", null, 4, [["padding-block", "3px"]]], [".py-\\[6px\\]", null, 4, [["padding-block", "6px"]]], [".py-px", null, 4, [["padding-block", "1px"]]], [".pt-1", null, 4, [["padding-top", "var(--spacing)"]]], [".pt-2", null, 4, [["padding-top", "calc(var(--spacing) * 2)"]]], [".pt-2\\.5", null, 4, [["padding-top", "calc(var(--spacing) * 2.5)"]]], [".pt-3", null, 4, [["padding-top", "calc(var(--spacing) * 3)"]]], [".pt-4", null, 4, [["padding-top", "calc(var(--spacing) * 4)"]]], [".pt-5", null, 4, [["padding-top", "calc(var(--spacing) * 5)"]]], [".pt-\\[0\\.2rem\\]", null, 4, [["padding-top", ".2rem"]]], [".pt-\\[0\\.4rem\\]", null, 4, [["padding-top", ".4rem"]]], [".pt-\\[0\\.6rem\\]", null, 4, [["padding-top", ".6rem"]]], [".pt-\\[0\\.85rem\\]", null, 4, [["padding-top", ".85rem"]]], [".pt-\\[2px\\]", null, 4, [["padding-top", "2px"]]], [".pt-\\[12vh\\]", null, 4, [["padding-top", "12vh"]]], [".pt-\\[max\\(0\\.5rem\\,env\\(safe-area-inset-top\\)\\)\\]", null, 4, [["padding-top", "max(.5rem, env(safe-area-inset-top))"]]], [".pr-0\\.5", null, 4, [["padding-right", "calc(var(--spacing) * .5)"]]], [".pr-1", null, 4, [["padding-right", "var(--spacing)"]]], [".pr-1\\.5", null, 4, [["padding-right", "calc(var(--spacing) * 1.5)"]]], [".pr-2", null, 4, [["padding-right", "calc(var(--spacing) * 2)"]]], [".pr-3", null, 4, [["padding-right", "calc(var(--spacing) * 3)"]]], [".pr-12", null, 4, [["padding-right", "calc(var(--spacing) * 12)"]]], [".pr-\\[0\\.3rem\\]", null, 4, [["padding-right", ".3rem"]]], [".pr-\\[0\\.6rem\\]", null, 4, [["padding-right", ".6rem"]]], [".pr-\\[0\\.35rem\\]", null, 4, [["padding-right", ".35rem"]]], [".pr-\\[0\\.45rem\\]", null, 4, [["padding-right", ".45rem"]]], [".pr-\\[0\\.55rem\\]", null, 4, [["padding-right", ".55rem"]]], [".pr-\\[1\\.6rem\\]", null, 4, [["padding-right", "1.6rem"]]], [".pr-\\[3px\\]", null, 4, [["padding-right", "3px"]]], [".pr-\\[env\\(safe-area-inset-right\\)\\]", null, 4, [["padding-right", "env(safe-area-inset-right)"]]], [".pr-\\[max\\(0\\.5rem\\,env\\(safe-area-inset-right\\)\\)\\]", null, 4, [["padding-right", "max(.5rem, env(safe-area-inset-right))"]]], [".pb-1", null, 4, [["padding-bottom", "var(--spacing)"]]], [".pb-2", null, 4, [["padding-bottom", "calc(var(--spacing) * 2)"]]], [".pb-3", null, 4, [["padding-bottom", "calc(var(--spacing) * 3)"]]], [".pb-4", null, 4, [["padding-bottom", "calc(var(--spacing) * 4)"]]], [".pb-8", null, 4, [["padding-bottom", "calc(var(--spacing) * 8)"]]], [".pb-\\[0\\.3rem\\]", null, 4, [["padding-bottom", ".3rem"]]], [".pb-\\[0\\.4rem\\]", null, 4, [["padding-bottom", ".4rem"]]], [".pb-\\[0\\.25rem\\]", null, 4, [["padding-bottom", ".25rem"]]], [".pb-\\[0\\.55rem\\]", null, 4, [["padding-bottom", ".55rem"]]], [".pb-\\[1\\.4rem\\]", null, 4, [["padding-bottom", "1.4rem"]]], [".pb-\\[calc\\(1\\.5rem\\+env\\(safe-area-inset-bottom\\)\\)\\]", null, 4, [["padding-bottom", "calc(1.5rem + env(safe-area-inset-bottom))"]]], [".pb-\\[calc\\(1rem\\+env\\(safe-area-inset-bottom\\)\\)\\]", null, 4, [["padding-bottom", "calc(1rem + env(safe-area-inset-bottom))"]]], [".pb-\\[env\\(safe-area-inset-bottom\\)\\]", null, 4, [["padding-bottom", "env(safe-area-inset-bottom)"]]], [".pb-\\[max\\(0\\.5rem\\,env\\(safe-area-inset-bottom\\)\\)\\]", null, 4, [["padding-bottom", "max(.5rem, env(safe-area-inset-bottom))"]]], [".pl-1", null, 4, [["padding-left", "var(--spacing)"]]], [".pl-2", null, 4, [["padding-left", "calc(var(--spacing) * 2)"]]], [".pl-3", null, 4, [["padding-left", "calc(var(--spacing) * 3)"]]], [".pl-4", null, 4, [["padding-left", "calc(var(--spacing) * 4)"]]], [".pl-5", null, 4, [["padding-left", "calc(var(--spacing) * 5)"]]], [".pl-6", null, 4, [["padding-left", "calc(var(--spacing) * 6)"]]], [".pl-\\[0\\.4rem\\]", null, 4, [["padding-left", ".4rem"]]], [".pl-\\[0\\.45rem\\]", null, 4, [["padding-left", ".45rem"]]], [".pl-\\[0\\.75rem\\]", null, 4, [["padding-left", ".75rem"]]], [".pl-\\[0\\.85rem\\]", null, 4, [["padding-left", ".85rem"]]], [".pl-\\[1\\.2rem\\]", null, 4, [["padding-left", "1.2rem"]]], [".pl-\\[1\\.9rem\\]", null, 4, [["padding-left", "1.9rem"]]], [".pl-\\[1\\.45rem\\]", null, 4, [["padding-left", "1.45rem"]]], [".pl-\\[1\\.55rem\\]", null, 4, [["padding-left", "1.55rem"]]], [".pl-\\[1\\.875rem\\]", null, 4, [["padding-left", "1.875rem"]]], [".pl-\\[85px\\]", null, 4, [["padding-left", "85px"]]], [".pl-\\[max\\(0\\.5rem\\,env\\(safe-area-inset-left\\)\\)\\]", null, 4, [["padding-left", "max(.5rem, env(safe-area-inset-left))"]]], [".pl-\\[max\\(0\\.25rem\\,env\\(safe-area-inset-left\\)\\)\\]", null, 4, [["padding-left", "max(.25rem, env(safe-area-inset-left))"]]], [".text-center", null, 4, [["text-align", "center"]]], [".text-left", null, 4, [["text-align", "left"]]], [".text-right", null, 4, [["text-align", "right"]]], [".\\[font-family\\:inherit\\]", null, 4, [["font-family", "inherit"]]], [".\\[font-family\\:ui-monospace\\,SFMono-Regular\\,Menlo\\,monospace\\]", null, 4, [["font-family", "ui-monospace, SFMono-Regular, Menlo, monospace"]]], [".\\[font-family\\:var\\(--font-mono\\)\\]", null, 4, [["font-family", "var(--font-mono)"]]], [".text-sm", null, 4, [["font-size", "var(--text-sm)"], ["line-height", "var(--tw-leading, var(--text-sm--line-height))"]]], [".text-xs", null, 4, [["font-size", "var(--text-xs)"], ["line-height", "var(--tw-leading, var(--text-xs--line-height))"]]], [".\\[font-size\\:inherit\\]", null, 4, [["font-size", "inherit"]]], [".text-\\[0\\.6rem\\]", null, 4, [["font-size", ".6rem"]]], [".text-\\[0\\.7rem\\]", null, 4, [["font-size", ".7rem"]]], [".text-\\[0\\.8em\\]", null, 4, [["font-size", ".8em"]]], [".text-\\[0\\.8rem\\]", null, 4, [["font-size", ".8rem"]]], [".text-\\[0\\.9em\\]", null, 4, [["font-size", ".9em"]]], [".text-\\[0\\.9rem\\]", null, 4, [["font-size", ".9rem"]]], [".text-\\[0\\.54rem\\]", null, 4, [["font-size", ".54rem"]]], [".text-\\[0\\.58rem\\]", null, 4, [["font-size", ".58rem"]]], [".text-\\[0\\.62rem\\]", null, 4, [["font-size", ".62rem"]]], [".text-\\[0\\.63rem\\]", null, 4, [["font-size", ".63rem"]]], [".text-\\[0\\.64rem\\]", null, 4, [["font-size", ".64rem"]]], [".text-\\[0\\.65rem\\]", null, 4, [["font-size", ".65rem"]]], [".text-\\[0\\.66rem\\]", null, 4, [["font-size", ".66rem"]]], [".text-\\[0\\.66rem\\]\\!", null, 4, [["font-size", ".66rem", 1]]], [".text-\\[0\\.68rem\\]", null, 4, [["font-size", ".68rem"]]], [".text-\\[0\\.72rem\\]", null, 4, [["font-size", ".72rem"]]], [".text-\\[0\\.74rem\\]", null, 4, [["font-size", ".74rem"]]], [".text-\\[0\\.75rem\\]", null, 4, [["font-size", ".75rem"]]], [".text-\\[0\\.76rem\\]", null, 4, [["font-size", ".76rem"]]], [".text-\\[0\\.77rem\\]", null, 4, [["font-size", ".77rem"]]], [".text-\\[0\\.78rem\\]", null, 4, [["font-size", ".78rem"]]], [".text-\\[0\\.82rem\\]", null, 4, [["font-size", ".82rem"]]], [".text-\\[0\\.83rem\\]", null, 4, [["font-size", ".83rem"]]], [".text-\\[0\\.85rem\\]", null, 4, [["font-size", ".85rem"]]], [".text-\\[0\\.88rem\\]", null, 4, [["font-size", ".88rem"]]], [".text-\\[0\\.95rem\\]", null, 4, [["font-size", ".95rem"]]], [".text-\\[0\\.875rem\\]", null, 4, [["font-size", ".875rem"]]], [".text-\\[1\\.1rem\\]", null, 4, [["font-size", "1.1rem"]]], [".text-\\[1\\.3rem\\]", null, 4, [["font-size", "1.3rem"]]], [".text-\\[1\\.4em\\]", null, 4, [["font-size", "1.4em"]]], [".text-\\[1\\.6rem\\]", null, 4, [["font-size", "1.6rem"]]], [".text-\\[1\\.15rem\\]", null, 4, [["font-size", "1.15rem"]]], [".text-\\[1rem\\]", null, 4, [["font-size", "1rem"]]], [".text-\\[2\\.4rem\\]", null, 4, [["font-size", "2.4rem"]]], [".text-\\[9px\\]", null, 4, [["font-size", "9px"]]], [".text-\\[10px\\]", null, 4, [["font-size", "10px"]]], [".text-\\[11px\\]", null, 4, [["font-size", "11px"]]], [".text-\\[12\\.5px\\]", null, 4, [["font-size", "12.5px"]]], [".text-\\[12px\\]", null, 4, [["font-size", "12px"]]], [".text-\\[13px\\]", null, 4, [["font-size", "13px"]]], [".text-\\[14px\\]", null, 4, [["font-size", "14px"]]], [".text-\\[calc\\(0\\.95rem\\*var\\(--chat-font-scale\\,1\\)\\)\\]", null, 4, [["font-size", "calc(.95rem * var(--chat-font-scale, 1))"]]], [".text-\\[length\\:calc\\(11px\\*var\\(--zoom\\,1\\)\\)\\]", null, 4, [["font-size", "calc(11px * var(--zoom, 1))"]]], [".text-\\[length\\:calc\\(13px\\*var\\(--zoom\\,1\\)\\)\\]", null, 4, [["font-size", "calc(13px * var(--zoom, 1))"]]], [".leading-4", null, 4, [["--tw-leading", "calc(var(--spacing) * 4)"], ["line-height", "calc(var(--spacing) * 4)"]]], [".leading-\\[1\\.1\\]", null, 4, [["--tw-leading", "1.1"], ["line-height", "1.1"]]], [".leading-\\[1\\.2\\]", null, 4, [["--tw-leading", "1.2"], ["line-height", "1.2"]]], [".leading-\\[1\\.3\\]", null, 4, [["--tw-leading", "1.3"], ["line-height", "1.3"]]], [".leading-\\[1\\.4\\]", null, 4, [["--tw-leading", "1.4"], ["line-height", "1.4"]]], [".leading-\\[1\\.5\\]", null, 4, [["--tw-leading", "1.5"], ["line-height", "1.5"]]], [".leading-\\[1\\.6\\]", null, 4, [["--tw-leading", "1.6"], ["line-height", "1.6"]]], [".leading-\\[1\\.45\\]", null, 4, [["--tw-leading", "1.45"], ["line-height", "1.45"]]], [".leading-\\[18px\\]", null, 4, [["--tw-leading", "18px"], ["line-height", "18px"]]], [".leading-none", null, 4, [["--tw-leading", "1"], ["line-height", "1"]]], [".leading-relaxed", null, 4, [["--tw-leading", "var(--leading-relaxed)"], ["line-height", "var(--leading-relaxed)"]]], [".leading-tight", null, 4, [["--tw-leading", "var(--leading-tight)"], ["line-height", "var(--leading-tight)"]]], [".\\[line-height\\:inherit\\]", null, 4, [["line-height", "inherit"]]], [".font-bold", null, 4, [["--tw-font-weight", "var(--font-weight-bold)"], ["font-weight", "var(--font-weight-bold)"]]], [".font-medium", null, 4, [["--tw-font-weight", "var(--font-weight-medium)"], ["font-weight", "var(--font-weight-medium)"]]], [".font-normal", null, 4, [["--tw-font-weight", "var(--font-weight-normal)"], ["font-weight", "var(--font-weight-normal)"]]], [".font-semibold", null, 4, [["--tw-font-weight", "var(--font-weight-semibold)"], ["font-weight", "var(--font-weight-semibold)"]]], [".\\[font-weight\\:inherit\\]", null, 4, [["font-weight", "inherit"]]], [".tracking-\\[-0\\.02em\\]", null, 4, [["--tw-tracking", "-.02em"], ["letter-spacing", "-.02em"]]], [".tracking-\\[0\\.03em\\]", null, 4, [["--tw-tracking", ".03em"], ["letter-spacing", ".03em"]]], [".tracking-\\[0\\.04em\\]", null, 4, [["--tw-tracking", ".04em"], ["letter-spacing", ".04em"]]], [".tracking-\\[0\\.06em\\]", null, 4, [["--tw-tracking", ".06em"], ["letter-spacing", ".06em"]]], [".tracking-\\[0\\.08em\\]", null, 4, [["--tw-tracking", ".08em"], ["letter-spacing", ".08em"]]], [".tracking-\\[0\\.09em\\]", null, 4, [["--tw-tracking", ".09em"], ["letter-spacing", ".09em"]]], [".tracking-\\[0\\.22em\\]", null, 4, [["--tw-tracking", ".22em"], ["letter-spacing", ".22em"]]], [".tracking-normal", null, 4, [["--tw-tracking", "var(--tracking-normal)"], ["letter-spacing", "var(--tracking-normal)"]]], [".tracking-wide", null, 4, [["--tw-tracking", "var(--tracking-wide)"], ["letter-spacing", "var(--tracking-wide)"]]], [".\\[overflow-wrap\\:anywhere\\]", null, 4, [["overflow-wrap", "anywhere"]]], [".break-words", null, 4, [["overflow-wrap", "break-word"]]], [".\\[word-break\\:break-word\\]", null, 4, [["word-break", "break-word"]]], [".text-ellipsis", null, 4, [["text-overflow", "ellipsis"]]], [".whitespace-normal", null, 4, [["white-space", "normal"]]], [".whitespace-nowrap", null, 4, [["white-space", "nowrap"]]], [".whitespace-pre", null, 4, [["white-space", "pre"]]], [".whitespace-pre-wrap", null, 4, [["white-space", "pre-wrap"]]], [".\\[tab-size\\:2\\]", null, 4, [["tab-size", "2"]]], [".text-\\[color\\:var\\(--git-muted\\)\\]", null, 4, [["color", "var(--git-muted)"]]], [".text-\\[var\\(--subtext-0\\)\\]", null, 4, [["color", "var(--subtext-0)"]]], [".text-\\[var\\(--text\\)\\]", null, 4, [["color", "var(--text)"]]], [".text-accent", null, 4, [["color", "var(--accent)"]]], [".text-blue", null, 4, [["color", "var(--blue)"]]], [".text-current", null, 4, [["color", "currentColor"]]], [".text-fg", null, 4, [["color", "var(--text)"]]], [".text-green", null, 4, [["color", "var(--green)"]]], [".text-inherit", null, 4, [["color", "inherit"]]], [".text-mauve", null, 4, [["color", "var(--mauve)"]]], [".text-overlay-0", null, 4, [["color", "var(--overlay-0)"]]], [".text-overlay-1", null, 4, [["color", "var(--overlay-1)"]]], [".text-panel-bg", null, 4, [["color", "var(--panel-bg)"]]], [".text-peach", null, 4, [["color", "var(--peach)"]]], [".text-red", null, 4, [["color", "var(--red)"]]], [".text-red\\!", null, 4, [["color", "var(--red)", 1]]], [".text-subtext-0", null, 4, [["color", "var(--subtext-0)"]]], [".text-yellow", null, 4, [["color", "var(--yellow)"]]], [".capitalize", null, 4, [["text-transform", "capitalize"]]], [".normal-case", null, 4, [["text-transform", "none"]]], [".uppercase", null, 4, [["text-transform", "uppercase"]]], [".italic", null, 4, [["font-style", "italic"]]], [".not-italic", null, 4, [["font-style", "normal"]]], [".tabular-nums", null, 4, [["--tw-numeric-spacing", "tabular-nums"], ["font-variant-numeric", "var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, )"]]], [".line-through", null, 4, [["text-decoration-line", "line-through"]]], [".no-underline", null, 4, [["text-decoration-line", "none"]]], [".underline", null, 4, [["text-decoration-line", "underline"]]], [".opacity-0", null, 4, [["opacity", "0"]]], [".opacity-40", null, 4, [["opacity", ".4"]]], [".opacity-60", null, 4, [["opacity", ".6"]]], [".opacity-70", null, 4, [["opacity", ".7"]]], [".opacity-75", null, 4, [["opacity", ".75"]]], [".opacity-80", null, 4, [["opacity", ".8"]]], [".opacity-\\[0\\.72\\]", null, 4, [["opacity", ".72"]]], [".shadow", null, 4, [["--tw-shadow", "0 1px 3px 0 var(--tw-shadow-color, #0000001a), 0 1px 2px -1px var(--tw-shadow-color, #0000001a)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_1px_4px_rgba\\(0\\,0\\,0\\,0\\.4\\)\\]", null, 4, [["--tw-shadow", "0 1px 4px var(--tw-shadow-color, #0006)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_2px_8px_rgba\\(0\\,0\\,0\\,0\\.4\\)\\]", null, 4, [["--tw-shadow", "0 2px 8px var(--tw-shadow-color, #0006)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_2px_8px_rgba\\(0\\,0\\,0\\,0\\.35\\)\\]", null, 4, [["--tw-shadow", "0 2px 8px var(--tw-shadow-color, #00000059)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_6px_20px_rgba\\(0\\,0\\,0\\,0\\.3\\)\\]", null, 4, [["--tw-shadow", "0 6px 20px var(--tw-shadow-color, #0000004d)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_8px_24px_rgba\\(0\\,0\\,0\\,0\\.35\\)\\]", null, 4, [["--tw-shadow", "0 8px 24px var(--tw-shadow-color, #00000059)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_8px_24px_rgba\\(0\\,0\\,0\\,0\\.45\\)\\]", null, 4, [["--tw-shadow", "0 8px 24px var(--tw-shadow-color, #00000073)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_8px_32px_rgba\\(0\\,0\\,0\\,0\\.5\\)\\]", null, 4, [["--tw-shadow", "0 8px 32px var(--tw-shadow-color, #00000080)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_12px_32px_rgba\\(0\\,0\\,0\\,0\\.5\\)\\]", null, 4, [["--tw-shadow", "0 12px 32px var(--tw-shadow-color, #00000080)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_16px_48px_rgba\\(0\\,0\\,0\\,0\\.55\\)\\]", null, 4, [["--tw-shadow", "0 16px 48px var(--tw-shadow-color, #0000008c)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[inset_0_0_24px_var\\(--accent\\)\\]", null, 4, [["--tw-shadow", "inset 0 0 24px var(--tw-shadow-color, var(--accent))"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-lg", null, 4, [["--tw-shadow", "0 10px 15px -3px var(--tw-shadow-color, #0000001a), 0 4px 6px -4px var(--tw-shadow-color, #0000001a)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".ring", null, 4, [["--tw-ring-shadow", "var(--tw-ring-inset, ) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".\\[box-shadow\\:0_1px_2px_rgba\\(0\\,0\\,0\\,0\\.3\\)\\]", null, 4, [["box-shadow", "0 1px 2px #0000004d"]]], [".\\[box-shadow\\:0_4px_14px_rgba\\(0\\,0\\,0\\,0\\.35\\)\\]", null, 4, [["box-shadow", "0 4px 14px #00000059"]]], [".\\[box-shadow\\:none\\]", null, 4, [["box-shadow", "none"]]], [".\\[outline\\:none\\]", null, 4, [["outline", "none"]]], [".outline, .outline-1", null, 4, [["outline-style", "var(--tw-outline-style)"], ["outline-width", "1px"]]], [".outline-2", null, 4, [["outline-style", "var(--tw-outline-style)"], ["outline-width", "2px"]]], [".outline-accent", null, 4, [["outline-color", "var(--accent)"]]], [".blur", null, 4, [["--tw-blur", "blur(8px)"], ["filter", "var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )"]]], [".\\!filter", null, 4, [["filter", "var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )", 1]]], [".\\[filter\\:drop-shadow\\(0_6px_10px_rgba\\(0\\,0\\,0\\,0\\.45\\)\\)\\]", null, 4, [["filter", "drop-shadow(0 6px 10px #00000073)"]]], [".filter", null, 4, [["filter", "var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )"]]], [".backdrop-blur-xl", null, 4, [["--tw-backdrop-blur", "blur(var(--blur-xl))"], ["-webkit-backdrop-filter", "var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, )"], ["backdrop-filter", "var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, )"]]], [".backdrop-saturate-150", null, 4, [["--tw-backdrop-saturate", "saturate(150%)"], ["-webkit-backdrop-filter", "var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, )"], ["backdrop-filter", "var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, )"]]], [".transition", null, 4, [["transition-property", "color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events"], ["transition-timing-function", "var(--tw-ease, var(--default-transition-timing-function))"], ["transition-duration", "var(--tw-duration, var(--default-transition-duration))"]]], [".transition-\\[left\\,top\\,width\\,height\\]", null, 4, [["transition-property", "left, top, width, height"], ["transition-timing-function", "var(--tw-ease, var(--default-transition-timing-function))"], ["transition-duration", "var(--tw-duration, var(--default-transition-duration))"]]], [".transition-opacity", null, 4, [["transition-property", "opacity"], ["transition-timing-function", "var(--tw-ease, var(--default-transition-timing-function))"], ["transition-duration", "var(--tw-duration, var(--default-transition-duration))"]]], [".duration-150", null, 4, [["--tw-duration", ".15s"], ["transition-duration", ".15s"]]], [".ease-out", null, 4, [["--tw-ease", "var(--ease-out)"], ["transition-timing-function", "var(--ease-out)"]]], [".outline-none", null, 4, [["--tw-outline-style", "none"], ["outline-style", "none"]]], [".outline-solid", null, 4, [["--tw-outline-style", "solid"], ["outline-style", "solid"]]], [".select-none", null, 4, [["-webkit-user-select", "none"], ["user-select", "none"]]], [".select-text", null, 4, [["-webkit-user-select", "text"], ["user-select", "text"]]], [".\\[--panel-bg\\:var\\(--surface-dim\\)\\]", null, 4, [["--panel-bg", "var(--surface-dim)"]]], [".\\[--picker-bg\\:var\\(--surface-0\\)\\]", null, 4, [["--picker-bg", "var(--surface-0)"]]], [".\\[--radius\\:var\\(--radius-pane\\)\\]", null, 4, [["--radius", "var(--radius-pane)"]]], [".\\[--workspace-tools-bg\\:transparent\\]", null, 4, [["--workspace-tools-bg", "transparent"]]], [".\\[-webkit-box-orient\\:vertical\\]", null, 4, [["-webkit-box-orient", "vertical"]]], [".\\[-webkit-line-clamp\\:3\\]", null, 4, [["-webkit-line-clamp", "3"]]], [".\\[-webkit-touch-callout\\:none\\]", null, 4, [["-webkit-touch-callout", "none"]]], [".\\[background\\:none\\]", null, 4, [["background", "none"]]], [".\\[border-right\\:1px_solid_var\\(--git-border\\)\\]", null, 4, [["border-right", "1px solid var(--git-border)"]]], [".\\[border-top\\:1px_solid_var\\(--git-border\\)\\]", null, 4, [["border-top", "1px solid var(--git-border)"]]], [".\\[border\\:0\\]", null, 4, [["border", "0"]]], [".\\[border\\:none\\]", null, 4, [["border", "none"]]], [".\\[font\\:1\\.15rem\\/1_var\\(--font-mono\\)\\]", null, 4, [["font", "1.15rem/1 var(--font-mono)"]]], [".\\[font\\:1rem\\/1\\.2_var\\(--font-mono\\)\\]", null, 4, [["font", "1rem/1.2 var(--font-mono)"]]], [".\\[font\\:inherit\\]", null, 4, [["font", "inherit"]]], [".\\[transition\\:background_0\\.1s_ease\\]", null, 4, [["transition", "background .1s"]]], [".\\[transition\\:background_0\\.12s_ease\\]", null, 4, [["transition", "background .12s"]]], [".\\[transition\\:background_0\\.15s_ease\\]", null, 4, [["transition", "background .15s"]]], [".\\[transition\\:color_0\\.1s_ease\\,background_0\\.1s_ease\\]", null, 4, [["transition", "color .1s, background .1s"]]], [".\\[transition\\:color_0\\.12s_ease\\,background_0\\.12s_ease\\]", null, 4, [["transition", "color .12s, background .12s"]]], [".\\[transition\\:color_0\\.15s_ease\\]", null, 4, [["transition", "color .15s"]]], [".\\[transition\\:opacity_0\\.12s_ease\\]", null, 4, [["transition", "opacity .12s"]]], [".\\[transition\\:transform_0\\.15s_ease\\,background_0\\.15s_ease\\]", null, 4, [["transition", "transform .15s, background .15s"]]], [".not-has-\\[\\[data-setting-row\\]\\]\\:hidden:not(:has([data-setting-row]))", null, 4, [["display", "none"]]], [".group-focus-within\\:flex:is(:where(.group):focus-within *)", null, 4, [["display", "flex"]]], [".group-focus-within\\/row\\:opacity-100:is(:where(.group\\/row):focus-within *)", null, 4, [["opacity", "1"]]], [".group-hover\\:flex:is(:where(.group):hover *)", null, 4, [["display", "flex"]]], [".group-hover\\:opacity-100:is(:where(.group):hover *)", null, 4, [["opacity", "1"]]], [".group-hover\\/line\\:opacity-90:is(:where(.group\\/line):hover *)", null, 4, [["opacity", ".9"]]], [".group-hover\\/ph\\:opacity-100:is(:where(.group\\/ph):hover *), .group-hover\\/row\\:opacity-100:is(:where(.group\\/row):hover *)", null, 4, [["opacity", "1"]]], [".group-focus\\/tree\\:ring-1:is(:where(.group\\/tree):focus *)", null, 4, [["--tw-ring-shadow", "var(--tw-ring-inset, ) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".group-focus\\/tree\\:ring-overlay-1:is(:where(.group\\/tree):focus *)", null, 4, [["--tw-ring-color", "var(--overlay-1)"]]], [".group-focus\\/tree\\:ring-inset:is(:where(.group\\/tree):focus *)", null, 4, [["--tw-ring-inset", "inset"]]], ['.group-aria-checked\\:\\[transform\\:translateX\\(1\\.1rem\\)\\]:is(:where(.group)[aria-checked="true"] *)', null, 4, [["transform", "translateX(1.1rem)"]]], ['.group-aria-checked\\:border-accent:is(:where(.group)[aria-checked="true"] *)', null, 4, [["border-color", "var(--accent)"]]], ['.group-aria-checked\\:bg-accent:is(:where(.group)[aria-checked="true"] *)', null, 4, [["background-color", "var(--accent)"]]], ['.group-aria-checked\\:bg-panel-bg:is(:where(.group)[aria-checked="true"] *)', null, 4, [["background-color", "var(--panel-bg)"]]], ['.group-aria-checked\\:text-accent:is(:where(.group)[aria-checked="true"] *), .group-aria-\\[checked\\=false\\]\\:text-accent:is(:where(.group)[aria-checked="false"] *)', null, 4, [["color", "var(--accent)"]]], [".placeholder\\:text-subtext-0::placeholder", null, 4, [["color", "var(--subtext-0)"]]], [".before\\:absolute:before", null, 4, [["content", "var(--tw-content)"], ["position", "absolute"]]], [".before\\:top-\\[0\\.15rem\\]:before", null, 4, [["content", "var(--tw-content)"], ["top", ".15rem"]]], [".before\\:left-\\[0\\.15rem\\]:before", null, 4, [["content", "var(--tw-content)"], ["left", ".15rem"]]], [".before\\:h-\\[0\\.95rem\\]:before", null, 4, [["content", "var(--tw-content)"], ["height", ".95rem"]]], [".before\\:w-\\[0\\.95rem\\]:before", null, 4, [["content", "var(--tw-content)"], ["width", ".95rem"]]], [".before\\:rounded-full:before", null, 4, [["content", "var(--tw-content)"], ["border-radius", "3.40282e38px"]]], [".before\\:bg-fg:before", null, 4, [["content", "var(--tw-content)"], ["background-color", "var(--text)"]]], [".before\\:content-\\[\\'\\'\\]:before", null, 4, [["--tw-content", '""'], ["content", "var(--tw-content)"]]], [".before\\:\\[transition\\:transform_0\\.12s_ease\\]:before", null, 4, [["content", "var(--tw-content)"], ["transition", "transform .12s"]]], [".after\\:absolute:after", null, 4, [["content", "var(--tw-content)"], ["position", "absolute"]]], [".after\\:inset-0:after", null, 4, [["content", "var(--tw-content)"], ["inset", "0"]]], [".after\\:inset-x-0:after", null, 4, [["content", "var(--tw-content)"], ["inset-inline", "0"]]], [".after\\:-inset-y-2:after", null, 4, [["content", "var(--tw-content)"], ["inset-block", "calc(var(--spacing) * -2)"]]], [".after\\:m-auto:after", null, 4, [["content", "var(--tw-content)"], ["margin", "auto"]]], [".after\\:h-8:after", null, 4, [["content", "var(--tw-content)"], ["height", "calc(var(--spacing) * 8)"]]], [".after\\:h-12:after", null, 4, [["content", "var(--tw-content)"], ["height", "calc(var(--spacing) * 12)"]]], [".after\\:h-\\[3px\\]:after", null, 4, [["content", "var(--tw-content)"], ["height", "3px"]]], [".after\\:w-8:after", null, 4, [["content", "var(--tw-content)"], ["width", "calc(var(--spacing) * 8)"]]], [".after\\:w-\\[3px\\]:after", null, 4, [["content", "var(--tw-content)"], ["width", "3px"]]], [".after\\:rounded-full:after", null, 4, [["content", "var(--tw-content)"], ["border-radius", "3.40282e38px"]]], [".after\\:bg-transparent:after", null, 4, [["content", "var(--tw-content)"], ["background-color", "#0000"]]], [".after\\:content-\\[\\'\\'\\]:after", null, 4, [["--tw-content", '""'], ["content", "var(--tw-content)"]]], [".last\\:border-b-0:last-child", null, 4, [["border-bottom-style", "var(--tw-border-style)"], ["border-bottom-width", "0"]]], [".checked\\:bg-accent:checked", null, 4, [["background-color", "var(--accent)"]]], [".checked\\:before\\:translate-x-\\[1rem\\]:checked:before", null, 4, [["content", "var(--tw-content)"], ["--tw-translate-x", "1rem"], ["translate", "var(--tw-translate-x) var(--tw-translate-y)"]]], [".checked\\:before\\:bg-panel-bg:checked:before", null, 4, [["content", "var(--tw-content)"], ["background-color", "var(--panel-bg)"]]], [".focus-within\\:bg-surface-1:focus-within", null, 4, [["background-color", "var(--surface-1)"]]], [".focus-within\\:outline:focus-within, .focus-within\\:outline-1:focus-within", null, 4, [["outline-style", "var(--tw-outline-style)"], ["outline-width", "1px"]]], [".focus-within\\:outline-fg:focus-within", null, 4, [["outline-color", "var(--text)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_12\\%\\,transparent\\)\\]:hover", null, 4, [["background-color", "var(--accent)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_12\\%\\,transparent\\)\\]:hover", null, 4, [["background-color", "color-mix(in srgb,var(--accent) 12%,transparent)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_15\\%\\,transparent\\)\\]:hover", null, 4, [["background-color", "var(--accent)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_15\\%\\,transparent\\)\\]:hover", null, 4, [["background-color", "color-mix(in srgb,var(--accent) 15%,transparent)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--text\\)_10\\%\\,var\\(--panel-bg\\)\\)\\]:hover", null, 4, [["background-color", "var(--text)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--text\\)_10\\%\\,var\\(--panel-bg\\)\\)\\]:hover", null, 4, [["background-color", "color-mix(in srgb,var(--text) 10%,var(--panel-bg))"]]], [".hover\\:bg-\\[var\\(--surface-0\\)\\]:hover", null, 4, [["background-color", "var(--surface-0)"]]], [".hover\\:bg-accent:hover", null, 4, [["background-color", "var(--accent)"]]], [".hover\\:bg-overlay-0:hover", null, 4, [["background-color", "var(--overlay-0)"]]], [".hover\\:bg-panel-bg:hover", null, 4, [["background-color", "var(--panel-bg)"]]], [".hover\\:bg-surface-0:hover", null, 4, [["background-color", "var(--surface-0)"]]], [".hover\\:bg-surface-1:hover", null, 4, [["background-color", "var(--surface-1)"]]], [".hover\\:bg-transparent:hover", null, 4, [["background-color", "#0000"]]], [".hover\\:text-accent:hover", null, 4, [["color", "var(--accent)"]]], [".hover\\:text-fg:hover", null, 4, [["color", "var(--text)"]]], [".hover\\:text-inherit:hover", null, 4, [["color", "inherit"]]], [".hover\\:text-overlay-0:hover", null, 4, [["color", "var(--overlay-0)"]]], [".hover\\:text-panel-bg:hover", null, 4, [["color", "var(--panel-bg)"]]], [".hover\\:text-red:hover", null, 4, [["color", "var(--red)"]]], [".hover\\:text-subtext-0:hover", null, 4, [["color", "var(--subtext-0)"]]], [".hover\\:text-yellow:hover", null, 4, [["color", "var(--yellow)"]]], [".hover\\:underline:hover", null, 4, [["text-decoration-line", "underline"]]], [".hover\\:opacity-60:hover", null, 4, [["opacity", ".6"]]], [".hover\\:opacity-100\\!:hover", null, 4, [["opacity", "1", 1]]], [".hover\\:opacity-\\[0\\.85\\]:hover", null, 4, [["opacity", ".85"]]], [".hover\\:brightness-110:hover", null, 4, [["--tw-brightness", "brightness(110%)"], ["filter", "var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )"]]], [".hover\\:\\[filter\\:brightness\\(1\\.08\\)\\]:hover", null, 4, [["filter", "brightness(1.08)"]]], [".hover\\:after\\:bg-overlay-1:hover:after", null, 4, [["content", "var(--tw-content)"], ["background-color", "var(--overlay-1)"]]], [".focus\\:\\[outline\\:1px_solid_var\\(--accent\\)\\]:focus", null, 4, [["outline", "1px solid var(--accent)"]]], [".focus\\:outline-2:focus", null, 4, [["outline-style", "var(--tw-outline-style)"], ["outline-width", "2px"]]], [".focus\\:outline-none:focus", null, 4, [["--tw-outline-style", "none"], ["outline-style", "none"]]], [".focus-visible\\:bg-accent:focus-visible", null, 4, [["background-color", "var(--accent)"]]], [".focus-visible\\:bg-surface-0:focus-visible", null, 4, [["background-color", "var(--surface-0)"]]], [".focus-visible\\:bg-surface-1:focus-visible", null, 4, [["background-color", "var(--surface-1)"]]], [".focus-visible\\:text-accent:focus-visible", null, 4, [["color", "var(--accent)"]]], [".focus-visible\\:text-fg:focus-visible", null, 4, [["color", "var(--text)"]]], [".focus-visible\\:text-panel-bg:focus-visible", null, 4, [["color", "var(--panel-bg)"]]], [".focus-visible\\:text-red:focus-visible", null, 4, [["color", "var(--red)"]]], [".focus-visible\\:text-yellow:focus-visible", null, 4, [["color", "var(--yellow)"]]], [".focus-visible\\:underline:focus-visible", null, 4, [["text-decoration-line", "underline"]]], [".focus-visible\\:opacity-100:focus-visible", null, 4, [["opacity", "1"]]], [".focus-visible\\:\\[outline\\:1px_solid_var\\(--accent\\)\\]:focus-visible", null, 4, [["outline", "1px solid var(--accent)"]]], [".focus-visible\\:\\[outline\\:1px_solid_var\\(--overlay-1\\)\\]:focus-visible", null, 4, [["outline", "1px solid var(--overlay-1)"]]], [".focus-visible\\:\\[outline\\:2px_solid_var\\(--accent\\)\\]:focus-visible", null, 4, [["outline", "2px solid var(--accent)"]]], [".focus-visible\\:outline:focus-visible, .focus-visible\\:outline-1:focus-visible", null, 4, [["outline-style", "var(--tw-outline-style)"], ["outline-width", "1px"]]], [".focus-visible\\:\\[outline-offset\\:-1px\\]:focus-visible", null, 4, [["outline-offset", "-1px"]]], [".focus-visible\\:\\[outline-offset\\:-2px\\]:focus-visible", null, 4, [["outline-offset", "-2px"]]], [".focus-visible\\:\\[outline-offset\\:2px\\]:focus-visible", null, 4, [["outline-offset", "2px"]]], [".focus-visible\\:outline-offset-1:focus-visible", null, 4, [["outline-offset", "1px"]]], [".focus-visible\\:outline-fg:focus-visible", null, 4, [["outline-color", "var(--text)"]]], [".focus-visible\\:after\\:bg-accent:focus-visible:after", null, 4, [["content", "var(--tw-content)"], ["background-color", "var(--accent)"]]], [".active\\:cursor-grabbing:active", null, 4, [["cursor", "grabbing"]]], [".active\\:bg-surface-1:active", null, 4, [["background-color", "var(--surface-1)"]]], [".active\\:text-fg:active", null, 4, [["color", "var(--text)"]]], [".active\\:after\\:bg-accent:active:after", null, 4, [["content", "var(--tw-content)"], ["background-color", "var(--accent)"]]], [".enabled\\:hover\\:bg-surface-1:enabled:hover", null, 4, [["background-color", "var(--surface-1)"]]], [".enabled\\:hover\\:text-fg:enabled:hover", null, 4, [["color", "var(--text)"]]], [".disabled\\:cursor-default:disabled", null, 4, [["cursor", "default"]]], [".disabled\\:cursor-not-allowed:disabled", null, 4, [["cursor", "not-allowed"]]], [".disabled\\:cursor-not-allowed\\!:disabled", null, 4, [["cursor", "not-allowed", 1]]], [".disabled\\:cursor-wait:disabled", null, 4, [["cursor", "wait"]]], [".disabled\\:bg-transparent:disabled", null, 4, [["background-color", "#0000"]]], [".disabled\\:text-fg:disabled", null, 4, [["color", "var(--text)"]]], [".disabled\\:opacity-40:disabled", null, 4, [["opacity", ".4"]]], [".disabled\\:opacity-50:disabled", null, 4, [["opacity", ".5"]]], [".disabled\\:opacity-\\[0\\.45\\]:disabled", null, 4, [["opacity", ".45"]]], [".disabled\\:opacity-\\[0\\.55\\]:disabled", null, 4, [["opacity", ".55"]]], [":where(.app--mac-desktop) .in-\\[\\.app--mac-desktop\\]\\:pl-\\[84px\\]", null, 4, [["padding-left", "84px"]]], [".has-\\[\\:checked\\]\\:bg-surface-0:has(:checked)", null, 4, [["background-color", "var(--surface-0)"]]], [".has-\\[\\:checked\\]\\:text-fg:has(:checked)", null, 4, [["color", "var(--text)"]]], [".has-\\[\\:focus-visible\\]\\:bg-surface-0:has(:focus-visible)", null, 4, [["background-color", "var(--surface-0)"]]], ['.aria-disabled\\:cursor-not-allowed[aria-disabled="true"]', null, 4, [["cursor", "not-allowed"]]], ['.aria-disabled\\:opacity-40[aria-disabled="true"]', null, 4, [["opacity", ".4"]]], ['.aria-expanded\\:opacity-100[aria-expanded="true"]', null, 4, [["opacity", "1"]]], ['.aria-pressed\\:bg-surface-0[aria-pressed="true"]', null, 4, [["background-color", "var(--surface-0)"]]], ['.aria-pressed\\:text-fg[aria-pressed="true"]', null, 4, [["color", "var(--text)"]]], [".motion-reduce\\:animate-none", ["(prefers-reduced-motion: reduce)"], 4, [["animation", "none"]]], [".max-\\[900px\\]\\:hidden", ["not all and (min-width: 900px)"], 4, [["display", "none"]]], [".max-\\[700px\\]\\:hidden", ["not all and (min-width: 700px)"], 4, [["display", "none"]]], [".max-\\[700px\\]\\:size-11", ["not all and (min-width: 700px)"], 4, [["width", "calc(var(--spacing) * 11)"], ["height", "calc(var(--spacing) * 11)"]]], [".max-\\[700px\\]\\:h-9", ["not all and (min-width: 700px)"], 4, [["height", "calc(var(--spacing) * 9)"]]], [".max-\\[700px\\]\\:h-12", ["not all and (min-width: 700px)"], 4, [["height", "calc(var(--spacing) * 12)"]]], [".max-\\[700px\\]\\:min-h-9", ["not all and (min-width: 700px)"], 4, [["min-height", "calc(var(--spacing) * 9)"]]], [".max-\\[700px\\]\\:min-h-11", ["not all and (min-width: 700px)"], 4, [["min-height", "calc(var(--spacing) * 11)"]]], [".max-\\[700px\\]\\:w-24", ["not all and (min-width: 700px)"], 4, [["width", "calc(var(--spacing) * 24)"]]], [".max-\\[700px\\]\\:min-w-11", ["not all and (min-width: 700px)"], 4, [["min-width", "calc(var(--spacing) * 11)"]]], [".max-\\[700px\\]\\:flex-1", ["not all and (min-width: 700px)"], 4, [["flex", "1"]]], [".max-\\[700px\\]\\:flex-\\[1_1_6rem\\]", ["not all and (min-width: 700px)"], 4, [["flex", "6rem"]]], [".max-\\[700px\\]\\:flex-\\[1_1_100\\%\\]", ["not all and (min-width: 700px)"], 4, [["flex", "100%"]]], [".max-\\[700px\\]\\:basis-56", ["not all and (min-width: 700px)"], 4, [["flex-basis", "calc(var(--spacing) * 56)"]]], [".max-\\[700px\\]\\:basis-full", ["not all and (min-width: 700px)"], 4, [["flex-basis", "100%"]]], [".max-\\[700px\\]\\:flex-wrap", ["not all and (min-width: 700px)"], 4, [["flex-wrap", "wrap"]]], [".max-\\[700px\\]\\:gap-y-2", ["not all and (min-width: 700px)"], 4, [["row-gap", "calc(var(--spacing) * 2)"]]], [".min-\\[701px\\]\\:left-auto", ["(min-width: 701px)"], 4, [["left", "auto"]]], [".min-\\[701px\\]\\:my-\\[3px\\]", ["(min-width: 701px)"], 4, [["margin-block", "3px"]]], [".min-\\[701px\\]\\:block", ["(min-width: 701px)"], 4, [["display", "block"]]], [".min-\\[701px\\]\\:hidden", ["(min-width: 701px)"], 4, [["display", "none"]]], [".min-\\[701px\\]\\:min-h-6", ["(min-width: 701px)"], 4, [["min-height", "calc(var(--spacing) * 6)"]]], [".min-\\[701px\\]\\:w-80", ["(min-width: 701px)"], 4, [["width", "calc(var(--spacing) * 80)"]]], [".min-\\[701px\\]\\:rounded-ui", ["(min-width: 701px)"], 4, [["border-radius", "var(--radius)"]]], [".min-\\[701px\\]\\:px-3", ["(min-width: 701px)"], 4, [["padding-inline", "calc(var(--spacing) * 3)"]]], [".min-\\[701px\\]\\:pr-\\[3px\\]", ["(min-width: 701px)"], 4, [["padding-right", "3px"]]], [".min-\\[701px\\]\\:pl-4", ["(min-width: 701px)"], 4, [["padding-left", "calc(var(--spacing) * 4)"]]], [".min-\\[701px\\]\\:text-\\[0\\.62rem\\]", ["(min-width: 701px)"], 4, [["font-size", ".62rem"]]], [".min-\\[701px\\]\\:text-\\[12\\.5px\\]", ["(min-width: 701px)"], 4, [["font-size", "12.5px"]]], [".min-\\[701px\\]\\:text-\\[12px\\]", ["(min-width: 701px)"], 4, [["font-size", "12px"]]], [".min-\\[701px\\]\\:font-medium", ["(min-width: 701px)"], 4, [["--tw-font-weight", "var(--font-weight-medium)"], ["font-weight", "var(--font-weight-medium)"]]], [".min-\\[701px\\]\\:font-semibold", ["(min-width: 701px)"], 4, [["--tw-font-weight", "var(--font-weight-semibold)"], ["font-weight", "var(--font-weight-semibold)"]]], [".min-\\[701px\\]\\:tracking-\\[0\\.045em\\]", ["(min-width: 701px)"], 4, [["--tw-tracking", ".045em"], ["letter-spacing", ".045em"]]], [".min-\\[701px\\]\\:text-subtext-0", ["(min-width: 701px)"], 4, [["color", "var(--subtext-0)"]]], [".min-\\[701px\\]\\:uppercase", ["(min-width: 701px)"], 4, [["text-transform", "uppercase"]]], [".min-\\[900px\\]\\:inline", ["(min-width: 900px)"], 4, [["display", "inline"]]], [".pointer-coarse\\:opacity-100", ["(pointer: coarse)"], 4, [["opacity", "1"]]], [".\\[\\&_\\.mode-switch\\]\\:ml-0 .mode-switch", null, 4, [["margin-left", "0"]]], [".max-\\[700px\\]\\:\\[\\&_button\\]\\:min-h-11 button", ["not all and (min-width: 700px)"], 4, [["min-height", "calc(var(--spacing) * 11)"]]], [".\\[\\&_pre\\]\\:m-\\[0\\.2rem_0_0\\.3rem_1\\.2rem\\] pre", null, 4, [["margin", ".2rem 0 .3rem 1.2rem"]]], [".\\[\\&_pre\\]\\:max-h-72 pre", null, 4, [["max-height", "calc(var(--spacing) * 72)"]]], [".\\[\\&_pre\\]\\:overflow-auto pre", null, 4, [["overflow", "auto"]]], [".\\[\\&_pre\\]\\:rounded-ui pre", null, 4, [["border-radius", "var(--radius)"]]], [".\\[\\&_pre\\]\\:bg-surface-0 pre", null, 4, [["background-color", "var(--surface-0)"]]], [".\\[\\&_pre\\]\\:p-2 pre", null, 4, [["padding", "calc(var(--spacing) * 2)"]]], [".\\[\\&_pre\\]\\:text-\\[0\\.78rem\\] pre", null, 4, [["font-size", ".78rem"]]], [".\\[\\&_pre\\]\\:\\[overflow-wrap\\:anywhere\\] pre", null, 4, [["overflow-wrap", "anywhere"]]], [".\\[\\&_pre\\]\\:whitespace-pre-wrap pre", null, 4, [["white-space", "pre-wrap"]]], [".\\[\\&_pre\\]\\:text-fg pre, .\\[\\&_strong\\]\\:text-fg strong", null, 4, [["color", "var(--text)"]]], [".\\[\\&_summary\\]\\:cursor-pointer summary", null, 4, [["cursor", "pointer"]]], [".\\[\\&\\:hover\\:not\\(\\:disabled\\)\\]\\:bg-surface-1:hover:not(:disabled)", null, 4, [["background-color", "var(--surface-1)"]]], [".\\[\\&\\:hover\\:not\\(\\:disabled\\)\\]\\:text-accent:hover:not(:disabled)", null, 4, [["color", "var(--accent)"]]], [".\\[\\&\\:hover\\:not\\(\\:disabled\\)\\]\\:text-red:hover:not(:disabled)", null, 4, [["color", "var(--red)"]]], [".\\[\\&\\:not\\(\\:has\\(\\[data-setting-row\\]\\)\\)\\>\\[data-none\\]\\]\\:block:not(:has([data-setting-row])) > [data-none]", null, 4, [["display", "block"]]], [".\\[\\&\\>\\*\\]\\:min-h-0 > *", null, 4, [["min-height", "0"]]], [".\\[\\&\\>\\*\\]\\:min-w-0 > *", null, 4, [["min-width", "0"]]], [".\\[\\&\\>\\*\\]\\:flex-1 > *", null, 4, [["flex", "1"]]], [".\\[\\&\\>\\*\\]\\:shrink-0 > *", null, 4, [["flex-shrink", "0"]]], [".\\[\\&\\>li\\]\\:text-\\[0\\.85rem\\] > li", null, 4, [["font-size", ".85rem"]]], [".\\[\\&\\>li\\]\\:leading-\\[1\\.5\\] > li", null, 4, [["--tw-leading", "1.5"], ["line-height", "1.5"]]], [".\\[\\&\\>li\\]\\:text-fg > li", null, 4, [["color", "var(--text)"]]], [".\\[\\&\\>summary\\]\\:flex > summary", null, 4, [["display", "flex"]]], [".\\[\\&\\>summary\\]\\:cursor-pointer > summary", null, 4, [["cursor", "pointer"]]], [".\\[\\&\\>summary\\]\\:list-none > summary", null, 4, [["list-style-type", "none"]]], [".\\[\\&\\>summary\\]\\:items-center > summary", null, 4, [["align-items", "center"]]], [".\\[\\&\\>summary\\]\\:gap-\\[0\\.4rem\\] > summary", null, 4, [["gap", ".4rem"]]], [".\\[\\&\\>summary\\]\\:rounded-ui > summary", null, 4, [["border-radius", "var(--radius)"]]], [".\\[\\&\\>summary\\]\\:px-\\[0\\.4rem\\] > summary", null, 4, [["padding-inline", ".4rem"]]], [".\\[\\&\\>summary\\]\\:py-\\[0\\.25rem\\] > summary", null, 4, [["padding-block", ".25rem"]]], [".\\[\\&\\>summary\\]\\:select-none > summary", null, 4, [["-webkit-user-select", "none"], ["user-select", "none"]]], [".\\[\\&\\>summary\\]\\:before\\:inline-block > summary:before", null, 4, [["content", "var(--tw-content)"], ["display", "inline-block"]]], [".\\[\\&\\>summary\\]\\:before\\:size-\\[0\\.4rem\\] > summary:before", null, 4, [["content", "var(--tw-content)"], ["width", ".4rem"], ["height", ".4rem"]]], [".\\[\\&\\>summary\\]\\:before\\:shrink-0 > summary:before", null, 4, [["content", "var(--tw-content)"], ["flex-shrink", "0"]]], [".\\[\\&\\>summary\\]\\:before\\:\\[transform\\:rotate\\(-45deg\\)\\] > summary:before", null, 4, [["content", "var(--tw-content)"], ["transform", "rotate(-45deg)"]]], [".\\[\\&\\>summary\\]\\:before\\:content-\\[\\'\\'\\] > summary:before", null, 4, [["--tw-content", '""'], ["content", "var(--tw-content)"]]], [".\\[\\&\\>summary\\]\\:before\\:\\[border-bottom\\:1\\.3px_solid_currentColor\\] > summary:before", null, 4, [["content", "var(--tw-content)"], ["border-bottom", "1.3px solid"]]], [".\\[\\&\\>summary\\]\\:before\\:\\[border-right\\:1\\.3px_solid_currentColor\\] > summary:before", null, 4, [["content", "var(--tw-content)"], ["border-right", "1.3px solid"]]], [".\\[\\&\\>summary\\]\\:before\\:\\[transition\\:transform_0\\.15s_ease\\] > summary:before", null, 4, [["content", "var(--tw-content)"], ["transition", "transform .15s"]]], [".\\[\\&\\>summary\\:hover\\]\\:bg-surface-1 > summary:hover", null, 4, [["background-color", "var(--surface-1)"]]], [".\\[\\&\\>summary\\:hover\\]\\:text-fg > summary:hover", null, 4, [["color", "var(--text)"]]], [".\\[\\&\\[open\\]\\>summary\\]\\:before\\:\\[transform\\:rotate\\(45deg\\)\\][open] > summary:before", null, 4, [["content", "var(--tw-content)"], ["transform", "rotate(45deg)"]]], [".app--mobile .\\[\\.app--mobile_\\&\\]\\:min-h-11", null, 4, [["min-height", "calc(var(--spacing) * 11)"]]], [".app--mobile .\\[\\.app--mobile_\\&\\]\\:min-h-\\[44px\\]", null, 4, [["min-height", "44px"]]], [".\\[\\@media\\(hover\\:none\\)\\]\\:opacity-60", ["(hover: none)"], 4, [["opacity", ".6"]]], [".\\[\\@media\\(hover\\:none\\)\\]\\:opacity-100", ["(hover: none)"], 4, [["opacity", "1"]]], [".\\[\\@media\\(max-width\\:700px\\)\\]\\:h-\\[2\\.75rem\\]", ["(max-width: 700px)"], 4, [["height", "2.75rem"]]], [".\\[\\@media\\(max-width\\:700px\\)\\]\\:min-h-\\[2\\.75rem\\]", ["(max-width: 700px)"], 4, [["min-height", "2.75rem"]]], [".\\[\\@media\\(max-width\\:700px\\)\\]\\:w-\\[2\\.75rem\\]", ["(max-width: 700px)"], 4, [["width", "2.75rem"]]], [".\\[\\@media\\(max-width\\:700px\\)\\]\\:min-w-\\[2\\.75rem\\]", ["(max-width: 700px)"], 4, [["min-width", "2.75rem"]]], [".\\[\\@media\\(max-width\\:700px\\)\\]\\:px-\\[0\\.65rem\\]", ["(max-width: 700px)"], 4, [["padding-inline", ".65rem"]]], ["div:hover > .\\[div\\:hover\\>\\&\\]\\:opacity-100", null, 4, [["opacity", "1"]]], [":root", null, 1e3, [["color-scheme", "dark"], ["--scrollbar-size", "6px"], ["--accent", "#c8c8c8"], ["--panel-bg", "#161616"], ["--surface-0", "#262626"], ["--surface-1", "#333"], ["--surface-dim", "#1c1c1c"], ["--backdrop", "#050505"], ["--overlay-0", "#3a3a3a"], ["--overlay-1", "#9b9b9b"], ["--text", "#d8d8d8"], ["--subtext-0", "#9b9b9b"], ["--mauve", "#a993c9"], ["--green", "#7fb685"], ["--yellow", "#d3b46a"], ["--red", "#df8c8c"], ["--blue", "#7aa2d7"], ["--teal", "#7fb8b8"], ["--peach", "#d39a6a"], ["--bg", "var(--panel-bg)"], ["--surface", "var(--surface-0)"], ["--surface-alt", "var(--surface-1)"], ["--border", "var(--overlay-0)"], ["--muted", "var(--subtext-0)"], ["--danger", "var(--red)"], ["--radius", "8px"], ["--radius-pane", "8px"], ["accent-color", "var(--accent)"], ["--font-ui", '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif'], ["--font-mono", `ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+const Vg = { layers: ["properties", "theme", "base", "utilities"], properties: { "--tw-translate-x": { inherits: !1, initial: "0" }, "--tw-translate-y": { inherits: !1, initial: "0" }, "--tw-translate-z": { inherits: !1, initial: "0" }, "--tw-rotate-x": { inherits: !1, initial: null }, "--tw-rotate-y": { inherits: !1, initial: null }, "--tw-rotate-z": { inherits: !1, initial: null }, "--tw-skew-x": { inherits: !1, initial: null }, "--tw-skew-y": { inherits: !1, initial: null }, "--tw-space-y-reverse": { inherits: !1, initial: "0" }, "--tw-border-style": { inherits: !1, initial: "solid" }, "--tw-leading": { inherits: !1, initial: null }, "--tw-font-weight": { inherits: !1, initial: null }, "--tw-tracking": { inherits: !1, initial: null }, "--tw-ordinal": { inherits: !1, initial: null }, "--tw-slashed-zero": { inherits: !1, initial: null }, "--tw-numeric-figure": { inherits: !1, initial: null }, "--tw-numeric-spacing": { inherits: !1, initial: null }, "--tw-numeric-fraction": { inherits: !1, initial: null }, "--tw-shadow": { inherits: !1, initial: "0 0 #0000" }, "--tw-shadow-color": { inherits: !1, initial: null }, "--tw-shadow-alpha": { inherits: !1, initial: "100%" }, "--tw-inset-shadow": { inherits: !1, initial: "0 0 #0000" }, "--tw-inset-shadow-color": { inherits: !1, initial: null }, "--tw-inset-shadow-alpha": { inherits: !1, initial: "100%" }, "--tw-ring-color": { inherits: !1, initial: null }, "--tw-ring-shadow": { inherits: !1, initial: "0 0 #0000" }, "--tw-inset-ring-color": { inherits: !1, initial: null }, "--tw-inset-ring-shadow": { inherits: !1, initial: "0 0 #0000" }, "--tw-ring-inset": { inherits: !1, initial: null }, "--tw-ring-offset-width": { inherits: !1, initial: "0" }, "--tw-ring-offset-color": { inherits: !1, initial: "#fff" }, "--tw-ring-offset-shadow": { inherits: !1, initial: "0 0 #0000" }, "--tw-outline-style": { inherits: !1, initial: "solid" }, "--tw-blur": { inherits: !1, initial: null }, "--tw-brightness": { inherits: !1, initial: null }, "--tw-contrast": { inherits: !1, initial: null }, "--tw-grayscale": { inherits: !1, initial: null }, "--tw-hue-rotate": { inherits: !1, initial: null }, "--tw-invert": { inherits: !1, initial: null }, "--tw-opacity": { inherits: !1, initial: null }, "--tw-saturate": { inherits: !1, initial: null }, "--tw-sepia": { inherits: !1, initial: null }, "--tw-drop-shadow": { inherits: !1, initial: null }, "--tw-drop-shadow-color": { inherits: !1, initial: null }, "--tw-drop-shadow-alpha": { inherits: !1, initial: "100%" }, "--tw-drop-shadow-size": { inherits: !1, initial: null }, "--tw-backdrop-blur": { inherits: !1, initial: null }, "--tw-backdrop-brightness": { inherits: !1, initial: null }, "--tw-backdrop-contrast": { inherits: !1, initial: null }, "--tw-backdrop-grayscale": { inherits: !1, initial: null }, "--tw-backdrop-hue-rotate": { inherits: !1, initial: null }, "--tw-backdrop-invert": { inherits: !1, initial: null }, "--tw-backdrop-opacity": { inherits: !1, initial: null }, "--tw-backdrop-saturate": { inherits: !1, initial: null }, "--tw-backdrop-sepia": { inherits: !1, initial: null }, "--tw-duration": { inherits: !1, initial: null }, "--tw-ease": { inherits: !1, initial: null }, "--tw-content": { inherits: !1, initial: '""' } }, rules: [[":root, :host", null, 2, [["--spacing", ".25rem"], ["--text-xs", ".75rem"], ["--text-xs--line-height", "calc(1 / .75)"], ["--text-sm", ".875rem"], ["--text-sm--line-height", "calc(1.25 / .875)"], ["--font-weight-normal", "400"], ["--font-weight-medium", "500"], ["--font-weight-semibold", "600"], ["--font-weight-bold", "700"], ["--tracking-normal", "0em"], ["--tracking-wide", ".025em"], ["--leading-tight", "1.25"], ["--leading-relaxed", "1.625"], ["--ease-out", "cubic-bezier(0, 0, .2, 1)"], ["--animate-pulse", "pulse 2s cubic-bezier(.4, 0, .6, 1) infinite"], ["--blur-xl", "24px"], ["--default-transition-duration", ".15s"], ["--default-transition-timing-function", "cubic-bezier(.4, 0, .2, 1)"], ["--animate-toast-in", "toast-in .2s cubic-bezier(.22, 1, .36, 1)"], ["--animate-host-pulse", "host-connecting-pulse 1.4s ease-in-out infinite"], ["--animate-drop-zone", "drop-zone-in .14s ease-out, drop-zone-pulse 1.2s ease-in-out .14s infinite"]]], ["::selection", null, 3, [["background", "var(--accent)"], ["color", "var(--panel-bg)"]]], [":where(input, textarea)::placeholder", null, 3, [["color", "var(--subtext-0)"], ["opacity", "1"]]], [":where(button, input, select, textarea)", null, 3, [["border", "0"]]], [':where(button, a[href], select, summary, [role="button"], [role="menuitem"]):focus-visible', null, 3, [["outline", "2px solid var(--accent)"], ["outline-offset", "-2px"]]], ["::-webkit-scrollbar", null, 3, [["width", "var(--scrollbar-size)"], ["height", "var(--scrollbar-size)"]]], ["::-webkit-scrollbar-track", null, 3, [["background", "none"]]], ["::-webkit-scrollbar-corner", null, 3, [["background", "none"]]], ["::-webkit-scrollbar-thumb", null, 3, [["background", "var(--text)"]]], ["::-webkit-scrollbar-thumb", null, 3, [["background", "color-mix(in srgb, var(--text) 20%, transparent)"]]], ["::-webkit-scrollbar-thumb", null, 3, [["border-radius", "var(--scrollbar-size)"]]], ["::-webkit-scrollbar-thumb:hover", null, 3, [["background", "var(--text)"]]], ["::-webkit-scrollbar-thumb:hover", null, 3, [["background", "color-mix(in srgb, var(--text) 40%, transparent)"]]], [".xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider", null, 3, [["border-radius", "var(--scrollbar-size)"]]], [".\\@container, .\\[container-type\\:inline-size\\]", null, 4, [["container-type", "inline-size"]]], [".pointer-events-auto", null, 4, [["pointer-events", "auto"]]], [".pointer-events-none", null, 4, [["pointer-events", "none"]]], [".collapse", null, 4, [["visibility", "collapse"]]], [".invisible", null, 4, [["visibility", "hidden"]]], [".visible", null, 4, [["visibility", "visible"]]], [".sr-only", null, 4, [["clip-path", "inset(50%)"], ["white-space", "nowrap"], ["border-width", "0"], ["width", "1px"], ["height", "1px"], ["margin", "-1px"], ["padding", "0"], ["position", "absolute"], ["overflow", "hidden"]]], [".absolute", null, 4, [["position", "absolute"]]], [".fixed", null, 4, [["position", "fixed"]]], [".relative", null, 4, [["position", "relative"]]], [".static", null, 4, [["position", "static"]]], [".sticky", null, 4, [["position", "sticky"]]], [".inset-0", null, 4, [["inset", "0"]]], [".inset-x-0", null, 4, [["inset-inline", "0"]]], [".inset-x-2", null, 4, [["inset-inline", "calc(var(--spacing) * 2)"]]], [".-top-1", null, 4, [["top", "calc(var(--spacing) * -1)"]]], [".-top-1\\.5", null, 4, [["top", "calc(var(--spacing) * -1.5)"]]], [".top-0", null, 4, [["top", "0"]]], [".top-1", null, 4, [["top", "var(--spacing)"]]], [".top-1\\.5", null, 4, [["top", "calc(var(--spacing) * 1.5)"]]], [".top-1\\/2", null, 4, [["top", "50%"]]], [".top-2", null, 4, [["top", "calc(var(--spacing) * 2)"]]], [".top-4", null, 4, [["top", "calc(var(--spacing) * 4)"]]], [".top-\\[0\\.1rem\\]", null, 4, [["top", ".1rem"]]], [".top-\\[7px\\]", null, 4, [["top", "7px"]]], [".top-\\[max\\(0\\.75rem\\,env\\(safe-area-inset-top\\)\\)\\]", null, 4, [["top", "max(.75rem, env(safe-area-inset-top))"]]], [".top-full", null, 4, [["top", "100%"]]], [".top-px", null, 4, [["top", "1px"]]], [".-right-1", null, 4, [["right", "calc(var(--spacing) * -1)"]]], [".-right-1\\.5", null, 4, [["right", "calc(var(--spacing) * -1.5)"]]], [".right-0", null, 4, [["right", "0"]]], [".right-1", null, 4, [["right", "var(--spacing)"]]], [".right-3", null, 4, [["right", "calc(var(--spacing) * 3)"]]], [".right-4", null, 4, [["right", "calc(var(--spacing) * 4)"]]], [".right-\\[0\\.8rem\\]", null, 4, [["right", ".8rem"]]], [".right-\\[0\\.25rem\\]", null, 4, [["right", ".25rem"]]], [".right-\\[max\\(0\\.75rem\\,env\\(safe-area-inset-right\\)\\)\\]", null, 4, [["right", "max(.75rem, env(safe-area-inset-right))"]]], [".bottom-0", null, 4, [["bottom", "0"]]], [".bottom-2", null, 4, [["bottom", "calc(var(--spacing) * 2)"]]], [".bottom-3", null, 4, [["bottom", "calc(var(--spacing) * 3)"]]], [".bottom-\\[0\\.8rem\\]", null, 4, [["bottom", ".8rem"]]], [".bottom-full", null, 4, [["bottom", "100%"]]], [".-left-8", null, 4, [["left", "calc(var(--spacing) * -8)"]]], [".-left-\\[2px\\]", null, 4, [["left", "-2px"]]], [".left-0", null, 4, [["left", "0"]]], [".left-2", null, 4, [["left", "calc(var(--spacing) * 2)"]]], [".left-\\[0\\.1rem\\]", null, 4, [["left", ".1rem"]]], [".left-\\[max\\(0\\.75rem\\,env\\(safe-area-inset-left\\)\\)\\]", null, 4, [["left", "max(.75rem, env(safe-area-inset-left))"]]], [".left-px", null, 4, [["left", "1px"]]], [".isolate", null, 4, [["isolation", "isolate"]]], [".z-4", null, 4, [["z-index", "4"]]], [".z-5", null, 4, [["z-index", "5"]]], [".z-10", null, 4, [["z-index", "10"]]], [".z-20", null, 4, [["z-index", "20"]]], [".z-30", null, 4, [["z-index", "30"]]], [".z-40", null, 4, [["z-index", "40"]]], [".z-50", null, 4, [["z-index", "50"]]], [".z-\\[2\\]", null, 4, [["z-index", "2"]]], [".z-\\[3\\]", null, 4, [["z-index", "3"]]], [".z-\\[5\\]", null, 4, [["z-index", "5"]]], [".z-\\[1000\\]", null, 4, [["z-index", "1000"]]], [".z-\\[2000\\]", null, 4, [["z-index", "2000"]]], [".z-\\[2100\\]", null, 4, [["z-index", "2100"]]], [".z-\\[2200\\]", null, 4, [["z-index", "2200"]]], [".z-\\[3000\\]", null, 4, [["z-index", "3000"]]], [".z-\\[3100\\]", null, 4, [["z-index", "3100"]]], [".z-\\[4000\\]", null, 4, [["z-index", "4000"]]], [".z-\\[9998\\]", null, 4, [["z-index", "9998"]]], [".z-\\[9999\\]", null, 4, [["z-index", "9999"]]], [".z-\\[10000\\]", null, 4, [["z-index", "10000"]]], [".z-auto", null, 4, [["z-index", "auto"]]], [".order-last", null, 4, [["order", "9999"]]], [".col-\\[1\\/-1\\]", null, 4, [["grid-column", "1 / -1"]]], [".container", null, 4, [["width", "100%"]]], [".container", ["(min-width: 40rem)"], 4, [["max-width", "40rem"]]], [".container", ["(min-width: 48rem)"], 4, [["max-width", "48rem"]]], [".container", ["(min-width: 64rem)"], 4, [["max-width", "64rem"]]], [".container", ["(min-width: 80rem)"], 4, [["max-width", "80rem"]]], [".container", ["(min-width: 96rem)"], 4, [["max-width", "96rem"]]], [".m-0", null, 4, [["margin", "0"]]], [".m-2", null, 4, [["margin", "calc(var(--spacing) * 2)"]]], [".m-\\[0\\.7rem\\]", null, 4, [["margin", ".7rem"]]], [".m-auto", null, 4, [["margin", "auto"]]], [".mx-0", null, 4, [["margin-inline", "0"]]], [".mx-0\\.5", null, 4, [["margin-inline", "calc(var(--spacing) * .5)"]]], [".mx-2", null, 4, [["margin-inline", "calc(var(--spacing) * 2)"]]], [".mx-3", null, 4, [["margin-inline", "calc(var(--spacing) * 3)"]]], [".mx-4", null, 4, [["margin-inline", "calc(var(--spacing) * 4)"]]], [".mx-\\[0\\.3rem\\]", null, 4, [["margin-inline", ".3rem"]]], [".mx-\\[0\\.7rem\\]", null, 4, [["margin-inline", ".7rem"]]], [".mx-\\[0\\.65rem\\]", null, 4, [["margin-inline", ".65rem"]]], [".mx-\\[3px\\]", null, 4, [["margin-inline", "3px"]]], [".mx-\\[11px\\]", null, 4, [["margin-inline", "11px"]]], [".mx-auto", null, 4, [["margin-inline", "auto"]]], [".my-0\\.5", null, 4, [["margin-block", "calc(var(--spacing) * .5)"]]], [".my-1", null, 4, [["margin-block", "var(--spacing)"]]], [".my-2", null, 4, [["margin-block", "calc(var(--spacing) * 2)"]]], [".my-\\[0\\.2rem\\]", null, 4, [["margin-block", ".2rem"]]], [".my-\\[0\\.3rem\\]", null, 4, [["margin-block", ".3rem"]]], [".my-\\[0\\.6rem\\]", null, 4, [["margin-block", ".6rem"]]], [".my-\\[0\\.28rem\\]", null, 4, [["margin-block", ".28rem"]]], [".my-\\[0\\.45rem\\]", null, 4, [["margin-block", ".45rem"]]], [".my-\\[0\\.55rem\\]", null, 4, [["margin-block", ".55rem"]]], [".my-\\[3px\\]", null, 4, [["margin-block", "3px"]]], [".mt-0", null, 4, [["margin-top", "0"]]], [".mt-0\\.5", null, 4, [["margin-top", "calc(var(--spacing) * .5)"]]], [".mt-1", null, 4, [["margin-top", "var(--spacing)"]]], [".mt-1\\.5", null, 4, [["margin-top", "calc(var(--spacing) * 1.5)"]]], [".mt-2", null, 4, [["margin-top", "calc(var(--spacing) * 2)"]]], [".mt-3", null, 4, [["margin-top", "calc(var(--spacing) * 3)"]]], [".mt-4", null, 4, [["margin-top", "calc(var(--spacing) * 4)"]]], [".mt-\\[0\\.1rem\\]", null, 4, [["margin-top", ".1rem"]]], [".mt-\\[0\\.2rem\\]", null, 4, [["margin-top", ".2rem"]]], [".mt-\\[0\\.3rem\\]", null, 4, [["margin-top", ".3rem"]]], [".mt-\\[0\\.4rem\\]", null, 4, [["margin-top", ".4rem"]]], [".mt-\\[0\\.5rem\\]", null, 4, [["margin-top", ".5rem"]]], [".mt-\\[0\\.15rem\\]", null, 4, [["margin-top", ".15rem"]]], [".mt-\\[0\\.18rem\\]", null, 4, [["margin-top", ".18rem"]]], [".mt-\\[0\\.35rem\\]", null, 4, [["margin-top", ".35rem"]]], [".mr-1", null, 4, [["margin-right", "var(--spacing)"]]], [".mr-1\\.5", null, 4, [["margin-right", "calc(var(--spacing) * 1.5)"]]], [".mr-\\[0\\.3rem\\]", null, 4, [["margin-right", ".3rem"]]], [".mr-\\[0\\.7rem\\]", null, 4, [["margin-right", ".7rem"]]], [".mr-auto", null, 4, [["margin-right", "auto"]]], [".mb-0", null, 4, [["margin-bottom", "0"]]], [".mb-0\\.5", null, 4, [["margin-bottom", "calc(var(--spacing) * .5)"]]], [".mb-1", null, 4, [["margin-bottom", "var(--spacing)"]]], [".mb-2", null, 4, [["margin-bottom", "calc(var(--spacing) * 2)"]]], [".mb-3", null, 4, [["margin-bottom", "calc(var(--spacing) * 3)"]]], [".mb-4", null, 4, [["margin-bottom", "calc(var(--spacing) * 4)"]]], [".mb-8", null, 4, [["margin-bottom", "calc(var(--spacing) * 8)"]]], [".mb-\\[0\\.2rem\\]", null, 4, [["margin-bottom", ".2rem"]]], [".mb-\\[0\\.3rem\\]", null, 4, [["margin-bottom", ".3rem"]]], [".mb-\\[0\\.4rem\\]", null, 4, [["margin-bottom", ".4rem"]]], [".mb-\\[0\\.6rem\\]", null, 4, [["margin-bottom", ".6rem"]]], [".mb-\\[0\\.7rem\\]", null, 4, [["margin-bottom", ".7rem"]]], [".mb-\\[0\\.9rem\\]", null, 4, [["margin-bottom", ".9rem"]]], [".mb-\\[0\\.35rem\\]", null, 4, [["margin-bottom", ".35rem"]]], [".mb-\\[0\\.55rem\\]", null, 4, [["margin-bottom", ".55rem"]]], [".mb-\\[1\\.1rem\\]", null, 4, [["margin-bottom", "1.1rem"]]], [".-ml-1", null, 4, [["margin-left", "calc(var(--spacing) * -1)"]]], [".-ml-2", null, 4, [["margin-left", "calc(var(--spacing) * -2)"]]], [".ml-1", null, 4, [["margin-left", "var(--spacing)"]]], [".ml-2", null, 4, [["margin-left", "calc(var(--spacing) * 2)"]]], [".ml-4", null, 4, [["margin-left", "calc(var(--spacing) * 4)"]]], [".ml-\\[0\\.4rem\\]", null, 4, [["margin-left", ".4rem"]]], [".ml-\\[0\\.5rem\\]", null, 4, [["margin-left", ".5rem"]]], [".ml-\\[0\\.9rem\\]", null, 4, [["margin-left", ".9rem"]]], [".ml-\\[0\\.35rem\\]", null, 4, [["margin-left", ".35rem"]]], [".ml-\\[0\\.55rem\\]", null, 4, [["margin-left", ".55rem"]]], [".ml-\\[1\\.45rem\\]", null, 4, [["margin-left", "1.45rem"]]], [".ml-\\[6\\.1rem\\]", null, 4, [["margin-left", "6.1rem"]]], [".ml-auto", null, 4, [["margin-left", "auto"]]], [".box-border", null, 4, [["box-sizing", "border-box"]]], [".\\!hidden", null, 4, [["display", "none", 1]]], [".\\[display\\:-webkit-box\\]", null, 4, [["display", "-webkit-box"]]], [".\\[display\\:var\\(--pane-grip\\,flex\\)\\]", null, 4, [["display", "var(--pane-grip, flex)"]]], [".block", null, 4, [["display", "block"]]], [".contents", null, 4, [["display", "contents"]]], [".flex", null, 4, [["display", "flex"]]], [".grid", null, 4, [["display", "grid"]]], [".hidden", null, 4, [["display", "none"]]], [".inline", null, 4, [["display", "inline"]]], [".inline-block", null, 4, [["display", "inline-block"]]], [".inline-flex", null, 4, [["display", "inline-flex"]]], [".table", null, 4, [["display", "table"]]], [".size-1", null, 4, [["width", "var(--spacing)"], ["height", "var(--spacing)"]]], [".size-1\\.5", null, 4, [["width", "calc(var(--spacing) * 1.5)"], ["height", "calc(var(--spacing) * 1.5)"]]], [".size-2", null, 4, [["width", "calc(var(--spacing) * 2)"], ["height", "calc(var(--spacing) * 2)"]]], [".size-3", null, 4, [["width", "calc(var(--spacing) * 3)"], ["height", "calc(var(--spacing) * 3)"]]], [".size-5", null, 4, [["width", "calc(var(--spacing) * 5)"], ["height", "calc(var(--spacing) * 5)"]]], [".size-6", null, 4, [["width", "calc(var(--spacing) * 6)"], ["height", "calc(var(--spacing) * 6)"]]], [".size-7", null, 4, [["width", "calc(var(--spacing) * 7)"], ["height", "calc(var(--spacing) * 7)"]]], [".size-8", null, 4, [["width", "calc(var(--spacing) * 8)"], ["height", "calc(var(--spacing) * 8)"]]], [".size-11", null, 4, [["width", "calc(var(--spacing) * 11)"], ["height", "calc(var(--spacing) * 11)"]]], [".size-14", null, 4, [["width", "calc(var(--spacing) * 14)"], ["height", "calc(var(--spacing) * 14)"]]], [".size-\\[0\\.6rem\\]", null, 4, [["width", ".6rem"], ["height", ".6rem"]]], [".size-\\[1\\.2rem\\]", null, 4, [["width", "1.2rem"], ["height", "1.2rem"]]], [".size-\\[5px\\]", null, 4, [["width", "5px"], ["height", "5px"]]], [".size-\\[14px\\]", null, 4, [["width", "14px"], ["height", "14px"]]], [".size-\\[calc\\(14px\\*var\\(--zoom\\,1\\)\\)\\]", null, 4, [["width", "calc(14px * var(--zoom, 1))"], ["height", "calc(14px * var(--zoom, 1))"]]], [".size-full", null, 4, [["width", "100%"], ["height", "100%"]]], [".h-1", null, 4, [["height", "var(--spacing)"]]], [".h-1\\.5", null, 4, [["height", "calc(var(--spacing) * 1.5)"]]], [".h-2", null, 4, [["height", "calc(var(--spacing) * 2)"]]], [".h-3", null, 4, [["height", "calc(var(--spacing) * 3)"]]], [".h-4", null, 4, [["height", "calc(var(--spacing) * 4)"]]], [".h-5", null, 4, [["height", "calc(var(--spacing) * 5)"]]], [".h-6", null, 4, [["height", "calc(var(--spacing) * 6)"]]], [".h-7", null, 4, [["height", "calc(var(--spacing) * 7)"]]], [".h-8", null, 4, [["height", "calc(var(--spacing) * 8)"]]], [".h-9", null, 4, [["height", "calc(var(--spacing) * 9)"]]], [".h-11", null, 4, [["height", "calc(var(--spacing) * 11)"]]], [".h-12", null, 4, [["height", "calc(var(--spacing) * 12)"]]], [".h-44", null, 4, [["height", "calc(var(--spacing) * 44)"]]], [".h-\\[1\\.1rem\\]", null, 4, [["height", "1.1rem"]]], [".h-\\[1\\.3rem\\]", null, 4, [["height", "1.3rem"]]], [".h-\\[1\\.4rem\\]", null, 4, [["height", "1.4rem"]]], [".h-\\[1\\.25rem\\]", null, 4, [["height", "1.25rem"]]], [".h-\\[2px\\]", null, 4, [["height", "2px"]]], [".h-\\[14px\\]", null, 4, [["height", "14px"]]], [".h-\\[18px\\]", null, 4, [["height", "18px"]]], [".h-\\[43px\\]", null, 4, [["height", "43px"]]], [".h-\\[calc\\(100\\%-max\\(0\\.5rem\\,env\\(safe-area-inset-top\\)\\)\\)\\]", null, 4, [["height", "calc(100% - max(.5rem, env(safe-area-inset-top)))"]]], [".h-full", null, 4, [["height", "100%"]]], [".h-px", null, 4, [["height", "1px"]]], [".max-h-40", null, 4, [["max-height", "calc(var(--spacing) * 40)"]]], [".max-h-56", null, 4, [["max-height", "calc(var(--spacing) * 56)"]]], [".max-h-72", null, 4, [["max-height", "calc(var(--spacing) * 72)"]]], [".max-h-\\[8rem\\]", null, 4, [["max-height", "8rem"]]], [".max-h-\\[13rem\\]", null, 4, [["max-height", "13rem"]]], [".max-h-\\[30\\%\\]", null, 4, [["max-height", "30%"]]], [".max-h-\\[30vh\\]", null, 4, [["max-height", "30vh"]]], [".max-h-\\[35vh\\]", null, 4, [["max-height", "35vh"]]], [".max-h-\\[40\\%\\]", null, 4, [["max-height", "40%"]]], [".max-h-\\[50dvh\\]", null, 4, [["max-height", "50dvh"]]], [".max-h-\\[60\\%\\]", null, 4, [["max-height", "60%"]]], [".max-h-\\[70\\%\\]", null, 4, [["max-height", "70%"]]], [".max-h-\\[85vh\\]", null, 4, [["max-height", "85vh"]]], [".max-h-\\[90\\%\\]", null, 4, [["max-height", "90%"]]], [".max-h-\\[190px\\]", null, 4, [["max-height", "190px"]]], [".max-h-\\[240px\\]", null, 4, [["max-height", "240px"]]], [".max-h-\\[260px\\]", null, 4, [["max-height", "260px"]]], [".max-h-\\[calc\\(85vh-4rem\\)\\]", null, 4, [["max-height", "calc(85vh - 4rem)"]]], [".max-h-\\[calc\\(100dvh_-_4rem\\)\\]", null, 4, [["max-height", "calc(100dvh - 4rem)"]]], [".max-h-\\[min\\(420px\\,calc\\(100dvh_-_16vh_-_2rem\\)\\)\\]", null, 4, [["max-height", "min(420px, 100dvh - 16vh - 2rem)"]]], [".max-h-\\[min\\(480px\\,calc\\(100dvh_-_16vh_-_2rem\\)\\)\\]", null, 4, [["max-height", "min(480px, 100dvh - 16vh - 2rem)"]]], [".max-h-full", null, 4, [["max-height", "100%"]]], [".min-h-0", null, 4, [["min-height", "0"]]], [".min-h-6", null, 4, [["min-height", "calc(var(--spacing) * 6)"]]], [".min-h-7", null, 4, [["min-height", "calc(var(--spacing) * 7)"]]], [".min-h-8", null, 4, [["min-height", "calc(var(--spacing) * 8)"]]], [".min-h-9", null, 4, [["min-height", "calc(var(--spacing) * 9)"]]], [".min-h-10", null, 4, [["min-height", "calc(var(--spacing) * 10)"]]], [".min-h-11", null, 4, [["min-height", "calc(var(--spacing) * 11)"]]], [".min-h-20", null, 4, [["min-height", "calc(var(--spacing) * 20)"]]], [".min-h-40", null, 4, [["min-height", "calc(var(--spacing) * 40)"]]], [".min-h-\\[1\\.5em\\]", null, 4, [["min-height", "1.5em"]]], [".min-h-\\[1\\.8rem\\]", null, 4, [["min-height", "1.8rem"]]], [".min-h-\\[2\\.5rem\\]", null, 4, [["min-height", "2.5rem"]]], [".min-h-\\[3\\.2rem\\]", null, 4, [["min-height", "3.2rem"]]], [".min-h-\\[3\\.25rem\\]", null, 4, [["min-height", "3.25rem"]]], [".min-h-\\[6rem\\]", null, 4, [["min-height", "6rem"]]], [".min-h-\\[8rem\\]", null, 4, [["min-height", "8rem"]]], [".min-h-\\[10rem\\]", null, 4, [["min-height", "10rem"]]], [".min-h-\\[12rem\\]", null, 4, [["min-height", "12rem"]]], [".min-h-\\[13rem\\]", null, 4, [["min-height", "13rem"]]], [".min-h-\\[32px\\]", null, 4, [["min-height", "32px"]]], [".min-h-\\[44px\\]", null, 4, [["min-height", "44px"]]], [".min-h-\\[60px\\]", null, 4, [["min-height", "60px"]]], [".min-h-\\[100dvh\\]", null, 4, [["min-height", "100dvh"]]], [".min-h-\\[calc\\(22px\\*var\\(--zoom\\,1\\)\\)\\]", null, 4, [["min-height", "calc(22px * var(--zoom, 1))"]]], [".min-h-full", null, 4, [["min-height", "100%"]]], [".w-2", null, 4, [["width", "calc(var(--spacing) * 2)"]]], [".w-3", null, 4, [["width", "calc(var(--spacing) * 3)"]]], [".w-4", null, 4, [["width", "calc(var(--spacing) * 4)"]]], [".w-5", null, 4, [["width", "calc(var(--spacing) * 5)"]]], [".w-7", null, 4, [["width", "calc(var(--spacing) * 7)"]]], [".w-8", null, 4, [["width", "calc(var(--spacing) * 8)"]]], [".w-9", null, 4, [["width", "calc(var(--spacing) * 9)"]]], [".w-10", null, 4, [["width", "calc(var(--spacing) * 10)"]]], [".w-20", null, 4, [["width", "calc(var(--spacing) * 20)"]]], [".w-40", null, 4, [["width", "calc(var(--spacing) * 40)"]]], [".w-44", null, 4, [["width", "calc(var(--spacing) * 44)"]]], [".w-\\[1\\.1rem\\]", null, 4, [["width", "1.1rem"]]], [".w-\\[1\\.4rem\\]", null, 4, [["width", "1.4rem"]]], [".w-\\[1\\.6rem\\]", null, 4, [["width", "1.6rem"]]], [".w-\\[1\\.25rem\\]", null, 4, [["width", "1.25rem"]]], [".w-\\[2\\.4rem\\]", null, 4, [["width", "2.4rem"]]], [".w-\\[2\\.25rem\\]", null, 4, [["width", "2.25rem"]]], [".w-\\[6rem\\]", null, 4, [["width", "6rem"]]], [".w-\\[7rem\\]", null, 4, [["width", "7rem"]]], [".w-\\[11rem\\]", null, 4, [["width", "11rem"]]], [".w-\\[15rem\\]", null, 4, [["width", "15rem"]]], [".w-\\[16rem\\]", null, 4, [["width", "16rem"]]], [".w-\\[18px\\]", null, 4, [["width", "18px"]]], [".w-\\[100cqi\\]", null, 4, [["width", "100cqi"]]], [".w-\\[calc\\(\\(100\\%-0\\.875rem\\)\\/8\\)\\]", null, 4, [["width", "calc(12.5% - .109375rem)"]]], [".w-\\[calc\\(100\\%_-_0\\.6rem\\)\\]", null, 4, [["width", "calc(100% - .6rem)"]]], [".w-\\[calc\\(100\\%_-_1rem\\)\\]", null, 4, [["width", "calc(100% - 1rem)"]]], [".w-\\[min\\(22rem\\,calc\\(100vw-3rem\\)\\)\\]", null, 4, [["width", "min(22rem, 100vw - 3rem)"]]], [".w-\\[min\\(26rem\\,100\\%\\)\\]", null, 4, [["width", "min(26rem, 100%)"]]], [".w-\\[min\\(28rem\\,calc\\(100vw-2\\.5rem\\)\\)\\]", null, 4, [["width", "min(28rem, 100vw - 2.5rem)"]]], [".w-\\[min\\(30rem\\,92vw\\)\\]", null, 4, [["width", "min(30rem, 92vw)"]]], [".w-\\[min\\(32rem\\,100\\%\\)\\]", null, 4, [["width", "min(32rem, 100%)"]]], [".w-\\[min\\(340px\\,calc\\(100vw-16px\\)\\)\\]", null, 4, [["width", "min(340px, 100vw - 16px)"]]], [".w-\\[min\\(360px\\,calc\\(100vw_-_2rem\\)\\)\\]", null, 4, [["width", "min(360px, 100vw - 2rem)"]]], [".w-\\[min\\(420px\\,calc\\(100vw_-_16px\\)\\)\\]", null, 4, [["width", "min(420px, 100vw - 16px)"]]], [".w-\\[min\\(480px\\,calc\\(100vw_-_2rem\\)\\)\\]", null, 4, [["width", "min(480px, 100vw - 2rem)"]]], [".w-\\[min\\(560px\\,calc\\(100vw_-_2rem\\)\\)\\]", null, 4, [["width", "min(560px, 100vw - 2rem)"]]], [".w-\\[var\\(--sidebar-width\\,240px\\)\\]", null, 4, [["width", "var(--sidebar-width, 240px)"]]], [".w-\\[var\\(--tools-width\\)\\]", null, 4, [["width", "var(--tools-width)"]]], [".w-auto", null, 4, [["width", "auto"]]], [".w-full", null, 4, [["width", "100%"]]], [".w-px", null, 4, [["width", "1px"]]], [".max-w-24", null, 4, [["max-width", "calc(var(--spacing) * 24)"]]], [".max-w-32", null, 4, [["max-width", "calc(var(--spacing) * 32)"]]], [".max-w-\\[9rem\\]", null, 4, [["max-width", "9rem"]]], [".max-w-\\[10rem\\]", null, 4, [["max-width", "10rem"]]], [".max-w-\\[14rem\\]", null, 4, [["max-width", "14rem"]]], [".max-w-\\[16rem\\]", null, 4, [["max-width", "16rem"]]], [".max-w-\\[24rem\\]", null, 4, [["max-width", "24rem"]]], [".max-w-\\[25\\%\\]", null, 4, [["max-width", "25%"]]], [".max-w-\\[26rem\\]", null, 4, [["max-width", "26rem"]]], [".max-w-\\[28rem\\]", null, 4, [["max-width", "28rem"]]], [".max-w-\\[35\\%\\]", null, 4, [["max-width", "35%"]]], [".max-w-\\[38\\%\\]", null, 4, [["max-width", "38%"]]], [".max-w-\\[45\\%\\]", null, 4, [["max-width", "45%"]]], [".max-w-\\[46rem\\]", null, 4, [["max-width", "46rem"]]], [".max-w-\\[55\\%\\]", null, 4, [["max-width", "55%"]]], [".max-w-\\[56rem\\]", null, 4, [["max-width", "56rem"]]], [".max-w-\\[85\\%\\]", null, 4, [["max-width", "85%"]]], [".max-w-\\[140px\\]", null, 4, [["max-width", "140px"]]], [".max-w-\\[320px\\]", null, 4, [["max-width", "320px"]]], [".max-w-\\[min\\(22rem\\,calc\\(100\\%-1\\.5rem\\)\\)\\]", null, 4, [["max-width", "min(22rem, 100% - 1.5rem)"]]], [".max-w-\\[min\\(30rem\\,calc\\(100\\%-1\\.6rem\\)\\)\\]", null, 4, [["max-width", "min(30rem, 100% - 1.6rem)"]]], [".max-w-\\[min\\(34rem\\,calc\\(100\\%-1\\.5rem\\)\\)\\]", null, 4, [["max-width", "min(34rem, 100% - 1.5rem)"]]], [".max-w-\\[min\\(320px\\,calc\\(100vw_-_24px\\)\\)\\]", null, 4, [["max-width", "min(320px, 100vw - 24px)"]]], [".max-w-full", null, 4, [["max-width", "100%"]]], [".max-w-none", null, 4, [["max-width", "none"]]], [".min-w-0", null, 4, [["min-width", "0"]]], [".min-w-6", null, 4, [["min-width", "calc(var(--spacing) * 6)"]]], [".min-w-8", null, 4, [["min-width", "calc(var(--spacing) * 8)"]]], [".min-w-12", null, 4, [["min-width", "calc(var(--spacing) * 12)"]]], [".min-w-24", null, 4, [["min-width", "calc(var(--spacing) * 24)"]]], [".min-w-36", null, 4, [["min-width", "calc(var(--spacing) * 36)"]]], [".min-w-56", null, 4, [["min-width", "calc(var(--spacing) * 56)"]]], [".min-w-\\[5\\.5rem\\]", null, 4, [["min-width", "5.5rem"]]], [".min-w-\\[7rem\\]", null, 4, [["min-width", "7rem"]]], [".min-w-\\[12rem\\]", null, 4, [["min-width", "12rem"]]], [".min-w-\\[14px\\]", null, 4, [["min-width", "14px"]]], [".min-w-\\[200px\\]", null, 4, [["min-width", "200px"]]], [".min-w-fit", null, 4, [["min-width", "fit-content"]]], [".min-w-max", null, 4, [["min-width", "max-content"]]], [".flex-1", null, 4, [["flex", "1"]]], [".flex-\\[0_0_5rem\\]", null, 4, [["flex", "0 0 5rem"]]], [".flex-\\[0_0_8px\\]", null, 4, [["flex", "0 0 8px"]]], [".flex-\\[0_1_40\\%\\]", null, 4, [["flex", "0 40%"]]], [".flex-\\[1_1_100\\%\\]", null, 4, [["flex", "100%"]]], [".flex-\\[2\\]", null, 4, [["flex", "2"]]], [".flex-none", null, 4, [["flex", "none"]]], [".shrink", null, 4, [["flex-shrink", "1"]]], [".shrink-0", null, 4, [["flex-shrink", "0"]]], [".shrink-\\[0\\.001\\]", null, 4, [["flex-shrink", ".001"]]], [".shrink-\\[2\\]", null, 4, [["flex-shrink", "2"]]], [".shrink-\\[3\\]", null, 4, [["flex-shrink", "3"]]], [".grow", null, 4, [["flex-grow", "1"]]], [".basis-0", null, 4, [["flex-basis", "0"]]], [".basis-\\[14rem\\]", null, 4, [["flex-basis", "14rem"]]], [".-translate-y-1\\/2", null, 4, [["--tw-translate-y", "calc(calc(1 / 2 * 100%) * -1)"], ["translate", "var(--tw-translate-x) var(--tw-translate-y)"]]], [".\\[transform\\:translateY\\(-50\\%\\)\\]", null, 4, [["transform", "translateY(-50%)"]]], [".transform", null, 4, [["transform", "var(--tw-rotate-x, ) var(--tw-rotate-y, ) var(--tw-rotate-z, ) var(--tw-skew-x, ) var(--tw-skew-y, )"]]], [".animate-drop-zone", null, 4, [["animation", "var(--animate-drop-zone)"]]], [".animate-host-pulse", null, 4, [["animation", "var(--animate-host-pulse)"]]], [".animate-pulse", null, 4, [["animation", "var(--animate-pulse)"]]], [".animate-toast-in", null, 4, [["animation", "var(--animate-toast-in)"]]], [".cursor-col-resize", null, 4, [["cursor", "col-resize"]]], [".cursor-default", null, 4, [["cursor", "default"]]], [".cursor-grab", null, 4, [["cursor", "grab"]]], [".cursor-grabbing", null, 4, [["cursor", "grabbing"]]], [".cursor-pointer", null, 4, [["cursor", "pointer"]]], [".cursor-row-resize", null, 4, [["cursor", "row-resize"]]], [".touch-none", null, 4, [["touch-action", "none"]]], [".resize", null, 4, [["resize", "both"]]], [".resize-none", null, 4, [["resize", "none"]]], [".resize-y", null, 4, [["resize", "vertical"]]], [".\\[scrollbar-width\\:none\\]", null, 4, [["scrollbar-width", "none"]]], [".list-disc", null, 4, [["list-style-type", "disc"]]], [".list-none", null, 4, [["list-style-type", "none"]]], [".appearance-none", null, 4, [["appearance", "none"]]], [".grid-cols-8", null, 4, [["grid-template-columns", "repeat(8, minmax(0, 1fr))"]]], [".grid-cols-\\[1fr_auto_1fr\\]", null, 4, [["grid-template-columns", "1fr auto 1fr"]]], [".grid-cols-\\[2\\.5rem_2\\.5rem_0\\.9rem_minmax\\(0\\,1fr\\)\\]", null, 4, [["grid-template-columns", "2.5rem 2.5rem .9rem minmax(0, 1fr)"]]], [".grid-cols-\\[auto_minmax\\(0\\,1fr\\)\\]", null, 4, [["grid-template-columns", "auto minmax(0, 1fr)"]]], [".grid-cols-\\[minmax\\(4rem\\,10rem\\)_1fr_auto\\]", null, 4, [["grid-template-columns", "minmax(4rem, 10rem) 1fr auto"]]], [".grid-cols-\\[repeat\\(2\\,minmax\\(0\\,1fr\\)\\)\\]", null, 4, [["grid-template-columns", "repeat(2, minmax(0, 1fr))"]]], [".grid-cols-\\[repeat\\(auto-fit\\,minmax\\(8rem\\,1fr\\)\\)\\]", null, 4, [["grid-template-columns", "repeat(auto-fit, minmax(8rem, 1fr))"]]], [".flex-col", null, 4, [["flex-direction", "column"]]], [".flex-row", null, 4, [["flex-direction", "row"]]], [".flex-wrap", null, 4, [["flex-wrap", "wrap"]]], [".place-items-center", null, 4, [["place-items", "center"]]], [".content-center", null, 4, [["align-content", "center"]]], [".items-baseline", null, 4, [["align-items", "baseline"]]], [".items-center", null, 4, [["align-items", "center"]]], [".items-end", null, 4, [["align-items", "flex-end"]]], [".items-start", null, 4, [["align-items", "flex-start"]]], [".items-stretch", null, 4, [["align-items", "stretch"]]], [".justify-between", null, 4, [["justify-content", "space-between"]]], [".justify-center", null, 4, [["justify-content", "center"]]], [".justify-end", null, 4, [["justify-content", "flex-end"]]], [".justify-start", null, 4, [["justify-content", "flex-start"]]], [".justify-items-center", null, 4, [["justify-items", "center"]]], [".justify-items-start", null, 4, [["justify-items", "start"]]], [".gap-0", null, 4, [["gap", "0"]]], [".gap-0\\.5", null, 4, [["gap", "calc(var(--spacing) * .5)"]]], [".gap-1", null, 4, [["gap", "var(--spacing)"]]], [".gap-1\\.5", null, 4, [["gap", "calc(var(--spacing) * 1.5)"]]], [".gap-2", null, 4, [["gap", "calc(var(--spacing) * 2)"]]], [".gap-3", null, 4, [["gap", "calc(var(--spacing) * 3)"]]], [".gap-4", null, 4, [["gap", "calc(var(--spacing) * 4)"]]], [".gap-6", null, 4, [["gap", "calc(var(--spacing) * 6)"]]], [".gap-\\[0\\.1rem\\]", null, 4, [["gap", ".1rem"]]], [".gap-\\[0\\.3rem\\]", null, 4, [["gap", ".3rem"]]], [".gap-\\[0\\.4rem\\]", null, 4, [["gap", ".4rem"]]], [".gap-\\[0\\.05rem\\]", null, 4, [["gap", ".05rem"]]], [".gap-\\[0\\.6rem\\]", null, 4, [["gap", ".6rem"]]], [".gap-\\[0\\.8rem\\]", null, 4, [["gap", ".8rem"]]], [".gap-\\[0\\.16rem\\]", null, 4, [["gap", ".16rem"]]], [".gap-\\[0\\.32rem\\]", null, 4, [["gap", ".32rem"]]], [".gap-\\[0\\.35rem\\]", null, 4, [["gap", ".35rem"]]], [".gap-\\[0\\.45rem\\]", null, 4, [["gap", ".45rem"]]], [".gap-\\[0\\.55rem\\]", null, 4, [["gap", ".55rem"]]], [".gap-\\[0\\.65rem\\]", null, 4, [["gap", ".65rem"]]], [".gap-\\[0\\.85rem\\]", null, 4, [["gap", ".85rem"]]], [".gap-\\[1px\\]", null, 4, [["gap", "1px"]]], [".gap-\\[2px\\]", null, 4, [["gap", "2px"]]], [".gap-\\[3px\\]", null, 4, [["gap", "3px"]]], [".gap-\\[7px\\]", null, 4, [["gap", "7px"]]], [".gap-\\[13px\\]", null, 4, [["gap", "13px"]]], [":where(.space-y-0\\.5 > :not(:last-child))", null, 4, [["--tw-space-y-reverse", "0"], ["margin-block-start", "calc(calc(var(--spacing) * .5) * var(--tw-space-y-reverse))"], ["margin-block-end", "calc(calc(var(--spacing) * .5) * calc(1 - var(--tw-space-y-reverse)))"]]], [".gap-x-3", null, 4, [["column-gap", "calc(var(--spacing) * 3)"]]], [".gap-x-4", null, 4, [["column-gap", "calc(var(--spacing) * 4)"]]], [".gap-x-\\[0\\.7rem\\]", null, 4, [["column-gap", ".7rem"]]], [".gap-x-\\[0\\.9rem\\]", null, 4, [["column-gap", ".9rem"]]], [".gap-y-1", null, 4, [["row-gap", "var(--spacing)"]]], [".gap-y-\\[0\\.3rem\\]", null, 4, [["row-gap", ".3rem"]]], [".self-center", null, 4, [["align-self", "center"]]], [".self-end", null, 4, [["align-self", "flex-end"]]], [".self-start", null, 4, [["align-self", "flex-start"]]], [".self-stretch", null, 4, [["align-self", "stretch"]]], [".justify-self-start", null, 4, [["justify-self", "flex-start"]]], [".truncate", null, 4, [["text-overflow", "ellipsis"], ["white-space", "nowrap"], ["overflow", "hidden"]]], [".overflow-auto", null, 4, [["overflow", "auto"]]], [".overflow-hidden", null, 4, [["overflow", "hidden"]]], [".overflow-visible", null, 4, [["overflow", "visible"]]], [".overflow-x-auto", null, 4, [["overflow-x", "auto"]]], [".overflow-y-auto", null, 4, [["overflow-y", "auto"]]], [".overscroll-contain", null, 4, [["overscroll-behavior", "contain"]]], [".rounded, .rounded-\\[0\\.25rem\\]", null, 4, [["border-radius", ".25rem"]]], [".rounded-\\[1\\.5rem\\]", null, 4, [["border-radius", "1.5rem"]]], [".rounded-\\[2px\\]", null, 4, [["border-radius", "2px"]]], [".rounded-\\[3px\\]", null, 4, [["border-radius", "3px"]]], [".rounded-\\[12px\\]", null, 4, [["border-radius", "12px"]]], [".rounded-\\[50\\%\\]", null, 4, [["border-radius", "50%"]]], [".rounded-\\[999px\\]", null, 4, [["border-radius", "999px"]]], [".rounded-\\[calc\\(var\\(--radius\\)\\*2\\)\\]", null, 4, [["border-radius", "calc(var(--radius) * 2)"]]], [".rounded-\\[var\\(--card-radius\\,8px\\)\\]", null, 4, [["border-radius", "var(--card-radius, 8px)"]]], [".rounded-\\[var\\(--card-radius\\,12px\\)\\]", null, 4, [["border-radius", "var(--card-radius, 12px)"]]], [".rounded-full", null, 4, [["border-radius", "3.40282e38px"]]], [".rounded-none", null, 4, [["border-radius", "0"]]], [".rounded-soft", null, 4, [["border-radius", "var(--radius-pane)"]]], [".rounded-ui", null, 4, [["border-radius", "var(--radius)"]]], [".rounded-t-\\[12px\\]", null, 4, [["border-top-left-radius", "12px"], ["border-top-right-radius", "12px"]]], [".rounded-t-none", null, 4, [["border-top-left-radius", "0"], ["border-top-right-radius", "0"]]], [".border", null, 4, [["border-style", "var(--tw-border-style)"], ["border-width", "1px"]]], [".border-0", null, 4, [["border-style", "var(--tw-border-style)"], ["border-width", "0"]]], [".border-\\[1\\.5px\\]", null, 4, [["border-style", "var(--tw-border-style)"], ["border-width", "1.5px"]]], [".border-b", null, 4, [["border-bottom-style", "var(--tw-border-style)"], ["border-bottom-width", "1px"]]], [".border-l", null, 4, [["border-left-style", "var(--tw-border-style)"], ["border-left-width", "1px"]]], [".border-l-\\[3px\\]", null, 4, [["border-left-style", "var(--tw-border-style)"], ["border-left-width", "3px"]]], [".border-solid", null, 4, [["--tw-border-style", "solid"], ["border-style", "solid"]]], [".border-accent", null, 4, [["border-color", "var(--accent)"]]], [".border-overlay-0", null, 4, [["border-color", "var(--overlay-0)"]]], [".border-overlay-1", null, 4, [["border-color", "var(--overlay-1)"]]], [".border-red", null, 4, [["border-color", "var(--red)"]]], [".border-subtext-0", null, 4, [["border-color", "var(--subtext-0)"]]], [".border-surface-1", null, 4, [["border-color", "var(--surface-1)"]]], [".border-teal", null, 4, [["border-color", "var(--teal)"]]], [".border-yellow", null, 4, [["border-color", "var(--yellow)"]]], [".border-l-accent", null, 4, [["border-left-color", "var(--accent)"]]], [".border-l-green", null, 4, [["border-left-color", "var(--green)"]]], [".border-l-red", null, 4, [["border-left-color", "var(--red)"]]], [".border-l-yellow", null, 4, [["border-left-color", "var(--yellow)"]]], [".bg-\\[\\#161616\\]", null, 4, [["background-color", "#161616"]]], [".bg-\\[\\#fff\\]", null, 4, [["background-color", "#fff"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_8\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "var(--accent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_8\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--accent) 8%,var(--panel-bg))"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_12\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--accent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_12\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--accent) 12%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--accent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--accent) 15%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--blue\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--blue)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--blue\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--blue) 15%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--green\\)_9\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--green)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--green\\)_9\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--green) 9%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--red\\)_7\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--red)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--red\\)_7\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--red) 7%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--red\\)_9\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--red)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--red\\)_9\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--red) 9%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--surface-1\\)_42\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--surface-1\\)_42\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--surface-1) 42%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--surface-1\\)_70\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--surface-1\\)_70\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--surface-1) 70%,var(--panel-bg))"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--text\\)_10\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "var(--text)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--text\\)_10\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--text) 10%,var(--panel-bg))"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--yellow\\)_8\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--yellow)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--yellow\\)_8\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--yellow) 8%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--yellow\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--yellow)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--yellow\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--yellow) 15%,transparent)"]]], [".bg-\\[rgba\\(0\\,0\\,0\\,0\\.5\\)\\]", null, 4, [["background-color", "#00000080"]]], [".bg-\\[rgba\\(0\\,0\\,0\\,0\\.7\\)\\]", null, 4, [["background-color", "#000000b3"]]], [".bg-\\[rgba\\(0\\,0\\,0\\,0\\.55\\)\\]", null, 4, [["background-color", "#0000008c"]]], [".bg-\\[rgba\\(0\\,0\\,0\\,0\\.62\\)\\]", null, 4, [["background-color", "#0000009e"]]], [".bg-\\[var\\(--accent\\)\\]", null, 4, [["background-color", "var(--accent)"]]], [".bg-\\[var\\(--backdrop\\)\\]", null, 4, [["background-color", "var(--backdrop)"]]], [".bg-\\[var\\(--bg\\)\\]", null, 4, [["background-color", "var(--bg)"]]], [".bg-\\[var\\(--card-bg\\)\\]", null, 4, [["background-color", "var(--card-bg)"]]], [".bg-\\[var\\(--picker-bg\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "var(--picker-bg, var(--panel-bg))"]]], [".bg-\\[var\\(--surface-1\\)\\]", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-\\[var\\(--workspace-tools-bg\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "var(--workspace-tools-bg, var(--panel-bg))"]]], [".bg-accent, .bg-accent\\/10", null, 4, [["background-color", "var(--accent)"]]], [".bg-accent\\/10", null, 4, [["background-color", "color-mix(in oklab, var(--accent) 10%, transparent)"]]], [".bg-accent\\/35", null, 4, [["background-color", "var(--accent)"]]], [".bg-accent\\/35", null, 4, [["background-color", "color-mix(in oklab, var(--accent) 35%, transparent)"]]], [".bg-fg", null, 4, [["background-color", "var(--text)"]]], [".bg-green, .bg-green\\/15", null, 4, [["background-color", "var(--green)"]]], [".bg-green\\/15", null, 4, [["background-color", "color-mix(in oklab, var(--green) 15%, transparent)"]]], [".bg-overlay-0", null, 4, [["background-color", "var(--overlay-0)"]]], [".bg-overlay-1", null, 4, [["background-color", "var(--overlay-1)"]]], [".bg-panel-bg", null, 4, [["background-color", "var(--panel-bg)"]]], [".bg-red, .bg-red\\/15", null, 4, [["background-color", "var(--red)"]]], [".bg-red\\/15", null, 4, [["background-color", "color-mix(in oklab, var(--red) 15%, transparent)"]]], [".bg-subtext-0", null, 4, [["background-color", "var(--subtext-0)"]]], [".bg-surface-0", null, 4, [["background-color", "var(--surface-0)"]]], [".bg-surface-1, .bg-surface-1\\/30", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-surface-1\\/30", null, 4, [["background-color", "color-mix(in oklab, var(--surface-1) 30%, transparent)"]]], [".bg-surface-1\\/60", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-surface-1\\/60", null, 4, [["background-color", "color-mix(in oklab, var(--surface-1) 60%, transparent)"]]], [".bg-surface-1\\/70", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-surface-1\\/70", null, 4, [["background-color", "color-mix(in oklab, var(--surface-1) 70%, transparent)"]]], [".bg-transparent", null, 4, [["background-color", "#0000"]]], [".bg-yellow", null, 4, [["background-color", "var(--yellow)"]]], [".object-contain", null, 4, [["object-fit", "contain"]]], [".object-cover", null, 4, [["object-fit", "cover"]]], [".p-0", null, 4, [["padding", "0"]]], [".p-0\\.5", null, 4, [["padding", "calc(var(--spacing) * .5)"]]], [".p-1", null, 4, [["padding", "var(--spacing)"]]], [".p-2", null, 4, [["padding", "calc(var(--spacing) * 2)"]]], [".p-3", null, 4, [["padding", "calc(var(--spacing) * 3)"]]], [".p-4", null, 4, [["padding", "calc(var(--spacing) * 4)"]]], [".p-5", null, 4, [["padding", "calc(var(--spacing) * 5)"]]], [".p-6", null, 4, [["padding", "calc(var(--spacing) * 6)"]]], [".p-\\[0\\.2rem\\]", null, 4, [["padding", ".2rem"]]], [".p-\\[0\\.4rem\\]", null, 4, [["padding", ".4rem"]]], [".p-\\[0\\.5rem\\]", null, 4, [["padding", ".5rem"]]], [".p-\\[0\\.9rem\\]", null, 4, [["padding", ".9rem"]]], [".p-\\[0\\.45rem\\]", null, 4, [["padding", ".45rem"]]], [".p-\\[0\\.55rem\\]", null, 4, [["padding", ".55rem"]]], [".p-\\[0\\.65rem\\]", null, 4, [["padding", ".65rem"]]], [".p-\\[2px\\]", null, 4, [["padding", "2px"]]], [".px-0", null, 4, [["padding-inline", "0"]]], [".px-1", null, 4, [["padding-inline", "var(--spacing)"]]], [".px-1\\.5", null, 4, [["padding-inline", "calc(var(--spacing) * 1.5)"]]], [".px-2", null, 4, [["padding-inline", "calc(var(--spacing) * 2)"]]], [".px-3", null, 4, [["padding-inline", "calc(var(--spacing) * 3)"]]], [".px-3\\.5", null, 4, [["padding-inline", "calc(var(--spacing) * 3.5)"]]], [".px-4", null, 4, [["padding-inline", "calc(var(--spacing) * 4)"]]], [".px-8", null, 4, [["padding-inline", "calc(var(--spacing) * 8)"]]], [".px-\\[0\\.2rem\\]", null, 4, [["padding-inline", ".2rem"]]], [".px-\\[0\\.3rem\\]", null, 4, [["padding-inline", ".3rem"]]], [".px-\\[0\\.4rem\\]", null, 4, [["padding-inline", ".4rem"]]], [".px-\\[0\\.5rem\\]", null, 4, [["padding-inline", ".5rem"]]], [".px-\\[0\\.6rem\\]", null, 4, [["padding-inline", ".6rem"]]], [".px-\\[0\\.7rem\\]", null, 4, [["padding-inline", ".7rem"]]], [".px-\\[0\\.8rem\\]", null, 4, [["padding-inline", ".8rem"]]], [".px-\\[0\\.9rem\\]", null, 4, [["padding-inline", ".9rem"]]], [".px-\\[0\\.26rem\\]", null, 4, [["padding-inline", ".26rem"]]], [".px-\\[0\\.28rem\\]", null, 4, [["padding-inline", ".28rem"]]], [".px-\\[0\\.35rem\\]", null, 4, [["padding-inline", ".35rem"]]], [".px-\\[0\\.42rem\\]", null, 4, [["padding-inline", ".42rem"]]], [".px-\\[0\\.45rem\\]", null, 4, [["padding-inline", ".45rem"]]], [".px-\\[0\\.48rem\\]", null, 4, [["padding-inline", ".48rem"]]], [".px-\\[0\\.55rem\\]", null, 4, [["padding-inline", ".55rem"]]], [".px-\\[0\\.65rem\\]", null, 4, [["padding-inline", ".65rem"]]], [".px-\\[0\\.75rem\\]", null, 4, [["padding-inline", ".75rem"]]], [".px-\\[0\\.85rem\\]", null, 4, [["padding-inline", ".85rem"]]], [".px-\\[1\\.4rem\\]", null, 4, [["padding-inline", "1.4rem"]]], [".px-\\[3px\\]", null, 4, [["padding-inline", "3px"]]], [".px-\\[10px\\]", null, 4, [["padding-inline", "10px"]]], [".py-0", null, 4, [["padding-block", "0"]]], [".py-0\\.5", null, 4, [["padding-block", "calc(var(--spacing) * .5)"]]], [".py-1", null, 4, [["padding-block", "var(--spacing)"]]], [".py-1\\.5", null, 4, [["padding-block", "calc(var(--spacing) * 1.5)"]]], [".py-2", null, 4, [["padding-block", "calc(var(--spacing) * 2)"]]], [".py-3", null, 4, [["padding-block", "calc(var(--spacing) * 3)"]]], [".py-4", null, 4, [["padding-block", "calc(var(--spacing) * 4)"]]], [".py-8", null, 4, [["padding-block", "calc(var(--spacing) * 8)"]]], [".py-\\[0\\.1rem\\]", null, 4, [["padding-block", ".1rem"]]], [".py-\\[0\\.2rem\\]", null, 4, [["padding-block", ".2rem"]]], [".py-\\[0\\.3rem\\]", null, 4, [["padding-block", ".3rem"]]], [".py-\\[0\\.4rem\\]", null, 4, [["padding-block", ".4rem"]]], [".py-\\[0\\.05rem\\]", null, 4, [["padding-block", ".05rem"]]], [".py-\\[0\\.6rem\\]", null, 4, [["padding-block", ".6rem"]]], [".py-\\[0\\.8rem\\]", null, 4, [["padding-block", ".8rem"]]], [".py-\\[0\\.12rem\\]", null, 4, [["padding-block", ".12rem"]]], [".py-\\[0\\.14rem\\]", null, 4, [["padding-block", ".14rem"]]], [".py-\\[0\\.15rem\\]", null, 4, [["padding-block", ".15rem"]]], [".py-\\[0\\.18rem\\]", null, 4, [["padding-block", ".18rem"]]], [".py-\\[0\\.25rem\\]", null, 4, [["padding-block", ".25rem"]]], [".py-\\[0\\.28rem\\]", null, 4, [["padding-block", ".28rem"]]], [".py-\\[0\\.32rem\\]", null, 4, [["padding-block", ".32rem"]]], [".py-\\[0\\.35rem\\]", null, 4, [["padding-block", ".35rem"]]], [".py-\\[0\\.42rem\\]", null, 4, [["padding-block", ".42rem"]]], [".py-\\[0\\.45rem\\]", null, 4, [["padding-block", ".45rem"]]], [".py-\\[0\\.55rem\\]", null, 4, [["padding-block", ".55rem"]]], [".py-\\[0\\.65rem\\]", null, 4, [["padding-block", ".65rem"]]], [".py-\\[1\\.1rem\\]", null, 4, [["padding-block", "1.1rem"]]], [".py-\\[2px\\]", null, 4, [["padding-block", "2px"]]], [".py-\\[3px\\]", null, 4, [["padding-block", "3px"]]], [".py-\\[6px\\]", null, 4, [["padding-block", "6px"]]], [".py-px", null, 4, [["padding-block", "1px"]]], [".pt-1", null, 4, [["padding-top", "var(--spacing)"]]], [".pt-2", null, 4, [["padding-top", "calc(var(--spacing) * 2)"]]], [".pt-2\\.5", null, 4, [["padding-top", "calc(var(--spacing) * 2.5)"]]], [".pt-3", null, 4, [["padding-top", "calc(var(--spacing) * 3)"]]], [".pt-4", null, 4, [["padding-top", "calc(var(--spacing) * 4)"]]], [".pt-5", null, 4, [["padding-top", "calc(var(--spacing) * 5)"]]], [".pt-\\[0\\.2rem\\]", null, 4, [["padding-top", ".2rem"]]], [".pt-\\[0\\.4rem\\]", null, 4, [["padding-top", ".4rem"]]], [".pt-\\[0\\.6rem\\]", null, 4, [["padding-top", ".6rem"]]], [".pt-\\[0\\.85rem\\]", null, 4, [["padding-top", ".85rem"]]], [".pt-\\[2px\\]", null, 4, [["padding-top", "2px"]]], [".pt-\\[12vh\\]", null, 4, [["padding-top", "12vh"]]], [".pt-\\[max\\(0\\.5rem\\,env\\(safe-area-inset-top\\)\\)\\]", null, 4, [["padding-top", "max(.5rem, env(safe-area-inset-top))"]]], [".pr-0\\.5", null, 4, [["padding-right", "calc(var(--spacing) * .5)"]]], [".pr-1", null, 4, [["padding-right", "var(--spacing)"]]], [".pr-1\\.5", null, 4, [["padding-right", "calc(var(--spacing) * 1.5)"]]], [".pr-2", null, 4, [["padding-right", "calc(var(--spacing) * 2)"]]], [".pr-3", null, 4, [["padding-right", "calc(var(--spacing) * 3)"]]], [".pr-12", null, 4, [["padding-right", "calc(var(--spacing) * 12)"]]], [".pr-\\[0\\.3rem\\]", null, 4, [["padding-right", ".3rem"]]], [".pr-\\[0\\.6rem\\]", null, 4, [["padding-right", ".6rem"]]], [".pr-\\[0\\.35rem\\]", null, 4, [["padding-right", ".35rem"]]], [".pr-\\[0\\.45rem\\]", null, 4, [["padding-right", ".45rem"]]], [".pr-\\[0\\.55rem\\]", null, 4, [["padding-right", ".55rem"]]], [".pr-\\[1\\.6rem\\]", null, 4, [["padding-right", "1.6rem"]]], [".pr-\\[3px\\]", null, 4, [["padding-right", "3px"]]], [".pr-\\[env\\(safe-area-inset-right\\)\\]", null, 4, [["padding-right", "env(safe-area-inset-right)"]]], [".pr-\\[max\\(0\\.5rem\\,env\\(safe-area-inset-right\\)\\)\\]", null, 4, [["padding-right", "max(.5rem, env(safe-area-inset-right))"]]], [".pb-1", null, 4, [["padding-bottom", "var(--spacing)"]]], [".pb-2", null, 4, [["padding-bottom", "calc(var(--spacing) * 2)"]]], [".pb-3", null, 4, [["padding-bottom", "calc(var(--spacing) * 3)"]]], [".pb-4", null, 4, [["padding-bottom", "calc(var(--spacing) * 4)"]]], [".pb-8", null, 4, [["padding-bottom", "calc(var(--spacing) * 8)"]]], [".pb-\\[0\\.3rem\\]", null, 4, [["padding-bottom", ".3rem"]]], [".pb-\\[0\\.4rem\\]", null, 4, [["padding-bottom", ".4rem"]]], [".pb-\\[0\\.25rem\\]", null, 4, [["padding-bottom", ".25rem"]]], [".pb-\\[0\\.55rem\\]", null, 4, [["padding-bottom", ".55rem"]]], [".pb-\\[1\\.4rem\\]", null, 4, [["padding-bottom", "1.4rem"]]], [".pb-\\[calc\\(1\\.5rem\\+env\\(safe-area-inset-bottom\\)\\)\\]", null, 4, [["padding-bottom", "calc(1.5rem + env(safe-area-inset-bottom))"]]], [".pb-\\[calc\\(1rem\\+env\\(safe-area-inset-bottom\\)\\)\\]", null, 4, [["padding-bottom", "calc(1rem + env(safe-area-inset-bottom))"]]], [".pb-\\[env\\(safe-area-inset-bottom\\)\\]", null, 4, [["padding-bottom", "env(safe-area-inset-bottom)"]]], [".pb-\\[max\\(0\\.5rem\\,env\\(safe-area-inset-bottom\\)\\)\\]", null, 4, [["padding-bottom", "max(.5rem, env(safe-area-inset-bottom))"]]], [".pl-1", null, 4, [["padding-left", "var(--spacing)"]]], [".pl-2", null, 4, [["padding-left", "calc(var(--spacing) * 2)"]]], [".pl-3", null, 4, [["padding-left", "calc(var(--spacing) * 3)"]]], [".pl-4", null, 4, [["padding-left", "calc(var(--spacing) * 4)"]]], [".pl-5", null, 4, [["padding-left", "calc(var(--spacing) * 5)"]]], [".pl-6", null, 4, [["padding-left", "calc(var(--spacing) * 6)"]]], [".pl-\\[0\\.4rem\\]", null, 4, [["padding-left", ".4rem"]]], [".pl-\\[0\\.45rem\\]", null, 4, [["padding-left", ".45rem"]]], [".pl-\\[0\\.75rem\\]", null, 4, [["padding-left", ".75rem"]]], [".pl-\\[0\\.85rem\\]", null, 4, [["padding-left", ".85rem"]]], [".pl-\\[1\\.2rem\\]", null, 4, [["padding-left", "1.2rem"]]], [".pl-\\[1\\.9rem\\]", null, 4, [["padding-left", "1.9rem"]]], [".pl-\\[1\\.45rem\\]", null, 4, [["padding-left", "1.45rem"]]], [".pl-\\[1\\.55rem\\]", null, 4, [["padding-left", "1.55rem"]]], [".pl-\\[1\\.875rem\\]", null, 4, [["padding-left", "1.875rem"]]], [".pl-\\[85px\\]", null, 4, [["padding-left", "85px"]]], [".pl-\\[max\\(0\\.5rem\\,env\\(safe-area-inset-left\\)\\)\\]", null, 4, [["padding-left", "max(.5rem, env(safe-area-inset-left))"]]], [".pl-\\[max\\(0\\.25rem\\,env\\(safe-area-inset-left\\)\\)\\]", null, 4, [["padding-left", "max(.25rem, env(safe-area-inset-left))"]]], [".text-center", null, 4, [["text-align", "center"]]], [".text-left", null, 4, [["text-align", "left"]]], [".text-right", null, 4, [["text-align", "right"]]], [".\\[font-family\\:inherit\\]", null, 4, [["font-family", "inherit"]]], [".\\[font-family\\:ui-monospace\\,SFMono-Regular\\,Menlo\\,monospace\\]", null, 4, [["font-family", "ui-monospace, SFMono-Regular, Menlo, monospace"]]], [".\\[font-family\\:var\\(--font-mono\\)\\]", null, 4, [["font-family", "var(--font-mono)"]]], [".text-sm", null, 4, [["font-size", "var(--text-sm)"], ["line-height", "var(--tw-leading, var(--text-sm--line-height))"]]], [".text-xs", null, 4, [["font-size", "var(--text-xs)"], ["line-height", "var(--tw-leading, var(--text-xs--line-height))"]]], [".\\[font-size\\:inherit\\]", null, 4, [["font-size", "inherit"]]], [".text-\\[0\\.6rem\\]", null, 4, [["font-size", ".6rem"]]], [".text-\\[0\\.7rem\\]", null, 4, [["font-size", ".7rem"]]], [".text-\\[0\\.8em\\]", null, 4, [["font-size", ".8em"]]], [".text-\\[0\\.8rem\\]", null, 4, [["font-size", ".8rem"]]], [".text-\\[0\\.9em\\]", null, 4, [["font-size", ".9em"]]], [".text-\\[0\\.9rem\\]", null, 4, [["font-size", ".9rem"]]], [".text-\\[0\\.54rem\\]", null, 4, [["font-size", ".54rem"]]], [".text-\\[0\\.58rem\\]", null, 4, [["font-size", ".58rem"]]], [".text-\\[0\\.62rem\\]", null, 4, [["font-size", ".62rem"]]], [".text-\\[0\\.63rem\\]", null, 4, [["font-size", ".63rem"]]], [".text-\\[0\\.64rem\\]", null, 4, [["font-size", ".64rem"]]], [".text-\\[0\\.65rem\\]", null, 4, [["font-size", ".65rem"]]], [".text-\\[0\\.66rem\\]", null, 4, [["font-size", ".66rem"]]], [".text-\\[0\\.66rem\\]\\!", null, 4, [["font-size", ".66rem", 1]]], [".text-\\[0\\.68rem\\]", null, 4, [["font-size", ".68rem"]]], [".text-\\[0\\.72rem\\]", null, 4, [["font-size", ".72rem"]]], [".text-\\[0\\.74rem\\]", null, 4, [["font-size", ".74rem"]]], [".text-\\[0\\.75rem\\]", null, 4, [["font-size", ".75rem"]]], [".text-\\[0\\.76rem\\]", null, 4, [["font-size", ".76rem"]]], [".text-\\[0\\.77rem\\]", null, 4, [["font-size", ".77rem"]]], [".text-\\[0\\.78rem\\]", null, 4, [["font-size", ".78rem"]]], [".text-\\[0\\.82rem\\]", null, 4, [["font-size", ".82rem"]]], [".text-\\[0\\.83rem\\]", null, 4, [["font-size", ".83rem"]]], [".text-\\[0\\.85rem\\]", null, 4, [["font-size", ".85rem"]]], [".text-\\[0\\.88rem\\]", null, 4, [["font-size", ".88rem"]]], [".text-\\[0\\.95rem\\]", null, 4, [["font-size", ".95rem"]]], [".text-\\[0\\.875rem\\]", null, 4, [["font-size", ".875rem"]]], [".text-\\[1\\.1rem\\]", null, 4, [["font-size", "1.1rem"]]], [".text-\\[1\\.3rem\\]", null, 4, [["font-size", "1.3rem"]]], [".text-\\[1\\.4em\\]", null, 4, [["font-size", "1.4em"]]], [".text-\\[1\\.6rem\\]", null, 4, [["font-size", "1.6rem"]]], [".text-\\[1\\.15rem\\]", null, 4, [["font-size", "1.15rem"]]], [".text-\\[1rem\\]", null, 4, [["font-size", "1rem"]]], [".text-\\[2\\.4rem\\]", null, 4, [["font-size", "2.4rem"]]], [".text-\\[9px\\]", null, 4, [["font-size", "9px"]]], [".text-\\[10px\\]", null, 4, [["font-size", "10px"]]], [".text-\\[11px\\]", null, 4, [["font-size", "11px"]]], [".text-\\[12\\.5px\\]", null, 4, [["font-size", "12.5px"]]], [".text-\\[12px\\]", null, 4, [["font-size", "12px"]]], [".text-\\[13px\\]", null, 4, [["font-size", "13px"]]], [".text-\\[14px\\]", null, 4, [["font-size", "14px"]]], [".text-\\[calc\\(0\\.95rem\\*var\\(--chat-font-scale\\,1\\)\\)\\]", null, 4, [["font-size", "calc(.95rem * var(--chat-font-scale, 1))"]]], [".text-\\[length\\:calc\\(11px\\*var\\(--zoom\\,1\\)\\)\\]", null, 4, [["font-size", "calc(11px * var(--zoom, 1))"]]], [".text-\\[length\\:calc\\(13px\\*var\\(--zoom\\,1\\)\\)\\]", null, 4, [["font-size", "calc(13px * var(--zoom, 1))"]]], [".leading-4", null, 4, [["--tw-leading", "calc(var(--spacing) * 4)"], ["line-height", "calc(var(--spacing) * 4)"]]], [".leading-\\[1\\.1\\]", null, 4, [["--tw-leading", "1.1"], ["line-height", "1.1"]]], [".leading-\\[1\\.2\\]", null, 4, [["--tw-leading", "1.2"], ["line-height", "1.2"]]], [".leading-\\[1\\.3\\]", null, 4, [["--tw-leading", "1.3"], ["line-height", "1.3"]]], [".leading-\\[1\\.4\\]", null, 4, [["--tw-leading", "1.4"], ["line-height", "1.4"]]], [".leading-\\[1\\.5\\]", null, 4, [["--tw-leading", "1.5"], ["line-height", "1.5"]]], [".leading-\\[1\\.6\\]", null, 4, [["--tw-leading", "1.6"], ["line-height", "1.6"]]], [".leading-\\[1\\.45\\]", null, 4, [["--tw-leading", "1.45"], ["line-height", "1.45"]]], [".leading-\\[18px\\]", null, 4, [["--tw-leading", "18px"], ["line-height", "18px"]]], [".leading-none", null, 4, [["--tw-leading", "1"], ["line-height", "1"]]], [".leading-relaxed", null, 4, [["--tw-leading", "var(--leading-relaxed)"], ["line-height", "var(--leading-relaxed)"]]], [".leading-tight", null, 4, [["--tw-leading", "var(--leading-tight)"], ["line-height", "var(--leading-tight)"]]], [".\\[line-height\\:inherit\\]", null, 4, [["line-height", "inherit"]]], [".font-bold", null, 4, [["--tw-font-weight", "var(--font-weight-bold)"], ["font-weight", "var(--font-weight-bold)"]]], [".font-medium", null, 4, [["--tw-font-weight", "var(--font-weight-medium)"], ["font-weight", "var(--font-weight-medium)"]]], [".font-normal", null, 4, [["--tw-font-weight", "var(--font-weight-normal)"], ["font-weight", "var(--font-weight-normal)"]]], [".font-semibold", null, 4, [["--tw-font-weight", "var(--font-weight-semibold)"], ["font-weight", "var(--font-weight-semibold)"]]], [".\\[font-weight\\:inherit\\]", null, 4, [["font-weight", "inherit"]]], [".tracking-\\[-0\\.02em\\]", null, 4, [["--tw-tracking", "-.02em"], ["letter-spacing", "-.02em"]]], [".tracking-\\[0\\.03em\\]", null, 4, [["--tw-tracking", ".03em"], ["letter-spacing", ".03em"]]], [".tracking-\\[0\\.04em\\]", null, 4, [["--tw-tracking", ".04em"], ["letter-spacing", ".04em"]]], [".tracking-\\[0\\.06em\\]", null, 4, [["--tw-tracking", ".06em"], ["letter-spacing", ".06em"]]], [".tracking-\\[0\\.08em\\]", null, 4, [["--tw-tracking", ".08em"], ["letter-spacing", ".08em"]]], [".tracking-\\[0\\.09em\\]", null, 4, [["--tw-tracking", ".09em"], ["letter-spacing", ".09em"]]], [".tracking-\\[0\\.22em\\]", null, 4, [["--tw-tracking", ".22em"], ["letter-spacing", ".22em"]]], [".tracking-normal", null, 4, [["--tw-tracking", "var(--tracking-normal)"], ["letter-spacing", "var(--tracking-normal)"]]], [".tracking-wide", null, 4, [["--tw-tracking", "var(--tracking-wide)"], ["letter-spacing", "var(--tracking-wide)"]]], [".\\[overflow-wrap\\:anywhere\\]", null, 4, [["overflow-wrap", "anywhere"]]], [".break-words", null, 4, [["overflow-wrap", "break-word"]]], [".\\[word-break\\:break-word\\]", null, 4, [["word-break", "break-word"]]], [".text-ellipsis", null, 4, [["text-overflow", "ellipsis"]]], [".whitespace-normal", null, 4, [["white-space", "normal"]]], [".whitespace-nowrap", null, 4, [["white-space", "nowrap"]]], [".whitespace-pre", null, 4, [["white-space", "pre"]]], [".whitespace-pre-wrap", null, 4, [["white-space", "pre-wrap"]]], [".\\[tab-size\\:2\\]", null, 4, [["tab-size", "2"]]], [".text-\\[color\\:var\\(--git-muted\\)\\]", null, 4, [["color", "var(--git-muted)"]]], [".text-\\[var\\(--subtext-0\\)\\]", null, 4, [["color", "var(--subtext-0)"]]], [".text-\\[var\\(--text\\)\\]", null, 4, [["color", "var(--text)"]]], [".text-accent", null, 4, [["color", "var(--accent)"]]], [".text-blue", null, 4, [["color", "var(--blue)"]]], [".text-current", null, 4, [["color", "currentColor"]]], [".text-fg", null, 4, [["color", "var(--text)"]]], [".text-green", null, 4, [["color", "var(--green)"]]], [".text-inherit", null, 4, [["color", "inherit"]]], [".text-mauve", null, 4, [["color", "var(--mauve)"]]], [".text-overlay-0", null, 4, [["color", "var(--overlay-0)"]]], [".text-overlay-1", null, 4, [["color", "var(--overlay-1)"]]], [".text-panel-bg", null, 4, [["color", "var(--panel-bg)"]]], [".text-peach", null, 4, [["color", "var(--peach)"]]], [".text-red", null, 4, [["color", "var(--red)"]]], [".text-red\\!", null, 4, [["color", "var(--red)", 1]]], [".text-subtext-0", null, 4, [["color", "var(--subtext-0)"]]], [".text-yellow", null, 4, [["color", "var(--yellow)"]]], [".capitalize", null, 4, [["text-transform", "capitalize"]]], [".normal-case", null, 4, [["text-transform", "none"]]], [".uppercase", null, 4, [["text-transform", "uppercase"]]], [".italic", null, 4, [["font-style", "italic"]]], [".not-italic", null, 4, [["font-style", "normal"]]], [".tabular-nums", null, 4, [["--tw-numeric-spacing", "tabular-nums"], ["font-variant-numeric", "var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, )"]]], [".line-through", null, 4, [["text-decoration-line", "line-through"]]], [".no-underline", null, 4, [["text-decoration-line", "none"]]], [".underline", null, 4, [["text-decoration-line", "underline"]]], [".opacity-0", null, 4, [["opacity", "0"]]], [".opacity-40", null, 4, [["opacity", ".4"]]], [".opacity-60", null, 4, [["opacity", ".6"]]], [".opacity-70", null, 4, [["opacity", ".7"]]], [".opacity-75", null, 4, [["opacity", ".75"]]], [".opacity-80", null, 4, [["opacity", ".8"]]], [".opacity-\\[0\\.72\\]", null, 4, [["opacity", ".72"]]], [".shadow", null, 4, [["--tw-shadow", "0 1px 3px 0 var(--tw-shadow-color, #0000001a), 0 1px 2px -1px var(--tw-shadow-color, #0000001a)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_1px_4px_rgba\\(0\\,0\\,0\\,0\\.4\\)\\]", null, 4, [["--tw-shadow", "0 1px 4px var(--tw-shadow-color, #0006)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_2px_8px_rgba\\(0\\,0\\,0\\,0\\.4\\)\\]", null, 4, [["--tw-shadow", "0 2px 8px var(--tw-shadow-color, #0006)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_2px_8px_rgba\\(0\\,0\\,0\\,0\\.35\\)\\]", null, 4, [["--tw-shadow", "0 2px 8px var(--tw-shadow-color, #00000059)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_6px_20px_rgba\\(0\\,0\\,0\\,0\\.3\\)\\]", null, 4, [["--tw-shadow", "0 6px 20px var(--tw-shadow-color, #0000004d)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_8px_24px_rgba\\(0\\,0\\,0\\,0\\.35\\)\\]", null, 4, [["--tw-shadow", "0 8px 24px var(--tw-shadow-color, #00000059)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_8px_24px_rgba\\(0\\,0\\,0\\,0\\.45\\)\\]", null, 4, [["--tw-shadow", "0 8px 24px var(--tw-shadow-color, #00000073)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_8px_32px_rgba\\(0\\,0\\,0\\,0\\.5\\)\\]", null, 4, [["--tw-shadow", "0 8px 32px var(--tw-shadow-color, #00000080)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_12px_32px_rgba\\(0\\,0\\,0\\,0\\.5\\)\\]", null, 4, [["--tw-shadow", "0 12px 32px var(--tw-shadow-color, #00000080)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_16px_48px_rgba\\(0\\,0\\,0\\,0\\.55\\)\\]", null, 4, [["--tw-shadow", "0 16px 48px var(--tw-shadow-color, #0000008c)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[inset_0_0_24px_var\\(--accent\\)\\]", null, 4, [["--tw-shadow", "inset 0 0 24px var(--tw-shadow-color, var(--accent))"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-lg", null, 4, [["--tw-shadow", "0 10px 15px -3px var(--tw-shadow-color, #0000001a), 0 4px 6px -4px var(--tw-shadow-color, #0000001a)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".ring", null, 4, [["--tw-ring-shadow", "var(--tw-ring-inset, ) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".\\[box-shadow\\:0_1px_2px_rgba\\(0\\,0\\,0\\,0\\.3\\)\\]", null, 4, [["box-shadow", "0 1px 2px #0000004d"]]], [".\\[box-shadow\\:0_4px_14px_rgba\\(0\\,0\\,0\\,0\\.35\\)\\]", null, 4, [["box-shadow", "0 4px 14px #00000059"]]], [".\\[box-shadow\\:none\\]", null, 4, [["box-shadow", "none"]]], [".\\[outline\\:none\\]", null, 4, [["outline", "none"]]], [".outline, .outline-1", null, 4, [["outline-style", "var(--tw-outline-style)"], ["outline-width", "1px"]]], [".outline-2", null, 4, [["outline-style", "var(--tw-outline-style)"], ["outline-width", "2px"]]], [".outline-accent", null, 4, [["outline-color", "var(--accent)"]]], [".blur", null, 4, [["--tw-blur", "blur(8px)"], ["filter", "var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )"]]], [".\\!filter", null, 4, [["filter", "var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )", 1]]], [".\\[filter\\:drop-shadow\\(0_6px_10px_rgba\\(0\\,0\\,0\\,0\\.45\\)\\)\\]", null, 4, [["filter", "drop-shadow(0 6px 10px #00000073)"]]], [".filter", null, 4, [["filter", "var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )"]]], [".backdrop-blur-xl", null, 4, [["--tw-backdrop-blur", "blur(var(--blur-xl))"], ["-webkit-backdrop-filter", "var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, )"], ["backdrop-filter", "var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, )"]]], [".backdrop-saturate-150", null, 4, [["--tw-backdrop-saturate", "saturate(150%)"], ["-webkit-backdrop-filter", "var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, )"], ["backdrop-filter", "var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, )"]]], [".transition", null, 4, [["transition-property", "color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events"], ["transition-timing-function", "var(--tw-ease, var(--default-transition-timing-function))"], ["transition-duration", "var(--tw-duration, var(--default-transition-duration))"]]], [".transition-\\[left\\,top\\,width\\,height\\]", null, 4, [["transition-property", "left, top, width, height"], ["transition-timing-function", "var(--tw-ease, var(--default-transition-timing-function))"], ["transition-duration", "var(--tw-duration, var(--default-transition-duration))"]]], [".transition-opacity", null, 4, [["transition-property", "opacity"], ["transition-timing-function", "var(--tw-ease, var(--default-transition-timing-function))"], ["transition-duration", "var(--tw-duration, var(--default-transition-duration))"]]], [".duration-150", null, 4, [["--tw-duration", ".15s"], ["transition-duration", ".15s"]]], [".ease-out", null, 4, [["--tw-ease", "var(--ease-out)"], ["transition-timing-function", "var(--ease-out)"]]], [".outline-none", null, 4, [["--tw-outline-style", "none"], ["outline-style", "none"]]], [".outline-solid", null, 4, [["--tw-outline-style", "solid"], ["outline-style", "solid"]]], [".select-none", null, 4, [["-webkit-user-select", "none"], ["user-select", "none"]]], [".select-text", null, 4, [["-webkit-user-select", "text"], ["user-select", "text"]]], [".\\[--panel-bg\\:var\\(--surface-dim\\)\\]", null, 4, [["--panel-bg", "var(--surface-dim)"]]], [".\\[--picker-bg\\:var\\(--surface-0\\)\\]", null, 4, [["--picker-bg", "var(--surface-0)"]]], [".\\[--radius\\:var\\(--radius-pane\\)\\]", null, 4, [["--radius", "var(--radius-pane)"]]], [".\\[--workspace-tools-bg\\:transparent\\]", null, 4, [["--workspace-tools-bg", "transparent"]]], [".\\[-webkit-box-orient\\:vertical\\]", null, 4, [["-webkit-box-orient", "vertical"]]], [".\\[-webkit-line-clamp\\:3\\]", null, 4, [["-webkit-line-clamp", "3"]]], [".\\[-webkit-touch-callout\\:none\\]", null, 4, [["-webkit-touch-callout", "none"]]], [".\\[background\\:none\\]", null, 4, [["background", "none"]]], [".\\[border-right\\:1px_solid_var\\(--git-border\\)\\]", null, 4, [["border-right", "1px solid var(--git-border)"]]], [".\\[border-top\\:1px_solid_var\\(--git-border\\)\\]", null, 4, [["border-top", "1px solid var(--git-border)"]]], [".\\[border\\:0\\]", null, 4, [["border", "0"]]], [".\\[border\\:none\\]", null, 4, [["border", "none"]]], [".\\[font\\:1\\.15rem\\/1_var\\(--font-mono\\)\\]", null, 4, [["font", "1.15rem/1 var(--font-mono)"]]], [".\\[font\\:1rem\\/1\\.2_var\\(--font-mono\\)\\]", null, 4, [["font", "1rem/1.2 var(--font-mono)"]]], [".\\[font\\:inherit\\]", null, 4, [["font", "inherit"]]], [".\\[transition\\:background_0\\.1s_ease\\]", null, 4, [["transition", "background .1s"]]], [".\\[transition\\:background_0\\.12s_ease\\]", null, 4, [["transition", "background .12s"]]], [".\\[transition\\:background_0\\.15s_ease\\]", null, 4, [["transition", "background .15s"]]], [".\\[transition\\:color_0\\.1s_ease\\,background_0\\.1s_ease\\]", null, 4, [["transition", "color .1s, background .1s"]]], [".\\[transition\\:color_0\\.12s_ease\\,background_0\\.12s_ease\\]", null, 4, [["transition", "color .12s, background .12s"]]], [".\\[transition\\:color_0\\.15s_ease\\]", null, 4, [["transition", "color .15s"]]], [".\\[transition\\:opacity_0\\.12s_ease\\]", null, 4, [["transition", "opacity .12s"]]], [".\\[transition\\:transform_0\\.15s_ease\\,background_0\\.15s_ease\\]", null, 4, [["transition", "transform .15s, background .15s"]]], [".not-has-\\[\\[data-setting-row\\]\\]\\:hidden:not(:has([data-setting-row]))", null, 4, [["display", "none"]]], [".group-focus-within\\:flex:is(:where(.group):focus-within *)", null, 4, [["display", "flex"]]], [".group-focus-within\\/row\\:opacity-100:is(:where(.group\\/row):focus-within *)", null, 4, [["opacity", "1"]]], [".group-hover\\:flex:is(:where(.group):hover *)", null, 4, [["display", "flex"]]], [".group-hover\\:opacity-100:is(:where(.group):hover *)", null, 4, [["opacity", "1"]]], [".group-hover\\/line\\:opacity-90:is(:where(.group\\/line):hover *)", null, 4, [["opacity", ".9"]]], [".group-hover\\/ph\\:opacity-100:is(:where(.group\\/ph):hover *), .group-hover\\/row\\:opacity-100:is(:where(.group\\/row):hover *)", null, 4, [["opacity", "1"]]], [".group-focus\\/tree\\:ring-1:is(:where(.group\\/tree):focus *)", null, 4, [["--tw-ring-shadow", "var(--tw-ring-inset, ) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".group-focus\\/tree\\:ring-overlay-1:is(:where(.group\\/tree):focus *)", null, 4, [["--tw-ring-color", "var(--overlay-1)"]]], [".group-focus\\/tree\\:ring-inset:is(:where(.group\\/tree):focus *)", null, 4, [["--tw-ring-inset", "inset"]]], ['.group-aria-checked\\:\\[transform\\:translateX\\(1\\.1rem\\)\\]:is(:where(.group)[aria-checked="true"] *)', null, 4, [["transform", "translateX(1.1rem)"]]], ['.group-aria-checked\\:border-accent:is(:where(.group)[aria-checked="true"] *)', null, 4, [["border-color", "var(--accent)"]]], ['.group-aria-checked\\:bg-accent:is(:where(.group)[aria-checked="true"] *)', null, 4, [["background-color", "var(--accent)"]]], ['.group-aria-checked\\:bg-panel-bg:is(:where(.group)[aria-checked="true"] *)', null, 4, [["background-color", "var(--panel-bg)"]]], ['.group-aria-checked\\:text-accent:is(:where(.group)[aria-checked="true"] *), .group-aria-\\[checked\\=false\\]\\:text-accent:is(:where(.group)[aria-checked="false"] *)', null, 4, [["color", "var(--accent)"]]], [".placeholder\\:text-subtext-0::placeholder", null, 4, [["color", "var(--subtext-0)"]]], [".before\\:absolute:before", null, 4, [["content", "var(--tw-content)"], ["position", "absolute"]]], [".before\\:top-\\[0\\.15rem\\]:before", null, 4, [["content", "var(--tw-content)"], ["top", ".15rem"]]], [".before\\:left-\\[0\\.15rem\\]:before", null, 4, [["content", "var(--tw-content)"], ["left", ".15rem"]]], [".before\\:h-\\[0\\.95rem\\]:before", null, 4, [["content", "var(--tw-content)"], ["height", ".95rem"]]], [".before\\:w-\\[0\\.95rem\\]:before", null, 4, [["content", "var(--tw-content)"], ["width", ".95rem"]]], [".before\\:rounded-full:before", null, 4, [["content", "var(--tw-content)"], ["border-radius", "3.40282e38px"]]], [".before\\:bg-fg:before", null, 4, [["content", "var(--tw-content)"], ["background-color", "var(--text)"]]], [".before\\:content-\\[\\'\\'\\]:before", null, 4, [["--tw-content", '""'], ["content", "var(--tw-content)"]]], [".before\\:\\[transition\\:transform_0\\.12s_ease\\]:before", null, 4, [["content", "var(--tw-content)"], ["transition", "transform .12s"]]], [".after\\:absolute:after", null, 4, [["content", "var(--tw-content)"], ["position", "absolute"]]], [".after\\:inset-0:after", null, 4, [["content", "var(--tw-content)"], ["inset", "0"]]], [".after\\:inset-x-0:after", null, 4, [["content", "var(--tw-content)"], ["inset-inline", "0"]]], [".after\\:-inset-y-2:after", null, 4, [["content", "var(--tw-content)"], ["inset-block", "calc(var(--spacing) * -2)"]]], [".after\\:m-auto:after", null, 4, [["content", "var(--tw-content)"], ["margin", "auto"]]], [".after\\:h-8:after", null, 4, [["content", "var(--tw-content)"], ["height", "calc(var(--spacing) * 8)"]]], [".after\\:h-12:after", null, 4, [["content", "var(--tw-content)"], ["height", "calc(var(--spacing) * 12)"]]], [".after\\:h-\\[3px\\]:after", null, 4, [["content", "var(--tw-content)"], ["height", "3px"]]], [".after\\:w-8:after", null, 4, [["content", "var(--tw-content)"], ["width", "calc(var(--spacing) * 8)"]]], [".after\\:w-\\[3px\\]:after", null, 4, [["content", "var(--tw-content)"], ["width", "3px"]]], [".after\\:rounded-full:after", null, 4, [["content", "var(--tw-content)"], ["border-radius", "3.40282e38px"]]], [".after\\:bg-transparent:after", null, 4, [["content", "var(--tw-content)"], ["background-color", "#0000"]]], [".after\\:content-\\[\\'\\'\\]:after", null, 4, [["--tw-content", '""'], ["content", "var(--tw-content)"]]], [".last\\:border-b-0:last-child", null, 4, [["border-bottom-style", "var(--tw-border-style)"], ["border-bottom-width", "0"]]], [".checked\\:bg-accent:checked", null, 4, [["background-color", "var(--accent)"]]], [".checked\\:before\\:translate-x-\\[1rem\\]:checked:before", null, 4, [["content", "var(--tw-content)"], ["--tw-translate-x", "1rem"], ["translate", "var(--tw-translate-x) var(--tw-translate-y)"]]], [".checked\\:before\\:bg-panel-bg:checked:before", null, 4, [["content", "var(--tw-content)"], ["background-color", "var(--panel-bg)"]]], [".focus-within\\:bg-surface-1:focus-within", null, 4, [["background-color", "var(--surface-1)"]]], [".focus-within\\:outline:focus-within, .focus-within\\:outline-1:focus-within", null, 4, [["outline-style", "var(--tw-outline-style)"], ["outline-width", "1px"]]], [".focus-within\\:outline-fg:focus-within", null, 4, [["outline-color", "var(--text)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_12\\%\\,transparent\\)\\]:hover", null, 4, [["background-color", "var(--accent)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_12\\%\\,transparent\\)\\]:hover", null, 4, [["background-color", "color-mix(in srgb,var(--accent) 12%,transparent)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_15\\%\\,transparent\\)\\]:hover", null, 4, [["background-color", "var(--accent)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_15\\%\\,transparent\\)\\]:hover", null, 4, [["background-color", "color-mix(in srgb,var(--accent) 15%,transparent)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--text\\)_10\\%\\,var\\(--panel-bg\\)\\)\\]:hover", null, 4, [["background-color", "var(--text)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--text\\)_10\\%\\,var\\(--panel-bg\\)\\)\\]:hover", null, 4, [["background-color", "color-mix(in srgb,var(--text) 10%,var(--panel-bg))"]]], [".hover\\:bg-\\[var\\(--surface-0\\)\\]:hover", null, 4, [["background-color", "var(--surface-0)"]]], [".hover\\:bg-accent:hover", null, 4, [["background-color", "var(--accent)"]]], [".hover\\:bg-overlay-0:hover", null, 4, [["background-color", "var(--overlay-0)"]]], [".hover\\:bg-panel-bg:hover", null, 4, [["background-color", "var(--panel-bg)"]]], [".hover\\:bg-surface-0:hover", null, 4, [["background-color", "var(--surface-0)"]]], [".hover\\:bg-surface-1:hover", null, 4, [["background-color", "var(--surface-1)"]]], [".hover\\:bg-transparent:hover", null, 4, [["background-color", "#0000"]]], [".hover\\:text-accent:hover", null, 4, [["color", "var(--accent)"]]], [".hover\\:text-fg:hover", null, 4, [["color", "var(--text)"]]], [".hover\\:text-inherit:hover", null, 4, [["color", "inherit"]]], [".hover\\:text-overlay-0:hover", null, 4, [["color", "var(--overlay-0)"]]], [".hover\\:text-panel-bg:hover", null, 4, [["color", "var(--panel-bg)"]]], [".hover\\:text-red:hover", null, 4, [["color", "var(--red)"]]], [".hover\\:text-subtext-0:hover", null, 4, [["color", "var(--subtext-0)"]]], [".hover\\:text-yellow:hover", null, 4, [["color", "var(--yellow)"]]], [".hover\\:underline:hover", null, 4, [["text-decoration-line", "underline"]]], [".hover\\:opacity-60:hover", null, 4, [["opacity", ".6"]]], [".hover\\:opacity-100\\!:hover", null, 4, [["opacity", "1", 1]]], [".hover\\:opacity-\\[0\\.85\\]:hover", null, 4, [["opacity", ".85"]]], [".hover\\:brightness-110:hover", null, 4, [["--tw-brightness", "brightness(110%)"], ["filter", "var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )"]]], [".hover\\:\\[filter\\:brightness\\(1\\.08\\)\\]:hover", null, 4, [["filter", "brightness(1.08)"]]], [".hover\\:after\\:bg-overlay-1:hover:after", null, 4, [["content", "var(--tw-content)"], ["background-color", "var(--overlay-1)"]]], [".focus\\:\\[outline\\:1px_solid_var\\(--accent\\)\\]:focus", null, 4, [["outline", "1px solid var(--accent)"]]], [".focus\\:outline-2:focus", null, 4, [["outline-style", "var(--tw-outline-style)"], ["outline-width", "2px"]]], [".focus\\:outline-none:focus", null, 4, [["--tw-outline-style", "none"], ["outline-style", "none"]]], [".focus-visible\\:bg-accent:focus-visible", null, 4, [["background-color", "var(--accent)"]]], [".focus-visible\\:bg-surface-0:focus-visible", null, 4, [["background-color", "var(--surface-0)"]]], [".focus-visible\\:bg-surface-1:focus-visible", null, 4, [["background-color", "var(--surface-1)"]]], [".focus-visible\\:text-accent:focus-visible", null, 4, [["color", "var(--accent)"]]], [".focus-visible\\:text-fg:focus-visible", null, 4, [["color", "var(--text)"]]], [".focus-visible\\:text-panel-bg:focus-visible", null, 4, [["color", "var(--panel-bg)"]]], [".focus-visible\\:text-red:focus-visible", null, 4, [["color", "var(--red)"]]], [".focus-visible\\:text-yellow:focus-visible", null, 4, [["color", "var(--yellow)"]]], [".focus-visible\\:underline:focus-visible", null, 4, [["text-decoration-line", "underline"]]], [".focus-visible\\:opacity-100:focus-visible", null, 4, [["opacity", "1"]]], [".focus-visible\\:\\[outline\\:1px_solid_var\\(--accent\\)\\]:focus-visible", null, 4, [["outline", "1px solid var(--accent)"]]], [".focus-visible\\:\\[outline\\:1px_solid_var\\(--overlay-1\\)\\]:focus-visible", null, 4, [["outline", "1px solid var(--overlay-1)"]]], [".focus-visible\\:\\[outline\\:2px_solid_var\\(--accent\\)\\]:focus-visible", null, 4, [["outline", "2px solid var(--accent)"]]], [".focus-visible\\:outline:focus-visible, .focus-visible\\:outline-1:focus-visible", null, 4, [["outline-style", "var(--tw-outline-style)"], ["outline-width", "1px"]]], [".focus-visible\\:\\[outline-offset\\:-1px\\]:focus-visible", null, 4, [["outline-offset", "-1px"]]], [".focus-visible\\:\\[outline-offset\\:-2px\\]:focus-visible", null, 4, [["outline-offset", "-2px"]]], [".focus-visible\\:\\[outline-offset\\:2px\\]:focus-visible", null, 4, [["outline-offset", "2px"]]], [".focus-visible\\:outline-offset-1:focus-visible", null, 4, [["outline-offset", "1px"]]], [".focus-visible\\:outline-fg:focus-visible", null, 4, [["outline-color", "var(--text)"]]], [".focus-visible\\:after\\:bg-accent:focus-visible:after", null, 4, [["content", "var(--tw-content)"], ["background-color", "var(--accent)"]]], [".active\\:cursor-grabbing:active", null, 4, [["cursor", "grabbing"]]], [".active\\:bg-surface-1:active", null, 4, [["background-color", "var(--surface-1)"]]], [".active\\:text-fg:active", null, 4, [["color", "var(--text)"]]], [".active\\:after\\:bg-accent:active:after", null, 4, [["content", "var(--tw-content)"], ["background-color", "var(--accent)"]]], [".enabled\\:hover\\:bg-surface-1:enabled:hover", null, 4, [["background-color", "var(--surface-1)"]]], [".enabled\\:hover\\:text-fg:enabled:hover", null, 4, [["color", "var(--text)"]]], [".disabled\\:cursor-default:disabled", null, 4, [["cursor", "default"]]], [".disabled\\:cursor-not-allowed:disabled", null, 4, [["cursor", "not-allowed"]]], [".disabled\\:cursor-not-allowed\\!:disabled", null, 4, [["cursor", "not-allowed", 1]]], [".disabled\\:cursor-wait:disabled", null, 4, [["cursor", "wait"]]], [".disabled\\:bg-transparent:disabled", null, 4, [["background-color", "#0000"]]], [".disabled\\:text-fg:disabled", null, 4, [["color", "var(--text)"]]], [".disabled\\:opacity-40:disabled", null, 4, [["opacity", ".4"]]], [".disabled\\:opacity-50:disabled", null, 4, [["opacity", ".5"]]], [".disabled\\:opacity-\\[0\\.45\\]:disabled", null, 4, [["opacity", ".45"]]], [".disabled\\:opacity-\\[0\\.55\\]:disabled", null, 4, [["opacity", ".55"]]], [":where(.app--mac-desktop) .in-\\[\\.app--mac-desktop\\]\\:pl-\\[84px\\]", null, 4, [["padding-left", "84px"]]], [".has-\\[\\:checked\\]\\:bg-surface-0:has(:checked)", null, 4, [["background-color", "var(--surface-0)"]]], [".has-\\[\\:checked\\]\\:text-fg:has(:checked)", null, 4, [["color", "var(--text)"]]], [".has-\\[\\:focus-visible\\]\\:bg-surface-0:has(:focus-visible)", null, 4, [["background-color", "var(--surface-0)"]]], ['.aria-disabled\\:cursor-not-allowed[aria-disabled="true"]', null, 4, [["cursor", "not-allowed"]]], ['.aria-disabled\\:opacity-40[aria-disabled="true"]', null, 4, [["opacity", ".4"]]], ['.aria-expanded\\:opacity-100[aria-expanded="true"]', null, 4, [["opacity", "1"]]], ['.aria-pressed\\:bg-surface-0[aria-pressed="true"]', null, 4, [["background-color", "var(--surface-0)"]]], ['.aria-pressed\\:text-fg[aria-pressed="true"]', null, 4, [["color", "var(--text)"]]], [".motion-reduce\\:animate-none", ["(prefers-reduced-motion: reduce)"], 4, [["animation", "none"]]], [".max-\\[900px\\]\\:hidden", ["not all and (min-width: 900px)"], 4, [["display", "none"]]], [".max-\\[700px\\]\\:hidden", ["not all and (min-width: 700px)"], 4, [["display", "none"]]], [".max-\\[700px\\]\\:size-11", ["not all and (min-width: 700px)"], 4, [["width", "calc(var(--spacing) * 11)"], ["height", "calc(var(--spacing) * 11)"]]], [".max-\\[700px\\]\\:h-9", ["not all and (min-width: 700px)"], 4, [["height", "calc(var(--spacing) * 9)"]]], [".max-\\[700px\\]\\:h-12", ["not all and (min-width: 700px)"], 4, [["height", "calc(var(--spacing) * 12)"]]], [".max-\\[700px\\]\\:min-h-9", ["not all and (min-width: 700px)"], 4, [["min-height", "calc(var(--spacing) * 9)"]]], [".max-\\[700px\\]\\:min-h-11", ["not all and (min-width: 700px)"], 4, [["min-height", "calc(var(--spacing) * 11)"]]], [".max-\\[700px\\]\\:w-24", ["not all and (min-width: 700px)"], 4, [["width", "calc(var(--spacing) * 24)"]]], [".max-\\[700px\\]\\:min-w-11", ["not all and (min-width: 700px)"], 4, [["min-width", "calc(var(--spacing) * 11)"]]], [".max-\\[700px\\]\\:flex-1", ["not all and (min-width: 700px)"], 4, [["flex", "1"]]], [".max-\\[700px\\]\\:flex-\\[1_1_6rem\\]", ["not all and (min-width: 700px)"], 4, [["flex", "6rem"]]], [".max-\\[700px\\]\\:flex-\\[1_1_100\\%\\]", ["not all and (min-width: 700px)"], 4, [["flex", "100%"]]], [".max-\\[700px\\]\\:basis-56", ["not all and (min-width: 700px)"], 4, [["flex-basis", "calc(var(--spacing) * 56)"]]], [".max-\\[700px\\]\\:basis-full", ["not all and (min-width: 700px)"], 4, [["flex-basis", "100%"]]], [".max-\\[700px\\]\\:flex-wrap", ["not all and (min-width: 700px)"], 4, [["flex-wrap", "wrap"]]], [".max-\\[700px\\]\\:gap-y-2", ["not all and (min-width: 700px)"], 4, [["row-gap", "calc(var(--spacing) * 2)"]]], [".min-\\[701px\\]\\:left-auto", ["(min-width: 701px)"], 4, [["left", "auto"]]], [".min-\\[701px\\]\\:my-\\[3px\\]", ["(min-width: 701px)"], 4, [["margin-block", "3px"]]], [".min-\\[701px\\]\\:block", ["(min-width: 701px)"], 4, [["display", "block"]]], [".min-\\[701px\\]\\:hidden", ["(min-width: 701px)"], 4, [["display", "none"]]], [".min-\\[701px\\]\\:min-h-6", ["(min-width: 701px)"], 4, [["min-height", "calc(var(--spacing) * 6)"]]], [".min-\\[701px\\]\\:w-80", ["(min-width: 701px)"], 4, [["width", "calc(var(--spacing) * 80)"]]], [".min-\\[701px\\]\\:rounded-ui", ["(min-width: 701px)"], 4, [["border-radius", "var(--radius)"]]], [".min-\\[701px\\]\\:px-3", ["(min-width: 701px)"], 4, [["padding-inline", "calc(var(--spacing) * 3)"]]], [".min-\\[701px\\]\\:pr-\\[3px\\]", ["(min-width: 701px)"], 4, [["padding-right", "3px"]]], [".min-\\[701px\\]\\:pl-4", ["(min-width: 701px)"], 4, [["padding-left", "calc(var(--spacing) * 4)"]]], [".min-\\[701px\\]\\:text-\\[0\\.62rem\\]", ["(min-width: 701px)"], 4, [["font-size", ".62rem"]]], [".min-\\[701px\\]\\:text-\\[12\\.5px\\]", ["(min-width: 701px)"], 4, [["font-size", "12.5px"]]], [".min-\\[701px\\]\\:text-\\[12px\\]", ["(min-width: 701px)"], 4, [["font-size", "12px"]]], [".min-\\[701px\\]\\:font-medium", ["(min-width: 701px)"], 4, [["--tw-font-weight", "var(--font-weight-medium)"], ["font-weight", "var(--font-weight-medium)"]]], [".min-\\[701px\\]\\:font-semibold", ["(min-width: 701px)"], 4, [["--tw-font-weight", "var(--font-weight-semibold)"], ["font-weight", "var(--font-weight-semibold)"]]], [".min-\\[701px\\]\\:tracking-\\[0\\.045em\\]", ["(min-width: 701px)"], 4, [["--tw-tracking", ".045em"], ["letter-spacing", ".045em"]]], [".min-\\[701px\\]\\:text-subtext-0", ["(min-width: 701px)"], 4, [["color", "var(--subtext-0)"]]], [".min-\\[701px\\]\\:uppercase", ["(min-width: 701px)"], 4, [["text-transform", "uppercase"]]], [".min-\\[900px\\]\\:inline", ["(min-width: 900px)"], 4, [["display", "inline"]]], [".pointer-coarse\\:opacity-100", ["(pointer: coarse)"], 4, [["opacity", "1"]]], [".\\[\\&_\\.mode-switch\\]\\:ml-0 .mode-switch", null, 4, [["margin-left", "0"]]], [".max-\\[700px\\]\\:\\[\\&_button\\]\\:min-h-11 button", ["not all and (min-width: 700px)"], 4, [["min-height", "calc(var(--spacing) * 11)"]]], [".\\[\\&_pre\\]\\:m-\\[0\\.2rem_0_0\\.3rem_1\\.2rem\\] pre", null, 4, [["margin", ".2rem 0 .3rem 1.2rem"]]], [".\\[\\&_pre\\]\\:max-h-72 pre", null, 4, [["max-height", "calc(var(--spacing) * 72)"]]], [".\\[\\&_pre\\]\\:overflow-auto pre", null, 4, [["overflow", "auto"]]], [".\\[\\&_pre\\]\\:rounded-ui pre", null, 4, [["border-radius", "var(--radius)"]]], [".\\[\\&_pre\\]\\:bg-surface-0 pre", null, 4, [["background-color", "var(--surface-0)"]]], [".\\[\\&_pre\\]\\:p-2 pre", null, 4, [["padding", "calc(var(--spacing) * 2)"]]], [".\\[\\&_pre\\]\\:text-\\[0\\.78rem\\] pre", null, 4, [["font-size", ".78rem"]]], [".\\[\\&_pre\\]\\:\\[overflow-wrap\\:anywhere\\] pre", null, 4, [["overflow-wrap", "anywhere"]]], [".\\[\\&_pre\\]\\:whitespace-pre-wrap pre", null, 4, [["white-space", "pre-wrap"]]], [".\\[\\&_pre\\]\\:text-fg pre, .\\[\\&_strong\\]\\:text-fg strong", null, 4, [["color", "var(--text)"]]], [".\\[\\&_summary\\]\\:cursor-pointer summary", null, 4, [["cursor", "pointer"]]], [".\\[\\&\\:hover\\:not\\(\\:disabled\\)\\]\\:bg-surface-1:hover:not(:disabled)", null, 4, [["background-color", "var(--surface-1)"]]], [".\\[\\&\\:hover\\:not\\(\\:disabled\\)\\]\\:text-accent:hover:not(:disabled)", null, 4, [["color", "var(--accent)"]]], [".\\[\\&\\:hover\\:not\\(\\:disabled\\)\\]\\:text-red:hover:not(:disabled)", null, 4, [["color", "var(--red)"]]], [".\\[\\&\\:not\\(\\:has\\(\\[data-setting-row\\]\\)\\)\\>\\[data-none\\]\\]\\:block:not(:has([data-setting-row])) > [data-none]", null, 4, [["display", "block"]]], [".\\[\\&\\>\\*\\]\\:min-h-0 > *", null, 4, [["min-height", "0"]]], [".\\[\\&\\>\\*\\]\\:min-w-0 > *", null, 4, [["min-width", "0"]]], [".\\[\\&\\>\\*\\]\\:flex-1 > *", null, 4, [["flex", "1"]]], [".\\[\\&\\>\\*\\]\\:shrink-0 > *", null, 4, [["flex-shrink", "0"]]], [".\\[\\&\\>li\\]\\:text-\\[0\\.85rem\\] > li", null, 4, [["font-size", ".85rem"]]], [".\\[\\&\\>li\\]\\:leading-\\[1\\.5\\] > li", null, 4, [["--tw-leading", "1.5"], ["line-height", "1.5"]]], [".\\[\\&\\>li\\]\\:text-fg > li", null, 4, [["color", "var(--text)"]]], [".\\[\\&\\>summary\\]\\:flex > summary", null, 4, [["display", "flex"]]], [".\\[\\&\\>summary\\]\\:cursor-pointer > summary", null, 4, [["cursor", "pointer"]]], [".\\[\\&\\>summary\\]\\:list-none > summary", null, 4, [["list-style-type", "none"]]], [".\\[\\&\\>summary\\]\\:items-center > summary", null, 4, [["align-items", "center"]]], [".\\[\\&\\>summary\\]\\:gap-\\[0\\.4rem\\] > summary", null, 4, [["gap", ".4rem"]]], [".\\[\\&\\>summary\\]\\:rounded-ui > summary", null, 4, [["border-radius", "var(--radius)"]]], [".\\[\\&\\>summary\\]\\:px-\\[0\\.4rem\\] > summary", null, 4, [["padding-inline", ".4rem"]]], [".\\[\\&\\>summary\\]\\:py-\\[0\\.25rem\\] > summary", null, 4, [["padding-block", ".25rem"]]], [".\\[\\&\\>summary\\]\\:select-none > summary", null, 4, [["-webkit-user-select", "none"], ["user-select", "none"]]], [".\\[\\&\\>summary\\]\\:before\\:inline-block > summary:before", null, 4, [["content", "var(--tw-content)"], ["display", "inline-block"]]], [".\\[\\&\\>summary\\]\\:before\\:size-\\[0\\.4rem\\] > summary:before", null, 4, [["content", "var(--tw-content)"], ["width", ".4rem"], ["height", ".4rem"]]], [".\\[\\&\\>summary\\]\\:before\\:shrink-0 > summary:before", null, 4, [["content", "var(--tw-content)"], ["flex-shrink", "0"]]], [".\\[\\&\\>summary\\]\\:before\\:\\[transform\\:rotate\\(-45deg\\)\\] > summary:before", null, 4, [["content", "var(--tw-content)"], ["transform", "rotate(-45deg)"]]], [".\\[\\&\\>summary\\]\\:before\\:content-\\[\\'\\'\\] > summary:before", null, 4, [["--tw-content", '""'], ["content", "var(--tw-content)"]]], [".\\[\\&\\>summary\\]\\:before\\:\\[border-bottom\\:1\\.3px_solid_currentColor\\] > summary:before", null, 4, [["content", "var(--tw-content)"], ["border-bottom", "1.3px solid"]]], [".\\[\\&\\>summary\\]\\:before\\:\\[border-right\\:1\\.3px_solid_currentColor\\] > summary:before", null, 4, [["content", "var(--tw-content)"], ["border-right", "1.3px solid"]]], [".\\[\\&\\>summary\\]\\:before\\:\\[transition\\:transform_0\\.15s_ease\\] > summary:before", null, 4, [["content", "var(--tw-content)"], ["transition", "transform .15s"]]], [".\\[\\&\\>summary\\:hover\\]\\:bg-surface-1 > summary:hover", null, 4, [["background-color", "var(--surface-1)"]]], [".\\[\\&\\>summary\\:hover\\]\\:text-fg > summary:hover", null, 4, [["color", "var(--text)"]]], [".\\[\\&\\[open\\]\\>summary\\]\\:before\\:\\[transform\\:rotate\\(45deg\\)\\][open] > summary:before", null, 4, [["content", "var(--tw-content)"], ["transform", "rotate(45deg)"]]], [".app--mobile .\\[\\.app--mobile_\\&\\]\\:min-h-11", null, 4, [["min-height", "calc(var(--spacing) * 11)"]]], [".app--mobile .\\[\\.app--mobile_\\&\\]\\:min-h-\\[44px\\]", null, 4, [["min-height", "44px"]]], [".\\[\\@media\\(hover\\:none\\)\\]\\:opacity-60", ["(hover: none)"], 4, [["opacity", ".6"]]], [".\\[\\@media\\(hover\\:none\\)\\]\\:opacity-100", ["(hover: none)"], 4, [["opacity", "1"]]], [".\\[\\@media\\(max-width\\:700px\\)\\]\\:h-\\[2\\.75rem\\]", ["(max-width: 700px)"], 4, [["height", "2.75rem"]]], [".\\[\\@media\\(max-width\\:700px\\)\\]\\:min-h-\\[2\\.75rem\\]", ["(max-width: 700px)"], 4, [["min-height", "2.75rem"]]], [".\\[\\@media\\(max-width\\:700px\\)\\]\\:w-\\[2\\.75rem\\]", ["(max-width: 700px)"], 4, [["width", "2.75rem"]]], [".\\[\\@media\\(max-width\\:700px\\)\\]\\:min-w-\\[2\\.75rem\\]", ["(max-width: 700px)"], 4, [["min-width", "2.75rem"]]], [".\\[\\@media\\(max-width\\:700px\\)\\]\\:px-\\[0\\.65rem\\]", ["(max-width: 700px)"], 4, [["padding-inline", ".65rem"]]], ["div:hover > .\\[div\\:hover\\>\\&\\]\\:opacity-100", null, 4, [["opacity", "1"]]], [":root", null, 1e3, [["color-scheme", "dark"], ["--scrollbar-size", "6px"], ["--accent", "#c8c8c8"], ["--panel-bg", "#161616"], ["--surface-0", "#262626"], ["--surface-1", "#333"], ["--surface-dim", "#1c1c1c"], ["--backdrop", "#050505"], ["--overlay-0", "#3a3a3a"], ["--overlay-1", "#9b9b9b"], ["--text", "#d8d8d8"], ["--subtext-0", "#9b9b9b"], ["--mauve", "#a993c9"], ["--green", "#7fb685"], ["--yellow", "#d3b46a"], ["--red", "#df8c8c"], ["--blue", "#7aa2d7"], ["--teal", "#7fb8b8"], ["--peach", "#d39a6a"], ["--bg", "var(--panel-bg)"], ["--surface", "var(--surface-0)"], ["--surface-alt", "var(--surface-1)"], ["--border", "var(--overlay-0)"], ["--muted", "var(--subtext-0)"], ["--danger", "var(--red)"], ["--radius", "8px"], ["--radius-pane", "8px"], ["accent-color", "var(--accent)"], ["--font-ui", '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif'], ["--font-mono", `ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
     monospace`], ["font-family", "var(--font-ui)"]]], ["code, pre, kbd, samp", null, 1e3, [["font-family", "var(--font-mono)"]]], ["*", null, 1e3, [["box-sizing", "border-box"]]], ["html, body, #root", null, 1e3, [["height", "100%"], ["margin", "0"]]], ["html", null, 1e3, [["overscroll-behavior", "none"], ["--shell-bg", "var(--panel-bg)"]]], ["html[data-glass]", null, 1e3, [["--shell-bg", "var(--panel-bg)"]]], ["html[data-glass]", null, 1e3, [["--shell-bg", "color-mix(in srgb, var(--panel-bg) 86%, transparent)"]]], ["html", null, 1e3, [["--backdrop-bg", "var(--backdrop)"], ["--card-bg", "var(--panel-bg)"]]], ["html[data-glass]", null, 1e3, [["--backdrop-bg", "var(--backdrop)"]]], ["html[data-glass]", null, 1e3, [["--backdrop-bg", "color-mix(in srgb, var(--backdrop) 86%, transparent)"]]], ["html[data-glass]", null, 1e3, [["--card-bg", "var(--panel-bg)"]]], ["html[data-glass]", null, 1e3, [["--card-bg", "color-mix(in srgb, var(--panel-bg) 86%, transparent)"]]], ['body:has(.app--cards, .app--mobile), .app--cards .dock-area:has([data-testid="split-canvas"]:not([data-split="0"]))', null, 1e3, [["background", "var(--backdrop-bg)"]]], ["body", null, 1e3, [["background", "var(--shell-bg)"], ["color", "var(--text)"], ["overscroll-behavior", "none"], ["-webkit-tap-highlight-color", "transparent"], ["line-height", "1.3"]]], [".app", null, 1e3, [["flex-direction", "column"], ["height", "100dvh"], ["display", "flex"]]], [".app--mobile", null, 1e3, [["inset", "var(--visible-top, 0px) 0 auto 0"], ["height", "var(--visible-height, 100dvh)"], ["position", "fixed"]]], [".mobile-drawer-backdrop", null, 1e3, [["animation", ".15s ease-out mobile-fade"]]], [".mobile-drawer--left", null, 1e3, [["animation", ".2s cubic-bezier(.2, .8, .2, 1) mobile-slide-left"]]], [".mobile-drawer--right", null, 1e3, [["animation", ".2s cubic-bezier(.2, .8, .2, 1) mobile-slide-right"]]], [".mobile-sheet", null, 1e3, [["animation", ".22s cubic-bezier(.2, .8, .2, 1) mobile-rise"]]], [".mobile-drawer-backdrop, .mobile-drawer, .mobile-sheet", ["(prefers-reduced-motion: reduce)"], 1e3, [["animation", "none"]]], [".layout-drawer", null, 1e3, [["transform", "translateX(var(--float-hide, 0))"], ["transition", "transform .18s"]]], [".layout-drawer:hover, .layout-drawer:focus-within", null, 1e3, [["--float-hide", "0px"]]], [".dockview-theme-perch", null, 1e3, [["--dv-color-abyss-dark", "var(--panel-bg)"], ["--dv-color-abyss", "var(--surface-0)"], ["--dv-color-abyss-light", "var(--surface-1)"], ["--dv-color-abyss-lighter", "var(--overlay-0)"], ["--dv-color-abyss-accent", "var(--accent)"], ["--dv-color-abyss-primary-text", "var(--text)"], ["--dv-color-abyss-secondary-text", "var(--subtext-0)"], ["--dv-group-view-background-color", "var(--panel-bg)"], ["--dv-tabs-and-actions-container-background-color", "var(--surface-0)"], ["--dv-activegroup-visiblepanel-tab-background-color", "var(--panel-bg)"], ["--dv-activegroup-hiddenpanel-tab-background-color", "var(--surface-0)"], ["--dv-inactivegroup-visiblepanel-tab-background-color", "var(--panel-bg)"], ["--dv-inactivegroup-hiddenpanel-tab-background-color", "var(--surface-0)"], ["--dv-tab-divider-color", "var(--overlay-0)"], ["--dv-activegroup-visiblepanel-tab-color", "var(--text)"], ["--dv-activegroup-hiddenpanel-tab-color", "var(--subtext-0)"], ["--dv-inactivegroup-visiblepanel-tab-color", "var(--subtext-0)"], ["--dv-inactivegroup-hiddenpanel-tab-color", "var(--subtext-0)"], ["--dv-separator-border", "var(--overlay-0)"], ["--dv-paneview-header-border-color", "var(--overlay-0)"], ["--dv-tabs-and-actions-container-font-size", ".82rem"], ["--dv-tabs-and-actions-container-height", "2.1rem"]]], [".dockview-theme-perch .dv-tabs-and-actions-container", null, 1e3, [["z-index", "1"], ["position", "relative"]]], [".pane-tab", null, 1e3, [["align-items", "center"], ["width", "100%"], ["height", "100%"], ["display", "flex"]]], [".pane-tab__agent-badge", null, 1e3, [["color", "var(--subtext-0)"], ["white-space", "nowrap"], ["flex-shrink", "0"], ["margin-right", ".4rem"], ["font-size", ".78em"]]], ['.pane-tab[data-testid="pane-tab-chat"] .dv-default-tab-action', null, 1e3, [["display", "none"]]], [".dockview-group-action", null, 1e3, [["border-radius", "var(--radius)"], ["width", "1.5rem"], ["height", "1.5rem"], ["color", "var(--subtext-0)"], ["cursor", "pointer"], ["background", "none"], ["border", "none"], ["justify-content", "center"], ["align-self", "center"], ["align-items", "center"], ["margin", "0 .15rem"], ["font-size", "1rem"], ["line-height", "1"], ["transition", "color .1s, background .1s"], ["display", "flex"]]], [".dockview-group-action:hover", null, 1e3, [["color", "var(--text)"], ["background", "var(--surface-1)"]]], [".dockview-theme-perch .dv-view-container > .dv-view:has(.dv-inactive-group)", ["(max-width: 700px)"], 1e3, [["display", "none"]]], [".dockview-theme-perch .dv-view-container > .dv-view:has(.dv-active-group)", ["(max-width: 700px)"], 1e3, [["width", "100%", 1], ["left", "0", 1]]], [".chat", null, 1e3, [["isolation", "isolate"], ["flex-direction", "column"], ["flex", "1"], ["height", "100%"], ["min-height", "0"], ["display", "flex"]]], [".message__markdown p", null, 1e3, [["margin", "0 0 .5em"]]], [".message__markdown p:last-child", null, 1e3, [["margin-bottom", "0"]]], [".message__markdown h1, .message__markdown h2, .message__markdown h3, .message__markdown h4", null, 1e3, [["margin", ".6em 0 .3em"], ["line-height", "1.25"]]], [".message__markdown h1", null, 1e3, [["font-size", "1.25em"]]], [".message__markdown h2", null, 1e3, [["font-size", "1.12em"]]], [".message__markdown h3", null, 1e3, [["font-size", "1em"]]], [".message__markdown > * + *", null, 1e3, [["margin-top", ".5em"]]], [".message__markdown table, .md-table", null, 1e3, [["border-collapse", "separate"], ["border-spacing", "0"], ["background", "var(--surface-0)"], ["border-radius", "var(--radius)"], ["max-width", "100%"], ["margin", ".5em 0"], ["font-size", ".92em"], ["display", "block"], ["overflow-x", "auto"]]], [".md-table", null, 1e3, [["width", "100%"], ["margin", "0"], ["display", "table"]]], [".message__markdown th, .message__markdown td, .md-table th, .md-table td", null, 1e3, [["text-align", "left"], ["vertical-align", "top"], ["border-bottom", "1px solid var(--surface-1)"], ["padding", ".35em .75em"]]], [".message__markdown th, .md-table th", null, 1e3, [["color", "var(--subtext-0)"], ["white-space", "nowrap"], ["background", "var(--surface-1)"], ["font-weight", "600"]]], [".message__markdown tbody tr:last-child td, .md-table tbody tr:last-child td", null, 1e3, [["border-bottom", "0"]]], [".message__markdown tbody tr:hover td, .md-table tbody tr:hover td", null, 1e3, [["background", "var(--surface-1)"]]], [".md-table caption", null, 1e3, [["text-align", "left"], ["color", "var(--subtext-0)"], ["padding", ".4em .75em"]]], [".md-code", null, 1e3, [["background", "var(--surface-0)"], ["border-radius", "var(--radius)"], ["overflow", "hidden"]]], [".md-code__bar", null, 1e3, [["color", "var(--subtext-0)"], ["background", "var(--surface-1)"], ["justify-content", "space-between"], ["align-items", "center"], ["padding", ".1rem .4rem .1rem .75rem"], ["font-size", ".75em"], ["display", "flex"]]], [".message__markdown .md-code pre", null, 1e3, [["background", "none"], ["border-radius", "0"], ["margin", "0"]]], [".hl-keyword", null, 1e3, [["color", "var(--mauve)"]]], [".hl-string", null, 1e3, [["color", "var(--green)"]]], [".hl-number", null, 1e3, [["color", "var(--peach)"]]], [".hl-function", null, 1e3, [["color", "var(--blue)"]]], [".hl-type", null, 1e3, [["color", "var(--yellow)"]]], [".hl-tag", null, 1e3, [["color", "var(--teal)"]]], [".hl-comment", null, 1e3, [["color", "var(--overlay-1)"], ["font-style", "italic"]]], [".message__markdown ul, .message__markdown ol", null, 1e3, [["margin", ".3em 0 .5em 1.3em"], ["padding", "0"]]], [".message__markdown li", null, 1e3, [["margin-bottom", ".2em"]]], [".message__markdown code", null, 1e3, [["background", "var(--surface-0)"], ["border-radius", ".25rem"], ["padding", ".1em .35em"], ["font-family", "ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace"], ["font-size", ".88em"]]], [".message__markdown pre", null, 1e3, [["background", "var(--surface-0)"], ["border-radius", "var(--radius)"], ["margin", ".4em 0"], ["padding", ".6rem .75rem"], ["position", "relative"], ["overflow-x", "auto"]]], [".message__markdown pre code", null, 1e3, [["background", "none"], ["border", "none"], ["padding", "0"], ["font-size", ".85em"]]], [".message__markdown a", null, 1e3, [["color", "var(--accent)"], ["text-decoration", "underline"]]], [".message__markdown blockquote", null, 1e3, [["border-left", "3px solid var(--overlay-0)"], ["color", "var(--subtext-0)"], ["margin", ".4em 0"], ["padding", ".1em .6em"]]], [".message__markdown hr", null, 1e3, [["border", "none"], ["border-top", "1px solid var(--overlay-0)"], ["margin", ".75em 0"]]], [".file-markdown", null, 1e3, [["overflow-wrap", "anywhere"]]], [".file-markdown img", null, 1e3, [["max-width", "100%"]]], [".file-markdown table", null, 1e3, [["border-collapse", "collapse"], ["margin", ".4em 0"], ["display", "block"], ["overflow-x", "auto"]]], [".file-markdown th, .file-markdown td", null, 1e3, [["border", "1px solid var(--overlay-0)"], ["padding", ".2em .5em"]]], [".file-markdown .md-placeholder", null, 1e3, [["color", "var(--subtext-0)"], ["border", "1px dashed var(--overlay-0)"], ["border-radius", ".25rem"], ["padding", ".05em .35em"], ["font-size", ".9em"]]], [".terminal", null, 1e3, [["min-width", "0"], ["min-height", "0"], ["padding", "var(--terminal-padding, 0)"], ["opacity", "var(--terminal-opacity, 1)"], ["flex", "1"], ["display", "flex"], ["position", "relative"]]], [".terminal__surface", null, 1e3, [["flex", "1"], ["min-width", "0"], ["min-height", "0"], ["overflow", "hidden"]]], [".terminal__surface .xterm", null, 1e3, [["height", "100%"]]], [".terminal__surface .xterm:not(.allow-transparency) .xterm-viewport", null, 1e3, [["background-color", "#0000"]]], [".terminal__surface .xterm-scrollable-element", null, 1e3, [["position", "static", 1]]], [".terminal__surface .xterm-decoration-overview-ruler, .no-pane-scrollbars .terminal__surface .xterm-scrollable-element > .xterm-scrollbar", null, 1e3, [["display", "none"]]], [".terminal--persistent", null, 1e3, [["flex-direction", "column"]]], [".terminal__toolbar", null, 1e3, [["color", "var(--subtext-0)"], ["align-items", "center"], ["gap", ".5rem"], ["padding", ".25rem 1.5rem .25rem .5rem"], ["font-size", ".8rem"], ["display", "flex"]]], [".terminal__toolbar button", null, 1e3, [["border-radius", "var(--radius)"], ["min-height", "32px"], ["color", "var(--text)"], ["background", "var(--surface-0)"], ["border", "0"], ["padding", ".25rem .5rem"]]], [".terminal__toolbar--overlay", null, 1e3, [["z-index", "2"], ["border-radius", "var(--radius)"], ["background", "var(--surface-1)"], ["padding", ".2rem .3rem .2rem .6rem"], ["position", "absolute"], ["top", ".4rem"], ["right", ".9rem"], ["box-shadow", "0 2px 8px #00000040"]]], [".terminal__connection", null, 1e3, [["margin-right", "auto"]]], [".terminal__toolbar button:disabled", null, 1e3, [["opacity", ".5"]]], [".terminal__notice", null, 1e3, [["color", "var(--subtext-0)"], ["padding", ".75rem"], ["font-size", ".85rem"]]], [".app--mobile .terminal__toolbar button", null, 1e3, [["min-height", "44px"]]], [".app--mobile .terminal__connection", null, 1e3, [["display", "none"]]], [".app--mobile .terminal__toolbar", null, 1e3, [["padding-right", ".5rem"]]], [".terminal__exited", null, 1e3, [["background", "var(--surface-1)"], ["border-radius", "var(--radius)"], ["color", "var(--subtext-0)"], ["padding", ".35rem .75rem"], ["font-size", ".85rem"], ["position", "absolute"], ["bottom", ".75rem"], ["left", "50%"], ["transform", "translateX(-50%)"]]], [".terminal__exited--cli", null, 1e3, [["background", "var(--panel-bg)"], ["flex-direction", "column"], ["align-items", "center"], ["gap", ".6rem"], ["padding", ".9rem 1.1rem"], ["display", "flex"], ["top", "50%"], ["bottom", "auto"], ["transform", "translate(-50%, -50%)"], ["box-shadow", "0 6px 24px #00000059"]]], [".terminal__exited-actions", null, 1e3, [["gap", ".5rem"], ["display", "flex"]]], [".terminal__cli-error", null, 1e3, [["background", "var(--red)"], ["position", "absolute"], ["bottom", ".75rem"], ["left", "50%"], ["transform", "translateX(-50%)"]]], [".terminal__cli-error", null, 1e3, [["background", "color-mix(in srgb, var(--red) 20%, var(--panel-bg))"]]], [".terminal__cli-error", null, 1e3, [["border-radius", "var(--radius)"], ["color", "var(--red)"], ["text-align", "center"], ["white-space", "pre-wrap"], ["word-break", "break-word"], ["max-width", "90%"], ["padding", ".35rem .75rem"], ["font-size", ".85rem"]]], [".mobile-pane-shell__content > .chat, .mobile-pane-shell__content > .terminal, .mobile-pane-shell__content > .workspace-files, .mobile-pane-shell__content > .workspace-git", null, 1e3, [["flex", "1"], ["width", "100%"], ["min-width", "0"], ["height", "100%"], ["min-height", "0"]]], [".terminal__host", null, 1e3, [["width", "100%"], ["height", "100%"], ["overflow", "hidden"]]], [".workspace-git", null, 1e3, [["--git-border", "var(--overlay-0)"]]], [".workspace-git", null, 1e3, [["--git-border", "color-mix(in srgb, var(--overlay-0) 72%, transparent)"]]], [".workspace-git", null, 1e3, [["--git-muted", "var(--subtext-0)"], ["width", "100%"], ["min-width", "0"], ["height", "100%"], ["min-height", "0"], ["color", "var(--text)"], ["background", "var(--workspace-tools-bg, var(--panel-bg))"], ["flex-direction", "column"], ["font-size", ".78rem"], ["display", "flex"], ["position", "relative"], ["overflow", "hidden"], ["container-type", "inline-size"]]], [".workspace-git button, .workspace-git input, .workspace-git textarea", null, 1e3, [["font", "inherit"]]], [".workspace-git button", null, 1e3, [["cursor", "pointer"]]], ['.workspace-git button:focus-visible, .workspace-git input:focus-visible, .workspace-git textarea:focus-visible, .workspace-git [role="button"]:focus-visible', null, 1e3, [["outline", "2px solid var(--accent)"], ["outline-offset", "1px"]]], [".workspace-git__diff", null, 1e3, [["container-type", "inline-size"]]], [".workspace-git__line-comment-thread", null, 1e3, [["max-width", "max(0px, min(42rem, 100cqi - 6.9rem))"], ["position", "sticky"], ["left", "0"]]], [".workspace-git__comment-composer", null, 1e3, [["max-width", "max(0px, 100cqi - 1.4rem)"], ["position", "sticky"], ["left", "0"]]], [".dockview-group-action--split-session", null, 1e3, [["font-size", "13px"]]], [".session-split-popover", null, 1e3, [["display", "flex"], ["flex-direction", "column"], ["background", "var(--surface-1)"], ["border-radius", "var(--radius)"], ["box-shadow", "0 8px 24px rgba(0, 0, 0, 0.45)"], ["padding", "4px"], ["font-size", "12.5px"], ["color", "var(--text)"], ["overflow", "hidden"]]], [".session-split-popover__header", null, 1e3, [["padding", "6px 8px 4px"], ["font-size", "11px"], ["text-transform", "uppercase"], ["letter-spacing", "0.04em"], ["color", "var(--subtext-0)"]]], [".session-split-popover__empty", null, 1e3, [["padding", "8px"], ["color", "var(--subtext-0)"]]], [".session-split-popover__list", null, 1e3, [["overflow-y", "auto"]]], [".session-split-popover__item", null, 1e3, [["display", "flex"], ["flex-direction", "column"], ["align-items", "flex-start"], ["gap", "1px"], ["width", "100%"], ["padding", "6px 8px"], ["border", "none"], ["border-radius", "4px"], ["background", "transparent"], ["color", "inherit"], ["text-align", "left"], ["cursor", "grab"]]], [".session-split-popover__item:hover", null, 1e3, [["background", "var(--surface-0)"]]], [".session-split-popover__item-title", null, 1e3, [["font-weight", "500"], ["white-space", "nowrap"], ["overflow", "hidden"], ["text-overflow", "ellipsis"], ["max-width", "100%"]]], [".session-split-popover__item-cwd", null, 1e3, [["font-size", "11px"], ["color", "var(--subtext-0)"], ["white-space", "nowrap"], ["overflow", "hidden"], ["text-overflow", "ellipsis"], ["max-width", "100%"]]], [".session-split-popover__item-badge", null, 1e3, [["align-self", "flex-end"], ["font-size", "10px"], ["color", "var(--accent)"], ["margin-top", "-14px"]]], [".inactive-session-pane", null, 1e3, [["display", "flex"], ["flex-direction", "column"], ["align-items", "center"], ["justify-content", "center"], ["gap", "10px"], ["height", "100%"], ["padding", "24px"], ["text-align", "center"], ["color", "var(--subtext-0)"]]], [".inactive-session-pane__title", null, 1e3, [["font-size", "14px"], ["font-weight", "500"], ["color", "var(--text)"]]], [".inactive-session-pane__cwd", null, 1e3, [["font-size", "12px"], ["color", "var(--subtext-0)"], ["word-break", "break-all"]]], [".inactive-session-pane__note", null, 1e3, [["font-size", "12px"], ["max-width", "320px"], ["line-height", "1.5"]]], [".inactive-session-pane__switch", null, 1e3, [["margin-top", "4px"], ["padding", "6px 14px"], ["border-radius", "var(--radius)"], ["border", "0"], ["background", "var(--surface-0)"], ["color", "var(--text)"], ["cursor", "pointer"], ["font-size", "12.5px"]]], [".inactive-session-pane__switch:hover", null, 1e3, [["background", "var(--surface-1)"]]]], skipped: { "@supports evaluated false": 2, "@container": 6, "@keyframes": 9 } };
 //! The app's compiled stylesheet as a table (`build.mjs` writes it from Vite + Tailwind's output and bundles it as
 //! `virtual:perch-css-table`), parsed once on first use.
-let Vg = null;
-const Xg = () => Vg ??= new sg(Qg);
+let Xg = null;
+const Zg = () => Xg ??= new cg(Vg);
 //! The React renderer: React 19 through `react-reconciler` onto the retained host tree of `dom.mjs`, so a stock
 //! screen's unchanged source (`useRef`, `createPortal(..., document.body)`, `event.currentTarget.closest(...)`)
 //! runs as it does in the page. After every commit the tree is described for the engine (`describe.mjs`) and handed
@@ -9693,7 +9693,7 @@ const Xg = () => Vg ??= new sg(Qg);
 //! cascade reads for group variants, and `flush()` runs pending effects. An event is a discrete update: React
 //! commits it before `dispatch` returns.
 let en = hl.NoEventPriority;
-function Zg(n, l) {
+function Jg(n, l) {
   const o = /* @__PURE__ */ new Set([...Object.keys(n), ...Object.keys(l)]);
   for (const c of o) {
     if (c === "children") continue;
@@ -9703,12 +9703,12 @@ function Zg(n, l) {
   }
   return !1;
 }
-const Jg = (n) => !n.props.disabled && (/^(button|input|select|textarea)$/.test(n.tagName) || n.tagName === "a" && n.props.href != null || n.props.tabIndex != null);
+const Lg = (n) => !n.props.disabled && (/^(button|input|select|textarea)$/.test(n.tagName) || n.tagName === "a" && n.props.href != null || n.props.tabIndex != null);
 function Cd(n, l) {
-  for (const o of Eh(l.dangerouslySetInnerHTML?.__html, n.ownerDocument) ?? []) n.appendChild(o);
+  for (const o of Nh(l.dangerouslySetInnerHTML?.__html, n.ownerDocument) ?? []) n.appendChild(o);
   return n;
 }
-const Lg = {
+const Wg = {
   rendererPackageName: "perch-native",
   rendererVersion: "1.0.0",
   supportsMutation: !0,
@@ -9768,7 +9768,7 @@ const Lg = {
       for (const s of [...n.childNodes]) n.removeChild(s);
       Cd(n, c);
     }
-    Zg(o, c) && n.touch();
+    Jg(o, c) && n.touch();
   },
   commitTextUpdate: (n, l, o) => {
     n.data = String(o);
@@ -9824,7 +9824,7 @@ const Lg = {
   resetFormInstance: () => {
   },
   bindToConsole: (n, l) => Function.prototype.bind.call(console[n], console, ...l)
-}, Se = Lh(Lg), Bi = (n, l, o = null) => Se.createPortal(n, l, null, o), Wg = {
+}, Se = Wh(Wg), Bi = (n, l, o = null) => Se.createPortal(n, l, null, o), Fg = {
   click: "onClick",
   dblclick: "onDoubleClick",
   contextmenu: "onContextMenu",
@@ -9842,11 +9842,11 @@ const Lg = {
   input: "onInput",
   change: "onChange",
   submit: "onSubmit"
-}, Fg = /* @__PURE__ */ new Set(["click", "dblclick", "mousedown", "mouseup"]), Ig = /* @__PURE__ */ new Set(["button", "input", "select", "textarea", "fieldset"]), $g = (n) => {
-  for (let l = n; l instanceof It; l = l.parentNode) if (l.props.disabled && Ig.has(l.tagName)) return !0;
+}, Ig = /* @__PURE__ */ new Set(["click", "dblclick", "mousedown", "mouseup"]), $g = /* @__PURE__ */ new Set(["button", "input", "select", "textarea", "fieldset"]), Pg = (n) => {
+  for (let l = n; l instanceof It; l = l.parentNode) if (l.props.disabled && $g.has(l.tagName)) return !0;
   return !1;
 };
-class Pg {
+class t0 {
   constructor(l, o, c) {
     Object.assign(this, { clientX: 0, clientY: 0, button: 0, buttons: 0, pointerType: "mouse", key: "", code: "", shiftKey: !1, metaKey: !1, ctrlKey: !1, altKey: !1, repeat: !1, isComposing: !1, keyCode: 0 }, o), this.type = l, this.target = c, this.currentTarget = null, this.defaultPrevented = !1, this.propagationStopped = !1, this.timeStamp = Date.now();
   }
@@ -9876,20 +9876,20 @@ function yi(n, l, o) {
   for (const { type: c, listener: s, capture: d } of [...n.listeners ?? []])
     c === l.type && d === o && s.call(n, l);
   if (n instanceof It) {
-    const c = Wg[l.type], s = c && n.props[o ? `${c}Capture` : c];
+    const c = Fg[l.type], s = c && n.props[o ? `${c}Capture` : c];
     typeof s == "function" && s(l);
   }
 }
-function Wv(n, l, o = {}) {
-  const { document: c, window: s, globals: d } = Mh(n), p = new It("div", { id: "root", style: o.container ?? {} }, c);
+function Fv(n, l, o = {}) {
+  const { document: c, window: s, globals: d } = Ah(n), p = new It("div", { id: "root", style: o.container ?? {} }, c);
   c.body.appendChild(p);
   const f = [];
   let b = null;
-  const x = () => [c, s].map((z) => z.listeners.map((g) => `${g.type}:${g.capture}`).sort().join(",")).join("|");
+  const y = () => [c, s].map((z) => z.listeners.map((g) => `${g.type}:${g.capture}`).sort().join(",")).join("|");
   let C = "";
   const j = {}, E = `m${Math.random().toString(36).slice(2, 10)}:`;
-  let v = 0, y = -1;
-  c.measureKey = (z) => E + z.id, c.stale = () => y !== v, c.computed = (z) => {
+  let v = 0, x = -1;
+  c.measureKey = (z) => E + z.id, c.stale = () => x !== v, c.computed = (z) => {
     if (!j.cascade || !j.top) return null;
     const g = [];
     for (let D = z; D instanceof It && D !== c.body; D = D.parentNode) g.unshift(D);
@@ -9897,8 +9897,8 @@ function Wv(n, l, o = {}) {
     for (const D of g) h = j.cascade.compute(D, h);
     return h.values;
   };
-  const S = () => (v += 1, b = Kg(c, n, Xg(), j, o.names), C = x(), n.render?.(b), b), w = () => {
-    Se.flushPassiveEffects(), Se.flushSyncWork(), x() !== C && S();
+  const S = () => (v += 1, b = Qg(c, n, Zg(), j, o.names), C = y(), n.render?.(b), b), w = () => {
+    Se.flushPassiveEffects(), Se.flushSyncWork(), y() !== C && S();
   };
   c.afterCommit = S;
   const O = (z) => {
@@ -9938,8 +9938,8 @@ function Wv(n, l, o = {}) {
     /** Runs a DOM event of `type` at node `id`; false when the node is gone. */
     dispatch(z, g, h = {}) {
       const D = typeof z == "string" ? M(z) : z;
-      if (!D || Fg.has(g) && $g(D)) return !1;
-      const Q = new Pg(g, h, D), W = [];
+      if (!D || Ig.has(g) && Pg(D)) return !1;
+      const Q = new t0(g, h, D), W = [];
       for (let gt = D; gt; gt = gt.parentNode) W.push(gt);
       const L = [...W, c, s];
       K(() => {
@@ -9961,7 +9961,7 @@ function Wv(n, l, o = {}) {
       const D = z.key === "Enter" && !z.isComposing ? Uo(g, !0) : null;
       if (D)
         return U.dispatch(D, "submit", {}), !0;
-      if (!Pd(g) || g.props.disabled || g.props.readOnly) return !1;
+      if (!tf(g) || g.props.disabled || g.props.readOnly) return !1;
       if ((z.ctrlKey || z.metaKey) && !z.altKey && !z.shiftKey && z.key.toLowerCase() === "a")
         return g.selectedAll = !0, !0;
       if (z.ctrlKey || z.metaKey) return !1;
@@ -10010,13 +10010,13 @@ function Wv(n, l, o = {}) {
     // screen's ordinary buttons do not take the keyboard from a terminal.
     pressFocus(z) {
       let h = typeof z == "string" ? M(z) : z;
-      for (; h && !(h instanceof It && typeof h.props.onKeyDown == "function" && Jg(h)); ) h = h.parentNode;
+      for (; h && !(h instanceof It && typeof h.props.onKeyDown == "function" && Lg(h)); ) h = h.parentNode;
       !h || h === c.activeElement || (U.focus(h.id), h.state.pointerFocus = !0, h.touch(), S());
     },
     /** The engine is drawing the latest description: the boxes measured in this frame's layout are the tree's.
      * Returns whether effects wait for that layout (`measured`); run them with `retry` once the frame is drawn. */
     drawing() {
-      return y = v, c.retries.length > 0;
+      return x = v, c.retries.length > 0;
     },
     /** Runs the effects that waited for a fresh layout. */
     retry() {
@@ -10036,87 +10036,87 @@ function Wv(n, l, o = {}) {
 }
 //! `react-dom` for a screen on the native renderer: `createPortal` (into `document.body`, the overlay layer) and
 //! `flushSync`. Nothing of the browser renderer.
-const pf = (n) => Se.flushSyncFromReconciler(n), t0 = { createPortal: Bi, flushSync: pf }, Fv = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const hf = (n) => Se.flushSyncFromReconciler(n), e0 = { createPortal: Bi, flushSync: hf }, Iv = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   createPortal: Bi,
-  default: t0,
-  flushSync: pf
+  default: e0,
+  flushSync: hf
 }, Symbol.toStringTag, { value: "Module" }));
-function hf(n) {
+function gf(n) {
   var l, o, c = "";
   if (typeof n == "string" || typeof n == "number") c += n;
   else if (typeof n == "object") if (Array.isArray(n)) {
     var s = n.length;
-    for (l = 0; l < s; l++) n[l] && (o = hf(n[l])) && (c && (c += " "), c += o);
+    for (l = 0; l < s; l++) n[l] && (o = gf(n[l])) && (c && (c += " "), c += o);
   } else for (o in n) n[o] && (c && (c += " "), c += o);
   return c;
 }
-function gf() {
-  for (var n, l, o = 0, c = "", s = arguments.length; o < s; o++) (n = arguments[o]) && (l = hf(n)) && (c && (c += " "), c += l);
+function bf() {
+  for (var n, l, o = 0, c = "", s = arguments.length; o < s; o++) (n = arguments[o]) && (l = gf(n)) && (c && (c += " "), c += l);
   return c;
 }
-const e0 = (n, l) => {
+const a0 = (n, l) => {
   const o = new Array(n.length + l.length);
   for (let c = 0; c < n.length; c++)
     o[c] = n[c];
   for (let c = 0; c < l.length; c++)
     o[n.length + c] = l[c];
   return o;
-}, a0 = (n, l) => ({
+}, n0 = (n, l) => ({
   classGroupId: n,
   validator: l
-}), bf = (n = /* @__PURE__ */ new Map(), l = null, o) => ({
+}), vf = (n = /* @__PURE__ */ new Map(), l = null, o) => ({
   nextPart: n,
   validators: l,
   classGroupId: o
-}), Oi = "-", jd = [], n0 = "arbitrary..", l0 = (n) => {
-  const l = r0(n), {
+}), Oi = "-", jd = [], l0 = "arbitrary..", i0 = (n) => {
+  const l = o0(n), {
     conflictingClassGroups: o,
     conflictingClassGroupModifiers: c
   } = n;
   return {
     getClassGroupId: (p) => {
       if (p.startsWith("[") && p.endsWith("]"))
-        return i0(p);
+        return r0(p);
       const f = p.split(Oi), b = f[0] === "" && f.length > 1 ? 1 : 0;
-      return vf(f, b, l);
+      return yf(f, b, l);
     },
     getConflictingClassGroupIds: (p, f) => {
       if (f) {
-        const b = c[p], x = o[p];
-        return b ? x ? e0(x, b) : b : x || jd;
+        const b = c[p], y = o[p];
+        return b ? y ? a0(y, b) : b : y || jd;
       }
       return o[p] || jd;
     }
   };
-}, vf = (n, l, o) => {
+}, yf = (n, l, o) => {
   if (n.length - l === 0)
     return o.classGroupId;
   const s = n[l], d = o.nextPart.get(s);
   if (d) {
-    const x = vf(n, l + 1, d);
-    if (x) return x;
+    const y = yf(n, l + 1, d);
+    if (y) return y;
   }
   const p = o.validators;
   if (p === null)
     return;
   const f = l === 0 ? n.join(Oi) : n.slice(l).join(Oi), b = p.length;
-  for (let x = 0; x < b; x++) {
-    const C = p[x];
+  for (let y = 0; y < b; y++) {
+    const C = p[y];
     if (C.validator(f))
       return C.classGroupId;
   }
-}, i0 = (n) => n.slice(1, -1).indexOf(":") === -1 ? void 0 : (() => {
+}, r0 = (n) => n.slice(1, -1).indexOf(":") === -1 ? void 0 : (() => {
   const l = n.slice(1, -1), o = l.indexOf(":"), c = l.slice(0, o);
-  return c ? n0 + c : void 0;
-})(), r0 = (n) => {
+  return c ? l0 + c : void 0;
+})(), o0 = (n) => {
   const {
     theme: l,
     classGroups: o
   } = n;
-  return o0(o, l);
-}, o0 = (n, l) => {
-  const o = bf();
+  return s0(o, l);
+}, s0 = (n, l) => {
+  const o = vf();
   for (const c in n) {
     const s = n[c];
     es(s, o, c, l);
@@ -10126,43 +10126,43 @@ const e0 = (n, l) => {
   const s = n.length;
   for (let d = 0; d < s; d++) {
     const p = n[d];
-    s0(p, l, o, c);
+    c0(p, l, o, c);
   }
-}, s0 = (n, l, o, c) => {
+}, c0 = (n, l, o, c) => {
   if (typeof n == "string") {
-    c0(n, l, o);
+    u0(n, l, o);
     return;
   }
   if (typeof n == "function") {
-    u0(n, l, o, c);
+    d0(n, l, o, c);
     return;
   }
-  d0(n, l, o, c);
-}, c0 = (n, l, o) => {
-  const c = n === "" ? l : yf(l, n);
+  f0(n, l, o, c);
+}, u0 = (n, l, o) => {
+  const c = n === "" ? l : xf(l, n);
   c.classGroupId = o;
-}, u0 = (n, l, o, c) => {
-  if (f0(n)) {
+}, d0 = (n, l, o, c) => {
+  if (m0(n)) {
     es(n(c), l, o, c);
     return;
   }
-  l.validators === null && (l.validators = []), l.validators.push(a0(o, n));
-}, d0 = (n, l, o, c) => {
+  l.validators === null && (l.validators = []), l.validators.push(n0(o, n));
+}, f0 = (n, l, o, c) => {
   const s = Object.entries(n), d = s.length;
   for (let p = 0; p < d; p++) {
     const [f, b] = s[p];
-    es(b, yf(l, f), o, c);
+    es(b, xf(l, f), o, c);
   }
-}, yf = (n, l) => {
+}, xf = (n, l) => {
   let o = n;
   const c = l.split(Oi), s = c.length;
   for (let d = 0; d < s; d++) {
     const p = c[d];
     let f = o.nextPart.get(p);
-    f || (f = bf(), o.nextPart.set(p, f)), o = f;
+    f || (f = vf(), o.nextPart.set(p, f)), o = f;
   }
   return o;
-}, f0 = (n) => "isThemeGetter" in n && n.isThemeGetter === !0, m0 = (n) => {
+}, m0 = (n) => "isThemeGetter" in n && n.isThemeGetter === !0, p0 = (n) => {
   if (n < 1)
     return {
       get: () => {
@@ -10186,20 +10186,20 @@ const e0 = (n, l) => {
       d in o ? o[d] = p : s(d, p);
     }
   };
-}, Vo = "!", Md = ":", p0 = [], Ad = (n, l, o, c, s) => ({
+}, Vo = "!", Md = ":", h0 = [], Ad = (n, l, o, c, s) => ({
   modifiers: n,
   hasImportantModifier: l,
   baseClassName: o,
   maybePostfixModifierPosition: c,
   isExternal: s
-}), h0 = (n) => {
+}), g0 = (n) => {
   const {
     prefix: l,
     experimentalParseClassName: o
   } = n;
   let c = (s) => {
     const d = [];
-    let p = 0, f = 0, b = 0, x;
+    let p = 0, f = 0, b = 0, y;
     const C = s.length;
     for (let S = 0; S < C; S++) {
       const w = s[S];
@@ -10209,7 +10209,7 @@ const e0 = (n, l) => {
           continue;
         }
         if (w === "/") {
-          x = S;
+          y = S;
           continue;
         }
       }
@@ -10224,12 +10224,12 @@ const e0 = (n, l) => {
        */
       j.startsWith(Vo) && (E = j.slice(1), v = !0)
     );
-    const y = x && x > b ? x - b : void 0;
-    return Ad(d, v, E, y);
+    const x = y && y > b ? y - b : void 0;
+    return Ad(d, v, E, x);
   };
   if (l) {
     const s = l + Md, d = c;
-    c = (p) => p.startsWith(s) ? d(p.slice(s.length)) : Ad(p0, !1, p, void 0, !0);
+    c = (p) => p.startsWith(s) ? d(p.slice(s.length)) : Ad(h0, !1, p, void 0, !0);
   }
   if (o) {
     const s = c;
@@ -10239,7 +10239,7 @@ const e0 = (n, l) => {
     });
   }
   return c;
-}, g0 = (n) => {
+}, b0 = (n) => {
   const l = /* @__PURE__ */ new Map();
   return n.orderSensitiveModifiers.forEach((o, c) => {
     l.set(o, 1e6 + c);
@@ -10252,37 +10252,37 @@ const e0 = (n, l) => {
     }
     return s.length > 0 && (s.sort(), c.push(...s)), c;
   };
-}, b0 = (n) => ({
-  cache: m0(n.cacheSize),
-  parseClassName: h0(n),
-  sortModifiers: g0(n),
-  postfixLookupClassGroupIds: v0(n),
-  ...l0(n)
-}), v0 = (n) => {
+}, v0 = (n) => ({
+  cache: p0(n.cacheSize),
+  parseClassName: g0(n),
+  sortModifiers: b0(n),
+  postfixLookupClassGroupIds: y0(n),
+  ...i0(n)
+}), y0 = (n) => {
   const l = /* @__PURE__ */ Object.create(null), o = n.postfixLookupClassGroups;
   if (o)
     for (let c = 0; c < o.length; c++)
       l[o[c]] = !0;
   return l;
-}, y0 = /\s+/, x0 = (n, l) => {
+}, x0 = /\s+/, w0 = (n, l) => {
   const {
     parseClassName: o,
     getClassGroupId: c,
     getConflictingClassGroupIds: s,
     sortModifiers: d,
     postfixLookupClassGroupIds: p
-  } = l, f = [], b = n.trim().split(y0);
-  let x = "";
+  } = l, f = [], b = n.trim().split(x0);
+  let y = "";
   for (let C = b.length - 1; C >= 0; C -= 1) {
     const j = b[C], {
       isExternal: E,
       modifiers: v,
-      hasImportantModifier: y,
+      hasImportantModifier: x,
       baseClassName: S,
       maybePostfixModifierPosition: w
     } = o(j);
     if (E) {
-      x = j + (x.length > 0 ? " " + x : x);
+      y = j + (y.length > 0 ? " " + y : y);
       continue;
     }
     let O = !!w, N;
@@ -10295,16 +10295,16 @@ const e0 = (n, l) => {
       N = c(S);
     if (!N) {
       if (!O) {
-        x = j + (x.length > 0 ? " " + x : x);
+        y = j + (y.length > 0 ? " " + y : y);
         continue;
       }
       if (N = c(S), !N) {
-        x = j + (x.length > 0 ? " " + x : x);
+        y = j + (y.length > 0 ? " " + y : y);
         continue;
       }
       O = !1;
     }
-    const M = v.length === 0 ? "" : v.length === 1 ? v[0] : d(v).join(":"), K = y ? M + Vo : M, U = K + N;
+    const M = v.length === 0 ? "" : v.length === 1 ? v[0] : d(v).join(":"), K = x ? M + Vo : M, U = K + N;
     if (f.indexOf(U) > -1)
       continue;
     f.push(U);
@@ -10313,50 +10313,50 @@ const e0 = (n, l) => {
       const h = z[g];
       f.push(K + h);
     }
-    x = j + (x.length > 0 ? " " + x : x);
+    y = j + (y.length > 0 ? " " + y : y);
   }
-  return x;
-}, w0 = (...n) => {
+  return y;
+}, _0 = (...n) => {
   let l = 0, o, c, s = "";
   for (; l < n.length; )
-    (o = n[l++]) && (c = xf(o)) && (s && (s += " "), s += c);
+    (o = n[l++]) && (c = wf(o)) && (s && (s += " "), s += c);
   return s;
-}, xf = (n) => {
+}, wf = (n) => {
   if (typeof n == "string")
     return n;
   let l, o = "";
   for (let c = 0; c < n.length; c++)
-    n[c] && (l = xf(n[c])) && (o && (o += " "), o += l);
+    n[c] && (l = wf(n[c])) && (o && (o += " "), o += l);
   return o;
-}, _0 = (n, ...l) => {
+}, S0 = (n, ...l) => {
   let o, c, s, d;
   const p = (b) => {
-    const x = l.reduce((C, j) => j(C), n());
-    return o = b0(x), c = o.cache.get, s = o.cache.set, d = f, f(b);
+    const y = l.reduce((C, j) => j(C), n());
+    return o = v0(y), c = o.cache.get, s = o.cache.set, d = f, f(b);
   }, f = (b) => {
-    const x = c(b);
-    if (x)
-      return x;
-    const C = x0(b, o);
+    const y = c(b);
+    if (y)
+      return y;
+    const C = w0(b, o);
     return s(b, C), C;
   };
-  return d = p, (...b) => d(w0(...b));
-}, S0 = [], Zt = (n) => {
-  const l = (o) => o[n] || S0;
+  return d = p, (...b) => d(_0(...b));
+}, k0 = [], Zt = (n) => {
+  const l = (o) => o[n] || k0;
   return l.isThemeGetter = !0, l.themeKey = n, l;
-}, wf = /^\[(?:(\w[\w-]*):)?(.+)\]$/i, _f = /^\((?:(\w[\w-]*):)?(.+)\)$/i, k0 = /^\d+(?:\.\d+)?\/\d+(?:\.\d+)?$/, z0 = /^(\d+(\.\d+)?)?(xs|sm|md|lg|xl)$/, E0 = /\d+(%|px|r?em|[sdl]?v([hwib]|min|max)|pt|pc|in|cm|mm|cap|ch|ex|r?lh|cq(w|h|i|b|min|max))|\b(calc|min|max|clamp)\(.+\)|^0$/, N0 = /^(rgba?|hsla?|hwb|(ok)?(lab|lch)|color-mix|color|light-dark)\(.+\)$/, T0 = /^(inset_)?-?((\d+)?\.?(\d+)[a-z]+|0)_-?((\d+)?\.?(\d+)[a-z]+|0)/, C0 = /^(url|image|image-set|cross-fade|element|(repeating-)?(linear|radial|conic)-gradient)\(.+\)$/, ja = (n) => k0.test(n), ht = (n) => !!n && !Number.isNaN(Number(n)), Je = (n) => !!n && Number.isInteger(Number(n)), Ao = (n) => n.endsWith("%") && ht(n.slice(0, -1)), ca = (n) => z0.test(n), Sf = () => !0, j0 = (n) => (
+}, _f = /^\[(?:(\w[\w-]*):)?(.+)\]$/i, Sf = /^\((?:(\w[\w-]*):)?(.+)\)$/i, z0 = /^\d+(?:\.\d+)?\/\d+(?:\.\d+)?$/, E0 = /^(\d+(\.\d+)?)?(xs|sm|md|lg|xl)$/, N0 = /\d+(%|px|r?em|[sdl]?v([hwib]|min|max)|pt|pc|in|cm|mm|cap|ch|ex|r?lh|cq(w|h|i|b|min|max))|\b(calc|min|max|clamp)\(.+\)|^0$/, T0 = /^(rgba?|hsla?|hwb|(ok)?(lab|lch)|color-mix|color|light-dark)\(.+\)$/, C0 = /^(inset_)?-?((\d+)?\.?(\d+)[a-z]+|0)_-?((\d+)?\.?(\d+)[a-z]+|0)/, j0 = /^(url|image|image-set|cross-fade|element|(repeating-)?(linear|radial|conic)-gradient)\(.+\)$/, ja = (n) => z0.test(n), ht = (n) => !!n && !Number.isNaN(Number(n)), Je = (n) => !!n && Number.isInteger(Number(n)), Ao = (n) => n.endsWith("%") && ht(n.slice(0, -1)), ca = (n) => E0.test(n), kf = () => !0, M0 = (n) => (
   // `colorFunctionRegex` check is necessary because color functions can have percentages in them which which would be incorrectly classified as lengths.
   // For example, `hsl(0 0% 0%)` would be classified as a length without this check.
   // I could also use lookbehind assertion in `lengthUnitRegex` but that isn't supported widely enough.
-  E0.test(n) && !N0.test(n)
-), as = () => !1, M0 = (n) => T0.test(n), A0 = (n) => C0.test(n), O0 = (n) => !I(n) && !$(n), R0 = (n) => n.startsWith("@container") && (n[10] === "/" && n[11] !== void 0 || n[11] === "s" && n[16] !== void 0 && n.startsWith("-size/", 10) || n[11] === "n" && n[18] !== void 0 && n.startsWith("-normal/", 10)), H0 = (n) => Ra(n, Ef, as), I = (n) => wf.test(n), tn = (n) => Ra(n, Nf, j0), Od = (n) => Ra(n, Q0, ht), D0 = (n) => Ra(n, Cf, Sf), U0 = (n) => Ra(n, Tf, as), Rd = (n) => Ra(n, kf, as), B0 = (n) => Ra(n, zf, A0), xi = (n) => Ra(n, jf, M0), $ = (n) => _f.test(n), fl = (n) => nn(n, Nf), q0 = (n) => nn(n, Tf), Hd = (n) => nn(n, kf), Y0 = (n) => nn(n, Ef), G0 = (n) => nn(n, zf), wi = (n) => nn(n, jf, !0), K0 = (n) => nn(n, Cf, !0), Ra = (n, l, o) => {
-  const c = wf.exec(n);
+  N0.test(n) && !T0.test(n)
+), as = () => !1, A0 = (n) => C0.test(n), O0 = (n) => j0.test(n), R0 = (n) => !I(n) && !$(n), H0 = (n) => n.startsWith("@container") && (n[10] === "/" && n[11] !== void 0 || n[11] === "s" && n[16] !== void 0 && n.startsWith("-size/", 10) || n[11] === "n" && n[18] !== void 0 && n.startsWith("-normal/", 10)), D0 = (n) => Ra(n, Nf, as), I = (n) => _f.test(n), tn = (n) => Ra(n, Tf, M0), Od = (n) => Ra(n, V0, ht), U0 = (n) => Ra(n, jf, kf), B0 = (n) => Ra(n, Cf, as), Rd = (n) => Ra(n, zf, as), q0 = (n) => Ra(n, Ef, O0), xi = (n) => Ra(n, Mf, A0), $ = (n) => Sf.test(n), fl = (n) => nn(n, Tf), Y0 = (n) => nn(n, Cf), Hd = (n) => nn(n, zf), G0 = (n) => nn(n, Nf), K0 = (n) => nn(n, Ef), wi = (n) => nn(n, Mf, !0), Q0 = (n) => nn(n, jf, !0), Ra = (n, l, o) => {
+  const c = _f.exec(n);
   return c ? c[1] ? l(c[1]) : o(c[2]) : !1;
 }, nn = (n, l, o = !1) => {
-  const c = _f.exec(n);
+  const c = Sf.exec(n);
   return c ? c[1] ? l(c[1]) : o : !1;
-}, kf = (n) => n === "position" || n === "percentage", zf = (n) => n === "image" || n === "url", Ef = (n) => n === "length" || n === "size" || n === "bg-size", Nf = (n) => n === "length", Q0 = (n) => n === "number", Tf = (n) => n === "family-name", Cf = (n) => n === "number" || n === "weight", jf = (n) => n === "shadow", V0 = () => {
-  const n = Zt("color"), l = Zt("font"), o = Zt("text"), c = Zt("font-weight"), s = Zt("tracking"), d = Zt("leading"), p = Zt("breakpoint"), f = Zt("container"), b = Zt("spacing"), x = Zt("radius"), C = Zt("shadow"), j = Zt("inset-shadow"), E = Zt("text-shadow"), v = Zt("drop-shadow"), y = Zt("blur"), S = Zt("perspective"), w = Zt("aspect"), O = Zt("ease"), N = Zt("animate"), M = () => ["auto", "avoid", "all", "avoid-page", "page", "left", "right", "column"], K = () => [
+}, zf = (n) => n === "position" || n === "percentage", Ef = (n) => n === "image" || n === "url", Nf = (n) => n === "length" || n === "size" || n === "bg-size", Tf = (n) => n === "length", V0 = (n) => n === "number", Cf = (n) => n === "family-name", jf = (n) => n === "number" || n === "weight", Mf = (n) => n === "shadow", X0 = () => {
+  const n = Zt("color"), l = Zt("font"), o = Zt("text"), c = Zt("font-weight"), s = Zt("tracking"), d = Zt("leading"), p = Zt("breakpoint"), f = Zt("container"), b = Zt("spacing"), y = Zt("radius"), C = Zt("shadow"), j = Zt("inset-shadow"), E = Zt("text-shadow"), v = Zt("drop-shadow"), x = Zt("blur"), S = Zt("perspective"), w = Zt("aspect"), O = Zt("ease"), N = Zt("animate"), M = () => ["auto", "avoid", "all", "avoid-page", "page", "left", "right", "column"], K = () => [
     "center",
     "top",
     "bottom",
@@ -10380,21 +10380,21 @@ const e0 = (n, l) => {
     position: [$, I]
   }], Y = () => ["no-repeat", {
     repeat: ["", "x", "y", "space", "round"]
-  }], nt = () => ["auto", "cover", "contain", Y0, H0, {
+  }], nt = () => ["auto", "cover", "contain", G0, D0, {
     size: [$, I]
   }], tt = () => [Ao, fl, tn], at = () => [
     // Deprecated since Tailwind CSS v4.0.0
     "",
     "none",
     "full",
-    x,
+    y,
     $,
     I
   ], it = () => ["", ht, fl, tn], St = () => ["solid", "dashed", "dotted", "double"], Jt = () => ["normal", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn", "hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity"], ut = () => [ht, Ao, Hd, Rd], Ha = () => [
     // Deprecated since Tailwind CSS v4.0.0
     "",
     "none",
-    y,
+    x,
     $,
     I
   ], Da = () => ["none", ht, $, I], Oe = () => ["none", ht, $, I], Re = () => [ht, $, I], da = () => [ja, "full", ...h()];
@@ -10405,11 +10405,11 @@ const e0 = (n, l) => {
       aspect: ["video"],
       blur: [ca],
       breakpoint: [ca],
-      color: [Sf],
+      color: [kf],
       container: [ca],
       "drop-shadow": [ca],
       ease: ["in", "out", "in-out"],
-      font: [O0],
+      font: [R0],
       "font-weight": ["thin", "extralight", "light", "normal", "medium", "semibold", "bold", "extrabold", "black"],
       "inset-shadow": [ca],
       leading: ["none", "tight", "snug", "normal", "relaxed", "loose"],
@@ -10449,7 +10449,7 @@ const e0 = (n, l) => {
        * Container Name
        * @see https://tailwindcss.com/docs/responsive-design#named-containers
        */
-      "container-named": [R0],
+      "container-named": [H0],
       /**
        * Columns
        * @see https://tailwindcss.com/docs/columns
@@ -11215,7 +11215,7 @@ const e0 = (n, l) => {
        * @see https://tailwindcss.com/docs/font-weight
        */
       "font-weight": [{
-        font: [c, K0, D0]
+        font: [c, Q0, U0]
       }],
       /**
        * Font Stretch
@@ -11229,7 +11229,7 @@ const e0 = (n, l) => {
        * @see https://tailwindcss.com/docs/font-family
        */
       "font-family": [{
-        font: [q0, U0, l]
+        font: [Y0, B0, l]
       }],
       /**
        * Font Feature Settings
@@ -11499,7 +11499,7 @@ const e0 = (n, l) => {
           }, Je, $, I],
           radial: ["", $, I],
           conic: ["", Je, $, I]
-        }, G0, B0]
+        }, K0, q0]
       }],
       /**
        * Background Color
@@ -13043,36 +13043,36 @@ const e0 = (n, l) => {
     postfixLookupClassGroups: ["container-type"],
     orderSensitiveModifiers: ["*", "**", "after", "backdrop", "before", "details-content", "file", "first-letter", "first-line", "marker", "placeholder", "selection"]
   };
-}, X0 = /* @__PURE__ */ _0(V0);
+}, Z0 = /* @__PURE__ */ S0(X0);
 function Ae(...n) {
-  return X0(gf(n));
+  return Z0(bf(n));
 }
-function Z0(n, l, o) {
+function J0(n, l, o) {
   return n.filter((c, s) => s !== l && (c.start + c.end) / 2 < o).length;
 }
-function J0(n, l, o, c) {
+function L0(n, l, o, c) {
   const s = n.map(() => 0), d = n[l];
   if (!d) return s;
   const p = n[l + 1], f = n[l - 1], b = d.end - d.start + (p ? p.start - d.end : f ? d.start - f.end : 0);
-  return n.forEach((x, C) => {
+  return n.forEach((y, C) => {
     l < o && C > l && C <= o ? s[C] = -b : o < l && C >= o && C < l && (s[C] = b);
   }), s[l] = Math.min(Math.max(c, n[0].start - d.start), n[n.length - 1].end - d.end), s;
 }
 const Dd = ["transform", "transition", "zIndex", "filter", "pointerEvents", "position"];
-function L0(n, l) {
+function W0(n, l) {
   for (let o = n.parentElement; o; o = o.parentElement) {
     const c = getComputedStyle(o)[l === "x" ? "overflowX" : "overflowY"];
     if ((c === "auto" || c === "scroll") && (l === "x" ? o.scrollWidth > o.clientWidth : o.scrollHeight > o.clientHeight)) return o;
   }
   return null;
 }
-function W0(n, l, o, c) {
-  const s = n[l] ? L0(n[l], o) : null, d = () => s ? o === "x" ? s.scrollLeft : s.scrollTop : 0, p = (w) => (o === "x" ? w.clientX : w.clientY) + d(), f = p(c), b = d(), x = n.map((w) => {
+function F0(n, l, o, c) {
+  const s = n[l] ? W0(n[l], o) : null, d = () => s ? o === "x" ? s.scrollLeft : s.scrollTop : 0, p = (w) => (o === "x" ? w.clientX : w.clientY) + d(), f = p(c), b = d(), y = n.map((w) => {
     const O = w.getBoundingClientRect();
     return o === "x" ? { start: O.left + b, end: O.right + b } : { start: O.top + b, end: O.bottom + b };
   }), C = n.map((w) => Dd.map((O) => w.style[O])), j = typeof matchMedia == "function" && matchMedia("(prefers-reduced-motion: reduce)").matches, E = o === "x" ? "translateX" : "translateY";
   let v = !1;
-  const y = { to: l };
+  const x = { to: l };
   n.forEach((w, O) => {
     if (w.style.pointerEvents = "none", O !== l) {
       j || (w.style.transition = "transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1)");
@@ -13081,16 +13081,16 @@ function W0(n, l, o, c) {
     getComputedStyle(w).position === "static" && (w.style.position = "relative"), w.style.zIndex = "30", w.style.filter = "drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45))";
   });
   const S = (w, O) => {
-    y.to = w, J0(x, l, w, O).forEach((N, M) => {
+    x.to = w, L0(y, l, w, O).forEach((N, M) => {
       n[M].style.transform = N ? `${E}(${N}px)` : "";
     });
   };
   return {
     from: l,
     get to() {
-      return y.to;
+      return x.to;
     },
-    slot: (w) => Z0(x, l, p(w)),
+    slot: (w) => J0(y, l, p(w)),
     apply: (w, O) => {
       v || S(w, p(O) - f);
     },
@@ -13104,13 +13104,13 @@ function W0(n, l, o, c) {
     }
   };
 }
-const F0 = 5;
+const I0 = 5;
 let Oo = !1;
-function I0(n, l) {
+function $0(n, l) {
   if (n.button !== 0 || Oo) return;
   const o = { clientX: n.clientX, clientY: n.clientY }, c = n.currentTarget, s = n.pointerId;
   let d = null, p, f = !1;
-  const b = { cursor: document.body.style.cursor, userSelect: document.body.style.userSelect }, x = (y) => {
+  const b = { cursor: document.body.style.cursor, userSelect: document.body.style.userSelect }, y = (x) => {
     if (f) return;
     f = !0, window.removeEventListener("pointermove", C), window.removeEventListener("pointerup", j), window.removeEventListener("pointercancel", E), window.removeEventListener("keydown", v, !0), window.removeEventListener("blur", E), c.removeEventListener("lostpointercapture", E);
     try {
@@ -13120,12 +13120,12 @@ function I0(n, l) {
     if (!d) return;
     Oo = !1, document.body.style.cursor = b.cursor, document.body.style.userSelect = b.userSelect, d.end();
     const S = (w) => w.stopPropagation();
-    window.addEventListener("click", S, { capture: !0, once: !0 }), setTimeout(() => window.removeEventListener("click", S, !0), 0), p?.(), l.onEnd(y, d);
-  }, C = (y) => {
+    window.addEventListener("click", S, { capture: !0, once: !0 }), setTimeout(() => window.removeEventListener("click", S, !0), 0), p?.(), l.onEnd(x, d);
+  }, C = (x) => {
     if (!d) {
-      if (Math.hypot(y.clientX - o.clientX, y.clientY - o.clientY) < F0) return;
+      if (Math.hypot(x.clientX - o.clientX, x.clientY - o.clientY) < I0) return;
       const S = l.items();
-      d = W0(S, l.from(S), l.axis, o), Oo = !0, document.body.style.cursor = "grabbing", document.body.style.userSelect = "none";
+      d = F0(S, l.from(S), l.axis, o), Oo = !0, document.body.style.cursor = "grabbing", document.body.style.userSelect = "none";
       try {
         c.setPointerCapture(s);
       } catch {
@@ -13134,13 +13134,13 @@ function I0(n, l) {
       const w = l.onStart?.();
       p = typeof w == "function" ? w : void 0;
     }
-    l.onMove(y, d);
-  }, j = () => x(!0), E = () => x(!1), v = (y) => {
-    y.key === "Escape" && (y.stopPropagation(), x(!1));
+    l.onMove(x, d);
+  }, j = () => y(!0), E = () => y(!1), v = (x) => {
+    x.key === "Escape" && (x.stopPropagation(), y(!1));
   };
   window.addEventListener("pointermove", C), window.addEventListener("pointerup", j), window.addEventListener("pointercancel", E), window.addEventListener("keydown", v, !0), window.addEventListener("blur", E);
 }
-const Mf = typeof navigator < "u" && /Mac/i.test(navigator.platform), Ri = {
+const Af = typeof navigator < "u" && /Mac/i.test(navigator.platform), Ri = {
   "[": "BracketLeft",
   "]": "BracketRight",
   ",": "Comma",
@@ -13167,7 +13167,7 @@ const Mf = typeof navigator < "u" && /Mac/i.test(navigator.platform), Ri = {
   end: "End"
 };
 for (let n = 1; n <= 12; n++) Ri[`f${n}`] = `F${n}`;
-const $0 = Object.fromEntries(Object.entries(Ri).map(([n, l]) => [l, n])), P0 = {
+const P0 = Object.fromEntries(Object.entries(Ri).map(([n, l]) => [l, n])), tb = {
   up: "↑",
   down: "↓",
   left: "←",
@@ -13182,12 +13182,12 @@ const $0 = Object.fromEntries(Object.entries(Ri).map(([n, l]) => [l, n])), P0 = 
   home: "Home",
   end: "End"
 };
-function tb(n) {
+function eb(n) {
   const l = /^Key([A-Z])$/.exec(n) ?? /^Digit(\d)$/.exec(n);
-  return l ? l[1].toLowerCase() : $0[n];
+  return l ? l[1].toLowerCase() : P0[n];
 }
 const Ud = /* @__PURE__ */ new Map();
-function Af(n, l = Mf) {
+function Of(n, l = Af) {
   const o = `${l}|${n}`, c = Ud.get(o);
   if (c) return c;
   const s = { cmd: !1, ctrl: !1, shift: !1, alt: !1, code: "" };
@@ -13204,28 +13204,28 @@ function Af(n, l = Mf) {
   return Ud.set(o, s), s;
 }
 new Set(["cmd+q", "cmd+h", "cmd+alt+h", "cmd+m", "cmd+ctrl+f", "cmd+z", "cmd+shift+z", "cmd+x", "cmd+c", "cmd+v", "cmd+a"].map((n) => {
-  const l = Af(n, !0);
+  const l = Of(n, !0);
   return [l.cmd && "cmd", l.ctrl && "ctrl", l.alt && "alt", l.shift && "shift", l.code].filter(Boolean).join("+");
 }));
-function eb(n, l = Mf) {
-  const o = Af(n, l), c = ab(tb(o.code) ?? "");
+function ab(n, l = Af) {
+  const o = Of(n, l), c = nb(eb(o.code) ?? "");
   return l ? `${o.ctrl ? "⌃" : ""}${o.alt ? "⌥" : ""}${o.shift ? "⇧" : ""}${o.cmd ? "⌘" : ""}${c}` : [o.ctrl && "Ctrl", o.alt && "Alt", o.shift && "Shift", c].filter(Boolean).join("+");
 }
-const ab = (n) => P0[n] ?? n.toUpperCase(), Bd = (n) => typeof n == "boolean" ? `${n}` : n === 0 ? "0" : n, qd = gf, qi = (n, l) => (o) => {
+const nb = (n) => tb[n] ?? n.toUpperCase(), Bd = (n) => typeof n == "boolean" ? `${n}` : n === 0 ? "0" : n, qd = bf, qi = (n, l) => (o) => {
   var c;
   if (l?.variants == null) return qd(n, o?.class, o?.className);
-  const { variants: s, defaultVariants: d } = l, p = Object.keys(s).map((x) => {
-    const C = o?.[x], j = d?.[x];
+  const { variants: s, defaultVariants: d } = l, p = Object.keys(s).map((y) => {
+    const C = o?.[y], j = d?.[y];
     if (C === null) return null;
     const E = Bd(C) || Bd(j);
-    return s[x][E];
-  }), f = o && Object.entries(o).reduce((x, C) => {
+    return s[y][E];
+  }), f = o && Object.entries(o).reduce((y, C) => {
     let [j, E] = C;
-    return E === void 0 || (x[j] = E), x;
-  }, {}), b = l == null || (c = l.compoundVariants) === null || c === void 0 ? void 0 : c.reduce((x, C) => {
+    return E === void 0 || (y[j] = E), y;
+  }, {}), b = l == null || (c = l.compoundVariants) === null || c === void 0 ? void 0 : c.reduce((y, C) => {
     let { class: j, className: E, ...v } = C;
-    return Object.entries(v).every((y) => {
-      let [S, w] = y;
+    return Object.entries(v).every((x) => {
+      let [S, w] = x;
       return Array.isArray(w) ? w.includes({
         ...d,
         ...f
@@ -13234,13 +13234,13 @@ const ab = (n) => P0[n] ?? n.toUpperCase(), Bd = (n) => typeof n == "boolean" ? 
         ...f
       }[S] === w;
     }) ? [
-      ...x,
+      ...y,
       j,
       E
-    ] : x;
+    ] : y;
   }, []);
   return qd(n, p, b, o?.class, o?.className);
-}, nb = qi(
+}, lb = qi(
   "flex cursor-pointer items-center self-stretch rounded-none [border:0] [font-family:inherit] [transition:color_0.1s_ease,background_0.1s_ease] disabled:cursor-not-allowed disabled:opacity-40",
   {
     variants: {
@@ -13251,7 +13251,7 @@ const ab = (n) => P0[n] ?? n.toUpperCase(), Bd = (n) => typeof n == "boolean" ? 
     },
     defaultVariants: { active: !1 }
   }
-), lb = qi(
+), ib = qi(
   "mx-0.5 grid size-6 shrink-0 cursor-pointer place-items-center self-center rounded-ui bg-transparent p-0 leading-none text-subtext-0 [border:0] [font-family:inherit] [font-size:inherit] [font-weight:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg",
   {
     variants: {
@@ -13265,10 +13265,10 @@ const ab = (n) => P0[n] ?? n.toUpperCase(), Bd = (n) => typeof n == "boolean" ? 
     defaultVariants: { reveal: "always", tone: "default" }
   }
 );
-function ib({ className: n, ...l } = {}) {
-  return Ae(lb(l), n);
+function rb({ className: n, ...l } = {}) {
+  return Ae(ib(l), n);
 }
-const Of = "shrink-0 cursor-pointer rounded-ui bg-transparent px-[0.2rem] py-[0.1rem] text-[0.8rem] leading-none text-subtext-0 [font-family:inherit] [border:none] [transition:color_0.1s_ease,background_0.1s_ease] hover:bg-surface-1 hover:text-accent", Rf = "cursor-pointer rounded-ui bg-transparent text-subtext-0 [border:0] [font-family:inherit] [transition:color_0.1s_ease,background_0.1s_ease] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg disabled:cursor-not-allowed disabled:opacity-40", rb = qi(`${Rf} shrink-0 focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:-2px]`, {
+const Rf = "shrink-0 cursor-pointer rounded-ui bg-transparent px-[0.2rem] py-[0.1rem] text-[0.8rem] leading-none text-subtext-0 [font-family:inherit] [border:none] [transition:color_0.1s_ease,background_0.1s_ease] hover:bg-surface-1 hover:text-accent", Hf = "cursor-pointer rounded-ui bg-transparent text-subtext-0 [border:0] [font-family:inherit] [transition:color_0.1s_ease,background_0.1s_ease] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg disabled:cursor-not-allowed disabled:opacity-40", ob = qi(`${Hf} shrink-0 focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:-2px]`, {
   variants: {
     // `soft` is a ghost button on a resting fill, for empty-state calls to action;
     // `primary` is the one filled button of a surface.
@@ -13292,30 +13292,30 @@ const Of = "shrink-0 cursor-pointer rounded-ui bg-transparent px-[0.2rem] py-[0.
   },
   defaultVariants: { variant: "ghost", size: "md", tone: "default" }
 });
-function ob({ className: n, ...l } = {}) {
-  return Ae(rb(l), n);
+function sb({ className: n, ...l } = {}) {
+  return Ae(ob(l), n);
 }
-const Hf = "overflow-hidden rounded-ui bg-surface-1 py-[0.3rem] shadow-[0_8px_24px_rgba(0,0,0,0.45)]", sb = qi(
+const Df = "overflow-hidden rounded-ui bg-surface-1 py-[0.3rem] shadow-[0_8px_24px_rgba(0,0,0,0.45)]", cb = qi(
   "pane-context-menu__item block w-full cursor-pointer bg-transparent px-[0.9rem] py-[0.45rem] text-left text-[0.82rem] [border:none] [font-family:inherit] [transition:background_0.1s_ease] hover:bg-surface-0 disabled:cursor-not-allowed disabled:bg-transparent disabled:opacity-40",
   { variants: { danger: { true: "text-red", false: "text-fg" } }, defaultVariants: { danger: !1 } }
-), cb = "my-1 h-px bg-overlay-0";
-function ub({ size: n = 14, className: l }) {
+), ub = "my-1 h-px bg-overlay-0";
+function db({ size: n = 14, className: l }) {
   return /* @__PURE__ */ Nt.jsxs("svg", { className: l, width: n, height: n, viewBox: "0 0 16 16", fill: "currentColor", "aria-hidden": "true", children: [
     /* @__PURE__ */ Nt.jsx("circle", { cx: "3.5", cy: "8", r: "1.1" }),
     /* @__PURE__ */ Nt.jsx("circle", { cx: "8", cy: "8", r: "1.1" }),
     /* @__PURE__ */ Nt.jsx("circle", { cx: "12.5", cy: "8", r: "1.1" })
   ] });
 }
-function db({ size: n = 16, className: l }) {
+function fb({ size: n = 16, className: l }) {
   return /* @__PURE__ */ Nt.jsxs("svg", { className: l, width: n, height: n, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: "1.3", strokeLinejoin: "round", "aria-hidden": "true", children: [
     /* @__PURE__ */ Nt.jsx("path", { d: "M6.6 1.8h2.8l.4 1.6 1.1.6 1.5-.6 1.4 2.4-1.2 1.1v1.3l1.2 1.1-1.4 2.4-1.5-.6-1.1.6-.4 1.6H6.6l-.4-1.6-1.1-.6-1.5.6-1.4-2.4 1.2-1.1V7.3L2.2 6.2l1.4-2.4 1.5.6 1.1-.6z" }),
     /* @__PURE__ */ Nt.jsx("circle", { cx: "8", cy: "8", r: "2" })
   ] });
 }
-function fb({ size: n = 14, className: l }) {
+function mb({ size: n = 14, className: l }) {
   return /* @__PURE__ */ Nt.jsx("svg", { className: l, width: n, height: n, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round", "aria-hidden": "true", children: /* @__PURE__ */ Nt.jsx("path", { d: "M3.5 3.5l9 9M12.5 3.5l-9 9" }) });
 }
-function Df({ size: n = 14, className: l }) {
+function Uf({ size: n = 14, className: l }) {
   return /* @__PURE__ */ Nt.jsx("svg", { className: l, width: n, height: n, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round", "aria-hidden": "true", children: /* @__PURE__ */ Nt.jsx("path", { d: "M8 2.5v11M2.5 8h11" }) });
 }
 const Yd = {
@@ -13324,7 +13324,7 @@ const Yd = {
   error: "host-state--error bg-red",
   disabled: "host-state--disabled bg-subtext-0"
 };
-function mb({ state: n, error: l }) {
+function pb({ state: n, error: l }) {
   return /* @__PURE__ */ Nt.jsx(
     "span",
     {
@@ -13333,7 +13333,7 @@ function mb({ state: n, error: l }) {
     }
   );
 }
-function pb({ title: n, onClose: l, children: o, testId: c }) {
+function hb({ title: n, onClose: l, children: o, testId: c }) {
   return Bi(
     /* @__PURE__ */ Nt.jsx(
       "div",
@@ -13364,14 +13364,14 @@ function pb({ title: n, onClose: l, children: o, testId: c }) {
     document.body
   );
 }
-const _i = 4, Ma = 8, hb = "flex w-full cursor-pointer items-center justify-between gap-3 px-[0.9rem] py-[0.4rem] text-left text-[0.82rem] text-fg max-[700px]:min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-40", Gd = (n) => n.text ?? (typeof n.label == "string" ? n.label : n.value);
-function gb({ value: n, onChange: l, options: o, className: c, ariaLabel: s, testId: d, id: p, title: f, disabled: b, placeholder: x, freeText: C, onKeyDown: j }) {
-  const E = ft.useId(), [v, y] = ft.useState(!1), [S, w] = ft.useState(-1), [O, N] = ft.useState(!1), M = ft.useRef(null), K = ft.useRef(null), [U, z] = ft.useState({}), g = ft.useRef({ text: "", at: 0 }), h = C && O && n ? o.filter((B) => Gd(B).toLowerCase().includes(n.toLowerCase()) || B.value.toLowerCase().includes(n.toLowerCase())) : o, D = o.find((B) => B.value === n), Q = (B) => `${E}-${B}`;
+const _i = 4, Ma = 8, gb = "flex w-full cursor-pointer items-center justify-between gap-3 px-[0.9rem] py-[0.4rem] text-left text-[0.82rem] text-fg max-[700px]:min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-40", Gd = (n) => n.text ?? (typeof n.label == "string" ? n.label : n.value);
+function bb({ value: n, onChange: l, options: o, className: c, ariaLabel: s, testId: d, id: p, title: f, disabled: b, placeholder: y, freeText: C, onKeyDown: j }) {
+  const E = ft.useId(), [v, x] = ft.useState(!1), [S, w] = ft.useState(-1), [O, N] = ft.useState(!1), M = ft.useRef(null), K = ft.useRef(null), [U, z] = ft.useState({}), g = ft.useRef({ text: "", at: 0 }), h = C && O && n ? o.filter((B) => Gd(B).toLowerCase().includes(n.toLowerCase()) || B.value.toLowerCase().includes(n.toLowerCase())) : o, D = o.find((B) => B.value === n), Q = (B) => `${E}-${B}`;
   function W(B) {
-    b || (w(B), y(!0));
+    b || (w(B), x(!0));
   }
   function L() {
-    y(!1), N(!1), w(-1);
+    x(!1), N(!1), w(-1);
   }
   function pt(B) {
     !B || B.disabled || (l(B.value), L());
@@ -13418,7 +13418,7 @@ function gb({ value: n, onChange: l, options: o, className: c, ariaLabel: s, tes
   }, [v]), Le(() => {
     const B = v && S >= 0 ? document.getElementById(Q(S)) : null, q = K.current;
     !B || !q || (B.offsetTop < q.scrollTop ? q.scrollTop = B.offsetTop : B.offsetTop + B.offsetHeight > q.scrollTop + q.clientHeight && (q.scrollTop = B.offsetTop + B.offsetHeight - q.clientHeight));
-  }, [v, S]), Bf(v, (B) => {
+  }, [v, S]), qf(v, (B) => {
     B || L();
   }, M, K);
   function et(B) {
@@ -13486,11 +13486,11 @@ function gb({ value: n, onChange: l, options: o, className: c, ariaLabel: s, tes
         role: "combobox",
         "aria-autocomplete": "list",
         autoComplete: "off",
-        placeholder: x,
+        placeholder: y,
         className: c,
         value: n,
         onChange: (B) => {
-          l(B.target.value), N(!0), v ? w(-1) : (w(-1), y(!0));
+          l(B.target.value), N(!0), v ? w(-1) : (w(-1), x(!0));
         },
         onBlur: () => L()
       }
@@ -13505,8 +13505,8 @@ function gb({ value: n, onChange: l, options: o, className: c, ariaLabel: s, tes
         className: Ae("inline-flex items-center justify-between gap-2 text-left [font-family:inherit] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50", c),
         onClick: () => v ? L() : W(Math.max(0, h.findIndex((B) => B.value === n))),
         children: [
-          /* @__PURE__ */ Nt.jsx("span", { className: "min-w-0 flex-1 truncate", children: D ? D.label : x ?? "" }),
-          /* @__PURE__ */ Nt.jsx(Uf, { open: !0, className: "shrink-0 text-subtext-0" })
+          /* @__PURE__ */ Nt.jsx("span", { className: "min-w-0 flex-1 truncate", children: D ? D.label : y ?? "" }),
+          /* @__PURE__ */ Nt.jsx(Bf, { open: !0, className: "shrink-0 text-subtext-0" })
         ]
       }
     ),
@@ -13518,7 +13518,7 @@ function gb({ value: n, onChange: l, options: o, className: c, ariaLabel: s, tes
           id: E,
           role: "listbox",
           "aria-label": s,
-          className: Ae("z-[9999]", Hf),
+          className: Ae("z-[9999]", Df),
           style: U,
           onMouseDown: (B) => {
             B.preventDefault(), B.stopPropagation();
@@ -13532,7 +13532,7 @@ function gb({ value: n, onChange: l, options: o, className: c, ariaLabel: s, tes
               "aria-selected": B.value === n,
               "aria-disabled": B.disabled || void 0,
               "data-value": B.value,
-              className: Ae(hb, q === S && !B.disabled && "bg-surface-0"),
+              className: Ae(gb, q === S && !B.disabled && "bg-surface-0"),
               onMouseEnter: () => {
                 B.disabled || w(q);
               },
@@ -13550,11 +13550,11 @@ function gb({ value: n, onChange: l, options: o, className: c, ariaLabel: s, tes
     )
   ] });
 }
-const bb = "rounded-ui bg-surface-1 text-fg [font-family:inherit]", vb = `${bb} px-2 py-[0.3rem] text-[0.8rem] max-[700px]:min-h-11 focus:[outline:1px_solid_var(--accent)]`;
-function Uf({ open: n, size: l = 12, className: o }) {
+const vb = "rounded-ui bg-surface-1 text-fg [font-family:inherit]", yb = `${vb} px-2 py-[0.3rem] text-[0.8rem] max-[700px]:min-h-11 focus:[outline:1px_solid_var(--accent)]`;
+function Bf({ open: n, size: l = 12, className: o }) {
   return /* @__PURE__ */ Nt.jsx("svg", { className: o, width: l, height: l, viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.3", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", children: /* @__PURE__ */ Nt.jsx("path", { d: n ? "M2.5 4.5 6 8l3.5-3.5" : "M4.5 2.5 8 6l-3.5 3.5" }) });
 }
-function yb(n) {
+function xb(n) {
   return n.blocked && !n.stale ? "blocked" : n.status === "running" && !n.stale ? "working" : n.unseen ? "done" : "idle";
 }
 const Xo = {
@@ -13572,21 +13572,21 @@ const Xo = {
 function Zo(n, l) {
   return !!n.parentSessionId && n.parentSessionId !== n.id && l.some((o) => o.id === n.parentSessionId);
 }
-function xb(n) {
+function wb(n) {
   const l = /* @__PURE__ */ new Map();
   for (const o of n)
     Zo(o, n) && l.set(o.parentSessionId, [...l.get(o.parentSessionId) ?? [], o]);
   return l.size ? n.filter((o) => !Zo(o, n)).flatMap((o) => [o, ...l.get(o.id) ?? []]) : n;
 }
 const Si = 6, Kd = 8;
-function wb(n, l = {}) {
-  const { minWidth: o = 220, align: c = "right", minSpaceAbove: s = 100 } = l, d = n.getBoundingClientRect(), p = window.innerWidth, f = window.innerHeight, b = c === "right" ? { right: Math.max(0, p - d.right) } : { left: Math.max(0, d.left) }, x = d.top - Si - Kd, C = f - d.bottom - Si - Kd;
-  return x >= s ? {
+function _b(n, l = {}) {
+  const { minWidth: o = 220, align: c = "right", minSpaceAbove: s = 100 } = l, d = n.getBoundingClientRect(), p = window.innerWidth, f = window.innerHeight, b = c === "right" ? { right: Math.max(0, p - d.right) } : { left: Math.max(0, d.left) }, y = d.top - Si - Kd, C = f - d.bottom - Si - Kd;
+  return y >= s ? {
     position: "fixed",
     bottom: f - d.top + Si,
     ...b,
     minWidth: o,
-    maxHeight: Math.min(x, f * 0.75),
+    maxHeight: Math.min(y, f * 0.75),
     overflowY: "auto"
   } : {
     position: "fixed",
@@ -13597,12 +13597,12 @@ function wb(n, l = {}) {
     overflowY: "auto"
   };
 }
-function Bf(n, l, o, c) {
+function qf(n, l, o, c) {
   Le(() => {
     if (!n) return;
     function s(p) {
-      const f = p.target, b = o.current?.contains(f) ?? !1, x = c.current?.contains(f) ?? !1;
-      !b && !x && l(!1);
+      const f = p.target, b = o.current?.contains(f) ?? !1, y = c.current?.contains(f) ?? !1;
+      !b && !y && l(!1);
     }
     function d(p) {
       p.key === "Escape" && l(!1);
@@ -13612,11 +13612,11 @@ function Bf(n, l, o, c) {
     };
   }, [n]);
 }
-function _b({ icon: n, fallback: l }) {
+function Sb({ icon: n, fallback: l }) {
   const [o, c] = ft.useState(!1);
   return Le(() => c(!1), [n]), !n || o ? /* @__PURE__ */ Nt.jsx(Nt.Fragment, { children: l }) : /* @__PURE__ */ Nt.jsx("img", { src: n, alt: "", width: 14, height: 14, className: "size-[14px] rounded-[2px] object-contain", referrerPolicy: "no-referrer", onError: () => c(!0) });
 }
-const Sb = "[--radius:var(--radius-pane)] rounded-soft bg-surface-1/70 shadow-[0_6px_20px_rgba(0,0,0,0.3)] backdrop-blur-xl backdrop-saturate-150", kb = "hover:bg-transparent hover:text-subtext-0 active:bg-surface-1 active:text-fg";
+const kb = "[--radius:var(--radius-pane)] rounded-soft bg-surface-1/70 shadow-[0_6px_20px_rgba(0,0,0,0.3)] backdrop-blur-xl backdrop-saturate-150", zb = "hover:bg-transparent hover:text-subtext-0 active:bg-surface-1 active:text-fg";
 //! `@perch/sdk` for the native client: the surface a stock screen imports (the navigation part, 1.3), with every
 //! call going to one abstract host object, `globalThis.perch`, read when called (so a host or a test sets it before
 //! mounting). Class helpers, icons, `cn`, `keyLabel` and the host dot are the app's own modules, compiled in, so the
@@ -13624,9 +13624,9 @@ const Sb = "[--radius:var(--radius-pane)] rounded-soft bg-surface-1/70 shadow-[0
 //! (`perch.navigation(options)`, `perch.hosts()`, ...), which must return the same object until the data changes.
 //! Menus and dialogs Perch draws itself (session menu, new session menu, confirm, select, folder browser,
 //! instructions, memory) open through `perch.openOverlay(kind, props)`; their callbacks are plain functions.
-const zb = "1.3.0";
+const Eb = "1.3.0";
 let Ei = null;
-const Eb = (n) => {
+const Nb = (n) => {
   Ei = n;
 };
 function Tt() {
@@ -13634,15 +13634,15 @@ function Tt() {
   if (!n) throw new Error("@perch/sdk: no perch host (globalThis.perch) is set");
   return n;
 }
-const qf = (n) => Tt().subscribe?.(n) ?? (() => {
-}), Nb = wb, Tb = globalThis.perch?.isMac !== !1, Cb = (n) => eb(n, Tt().isMac !== !1), jb = (n) => nb(n), Mb = ({ className: n, ...l } = {}) => Ae(ib(l), n), Ab = ob, Ob = (n) => sb(n), Rb = cb, Hb = Rf, Db = Of, Ub = (n) => Xo[n].color, Bb = (n, l) => Tt().shortcutFor?.(n, l) ?? null, qb = (n) => Tt().shortcutLabel?.(n) ?? null, Yi = (n, l) => Tt().command(n, l ?? {}) !== !1, Yb = (n, l, o) => Tt().startSession?.(n, l, o), Gb = globalThis.perch?.pickFolder ? (n) => Tt().pickFolder(n) : null;
+const Tb = (n) => Tt().subscribe?.(n) ?? (() => {
+}), Cb = _b, jb = globalThis.perch?.isMac !== !1, Mb = (n) => ab(n, Tt().isMac !== !1), Ab = (n) => lb(n), Ob = ({ className: n, ...l } = {}) => Ae(rb(l), n), Rb = sb, Hb = (n) => cb(n), Db = ub, Ub = Hf, Bb = Rf, qb = (n) => Xo[n].color, Yb = (n, l) => Tt().shortcutFor?.(n, l) ?? null, Gb = (n) => Tt().shortcutLabel?.(n) ?? null, Yi = (n, l) => Tt().command(n, l ?? {}) !== !1, Kb = (n, l, o) => Tt().startSession?.(n, l, o), Qb = globalThis.perch?.pickFolder ? (n) => Tt().pickFolder(n) : null;
 function oe(n) {
   const l = ft.useRef(n);
-  return l.current = n, ft.useSyncExternalStore(qf, () => l.current(Tt()));
+  return l.current = n, ft.useSyncExternalStore(Tb, () => l.current(Tt()));
 }
-const Yf = (n = {}) => oe((l) => l.navigation({ showTerminals: !!n.showTerminals, sortByAttention: !!n.sortByAttention })), Kb = () => oe((n) => n.hosts()), Qb = () => oe((n) => n.sessionFolders());
-function Vb() {
-  const n = oe((l) => l.addProject?.() ?? Xb);
+const Yf = (n = {}) => oe((l) => l.navigation({ showTerminals: !!n.showTerminals, sortByAttention: !!n.sortByAttention })), Vb = () => oe((n) => n.hosts()), Xb = () => oe((n) => n.sessionFolders());
+function Zb() {
+  const n = oe((l) => l.addProject?.() ?? Jb);
   return {
     status: n.status ?? "idle",
     error: n.error,
@@ -13653,20 +13653,20 @@ function Vb() {
     clear: () => Tt().clearAddProject?.()
   };
 }
-const Xb = Object.freeze({ status: "idle" }), Gf = "perch.lastAgentChoice", Zb = Object.freeze({ connected: !1, discovery: !1, state: "ready", choices: [] }), Jb = () => {
+const Jb = Object.freeze({ status: "idle" }), Gf = "perch.lastAgentChoice", Lb = Object.freeze({ connected: !1, discovery: !1, state: "ready", choices: [] }), Wb = () => {
   const n = Tt().storage?.getItem(Gf);
   return n === "claude" || n === "codex" ? n : "claude";
-}, Lb = Object.freeze({ items: [] });
-function Wb() {
-  const n = oe((l) => l.notifications?.() ?? Lb);
+}, Fb = Object.freeze({ items: [] });
+function Ib() {
+  const n = oe((l) => l.notifications?.() ?? Fb);
   return ft.useMemo(() => ({
     items: n.items ?? [],
     open: (l) => Tt().command("notification.open", { id: l }),
     dismiss: (l) => Tt().command("notification.dismiss", { id: l })
   }), [n]);
 }
-function Fb(n) {
-  const l = oe((s) => s.agentChoices?.(n) ?? Zb), [o, c] = ft.useState(Jb);
+function $b(n) {
+  const l = oe((s) => s.agentChoices?.(n) ?? Lb), [o, c] = ft.useState(Wb);
   return ft.useMemo(() => ({
     connected: !!l.connected,
     discovery: !!l.discovery,
@@ -13680,17 +13680,17 @@ function Fb(n) {
     manage: () => Tt().command("agents.manage", {})
   }), [l, o]);
 }
-function Ib(n) {
+function Pb(n) {
   Le(() => Tt().onRequest?.("add-project", n) ?? void 0, [n]);
 }
-function $b(n) {
+function tv(n) {
   const l = n.map((o) => ({ id: o.id, parentSessionId: o.parentId, session: o }));
-  return xb(l).map((o) => ({ session: o.session, nested: Zo(o, l) }));
+  return wb(l).map((o) => ({ session: o.session, nested: Zo(o, l) }));
 }
-function Pb({ id: n, plain: l, className: o }) {
-  const c = oe((x) => x.session(n));
+function ev({ id: n, plain: l, className: o }) {
+  const c = oe((y) => y.session(n));
   if (!c) return null;
-  const s = c.state ?? yb(c), d = Xo[s]?.color ?? Xo.unknown.color, p = c.provider, f = p === "claude" || p === "claude-agent-teams" || p === "omp", b = l ? Ae("agent-mark", "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full leading-none", o) : Ae("agent-status-dot", `agent-status-dot--${s}`, "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-[1.5px] bg-panel-bg leading-none", o);
+  const s = c.state ?? xb(c), d = Xo[s]?.color ?? Xo.unknown.color, p = c.provider, f = p === "claude" || p === "claude-agent-teams" || p === "omp", b = l ? Ae("agent-mark", "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full leading-none", o) : Ae("agent-status-dot", `agent-status-dot--${s}`, "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-[1.5px] bg-panel-bg leading-none", o);
   return ft.createElement(
     "span",
     { className: b, style: l ? void 0 : { borderColor: d }, "data-provider": p ?? "unknown", title: l ? p ?? "Agent" : `${p ?? "Agent"} · ${s}`, "aria-hidden": "true" },
@@ -13701,8 +13701,8 @@ function Kf({ provider: n, size: l = 14 }) {
   const o = Tt().agentIcon?.(n, l) ?? null, c = o?.markup ?? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5" fill="currentColor"/></svg>';
   return ft.createElement("svg", { width: l, height: l, "aria-hidden": "true", "data-agent-icon": n ?? "unknown", "data-perch-markup": c, ...o && o.tint === !1 ? { "data-perch-image": "true" } : {} });
 }
-const tv = ({ children: n }) => ft.createElement(ft.Fragment, null, n);
-function ev(n, l) {
+const av = ({ children: n }) => ft.createElement(ft.Fragment, null, n);
+function nv(n, l) {
   const o = ft.useRef(l);
   return o.current = l, Le(() => {
     const c = Tt();
@@ -13715,80 +13715,86 @@ function ev(n, l) {
   }, [n]), null;
 }
 const ln = (n) => function(o) {
-  return ev(n, o);
-}, av = ln("session-menu"), nv = ln("new-session-menu"), lv = ln("confirm");
+  return nv(n, o);
+}, lv = ln("session-menu"), iv = ln("new-session-menu"), rv = ln("confirm");
 let Qf = null;
-const iv = (n) => {
+const ov = (n) => {
   Qf = n;
 };
-function rv(n) {
-  return ft.createElement(Qf ?? lv, n);
+function sv(n) {
+  return ft.createElement(Qf ?? rv, n);
 }
-function ov({ className: n = vb, ...l }) {
-  return ft.createElement(gb, { ...l, className: n });
+function cv({ className: n = yb, ...l }) {
+  return ft.createElement(bb, { ...l, className: n });
 }
 let Jo = null;
-const sv = (n) => {
+const uv = (n) => {
   Jo = n;
-}, cv = ln("folder-browser");
-function uv(n) {
-  return Jo ? ft.createElement(Jo, { ...n, browse: (l) => Tt().browse(n.hostId, l) }) : ft.createElement(cv, n);
+}, dv = ln("folder-browser");
+function fv(n) {
+  return Jo ? ft.createElement(Jo, { ...n, browse: (l) => Tt().browse(n.hostId, l) }) : ft.createElement(dv, n);
 }
-const dv = ln("instructions"), fv = ln("memory"), mv = pb;
+const mv = ln("instructions"), pv = ln("memory"), hv = hb;
 let ns = null;
-const pv = (n) => {
+const gv = (n) => {
   ns = n;
 };
-function hv(n) {
-  if (ns) return ft.createElement(vv, n);
+function bv(n) {
+  if (ns) return ft.createElement(yv, n);
   const { hostId: l, path: o, className: c } = n, s = ft.useRef(null);
   return ft.createElement(
     "button",
     {
       type: "button",
       ref: s,
-      className: Ae("worktree-menu__btn", Of, c),
+      className: Ae("worktree-menu__btn", Rf, c),
       "data-testid": `worktree-menu-${l}-${o}`,
       title: "New workspace (a git worktree)",
       "aria-label": "New workspace",
       "aria-expanded": !1,
       onClick: () => Tt().openOverlay?.("worktree", { hostId: l, cwd: o, anchor: s.current?.getBoundingClientRect() })
     },
-    ft.createElement(Df, null)
+    ft.createElement(Uf, null)
   );
 }
 const Vf = "Perch did not answer.";
 function ki(n) {
   return n ? n.type === "worktree.error" ? { error: n.message, dirty: !!n.dirty } : n.error ? { error: String(n.error) } : {} : { error: Vf };
 }
-function gv(n, l) {
-  const o = (c) => {
-    for (const s of c ?? []) {
-      if (s.path === l) return s;
-      const d = o(s.children);
-      if (d) return d;
+function vv(n, l, o = Tt()) {
+  const c = (s) => {
+    for (const d of s ?? []) {
+      if (d.path === l) return d;
+      const p = c(d.children);
+      if (p) return p;
     }
     return null;
   };
-  for (const c of Tt().navigation({})?.projects ?? []) {
-    if (c.hostId !== n) continue;
-    const s = o(c.workspaces) ?? o(c.hidden);
-    if (s) return s;
+  for (const s of o.navigation({})?.projects ?? []) {
+    if (s.hostId !== n) continue;
+    const d = c(s.workspaces) ?? c(s.hidden);
+    if (d) return d;
   }
   return null;
 }
-function bv(n, l, o) {
-  let c = !1, s = () => {
+const Qd = 5 * 6e4;
+function Xf(n, l, o, c = Tt()) {
+  const s = Date.now() + Qd;
+  let d = !1, p = () => {
   };
-  const d = () => {
-    c || !gv(n, l) || (c = !0, s(), clearTimeout(p), Tt().startSession?.(n, l, o));
-  }, p = setTimeout(() => {
-    c = !0, s();
-  }, 5 * 6e4);
-  s = qf(d), d();
+  const f = () => {
+    d = !0, p(), clearTimeout(y);
+  }, b = () => {
+    if (!d) {
+      if (Date.now() >= s) return f();
+      vv(n, l, c) && (f(), c.startSession?.(n, l, o));
+    }
+  }, y = setTimeout(f, Qd);
+  p = c.subscribe?.(b) ?? (() => {
+  }), b();
 }
-function vv({ hostId: n, path: l, className: o, worktrees: c, request: s, parentChoices: d, emptyAgent: p, ...f }) {
-  const [b, x] = ft.useState(c), C = (Q) => !!Tt().coreCan?.(Q, n), j = Yf(), E = `${n}:${l}`, v = ft.useMemo(() => {
+function yv({ hostId: n, path: l, className: o, worktrees: c, request: s, parentChoices: d, emptyAgent: p, ...f }) {
+  const [b, y] = ft.useState(c), C = (Q) => !!Tt().coreCan?.(Q, n), j = Yf(), E = `${n}:${l}`, v = ft.useMemo(() => {
     if (Array.isArray(d)) return d;
     if (!C("workspace.nest")) return [];
     const Q = j?.projects?.find((pt) => pt.hostId === n && pt.repoPath === l), W = [], L = (pt, gt) => {
@@ -13796,24 +13802,24 @@ function vv({ hostId: n, path: l, className: o, worktrees: c, request: s, parent
         gt && W.push({ id: wt.id, name: wt.name, path: wt.path }), L(wt.children, !0);
     };
     return L(Q?.workspaces, !1), W;
-  }, [d, j, n, l]), y = n === "local" && C("worktree.job"), S = f.deleteSupported ?? C("worktree.delete"), w = f.startFromSupported ?? C("worktree.startFrom"), O = oe((Q) => Q.emptyWorkspaceAgent?.() ?? void 0), N = p ?? O ?? void 0, M = oe((Q) => Q.worktreeMenuRequest?.() ?? null), K = M?.projectKey === E ? M.nonce : null, U = ft.useMemo(() => s ?? (K == null ? null : M), [s, K]), [z, g] = ft.useState(U);
+  }, [d, j, n, l]), x = n === "local" && C("worktree.job"), S = f.deleteSupported ?? C("worktree.delete"), w = f.startFromSupported ?? C("worktree.startFrom"), O = oe((Q) => Q.emptyWorkspaceAgent?.() ?? void 0), N = p ?? O ?? void 0, M = oe((Q) => Q.worktreeMenuRequest?.() ?? null), K = M?.projectKey === E ? M.nonce : null, U = ft.useMemo(() => s ?? (K == null ? null : M), [s, K]), [z, g] = ft.useState(U);
   Le(() => {
     U && g(U);
   }, [U]);
   const h = ft.useRef({});
-  h.current = { background: y, deleteSupported: S };
+  h.current = { background: x, deleteSupported: S };
   const D = ft.useMemo(() => {
     const Q = (W, L) => Tt().ask(W, { hostId: n, repoPath: l, ...L });
     return {
       list: async () => {
         const W = await Q("worktree.list", {});
-        return W?.type === "worktree.list.result" && x({ worktrees: W.worktrees ?? [], defaultRoot: W.defaultRoot ?? "", baseRef: W.baseRef, refs: W.refs ?? [] }), ki(W);
+        return W?.type === "worktree.list.result" && y({ worktrees: W.worktrees ?? [], defaultRoot: W.defaultRoot ?? "", baseRef: W.baseRef, refs: W.refs ?? [] }), ki(W);
       },
       create: async ({ branch: W, newBranch: L, path: pt, extra: gt, agent: wt }) => {
         const V = { branch: W, newBranch: !!L, path: pt ?? null, name: gt?.name ?? null, startFrom: gt?.startFrom ?? null, parentWorkspaceId: gt?.parentWorkspaceId ?? null }, { background: et } = h.current, lt = await Q(et ? "worktree.job.start" : "worktree.create", V), B = et ? "worktree.job.started" : "worktree.done";
         if (lt?.type !== B) return { error: ki(lt).error ?? Vf };
         const q = et ? lt.job?.path : lt.path;
-        return wt && q && bv(n, q, wt), { background: et };
+        return wt && q && Xf(n, q, wt), { background: et };
       },
       remove: async (W, L) => {
         const pt = await Q("worktree.remove", { path: W, force: !!L, deleteBranch: h.current.deleteSupported });
@@ -13832,7 +13838,7 @@ function vv({ hostId: n, path: l, className: o, worktrees: c, request: s, parent
     projectKey: E,
     className: o,
     worktrees: b,
-    background: y,
+    background: x,
     startFromSupported: w,
     deleteSupported: S,
     parentChoices: v,
@@ -13841,14 +13847,14 @@ function vv({ hostId: n, path: l, className: o, worktrees: c, request: s, parent
     actions: D
   });
 }
-const yv = (n, l) => {
+const xv = (n, l) => {
   if (!Tt().followPointer?.(n)) return;
   const o = l.items();
   for (const c of o) c.getBoundingClientRect();
-  o[0]?.parentElement?.getBoundingClientRect(), I0(n, l);
-}, xv = () => oe((n) => n.workspaceTabs()), wv = () => oe((n) => n.statusLine()), _v = () => oe((n) => n.zoom()), Sv = () => oe((n) => n.paneLook()), kv = () => oe((n) => n.keybindings?.() ?? []), zv = Object.freeze({ usage: Object.freeze([]), updatedAt: 0, spend: null, redeemResult: null });
-function Ev(n) {
-  const l = !!n?.keepFresh, o = oe((s) => s.statusLine?.().connected ?? !1), c = oe((s) => s.planUsage?.() ?? zv);
+  o[0]?.parentElement?.getBoundingClientRect(), $0(n, l);
+}, wv = () => oe((n) => n.workspaceTabs()), _v = () => oe((n) => n.statusLine()), Sv = () => oe((n) => n.zoom()), kv = () => oe((n) => n.paneLook()), zv = () => oe((n) => n.keybindings?.() ?? []), Ev = Object.freeze({ usage: Object.freeze([]), updatedAt: 0, spend: null, redeemResult: null });
+function Nv(n) {
+  const l = !!n?.keepFresh, o = oe((s) => s.statusLine?.().connected ?? !1), c = oe((s) => s.planUsage?.() ?? Ev);
   return Le(() => {
     if (!l || !o) return;
     let s;
@@ -13858,87 +13864,88 @@ function Ev(n) {
     return d(), () => clearTimeout(s);
   }, [l, o]), c;
 }
-const Nv = () => Tt().command("usage.get", { force: !0 }), Tv = (n) => Tt().command("usage.redeemReset", { accountId: n }), Cv = () => Yi("app.zoom_reset"), jv = {
+const Tv = () => Tt().command("usage.get", { force: !0 }), Cv = (n) => Tt().command("usage.redeemReset", { accountId: n }), jv = () => Yi("app.zoom_reset"), Mv = {
   focused: "bg-[color-mix(in_srgb,var(--text)_10%,var(--panel-bg))] hover:bg-[color-mix(in_srgb,var(--text)_10%,var(--panel-bg))] text-fg font-semibold",
   visible: "bg-transparent text-subtext-0 hover:bg-surface-0 hover:text-fg",
   hidden: "bg-transparent text-subtext-0 hover:bg-surface-0 hover:text-fg"
-}, Mv = (n, l, o) => Tt().beginTabDrag?.(n, l, o);
-function Av(n) {
+}, Av = (n, l, o) => Tt().beginTabDrag?.(n, l, o);
+function Ov(n) {
   Le(() => Tt().onRequest?.("new-tab", n) ?? void 0, [n]);
 }
-const Ov = (n) => Yi("browser.open", { workspaceId: n }), Rv = (n, l) => Yi("file.open", { workspaceId: n, path: l }), Hv = () => null, Dv = () => null, Uv = ln("new-file"), Iv = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const Rv = (n) => Yi("browser.open", { workspaceId: n }), Hv = (n, l) => Yi("file.open", { workspaceId: n, path: l }), Dv = () => null, Uv = () => null, Bv = ln("new-file"), $v = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   AgentIcon: Kf,
-  Chevron: Uf,
-  CloseIcon: fb,
-  ConfirmDialog: rv,
-  Dialog: mv,
-  EllipsisIcon: ub,
-  FolderBrowser: uv,
-  GearIcon: db,
-  HostStateDot: mb,
-  InstructionsDialog: dv,
-  MemoryDialog: fv,
-  NewFilePrompt: Uv,
-  NewSessionMenu: nv,
-  PageIcon: _b,
-  PlusIcon: Df,
-  Select: ov,
-  SessionDot: Pb,
-  SessionMenu: av,
-  Slot: tv,
-  TabDragLayer: Dv,
-  TabMenu: Hv,
-  WorktreeMenu: hv,
-  agentStateColor: Ub,
-  anchoredPopoverStyle: Nb,
-  beginReorderDrag: yv,
-  beginTabDrag: Mv,
-  bindHost: Eb,
-  buttonClass: Ab,
+  Chevron: Bf,
+  CloseIcon: mb,
+  ConfirmDialog: sv,
+  Dialog: hv,
+  EllipsisIcon: db,
+  FolderBrowser: fv,
+  GearIcon: fb,
+  HostStateDot: pb,
+  InstructionsDialog: mv,
+  MemoryDialog: pv,
+  NewFilePrompt: Bv,
+  NewSessionMenu: iv,
+  PageIcon: Sb,
+  PlusIcon: Uf,
+  Select: cv,
+  SessionDot: ev,
+  SessionMenu: lv,
+  Slot: av,
+  TabDragLayer: Uv,
+  TabMenu: Dv,
+  WorktreeMenu: bv,
+  agentStateColor: qb,
+  anchoredPopoverStyle: Cb,
+  beginReorderDrag: xv,
+  beginTabDrag: Av,
+  bindHost: Nb,
+  buttonClass: Rb,
   cn: Ae,
-  drawConfirmationsInPlace: iv,
-  drawFolderBrowserInPlace: sv,
-  drawWorktreeInPlace: pv,
-  ghostButton: Hb,
-  glassClass: Sb,
-  iconButton: Db,
-  isMac: Tb,
-  keyLabel: Cb,
-  menuDividerClass: Rb,
-  menuItemClass: Ob,
-  menuPanel: Hf,
-  nestSessions: $b,
-  openBrowserTab: Ov,
-  openFileTab: Rv,
-  pickFolder: Gb,
-  redeemUsageReset: Tv,
-  refreshUsage: Nv,
-  resetZoom: Cv,
-  rowActionClass: Mb,
+  drawConfirmationsInPlace: ov,
+  drawFolderBrowserInPlace: uv,
+  drawWorktreeInPlace: gv,
+  ghostButton: Ub,
+  glassClass: kb,
+  iconButton: Bb,
+  isMac: jb,
+  keyLabel: Mb,
+  menuDividerClass: Db,
+  menuItemClass: Hb,
+  menuPanel: Df,
+  nestSessions: tv,
+  openBrowserTab: Rv,
+  openFileTab: Hv,
+  pickFolder: Qb,
+  redeemUsageReset: Cv,
+  refreshUsage: Tv,
+  resetZoom: jv,
+  rowActionClass: Ob,
   runCommand: Yi,
-  segmentClass: jb,
-  shortcutFor: Bb,
-  shortcutLabel: qb,
-  startSession: Yb,
-  tabStateClass: jv,
-  tapButtonClass: kb,
-  useAddProject: Vb,
-  useAddProjectRequest: Ib,
-  useAgentChoices: Fb,
-  useDismissOnOutsideClick: Bf,
-  useHosts: Kb,
-  useKeybindings: kv,
+  segmentClass: Ab,
+  shortcutFor: Yb,
+  shortcutLabel: Gb,
+  startPaneWhenReady: Xf,
+  startSession: Kb,
+  tabStateClass: Mv,
+  tapButtonClass: zb,
+  useAddProject: Zb,
+  useAddProjectRequest: Pb,
+  useAgentChoices: $b,
+  useDismissOnOutsideClick: qf,
+  useHosts: Vb,
+  useKeybindings: zv,
   useNavigation: Yf,
-  useNewTabRequest: Av,
-  useNotifications: Wb,
-  usePaneLook: Sv,
-  usePlanUsage: Ev,
-  useSessionFolders: Qb,
-  useStatusLine: wv,
-  useWorkspaceTabs: xv,
-  useZoom: _v,
-  version: zb
+  useNewTabRequest: Ov,
+  useNotifications: Ib,
+  usePaneLook: kv,
+  usePlanUsage: Nv,
+  useSessionFolders: Xb,
+  useStatusLine: _v,
+  useWorkspaceTabs: wv,
+  useZoom: Sv,
+  version: Eb
 }, Symbol.toStringTag, { value: "Module" }));
 //! The description as GPUI elements: one gpui-kit builder chain per node, for a mod's `render()`. Every key the
 //! description can carry has exactly one entry in `STYLE` (a key it does not know throws, so a new key cannot be
@@ -14002,8 +14009,8 @@ const ls = {
 };
 for (const n of ["w", "h", "min_w", "min_h", "max_w", "max_h", "top", "right", "bottom", "left", "pt", "pr", "pb", "pl", "mt", "mr", "mb", "ml", "gap_x", "gap_y", "border_t", "border_r", "border_b", "border_l", "rounded_tl", "rounded_tr", "rounded_br", "rounded_bl"])
   ls[n] = (l, o) => l[n](o);
-const $v = Object.keys(ls);
-function Qd(n, l) {
+const Pv = Object.keys(ls);
+function Vd(n, l) {
   for (const [o, c] of Object.entries(l)) {
     const s = ls[o];
     if (!s) throw new Error(`the description key ${o} has no GPUI builder`);
@@ -14011,36 +14018,36 @@ function Qd(n, l) {
   }
   return n;
 }
-const Aa = (n) => ({ clientX: n?.position?.x ?? 0, clientY: n?.position?.y ?? 0 }), Vd = /* @__PURE__ */ new WeakSet();
-function Xd(n, l, o) {
+const Aa = (n) => ({ clientX: n?.position?.x ?? 0, clientY: n?.position?.y ?? 0 }), Xd = /* @__PURE__ */ new WeakSet();
+function Zd(n, l, o) {
   const c = n.pressed, s = Aa(o);
   return c && c.x === s.clientX && c.y === s.clientY ? c.id : l;
 }
-function Bv(n, l, o) {
+function qv(n, l, o) {
   if (n.name) return n.name;
   if (!(l.size || n.hover || n.focus || n.active || n.track_hover || o)) return null;
   const c = n.meta?.attrs["data-testid"];
   return c ? `~${n.id}:${c}` : `~${n.id}`;
 }
-const Xf = (n, l = !1) => (n.children ?? []).some((o) => o.kind === "text" ? !l || /\s/.test(String(o.text ?? "").trim()) : o.kind === "div" && o.style?.flex_direction !== "row" && o.style?.whitespace !== "nowrap" && Xf(o, !0)), ze = (n) => n.style?.display !== "hidden";
-function Lo(n, l, o, c, s = !1, d = !1, p = null, f = {}, b = !1, x = /* @__PURE__ */ new Map()) {
-  if (n.kind === "text") return x.get(n)?.text ?? n.text;
-  const C = Vd.has(n);
+const Zf = (n, l = !1) => (n.children ?? []).some((o) => o.kind === "text" ? !l || /\s/.test(String(o.text ?? "").trim()) : o.kind === "div" && o.style?.flex_direction !== "row" && o.style?.whitespace !== "nowrap" && Zf(o, !0)), ze = (n) => n.style?.display !== "hidden";
+function Lo(n, l, o, c, s = !1, d = !1, p = null, f = {}, b = !1, y = /* @__PURE__ */ new Map()) {
+  if (n.kind === "text") return y.get(n)?.text ?? n.text;
+  const C = Xd.has(n);
   d ||= n.style.opacity === 0 || n.style.visibility === "invisible", d && (n.name || n.range_name) && (n = { ...n, name: void 0, range_name: void 0, also: void 0 }), p = n.style.text_color ?? p;
-  const j = !!n.hover?.text_color && Wf(n);
+  const j = !!n.hover?.text_color && Ff(n);
   j && o.hovered?.(n.id) && (p = n.hover.text_color), f = { ...f };
   for (const z of ["text_size", "line_height", "whitespace", "text_ellipsis"]) n.style[z] !== void 0 && (f[z] = n.style[z]);
   const E = new Set(n.events ?? []);
   let v;
   n.kind === "image" && !n.markup ? v = l.image(n.src) : v = l.div(), n.markup && (v = v.child(c.icon(`~icon-${n.id}`, n.markup, n.kind === "svg" ? p : "")));
-  const y = Bv(n, E, s);
-  if (y && (v = v.id(y)), n.measure && (v = v.measure(n.measure)), n.name && v.also_named) for (const z of n.also ?? []) v = v.also_named(z);
-  v = Qd(v, { ...n.style, ...x.get(n) });
+  const x = qv(n, E, s);
+  if (x && (v = v.id(x)), n.measure && (v = v.measure(n.measure)), n.name && v.also_named) for (const z of n.also ?? []) v = v.also_named(z);
+  v = Vd(v, { ...n.style, ...y.get(n) });
   const S = f.whitespace !== "nowrap" && !f.text_ellipsis;
-  b && S && n.style.flex_shrink !== 0 && n.style.min_w === void 0 && Xf(n) && (v = v.min_w(0));
-  for (const z of ["hover", "focus", "active"]) n[z] && (v = v[z]((g) => Qd(g, n[z])));
+  b && S && n.style.flex_shrink !== 0 && n.style.min_w === void 0 && Zf(n) && (v = v.min_w(0));
+  for (const z of ["hover", "focus", "active"]) n[z] && (v = v[z]((g) => Vd(g, n[z])));
   if (l.scroll && (n.style.overflow_x === "scroll" || n.style.overflow_y === "scroll")) {
-    const z = o.document?.scrollTarget, g = z ? (n.children ?? []).filter(ze).findIndex((h) => Lf(h, z.id)) : -1;
+    const z = o.document?.scrollTarget, g = z ? (n.children ?? []).filter(ze).findIndex((h) => Wf(h, z.id)) : -1;
     if (g >= 0 && (o.scroller ?? n.id) === n.id && (o.document.scrollTarget = null, o.scroller = n.id, l.scroll.scroll_to_item(g)), o.scroller ??= n.id, o.scroller === n.id && o.document) {
       v = v.track_scroll(l.scroll);
       const h = (n.children ?? []).filter(ze).map((D) => D.id);
@@ -14050,19 +14057,19 @@ function Lo(n, l, o, c, s = !1, d = !1, p = null, f = {}, b = !1, x = /* @__PURE
   n.kind === "input" && !n.disabled && (v = v.on_mouse_down("left", (z, g) => {
     z.bounds && o.setBounds(n.id, z.bounds), o.focus(n.id), g.notify();
   }));
-  const w = n.kind === "input" ? n : n.meta?.tag === "label" ? Jf(n) : null;
+  const w = n.kind === "input" ? n : n.meta?.tag === "label" ? Lf(n) : null;
   w && !w.disabled && /^(checkbox|radio)$/.test(w.input_type) && (v = v.on_click((z, g) => {
     g.stop_propagation?.(), o.toggle(w.id), g.notify();
   }));
   const O = ["click", "double_click", "context_menu", "mouse_down", "mouse_up"].some((z) => E.has(z));
-  if (O || C) for (const z of n.children ?? []) z.kind !== "text" && Vd.add(z);
+  if (O || C) for (const z of n.children ?? []) z.kind !== "text" && Xd.add(z);
   if (O && (v = v.on_mouse_down("left", (z, g) => {
     g.stop_propagation?.(), z.bounds && o.setBounds(n.id, z.bounds);
-    const h = { ...Aa(z), button: 0, buttons: 1, detail: z.click_count }, D = Xd(o, n.id, z);
+    const h = { ...Aa(z), button: 0, buttons: 1, detail: z.click_count }, D = Zd(o, n.id, z);
     o.pressed = null, o.dispatch(D, "pointerdown", { ...h, pointerType: "mouse" }), o.dispatch(D, "mousedown", h) && o.pressFocus?.(D), g.notify();
   }), v = v.on_mouse_down("right", (z, g) => {
     g.stop_propagation?.(), z.bounds && o.setBounds(n.id, z.bounds);
-    const h = Xd(o, n.id, z);
+    const h = Zd(o, n.id, z);
     o.pressed = null, o.dispatch(h, "contextmenu", { ...Aa(z), button: 2 }), g.notify();
   }), v = v.on_mouse_up("left", (z, g) => {
     g.stop_propagation?.();
@@ -14088,84 +14095,84 @@ function Lo(n, l, o, c, s = !1, d = !1, p = null, f = {}, b = !1, x = /* @__PURE
     const z = n.value ? String(n.value) : String(n.placeholder ?? "");
     let g = l.div().whitespace_nowrap().overflow_x_hidden();
     const h = an(f);
-    h && (g = g.h(h)), !n.value && p && (g = g.text_color(Yv(p))), z && (v = v.child(g.child(n.input_type === "password" && n.value ? "•".repeat([...z].length) : z))), n.field_w && (v = v.child(l.div().w(n.field_w).h(0)));
+    h && (g = g.h(h)), !n.value && p && (g = g.text_color(Gv(p))), z && (v = v.child(g.child(n.input_type === "password" && n.value ? "•".repeat([...z].length) : z))), n.field_w && (v = v.child(l.div().w(n.field_w).h(0)));
   }
   const N = f.whitespace === "nowrap" ? an(f) : null, M = n.style.display === "flex" && !String(n.style.flex_direction ?? "row").startsWith("col");
   let K = !n.range_name;
   const U = n.style.display === "flex" && String(n.style.flex_direction ?? "row").startsWith("col") && (n.style.h === void 0 || n.style.h === "auto") && typeof n.style.max_h == "number";
   for (const z of (n.children ?? []).filter(ze)) {
     const g = z.style?.flex_basis;
-    U && z.style.flex_grow > 0 && (g === 0 || typeof g == "string" && g.endsWith("%")) && x.set(z, { ...x.get(z), flex_basis: "auto" });
-    let h = Lo(z, l, o, c, !1, d, p, f, M && z.style?.position !== "absolute", x);
-    const D = !K && (z.kind === "text" || !z.meta), Q = z.kind === "text" ? x.get(z)?.h ?? N : null, W = z.kind === "text" ? x.get(z)?.w : void 0;
+    U && z.style.flex_grow > 0 && (g === 0 || typeof g == "string" && g.endsWith("%")) && y.set(z, { ...y.get(z), flex_basis: "auto" });
+    let h = Lo(z, l, o, c, !1, d, p, f, M && z.style?.position !== "absolute", y);
+    const D = !K && (z.kind === "text" || !z.meta), Q = z.kind === "text" ? y.get(z)?.h ?? N : null, W = z.kind === "text" ? y.get(z)?.w : void 0;
     if (D || Q || W !== void 0) {
       let L = l.div();
-      D && (L = L.id(n.range_name)), D && !M && n.style.display === "flex" && (L = L[`self_${qv[f.text_align] ?? "start"}`]().max_w("100%")), Q && (L = L.h(Q)), W !== void 0 && (L = L.w(W).flex_none().whitespace_nowrap()), h = L.child(h), K ||= D;
+      D && (L = L.id(n.range_name)), D && !M && n.style.display === "flex" && (L = L[`self_${Yv[f.text_align] ?? "start"}`]().max_w("100%")), Q && (L = L.h(Q)), W !== void 0 && (L = L.w(W).flex_none().whitespace_nowrap()), h = L.child(h), K ||= D;
     }
     v = v.child(h);
   }
   return v;
 }
-const qv = { center: "center", right: "end", end: "end" };
-function Yv(n) {
+const Yv = { center: "center", right: "end", end: "end" };
+function Gv(n) {
   const l = String(n);
   if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(l)) return n;
   const o = l.length === 9 ? Number.parseInt(l.slice(7), 16) : 255;
   return `${l.slice(0, 7)}${Math.round(o / 2).toString(16).padStart(2, "0")}`;
 }
-const Zf = /^(?:[!-,.-~]+|\S)$/u, Jf = (n) => {
+const Jf = /^(?:[!-,.-~]+|\S)$/u, Lf = (n) => {
   for (const l of n.children ?? []) {
     if (l.kind === "input" && /^(checkbox|radio)$/.test(l.input_type)) return l;
-    const o = l.kind === "text" ? null : Jf(l);
+    const o = l.kind === "text" ? null : Lf(l);
     if (o) return o;
   }
   return null;
-}, Lf = (n, l) => n.id === l || (n.children ?? []).some((o) => o.kind !== "text" && Lf(o, l)), Wf = (n) => !!n.markup || (n.children ?? []).some((l) => l.kind !== "text" && Wf(l));
+}, Wf = (n, l) => n.id === l || (n.children ?? []).some((o) => o.kind !== "text" && Wf(o, l)), Ff = (n) => !!n.markup || (n.children ?? []).some((l) => l.kind !== "text" && Ff(l));
 function an(n) {
   const l = n.line_height;
   return typeof l == "string" && l.endsWith("px") ? Number.parseFloat(l) : typeof l == "number" && typeof n.text_size == "number" ? l * n.text_size : null;
 }
-function Pv(n, l, o, c, s = 0, d = !1) {
-  const p = [n.root, ...n.overlays], f = s > 0 ? Jv(p, s) : /* @__PURE__ */ new Map();
-  s > 0 && c.measure && Gv(p, s, c.measure, f), Xv(p, f), Vv(p, f), c.measure && Qv(p, c.measure, f);
-  let b = l.div().relative().size_full().child(Lo(n.root, l, o, c, !1, !1, null, {}, !1, f)), x = d && n.overlays.length ? l.div().relative().size_full().window_layer() : b;
-  for (const C of n.overlays) x = x.child(Lo(C, l, o, c, !0, !1, null, {}, !1, f));
-  return x === b ? b : b.child(x);
+function ty(n, l, o, c, s = 0, d = !1) {
+  const p = [n.root, ...n.overlays], f = s > 0 ? Lv(p, s) : /* @__PURE__ */ new Map();
+  s > 0 && c.measure && Kv(p, s, c.measure, f), Zv(p, f), Xv(p, f), c.measure && Vv(p, c.measure, f);
+  let b = l.div().relative().size_full().child(Lo(n.root, l, o, c, !1, !1, null, {}, !1, f)), y = d && n.overlays.length ? l.div().relative().size_full().window_layer() : b;
+  for (const C of n.overlays) y = y.child(Lo(C, l, o, c, !0, !1, null, {}, !1, f));
+  return y === b ? b : b.child(y);
 }
-function Gv(n, l, o, c) {
-  const s = (y, S) => c.set(y, { ...c.get(y), ...S }), d = /* @__PURE__ */ new Map(), p = /* @__PURE__ */ new Map(), f = ["text_size", "font_weight", "font_family", "italic", "whitespace", "text_ellipsis"];
-  function b(y, S, w) {
-    if (y.kind === "text") {
-      if (!(S.whitespace === "nowrap" || Zf.test(y.text)) || S.text_ellipsis || w || typeof S.text_size != "number") return NaN;
-      const g = o(y.text, { size: S.text_size, weight: S.font_weight ?? 400, family: S.font_family ?? ".SystemUIFont", italic: !!S.italic });
+function Kv(n, l, o, c) {
+  const s = (x, S) => c.set(x, { ...c.get(x), ...S }), d = /* @__PURE__ */ new Map(), p = /* @__PURE__ */ new Map(), f = ["text_size", "font_weight", "font_family", "italic", "whitespace", "text_ellipsis"];
+  function b(x, S, w) {
+    if (x.kind === "text") {
+      if (!(S.whitespace === "nowrap" || Jf.test(x.text)) || S.text_ellipsis || w || typeof S.text_size != "number") return NaN;
+      const g = o(x.text, { size: S.text_size, weight: S.font_weight ?? 400, family: S.font_family ?? ".SystemUIFont", italic: !!S.italic });
       return Number.isFinite(g) ? g : NaN;
     }
-    if (!ze(y) || y.kind === "input" || y.markup) return x(y);
+    if (!ze(x) || x.kind === "input" || x.markup) return y(x);
     const O = { ...S };
-    for (const z of f) y.style[z] !== void 0 && (O[z] = y.style[z]);
-    O.text_ellipsis = !!y.style.text_ellipsis, p.set(y, O);
-    const N = y.style, M = (y.children ?? []).filter(Ye), K = M.map((z) => b(z, O, w || !!y.tabular));
-    let U = x(y);
+    for (const z of f) x.style[z] !== void 0 && (O[z] = x.style[z]);
+    O.text_ellipsis = !!x.style.text_ellipsis, p.set(x, O);
+    const N = x.style, M = (x.children ?? []).filter(Ye), K = M.map((z) => b(z, O, w || !!x.tabular));
+    let U = y(x);
     if (!Number.isFinite(U) && N.w === void 0) {
       const z = M.map((h, D) => K[D] + (h.kind === "text" ? 0 : P(h.style.ml) + P(h.style.mr)));
       let g;
-      M.length ? Me(y) ? g = M.some((h) => h.kind !== "text" && h.style.flex_grow > 0) || N.flex_wrap === "wrap" ? NaN : z.reduce((h, D) => h + D, 0) + P(N.gap_x) * (M.length - 1) : g = Math.max(...z) : g = 0, U = g + P(N.pl) + P(N.pr) + P(N.border_l) + P(N.border_r), typeof N.min_w == "number" && (U = Math.max(U, N.min_w)), typeof N.max_w == "number" && (U = Math.min(U, N.max_w));
+      M.length ? Me(x) ? g = M.some((h) => h.kind !== "text" && h.style.flex_grow > 0) || N.flex_wrap === "wrap" ? NaN : z.reduce((h, D) => h + D, 0) + P(N.gap_x) * (M.length - 1) : g = Math.max(...z) : g = 0, U = g + P(N.pl) + P(N.pr) + P(N.border_l) + P(N.border_r), typeof N.min_w == "number" && (U = Math.max(U, N.min_w)), typeof N.max_w == "number" && (U = Math.min(U, N.max_w));
     }
-    return d.set(y, U), U;
+    return d.set(x, U), U;
   }
-  const x = (y) => typeof y.style?.w == "number" ? y.style.w : NaN, C = () => ({ exact: 0, laid: 0 }), j = (y, S) => {
+  const y = (x) => typeof x.style?.w == "number" ? x.style.w : NaN, C = () => ({ exact: 0, laid: 0 }), j = (x, S) => {
     if (!Number.isFinite(S))
-      return Object.assign(y, C()), NaN;
-    y.exact += S;
-    const w = Math.round(y.exact * l + 1e-9) / l, O = w - y.laid;
-    return y.laid = w, O;
-  }, E = (y) => Me(y) && y.style.flex_wrap !== "wrap" && (y.style.justify ?? "start") === "start";
-  function v(y) {
-    if (!y || y.kind === "text" || !ze(y)) return;
-    const S = (y.children ?? []).filter(Ye);
-    if (E(y) && S.length > 1) {
-      const w = P(y.style.gap_x), O = C(), N = !(w && S.some((M) => M.kind === "text"));
-      s(y, { border_l: j(O, P(y.style.border_l)), pl: j(O, P(y.style.pl)) }), N && w && s(y, { gap_x: 0 }), S.forEach((M, K) => {
+      return Object.assign(x, C()), NaN;
+    x.exact += S;
+    const w = Math.round(x.exact * l + 1e-9) / l, O = w - x.laid;
+    return x.laid = w, O;
+  }, E = (x) => Me(x) && x.style.flex_wrap !== "wrap" && (x.style.justify ?? "start") === "start";
+  function v(x) {
+    if (!x || x.kind === "text" || !ze(x)) return;
+    const S = (x.children ?? []).filter(Ye);
+    if (E(x) && S.length > 1) {
+      const w = P(x.style.gap_x), O = C(), N = !(w && S.some((M) => M.kind === "text"));
+      s(x, { border_l: j(O, P(x.style.border_l)), pl: j(O, P(x.style.pl)) }), N && w && s(x, { gap_x: 0 }), S.forEach((M, K) => {
         const U = (K && N ? w : 0) + (M.kind === "text" ? 0 : P(M.style.ml));
         if (M.kind === "text")
           U && Object.assign(O, C());
@@ -14173,37 +14180,37 @@ function Gv(n, l, o, c) {
           const D = j(O, U);
           Number.isFinite(D) && s(M, { ml: D });
         }
-        const z = M.kind === "text" ? p.get(y) ?? {} : null, g = M.kind === "text" ? b(M, z, !!y.tabular) : d.get(M);
+        const z = M.kind === "text" ? p.get(x) ?? {} : null, g = M.kind === "text" ? b(M, z, !!x.tabular) : d.get(M);
         if ((M.kind === "text" || !(M.style.flex_grow > 0)) && Number.isFinite(g) ? s(M, { w: j(O, g) }) : Object.assign(O, C()), M.kind !== "text") {
           const D = j(O, P(M.style.mr));
           Number.isFinite(D) && s(M, { mr: D });
         }
       });
     }
-    for (const w of y.children ?? []) w.kind !== "text" && v(w);
+    for (const w of x.children ?? []) w.kind !== "text" && v(w);
   }
-  for (const y of n)
-    y && (b(y, {}, !1), v(y));
+  for (const x of n)
+    x && (b(x, {}, !1), v(x));
 }
-const Kv = /(?<= +)(?=[^ ])|(?<=[\p{L}\p{N}]-)(?=[\p{L}\p{N}])/u;
-function Qv(n, l, o) {
-  const c = ["text_size", "font_weight", "font_family", "italic", "line_height"], s = (f) => typeof f == "number" ? f : 0, d = (f, b) => b && Hi(b) && !Me(b) && f.style.position !== "absolute" && !["start", "center", "end"].includes(f.style.self) && !["start", "center", "end"].includes(b.style.items), p = (f, b, x, C) => {
+const Qv = /(?<= +)(?=[^ ])|(?<=[\p{L}\p{N}]-)(?=[\p{L}\p{N}])/u;
+function Vv(n, l, o) {
+  const c = ["text_size", "font_weight", "font_family", "italic", "line_height"], s = (f) => typeof f == "number" ? f : 0, d = (f, b) => b && Hi(b) && !Me(b) && f.style.position !== "absolute" && !["start", "center", "end"].includes(f.style.self) && !["start", "center", "end"].includes(b.style.items), p = (f, b, y, C) => {
     if (!f || f.kind === "text" || !ze(f)) return;
     const j = f.style;
-    let E = typeof j.w == "number" ? j.w : j.w === "100%" ? x : d(f, b) ? x - s(j.ml) - s(j.mr) : NaN;
+    let E = typeof j.w == "number" ? j.w : j.w === "100%" ? y : d(f, b) ? y - s(j.ml) - s(j.mr) : NaN;
     typeof j.max_w == "number" && (E = Math.min(E, j.max_w));
-    const v = E - s(j.pl) - s(j.pr) - s(j.border_l) - s(j.border_r), y = { ...C };
-    for (const w of c) j[w] !== void 0 && (y[w] = j[w]);
+    const v = E - s(j.pl) - s(j.pr) - s(j.border_l) - s(j.border_r), x = { ...C };
+    for (const w of c) j[w] !== void 0 && (x[w] = j[w]);
     const S = f.children ?? [];
-    if (f.break_anywhere && Number.isFinite(v) && v > 0 && typeof y.text_size == "number" && S.length && S.every((w) => w.kind === "text")) {
-      const w = { size: y.text_size, weight: y.font_weight ?? 400, family: y.font_family ?? ".SystemUIFont", italic: !!y.italic }, O = (K) => l(K.trimEnd(), w) <= v + 0.01;
+    if (f.break_anywhere && Number.isFinite(v) && v > 0 && typeof x.text_size == "number" && S.length && S.every((w) => w.kind === "text")) {
+      const w = { size: x.text_size, weight: x.font_weight ?? 400, family: x.font_family ?? ".SystemUIFont", italic: !!x.italic }, O = (K) => l(K.trimEnd(), w) <= v + 0.01;
       let N = 0;
       for (const K of S) {
         const U = [];
         for (const g of K.text.split(`
 `)) {
           let h = "";
-          for (const D of g.split(Kv)) {
+          for (const D of g.split(Qv)) {
             if (O(h + D)) {
               h += D;
               continue;
@@ -14218,14 +14225,14 @@ function Qv(n, l, o) {
 `);
         U.every((g) => !g || O(g)) ? z !== K.text && o.set(K, { ...o.get(K), text: z }) : N = NaN, N += U.length;
       }
-      const M = an(y);
+      const M = an(x);
       Number.isFinite(N) && M && j.h === void 0 && S.length === 1 && o.set(f, { ...o.get(f), h: N * M + s(j.pt) + s(j.pb) + s(j.border_t) + s(j.border_b) });
     }
-    for (const w of S) p(w, f, Me(f) ? NaN : v, y);
+    for (const w of S) p(w, f, Me(f) ? NaN : v, x);
   };
   for (const f of n) p(f, null, NaN, {});
 }
-function Vv(n, l) {
+function Xv(n, l) {
   const o = (c, s) => {
     if (!c || c.kind === "text" || !ze(c)) return;
     const d = c.style, p = d.position === "absolute" ? d.w === void 0 && (d.left === void 0 || d.right === void 0) : s && typeof d.w != "number";
@@ -14238,32 +14245,32 @@ function Vv(n, l) {
   };
   for (const c of n) o(c, !1);
 }
-function Xv(n, l) {
+function Zv(n, l) {
   const o = l.heights ?? /* @__PURE__ */ new Map(), c = (b) => o.get(b), s = (b) => {
-    const x = c(b);
-    if (Number.isFinite(x)) return x;
+    const y = c(b);
+    if (Number.isFinite(y)) return y;
     if (b.kind === "text" || !ze(b)) return 0;
-    const C = b.style, j = typeof C.min_h == "number" ? C.min_h : 0, E = (b.children ?? []).filter(Ye), v = E.map((w) => s(w) + (w.kind === "text" ? 0 : Math.max(0, P(w.style.mt) || 0) + Math.max(0, P(w.style.mb) || 0))), y = E.length ? Me(b) ? Math.max(...v) : v.reduce((w, O) => w + O, 0) + (C.display === "flex" ? (P(C.gap_y) || 0) * (E.length - 1) : 0) : 0, S = [C.pt, C.pb, C.border_t, C.border_b].reduce((w, O) => w + (P(O) || 0), 0);
-    return Math.max(j, y + S);
-  }, d = (b) => !(b.children ?? []).filter(Ye).length || Me(b) ? NaN : s({ ...b, style: { ...b.style, h: void 0, max_h: void 0, min_h: void 0 } }), p = (b, x) => {
+    const C = b.style, j = typeof C.min_h == "number" ? C.min_h : 0, E = (b.children ?? []).filter(Ye), v = E.map((w) => s(w) + (w.kind === "text" ? 0 : Math.max(0, P(w.style.mt) || 0) + Math.max(0, P(w.style.mb) || 0))), x = E.length ? Me(b) ? Math.max(...v) : v.reduce((w, O) => w + O, 0) + (C.display === "flex" ? (P(C.gap_y) || 0) * (E.length - 1) : 0) : 0, S = [C.pt, C.pb, C.border_t, C.border_b].reduce((w, O) => w + (P(O) || 0), 0);
+    return Math.max(j, x + S);
+  }, d = (b) => !(b.children ?? []).filter(Ye).length || Me(b) ? NaN : s({ ...b, style: { ...b.style, h: void 0, max_h: void 0, min_h: void 0 } }), p = (b, y) => {
     const C = b.style;
     if (typeof C.h == "number") return C.h;
     if (typeof C.max_h == "number") return C.max_h;
-    if (!x || !Hi(x) || Me(x)) return NaN;
-    const j = x.style, E = typeof j.h == "number" ? j.h : typeof j.max_h == "number" ? j.max_h : NaN, v = (x.children ?? []).filter(Ye);
-    let y = 0;
+    if (!y || !Hi(y) || Me(y)) return NaN;
+    const j = y.style, E = typeof j.h == "number" ? j.h : typeof j.max_h == "number" ? j.max_h : NaN, v = (y.children ?? []).filter(Ye);
+    let x = 0;
     for (const w of v) {
       if (w === b) continue;
       const O = c(w);
       if (!Number.isFinite(O)) return NaN;
-      y += O + (w.kind === "text" ? 0 : P(w.style.mt) + P(w.style.mb));
+      x += O + (w.kind === "text" ? 0 : P(w.style.mt) + P(w.style.mb));
     }
     const S = j.display === "flex" ? P(j.gap_y) * Math.max(0, v.length - 1) : 0;
-    return E - P(j.pt) - P(j.pb) - P(j.border_t) - P(j.border_b) - y - S - P(C.mt) - P(C.mb);
-  }, f = (b, x) => {
+    return E - P(j.pt) - P(j.pb) - P(j.border_t) - P(j.border_b) - x - S - P(C.mt) - P(C.mb);
+  }, f = (b, y) => {
     if (!(!b || b.kind === "text" || !ze(b))) {
       if (b.scrollbar > 0 && b.style.overflow_y === "scroll") {
-        const C = d(b), j = p(b, x);
+        const C = d(b), j = p(b, y);
         Number.isFinite(C) && Number.isFinite(j) && C > j + 0.01 && l.set(b, { ...l.get(b), pr: P(b.style.pr) + b.scrollbar });
       }
       for (const C of b.children ?? []) f(C, b);
@@ -14271,13 +14278,13 @@ function Xv(n, l) {
   };
   for (const b of n) f(b, null);
 }
-const Zv = ["text_size", "line_height", "whitespace", "text_ellipsis"], P = (n) => n == null ? 0 : typeof n == "number" ? n : NaN, Hi = (n) => n.style.display === "flex" ? n.style.flex_direction === "col" : !0, Me = (n) => n.style.display === "flex" && (n.style.flex_direction ?? "row") === "row", Ye = (n) => n.kind === "text" || ze(n) && n.style.position !== "absolute";
-function Jv(n, l) {
+const Jv = ["text_size", "line_height", "whitespace", "text_ellipsis"], P = (n) => n == null ? 0 : typeof n == "number" ? n : NaN, Hi = (n) => n.style.display === "flex" ? n.style.flex_direction === "col" : !0, Me = (n) => n.style.display === "flex" && (n.style.flex_direction ?? "row") === "row", Ye = (n) => n.kind === "text" || ze(n) && n.style.position !== "absolute";
+function Lv(n, l) {
   const o = /* @__PURE__ */ new Map(), c = (S, w) => o.set(S, { ...o.get(S), ...Object.fromEntries(Object.entries(w).filter(([, O]) => Number.isFinite(O))) }), s = /* @__PURE__ */ new Map(), d = /* @__PURE__ */ new Map();
   function p(S, w) {
-    if (S.kind === "text") return w.whitespace === "nowrap" || Zf.test(S.text) ? an(w) ?? NaN : NaN;
+    if (S.kind === "text") return w.whitespace === "nowrap" || Jf.test(S.text) ? an(w) ?? NaN : NaN;
     const O = { ...w };
-    for (const z of Zv) S.style[z] !== void 0 && (O[z] = S.style[z]);
+    for (const z of Jv) S.style[z] !== void 0 && (O[z] = S.style[z]);
     d.set(S, O);
     const N = S.style, M = (S.children ?? []).filter(Ye), K = M.map((z) => p(z, O));
     let U;
@@ -14296,7 +14303,7 @@ function Jv(n, l) {
     }
     return s.set(S, U), U;
   }
-  const f = (S) => (an(S) - (Mi + ff) * S.text_size) / 2 + Mi * S.text_size;
+  const f = (S) => (an(S) - (Mi + mf) * S.text_size) / 2 + Mi * S.text_size;
   function b(S, w, O) {
     let N = 0, M = 0;
     for (const [K, U] of S.entries()) {
@@ -14307,9 +14314,9 @@ function Jv(n, l) {
     }
     return N + M;
   }
-  const x = () => ({ exact: 0, laid: 0 }), C = (S, w) => {
+  const y = () => ({ exact: 0, laid: 0 }), C = (S, w) => {
     if (!Number.isFinite(w))
-      return Object.assign(S, x()), NaN;
+      return Object.assign(S, y()), NaN;
     S.exact += w;
     const O = Math.round(S.exact * l + 1e-9) / l, N = O - S.laid;
     return S.laid = O, N;
@@ -14318,7 +14325,7 @@ function Jv(n, l) {
     if (!(S.kind === "text" || !ze(S))) {
       for (const w of (S.children ?? []).filter((O) => O.kind !== "text" && ze(O) && O.style.position === "absolute")) j(w);
       if (Hi(S) && !Me(S)) {
-        const w = x();
+        const w = y();
         c(S, { border_t: C(w, P(S.style.border_t)), pt: C(w, P(S.style.pt)) }), E(S, w);
       } else for (const w of (S.children ?? []).filter(Ye)) w.kind !== "text" && j(w);
     }
@@ -14332,15 +14339,15 @@ function Jv(n, l) {
     return N && c(S, { gap_y: 0 }), O.forEach((M, K) => {
       if (M.kind === "text") {
         const U = s.get(M) ?? p(M, d.get(S) ?? {});
-        Number.isFinite(U) ? c(M, { h: C(w, U) }) : Object.assign(w, x());
+        Number.isFinite(U) ? c(M, { h: C(w, U) }) : Object.assign(w, y());
         return;
       }
-      if (c(M, { mt: C(w, (K ? N : 0) + P(M.style.mt)) }), Number.isFinite(s.get(M))) y(M, w);
+      if (c(M, { mt: C(w, (K ? N : 0) + P(M.style.mt)) }), Number.isFinite(s.get(M))) x(M, w);
       else if (v(M)) {
         const U = M.style;
         c(M, { border_t: C(w, P(U.border_t)), pt: C(w, P(U.pt)) }), c(M, { pb: C(w, P(U.pb)), border_b: C(w, P(U.border_b)) });
       } else
-        j(M), Object.assign(w, x());
+        j(M), Object.assign(w, y());
       c(M, { mb: C(w, P(M.style.mb)) });
     }), !0;
   }
@@ -14348,7 +14355,7 @@ function Jv(n, l) {
     const w = S.style, O = (S.children ?? []).filter(Ye), N = an(d.get(S) ?? {});
     return S.kind === "div" && !Me(S) && O.length > 0 && O.every((M) => M.kind === "text") && Number.isInteger(N) && [w.h, w.min_h, w.max_h].every((M) => M === void 0 || M === "auto");
   }
-  function y(S, w) {
+  function x(S, w) {
     const O = S.style;
     for (const z of (S.children ?? []).filter((g) => g.kind !== "text" && ze(g) && g.style.position === "absolute")) j(z);
     const N = w.laid, M = w.exact;
@@ -14370,15 +14377,15 @@ function Jv(n, l) {
     p(S, {}), j(S);
   return Object.defineProperty(o, "heights", { value: s }), o;
 }
-const ty = { sidebar: [{ name: "sidebar-root", selector: "aside.sidebar" }, { name: "sidebar-content", selector: "aside.sidebar > div:first-child" }, { name: "host-switcher", selector: '[data-testid="host-switcher"]' }, { name: "host-chip", selector: '[data-testid="host-switcher"] > div' }, { name: "host-badge", selector: ".sidebar__env-badge" }, { name: "host-name", selector: ".sidebar__env-host" }, { name: "host-meta", selector: '[data-testid="host-switcher"] > div > div:first-child > span:nth-child(3)' }, { name: "host-line", selector: ".sidebar__env-cwd" }, { name: "host-caret", selector: '[data-testid="host-switcher"] > span[aria-hidden="true"]' }, { name: "new-session-button", selector: 'button[data-testid^="new-session-"]', key: { self: !0, attr: "data-testid", strip: "new-session-" } }, { name: "new-session-icon", selector: 'button[data-testid^="new-session-"] > svg' }, { name: "new-session-label", selector: 'button[data-testid^="new-session-"]', textRange: !0 }, { name: "new-session-shortcut", selector: 'button[data-testid^="new-session-"] > span' }, { name: "overview", selector: '[data-testid="workspace-overview"]' }, { name: "overview-header", selector: '[data-testid="workspace-overview"] > div:first-child' }, { name: "overview-title", selector: '[data-testid="workspace-overview"] > div:first-child > div:first-child > span:first-child' }, { name: "needs-you-button", selector: '[data-testid="workspace-needs-you"]' }, { name: "organize-button", selector: '[data-testid="workspace-organize"]' }, { name: "organize-icon", selector: '[data-testid="workspace-organize"] > svg' }, { name: "add-project-button", selector: '[data-testid="workspace-add-project"]' }, { name: "add-project-icon", selector: '[data-testid="workspace-add-project"] > svg' }, { name: "add-project-label", selector: '[data-testid="workspace-add-project"]', textRange: !0 }, { name: "project-list", selector: '[data-testid="project-list"]' }, { name: "project", selector: ".workspace-project", key: { self: !0, attr: "data-testid", strip: "workspace-project-" } }, { name: "project-header", selector: ".workspace-project > div:first-child", key: { closest: ".workspace-project", attr: "data-testid", strip: "workspace-project-" } }, { name: "project-toggle", selector: '[data-testid^="project-toggle-"]', key: { self: !0, attr: "data-testid", strip: "project-toggle-" } }, { name: "project-chevron", selector: '[data-testid^="project-toggle-"] > svg:not([data-testid])', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-folder-icon", selector: '[data-testid="project-folder-icon"]', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-name", selector: '[data-testid^="project-toggle-"] strong', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-branch", selector: '[data-testid^="project-toggle-"] > span.whitespace-nowrap', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-dirty-mark", selector: '[data-testid^="project-toggle-"] > span[title="Uncommitted changes"]', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-rollup", selector: '[data-testid^="project-rollup-"]', key: { self: !0, attr: "data-testid", strip: "project-rollup-" } }, { name: "project-rollup-badge", selector: '[data-testid^="project-rollup-"] > span', key: { closest: '[data-testid^="project-rollup-"]', attr: "data-testid", strip: "project-rollup-" } }, { name: "project-menu-button", selector: '[data-testid^="workspace-project-menu-"]', key: { self: !0, attr: "data-testid", strip: "workspace-project-menu-" } }, { name: "project-add-button", selector: ".workspace-project > div:first-child .worktree-menu__btn", key: { closest: ".workspace-project", attr: "data-testid", strip: "workspace-project-" } }, { name: "project-workspaces", selector: ".workspace-project__workspaces", key: { closest: ".workspace-project", attr: "data-testid", strip: "workspace-project-" } }, { name: "workspace", selector: '[data-testid="workspace-tree-root"] [data-testid^="workspace-entry-"]', key: { self: !0, attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-button", selector: '[data-testid="workspace-tree-root"] button.workspace-entry__button', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-icon", selector: '[data-testid="workspace-tree-root"] [data-testid="workspace-checkout-icon"]', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-name", selector: '[data-testid="workspace-tree-root"] strong[title="Double-click to rename"]', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-branch", selector: '[data-testid="workspace-tree-root"] button.workspace-entry__button > span.items-baseline > span', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-dirty-mark", selector: '[data-testid="workspace-tree-root"] button.workspace-entry__button > span[title="Uncommitted changes"]', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-pinned-label", selector: '[data-testid="workspace-tree-root"] button.workspace-entry__button > span.shrink-0:not([title])', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "hidden-worktrees-button", selector: '[data-testid^="workspace-hidden-"]', key: { self: !0, attr: "data-testid", strip: "workspace-hidden-" } }, { name: "session-row", selector: 'div[class~="group/row"]', key: { find: 'button[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])', attr: "data-testid", strip: "workspace-session-" } }, { name: "session-button", selector: 'button[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])', key: { self: !0, attr: "data-testid", strip: "workspace-session-" } }, { name: "session-mark", selector: ".agent-mark", key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "session-mark-icon", selector: ".agent-mark > span > *", key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "session-title", selector: 'button[data-testid^="workspace-session-"] > span.whitespace-nowrap', key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "status-row-title", selector: "button[data-session] span.truncate:not([data-testid])", key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "status-row-detail", selector: '[data-testid="status-row-detail"]', key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "session-state-badge", selector: '[data-testid^="session-state-"]', key: { self: !0, attr: "data-testid", strip: "session-state-" } }, { name: "session-close-button", selector: '[data-testid^="workspace-session-close-"]', key: { self: !0, attr: "data-testid", strip: "workspace-session-close-" } }, { name: "chats", selector: '[data-testid="workspace-chats"]' }, { name: "chats-header", selector: '[data-testid="workspace-chats"] > div:first-child' }, { name: "chats-toggle", selector: '[data-testid="workspace-chats-collapse"]' }, { name: "chats-label", selector: '[data-testid="workspace-chats-collapse"]', textRange: !0 }, { name: "chats-chevron", selector: '[data-testid="workspace-chats-collapse"] > svg' }, { name: "chats-menu-button", selector: '[data-testid="workspace-chats-menu"]' }, { name: "chats-new-button", selector: '[data-testid="workspace-chats-new"]' }, { name: "chats-new-icon", selector: '[data-testid="workspace-chats-new"] > svg' }, { name: "status-view", selector: '[data-testid="workspace-status-view"]' }, { name: "status-section", selector: '[data-testid^="status-section-"]:not([data-testid^="status-section-title-"])', key: { self: !0, attr: "data-testid", strip: "status-section-" } }, { name: "status-heading", selector: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', key: { self: !0, attr: "data-testid" } }, { name: "status-heading-dot", selector: '[data-testid^="status-section-title-"] > span:first-child, [data-testid="status-no-sessions-title"] > span:first-child', key: { closest: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', attr: "data-testid" } }, { name: "status-heading-label", selector: '[data-testid^="status-section-title-"] > span:nth-child(2), [data-testid="status-no-sessions-title"] > span:nth-child(2)', key: { closest: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', attr: "data-testid" } }, { name: "status-heading-count", selector: '[data-testid^="status-section-title-"] > span[aria-label], [data-testid="status-no-sessions-title"] > span[aria-label]', key: { closest: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', attr: "data-testid" } }, { name: "status-heading-note", selector: '[data-testid^="status-section-title-"] > span.truncate, [data-testid="status-no-sessions-title"] > span.truncate', key: { closest: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', attr: "data-testid" } }, { name: "status-project", selector: 'div[data-testid^="status-project-"]', key: { self: !0, attr: "data-testid", strip: "status-project-" } }, { name: "status-project-header", selector: 'div[data-testid^="status-project-"] > div:first-child', key: { closest: 'div[data-testid^="status-project-"]', attr: "data-testid", strip: "status-project-" } }, { name: "status-project-icon", selector: 'div[data-testid^="status-project-"] > div:first-child > svg', key: { closest: 'div[data-testid^="status-project-"]', attr: "data-testid", strip: "status-project-" } }, { name: "status-project-title", selector: '[data-testid="status-project-title"]', key: { closest: 'div[data-testid^="status-project-"]', attr: "data-testid", strip: "status-project-" } }, { name: "status-empty-project", selector: '[data-testid^="status-empty-project-"]', key: { self: !0, attr: "data-testid", strip: "status-empty-project-" } }, { name: "status-empty-project-icon", selector: '[data-testid^="status-empty-project-"] > button:first-child > svg', key: { closest: '[data-testid^="status-empty-project-"]', attr: "data-testid", strip: "status-empty-project-" } }, { name: "status-empty-project-title", selector: '[data-testid^="status-empty-project-"] > button > span.whitespace-nowrap', key: { closest: '[data-testid^="status-empty-project-"]', attr: "data-testid", strip: "status-empty-project-" } }, { name: "settings-bar", selector: "aside.sidebar > div:last-child" }, { name: "settings-gear", selector: '[data-testid="settings-gear"]' }, { name: "settings-gear-icon", selector: '[data-testid="settings-gear"] > svg' }], tabs: [{ name: "tab-strip", selector: '[data-testid="tab-bar"]' }, { name: "tab-slot", selector: "[data-tab-entry]", key: { self: !0, attr: "data-tab-entry" } }, { name: "tab-separator", selector: '[data-testid="tab-separator"]', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab", selector: "button.tab-bar__tab", key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-icon", selector: 'button.tab-bar__tab > span[aria-hidden="true"]', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-icon-glyph", selector: 'button.tab-bar__tab > span[aria-hidden="true"] > *', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-label", selector: "button.tab-bar__tab > span.truncate", key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-dirty", selector: 'button.tab-bar__tab > span[aria-label="unsaved changes"]', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-close", selector: '[data-tab-entry] > button[aria-label^="Close"]', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-close-glyph", selector: '[data-tab-entry] > button[aria-label^="Close"] > svg', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-new", selector: '[data-testid="tab-new"]' }, { name: "tab-new-glyph", selector: '[data-testid="tab-new"] > svg' }], status: [{ name: "status-bar", selector: "footer.status-bar" }, { name: "status-location", selector: ".status-bar__location" }, { name: "status-dot", selector: ".status-bar__location > span:first-child" }, { name: "status-host", selector: '[data-testid="status-host"]' }, { name: "status-cwd", selector: ".status-item--cwd" }, { name: "status-branch", selector: ".status-bar__branch" }, { name: "status-branch-icon", selector: ".status-bar__branch > svg" }, { name: "status-branch-name", selector: ".status-bar__branch > span" }, { name: "status-details", selector: ".status-bar__details" }, { name: "zoom-indicator", selector: '[data-testid="zoom-indicator"]' }, { name: "status-detail", selector: ".status-bar__details > span" }, { name: "status-usage", selector: ".status-bar__usage" }, { name: "usage-summary", selector: '[data-testid="usage-summary"]' }, { name: "usage-unavailable", selector: '[data-testid="usage-summary"] > span:only-child' }, { name: "usage-account", selector: '[data-testid="usage-summary"] > span.flex' }, { name: "usage-account-name", selector: '[data-testid="usage-summary"] > span.flex > span:first-child' }, { name: "usage-window", selector: '[data-testid="usage-summary"] > span.flex > span:not(:first-child)' }, { name: "status-connection", selector: '[data-testid="status-connection"]' }, { name: "status-connection-glyph", selector: '[data-testid="status-connection"] > svg' }], navigator: [{ name: "navigator-scrim", selector: "body > div.fixed.inset-0" }, { name: "navigator-panel", selector: '[data-testid="navigator"]' }, { name: "navigator-input", selector: '[data-testid="navigator-input"]' }, { name: "navigator-chips", selector: '[data-testid="navigator"] > div:nth-child(2)' }, { name: "navigator-chip", selector: '[data-testid^="navigator-filter-"]', key: { self: !0, attr: "data-testid", strip: "navigator-filter-" } }, { name: "navigator-list", selector: '[data-testid="navigator"] > div:nth-child(3)' }, { name: "navigator-notice", selector: '[data-testid="navigator"] > div:nth-child(3) > p[role]' }, { name: "navigator-empty", selector: '[data-testid="navigator"] div.text-center' }, { name: "navigator-command", selector: '[data-testid^="navigator-command-"]', key: { self: !0, attr: "data-testid", strip: "navigator-command-" } }, { name: "navigator-command-title", selector: '[data-testid^="navigator-command-"] > span:first-child', key: { closest: '[data-testid^="navigator-command-"]', attr: "data-testid", strip: "navigator-command-" } }, { name: "navigator-command-detail", selector: '[data-testid^="navigator-command-"] > span:last-child', key: { closest: '[data-testid^="navigator-command-"]', attr: "data-testid", strip: "navigator-command-" } }, { name: "navigator-row", selector: '[data-testid^="navigator-row-"]', key: { self: !0, attr: "data-testid", strip: "navigator-row-" } }, { name: "navigator-row-dot", selector: '[data-testid^="navigator-row-"] > :first-child', key: { closest: '[data-testid^="navigator-row-"]', attr: "data-testid", strip: "navigator-row-" } }, { name: "navigator-row-title", selector: '[data-testid^="navigator-row-"] > span:nth-child(2)', key: { closest: '[data-testid^="navigator-row-"]', attr: "data-testid", strip: "navigator-row-" } }, { name: "navigator-row-detail", selector: '[data-testid^="navigator-row-"] > span:last-child', key: { closest: '[data-testid^="navigator-row-"]', attr: "data-testid", strip: "navigator-row-" } }, { name: "navigator-note", selector: '[data-testid="navigator"] > p:last-child' }], "pane-menu": [{ name: "pane-menu", selector: '[data-testid="pane-context-menu"]' }, { name: "pane-menu-item", selector: '[data-testid="pane-context-menu"] > button', key: { self: !0, attr: "data-testid", strip: "pane-menu-" } }, { name: "pane-menu-divider", selector: '[data-testid="pane-context-menu"] > div.h-px' }, { name: "pane-menu-rename-row", selector: '[data-testid="pane-context-menu"] > div.flex' }, { name: "pane-menu-rename-input", selector: '[data-testid="pane-menu-rename-input"]' }, { name: "pane-menu-rename-confirm", selector: '[data-testid="pane-menu-rename-confirm"]' }], confirm: [{ name: "confirm-scrim", selector: "body > div.fixed.inset-0" }, { name: "confirm-panel", selector: '[data-testid="confirm-dialog"]' }, { name: "confirm-message", selector: ".confirm-dialog__message" }, { name: "confirm-extra", selector: '[data-testid="confirm-dialog"] > :not(.confirm-dialog__message):not(div.flex)' }, { name: "confirm-buttons", selector: '[data-testid="confirm-dialog"] > div.flex' }, { name: "confirm-cancel", selector: '[data-testid="confirm-cancel"]' }, { name: "confirm-accept", selector: '[data-testid="confirm-accept"]' }], dialog: [{ name: "dialog-scrim", selector: "body > div.fixed.inset-0" }, { name: "dialog-panel", selector: '[data-testid="file-name-dialog"]' }, { name: "dialog-title", selector: '[data-testid="file-name-dialog"] > h2' }, { name: "dialog-input", selector: '[data-testid="file-name-input"]' }, { name: "dialog-hint", selector: '[data-testid="file-name-dialog"] > p:not([role])' }, { name: "dialog-error", selector: '[data-testid="file-name-dialog"] > p[role="alert"]' }, { name: "dialog-buttons", selector: '[data-testid="file-name-dialog"] > div.flex' }, { name: "dialog-cancel", selector: '[data-testid="file-name-dialog"] > div.flex > button:first-child' }, { name: "dialog-confirm", selector: '[data-testid="file-name-confirm"]' }], toast: [{ name: "toast-stack", selector: '[data-testid="toast"]' }, { name: "toast-card", selector: '[data-testid="toast"] .animate-toast-in' }, { name: "toast-open", selector: '[data-testid^="toast-"]:not([data-testid^="toast-dismiss-"])' }, { name: "toast-mark", selector: '[data-testid^="toast-"]:not([data-testid^="toast-dismiss-"]) > :first-child' }, { name: "toast-heading", selector: '[data-testid^="toast-"]:not([data-testid^="toast-dismiss-"]) > span.min-w-0 > span:first-child' }, { name: "toast-detail", selector: '[data-testid^="toast-"]:not([data-testid^="toast-dismiss-"]) > span.min-w-0 > span:nth-child(2)' }, { name: "toast-dismiss", selector: '[data-testid^="toast-dismiss-"]' }, { name: "toast-dismiss-glyph", selector: '[data-testid^="toast-dismiss-"] > svg' }], "pane-header": [{ name: "pane-header", selector: '[data-testid^="pane-header-"]', key: { self: !0, attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-icon", selector: '[data-testid^="pane-header-"] > span.shrink-0:not([data-testid])', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-icon-glyph", selector: '[data-testid^="pane-header-"] > span.shrink-0:not([data-testid]) > *', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-name", selector: '[data-testid^="pane-header-"] > span.truncate', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-state", selector: '[data-testid^="pane-header-"] > span.flex[title]', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-state-dot", selector: '[data-testid^="pane-header-"] > span.flex[title] > span.rounded-full', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-state-word", selector: '[data-testid^="pane-header-"] > span.flex[title] > span.truncate', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-controls", selector: '[data-testid^="tile-controls-"]', key: { self: !0, attr: "data-testid", strip: "tile-controls-" } }, { name: "pane-expand", selector: '[data-testid^="tile-expand-"]', key: { self: !0, attr: "data-testid", strip: "tile-expand-" } }, { name: "pane-expand-glyph", selector: '[data-testid^="tile-expand-"] > svg', key: { closest: '[data-testid^="tile-expand-"]', attr: "data-testid", strip: "tile-expand-" } }, { name: "pane-close", selector: '[data-testid^="tile-close-"]', key: { self: !0, attr: "data-testid", strip: "tile-close-" } }, { name: "pane-close-glyph", selector: '[data-testid^="tile-close-"] > svg', key: { closest: '[data-testid^="tile-close-"]', attr: "data-testid", strip: "tile-close-" } }, { name: "pane-corner", selector: "div.pointer-events-auto.absolute" }], "new-session": [{ name: "launcher", selector: ".new-session-popover" }, { name: "launcher-filter", selector: '[data-testid="new-tab-filter"]' }, { name: "launcher-list", selector: "#new-tab-launcher-list" }, { name: "launcher-option", selector: '[role="option"]', key: { self: !0, attr: "data-testid" } }, { name: "launcher-option-icon", selector: '[role="option"] > :first-child:not(span.flex-1):not(kbd)', key: { closest: '[role="option"]', attr: "data-testid" } }, { name: "launcher-option-label", selector: '[role="option"] > span.flex-1', key: { closest: '[role="option"]', attr: "data-testid" } }, { name: "launcher-option-key", selector: '[role="option"] > kbd', key: { closest: '[role="option"]', attr: "data-testid" } }, { name: "launcher-note", selector: ".new-session-popover p[role]" }, { name: "agent-select", selector: '[data-testid="new-session-popover-agent"]' }, { name: "agent-manage", selector: ".new-session-popover > div:first-child > button:not([data-testid])" }, { name: "project-option", selector: '[data-testid^="project-option-"]', key: { self: !0, attr: "data-testid", strip: "project-option-" } }, { name: "project-option-name", selector: '[data-testid^="project-option-"]', key: { closest: '[data-testid^="project-option-"]', attr: "data-testid", strip: "project-option-" }, textRange: !0 }, { name: "project-option-path", selector: '[data-testid^="project-option-"] > span', key: { closest: '[data-testid^="project-option-"]', attr: "data-testid", strip: "project-option-" } }], "tab-menu": [{ name: "tab-menu", selector: '[data-testid="tab-split-menu"]' }, { name: "tab-menu-item", selector: '[data-testid="tab-split-menu"] > button', key: { self: !0, attr: "data-testid" } }, { name: "tab-menu-item-label", selector: '[data-testid="tab-split-menu"] > button > span.block', key: { closest: '[data-testid="tab-split-menu"] > button', attr: "data-testid" } }, { name: "tab-menu-heading", selector: '[data-testid="tab-split-menu"] > p' }, { name: "tab-menu-empty", selector: '[data-testid="tab-split-menu"] > div:not(.h-px)' }, { name: "tab-menu-divider", selector: '[data-testid="tab-split-menu"] > div.h-px' }, { name: "tab-menu-rename-form", selector: '[data-testid="tab-split-menu"] > form' }, { name: "tab-menu-rename-input", selector: '[data-testid="tab-menu-rename-input"]' }, { name: "tab-menu-rename-save", selector: '[data-testid="tab-split-menu"] > form > button' }], select: [{ name: "select-field", selector: '[data-testid="select-demo"]' }, { name: "select-field-label", selector: '[data-testid="select-demo"] > span.truncate' }, { name: "select-chevron", selector: '[data-testid="select-demo"] > svg' }, { name: "select-list", selector: '[role="listbox"]' }, { name: "select-option", selector: '[role="listbox"] > [role="option"]', key: { self: !0, attr: "data-value" } }, { name: "select-option-label", selector: '[role="listbox"] > [role="option"] > span.truncate', key: { closest: '[role="option"]', attr: "data-value" } }, { name: "select-option-check", selector: '[role="listbox"] > [role="option"] > span[aria-hidden]', key: { closest: '[role="option"]', attr: "data-value" } }], "keybind-help": [{ name: "keybind-help-scrim", selector: "body > div.fixed.inset-0" }, { name: "keybind-help-panel", selector: '[data-testid="keybind-help"]' }, { name: "keybind-help-header", selector: '[data-testid="keybind-help"] > div:first-child' }, { name: "keybind-help-title", selector: '[data-testid="keybind-help"] h2' }, { name: "keybind-help-close", selector: '[aria-label="Close keybind help"]' }, { name: "keybind-help-close-glyph", selector: '[aria-label="Close keybind help"] > svg' }, { name: "keybind-help-search", selector: '[data-testid="keybind-help-search"]' }, { name: "keybind-help-list", selector: '[data-testid="keybind-help"] > div:last-child' }, { name: "keybind-help-empty", selector: '[data-testid="keybind-help"] div.text-center' }, { name: "keybind-help-group", selector: '[data-testid="keybind-help"] section' }, { name: "keybind-help-group-title", selector: '[data-testid="keybind-help"] section > h3' }, { name: "keybind-help-row", selector: '[data-testid="keybind-help"] li' }, { name: "keybind-help-keys", selector: '[data-testid="keybind-help"] li > kbd' }, { name: "keybind-help-description", selector: '[data-testid="keybind-help"] li > span' }], launcher: [{ name: "launcher-scrim", selector: "body > div.fixed.inset-0" }, { name: "launcher-panel", selector: '[data-testid="new-session-dialog"]' }, { name: "launcher-title", selector: '[data-testid="new-session-dialog"] > p' }, { name: "launcher-filter", selector: '[data-testid="new-session-filter"]' }, { name: "launcher-list", selector: "#new-session-list" }, { name: "launcher-row", selector: '[data-testid^="new-session-row-"]', key: { self: !0, attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-row-icon", selector: '[data-testid^="new-session-row-"] > :first-child:not(span):not(kbd)', key: { closest: '[data-testid^="new-session-row-"]', attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-row-label", selector: '[data-testid^="new-session-row-"] > span.shrink-0', key: { closest: '[data-testid^="new-session-row-"]', attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-row-detail", selector: '[data-testid^="new-session-row-"] > span.ml-auto', key: { closest: '[data-testid^="new-session-row-"]', attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-row-key", selector: '[data-testid^="new-session-row-"] > kbd', key: { closest: '[data-testid^="new-session-row-"]', attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-note", selector: "#new-session-list > p" }], "session-menu": [{ name: "tab-menu", selector: '[data-testid="tab-split-menu"]' }, { name: "tab-menu-item", selector: '[data-testid="tab-split-menu"] > button', key: { self: !0, attr: "data-testid" } }, { name: "tab-menu-item-label", selector: '[data-testid="tab-split-menu"] > button > span.block', key: { closest: '[data-testid="tab-split-menu"] > button', attr: "data-testid" } }, { name: "tab-menu-heading", selector: '[data-testid="tab-split-menu"] > p' }, { name: "tab-menu-empty", selector: '[data-testid="tab-split-menu"] > div:not(.h-px)' }, { name: "tab-menu-divider", selector: '[data-testid="tab-split-menu"] > div.h-px' }], "tab-drag": [{ name: "tab-drag-layer", selector: '[data-testid="tab-drag-layer"]' }, { name: "tab-drag-pane", selector: '[data-testid="tab-drag-layer"] > div.bg-surface-1\\/30' }, { name: "tab-drop-zone", selector: '[data-testid="tab-drop-zone"]', key: { self: !0, attr: "data-zone" } }, { name: "tab-drop-label", selector: '[data-testid="tab-drop-zone"] > span' }, { name: "tab-drag-ghost", selector: '[data-testid="tab-drag-ghost"]' }], start: [{ name: "start-panel", selector: '[data-testid="no-session-panel"], [data-testid="cli-start-panel"]' }, { name: "start-column", selector: '[data-testid$="-panel"] > div' }, { name: "start-logo", selector: '[data-testid="no-session-panel"] img' }, { name: "start-name", selector: '[data-testid$="-panel"] h1, [data-testid="no-session-panel"] h1, [data-testid="no-session-panel"] h2' }, { name: "start-hint", selector: '[data-testid$="-panel"] p' }, { name: "start-target", selector: '[data-testid="workspace-start-target"], [data-testid="cli-start-target"]' }, { name: "start-action", selector: '[data-testid="home-add-project"], [data-testid="no-session-create"], [data-testid^="workspace-start-"]:not([data-testid="workspace-start-target"]), [data-testid^="cli-start-agent-"]', key: { self: !0, attr: "data-testid" } }, { name: "start-status", selector: '[role="status"], [role="alert"]' }, { name: "start-status-action", selector: '[role="status"] > button, [role="alert"] > button' }, { name: "start-link", selector: '[data-testid$="-panel"] button.text-subtext-0' }, { name: "start-shortcut-row", selector: '[data-testid="no-session-panel"] dl > div' }, { name: "start-shortcut-label", selector: '[data-testid="no-session-panel"] dl dt' }, { name: "start-shortcut-key", selector: '[data-testid="no-session-panel"] dl kbd' }], "folder-browser": [{ name: "folder-browser", selector: '[data-testid="dir-browser"]' }, { name: "folder-browser-mode-toggle", selector: '[data-testid="dir-browser-mode-toggle"]' }, { name: "folder-browser-up", selector: '[data-testid="dir-browser-up"]' }, { name: "folder-browser-crumbs", selector: '[data-testid="dir-browser"] span.min-w-0.flex-1' }, { name: "folder-browser-crumb", selector: '[data-testid="dir-browser"] span.min-w-0.flex-1 button' }, { name: "folder-browser-filter", selector: '[data-testid="dir-browser-filter"]' }, { name: "folder-browser-list", selector: '[data-testid="dir-browser"] div.overflow-y-auto' }, { name: "folder-browser-entry", selector: '[data-testid^="dir-browser-entry-"]', key: { self: !0, attr: "data-testid", strip: "dir-browser-entry-" } }, { name: "folder-browser-entry-name", selector: '[data-testid^="dir-browser-entry-"] > span:first-child', key: { closest: '[data-testid^="dir-browser-entry-"]', attr: "data-testid", strip: "dir-browser-entry-" } }, { name: "folder-browser-git", selector: '[data-testid^="dir-browser-entry-"] > span:last-child:not(:first-child)', key: { closest: '[data-testid^="dir-browser-entry-"]', attr: "data-testid", strip: "dir-browser-entry-" } }, { name: "folder-browser-note", selector: '[data-testid="dir-browser"] div.overflow-y-auto > div' }, { name: "folder-browser-use", selector: '[data-testid="dir-browser-use"]' }, { name: "folder-browser-path-input", selector: '[data-testid="project-path-input"]' }], instructions: [{ name: "instructions-scrim", selector: "body > div.fixed.inset-0" }, { name: "instructions-panel", selector: '[data-testid="instructions-dialog"]' }, { name: "instructions-title", selector: '[data-testid="instructions-dialog"] > h2' }, { name: "instructions-intro", selector: '[data-testid="instructions-dialog"] > p' }, { name: "instructions-label", selector: '[data-testid="instructions-dialog"] > label > span:first-child' }, { name: "instructions-count", selector: '[data-testid="instructions-count"]' }, { name: "instructions-text", selector: '[data-testid="instructions-text"]' }, { name: "instructions-folders", selector: '[data-testid="instructions-folders"]' }, { name: "instructions-error", selector: '[data-testid="instructions-error"]' }, { name: "instructions-cancel", selector: '[data-testid="instructions-dialog"] > div.flex.justify-end > button:first-child' }, { name: "instructions-save", selector: '[data-testid="instructions-save"]' }], memory: [{ name: "memory-scrim", selector: "body > div.fixed.inset-0", key: { self: !0, attr: "data-testid" } }, { name: "memory-panel", selector: '[data-testid="memory-dialog"]' }, { name: "memory-title", selector: '[data-testid="memory-dialog"] > h2' }, { name: "memory-intro", selector: '[data-testid="memory-dialog"] > p' }, { name: "memory-caps", selector: '[data-testid="memory-caps"]' }, { name: "memory-new", selector: '[data-testid="memory-new"]' }, { name: "memory-enabled", selector: '[data-testid="memory-enabled"]' }, { name: "memory-enabled-label", selector: '[data-testid="memory-dialog"] > label.flex > span' }, { name: "memory-note", selector: '[data-testid="memory-dialog"] > span.text-subtext-0' }, { name: "memory-row", selector: '[data-testid^="memory-row-"]', key: { self: !0, attr: "data-testid", strip: "memory-row-" } }, { name: "memory-open", selector: '[data-testid^="memory-open-"]', key: { self: !0, attr: "data-testid", strip: "memory-open-" } }, { name: "memory-file-title", selector: '[data-testid^="memory-row-"] button > span:first-child', key: { closest: '[data-testid^="memory-row-"]', attr: "data-testid", strip: "memory-row-" } }, { name: "memory-file-summary", selector: '[data-testid^="memory-row-"] button > span.truncate', key: { closest: '[data-testid^="memory-row-"]', attr: "data-testid", strip: "memory-row-" } }, { name: "memory-file-meta", selector: '[data-testid^="memory-row-"] button > span:last-child', key: { closest: '[data-testid^="memory-row-"]', attr: "data-testid", strip: "memory-row-" } }, { name: "memory-delete", selector: '[data-testid^="memory-delete-"]', key: { self: !0, attr: "data-testid", strip: "memory-delete-" } }, { name: "memory-error", selector: '[data-testid="memory-error"]' }, { name: "memory-close", selector: '[data-testid="memory-dialog"] > div.flex.justify-end > button' }, { name: "memory-file-name", selector: '[data-testid="memory-file-name"]' }, { name: "memory-name", selector: '[data-testid="memory-name"]' }, { name: "memory-count", selector: '[data-testid="memory-count"]' }, { name: "memory-text", selector: '[data-testid="memory-text"]' }, { name: "memory-conflict", selector: '[data-testid="memory-conflict"]' }, { name: "memory-reload", selector: '[data-testid="memory-reload"]' }, { name: "memory-back", selector: '[data-testid="memory-back"]' }, { name: "memory-save", selector: '[data-testid="memory-save"]' }, { name: "memory-confirm", selector: '[data-testid="confirm-dialog"]' }, { name: "memory-confirm-message", selector: ".confirm-dialog__message" }], worktree: [{ name: "worktree-plus", selector: '[data-testid^="worktree-menu-"]' }, { name: "worktree-popover", selector: '[role="dialog"][aria-label="Git worktrees"]' }, { name: "worktree-heading", selector: '[role="dialog"][aria-label="Git worktrees"] > div:first-child > span:first-child' }, { name: "worktree-project", selector: '[role="dialog"][aria-label="Git worktrees"] > div:first-child > span:last-child' }, { name: "worktree-list", selector: '[role="dialog"][aria-label="Git worktrees"] > div.overflow-y-auto' }, { name: "worktree-note", selector: '[role="dialog"][aria-label="Git worktrees"] > div.overflow-y-auto > div:not(.worktree-menu__entry)' }, { name: "worktree-entry", selector: '[data-testid^="worktree-entry-"]', key: { self: !0, attr: "data-testid", strip: "worktree-entry-" } }, { name: "worktree-entry-branch", selector: ".worktree-menu__entry-branch", key: { closest: '[data-testid^="worktree-entry-"]', attr: "data-testid", strip: "worktree-entry-" } }, { name: "worktree-badge", selector: '[data-testid^="worktree-entry-"] .worktree-menu__entry-branch > span', key: { closest: '[data-testid^="worktree-entry-"]', attr: "data-testid", strip: "worktree-entry-" } }, { name: "worktree-entry-path", selector: ".worktree-menu__entry-path", key: { closest: '[data-testid^="worktree-entry-"]', attr: "data-testid", strip: "worktree-entry-" } }, { name: "worktree-open", selector: '[data-testid^="worktree-open-"]', key: { self: !0, attr: "data-testid", strip: "worktree-open-" } }, { name: "worktree-remove", selector: '[data-testid^="worktree-remove-"]', key: { self: !0, attr: "data-testid", strip: "worktree-remove-" } }, { name: "worktree-error", selector: '[data-testid="worktree-error"]' }, { name: "worktree-new", selector: '[data-testid="worktree-new"]' }, { name: "worktree-name-input", selector: '[data-testid="worktree-name-input"]' }, { name: "worktree-start-input", selector: '[data-testid="worktree-start-input"]' }, { name: "worktree-branch-input", selector: '[data-testid="worktree-branch-input"]' }, { name: "worktree-parent-select", selector: '[data-testid="worktree-parent-select"]' }, { name: "worktree-new-branch", selector: '[data-testid="worktree-new-branch"]' }, { name: "worktree-path-input", selector: '[data-testid="worktree-path-input"]' }, { name: "worktree-agent-select", selector: '[data-testid="worktree-agent-select"]' }, { name: "worktree-create-cancel", selector: '[data-testid="worktree-create-cancel"]' }, { name: "worktree-create-submit", selector: '[data-testid="worktree-create-submit"]' }, { name: "worktree-confirm", selector: '[data-testid="confirm-dialog"]' }, { name: "worktree-confirm-message", selector: ".confirm-dialog__message" }, { name: "worktree-confirm-accept", selector: '[data-testid="confirm-accept"]' }, { name: "worktree-confirm-cancel", selector: '[data-testid="confirm-cancel"]' }], "terminal-search": [{ name: "terminal-frame", selector: '[data-testid="persistent-agent-terminal"]' }, { name: "term-search", selector: '[data-testid="term-search"]' }, { name: "term-search-input", selector: '[data-testid="term-search-input"]' }, { name: "term-search-button", selector: '[data-testid="term-search"] > button', key: { self: !0, attr: "title" } }], "agent-control": [{ name: "terminal-frame", selector: '[data-testid="persistent-agent-terminal"]' }, { name: "agent-control-chip", selector: '[data-testid="agent-control-chip"]' }, { name: "agent-control-label", selector: '[data-testid="agent-control-chip"] > span' }, { name: "agent-control-button", selector: '[data-testid="agent-control-chip"] > button' }, { name: "agent-control-error", selector: ".terminal__cli-error" }, { name: "agent-control-ended", selector: ".terminal__exited", key: { self: !0, attr: "data-testid" } }, { name: "agent-control-ended-text", selector: ".terminal__exited-text" }, { name: "agent-control-ended-button", selector: ".terminal__exited-actions > button", key: { self: !0, attr: "data-testid" } }], "phone-size": [{ name: "terminal-frame", selector: '[data-testid="persistent-agent-terminal"]' }, { name: "phone-size-notice", selector: '[data-testid="phone-size-notice"]' }, { name: "phone-size-chip", selector: '[data-testid="phone-size-chip"]' }, { name: "phone-size-heading", selector: '[data-testid="phone-size-notice"] span.font-semibold' }, { name: "phone-size-text", selector: '[data-testid="phone-size-notice"] span:not(.font-semibold)' }, { name: "phone-size-fold", selector: '[aria-label="Keep phone size and hide this"]' }, { name: "phone-size-button", selector: '[data-testid="phone-size-notice"] div.flex.flex-wrap > button, [data-testid="phone-size-chip"] > button' }] };
+const ey = { sidebar: [{ name: "sidebar-root", selector: "aside.sidebar" }, { name: "sidebar-content", selector: "aside.sidebar > div:first-child" }, { name: "host-switcher", selector: '[data-testid="host-switcher"]' }, { name: "host-chip", selector: '[data-testid="host-switcher"] > div' }, { name: "host-badge", selector: ".sidebar__env-badge" }, { name: "host-name", selector: ".sidebar__env-host" }, { name: "host-meta", selector: '[data-testid="host-switcher"] > div > div:first-child > span:nth-child(3)' }, { name: "host-line", selector: ".sidebar__env-cwd" }, { name: "host-caret", selector: '[data-testid="host-switcher"] > span[aria-hidden="true"]' }, { name: "new-session-button", selector: 'button[data-testid^="new-session-"]', key: { self: !0, attr: "data-testid", strip: "new-session-" } }, { name: "new-session-icon", selector: 'button[data-testid^="new-session-"] > svg' }, { name: "new-session-label", selector: 'button[data-testid^="new-session-"]', textRange: !0 }, { name: "new-session-shortcut", selector: 'button[data-testid^="new-session-"] > span' }, { name: "overview", selector: '[data-testid="workspace-overview"]' }, { name: "overview-header", selector: '[data-testid="workspace-overview"] > div:first-child' }, { name: "overview-title", selector: '[data-testid="workspace-overview"] > div:first-child > div:first-child > span:first-child' }, { name: "needs-you-button", selector: '[data-testid="workspace-needs-you"]' }, { name: "organize-button", selector: '[data-testid="workspace-organize"]' }, { name: "organize-icon", selector: '[data-testid="workspace-organize"] > svg' }, { name: "add-project-button", selector: '[data-testid="workspace-add-project"]' }, { name: "add-project-icon", selector: '[data-testid="workspace-add-project"] > svg' }, { name: "add-project-label", selector: '[data-testid="workspace-add-project"]', textRange: !0 }, { name: "project-list", selector: '[data-testid="project-list"]' }, { name: "project", selector: ".workspace-project", key: { self: !0, attr: "data-testid", strip: "workspace-project-" } }, { name: "project-header", selector: ".workspace-project > div:first-child", key: { closest: ".workspace-project", attr: "data-testid", strip: "workspace-project-" } }, { name: "project-toggle", selector: '[data-testid^="project-toggle-"]', key: { self: !0, attr: "data-testid", strip: "project-toggle-" } }, { name: "project-chevron", selector: '[data-testid^="project-toggle-"] > svg:not([data-testid])', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-folder-icon", selector: '[data-testid="project-folder-icon"]', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-name", selector: '[data-testid^="project-toggle-"] strong', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-branch", selector: '[data-testid^="project-toggle-"] > span.whitespace-nowrap', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-dirty-mark", selector: '[data-testid^="project-toggle-"] > span[title="Uncommitted changes"]', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-rollup", selector: '[data-testid^="project-rollup-"]', key: { self: !0, attr: "data-testid", strip: "project-rollup-" } }, { name: "project-rollup-badge", selector: '[data-testid^="project-rollup-"] > span', key: { closest: '[data-testid^="project-rollup-"]', attr: "data-testid", strip: "project-rollup-" } }, { name: "project-menu-button", selector: '[data-testid^="workspace-project-menu-"]', key: { self: !0, attr: "data-testid", strip: "workspace-project-menu-" } }, { name: "project-add-button", selector: ".workspace-project > div:first-child .worktree-menu__btn", key: { closest: ".workspace-project", attr: "data-testid", strip: "workspace-project-" } }, { name: "project-workspaces", selector: ".workspace-project__workspaces", key: { closest: ".workspace-project", attr: "data-testid", strip: "workspace-project-" } }, { name: "workspace", selector: '[data-testid="workspace-tree-root"] [data-testid^="workspace-entry-"]', key: { self: !0, attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-button", selector: '[data-testid="workspace-tree-root"] button.workspace-entry__button', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-icon", selector: '[data-testid="workspace-tree-root"] [data-testid="workspace-checkout-icon"]', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-name", selector: '[data-testid="workspace-tree-root"] strong[title="Double-click to rename"]', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-branch", selector: '[data-testid="workspace-tree-root"] button.workspace-entry__button > span.items-baseline > span', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-dirty-mark", selector: '[data-testid="workspace-tree-root"] button.workspace-entry__button > span[title="Uncommitted changes"]', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-pinned-label", selector: '[data-testid="workspace-tree-root"] button.workspace-entry__button > span.shrink-0:not([title])', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "hidden-worktrees-button", selector: '[data-testid^="workspace-hidden-"]', key: { self: !0, attr: "data-testid", strip: "workspace-hidden-" } }, { name: "session-row", selector: 'div[class~="group/row"]', key: { find: 'button[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])', attr: "data-testid", strip: "workspace-session-" } }, { name: "session-button", selector: 'button[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])', key: { self: !0, attr: "data-testid", strip: "workspace-session-" } }, { name: "session-mark", selector: ".agent-mark", key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "session-mark-icon", selector: ".agent-mark > span > *", key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "session-title", selector: 'button[data-testid^="workspace-session-"] > span.whitespace-nowrap', key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "status-row-title", selector: "button[data-session] span.truncate:not([data-testid])", key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "status-row-detail", selector: '[data-testid="status-row-detail"]', key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "session-state-badge", selector: '[data-testid^="session-state-"]', key: { self: !0, attr: "data-testid", strip: "session-state-" } }, { name: "session-close-button", selector: '[data-testid^="workspace-session-close-"]', key: { self: !0, attr: "data-testid", strip: "workspace-session-close-" } }, { name: "chats", selector: '[data-testid="workspace-chats"]' }, { name: "chats-header", selector: '[data-testid="workspace-chats"] > div:first-child' }, { name: "chats-toggle", selector: '[data-testid="workspace-chats-collapse"]' }, { name: "chats-label", selector: '[data-testid="workspace-chats-collapse"]', textRange: !0 }, { name: "chats-chevron", selector: '[data-testid="workspace-chats-collapse"] > svg' }, { name: "chats-menu-button", selector: '[data-testid="workspace-chats-menu"]' }, { name: "chats-new-button", selector: '[data-testid="workspace-chats-new"]' }, { name: "chats-new-icon", selector: '[data-testid="workspace-chats-new"] > svg' }, { name: "status-view", selector: '[data-testid="workspace-status-view"]' }, { name: "status-section", selector: '[data-testid^="status-section-"]:not([data-testid^="status-section-title-"])', key: { self: !0, attr: "data-testid", strip: "status-section-" } }, { name: "status-heading", selector: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', key: { self: !0, attr: "data-testid" } }, { name: "status-heading-dot", selector: '[data-testid^="status-section-title-"] > span:first-child, [data-testid="status-no-sessions-title"] > span:first-child', key: { closest: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', attr: "data-testid" } }, { name: "status-heading-label", selector: '[data-testid^="status-section-title-"] > span:nth-child(2), [data-testid="status-no-sessions-title"] > span:nth-child(2)', key: { closest: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', attr: "data-testid" } }, { name: "status-heading-count", selector: '[data-testid^="status-section-title-"] > span[aria-label], [data-testid="status-no-sessions-title"] > span[aria-label]', key: { closest: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', attr: "data-testid" } }, { name: "status-heading-note", selector: '[data-testid^="status-section-title-"] > span.truncate, [data-testid="status-no-sessions-title"] > span.truncate', key: { closest: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', attr: "data-testid" } }, { name: "status-project", selector: 'div[data-testid^="status-project-"]', key: { self: !0, attr: "data-testid", strip: "status-project-" } }, { name: "status-project-header", selector: 'div[data-testid^="status-project-"] > div:first-child', key: { closest: 'div[data-testid^="status-project-"]', attr: "data-testid", strip: "status-project-" } }, { name: "status-project-icon", selector: 'div[data-testid^="status-project-"] > div:first-child > svg', key: { closest: 'div[data-testid^="status-project-"]', attr: "data-testid", strip: "status-project-" } }, { name: "status-project-title", selector: '[data-testid="status-project-title"]', key: { closest: 'div[data-testid^="status-project-"]', attr: "data-testid", strip: "status-project-" } }, { name: "status-empty-project", selector: '[data-testid^="status-empty-project-"]', key: { self: !0, attr: "data-testid", strip: "status-empty-project-" } }, { name: "status-empty-project-icon", selector: '[data-testid^="status-empty-project-"] > button:first-child > svg', key: { closest: '[data-testid^="status-empty-project-"]', attr: "data-testid", strip: "status-empty-project-" } }, { name: "status-empty-project-title", selector: '[data-testid^="status-empty-project-"] > button > span.whitespace-nowrap', key: { closest: '[data-testid^="status-empty-project-"]', attr: "data-testid", strip: "status-empty-project-" } }, { name: "settings-bar", selector: "aside.sidebar > div:last-child" }, { name: "settings-gear", selector: '[data-testid="settings-gear"]' }, { name: "settings-gear-icon", selector: '[data-testid="settings-gear"] > svg' }], tabs: [{ name: "tab-strip", selector: '[data-testid="tab-bar"]' }, { name: "tab-slot", selector: "[data-tab-entry]", key: { self: !0, attr: "data-tab-entry" } }, { name: "tab-separator", selector: '[data-testid="tab-separator"]', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab", selector: "button.tab-bar__tab", key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-icon", selector: 'button.tab-bar__tab > span[aria-hidden="true"]', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-icon-glyph", selector: 'button.tab-bar__tab > span[aria-hidden="true"] > *', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-label", selector: "button.tab-bar__tab > span.truncate", key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-dirty", selector: 'button.tab-bar__tab > span[aria-label="unsaved changes"]', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-close", selector: '[data-tab-entry] > button[aria-label^="Close"]', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-close-glyph", selector: '[data-tab-entry] > button[aria-label^="Close"] > svg', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-new", selector: '[data-testid="tab-new"]' }, { name: "tab-new-glyph", selector: '[data-testid="tab-new"] > svg' }], status: [{ name: "status-bar", selector: "footer.status-bar" }, { name: "status-location", selector: ".status-bar__location" }, { name: "status-dot", selector: ".status-bar__location > span:first-child" }, { name: "status-host", selector: '[data-testid="status-host"]' }, { name: "status-cwd", selector: ".status-item--cwd" }, { name: "status-branch", selector: ".status-bar__branch" }, { name: "status-branch-icon", selector: ".status-bar__branch > svg" }, { name: "status-branch-name", selector: ".status-bar__branch > span" }, { name: "status-details", selector: ".status-bar__details" }, { name: "zoom-indicator", selector: '[data-testid="zoom-indicator"]' }, { name: "status-detail", selector: ".status-bar__details > span" }, { name: "status-usage", selector: ".status-bar__usage" }, { name: "usage-summary", selector: '[data-testid="usage-summary"]' }, { name: "usage-unavailable", selector: '[data-testid="usage-summary"] > span:only-child' }, { name: "usage-account", selector: '[data-testid="usage-summary"] > span.flex' }, { name: "usage-account-name", selector: '[data-testid="usage-summary"] > span.flex > span:first-child' }, { name: "usage-window", selector: '[data-testid="usage-summary"] > span.flex > span:not(:first-child)' }, { name: "status-connection", selector: '[data-testid="status-connection"]' }, { name: "status-connection-glyph", selector: '[data-testid="status-connection"] > svg' }], navigator: [{ name: "navigator-scrim", selector: "body > div.fixed.inset-0" }, { name: "navigator-panel", selector: '[data-testid="navigator"]' }, { name: "navigator-input", selector: '[data-testid="navigator-input"]' }, { name: "navigator-chips", selector: '[data-testid="navigator"] > div:nth-child(2)' }, { name: "navigator-chip", selector: '[data-testid^="navigator-filter-"]', key: { self: !0, attr: "data-testid", strip: "navigator-filter-" } }, { name: "navigator-list", selector: '[data-testid="navigator"] > div:nth-child(3)' }, { name: "navigator-notice", selector: '[data-testid="navigator"] > div:nth-child(3) > p[role]' }, { name: "navigator-empty", selector: '[data-testid="navigator"] div.text-center' }, { name: "navigator-command", selector: '[data-testid^="navigator-command-"]', key: { self: !0, attr: "data-testid", strip: "navigator-command-" } }, { name: "navigator-command-title", selector: '[data-testid^="navigator-command-"] > span:first-child', key: { closest: '[data-testid^="navigator-command-"]', attr: "data-testid", strip: "navigator-command-" } }, { name: "navigator-command-detail", selector: '[data-testid^="navigator-command-"] > span:last-child', key: { closest: '[data-testid^="navigator-command-"]', attr: "data-testid", strip: "navigator-command-" } }, { name: "navigator-row", selector: '[data-testid^="navigator-row-"]', key: { self: !0, attr: "data-testid", strip: "navigator-row-" } }, { name: "navigator-row-dot", selector: '[data-testid^="navigator-row-"] > :first-child', key: { closest: '[data-testid^="navigator-row-"]', attr: "data-testid", strip: "navigator-row-" } }, { name: "navigator-row-title", selector: '[data-testid^="navigator-row-"] > span:nth-child(2)', key: { closest: '[data-testid^="navigator-row-"]', attr: "data-testid", strip: "navigator-row-" } }, { name: "navigator-row-detail", selector: '[data-testid^="navigator-row-"] > span:last-child', key: { closest: '[data-testid^="navigator-row-"]', attr: "data-testid", strip: "navigator-row-" } }, { name: "navigator-note", selector: '[data-testid="navigator"] > p:last-child' }], "pane-menu": [{ name: "pane-menu", selector: '[data-testid="pane-context-menu"]' }, { name: "pane-menu-item", selector: '[data-testid="pane-context-menu"] > button', key: { self: !0, attr: "data-testid", strip: "pane-menu-" } }, { name: "pane-menu-divider", selector: '[data-testid="pane-context-menu"] > div.h-px' }, { name: "pane-menu-rename-row", selector: '[data-testid="pane-context-menu"] > div.flex' }, { name: "pane-menu-rename-input", selector: '[data-testid="pane-menu-rename-input"]' }, { name: "pane-menu-rename-confirm", selector: '[data-testid="pane-menu-rename-confirm"]' }], confirm: [{ name: "confirm-scrim", selector: "body > div.fixed.inset-0" }, { name: "confirm-panel", selector: '[data-testid="confirm-dialog"]' }, { name: "confirm-message", selector: ".confirm-dialog__message" }, { name: "confirm-extra", selector: '[data-testid="confirm-dialog"] > :not(.confirm-dialog__message):not(div.flex)' }, { name: "confirm-buttons", selector: '[data-testid="confirm-dialog"] > div.flex' }, { name: "confirm-cancel", selector: '[data-testid="confirm-cancel"]' }, { name: "confirm-accept", selector: '[data-testid="confirm-accept"]' }], dialog: [{ name: "dialog-scrim", selector: "body > div.fixed.inset-0" }, { name: "dialog-panel", selector: '[data-testid="file-name-dialog"]' }, { name: "dialog-title", selector: '[data-testid="file-name-dialog"] > h2' }, { name: "dialog-input", selector: '[data-testid="file-name-input"]' }, { name: "dialog-hint", selector: '[data-testid="file-name-dialog"] > p:not([role])' }, { name: "dialog-error", selector: '[data-testid="file-name-dialog"] > p[role="alert"]' }, { name: "dialog-buttons", selector: '[data-testid="file-name-dialog"] > div.flex' }, { name: "dialog-cancel", selector: '[data-testid="file-name-dialog"] > div.flex > button:first-child' }, { name: "dialog-confirm", selector: '[data-testid="file-name-confirm"]' }], toast: [{ name: "toast-stack", selector: '[data-testid="toast"]' }, { name: "toast-card", selector: '[data-testid="toast"] .animate-toast-in' }, { name: "toast-open", selector: '[data-testid^="toast-"]:not([data-testid^="toast-dismiss-"])' }, { name: "toast-mark", selector: '[data-testid^="toast-"]:not([data-testid^="toast-dismiss-"]) > :first-child' }, { name: "toast-heading", selector: '[data-testid^="toast-"]:not([data-testid^="toast-dismiss-"]) > span.min-w-0 > span:first-child' }, { name: "toast-detail", selector: '[data-testid^="toast-"]:not([data-testid^="toast-dismiss-"]) > span.min-w-0 > span:nth-child(2)' }, { name: "toast-dismiss", selector: '[data-testid^="toast-dismiss-"]' }, { name: "toast-dismiss-glyph", selector: '[data-testid^="toast-dismiss-"] > svg' }], "pane-header": [{ name: "pane-header", selector: '[data-testid^="pane-header-"]', key: { self: !0, attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-icon", selector: '[data-testid^="pane-header-"] > span.shrink-0:not([data-testid])', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-icon-glyph", selector: '[data-testid^="pane-header-"] > span.shrink-0:not([data-testid]) > *', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-name", selector: '[data-testid^="pane-header-"] > span.truncate', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-state", selector: '[data-testid^="pane-header-"] > span.flex[title]', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-state-dot", selector: '[data-testid^="pane-header-"] > span.flex[title] > span.rounded-full', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-state-word", selector: '[data-testid^="pane-header-"] > span.flex[title] > span.truncate', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-controls", selector: '[data-testid^="tile-controls-"]', key: { self: !0, attr: "data-testid", strip: "tile-controls-" } }, { name: "pane-expand", selector: '[data-testid^="tile-expand-"]', key: { self: !0, attr: "data-testid", strip: "tile-expand-" } }, { name: "pane-expand-glyph", selector: '[data-testid^="tile-expand-"] > svg', key: { closest: '[data-testid^="tile-expand-"]', attr: "data-testid", strip: "tile-expand-" } }, { name: "pane-close", selector: '[data-testid^="tile-close-"]', key: { self: !0, attr: "data-testid", strip: "tile-close-" } }, { name: "pane-close-glyph", selector: '[data-testid^="tile-close-"] > svg', key: { closest: '[data-testid^="tile-close-"]', attr: "data-testid", strip: "tile-close-" } }, { name: "pane-corner", selector: "div.pointer-events-auto.absolute" }], "new-session": [{ name: "launcher", selector: ".new-session-popover" }, { name: "launcher-filter", selector: '[data-testid="new-tab-filter"]' }, { name: "launcher-list", selector: "#new-tab-launcher-list" }, { name: "launcher-option", selector: '[role="option"]', key: { self: !0, attr: "data-testid" } }, { name: "launcher-option-icon", selector: '[role="option"] > :first-child:not(span.flex-1):not(kbd)', key: { closest: '[role="option"]', attr: "data-testid" } }, { name: "launcher-option-label", selector: '[role="option"] > span.flex-1', key: { closest: '[role="option"]', attr: "data-testid" } }, { name: "launcher-option-key", selector: '[role="option"] > kbd', key: { closest: '[role="option"]', attr: "data-testid" } }, { name: "launcher-note", selector: ".new-session-popover p[role]" }, { name: "agent-select", selector: '[data-testid="new-session-popover-agent"]' }, { name: "agent-manage", selector: ".new-session-popover > div:first-child > button:not([data-testid])" }, { name: "project-option", selector: '[data-testid^="project-option-"]', key: { self: !0, attr: "data-testid", strip: "project-option-" } }, { name: "project-option-name", selector: '[data-testid^="project-option-"]', key: { closest: '[data-testid^="project-option-"]', attr: "data-testid", strip: "project-option-" }, textRange: !0 }, { name: "project-option-path", selector: '[data-testid^="project-option-"] > span', key: { closest: '[data-testid^="project-option-"]', attr: "data-testid", strip: "project-option-" } }], "tab-menu": [{ name: "tab-menu", selector: '[data-testid="tab-split-menu"]' }, { name: "tab-menu-item", selector: '[data-testid="tab-split-menu"] > button', key: { self: !0, attr: "data-testid" } }, { name: "tab-menu-item-label", selector: '[data-testid="tab-split-menu"] > button > span.block', key: { closest: '[data-testid="tab-split-menu"] > button', attr: "data-testid" } }, { name: "tab-menu-heading", selector: '[data-testid="tab-split-menu"] > p' }, { name: "tab-menu-empty", selector: '[data-testid="tab-split-menu"] > div:not(.h-px)' }, { name: "tab-menu-divider", selector: '[data-testid="tab-split-menu"] > div.h-px' }, { name: "tab-menu-rename-form", selector: '[data-testid="tab-split-menu"] > form' }, { name: "tab-menu-rename-input", selector: '[data-testid="tab-menu-rename-input"]' }, { name: "tab-menu-rename-save", selector: '[data-testid="tab-split-menu"] > form > button' }], select: [{ name: "select-field", selector: '[data-testid="select-demo"]' }, { name: "select-field-label", selector: '[data-testid="select-demo"] > span.truncate' }, { name: "select-chevron", selector: '[data-testid="select-demo"] > svg' }, { name: "select-list", selector: '[role="listbox"]' }, { name: "select-option", selector: '[role="listbox"] > [role="option"]', key: { self: !0, attr: "data-value" } }, { name: "select-option-label", selector: '[role="listbox"] > [role="option"] > span.truncate', key: { closest: '[role="option"]', attr: "data-value" } }, { name: "select-option-check", selector: '[role="listbox"] > [role="option"] > span[aria-hidden]', key: { closest: '[role="option"]', attr: "data-value" } }], "keybind-help": [{ name: "keybind-help-scrim", selector: "body > div.fixed.inset-0" }, { name: "keybind-help-panel", selector: '[data-testid="keybind-help"]' }, { name: "keybind-help-header", selector: '[data-testid="keybind-help"] > div:first-child' }, { name: "keybind-help-title", selector: '[data-testid="keybind-help"] h2' }, { name: "keybind-help-close", selector: '[aria-label="Close keybind help"]' }, { name: "keybind-help-close-glyph", selector: '[aria-label="Close keybind help"] > svg' }, { name: "keybind-help-search", selector: '[data-testid="keybind-help-search"]' }, { name: "keybind-help-list", selector: '[data-testid="keybind-help"] > div:last-child' }, { name: "keybind-help-empty", selector: '[data-testid="keybind-help"] div.text-center' }, { name: "keybind-help-group", selector: '[data-testid="keybind-help"] section' }, { name: "keybind-help-group-title", selector: '[data-testid="keybind-help"] section > h3' }, { name: "keybind-help-row", selector: '[data-testid="keybind-help"] li' }, { name: "keybind-help-keys", selector: '[data-testid="keybind-help"] li > kbd' }, { name: "keybind-help-description", selector: '[data-testid="keybind-help"] li > span' }], launcher: [{ name: "launcher-scrim", selector: "body > div.fixed.inset-0" }, { name: "launcher-panel", selector: '[data-testid="new-session-dialog"]' }, { name: "launcher-title", selector: '[data-testid="new-session-dialog"] > p' }, { name: "launcher-filter", selector: '[data-testid="new-session-filter"]' }, { name: "launcher-list", selector: "#new-session-list" }, { name: "launcher-row", selector: '[data-testid^="new-session-row-"]', key: { self: !0, attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-row-icon", selector: '[data-testid^="new-session-row-"] > :first-child:not(span):not(kbd)', key: { closest: '[data-testid^="new-session-row-"]', attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-row-label", selector: '[data-testid^="new-session-row-"] > span.shrink-0', key: { closest: '[data-testid^="new-session-row-"]', attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-row-detail", selector: '[data-testid^="new-session-row-"] > span.ml-auto', key: { closest: '[data-testid^="new-session-row-"]', attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-row-key", selector: '[data-testid^="new-session-row-"] > kbd', key: { closest: '[data-testid^="new-session-row-"]', attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-note", selector: "#new-session-list > p" }], "session-menu": [{ name: "tab-menu", selector: '[data-testid="tab-split-menu"]' }, { name: "tab-menu-item", selector: '[data-testid="tab-split-menu"] > button', key: { self: !0, attr: "data-testid" } }, { name: "tab-menu-item-label", selector: '[data-testid="tab-split-menu"] > button > span.block', key: { closest: '[data-testid="tab-split-menu"] > button', attr: "data-testid" } }, { name: "tab-menu-heading", selector: '[data-testid="tab-split-menu"] > p' }, { name: "tab-menu-empty", selector: '[data-testid="tab-split-menu"] > div:not(.h-px)' }, { name: "tab-menu-divider", selector: '[data-testid="tab-split-menu"] > div.h-px' }], "tab-drag": [{ name: "tab-drag-layer", selector: '[data-testid="tab-drag-layer"]' }, { name: "tab-drag-pane", selector: '[data-testid="tab-drag-layer"] > div.bg-surface-1\\/30' }, { name: "tab-drop-zone", selector: '[data-testid="tab-drop-zone"]', key: { self: !0, attr: "data-zone" } }, { name: "tab-drop-label", selector: '[data-testid="tab-drop-zone"] > span' }, { name: "tab-drag-ghost", selector: '[data-testid="tab-drag-ghost"]' }], start: [{ name: "start-panel", selector: '[data-testid="no-session-panel"], [data-testid="cli-start-panel"]' }, { name: "start-column", selector: '[data-testid$="-panel"] > div' }, { name: "start-logo", selector: '[data-testid="no-session-panel"] img' }, { name: "start-name", selector: '[data-testid$="-panel"] h1, [data-testid="no-session-panel"] h1, [data-testid="no-session-panel"] h2' }, { name: "start-hint", selector: '[data-testid$="-panel"] p' }, { name: "start-target", selector: '[data-testid="workspace-start-target"], [data-testid="cli-start-target"]' }, { name: "start-action", selector: '[data-testid="home-add-project"], [data-testid="no-session-create"], [data-testid^="workspace-start-"]:not([data-testid="workspace-start-target"]), [data-testid^="cli-start-agent-"]', key: { self: !0, attr: "data-testid" } }, { name: "start-status", selector: '[role="status"], [role="alert"]' }, { name: "start-status-action", selector: '[role="status"] > button, [role="alert"] > button' }, { name: "start-link", selector: '[data-testid$="-panel"] button.text-subtext-0' }, { name: "start-shortcut-row", selector: '[data-testid="no-session-panel"] dl > div' }, { name: "start-shortcut-label", selector: '[data-testid="no-session-panel"] dl dt' }, { name: "start-shortcut-key", selector: '[data-testid="no-session-panel"] dl kbd' }], "folder-browser": [{ name: "folder-browser", selector: '[data-testid="dir-browser"]' }, { name: "folder-browser-mode-toggle", selector: '[data-testid="dir-browser-mode-toggle"]' }, { name: "folder-browser-up", selector: '[data-testid="dir-browser-up"]' }, { name: "folder-browser-crumbs", selector: '[data-testid="dir-browser"] span.min-w-0.flex-1' }, { name: "folder-browser-crumb", selector: '[data-testid="dir-browser"] span.min-w-0.flex-1 button' }, { name: "folder-browser-filter", selector: '[data-testid="dir-browser-filter"]' }, { name: "folder-browser-list", selector: '[data-testid="dir-browser"] div.overflow-y-auto' }, { name: "folder-browser-entry", selector: '[data-testid^="dir-browser-entry-"]', key: { self: !0, attr: "data-testid", strip: "dir-browser-entry-" } }, { name: "folder-browser-entry-name", selector: '[data-testid^="dir-browser-entry-"] > span:first-child', key: { closest: '[data-testid^="dir-browser-entry-"]', attr: "data-testid", strip: "dir-browser-entry-" } }, { name: "folder-browser-git", selector: '[data-testid^="dir-browser-entry-"] > span:last-child:not(:first-child)', key: { closest: '[data-testid^="dir-browser-entry-"]', attr: "data-testid", strip: "dir-browser-entry-" } }, { name: "folder-browser-note", selector: '[data-testid="dir-browser"] div.overflow-y-auto > div' }, { name: "folder-browser-use", selector: '[data-testid="dir-browser-use"]' }, { name: "folder-browser-path-input", selector: '[data-testid="project-path-input"]' }], instructions: [{ name: "instructions-scrim", selector: "body > div.fixed.inset-0" }, { name: "instructions-panel", selector: '[data-testid="instructions-dialog"]' }, { name: "instructions-title", selector: '[data-testid="instructions-dialog"] > h2' }, { name: "instructions-intro", selector: '[data-testid="instructions-dialog"] > p' }, { name: "instructions-label", selector: '[data-testid="instructions-dialog"] > label > span:first-child' }, { name: "instructions-count", selector: '[data-testid="instructions-count"]' }, { name: "instructions-text", selector: '[data-testid="instructions-text"]' }, { name: "instructions-folders", selector: '[data-testid="instructions-folders"]' }, { name: "instructions-error", selector: '[data-testid="instructions-error"]' }, { name: "instructions-cancel", selector: '[data-testid="instructions-dialog"] > div.flex.justify-end > button:first-child' }, { name: "instructions-save", selector: '[data-testid="instructions-save"]' }], memory: [{ name: "memory-scrim", selector: "body > div.fixed.inset-0", key: { self: !0, attr: "data-testid" } }, { name: "memory-panel", selector: '[data-testid="memory-dialog"]' }, { name: "memory-title", selector: '[data-testid="memory-dialog"] > h2' }, { name: "memory-intro", selector: '[data-testid="memory-dialog"] > p' }, { name: "memory-caps", selector: '[data-testid="memory-caps"]' }, { name: "memory-new", selector: '[data-testid="memory-new"]' }, { name: "memory-enabled", selector: '[data-testid="memory-enabled"]' }, { name: "memory-enabled-label", selector: '[data-testid="memory-dialog"] > label.flex > span' }, { name: "memory-note", selector: '[data-testid="memory-dialog"] > span.text-subtext-0' }, { name: "memory-row", selector: '[data-testid^="memory-row-"]', key: { self: !0, attr: "data-testid", strip: "memory-row-" } }, { name: "memory-open", selector: '[data-testid^="memory-open-"]', key: { self: !0, attr: "data-testid", strip: "memory-open-" } }, { name: "memory-file-title", selector: '[data-testid^="memory-row-"] button > span:first-child', key: { closest: '[data-testid^="memory-row-"]', attr: "data-testid", strip: "memory-row-" } }, { name: "memory-file-summary", selector: '[data-testid^="memory-row-"] button > span.truncate', key: { closest: '[data-testid^="memory-row-"]', attr: "data-testid", strip: "memory-row-" } }, { name: "memory-file-meta", selector: '[data-testid^="memory-row-"] button > span:last-child', key: { closest: '[data-testid^="memory-row-"]', attr: "data-testid", strip: "memory-row-" } }, { name: "memory-delete", selector: '[data-testid^="memory-delete-"]', key: { self: !0, attr: "data-testid", strip: "memory-delete-" } }, { name: "memory-error", selector: '[data-testid="memory-error"]' }, { name: "memory-close", selector: '[data-testid="memory-dialog"] > div.flex.justify-end > button' }, { name: "memory-file-name", selector: '[data-testid="memory-file-name"]' }, { name: "memory-name", selector: '[data-testid="memory-name"]' }, { name: "memory-count", selector: '[data-testid="memory-count"]' }, { name: "memory-text", selector: '[data-testid="memory-text"]' }, { name: "memory-conflict", selector: '[data-testid="memory-conflict"]' }, { name: "memory-reload", selector: '[data-testid="memory-reload"]' }, { name: "memory-back", selector: '[data-testid="memory-back"]' }, { name: "memory-save", selector: '[data-testid="memory-save"]' }, { name: "memory-confirm", selector: '[data-testid="confirm-dialog"]' }, { name: "memory-confirm-message", selector: ".confirm-dialog__message" }], worktree: [{ name: "worktree-plus", selector: '[data-testid^="worktree-menu-"]' }, { name: "worktree-popover", selector: '[role="dialog"][aria-label="Git worktrees"]' }, { name: "worktree-heading", selector: '[role="dialog"][aria-label="Git worktrees"] > div:first-child > span:first-child' }, { name: "worktree-project", selector: '[role="dialog"][aria-label="Git worktrees"] > div:first-child > span:last-child' }, { name: "worktree-list", selector: '[role="dialog"][aria-label="Git worktrees"] > div.overflow-y-auto' }, { name: "worktree-note", selector: '[role="dialog"][aria-label="Git worktrees"] > div.overflow-y-auto > div:not(.worktree-menu__entry)' }, { name: "worktree-entry", selector: '[data-testid^="worktree-entry-"]', key: { self: !0, attr: "data-testid", strip: "worktree-entry-" } }, { name: "worktree-entry-branch", selector: ".worktree-menu__entry-branch", key: { closest: '[data-testid^="worktree-entry-"]', attr: "data-testid", strip: "worktree-entry-" } }, { name: "worktree-badge", selector: '[data-testid^="worktree-entry-"] .worktree-menu__entry-branch > span', key: { closest: '[data-testid^="worktree-entry-"]', attr: "data-testid", strip: "worktree-entry-" } }, { name: "worktree-entry-path", selector: ".worktree-menu__entry-path", key: { closest: '[data-testid^="worktree-entry-"]', attr: "data-testid", strip: "worktree-entry-" } }, { name: "worktree-open", selector: '[data-testid^="worktree-open-"]', key: { self: !0, attr: "data-testid", strip: "worktree-open-" } }, { name: "worktree-remove", selector: '[data-testid^="worktree-remove-"]', key: { self: !0, attr: "data-testid", strip: "worktree-remove-" } }, { name: "worktree-error", selector: '[data-testid="worktree-error"]' }, { name: "worktree-new", selector: '[data-testid="worktree-new"]' }, { name: "worktree-name-input", selector: '[data-testid="worktree-name-input"]' }, { name: "worktree-start-input", selector: '[data-testid="worktree-start-input"]' }, { name: "worktree-branch-input", selector: '[data-testid="worktree-branch-input"]' }, { name: "worktree-parent-select", selector: '[data-testid="worktree-parent-select"]' }, { name: "worktree-new-branch", selector: '[data-testid="worktree-new-branch"]' }, { name: "worktree-path-input", selector: '[data-testid="worktree-path-input"]' }, { name: "worktree-agent-select", selector: '[data-testid="worktree-agent-select"]' }, { name: "worktree-create-cancel", selector: '[data-testid="worktree-create-cancel"]' }, { name: "worktree-create-submit", selector: '[data-testid="worktree-create-submit"]' }, { name: "worktree-confirm", selector: '[data-testid="confirm-dialog"]' }, { name: "worktree-confirm-message", selector: ".confirm-dialog__message" }, { name: "worktree-confirm-accept", selector: '[data-testid="confirm-accept"]' }, { name: "worktree-confirm-cancel", selector: '[data-testid="confirm-cancel"]' }], "terminal-search": [{ name: "terminal-frame", selector: '[data-testid="persistent-agent-terminal"]' }, { name: "term-search", selector: '[data-testid="term-search"]' }, { name: "term-search-input", selector: '[data-testid="term-search-input"]' }, { name: "term-search-button", selector: '[data-testid="term-search"] > button', key: { self: !0, attr: "title" } }], "agent-control": [{ name: "terminal-frame", selector: '[data-testid="persistent-agent-terminal"]' }, { name: "agent-control-chip", selector: '[data-testid="agent-control-chip"]' }, { name: "agent-control-label", selector: '[data-testid="agent-control-chip"] > span' }, { name: "agent-control-button", selector: '[data-testid="agent-control-chip"] > button' }, { name: "agent-control-error", selector: ".terminal__cli-error" }, { name: "agent-control-ended", selector: ".terminal__exited", key: { self: !0, attr: "data-testid" } }, { name: "agent-control-ended-text", selector: ".terminal__exited-text" }, { name: "agent-control-ended-button", selector: ".terminal__exited-actions > button", key: { self: !0, attr: "data-testid" } }], "phone-size": [{ name: "terminal-frame", selector: '[data-testid="persistent-agent-terminal"]' }, { name: "phone-size-notice", selector: '[data-testid="phone-size-notice"]' }, { name: "phone-size-chip", selector: '[data-testid="phone-size-chip"]' }, { name: "phone-size-heading", selector: '[data-testid="phone-size-notice"] span.font-semibold' }, { name: "phone-size-text", selector: '[data-testid="phone-size-notice"] span:not(.font-semibold)' }, { name: "phone-size-fold", selector: '[aria-label="Keep phone size and hide this"]' }, { name: "phone-size-button", selector: '[data-testid="phone-size-notice"] div.flex.flex-wrap > button, [data-testid="phone-size-chip"] > button' }] };
 export {
-  ty as NAMED_ELEMENTS,
-  Bh as React,
-  bg as SCHEMA,
-  $v as STYLE_KEYS,
-  Pv as describeToGpui,
-  Lv as jsxRuntime,
-  Wv as mount,
-  Fv as reactDom,
-  Iv as sdk
+  ey as NAMED_ELEMENTS,
+  qh as React,
+  vg as SCHEMA,
+  Pv as STYLE_KEYS,
+  ty as describeToGpui,
+  Wv as jsxRuntime,
+  Fv as mount,
+  Iv as reactDom,
+  $v as sdk
 };

@@ -310,6 +310,12 @@ impl Render for ScriptView {
 
 impl ScriptView {
     fn draw(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        // PERCH: the boxes this view's elements measure are its script's (`measure`).
+        let policy = self.policy.clone();
+        crate::measure::drawing(&policy, || self.draw_snapshot(window, cx))
+    }
+
+    fn draw_snapshot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         match (self.error.as_deref(), self.current.as_ref()) {
             (None, Some(snapshot)) => materialize(&self.runtime, snapshot, window, cx),
             // A build that failed left the last good snapshot in place, so the

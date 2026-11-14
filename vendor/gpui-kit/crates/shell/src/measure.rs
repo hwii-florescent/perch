@@ -5,35 +5,113 @@
 //! `.measure` are not wrapped and cost nothing. A frame GPUI replays from its view cache
 //! prepaints nothing, so the box kept is the one from the last frame that laid the element out,
 //! which is where it still is.
+//!
+//! Boxes are kept per script copy, by the policy its views run under (each load of a script
+//! gets its own): a view's elements are kept under the policy of the view that drew them
+//! ([`drawing`]), and a script reads and forgets only under its own ([`crate::scope::policy`]).
+//! So one copy can neither read nor overwrite another's boxes, and a copy's boxes go once its
+//! policy has gone (the copy closed), at the next frame that keeps a box.
 
-use std::{cell::RefCell, collections::HashMap};
-
-use gpui::{
-    AnyElement, App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId,
-    IntoElement, LayoutId, Pixels, SharedString, Window,
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    rc::{Rc, Weak},
 };
 
+use gpui::{
+    AnyElement, App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement,
+    LayoutId, Pixels, SharedString, Window,
+};
+
+use crate::policy::Policy;
+
+/// A copy's boxes, with the policy that tells the copy apart (and whether it is still open).
+type Kept = (Weak<Policy>, HashMap<SharedString, Bounds<Pixels>>);
+
 thread_local! {
-    static BOXES: RefCell<HashMap<SharedString, Bounds<Pixels>>> = RefCell::new(HashMap::new());
+    /// By the policy's address; the weak handle confirms the address is still that policy.
+    static BOXES: RefCell<HashMap<usize, Kept>> = RefCell::new(HashMap::new());
+    /// The policy of the view being drawn now, whose measured elements are its own.
+    static DRAWING: RefCell<Option<Weak<Policy>>> = const { RefCell::new(None) };
 }
 
-/// The box the element measured as `key` was last laid out in: logical pixels from the window's
-/// top left. None before it has been laid out.
+fn owner(policy: &Rc<Policy>) -> usize {
+    Rc::as_ptr(policy) as usize
+}
+
+/// Runs `draw` (a view's materialize) with the elements it measures kept under `policy`.
+pub(crate) fn drawing<R>(policy: &Rc<Policy>, draw: impl FnOnce() -> R) -> R {
+    let outer = DRAWING.with(|d| d.replace(Some(Rc::downgrade(policy))));
+    let result = draw();
+    DRAWING.with(|d| *d.borrow_mut() = outer);
+    result
+}
+
+/// The box the element the calling script measured as `key` was last laid out in: logical pixels
+/// from the window's top left. None before it has been laid out, or outside a script.
 pub fn bounds(key: &str) -> Option<Bounds<Pixels>> {
-    BOXES.with(|boxes| boxes.borrow().get(key).copied())
+    let policy = crate::scope::current_policy()?;
+    BOXES.with(|boxes| {
+        let boxes = boxes.borrow();
+        let (kept, keys) = boxes.get(&owner(&policy))?;
+        Weak::ptr_eq(kept, &Rc::downgrade(&policy))
+            .then(|| keys.get(key).copied())
+            .flatten()
+    })
 }
 
-/// Forgets every box whose key starts with `prefix` (the elements of a tree that went away).
+/// Forgets every box of the calling script whose key starts with `prefix` (the elements of a
+/// tree that went away).
 pub fn forget(prefix: &str) {
-    BOXES.with(|boxes| boxes.borrow_mut().retain(|key, _| !key.starts_with(prefix)));
+    let Some(policy) = crate::scope::current_policy() else {
+        return;
+    };
+    BOXES.with(|boxes| {
+        if let Some((_, keys)) = boxes.borrow_mut().get_mut(&owner(&policy)) {
+            keys.retain(|key, _| !key.starts_with(prefix));
+        }
+    });
 }
 
-/// Wraps `element` so its box is kept under `key`.
+/// How many boxes are kept, across every copy (for a test that a closed copy's go).
+pub fn kept() -> usize {
+    BOXES.with(|boxes| boxes.borrow().values().map(|(_, keys)| keys.len()).sum())
+}
+
+/// Wraps `element` so its box is kept under `key` for the view being drawn. Outside a view's
+/// drawing there is no copy to keep it for, and the element is left as it is.
 pub(crate) fn wrap(key: SharedString, element: AnyElement) -> AnyElement {
-    Measure { key, element }.into_any_element()
+    match DRAWING.with(|d| d.borrow().clone()) {
+        Some(policy) => Measure {
+            policy,
+            key,
+            element,
+        }
+        .into_any_element(),
+        None => element,
+    }
+}
+
+fn keep(policy: &Weak<Policy>, key: &SharedString, bounds: Bounds<Pixels>) {
+    let Some(strong) = policy.upgrade() else {
+        return;
+    };
+    BOXES.with(|boxes| {
+        let mut boxes = boxes.borrow_mut();
+        // A copy whose policy has gone has closed: its boxes go with it.
+        boxes.retain(|_, (kept, _)| kept.strong_count() > 0);
+        let entry = boxes
+            .entry(owner(&strong))
+            .or_insert_with(|| (policy.clone(), HashMap::new()));
+        if !Weak::ptr_eq(&entry.0, policy) {
+            *entry = (policy.clone(), HashMap::new());
+        }
+        entry.1.insert(key.clone(), bounds);
+    });
 }
 
 pub(crate) struct Measure {
+    policy: Weak<Policy>,
     key: SharedString,
     element: AnyElement,
 }
@@ -77,7 +155,7 @@ impl Element for Measure {
         window: &mut Window,
         cx: &mut App,
     ) {
-        BOXES.with(|boxes| boxes.borrow_mut().insert(self.key.clone(), bounds));
+        keep(&self.policy, &self.key, bounds);
         self.element.prepaint(window, cx);
     }
 

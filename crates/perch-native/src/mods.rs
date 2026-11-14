@@ -604,8 +604,11 @@ impl ModHost {
     /// data folder, and may put text on the clipboard but not read it. No process, no network.
     fn policy_for(&self, id: &str, key: &str, dir: &Path) -> Result<Policy> {
         let data = self.0.user_dir.join(".data").join(id);
+        // Its own folder, the stock copy of it (a picture a person's copy did not bring along)
+        // and its data: what it reads by path, `fs` and an `<img>` alike.
+        let stock = self.0.user_dir.join(".stock").join(id);
         let capabilities = Capabilities::new()
-            .read_roots([dir.to_path_buf()])
+            .read_roots([dir.to_path_buf(), stock, data.clone()])
             .write_roots([data.clone()])
             .storage(true)
             .clipboard_read(false)
