@@ -853,9 +853,9 @@ fn find_in_the_pane() {
         "x",
         "typing replaced the old query"
     );
-    // The bar is on screen at the top right.
-    let shot = h.draw();
-    assert!(shot.ink(88, 0, 10, rgb(0)) > 100, "the find bar is drawn");
+    // The bar itself is the terminal-search stock screen over the pane, covered by the chrome
+    // window test; the view draws nothing of its own for it.
+    h.draw();
 }
 
 /// Backgrounds, foregrounds, inverse and the cursor in each shape and focus.

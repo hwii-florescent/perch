@@ -1,0 +1,5 @@
+{
+  "name": "Phone size",
+  "description": "The web app's stock notice over a terminal whose size a phone holds, unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

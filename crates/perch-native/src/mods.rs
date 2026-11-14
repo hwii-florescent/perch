@@ -160,6 +160,30 @@ pub const STOCK: &[(&str, &str)] = &[
         include_str!("../mods/sidebar/worktree/main.js"),
     ),
     (
+        "terminal-search/main.js",
+        include_str!("../mods/terminal-search/main.js"),
+    ),
+    (
+        "terminal-search/mod.json",
+        include_str!("../mods/terminal-search/mod.json"),
+    ),
+    (
+        "terminal-search/terminal-search/main.js",
+        include_str!("../mods/terminal-search/terminal-search/main.js"),
+    ),
+    (
+        "phone-size/main.js",
+        include_str!("../mods/phone-size/main.js"),
+    ),
+    (
+        "phone-size/mod.json",
+        include_str!("../mods/phone-size/mod.json"),
+    ),
+    (
+        "phone-size/phone-size/main.js",
+        include_str!("../mods/phone-size/phone-size/main.js"),
+    ),
+    (
         "launcher/launcher/main.js",
         include_str!("../mods/launcher/launcher/main.js"),
     ),

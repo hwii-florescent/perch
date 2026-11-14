@@ -97,6 +97,17 @@ const length = (l) => {
 const TEXT_FIELD = /^(text|search|url|email|tel|password|number)$/;
 const FIELD_EMS = 162.13 / 12.8;
 
+/** The smallest fixed length among `min(...)`'s arguments, when one of them is fixed (a length with no percentage). */
+function fixedBoundOf(value, fontSize) {
+  const m = typeof value === "object" && /^min\((.*)\)$/.exec(String(value?.expr ?? "").trim());
+  if (!m) return undefined;
+  const fixed = splitTop(m[1], ",")
+    .map((arg) => evalLength(arg.trim(), { fontSize }))
+    .filter((at) => at && !at.pct && !at.num)
+    .map((at) => at.px);
+  return fixed.length ? Math.min(...fixed) : undefined;
+}
+
 /** Whether `value` is `calc(100% - m)` where `m` is the box's left and right margins together. */
 function fillsLessMargins(value, v) {
   if (typeof value !== "object" || !value?.expr) return false;
@@ -211,6 +222,15 @@ function boxStyle(computed, report, viewport = null) {
       // ponytail: right in a column (a block's children are one); a row has no stretch along it.
       s.self = "stretch";
       report("approximated", prop, value.expr, src(prop), "stretched across its parent, inside its margins");
+      continue;
+    }
+    // `max-width: min(22rem, calc(100% - 1.5rem))`: the fixed bound alone.
+    // ponytail: right while the parent is wider than that bound and the relative one's inset; a narrower parent
+    // would need the parent's width, which is not known here.
+    const fixed = out === undefined && /^max-/.test(prop) ? fixedBoundOf(value, v["font-size"]) : undefined;
+    if (fixed !== undefined) {
+      s[key] = fixed;
+      report("approximated", prop, value.expr, src(prop), "the fixed bound of min()");
       continue;
     }
     if (out === undefined) {
