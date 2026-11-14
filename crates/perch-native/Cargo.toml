@@ -89,6 +89,11 @@ path = "tests/workspace_session.rs"
 harness = false
 
 [[test]]
+name = "workspace_phone_hold"
+path = "tests/workspace_phone_hold.rs"
+harness = false
+
+[[test]]
 name = "workspace_lifecycle"
 path = "tests/workspace_lifecycle.rs"
 harness = false
