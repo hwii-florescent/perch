@@ -7,6 +7,8 @@
 //! - Back and Forward: the tabs shown before and after, by when they were shown.
 //! - The leader's `w`: the newest session of the next folder, folders ordered by their newest.
 //! - Add project (Cmd+O): the sidebar's form, with the folder browser listing through the core.
+//! - A field of an in-flow screen that holds the keyboard lets go of it when its screen is no
+//!   longer drawn or loads again, so the terminal takes the keyboard back.
 //!
 //! Offscreen, as the other render tests: no window is shown or focused, no core runs, and every
 //! event goes through the window's own dispatch.
@@ -18,7 +20,7 @@ use gpui::{
 use gpui_shell::probe::{self, ProbeRecord};
 use perch_core::protocol::ServerMessage;
 use perch_native::client::{Command, Update};
-use perch_native::mods::{self, POLL};
+use perch_native::mods::{self, WindowMods, POLL};
 use perch_native::sidebar::State;
 use perch_native::tabs::Node;
 use perch_native::ui::Workspace;
@@ -321,6 +323,40 @@ fn add_project(rig: &mut Rig) {
     println!("add project: ok");
 }
 
+/// The sidebar's copy says one of its fields holds the keyboard, as `screen.js` does on focus.
+fn hold_in_sidebar(rig: &mut Rig) {
+    let load = rig
+        .cx
+        .update(|cx| cx.global::<WindowMods>().perch.loads("sidebar"));
+    assert!(load > 0, "the sidebar's copy is loaded");
+    // The field takes the focus from the terminal and says so; the window leaves it there.
+    rig.ws(|ws, window, cx| {
+        window.blur(cx);
+        ws.hold_keyboard("sidebar", load, true, cx)
+    });
+    rig.draw();
+    assert!(rig.ws(|ws, _, _| ws.keyboard_held()));
+    assert!(!rig.terminal_focused(), "the terminal does not take it");
+}
+
+fn held_keyboard(rig: &mut Rig) {
+    // The sidebar goes while one of its fields holds the keyboard: the terminal takes it back.
+    hold_in_sidebar(rig);
+    assert!(rig.press(if MAC { "cmd-b" } else { "ctrl-shift-b" }));
+    assert!(!rig.ws(|ws, _, _| ws.keyboard_held()), "let go");
+    assert!(rig.terminal_focused());
+    assert!(rig.press(if MAC { "cmd-b" } else { "ctrl-shift-b" }));
+    // The sidebar's copy loads again (its files changed): the new copy holds nothing.
+    hold_in_sidebar(rig);
+    rig.cx.update(|cx| {
+        cx.global::<WindowMods>().perch.module("sidebar");
+    });
+    rig.draw();
+    assert!(!rig.ws(|ws, _, _| ws.keyboard_held()), "let go");
+    assert!(rig.terminal_focused());
+    println!("held keyboard: ok");
+}
+
 fn main() {
     let scratch: PathBuf =
         std::env::temp_dir().join(format!("perch-keys-window-{}", std::process::id()));
@@ -334,6 +370,7 @@ fn main() {
     next_project(&mut rig);
     resize(&mut rig);
     add_project(&mut rig);
+    held_keyboard(&mut rig);
 
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())

@@ -244,7 +244,7 @@ pub struct Workspace {
     worktree_requests: u64,
     /// The in-flow mod whose own field has the keyboard (the sidebar's Add project form): the
     /// window leaves the keyboard there and types into it rather than running plain keys.
-    keyboard_held: Option<String>,
+    keyboard_held: Option<(String, u64)>,
     /// A press on a tab of the strip, which may become a drag (`tab.beginDrag`).
     drag: Option<TabDrag>,
     /// A press a mod follows (`pointer.follow`): its token while the press lasts, and the
@@ -581,11 +581,17 @@ impl Workspace {
         cx.notify();
     }
 
-    /// In-flow mod `id` says whether one of its own fields has the keyboard.
-    pub fn hold_keyboard(&mut self, id: &str, held: bool, cx: &mut Context<Self>) {
+    /// The copy of an in-flow mod under key `id`, in its `load`th load, says whether one of its
+    /// own fields has the keyboard. The hold goes with that copy: when it is no longer drawn or
+    /// loads again, the window lets go of it (see [`Self::let_go_of_stale_hold`]).
+    pub fn hold_keyboard(&mut self, id: &str, load: u64, held: bool, cx: &mut Context<Self>) {
         let now = if held {
-            Some(id.to_string())
-        } else if self.keyboard_held.as_deref() == Some(id) {
+            Some((id.to_string(), load))
+        } else if self
+            .keyboard_held
+            .as_ref()
+            .is_some_and(|(key, _)| key == id)
+        {
             None
         } else {
             return;
@@ -593,6 +599,23 @@ impl Workspace {
         if self.keyboard_held != now {
             self.keyboard_held = now;
             cx.notify();
+        }
+    }
+
+    /// Whether a field of an in-flow mod holds the keyboard.
+    pub fn keyboard_held(&self) -> bool {
+        self.keyboard_held.is_some()
+    }
+
+    /// A hold whose copy is no longer drawn (`wanted`), or has loaded again, holds nothing: the
+    /// copy that asked for it cannot let go any more.
+    fn let_go_of_stale_hold(&mut self, wanted: &[(&'static str, String, Value)], cx: &App) {
+        let stale = self.keyboard_held.as_ref().is_some_and(|(key, load)| {
+            !wanted.iter().any(|(_, k, _)| k == key)
+                || screens::mods(cx).is_some_and(|(_, perch)| perch.loads(key) != *load)
+        });
+        if stale {
+            self.keyboard_held = None;
         }
     }
 
@@ -1144,7 +1167,8 @@ impl Workspace {
                     cx,
                 )
             }
-            "stopAgent" => self.run_command("terminal.kill", None, window, cx),
+            // The menu's own tab, whichever has the keyboard by now.
+            "stopAgent" => self.run_command("terminal.kill", Some(&tab), window, cx),
             "showFull" => self.run_command("pane.unsplit", Some(&tab), window, cx),
             "splitSession" => {
                 self.open_session_split(id, at, cx);
@@ -2095,6 +2119,7 @@ impl Workspace {
                 r#"This command needs {direction: "left" | "right" | "up" | "down"}."#.to_string()
             })
         };
+        self.sidebar.read(cx).take_refused();
         match name {
             "global.navigator" | "global.navigatorAlt" | "app.palette" => {
                 self.toggle_palette(window, cx)
@@ -2164,20 +2189,22 @@ impl Workspace {
                     .find(|s| s.id == id)
                     .map(|s| s.host_id.clone())
                     .unwrap_or_else(|| LOCAL.into());
-                // ponytail: the group is the sidebar's siblings, not also each workspace's strip
-                // order as the web's `moveChat` refills; the native strip keeps no order of its own.
-                let mut group: Vec<String> = siblings.clone();
-                for extra in [&id, &target] {
-                    if !group.contains(extra) {
-                        group.push(extra.clone());
-                    }
-                }
-                let live = store
+                let live: std::collections::HashSet<String> = store
                     .sessions
                     .iter()
                     .filter(|s| s.host_id == host)
                     .map(|s| s.id.clone())
                     .collect();
+                // ponytail: the group is the sidebar's siblings, not also each workspace's strip
+                // order as the web's `moveChat` refills; the native strip keeps no order of its own.
+                // Only this computer's sessions go into its order: an unknown id is left out.
+                let mut group: Vec<String> =
+                    siblings.into_iter().filter(|s| live.contains(s)).collect();
+                for extra in [&id, &target] {
+                    if !group.contains(extra) {
+                        group.push(extra.clone());
+                    }
+                }
                 let core = store
                     .order
                     .get(&host)
@@ -2762,6 +2789,10 @@ impl Workspace {
             }
         }
         let _ = window;
+        // What it would have changed in the core was not sent: the core is away.
+        if self.sidebar.read(cx).take_refused() {
+            return Err(crate::client::NOT_CONNECTED.into());
+        }
         Ok(())
     }
 
@@ -3918,6 +3949,7 @@ impl gpui::Render for Workspace {
         }
         self.screens.realize(&self.screen_focus, window, cx);
         let wanted = self.inflow_wanted(cx);
+        self.let_go_of_stale_hold(&wanted, cx);
         self.screens.place(wanted, window, cx);
         // A terminal that attaches takes the keyboard when it first draws; the tab that has it in
         // the layout keeps it. A modal screen has the keyboard while it is up.

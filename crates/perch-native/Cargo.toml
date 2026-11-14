@@ -147,3 +147,8 @@ harness = false
 name = "workspace_keys_window"
 path = "tests/workspace_keys_window.rs"
 harness = false
+
+[[test]]
+name = "workspace_offline_window"
+path = "tests/workspace_offline_window.rs"
+harness = false

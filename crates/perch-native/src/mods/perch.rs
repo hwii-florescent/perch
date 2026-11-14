@@ -188,6 +188,9 @@ struct Shared {
     held_clock: std::cell::Cell<Option<f64>>,
     attached: RefCell<Option<Attached>>,
     flush_queued: Cell<bool>,
+    /// Per copy key, how many times a copy under it was loaded: a reload is a new one, which
+    /// holds nothing its predecessor held.
+    loads: RefCell<HashMap<String, u64>>,
 }
 
 /// The `perch` module's state for one window. Cheap to clone.
@@ -211,6 +214,7 @@ impl Perch {
             held_clock: std::cell::Cell::default(),
             attached: RefCell::default(),
             flush_queued: Cell::new(false),
+            loads: RefCell::default(),
         }))
     }
 
@@ -711,7 +715,19 @@ impl Perch {
     }
 
     /// The `perch` module for mod `id`.
+    /// How many times a copy under key `key` was loaded (see [`Self::module`]).
+    pub fn loads(&self, key: &str) -> u64 {
+        self.0.loads.borrow().get(key).copied().unwrap_or(0)
+    }
+
     pub fn module(&self, id: &str) -> HostModule {
+        // Built once for each load of the copy `id`.
+        let load = {
+            let mut loads = self.0.loads.borrow_mut();
+            let count = loads.entry(id.to_string()).or_default();
+            *count += 1;
+            *count
+        };
         let id: Rc<str> = id.into();
         let reader = |part: &'static str, f: fn(&Perch, &HostArguments) -> Value| {
             let (perch, id) = (self.clone(), id.clone());
@@ -960,7 +976,7 @@ impl Perch {
                 move |args| {
                     let held = matches!(args.get(0), Some(HostValue::Bool(true)));
                     let id = id.to_string();
-                    perch.in_workspace(move |ws, cx| ws.hold_keyboard(&id, held, cx))?;
+                    perch.in_workspace(move |ws, cx| ws.hold_keyboard(&id, load, held, cx))?;
                     Ok(HostValue::Null)
                 }
             })

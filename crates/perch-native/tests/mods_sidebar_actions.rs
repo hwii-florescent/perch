@@ -546,6 +546,23 @@ fn sidebar_commands(rig: &mut Rig) {
         refused.is_err() && asked.is_empty(),
         "an unknown session is refused"
     );
+    // A sibling the core does not list on this computer never goes into its order.
+    let (_, asked) = run(
+        rig,
+        "session.move",
+        json!({"id": "alpha", "target": "charlie", "after": true,
+               "siblings": ["ghost", "bravo", "charlie", "alpha"]}),
+    );
+    let written = asked.into_iter().find_map(|c| match c {
+        Command::SetOrder { sessions, .. } => sessions,
+        _ => None,
+    });
+    assert!(
+        written.as_ref().is_some_and(
+            |ids| !ids.contains(&"ghost".to_string()) && ids.contains(&"alpha".to_string())
+        ),
+        "{written:?}"
+    );
 
     // Deleting a session asks the core; its tab stays until the core says it is gone.
     let (result, asked) = run(rig, "session.close", json!({"id": "bravo"}));
