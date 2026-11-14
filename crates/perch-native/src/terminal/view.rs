@@ -13,7 +13,12 @@
 //! - A phone can hold the size. Where typing is shared the window draws the web's phone-size
 //!   notice over the pane ([`TerminalView::offers_take_back`]), with its two choices, "Take back
 //!   this tab" (the input and the size) and "Take back all tabs" (the window takes the size alone
-//!   of each terminal a phone holds); without shared typing the pane's note offers Take control.
+//!   of each terminal a phone holds); without shared typing the agent's chip offers Take control.
+//! - What the pane says about the agent (the chip: "Viewing agent", "Reconnecting…"; Take control,
+//!   Retry CLI; the error line; the exited or sleeping banner with Restart CLI, Resume agent and
+//!   Close session) is the window's `agent-control` screen over the pane, drawn from
+//!   [`TerminalView::agent_control`]. Starting the agent again is only ever a person's click
+//!   ([`TerminalView::restart`]), after the core said the attach failed or the shell ended.
 //! - Find is the view's (the query, the matches, the highlights); its bar is the window's
 //!   `terminal-search` screen over the pane, which [`TerminalEvent::Chrome`] says to draw.
 //! - A dropped connection leaves the screen as it was and says so. It is never taken for the end
@@ -23,6 +28,8 @@
 //!   session once the window agrees (see [`TerminalEvent::Chose`]). The core records the provider
 //!   an attach names as the session's own, so nothing else ever picks one.
 //!
+
+use serde_json::{json, Value};
 
 use super::actions::{Action, Scroll};
 use super::attach::{self, AgentInfo, FromCore, Piece, ToCore};
@@ -317,8 +324,14 @@ pub struct TerminalView {
     hosted: bool,
     /// The session and provider this view attaches, kept to attach to again.
     target: Option<(String, String)>,
-    /// A window will attach again after a drop, so the note says it is waiting for the core.
+    /// A window will attach again after a drop, so the agent's chip says it is waiting for the
+    /// core.
     reconnects: bool,
+    /// A take-over this view asked for, until the core answers (the leases change) or the
+    /// connection changes: the web's `pending`.
+    taking: bool,
+    /// The agent-control props last drawn: a change tells the window ([`TerminalEvent::Chrome`]).
+    drawn_control: Value,
 }
 
 impl TerminalView {
@@ -390,6 +403,8 @@ impl TerminalView {
             hosted: false,
             target: None,
             reconnects: false,
+            taking: false,
+            drawn_control: Value::Null,
         }
     }
 
@@ -539,9 +554,24 @@ impl TerminalView {
     /// refusal is a failure to attach, never an exit. False, doing nothing, unless the view is
     /// disconnected from a session it attached.
     pub fn reattach(&mut self, core: Core, cx: &mut Context<Self>) -> bool {
-        let (Status::Disconnected(_), Some((session_id, provider))) =
-            (&self.status, self.target.clone())
-        else {
+        if !matches!(self.status, Status::Disconnected(_)) {
+            return false;
+        }
+        self.attach_again(core, cx)
+    }
+
+    /// Starts the agent again at a person's request, as the web's Retry CLI, Restart CLI and
+    /// Resume agent do: only once the core said it could not attach or the shell ended, never on
+    /// a drop, whose shell is not known to have ended. False otherwise.
+    pub fn restart(&mut self, core: Core, cx: &mut Context<Self>) -> bool {
+        if !matches!(self.status, Status::Failed(_) | Status::Exited(_)) {
+            return false;
+        }
+        self.attach_again(core, cx)
+    }
+
+    fn attach_again(&mut self, core: Core, cx: &mut Context<Self>) -> bool {
+        let Some((session_id, provider)) = self.target.clone() else {
             return false;
         };
         let (cols, rows) = self.fitted.map_or(self.vt.size(), |f| (f.cols, f.rows));
@@ -726,6 +756,7 @@ impl TerminalView {
 
     fn set_status(&mut self, status: Status, cx: &mut Context<Self>) {
         if self.status != status {
+            self.taking = false;
             self.status = status.clone();
             cx.emit(TerminalEvent::Status(status));
             cx.notify();
@@ -797,6 +828,7 @@ impl TerminalView {
                     }
                 }
                 let offered = self.offers_take_back();
+                self.taking = false;
                 self.input_lease = agent.input;
                 self.resize_lease = agent.resize;
                 self.agent = Some(agent);
@@ -2211,52 +2243,83 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// What the pane says about the session when it is not simply showing the shell, in the
-    /// words the web's agent chip uses.
-    pub fn note(&self) -> Option<String> {
-        if let Some(reason) = &self.drop_notice {
-            return Some(reason.clone());
-        }
-        if self.choice.is_some() {
-            return Some("Nothing is running in this session. Choose what to start.".into());
-        }
+    /// What the file drop or paste last said on the pane, until the next key: what is being
+    /// sent, or why something was not (the web's `fileDrop` notice).
+    pub fn drop_notice(&self) -> Option<&str> {
+        self.drop_notice.as_deref()
+    }
+
+    /// A take-over this view asked for that the core has not answered yet.
+    pub fn taking(&self) -> bool {
+        self.taking
+    }
+
+    /// The props of the web's `agent-control` screen over this terminal, as
+    /// `PersistentAgentTerminal` works them out on a desktop, with the actions as flags (`retry`,
+    /// `control`, `ended.close`) that the screen's mod turns into the window's commands. Empty
+    /// (no `label`, `error` or `ended`) when there is nothing to draw. Where the native view
+    /// knows more than the web, it says only what is known: a drop the window will not
+    /// reattach is "Disconnected", not "Reconnecting…".
+    pub fn agent_control(&self) -> Value {
         let sleeping = self.agent.is_some_and(|a| a.state == AgentState::Sleeping);
-        match &self.status {
-            Status::Detached => Some("Not connected".into()),
-            Status::Connecting => Some("Connecting".into()),
-            Status::Live => {
-                let Some(agent) = self.agent else {
-                    return (!self.can_type()).then(|| "Viewing agent".into());
-                };
-                if agent.state == AgentState::Reconnecting {
-                    Some("Reconnecting\u{2026}".into())
-                } else if agent.resize_on_device && !agent.resize {
-                    // The web's notice, whose choices ([`Self::offers_take_back`]) stand in for
-                    // Take control.
-                    Some(if self.shared_input() {
-                        "Your phone is sizing this terminal".into()
-                    } else {
-                        "A phone sets this terminal's size".into()
-                    })
-                } else if self.can_type() {
-                    None
-                } else if agent.input_elsewhere {
-                    Some("Another view is typing in this agent".into())
-                } else {
-                    Some("Viewing agent".into())
-                }
+        let reconnecting = self
+            .agent
+            .is_some_and(|a| a.state == AgentState::Reconnecting);
+        let dropped = matches!(self.status, Status::Disconnected(_));
+        let connected = !dropped && !reconnecting;
+        let shared = self.shared_input();
+        let label: Option<&str> = match &self.status {
+            // A blank session lists its launch choices instead.
+            Status::Detached if self.choice.is_some() => None,
+            Status::Detached | Status::Connecting => Some("Opening agent\u{2026}"),
+            Status::Disconnected(_) if self.reconnects => Some("Reconnecting\u{2026}"),
+            Status::Disconnected(_) => Some("Disconnected"),
+            Status::Failed(_) => Some("Agent unavailable"),
+            Status::Exited(_) => None,
+            Status::Live if reconnecting => Some("Reconnecting\u{2026}"),
+            // The phone-size notice says it.
+            Status::Live if self.offers_take_back() => None,
+            Status::Live if self.input_lease || shared => None,
+            Status::Live if self.agent.is_some_and(|a| a.input_elsewhere) => {
+                Some("Another view is typing in this agent")
             }
-            Status::Disconnected(_) if self.reconnects => {
-                Some("Disconnected \u{2014} reconnecting to the core\u{2026}".into())
-            }
-            Status::Disconnected(_) => Some("Disconnected".into()),
-            Status::Failed(reason) => Some(format!("Could not open the terminal: {reason}")),
-            // A hibernated agent closes its terminal like an exit, but its conversation is kept.
-            Status::Exited(_) if sleeping => {
-                Some("Sleeping to save memory \u{2014} its conversation is kept".into())
-            }
-            Status::Exited(code) => Some(format!("Shell exited (code {code})")),
-        }
+            Status::Live => Some("Viewing agent"),
+        };
+        let attached = matches!(self.status, Status::Live) || dropped;
+        let control = (attached && !self.input_lease && !shared).then(|| {
+            json!({
+                "label": if self.taking { "Taking control\u{2026}" } else { "Take control" },
+                "disabled": self.taking || !connected || self.to_core.is_none(),
+            })
+        });
+        let error = match &self.status {
+            Status::Failed(reason) => Some(reason.as_str()),
+            _ => None,
+        };
+        let ended = match self.status {
+            Status::Exited(code) => Some(json!({
+                "sleeping": sleeping,
+                "exitCode": if sleeping { Value::Null } else { json!(code) },
+                "close": true,
+            })),
+            _ => None,
+        };
+        json!({
+            "agent": self.target.as_ref().map_or("", |t| t.1.as_str()),
+            "label": label,
+            "connected": connected,
+            "pending": self.taking,
+            "retry": matches!(self.status, Status::Failed(_)) && self.target.is_some(),
+            "control": control,
+            "error": error,
+            "ended": ended,
+            "state": {
+                "controlling": self.input_lease,
+                "shared": shared,
+                "writable": self.can_type(),
+                "phone": false,
+            },
+        })
     }
 
     /// Whether a paired device (a phone) holds this terminal's size, and this view is attached to
@@ -2324,18 +2387,23 @@ impl TerminalView {
                 self.open_find(cx);
                 true
             }
+            // One take-over at a time, as the web's: a second waits for the core's answer.
             Action::TakeControl => {
-                if !self.can_take_control() {
+                if self.taking || !self.can_take_control() {
                     return false;
                 }
                 self.send(ToCore::TakeControl);
+                self.taking = true;
+                cx.notify();
                 true
             }
             Action::TakeBack => {
-                if !self.size_held_by_phone() {
+                if self.taking || !self.size_held_by_phone() {
                     return false;
                 }
                 self.send(ToCore::TakeControl);
+                self.taking = true;
+                cx.notify();
                 true
             }
             Action::TakeSize => {
@@ -2808,10 +2876,14 @@ impl gpui::Render for TerminalView {
         let focused = self.focus.is_focused(window);
         let mut bg = color(self.vt.background());
         bg.a = self.settings.opacity;
-        let take_back = self.offers_take_back();
-        // The phone-size notice says it, with its choices (the window's `phone-size` screen).
-        let note = self.note().filter(|_| !take_back);
-        let take_control = self.can_take_control() && self.status == Status::Live && !take_back;
+        // The agent's chip, error line and ended banner are the window's `agent-control`
+        // screen over the pane; only what a file drop or paste said is drawn here.
+        let notice = self.drop_notice.clone();
+        let control = self.agent_control();
+        if control != self.drawn_control {
+            self.drawn_control = control;
+            cx.emit(TerminalEvent::Chrome);
+        }
         let mut pane = div()
             .id("terminal")
             .track_focus(&self.focus)
@@ -2911,41 +2983,18 @@ impl gpui::Render for TerminalView {
                     })),
             )
         })
-        .when_some(note, |pane, note| {
+        .when_some(notice, |pane, notice| {
             pane.child(
                 div()
                     .absolute()
                     .bottom_2()
                     .right_3()
-                    .flex()
-                    .items_center()
-                    .gap_2()
                     .text_xs()
                     .text_color(rgb(NOTE_COLOR))
-                    .child(note)
-                    .when(take_control, |row| {
-                        row.child(note_button("take-control", "Take control").on_click(
-                            cx.listener(|this, _, _, cx| {
-                                this.perform(Action::TakeControl, cx);
-                            }),
-                        ))
-                    }),
+                    .child(notice),
             )
         })
     }
-}
-
-/// A button in the pane's note row.
-fn note_button(id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(id)
-        .px_2()
-        .rounded_sm()
-        .cursor_pointer()
-        .border_1()
-        .border_color(rgb(NOTE_COLOR))
-        .child(label)
-        .on_mouse_down(GpuiButton::Left, |_, _, cx| cx.stop_propagation())
 }
 
 /// Text from the system's input: dead keys, AltGr, input methods, and every plain key that only

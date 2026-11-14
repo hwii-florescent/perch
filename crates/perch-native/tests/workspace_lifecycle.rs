@@ -126,8 +126,17 @@ fn a_shell_that_ended_before_attach(rig: &Rig, h: &mut Harness, id: &str) {
         unreachable!()
     };
     assert!(reason.contains("no longer available"), "{reason}");
-    let note = h.view(id, |v| v.note()).flatten().unwrap();
-    assert!(note.starts_with("Could not open the terminal"), "{note}");
+    // The agent's chip says it is unavailable, with the core's reason and Retry CLI, which
+    // only a click runs.
+    let control = h.view(id, |v| v.agent_control()).unwrap();
+    assert_eq!(control["label"], "Agent unavailable");
+    assert!(
+        control["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("no longer available")),
+        "{control}"
+    );
+    assert_eq!(control["retry"], true);
     // Nothing is retried or started over.
     h.settle();
     assert!(matches!(
@@ -212,10 +221,12 @@ fn a_core_that_drops_and_returns(
         "{seen:?}"
     );
     assert!(h.rows(id).contains(&pid_line), "the screen is kept");
-    let note = h.view(id, |v| v.note()).flatten().unwrap_or_default();
-    assert!(
-        note.contains("econnect"),
-        "the note says the window is waiting: {note:?}"
+    let label = h
+        .view(id, |v| v.agent_control()["label"].clone())
+        .unwrap_or_default();
+    assert_eq!(
+        label, "Reconnecting\u{2026}",
+        "the agent's chip says the window is waiting"
     );
     assert!(
         shells(rig).contains(&(pid, true)),
@@ -367,10 +378,15 @@ fn files_and_images_reach_the_core(
         assert!(v.drop_files(std::slice::from_ref(&file), true, cx));
     });
     h.wait("the core's answer", |h| {
-        h.view(&id, |v| v.note().is_some_and(|n| n.contains("SSH host")))
-            .unwrap_or(false)
+        h.view(&id, |v| {
+            v.drop_notice().is_some_and(|n| n.contains("SSH host"))
+        })
+        .unwrap_or(false)
     });
-    let note = h.view(&id, |v| v.note()).flatten().unwrap();
+    let note = h
+        .view(&id, |v| v.drop_notice().map(str::to_string))
+        .flatten()
+        .unwrap();
     assert!(
         note.contains("report 1.txt") && note.contains("disabled, missing"),
         "{note}"
@@ -411,7 +427,8 @@ fn typing_is_shared_but_stopping_is_not(
             .unwrap_or(false)
     });
     assert!(
-        h.view(&id, |v| v.note()).flatten().is_none(),
+        h.view(&id, |v| v.agent_control()["label"].is_null())
+            .unwrap_or(false),
         "nothing to warn about"
     );
 

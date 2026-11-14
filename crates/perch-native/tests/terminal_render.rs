@@ -1113,7 +1113,11 @@ fn output_far_behind_is_dropped_and_the_terminal_detaches() {
     assert_eq!(h.view(|v, _| v.backlog_bytes()), 0, "nothing is kept of it");
     assert!(!h.view(|v, _| v.can_type()));
     assert!(h.view(|v, _| v.frame().row_text(0)).contains("kept"));
-    assert!(h.view(|v, _| v.note()).is_some());
+    assert_eq!(
+        h.view(|v, _| v.agent_control()["label"].clone()),
+        "Disconnected",
+        "the agent's chip says it"
+    );
 }
 
 /// Files dropped on the pane, or copied in the file manager and pasted, are typed as quoted
@@ -1166,11 +1170,11 @@ fn dropped_files_type_their_paths() {
     assert!(!h.view(|v, cx| v.drop_paths(&[PathBuf::from("/tmp/a\nb")], cx)));
     assert_eq!(typed(&mut h), Vec::<u8>::new());
     assert!(h
-        .view(|v, _| v.note())
+        .view(|v, _| v.drop_notice().map(str::to_string))
         .is_some_and(|n| n.contains("control character")));
     // The next key clears the reason.
     assert!(h.view(|v, cx| v.key_down(&key("a", Some("a")), cx)));
-    assert_eq!(h.view(|v, _| v.note()), None);
+    assert_eq!(h.view(|v, _| v.drop_notice().map(str::to_string)), None);
     typed(&mut h);
 
     // Another machine's terminal needs a core that sends files there: nothing is typed.
@@ -1178,7 +1182,7 @@ fn dropped_files_type_their_paths() {
     assert!(!h.view(|v, cx| v.drop_paths(&files, cx)));
     assert_eq!(typed(&mut h), Vec::<u8>::new());
     assert!(h
-        .view(|v, _| v.note())
+        .view(|v, _| v.drop_notice().map(str::to_string))
         .is_some_and(|n| n.contains("newer Perch core")));
 }
 
@@ -1279,7 +1283,10 @@ fn files_and_images_are_sent_before_their_paths_are_typed() {
     h.draw();
     h.sent();
     let files = vec![PathBuf::from("/tmp/a b.txt"), PathBuf::from("/tmp/c.png")];
-    let note = |h: &mut Harness| h.view(|v, _| v.note()).unwrap_or_default();
+    let note = |h: &mut Harness| {
+        h.view(|v, _| v.drop_notice().map(str::to_string))
+            .unwrap_or_default()
+    };
 
     // A core that does not send files elsewhere: refused, and nothing leaves the view.
     assert!(!h.view(|v, cx| v.drop_files(&files, true, cx)));
@@ -1315,7 +1322,7 @@ fn files_and_images_are_sent_before_their_paths_are_typed() {
         typed(&mut h).0,
         b"'/home/me/.perch/a b.txt' '/home/me/it'\\''s.png' ".to_vec()
     );
-    assert_eq!(h.view(|v, _| v.note()), None);
+    assert_eq!(h.view(|v, _| v.drop_notice().map(str::to_string)), None);
 
     // One file failed: the other is typed, and the reason stays on the pane.
     assert!(h.view(|v, cx| v.drop_files(&files, true, cx)));
@@ -1855,9 +1862,11 @@ fn disconnect_keeps_the_screen() {
     // Only the core saying so marks the shell as ended.
     h.say(FromCore::Exited(3));
     assert_eq!(h.view(|v, _| v.status().clone()), Status::Exited(3));
+    // The agent's banner says so, with Restart CLI and Close session.
+    let ended = h.view(|v, _| v.agent_control()["ended"].clone());
     assert_eq!(
-        h.view(|v, _| v.note()).as_deref(),
-        Some("Shell exited (code 3)")
+        ended,
+        serde_json::json!({"sleeping": false, "exitCode": 3, "close": true})
     );
     let events = events.borrow();
     assert!(events.contains(&TerminalEvent::Title("the title".into())));
@@ -1970,7 +1979,12 @@ fn ownership_and_named_actions() {
     h.attach(100, 24, "");
     h.focus();
     h.draw();
-    assert_eq!(h.view(|v, _| v.note()), None, "the owner is told nothing");
+    assert_eq!(
+        h.view(|v, _| v.agent_control()["label"].as_str().map(str::to_string)),
+        None,
+        "the owner is told nothing"
+    );
+    assert!(h.view(|v, _| v.agent_control()["control"].is_null()));
     assert!(
         !h.view(|v, cx| v.perform(Action::TakeControl, cx)),
         "nothing to take"
@@ -1985,8 +1999,13 @@ fn ownership_and_named_actions() {
         false,
     )));
     assert_eq!(
-        h.view(|v, _| v.note()).as_deref(),
+        h.view(|v, _| v.agent_control()["label"].as_str().map(str::to_string))
+            .as_deref(),
         Some("Another view is typing in this agent")
+    );
+    assert_eq!(
+        h.view(|v, _| v.agent_control()["control"].clone()),
+        serde_json::json!({"label": "Take control", "disabled": false})
     );
     assert!(!h.view(|v, _| v.can_type()));
     h.sent();
@@ -2002,6 +2021,11 @@ fn ownership_and_named_actions() {
     );
     assert!(h.view(|v, cx| v.perform(Action::TakeControl, cx)));
     assert_eq!(h.sent(), vec![ToCore::TakeControl]);
+    // Until the core answers, the button says it is taking control and does nothing more.
+    assert_eq!(
+        h.view(|v, _| v.agent_control()["control"].clone()),
+        serde_json::json!({"label": "Taking control\u{2026}", "disabled": true})
+    );
 
     h.say(FromCore::Agent(info(
         AgentState::Idle,
@@ -2010,7 +2034,16 @@ fn ownership_and_named_actions() {
         false,
         false,
     )));
-    assert_eq!(h.view(|v, _| v.note()).as_deref(), Some("Viewing agent"));
+    assert_eq!(
+        h.view(|v, _| v.agent_control()["label"].as_str().map(str::to_string))
+            .as_deref(),
+        Some("Viewing agent")
+    );
+    assert_eq!(
+        h.view(|v, _| v.agent_control()["pending"].clone()),
+        false,
+        "the core's answer ends the take-over"
+    );
     h.say(FromCore::Agent(info(
         AgentState::Idle,
         true,
@@ -2018,9 +2051,10 @@ fn ownership_and_named_actions() {
         false,
         true,
     )));
+    // Typing here and a phone sizing it, without shared typing: as the web's, nothing to say.
     assert_eq!(
-        h.view(|v, _| v.note()).as_deref(),
-        Some("A phone sets this terminal's size")
+        h.view(|v, _| v.agent_control()["label"].as_str().map(str::to_string)),
+        None
     );
     h.say(FromCore::Agent(info(
         AgentState::Reconnecting,
@@ -2030,7 +2064,8 @@ fn ownership_and_named_actions() {
         false,
     )));
     assert_eq!(
-        h.view(|v, _| v.note()).as_deref(),
+        h.view(|v, _| v.agent_control()["label"].as_str().map(str::to_string))
+            .as_deref(),
         Some("Reconnecting\u{2026}")
     );
 
@@ -2042,7 +2077,10 @@ fn ownership_and_named_actions() {
         false,
         false,
     )));
-    assert_eq!(h.view(|v, _| v.note()), None);
+    assert_eq!(
+        h.view(|v, _| v.agent_control()["label"].as_str().map(str::to_string)),
+        None
+    );
     h.draw();
     assert!(
         h.sent().iter().any(|m| matches!(m, ToCore::Resize(..))),
@@ -2115,9 +2153,11 @@ fn ownership_and_named_actions() {
         false,
     )));
     h.say(FromCore::Exited(0));
-    assert!(h
-        .view(|v, _| v.note())
-        .is_some_and(|n| n.starts_with("Sleeping to save memory")));
+    assert_eq!(
+        h.view(|v, _| v.agent_control()["ended"].clone()),
+        serde_json::json!({"sleeping": true, "exitCode": null, "close": true}),
+        "Resume agent, not an exit code"
+    );
 }
 
 /// Rows rarely fill the pane: what is left is split above and below the grid, and a pointer on

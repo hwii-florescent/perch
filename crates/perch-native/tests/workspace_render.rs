@@ -1082,10 +1082,8 @@ fn the_size_is_taken_back_from_a_phone_for_one_terminal_or_all() {
     assert!(h.ws(|ws| ws.terminal().is_some()));
     h.open_as("c", Some("terminal"));
     assert!(h.view(|v| v.size_held_by_phone() && !v.offers_take_back()));
-    assert_eq!(
-        h.view(|v| v.note()).as_deref(),
-        Some("A phone sets this terminal's size")
-    );
+    // Without shared typing the web offers Take control, and the pane's chip says who types.
+    assert!(h.view(|v| !v.agent_control()["control"].is_null()));
     for which in 0..3 {
         say(
             &mut h,
@@ -1094,10 +1092,8 @@ fn the_size_is_taken_back_from_a_phone_for_one_terminal_or_all() {
         );
     }
     assert!(h.view(|v| v.offers_take_back()));
-    assert_eq!(
-        h.view(|v| v.note()).as_deref(),
-        Some("Your phone is sizing this terminal")
-    );
+    // The phone-size notice says it; the agent's chip says nothing.
+    assert!(h.view(|v| v.agent_control()["label"].is_null()));
     // The window sizes b: no choices, and neither command has anything to do there.
     h.open_as("b", Some("terminal"));
     assert!(!h.view(|v| v.size_held_by_phone() || v.offers_take_back()));
@@ -1129,7 +1125,10 @@ fn the_size_is_taken_back_from_a_phone_for_one_terminal_or_all() {
     // Once the core says this window has the size, the choices go and the commands refuse.
     say(&mut h, 0, info(true, false));
     assert!(!h.view(|v| v.offers_take_back()));
-    assert_eq!(h.view(|v| v.note()), None, "the owner is told nothing");
+    assert!(
+        h.view(|v| v.agent_control()["label"].is_null()),
+        "the owner is told nothing"
+    );
     println!("workspace_render: take back ok");
 }
 
@@ -1587,14 +1586,18 @@ fn a_blank_session_offers_the_launch_choices() {
     h.open_as("blank", None);
     h.draw();
     assert!(h.ws(|ws| ws.open().is_some_and(|o| o.blank)));
-    let (choosing, status, note) = h.view(|v| (v.choosing(), v.status().clone(), v.note()));
+    let (choosing, status, control) =
+        h.view(|v| (v.choosing(), v.status().clone(), v.agent_control()));
     assert!(choosing);
     assert_eq!(
         status,
         Status::Detached,
         "nothing is attached before a choice"
     );
-    assert!(note.is_some_and(|n| n.contains("Choose")));
+    assert!(
+        control["label"].is_null(),
+        "the choices stand in for the agent's chip"
+    );
     // The choices are the launch list, the terminal first: Down moves to the agent after it and
     // Enter starts this session with it.
     assert!(h.press("down"));

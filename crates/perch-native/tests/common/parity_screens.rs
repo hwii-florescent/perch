@@ -1195,7 +1195,13 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
         }
         perch.set_props(screen.id, props.clone().unwrap_or_else(|| json!({})));
     }
-    if screen_id == "session-menu" {
+    if screen_id == "agent-control" {
+        // The fixture keeps the props under `ac`, as the harness built them for the web.
+        props = props.map(|p| p["ac"].clone());
+        if let Some(props) = &props {
+            perch.set_props(screen.id, props.clone());
+        }
+    } else if screen_id == "session-menu" {
         let menu = props.take().unwrap_or_else(|| json!({}));
         props = Some(session_menu_props(&fixture.data(capture.state), &menu));
     } else if screen_id == "tab-drag" {

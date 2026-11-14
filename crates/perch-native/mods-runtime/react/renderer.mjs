@@ -138,6 +138,14 @@ const PROP = {
   submit: "onSubmit",
 };
 
+const MOUSE_BUTTON_EVENTS = new Set(["click", "dblclick", "mousedown", "mouseup"]);
+const CONTROLS = new Set(["button", "input", "select", "textarea", "fieldset"]);
+/** Whether `node` is a disabled form control or inside one. */
+const insideDisabled = (node) => {
+  for (let n = node; n instanceof HostElement; n = n.parentNode) if (n.props.disabled && CONTROLS.has(n.tagName)) return true;
+  return false;
+};
+
 /** A DOM-shaped event: what a handler in the source reads (`clientX`, `key`, `pointerType`, `currentTarget`). */
 class HostEvent {
   constructor(type, init, target) {
@@ -251,6 +259,8 @@ export function mount(perch, Component, options = {}) {
     dispatch(id, type, init = {}) {
       const target = typeof id === "string" ? byId(id) : id;
       if (!target) return false;
+      // A browser sends no click or mouse button event to a disabled control, or to what is inside one.
+      if (MOUSE_BUTTON_EVENTS.has(type) && insideDisabled(target)) return false;
       const event = new HostEvent(type, init, target);
       const chain = [];
       for (let node = target; node; node = node.parentNode) chain.push(node);

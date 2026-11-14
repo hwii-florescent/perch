@@ -610,6 +610,35 @@ fn sidebar_commands(rig: &mut Rig) {
     assert_eq!(result, Ok(()));
     let last = rig.tabs().0.last().cloned();
     assert_eq!(rig.tabs().2, last, "its last tab is shown");
+
+    // A folder row shows the folder's newest session on the shown computer; a folder or computer
+    // without sessions is refused and nothing changes.
+    rig.ws(|ws, window, cx| {
+        ws.run_command("tab.select", Some(&json!({"id": "alpha"})), window, cx)
+    })
+    .unwrap();
+    let (result, asked) = run(rig, "folder.select", json!({"cwd": "/work"}));
+    assert_eq!(result, Ok(()));
+    assert_eq!(
+        rig.tabs().2.as_deref(),
+        Some("charlie"),
+        "the newest is shown"
+    );
+    assert!(
+        asked
+            .iter()
+            .all(|c| matches!(c, Command::View(id) if id == "charlie")),
+        "only the view is told: {asked:?}"
+    );
+    for args in [
+        json!({}),
+        json!({"cwd": "/elsewhere"}),
+        json!({"cwd": "/work", "host": "buildbox"}),
+    ] {
+        let (refused, asked) = run(rig, "folder.select", args.clone());
+        assert!(refused.is_err() && asked.is_empty(), "{args} is refused");
+        assert_eq!(rig.tabs().2.as_deref(), Some("charlie"));
+    }
     println!("sidebar-commands: ok");
 }
 

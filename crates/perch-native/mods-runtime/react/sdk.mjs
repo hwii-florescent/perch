@@ -52,6 +52,8 @@ export const keyLabel = (combo) => formatCombo(combo, host().isMac !== false);
 export const segmentClass = (options) => segment(options);
 export const rowActionClass = ({ className, ...variants } = {}) => cn(rowAction(variants), className);
 export const buttonClass = button;
+// Floating chrome over a terminal (the agent's chip, notices), as the web's.
+export { glass as glassClass, TAP_BUTTON as tapButtonClass } from "../../../../packages/web/src/components/ui/glass.ts";
 export const menuItemClass = (options) => menuItem(options);
 export const menuDividerClass = menuDivider;
 export const ghostButton = GHOST_BUTTON;
@@ -241,13 +243,47 @@ function worktreeAnswer(reply) {
   if (reply.type === "worktree.error") return { error: reply.message, dirty: !!reply.dirty };
   return reply.error ? { error: String(reply.error) } : {};
 }
+/** The workspace at `path` on `hostId` as the navigation lists it, or null. */
+function workspaceAt(hostId, path) {
+  const walk = (list) => {
+    for (const w of list ?? []) {
+      if (w.path === path) return w;
+      const child = walk(w.children);
+      if (child) return child;
+    }
+    return null;
+  };
+  for (const project of host().navigation({})?.projects ?? []) {
+    if (project.hostId !== hostId) continue;
+    const found = walk(project.workspaces) ?? walk(project.hidden);
+    if (found) return found;
+  }
+  return null;
+}
+/** The web's `startPaneWhenReady`: starts `agent` in the checkout at `path` once the core lists its workspace (a
+ * background create reports the path before the workspace exists); given up after 5 minutes, as the web does. */
+function startPaneWhenReady(hostId, path, agent) {
+  let finished = false;
+  let stop = () => {};
+  const check = () => {
+    if (finished || !workspaceAt(hostId, path)) return;
+    finished = true;
+    stop();
+    clearTimeout(timer);
+    host().startSession?.(hostId, path, agent);
+  };
+  const timer = setTimeout(() => { finished = true; stop(); }, 5 * 60_000);
+  stop = subscribe(check);
+  check();
+}
 /** The web's `components/WorktreeMenu.tsx` on the native host: what the computer can do is its core's
  * capabilities, the list is what `worktree.list` last answered (the caller's `worktrees` until then), and the
  * operations are the core's questions, as the web's store asks them. */
-function WorktreeInPlace({ hostId, path: cwd, className, worktrees: given, request = null, parentChoices: parents, emptyAgent, ...rest }) {
+function WorktreeInPlace({ hostId, path: cwd, className, worktrees: given, request: given_request, parentChoices: parents, emptyAgent: givenAgent, ...rest }) {
   const [worktrees, setWorktrees] = useState(given);
   const can = (capability) => !!host().coreCan?.(capability, hostId);
   const navigation = useNavigation();
+  const projectKey = `${hostId}:${cwd}`;
   // The repo's worktrees nested under another (the web's `parentWorkspaceId`), when the computer can nest.
   const parentChoices = useMemo(() => {
     if (Array.isArray(parents)) return parents;
@@ -263,11 +299,24 @@ function WorktreeInPlace({ hostId, path: cwd, className, worktrees: given, reque
     walk(project?.workspaces, false);
     return out;
   }, [parents, navigation, hostId, cwd]); // eslint-disable-line react-hooks/exhaustive-deps
-  // The window lists no worktree jobs (the sidebar's `jobs` are empty), so a create is never sent to the background:
-  // it waits in the form (`Creating…`) for the checkout, as on a computer without `worktree.job`.
-  const background = false;
+  // This computer's creates run in the background where its core says `worktree.job`: the form closes at once and
+  // progress is the sidebar's job row.
+  const background = hostId === "local" && can("worktree.job");
   const deleteSupported = rest.deleteSupported ?? can("worktree.delete");
   const startFromSupported = rest.startFromSupported ?? can("worktree.startFrom");
+  // Settings' "Empty workspace opens" ("" for none).
+  const settingAgent = useHostSnapshot((perch) => perch.emptyWorkspaceAgent?.() ?? undefined);
+  const emptyAgent = givenAgent ?? settingAgent ?? undefined;
+  // The window's request for this project's menu (leader W, New workspace, `worktree.remove`), else the caller's.
+  const windowRequest = useHostSnapshot((perch) => perch.worktreeMenuRequest?.() ?? null);
+  const nonce = windowRequest?.projectKey === projectKey ? windowRequest.nonce : null;
+  const request = useMemo(() => given_request ?? (nonce == null ? null : windowRequest), [given_request, nonce]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The screen keeps the request it was given until a newer one (see `takeRequest`), so its actions stay the same
+  // object while the menu is mounted: a new one would run the screen's request effect again on the old request.
+  const [asked, setAsked] = useState(request);
+  useEffect(() => { if (request) setAsked(request); }, [request]);
+  const now = useRef({});
+  now.current = { background, deleteSupported };
   const actions = useMemo(() => {
     const ask = (kind, args) => host().ask(kind, { hostId, repoPath: cwd, ...args });
     return {
@@ -279,28 +328,30 @@ function WorktreeInPlace({ hostId, path: cwd, className, worktrees: given, reque
         return worktreeAnswer(reply);
       },
       create: async ({ branch, newBranch, path, extra, agent }) => {
-        const reply = await ask("worktree.create", { branch, newBranch: !!newBranch, path: path ?? null, name: extra?.name ?? null, startFrom: extra?.startFrom ?? null, parentWorkspaceId: extra?.parentWorkspaceId ?? null });
-        if (reply?.type !== "worktree.done") return { error: worktreeAnswer(reply).error ?? NO_ANSWER };
-        // The checkout exists once the core answers, so the starting pane starts in it.
-        if (agent && reply.path) host().startSession?.(hostId, reply.path, agent);
-        return {};
+        const fields = { branch, newBranch: !!newBranch, path: path ?? null, name: extra?.name ?? null, startFrom: extra?.startFrom ?? null, parentWorkspaceId: extra?.parentWorkspaceId ?? null };
+        const { background } = now.current;
+        const reply = await ask(background ? "worktree.job.start" : "worktree.create", fields);
+        const made = background ? "worktree.job.started" : "worktree.done";
+        // No answer, or one that is not the acceptance, is not a create: the form says so and stays.
+        if (reply?.type !== made) return { error: worktreeAnswer(reply).error ?? NO_ANSWER };
+        const created = background ? reply.job?.path : reply.path;
+        if (agent && created) startPaneWhenReady(hostId, created, agent);
+        return { background };
       },
       remove: async (path, force) => {
-        const reply = await ask("worktree.remove", { path, force: !!force, deleteBranch: deleteSupported });
+        const reply = await ask("worktree.remove", { path, force: !!force, deleteBranch: now.current.deleteSupported });
         return { ...worktreeAnswer(reply), preservedBranch: reply?.type === "worktree.done" ? (reply.preservedBranch ?? undefined) : undefined };
       },
       deleteBranch: async (branch, head) => worktreeAnswer(await ask("worktree.branch.delete", { branch, expectedHead: head })),
       open: (path) => host().startSession?.(hostId, path, "terminal"),
-      // The request stays as given: clearing it re-renders the menu while its opening effect waits for the "+"'s
-      // box (`measured`), and that new render drops the wait, so the menu never opens. The effect runs once per
-      // mount, so the request is taken once. ponytail: a caller that sends a request to a mounted menu (the leader
-      // key's) needs a new object per request, which this keeps working with.
-      takeRequest: () => {},
+      // The window forgets the request; the screen keeps it until a newer one, as clearing it would re-run (and so
+      // cancel) the screen's effect that a measurement put off until the next frame (`measured`).
+      takeRequest: () => host().takeWorktreeRequest?.(),
     };
-  }, [hostId, cwd, deleteSupported]);
+  }, [hostId, cwd]);
   return createElement(worktreeInPlace, {
-    hostId, cwd, projectKey: `${hostId}:${cwd}`, className, worktrees, background, startFromSupported, deleteSupported,
-    parentChoices, emptyAgent, request, actions,
+    hostId, cwd, projectKey, className, worktrees, background, startFromSupported, deleteSupported,
+    parentChoices, emptyAgent, request: asked, actions,
   });
 }
 

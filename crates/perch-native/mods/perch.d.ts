@@ -474,6 +474,20 @@ declare module "perch" {
   /** Whether computer `hostId`'s core (default this one) has `capability` (its `server.info`), e.g.
    * `"memory.off.v1"`. */
   export function coreCan(capability: string, hostId?: string): boolean;
+  /** Settings' "Empty workspace opens": the pane a new workspace starts with (`""` for none), null until the core
+   * has sent its settings. */
+  export function emptyWorkspaceAgent(): string | null;
+  /** The window's last request for a project's worktree menu (leader W, New workspace, `worktree.remove`), null once
+   * taken: the menu of `projectKey` (`host:repoPath`) opens, on its create form with `create`, or asks before removing
+   * `remove`. */
+  export function worktreeMenuRequest(): {
+    projectKey: string;
+    nonce: number;
+    remove?: { path: string; branch?: string };
+    create?: boolean;
+  } | null;
+  /** The worktree menu took the window's request. */
+  export function takeWorktreeRequest(): void;
   /** The instant a test holds the screens' clock at (ms since the epoch), else null. */
   export function heldClock(): number | null;
   /** `shortcutFor(event, scope)` for a screen's own scope (`"directory"`): the command the key event presses. */

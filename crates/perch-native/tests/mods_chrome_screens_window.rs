@@ -21,7 +21,11 @@
 //! - Worktrees: a git project's + opens its worktree menu on the create form, listed through the
 //!   core; a create the core refuses stays with the reason, one it makes closes the form; Remove
 //!   asks first and a dirty checkout is asked again, forced; Open starts a terminal there;
-//!   Escape and a press outside close it.
+//!   Escape and a press outside close it. Where the core runs creates in the background, a create
+//!   is a job: the form closes on its acceptance, the job is a sidebar row (failed with its
+//!   reason, retried through the core), and Settings' starting pane starts once the checkout is
+//!   listed. New workspace's key and leader W open the shown project's menu; `worktree.remove`
+//!   asks first in it.
 //! - Terminal find: the terminal's find key opens the find bar over its pane with the keyboard in
 //!   it; what is typed is the terminal's query (and never reaches the shell); Escape and × close
 //!   it, the keyboard back in the terminal.
@@ -995,6 +999,161 @@ fn worktree(rig: &mut Rig) {
     println!("worktree: ok");
 }
 
+const NEW_WORKSPACE_KEY: &str = if cfg!(target_os = "macos") {
+    "cmd-n"
+} else {
+    "ctrl-shift-n"
+};
+
+/// `state()` where this computer's core runs creates in the background (`worktree.job`), with
+/// Settings' "Empty workspace opens" set to a terminal, and then `more` from the core.
+fn job_state(more: &[Value]) -> State {
+    let mut state = state();
+    state.apply(&message(json!({
+        "type": "server.info", "hostname": "studio", "isSsh": false, "platform": "macOS",
+        "capabilities": ["workspace.snapshot", "worktree.startFrom", "worktree.job"]})));
+    state.apply(&message(json!({"type": "settings.current",
+        "settings": {"emptyWorkspaceAgent": "terminal"}})));
+    for frame in more {
+        state.apply(&message(frame.clone()));
+    }
+    state
+}
+
+fn show(rig: &mut Rig, state: State) {
+    let model = state.model();
+    rig.ws(|ws, _, cx| {
+        ws.sidebar()
+            .update(cx, |sidebar, cx| sidebar.apply(Update::Model(model), cx))
+    });
+    rig.draw();
+}
+
+/// A background create of `/wt/job` (branch `job`) as `worktree.jobs` lists it.
+fn job(status: &str, error: Option<&str>) -> Value {
+    json!({"type": "worktree.jobs", "jobs": [{"jobId": "j1", "repoPath": "/work", "branch": "job",
+        "path": "/wt/job", "status": status, "phase": "Checking out", "error": error,
+        "startedAt": 1}]})
+}
+
+fn worktree_jobs(rig: &mut Rig) {
+    show(rig, job_state(&[]));
+    rig.asked();
+    // Where the core says `worktree.job`, a create is a job: the form closes once the core takes
+    // it, and nothing starts before the checkout is listed.
+    click_worktree_plus(rig);
+    list_worktrees(rig);
+    // The menu was last closed on its form, so the form does not take the keyboard again by
+    // itself (as on the web): a press in the task name gives it.
+    rig.click("worktree-name-input");
+    assert!(!rig.terminal_focused(), "the form has the keyboard");
+    rig.type_text("Job");
+    rig.click("worktree-create-submit");
+    let (frame, reply) = one_ask(rig, "worktree.job.start");
+    assert_eq!(
+        (&frame["repoPath"], &frame["name"]),
+        (&json!("/work"), &json!("Job")),
+        "{frame}"
+    );
+    assert!(frame.get("hostId").is_none(), "this computer's own");
+    reply
+        .send(Ok(
+            json!({"type": "worktree.job.started", "job": {"jobId": "j1",
+            "repoPath": "/work", "branch": "job", "path": "/wt/job", "status": "running",
+            "phase": "Checking out", "startedAt": 1}}),
+        ))
+        .unwrap();
+    rig.draw();
+    assert!(
+        rig.record("worktree-popover").is_none(),
+        "the form closed at once"
+    );
+    // Its progress is a sidebar row; a failed one says so with the reason until retried.
+    show(rig, job_state(&[job("running", None)]));
+    by_test_id(rig, "worktree-job-cancel-job");
+    show(
+        rig,
+        job_state(&[job("failed", Some("fatal: no space left"))]),
+    );
+    // Retry and Dismiss are drawn for a failed job only.
+    by_test_id(rig, "worktree-job-dismiss-job");
+    assert!(launched(rig).is_empty(), "a failed create starts nothing");
+    let retry = by_test_id(rig, "worktree-job-retry-job");
+    rig.click(&retry);
+    let retried = rig
+        .asked()
+        .into_iter()
+        .any(|c| matches!(c, Command::WorktreeJob { verb: "retry", job_id } if job_id == "j1"));
+    assert!(retried, "Retry is the core's");
+    // Once the core lists the checkout, the starting pane ("Empty workspace opens") starts in it.
+    let made = json!({"type": "workspace.updated", "workspace": {"id": "w2", "projectId": "p",
+        "hostId": "local", "path": "/wt/job", "name": "job", "branch": "job",
+        "parentWorkspaceId": "w1", "dirty": false, "state": "active", "createdAt": 1,
+        "updatedAt": 1, "pinned": false}, "snapshotEpoch": "e", "snapshotRevision": 2});
+    show(
+        rig,
+        job_state(&[made.clone(), json!({"type": "worktree.jobs", "jobs": []})]),
+    );
+    assert_eq!(
+        launched(rig),
+        [(
+            "local".to_string(),
+            Some("/wt/job".to_string()),
+            "terminal".to_string()
+        )]
+    );
+    let run = |rig: &mut Rig, name: &str, args: Value| {
+        rig.ws(|ws, window, cx| ws.run_command(name, Some(&args), window, cx))
+    };
+    assert!(run(rig, "worktree.cancel", json!({"id": "j1"})).is_err());
+
+    // New workspace's key and leader W open the shown project's menu, the key on the form.
+    rig.press(NEW_WORKSPACE_KEY);
+    list_worktrees(rig);
+    assert!(rig.record("worktree-popover").is_some(), "the menu is open");
+    assert!(rig.record("worktree-name-input").is_some(), "on the form");
+    rig.press("escape");
+    rig.press("ctrl-space");
+    rig.press("shift-w");
+    list_worktrees(rig);
+    assert!(
+        rig.record("worktree-popover").is_some(),
+        "leader W opened it"
+    );
+    assert!(rig.record("worktree-name-input").is_none(), "on the list");
+    assert!(rig.terminal_focused(), "the list takes no keyboard");
+    rig.mouse(WIDTH - 8., HEIGHT - 8.);
+    assert!(rig.record("worktree-popover").is_none());
+
+    // `worktree.remove` asks first in the menu; only yes removes it.
+    assert!(run(rig, "worktree.remove", json!({"id": "w1"})).is_err());
+    run(rig, "worktree.remove", json!({"id": "w2"})).unwrap();
+    rig.draw();
+    assert!(
+        !rig.asked().iter().any(|c| matches!(c, Command::Ask { .. })),
+        "nothing is removed before the answer"
+    );
+    accept_confirmation(rig);
+    let (frame, reply) = one_ask(rig, "worktree.remove");
+    assert_eq!(frame["path"], "/wt/job", "{frame}");
+    reply
+        .send(Ok(
+            json!({"type": "worktree.done", "hostId": "local", "action": "remove",
+            "path": "/wt/job"}),
+        ))
+        .unwrap();
+    rig.draw();
+    assert!(rig.open_screens().is_empty());
+    // What the computer can do changing asks nothing again.
+    show(rig, state());
+    assert!(
+        rig.open_screens().is_empty(),
+        "the removal is not asked again"
+    );
+    assert!(rig.terminal_focused());
+    println!("worktree-jobs: ok");
+}
+
 const FIND_KEY: &str = if cfg!(target_os = "macos") {
     "cmd-f"
 } else {
@@ -1062,6 +1221,7 @@ fn main() {
     instructions(&mut rig);
     memory(&mut rig);
     worktree(&mut rig);
+    worktree_jobs(&mut rig);
     terminal_find(&mut rig);
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())

@@ -89,6 +89,11 @@ path = "tests/workspace_session.rs"
 harness = false
 
 [[test]]
+name = "workspace_phone_hold"
+path = "tests/workspace_phone_hold.rs"
+harness = false
+
+[[test]]
 name = "workspace_lifecycle"
 path = "tests/workspace_lifecycle.rs"
 harness = false
@@ -131,4 +136,9 @@ harness = false
 [[test]]
 name = "mods_chrome_screens_window"
 path = "tests/mods_chrome_screens_window.rs"
+harness = false
+
+[[test]]
+name = "mods_agent_control_window"
+path = "tests/mods_agent_control_window.rs"
 harness = false
