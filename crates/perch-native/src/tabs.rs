@@ -13,6 +13,12 @@
 /// Most panes a split set holds.
 pub const MAX_SPLIT: usize = 4;
 
+/// Fewest pixels a resize by key leaves a pane, as the web's `MIN_PANE_PX` (48 and the gap).
+pub const MIN_PANE_PX: f32 = 54.0;
+
+/// Most places Back and Forward remember, as the web's.
+const MAX_PLACES: usize = 50;
+
 /// Panes side by side (`Row`) or stacked (`Col`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dir {
@@ -640,6 +646,26 @@ impl Tabs {
         }
     }
 
+    /// Grow (a positive `delta`) or shrink the focused pane by `delta` pixels, as the web's
+    /// `resize`: in the innermost row or column holding it, against the next pane, or the one
+    /// before for the last, and neither is left under [`MIN_PANE_PX`]. `width` and `height` are the
+    /// split's on screen. `false` when nothing changed: no split, a zoomed pane, or no room.
+    pub fn resize(&mut self, delta: f32, width: f32, height: f32) -> bool {
+        let Some(active) = self.active.clone() else {
+            return false;
+        };
+        let Some(i) = self.set_of(Some(&active)).filter(|_| !self.zoomed()) else {
+            return false;
+        };
+        let rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: width,
+            h: height,
+        };
+        resize_in(&mut self.sets[i], &active, delta, rect)
+    }
+
     /// Swap with the next pane in layout order.
     pub fn swap_next(&mut self) -> bool {
         let shown = self.shown();
@@ -657,9 +683,173 @@ impl Tabs {
     }
 }
 
+/// [`Tabs::resize`] in `node`, laid out in `rect`.
+fn resize_in(node: &mut Node, id: &str, delta: f32, rect: Rect) -> bool {
+    let Node::Split { dir, kids, sizes } = node else {
+        return false;
+    };
+    if let Some(at) = kids
+        .iter()
+        .position(|kid| matches!(kid, Node::Pane(pane) if pane == id))
+    {
+        let extent = match dir {
+            Dir::Row => rect.w,
+            Dir::Col => rect.h,
+        };
+        if extent <= 0.0 || sizes.len() < 2 {
+            return false;
+        }
+        let other = if at + 1 < sizes.len() { at + 1 } else { at - 1 };
+        let min = MIN_PANE_PX / extent;
+        let change = (delta / extent)
+            .min(sizes[other] - min)
+            .max(min - sizes[at]);
+        sizes[at] += change;
+        sizes[other] -= change;
+        return change.abs() > f32::EPSILON;
+    }
+    let mut at = 0.0;
+    for (kid, size) in kids.iter_mut().zip(sizes.iter()) {
+        let r = match dir {
+            Dir::Row => Rect {
+                x: rect.x + rect.w * at,
+                w: rect.w * size,
+                ..rect
+            },
+            Dir::Col => Rect {
+                y: rect.y + rect.h * at,
+                h: rect.h * size,
+                ..rect
+            },
+        };
+        at += size;
+        if kid.has(id) {
+            return resize_in(kid, id, delta, r);
+        }
+    }
+    false
+}
+
+/// Back and Forward over the tabs this window showed, as a browser's history (the web's
+/// `NavHistory`): it moves by when a tab was shown, not by its place in the strip. Per window and
+/// in memory only; it only shows tabs, never starts or ends anything.
+#[derive(Clone, Debug, Default)]
+pub struct History {
+    places: Vec<String>,
+    at: Option<usize>,
+}
+
+impl History {
+    /// The place shown now.
+    pub fn current(&self) -> Option<&str> {
+        self.at
+            .and_then(|at| self.places.get(at))
+            .map(String::as_str)
+    }
+
+    /// `id` is shown: a visit, which drops the places ahead, as a browser does.
+    pub fn record(&mut self, id: &str) {
+        if self.current() == Some(id) {
+            return;
+        }
+        self.places.truncate(self.at.map_or(0, |at| at + 1));
+        self.places.push(id.into());
+        if self.places.len() > MAX_PLACES {
+            self.places.remove(0);
+        }
+        self.at = Some(self.places.len() - 1);
+    }
+
+    /// The nearest place back (`-1`) or forward (`1`) that still `exists`, which becomes the
+    /// current one; places gone since are passed over.
+    pub fn step(&mut self, by: isize, exists: impl Fn(&str) -> bool) -> Option<String> {
+        let mut i = self.at? as isize;
+        loop {
+            i += by;
+            let place = self.places.get(usize::try_from(i).ok()?)?;
+            if exists(place) {
+                self.at = Some(i as usize);
+                return Some(place.clone());
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resizing_moves_the_focused_pane_s_edge_and_keeps_a_minimum() {
+        // A row of two in 1000 px: grow a by 60 px, against b.
+        let mut t = tabs(&["a", "b"]);
+        t.show("a");
+        assert!(t.join("a", "b"));
+        assert!(t.resize(60.0, 1000.0, 500.0));
+        let sizes = |t: &Tabs| match t.visible() {
+            Some(Node::Split { sizes, .. }) => sizes,
+            other => panic!("{other:?}"),
+        };
+        assert!((sizes(&t)[0] - 0.56).abs() < 1e-4, "{:?}", sizes(&t));
+        // The last pane resizes against the one before: b shrinks, a grows.
+        t.show("b");
+        assert!(t.resize(-60.0, 1000.0, 500.0));
+        assert!((sizes(&t)[0] - 0.62).abs() < 1e-4, "{:?}", sizes(&t));
+        // Never under the minimum, and at it nothing changes.
+        for _ in 0..20 {
+            t.resize(-60.0, 1000.0, 500.0);
+        }
+        assert!((sizes(&t)[1] - 0.054).abs() < 1e-4, "{:?}", sizes(&t));
+        assert!(!t.resize(-60.0, 1000.0, 500.0));
+        // A zoomed pane, or a tab in no split, does not resize.
+        t.zoom();
+        assert!(!t.resize(60.0, 1000.0, 500.0));
+        let mut lone = tabs(&["c"]);
+        assert!(!lone.resize(60.0, 1000.0, 500.0));
+    }
+
+    #[test]
+    fn resizing_a_nested_pane_uses_its_own_column() {
+        // a | (b over c): growing c moves the edge between b and c, in the column's 500 px.
+        let mut t = tabs(&["a", "b", "c"]);
+        t.show("a");
+        assert!(t.join("a", "b"));
+        t.show("b");
+        assert!(t.split("c", Side::Down));
+        assert!(t.resize(50.0, 1000.0, 500.0));
+        match t.visible() {
+            Some(Node::Split { sizes, kids, .. }) => {
+                assert_eq!(sizes, vec![0.5, 0.5], "the row is untouched");
+                let Node::Split { sizes, .. } = &kids[1] else {
+                    panic!("{kids:?}")
+                };
+                assert!((sizes[1] - 0.6).abs() < 1e-4, "{sizes:?}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn history_goes_back_and_forward_over_what_was_shown() {
+        let mut h = History::default();
+        assert_eq!(h.step(-1, |_| true), None);
+        for id in ["a", "b", "b", "c"] {
+            h.record(id);
+        }
+        assert_eq!(h.step(-1, |_| true).as_deref(), Some("b"));
+        assert_eq!(h.step(-1, |_| true).as_deref(), Some("a"));
+        assert_eq!(h.step(-1, |_| true), None, "nothing before the first");
+        assert_eq!(h.step(1, |_| true).as_deref(), Some("b"));
+        // A visit drops what was ahead; a place gone since is passed over.
+        h.record("d");
+        assert_eq!(h.step(1, |_| true), None);
+        assert_eq!(h.step(-1, |id| id != "b").as_deref(), Some("a"));
+        assert_eq!(h.current(), Some("a"));
+        for i in 0..60 {
+            h.record(&i.to_string());
+        }
+        assert_eq!(h.places.len(), MAX_PLACES);
+    }
 
     fn tabs(ids: &[&str]) -> Tabs {
         let mut t = Tabs::default();

@@ -37,7 +37,7 @@ use crate::settings::{
 };
 use crate::sidebar::{navigation, Alert, Heard, Provider, LOCAL};
 use crate::tab_drag::{self, Drop, TabDrag};
-use crate::tabs::{Dir, Node, Side, Tabs};
+use crate::tabs::{Dir, History, Node, Side, Tabs};
 use crate::terminal::actions::{Action, Scroll};
 use crate::terminal::attach::FromCore;
 use crate::terminal::clipboard::{Clipboard, SystemClipboard};
@@ -62,6 +62,8 @@ use std::time::{Duration, Instant};
 
 /// How long a follow-up key after the leader chord is awaited.
 const LEADER_TIMEOUT: Duration = Duration::from_millis(1500);
+/// Pixels one resize key grows or shrinks the focused pane by, as the web's.
+const RESIZE_STEP: f32 = 60.;
 /// How many tabs out of sight keep their terminal attached. A tab beyond them is parked: its
 /// terminal lets go of the shell (which keeps running) and attaches again, with the core's
 /// repaint, when the tab is shown.
@@ -201,6 +203,11 @@ pub struct Workspace {
     peek: Option<String>,
     /// The leader chord was pressed; dropped when its time is up.
     leader: Option<Task<()>>,
+    /// Resize mode is armed (the leader's `r`); each of its keys arms it afresh, and it is
+    /// dropped when its time is up.
+    resizing: Option<Task<()>>,
+    /// Back and Forward over the tabs shown.
+    history: History,
     /// What the last command could not do, or did instead.
     notice: Option<String>,
     /// The tab whose close the close guard confirmed: the next close of it ends it.
@@ -298,6 +305,8 @@ impl Workspace {
             viewport_height: 0.0,
             peek: None,
             leader: None,
+            resizing: None,
+            history: History::default(),
             notice: None,
             armed_close: None,
             room: Rc::new(Cell::new(None)),
@@ -406,6 +415,10 @@ impl Workspace {
 
     pub fn leader_armed(&self) -> bool {
         self.leader.is_some()
+    }
+
+    pub fn resize_armed(&self) -> bool {
+        self.resizing.is_some()
     }
 
     /// What the last command could not do, or did instead.
@@ -1576,6 +1589,7 @@ impl Workspace {
             None => self.tabs.open(&id),
         }
         self.keep_in_bounds(cx);
+        self.note_shown();
         cx.notify();
     }
 
@@ -1752,6 +1766,7 @@ impl Workspace {
     /// Tell the sidebar which tab is shown, so it is marked read and highlighted.
     fn after_change(&mut self, cx: &mut Context<Self>) {
         self.keep_in_bounds(cx);
+        self.note_shown();
         let target = self.tabs.active().and_then(|id| {
             let open = &self.panes.get(id)?.open;
             Some((
@@ -1765,6 +1780,13 @@ impl Workspace {
             None => sidebar.clear_selection(cx),
         });
         cx.notify();
+    }
+
+    /// The shown tab is a visit for Back and Forward.
+    fn note_shown(&mut self) {
+        if let Some(id) = self.tabs.active() {
+            self.history.record(id);
+        }
     }
 
     /// Give the keyboard to the pane the person clicked.
@@ -1841,6 +1863,7 @@ impl Workspace {
             in_terminal: self.focused_terminal(window, cx).is_some(),
             typing: self.keyboard_held.is_some(),
             leader: self.leader.is_some(),
+            resize: self.resizing.is_some(),
         };
         let Some(hit) = keymap.resolve(keystroke, context) else {
             return false;
@@ -1865,9 +1888,17 @@ impl Workspace {
                     return true;
                 }
                 self.leader = None;
+                // A key of resize mode arms it afresh, for the next.
+                let resizing = name.starts_with("resize.");
+                if !resizing {
+                    self.resizing = None;
+                }
                 if let Err(error) = self.run_command(&name, args.as_ref(), window, cx) {
                     self.notice = Some(error);
                     cx.notify();
+                }
+                if resizing {
+                    self.arm_resize(cx);
                 }
                 true
             }
@@ -1890,11 +1921,98 @@ impl Workspace {
             }
             Hit::LeaderEnded => {
                 self.leader = None;
+                self.resizing = None;
                 cx.notify();
                 // Escape ends it quietly; any other key still reaches the program.
                 keystroke.key == "escape"
             }
         }
+    }
+
+    /// Arm resize mode, or keep it armed for another [`LEADER_TIMEOUT`] (the web's, as its
+    /// leader's).
+    fn arm_resize(&mut self, cx: &mut Context<Self>) {
+        self.resizing = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(LEADER_TIMEOUT).await;
+            let _ = this.update(cx, |this, cx| {
+                this.resizing = None;
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    /// Grow (a positive `delta`) or shrink the focused pane by `delta` pixels, in the split as it
+    /// was last drawn. Nothing happens before it is drawn, or with no split.
+    fn resize_pane(&mut self, delta: f32, cx: &mut Context<Self>) {
+        let area = {
+            let boxes = self.drop_boxes.borrow();
+            self.tabs
+                .shown()
+                .iter()
+                .filter_map(|id| boxes.panes.get(id).copied())
+                .reduce(|a, b| a.union(&b))
+        };
+        if let Some(area) = area {
+            let (width, height) = (f32::from(area.size.width), f32::from(area.size.height));
+            if self.tabs.resize(delta, width, height) {
+                cx.notify();
+            }
+        }
+    }
+
+    /// Back (`-1`) or Forward (`1`) to a tab shown before, passing over sessions gone since.
+    fn step_history(&mut self, by: isize, cx: &mut Context<Self>) -> Result<(), String> {
+        let sidebar = self.sidebar.read(cx);
+        let panes = &self.panes;
+        let place = self.history.step(by, |id| {
+            panes.contains_key(id) || sidebar.session_to_open(id).is_some()
+        });
+        match place {
+            Some(id) => self.show_session(&id, cx),
+            None => Ok(()),
+        }
+    }
+
+    /// The web's leader `w`: the newest session of the next folder, folders (computer and
+    /// folder) ordered by their newest session, after the shown session's folder. Nothing with
+    /// fewer than two folders.
+    fn next_project(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
+        let store = &self.sidebar.read(cx).model().store;
+        let mut folders: Vec<((&str, &str), &perch_core::protocol::SessionSummary)> = Vec::new();
+        for session in &store.sessions {
+            let key = (session.host_id.as_str(), session.cwd.as_str());
+            match folders.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, newest)) if newest.created_at >= session.created_at => {}
+                Some((_, newest)) => *newest = session,
+                None => folders.push((key, session)),
+            }
+        }
+        if folders.len() < 2 {
+            return Ok(());
+        }
+        folders.sort_by_key(|(_, newest)| std::cmp::Reverse(newest.created_at));
+        let shown = self
+            .tabs
+            .active()
+            .and_then(|id| store.sessions.iter().find(|s| s.id == id));
+        let at = shown.and_then(|s| {
+            folders
+                .iter()
+                .position(|(k, _)| *k == (s.host_id.as_str(), s.cwd.as_str()))
+        });
+        let target = folders[at.map_or(0, |at| (at + 1) % folders.len())].1;
+        if shown.is_some_and(|s| s.id == target.id) {
+            return Ok(());
+        }
+        let (host, id, provider) = (
+            target.host_id.clone(),
+            target.id.clone(),
+            target.cli_provider_id.clone(),
+        );
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.open(host, id, provider, cx));
+        Ok(())
     }
 
     fn arm_leader(&mut self, cx: &mut Context<Self>) {
@@ -2314,6 +2432,14 @@ impl Workspace {
             }
             // The web's leader W and New workspace: the shown project's worktree menu. A folder
             // that is not a git repo has no menu, so the request is left for none to take.
+            "leader.resize" => self.arm_resize(cx),
+            "resize.left" | "resize.down" | "leader.shrink" => self.resize_pane(-RESIZE_STEP, cx),
+            "resize.up" | "resize.right" | "leader.grow" => self.resize_pane(RESIZE_STEP, cx),
+            "nav.back" => self.step_history(-1, cx)?,
+            "nav.forward" => self.step_history(1, cx)?,
+            "leader.nextProject" => self.next_project(cx)?,
+            // The web's Cmd+O: the sidebar's Add project form, which picks the folder.
+            "nests.addBirdhouse" => self.ask_add_project(cx)?,
             "leader.worktree" | "nests.new" => {
                 if let Some(key) = self.active_repo_key(cx) {
                     self.request_worktree_menu(key, None, name == "nests.new", cx);
