@@ -16,8 +16,11 @@
 //! A key nothing binds goes to the terminal. Nothing here reads the keyboard or runs a command:
 //! [`Keymap::resolve`] names what to run and the window runs it.
 //!
+//! Resize mode is the web's: the leader's follow-up `r` arms it, and each of its keys resizes the
+//! focused pane and keeps it armed; any other key, Escape or the timeout ends it.
+//!
 //! Not built: `layout:<name>` and `mod:<name>` sections (this client shows no layout or mod
-//! view), resize mode, and the follow-ups of the leader chord that resize a pane.
+//! view).
 
 use crate::actions::{Action, ACTIONS};
 use gpui::Keystroke;
@@ -34,6 +37,8 @@ pub enum Scope {
     OutsideEditable,
     /// A follow-up key after the leader chord.
     Leader,
+    /// A key of resize mode (the leader's follow-up `r`).
+    Resize,
     /// A command on the terminal that has the keyboard (find, clear, copy, scroll). It applies only
     /// while a terminal has the keyboard; the window runs it on that terminal.
     Terminal,
@@ -96,6 +101,7 @@ impl From<&Action> for Shortcut {
 pub const SHORTCUTS: &[Shortcut] = &[
     s("global.navigator", "Open Navigator", &["mod+p"]),
     s("nests.new", "New workspace (worktree)", &["mod+n"]),
+    s("nests.addBirdhouse", "Add project", &["mod+o"]),
     scoped(
         "global.navigatorAlt",
         "Open Navigator (outside terminals)",
@@ -140,6 +146,17 @@ pub const SHORTCUTS: &[Shortcut] = &[
     s("tabs.last", "Jump to the last tab", &["cmd+9", "alt+9"]),
     s("tabs.next", "Next tab", &["cmd+shift+]", "ctrl+pagedown"]),
     s("tabs.prev", "Previous tab", &["cmd+shift+[", "ctrl+pageup"]),
+    // History, not position: where you were before and after, as the web's (VS Code's Ctrl+-).
+    s(
+        "nav.back",
+        "Back to where you were",
+        &["ctrl+-", "alt+shift+left"],
+    ),
+    s(
+        "nav.forward",
+        "Forward",
+        &["ctrl+shift+-", "alt+shift+right"],
+    ),
     s("panes.splitRight", "Split right", &["mod+d"]),
     s(
         "panes.splitDown",
@@ -304,6 +321,12 @@ pub const SHORTCUTS: &[Shortcut] = &[
     scoped("leader.jump8", "Jump to tab 8", &["8"], Scope::Leader),
     scoped("leader.jump9", "Jump to tab 9", &["9"], Scope::Leader),
     scoped(
+        "leader.nextProject",
+        "Next project's most recent session",
+        &["w"],
+        Scope::Leader,
+    ),
+    scoped(
         "leader.worktree",
         "Open this project's worktree menu",
         &["shift+w"],
@@ -319,6 +342,18 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "leader.swapNext",
         "Swap with the next pane",
         &["shift+]"],
+        Scope::Leader,
+    ),
+    scoped(
+        "leader.grow",
+        "Grow the focused pane",
+        &["shift+="],
+        Scope::Leader,
+    ),
+    scoped(
+        "leader.shrink",
+        "Shrink the focused pane",
+        &["-"],
         Scope::Leader,
     ),
     scoped(
@@ -344,6 +379,31 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Swap pane right",
         &["shift+l"],
         Scope::Leader,
+    ),
+    scoped(
+        "leader.resize",
+        "Enter resize mode (Escape or timeout exits)",
+        &["r"],
+        Scope::Leader,
+    ),
+    scoped(
+        "resize.left",
+        "Resize pane left (shrink)",
+        &["h"],
+        Scope::Resize,
+    ),
+    scoped(
+        "resize.down",
+        "Resize pane down (shrink)",
+        &["j"],
+        Scope::Resize,
+    ),
+    scoped("resize.up", "Resize pane up (grow)", &["k"], Scope::Resize),
+    scoped(
+        "resize.right",
+        "Resize pane right (grow)",
+        &["l"],
+        Scope::Resize,
     ),
     scoped(
         "navigator.next",
@@ -412,6 +472,7 @@ fn help_group(id: &str) -> &'static str {
         "panes" => "panes",
         "terminal" => "terminal",
         "leader" => "leader",
+        "resize" => "resize",
         "directory" => "directory",
         "navigator" => "navigator",
         _ => "global",
@@ -437,8 +498,13 @@ pub fn leader_target(id: &str) -> Option<&'static str> {
         "focus.up" => "panes.focus.up",
         "focus.right" => "panes.focus.right",
         "newSession" => "sessions.new",
-        // The window runs it itself: the shown project's worktree menu.
+        // The window runs these itself: the shown project's worktree menu, the next folder's
+        // newest session, the focused pane's size and resize mode.
         "worktree" => "leader.worktree",
+        "nextProject" => "leader.nextProject",
+        "grow" => "leader.grow",
+        "shrink" => "leader.shrink",
+        "resize" => "leader.resize",
         "jump1" => "tabs.jump1",
         "jump2" => "tabs.jump2",
         "jump3" => "tabs.jump3",
@@ -683,7 +749,7 @@ pub fn effective_spec(
 ) -> Option<Chord> {
     if let Some(own) = chosen.get(shortcut.id) {
         let chord = parse_combo(own, mac).filter(|c| !reserved(c, mac))?;
-        let plain_ok = shortcut.scope == Scope::Leader;
+        let plain_ok = matches!(shortcut.scope, Scope::Leader | Scope::Resize);
         return (plain_ok || chord.cmd || chord.ctrl || chord.alt || function_key(&chord))
             .then_some(chord);
     }
@@ -729,7 +795,7 @@ pub enum Hit {
     Terminal,
     /// A binding in `keys.json` that cannot run. The press is swallowed and this says why.
     Fault(String),
-    /// The leader chord was armed and this press ended it without a follow-up.
+    /// The leader chord or resize mode was armed and this press ended it without one of its keys.
     LeaderEnded,
 }
 
@@ -742,6 +808,8 @@ pub struct Context {
     pub typing: bool,
     /// The leader chord was pressed and its follow-up is awaited.
     pub leader: bool,
+    /// Resize mode is armed: its keys resize, any other ends it.
+    pub resize: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -786,14 +854,8 @@ impl Keymap {
             let Some(chord) = effective_spec(&shortcut, &self.chosen, self.mac) else {
                 continue;
             };
-            let leader = shortcut.scope == Scope::Leader;
-            let prefix = if leader {
-                match self.label("leader.arm") {
-                    Some(arm) => format!("{arm}, "),
-                    None => continue,
-                }
-            } else {
-                String::new()
+            let Some(prefix) = self.prefix(shortcut.scope) else {
+                continue;
             };
             let label = format!("{prefix}{}", self.format(&chord));
             let group = help_group(shortcut.id);
@@ -864,6 +926,21 @@ impl Keymap {
         rows
     }
 
+    /// What the help writes before a mode's key: the leader chord's (`⌃Space, `), and for resize
+    /// mode also the leader's follow-up that arms it (`⌃Space, R, `). `None` when the mode cannot
+    /// be reached because a key on the way is unbound.
+    fn prefix(&self, scope: Scope) -> Option<String> {
+        Some(match scope {
+            Scope::Leader => format!("{}, ", self.label("leader.arm")?),
+            Scope::Resize => format!(
+                "{}{}, ",
+                self.prefix(Scope::Leader)?,
+                self.label("leader.resize")?
+            ),
+            _ => String::new(),
+        })
+    }
+
     /// `cmd+shift+]` as `⇧⌘]` on a Mac, `Ctrl+Shift+]` elsewhere.
     fn format(&self, c: &Chord) -> String {
         let key = match c.key.as_str() {
@@ -914,8 +991,11 @@ impl Keymap {
         if m.control && m.alt && m.shift && keystroke.key == "escape" {
             return None;
         }
+        if context.resize {
+            return Some(self.mode_key(keystroke, Scope::Resize, Some));
+        }
         if context.leader {
-            return Some(self.follow_up(keystroke));
+            return Some(self.mode_key(keystroke, Scope::Leader, leader_target));
         }
         if let Some(hit) = self.file_hit(keystroke, context) {
             return Some(hit);
@@ -936,9 +1016,11 @@ impl Keymap {
                         Scope::Any => true,
                         Scope::OutsideTerminal => !context.in_terminal,
                         Scope::OutsideEditable => !context.in_terminal && !context.typing,
-                        Scope::Leader | Scope::Terminal | Scope::Directory | Scope::Navigator => {
-                            false
-                        }
+                        Scope::Leader
+                        | Scope::Resize
+                        | Scope::Terminal
+                        | Scope::Directory
+                        | Scope::Navigator => false,
                     })
                     .find(bound)
             })
@@ -994,15 +1076,21 @@ impl Keymap {
             .map(|s| s.id)
     }
 
-    /// The press after the leader chord: a follow-up runs, Escape ends it quietly, anything else
-    /// ends it and still goes to the terminal.
-    fn follow_up(&self, keystroke: &Keystroke) -> Hit {
+    /// A press while the leader chord or resize mode waits: a key of the mode runs (`target` names
+    /// its command), Escape ends the mode quietly, anything else ends it and still goes to the
+    /// terminal.
+    fn mode_key(
+        &self,
+        keystroke: &Keystroke,
+        scope: Scope,
+        target: fn(&'static str) -> Option<&'static str>,
+    ) -> Hit {
         let found = all_shortcuts()
-            .filter(|s| s.scope == Scope::Leader)
+            .filter(|s| s.scope == scope)
             .find(|s| {
                 effective_spec(s, &self.chosen, self.mac).is_some_and(|c| matches(&c, keystroke))
             })
-            .and_then(|s| leader_target(s.id));
+            .and_then(|s| target(s.id));
         match found {
             Some(target) => command_hit(target),
             None => Hit::LeaderEnded,
@@ -1128,6 +1216,7 @@ mod tests {
         in_terminal: true,
         typing: false,
         leader: false,
+        resize: false,
     };
 
     #[test]
@@ -1435,6 +1524,39 @@ mod tests {
         // Not a follow-up: the leader ends, and no other command runs behind it.
         assert_eq!(m.resolve(&press("cmd-t"), armed), Some(Hit::LeaderEnded));
         assert_eq!(m.resolve(&press("q"), armed), Some(Hit::LeaderEnded));
+        assert_eq!(run(m.resolve(&press("r"), armed)), "leader.resize");
+        assert_eq!(run(m.resolve(&press("w"), armed)), "leader.nextProject");
+        assert_eq!(run(m.resolve(&press("shift-+"), armed)), "leader.grow");
+        assert_eq!(run(m.resolve(&press("-"), armed)), "leader.shrink");
+        // Resize mode: h j k l resize, anything else ends it; its keys mean nothing outside it.
+        let resizing = Context {
+            resize: true,
+            ..IN_TERMINAL
+        };
+        for (key, id) in [
+            ("h", "resize.left"),
+            ("j", "resize.down"),
+            ("k", "resize.up"),
+            ("l", "resize.right"),
+        ] {
+            assert_eq!(run(m.resolve(&press(key), resizing)), id);
+            assert_eq!(m.resolve(&press(key), IN_TERMINAL), None);
+        }
+        assert_eq!(m.resolve(&press("v"), resizing), Some(Hit::LeaderEnded));
+        assert_eq!(
+            m.resolve(&press("escape"), resizing),
+            Some(Hit::LeaderEnded)
+        );
+        // History and Add project, as the web binds them on a Mac.
+        assert_eq!(run(m.resolve(&press("ctrl--"), IN_TERMINAL)), "nav.back");
+        assert_eq!(
+            run(m.resolve(&press("ctrl-shift-_"), IN_TERMINAL)),
+            "nav.forward"
+        );
+        assert_eq!(
+            run(m.resolve(&press("cmd-o"), IN_TERMINAL)),
+            "nests.addBirdhouse"
+        );
     }
 
     #[test]
@@ -1524,6 +1646,20 @@ mod tests {
         );
         assert_eq!(find(&rows, "Jump to tab 1…8"), ["tabs ⌘1…8"]);
         assert_eq!(find(&rows, "Jump to tab 1…9"), ["leader ⌃Space, 1…9"]);
+        // Resize mode's keys follow the leader's follow-up that arms it.
+        assert_eq!(
+            find(&rows, "Resize pane up (grow)"),
+            ["resize ⌃Space, R, K"]
+        );
+        assert_eq!(find(&rows, "Back to where you were"), ["tabs ⌃-"]);
+        assert_eq!(find(&rows, "Add project"), ["nests ⌘O"]);
+        assert!(
+            keymap(&[("leader.resize", "")], None)
+                .help()
+                .iter()
+                .all(|r| r["group"] != "resize"),
+            "no way into resize mode, no resize rows"
+        );
         assert!(
             find(&rows, "Jump to tab 3").is_empty(),
             "in the range's row"

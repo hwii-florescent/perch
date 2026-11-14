@@ -37,7 +37,7 @@ use crate::settings::{
 };
 use crate::sidebar::{navigation, Alert, Heard, Provider, LOCAL};
 use crate::tab_drag::{self, Drop, TabDrag};
-use crate::tabs::{Dir, Node, Side, Tabs};
+use crate::tabs::{Dir, History, Node, Side, Tabs};
 use crate::terminal::actions::{Action, Scroll};
 use crate::terminal::attach::FromCore;
 use crate::terminal::clipboard::{Clipboard, SystemClipboard};
@@ -56,12 +56,14 @@ use gpui::{
 };
 use serde_json::{json, Value};
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// How long a follow-up key after the leader chord is awaited.
 const LEADER_TIMEOUT: Duration = Duration::from_millis(1500);
+/// Pixels one resize key grows or shrinks the focused pane by, as the web's.
+const RESIZE_STEP: f32 = 60.;
 /// How many tabs out of sight keep their terminal attached. A tab beyond them is parked: its
 /// terminal lets go of the shell (which keeps running) and attaches again, with the core's
 /// repaint, when the tab is shown.
@@ -201,6 +203,11 @@ pub struct Workspace {
     peek: Option<String>,
     /// The leader chord was pressed; dropped when its time is up.
     leader: Option<Task<()>>,
+    /// Resize mode is armed (the leader's `r`); each of its keys arms it afresh, and it is
+    /// dropped when its time is up.
+    resizing: Option<Task<()>>,
+    /// Back and Forward over the tabs shown.
+    history: History,
     /// What the last command could not do, or did instead.
     notice: Option<String>,
     /// The tab whose close the close guard confirmed: the next close of it ends it.
@@ -237,7 +244,7 @@ pub struct Workspace {
     worktree_requests: u64,
     /// The in-flow mod whose own field has the keyboard (the sidebar's Add project form): the
     /// window leaves the keyboard there and types into it rather than running plain keys.
-    keyboard_held: Option<String>,
+    keyboard_held: Option<(String, u64)>,
     /// A press on a tab of the strip, which may become a drag (`tab.beginDrag`).
     drag: Option<TabDrag>,
     /// A press a mod follows (`pointer.follow`): its token while the press lasts, and the
@@ -298,6 +305,8 @@ impl Workspace {
             viewport_height: 0.0,
             peek: None,
             leader: None,
+            resizing: None,
+            history: History::default(),
             notice: None,
             armed_close: None,
             room: Rc::new(Cell::new(None)),
@@ -406,6 +415,10 @@ impl Workspace {
 
     pub fn leader_armed(&self) -> bool {
         self.leader.is_some()
+    }
+
+    pub fn resize_armed(&self) -> bool {
+        self.resizing.is_some()
     }
 
     /// What the last command could not do, or did instead.
@@ -568,11 +581,17 @@ impl Workspace {
         cx.notify();
     }
 
-    /// In-flow mod `id` says whether one of its own fields has the keyboard.
-    pub fn hold_keyboard(&mut self, id: &str, held: bool, cx: &mut Context<Self>) {
+    /// The copy of an in-flow mod under key `id`, in its `load`th load, says whether one of its
+    /// own fields has the keyboard. The hold goes with that copy: when it is no longer drawn or
+    /// loads again, the window lets go of it (see [`Self::let_go_of_stale_hold`]).
+    pub fn hold_keyboard(&mut self, id: &str, load: u64, held: bool, cx: &mut Context<Self>) {
         let now = if held {
-            Some(id.to_string())
-        } else if self.keyboard_held.as_deref() == Some(id) {
+            Some((id.to_string(), load))
+        } else if self
+            .keyboard_held
+            .as_ref()
+            .is_some_and(|(key, _)| key == id)
+        {
             None
         } else {
             return;
@@ -580,6 +599,23 @@ impl Workspace {
         if self.keyboard_held != now {
             self.keyboard_held = now;
             cx.notify();
+        }
+    }
+
+    /// Whether a field of an in-flow mod holds the keyboard.
+    pub fn keyboard_held(&self) -> bool {
+        self.keyboard_held.is_some()
+    }
+
+    /// A hold whose copy is no longer drawn (`wanted`), or has loaded again, holds nothing: the
+    /// copy that asked for it cannot let go any more.
+    fn let_go_of_stale_hold(&mut self, wanted: &[(&'static str, String, Value)], cx: &App) {
+        let stale = self.keyboard_held.as_ref().is_some_and(|(key, load)| {
+            !wanted.iter().any(|(_, k, _)| k == key)
+                || screens::mods(cx).is_some_and(|(_, perch)| perch.loads(key) != *load)
+        });
+        if stale {
+            self.keyboard_held = None;
         }
     }
 
@@ -1131,7 +1167,8 @@ impl Workspace {
                     cx,
                 )
             }
-            "stopAgent" => self.run_command("terminal.kill", None, window, cx),
+            // The menu's own tab, whichever has the keyboard by now.
+            "stopAgent" => self.run_command("terminal.kill", Some(&tab), window, cx),
             "showFull" => self.run_command("pane.unsplit", Some(&tab), window, cx),
             "splitSession" => {
                 self.open_session_split(id, at, cx);
@@ -1576,6 +1613,7 @@ impl Workspace {
             None => self.tabs.open(&id),
         }
         self.keep_in_bounds(cx);
+        self.note_shown();
         cx.notify();
     }
 
@@ -1752,6 +1790,7 @@ impl Workspace {
     /// Tell the sidebar which tab is shown, so it is marked read and highlighted.
     fn after_change(&mut self, cx: &mut Context<Self>) {
         self.keep_in_bounds(cx);
+        self.note_shown();
         let target = self.tabs.active().and_then(|id| {
             let open = &self.panes.get(id)?.open;
             Some((
@@ -1765,6 +1804,13 @@ impl Workspace {
             None => sidebar.clear_selection(cx),
         });
         cx.notify();
+    }
+
+    /// The shown tab is a visit for Back and Forward.
+    fn note_shown(&mut self) {
+        if let Some(id) = self.tabs.active() {
+            self.history.record(id);
+        }
     }
 
     /// Give the keyboard to the pane the person clicked.
@@ -1841,6 +1887,7 @@ impl Workspace {
             in_terminal: self.focused_terminal(window, cx).is_some(),
             typing: self.keyboard_held.is_some(),
             leader: self.leader.is_some(),
+            resize: self.resizing.is_some(),
         };
         let Some(hit) = keymap.resolve(keystroke, context) else {
             return false;
@@ -1865,9 +1912,17 @@ impl Workspace {
                     return true;
                 }
                 self.leader = None;
+                // A key of resize mode arms it afresh, for the next.
+                let resizing = name.starts_with("resize.");
+                if !resizing {
+                    self.resizing = None;
+                }
                 if let Err(error) = self.run_command(&name, args.as_ref(), window, cx) {
                     self.notice = Some(error);
                     cx.notify();
+                }
+                if resizing {
+                    self.arm_resize(cx);
                 }
                 true
             }
@@ -1890,11 +1945,98 @@ impl Workspace {
             }
             Hit::LeaderEnded => {
                 self.leader = None;
+                self.resizing = None;
                 cx.notify();
                 // Escape ends it quietly; any other key still reaches the program.
                 keystroke.key == "escape"
             }
         }
+    }
+
+    /// Arm resize mode, or keep it armed for another [`LEADER_TIMEOUT`] (the web's, as its
+    /// leader's).
+    fn arm_resize(&mut self, cx: &mut Context<Self>) {
+        self.resizing = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(LEADER_TIMEOUT).await;
+            let _ = this.update(cx, |this, cx| {
+                this.resizing = None;
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    /// Grow (a positive `delta`) or shrink the focused pane by `delta` pixels, in the split as it
+    /// was last drawn. Nothing happens before it is drawn, or with no split.
+    fn resize_pane(&mut self, delta: f32, cx: &mut Context<Self>) {
+        let area = {
+            let boxes = self.drop_boxes.borrow();
+            self.tabs
+                .shown()
+                .iter()
+                .filter_map(|id| boxes.panes.get(id).copied())
+                .reduce(|a, b| a.union(&b))
+        };
+        if let Some(area) = area {
+            let (width, height) = (f32::from(area.size.width), f32::from(area.size.height));
+            if self.tabs.resize(delta, width, height) {
+                cx.notify();
+            }
+        }
+    }
+
+    /// Back (`-1`) or Forward (`1`) to a tab shown before, passing over sessions gone since.
+    fn step_history(&mut self, by: isize, cx: &mut Context<Self>) -> Result<(), String> {
+        let sidebar = self.sidebar.read(cx);
+        let panes = &self.panes;
+        let place = self.history.step(by, |id| {
+            panes.contains_key(id) || sidebar.session_to_open(id).is_some()
+        });
+        match place {
+            Some(id) => self.show_session(&id, cx),
+            None => Ok(()),
+        }
+    }
+
+    /// The web's leader `w`: the newest session of the next folder, folders (computer and
+    /// folder) ordered by their newest session, after the shown session's folder. Nothing with
+    /// fewer than two folders.
+    fn next_project(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
+        let store = &self.sidebar.read(cx).model().store;
+        let mut folders: Vec<((&str, &str), &perch_core::protocol::SessionSummary)> = Vec::new();
+        for session in &store.sessions {
+            let key = (session.host_id.as_str(), session.cwd.as_str());
+            match folders.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, newest)) if newest.created_at >= session.created_at => {}
+                Some((_, newest)) => *newest = session,
+                None => folders.push((key, session)),
+            }
+        }
+        if folders.len() < 2 {
+            return Ok(());
+        }
+        folders.sort_by_key(|(_, newest)| std::cmp::Reverse(newest.created_at));
+        let shown = self
+            .tabs
+            .active()
+            .and_then(|id| store.sessions.iter().find(|s| s.id == id));
+        let at = shown.and_then(|s| {
+            folders
+                .iter()
+                .position(|(k, _)| *k == (s.host_id.as_str(), s.cwd.as_str()))
+        });
+        let target = folders[at.map_or(0, |at| (at + 1) % folders.len())].1;
+        if shown.is_some_and(|s| s.id == target.id) {
+            return Ok(());
+        }
+        let (host, id, provider) = (
+            target.host_id.clone(),
+            target.id.clone(),
+            target.cli_provider_id.clone(),
+        );
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.open(host, id, provider, cx));
+        Ok(())
     }
 
     fn arm_leader(&mut self, cx: &mut Context<Self>) {
@@ -1977,6 +2119,7 @@ impl Workspace {
                 r#"This command needs {direction: "left" | "right" | "up" | "down"}."#.to_string()
             })
         };
+        self.sidebar.read(cx).take_refused();
         match name {
             "global.navigator" | "global.navigatorAlt" | "app.palette" => {
                 self.toggle_palette(window, cx)
@@ -2012,10 +2155,11 @@ impl Workspace {
             }
             "session.request_close" => {
                 let id = text("id").ok_or("This command needs {id}.")?.to_string();
-                if !self.tabs.contains(&id) {
-                    return Err(format!("Session {id} has no tab in this window."));
+                if self.tabs.contains(&id) {
+                    self.close(&id, cx);
+                } else {
+                    self.close_untabbed(&id, cx)?;
                 }
-                self.close(&id, cx);
             }
             // The sidebar's actions on what the core keeps: each names its target, and one the
             // core does not know is refused, so a command never acts on another.
@@ -2046,20 +2190,22 @@ impl Workspace {
                     .find(|s| s.id == id)
                     .map(|s| s.host_id.clone())
                     .unwrap_or_else(|| LOCAL.into());
-                // ponytail: the group is the sidebar's siblings, not also each workspace's strip
-                // order as the web's `moveChat` refills; the native strip keeps no order of its own.
-                let mut group: Vec<String> = siblings.clone();
-                for extra in [&id, &target] {
-                    if !group.contains(extra) {
-                        group.push(extra.clone());
-                    }
-                }
-                let live = store
+                let live: HashSet<String> = store
                     .sessions
                     .iter()
                     .filter(|s| s.host_id == host)
                     .map(|s| s.id.clone())
                     .collect();
+                // ponytail: the group is the sidebar's siblings, not also each workspace's strip
+                // order as the web's `moveChat` refills; the native strip keeps no order of its own.
+                // Only this computer's sessions go into its order: an unknown id is left out.
+                let mut group: Vec<String> =
+                    siblings.into_iter().filter(|s| live.contains(s)).collect();
+                for extra in [&id, &target] {
+                    if !group.contains(extra) {
+                        group.push(extra.clone());
+                    }
+                }
                 let core = store
                     .order
                     .get(&host)
@@ -2131,17 +2277,19 @@ impl Workspace {
                 let folder = text("folder")
                     .ok_or(r#"This command needs {folder: "/path"}."#)?
                     .to_string();
-                if args.is_some_and(|a| a.get("argv").is_some() || a.get("task").is_some()) {
-                    return Err(
-                        "The native window cannot run a program in a new project yet.".into(),
-                    );
-                }
                 let host = text("hostId").unwrap_or(LOCAL).to_string();
-                self.sidebar.read(cx).send(Command::CreateProject {
-                    host_id: host,
-                    path: folder,
-                    name: text("name").map(str::to_string),
-                });
+                let name = text("name").map(str::to_string);
+                match args.and_then(|a| a.get("argv")) {
+                    None => self.sidebar.read(cx).send(Command::CreateProject {
+                        host_id: host,
+                        path: folder,
+                        name,
+                    }),
+                    Some(argv) => {
+                        let command = program_in(argv, text("task"))?;
+                        self.new_project_running(host, folder, name, command, cx)?;
+                    }
+                }
             }
             "workspace.open" => {
                 let id = self.known_workspace(text("id"), cx)?;
@@ -2314,6 +2462,14 @@ impl Workspace {
             }
             // The web's leader W and New workspace: the shown project's worktree menu. A folder
             // that is not a git repo has no menu, so the request is left for none to take.
+            "leader.resize" => self.arm_resize(cx),
+            "resize.left" | "resize.down" | "leader.shrink" => self.resize_pane(-RESIZE_STEP, cx),
+            "resize.up" | "resize.right" | "leader.grow" => self.resize_pane(RESIZE_STEP, cx),
+            "nav.back" => self.step_history(-1, cx)?,
+            "nav.forward" => self.step_history(1, cx)?,
+            "leader.nextProject" => self.next_project(cx)?,
+            // The web's Cmd+O: the sidebar's Add project form, which picks the folder.
+            "nests.addBirdhouse" => self.ask_add_project(cx)?,
             "leader.worktree" | "nests.new" => {
                 if let Some(key) = self.active_repo_key(cx) {
                     self.request_worktree_menu(key, None, name == "nests.new", cx);
@@ -2636,6 +2792,10 @@ impl Workspace {
             }
         }
         let _ = window;
+        // What it would have changed in the core was not sent: the core is away.
+        if self.sidebar.read(cx).take_refused() {
+            return Err(crate::client::NOT_CONNECTED.into());
+        }
         Ok(())
     }
 
@@ -2802,6 +2962,162 @@ impl Workspace {
         }
         self.notice = Some("Ending the session\u{2026}".into());
         cx.notify();
+    }
+
+    /// The web's `project.new` with `argv`: add `folder` as a project on this computer, show it,
+    /// then run `command` in a new terminal of its workspace (`workspace.run`) and show that once
+    /// the core lists it. Each step waits for the core's answer; a refusal, or no answer, stops
+    /// there and says so. Nothing is retried.
+    fn new_project_running(
+        &mut self,
+        host: String,
+        folder: String,
+        name: Option<String>,
+        command: String,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let model = self.sidebar.read(cx).model();
+        let store = &model.store;
+        let can_run = store
+            .local_capabilities
+            .iter()
+            .any(|c| c == "workspace.run.v1");
+        if host != LOCAL || !model.connected || !can_run {
+            return Err("Run needs a connected local workspace and an updated core.".into());
+        }
+        let known: HashSet<String> = store.projects.iter().map(|p| p.id.clone()).collect();
+        let (reply, answer) = futures::channel::oneshot::channel();
+        self.sidebar.read(cx).send(Command::AddProject {
+            host_id: host.clone(),
+            path: folder.clone(),
+            name,
+            reply,
+        });
+        cx.spawn(async move |this, cx| {
+            let failed = |why: String| format!("{why}: {folder} was not started.");
+            let added = match answer.await {
+                Ok(Ok(_)) => Ok(()),
+                Ok(Err(error)) => Err(failed(error)),
+                Err(_) => Err(failed("The core did not answer".into())),
+            };
+            // The new project, shown, and its workspace: the one that was not listed before, or
+            // the one at the folder, as the web finds it.
+            let workspace = this.update(cx, |this, cx| {
+                added?;
+                let store = this.sidebar.read(cx).model().store.clone();
+                let created = store
+                    .projects
+                    .iter()
+                    .find(|p| p.host_id == host && !known.contains(&p.id))
+                    .or_else(|| store.projects.iter().find(|p| p.host_id == host && p.path == folder))
+                    .ok_or_else(|| failed("The project could not be added".into()))?;
+                if let Some((_, perch)) = screens::mods(cx) {
+                    if let Some(Err(error)) = perch.run_own("project.focus", &json!({ "id": created.id })) {
+                        return Err(failed(error));
+                    }
+                    perch.flush(cx);
+                }
+                navigation::landing_workspace(&store, &created.id, None)
+                    .map(|(id, _)| id)
+                    .ok_or_else(|| failed("The new project has no workspace".into()))
+            });
+            let started = match workspace {
+                Ok(Ok(workspace)) => {
+                    let frame = json!({ "type": "workspace.run", "workspaceId": workspace, "command": command });
+                    let asked = this.update(cx, |this, cx| this.ask(frame, cx));
+                    match asked {
+                        Ok(answer) => match answer.await {
+                            Ok(Ok(started)) => started["sessionId"]
+                                .as_str()
+                                .map(str::to_string)
+                                .ok_or_else(|| failed("The core did not say which terminal".into())),
+                            Ok(Err(error)) => Err(failed(error)),
+                            Err(_) => Err(failed(
+                                "The run's outcome is unknown; check the workspace's terminals before running again".into(),
+                            )),
+                        },
+                        Err(_) => return,
+                    }
+                }
+                Ok(Err(error)) => Err(error),
+                Err(_) => return,
+            };
+            let session = match started {
+                Ok(session) => session,
+                Err(error) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.notice = Some(error);
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+            // Shown once the core lists it, as the web's `showWhenListed`, for up to 10 s.
+            for _ in 0..100 {
+                let shown = this.update(cx, |this, cx| {
+                    let listed = this.sidebar.read(cx).session_to_open(&session);
+                    listed.map(|open| {
+                        this.sidebar.update(cx, |sidebar, cx| {
+                            sidebar.open(open.host_id, open.session_id, Some(perch_core::agent_fleet::TERMINAL_PROVIDER.into()), cx)
+                        })
+                    })
+                });
+                match shown {
+                    Ok(Some(())) | Err(_) => return,
+                    Ok(None) => cx.background_executor().timer(Duration::from_millis(100)).await,
+                }
+            }
+        })
+        .detach();
+        Ok(())
+    }
+
+    /// End session `id`, which has no tab here, as the web's `requestCloseSession`: an agent asks
+    /// first through the close guard while Settings > Warn before closing an agent is on, and
+    /// anything else is ended at once. Ending is the core's: the sidebar row goes when it says
+    /// the session is deleted. Keep running leaves it as it is, having no view here to dismiss.
+    fn close_untabbed(&mut self, id: &str, cx: &mut Context<Self>) -> Result<(), String> {
+        let open = self
+            .sidebar
+            .read(cx)
+            .session_to_open(id)
+            .ok_or_else(|| format!("No session {id}."))?;
+        let delete = Command::DeleteSession {
+            session_id: id.to_string(),
+        };
+        if !self.warns_before_ending(&open, cx) {
+            self.sidebar.read(cx).send(delete);
+            return Ok(());
+        }
+        if !self.screens.has("confirm", cx) {
+            return Err(
+                "No mod draws the confirmation, so the agent was not stopped. The stock \
+                        one is restored when the app starts."
+                    .into(),
+            );
+        }
+        let label = self.title_of(id, cx);
+        self.open_screen(
+            "confirm",
+            json!({ "sessionId": id, "label": label }),
+            None,
+            Some(Box::new(move |this, result, _, cx| {
+                if result.get("confirmed").and_then(Value::as_bool) != Some(true) {
+                    return;
+                }
+                if result.get("never").and_then(Value::as_bool) == Some(true) {
+                    this.change(Change::WarnCloseAgent(false), cx);
+                }
+                let sidebar = this.sidebar.read(cx);
+                sidebar.send(delete);
+                if sidebar.take_refused() {
+                    this.notice = Some(crate::client::NOT_CONNECTED.into());
+                    cx.notify();
+                }
+            })),
+            cx,
+        );
+        Ok(())
     }
 
     /// Take tab `id` out of this window without ending its session, saying `why` it keeps running.
@@ -3724,6 +4040,27 @@ fn action_of(result: &Value) -> (Option<String>, Vec<Value>) {
 }
 
 /// Argument `at` of an action, as text.
+/// The web's `programIn`: `argv` and `task` as one shell command, each part single-quoted.
+fn program_in(argv: &Value, task: Option<&str>) -> Result<String, String> {
+    let parts = argv
+        .as_array()
+        .filter(|parts| !parts.is_empty())
+        .and_then(|parts| {
+            parts
+                .iter()
+                .map(|p| p.as_str().filter(|p| !p.is_empty()))
+                .collect::<Option<Vec<_>>>()
+        })
+        .ok_or("argv is a list of strings: [program, ...arguments].")?;
+    let quote = |part: &str| format!("'{}'", part.replace('\'', "'\\''"));
+    Ok(parts
+        .into_iter()
+        .chain(task.filter(|t| !t.is_empty()))
+        .map(quote)
+        .collect::<Vec<_>>()
+        .join(" "))
+}
+
 fn word(args: &[Value], at: usize) -> Option<String> {
     args.get(at).and_then(Value::as_str).map(str::to_string)
 }
@@ -3792,6 +4129,7 @@ impl gpui::Render for Workspace {
         }
         self.screens.realize(&self.screen_focus, window, cx);
         let wanted = self.inflow_wanted(cx);
+        self.let_go_of_stale_hold(&wanted, cx);
         self.screens.place(wanted, window, cx);
         // A terminal that attaches takes the keyboard when it first draws; the tab that has it in
         // the layout keeps it. A modal screen has the keyboard while it is up.
@@ -4092,7 +4430,25 @@ impl gpui::Render for Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::Settle;
+    use super::{program_in, Settle};
+    use serde_json::json;
+
+    #[test]
+    fn a_program_is_quoted_as_the_web_quotes_it() {
+        assert_eq!(
+            program_in(&json!(["claude", "--model", "x"]), Some("fix it's bug")),
+            Ok("'claude' '--model' 'x' 'fix it'\\''s bug'".to_string())
+        );
+        assert_eq!(program_in(&json!(["sh"]), Some("")), Ok("'sh'".to_string()));
+        for bad in [
+            json!([]),
+            json!("claude"),
+            json!(["claude", ""]),
+            json!([1]),
+        ] {
+            assert!(program_in(&bad, None).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn a_size_is_applied_once_it_holds_for_two_draws() {

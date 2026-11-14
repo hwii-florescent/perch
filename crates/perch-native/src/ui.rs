@@ -62,6 +62,9 @@ pub struct Sidebar {
     commands: Option<UnboundedSender<Command>>,
     /// The session the last launch made, which the window opens as a tab or a split.
     launched: Option<String>,
+    /// A command that changes something was refused since the window last asked, because the
+    /// core was away.
+    refused: std::cell::Cell<bool>,
 }
 
 impl EventEmitter<OpenSession> for Sidebar {}
@@ -79,6 +82,7 @@ impl Sidebar {
             notice: None,
             commands,
             launched: None,
+            refused: Default::default(),
         }
     }
 
@@ -252,10 +256,22 @@ impl Sidebar {
         self.commands.clone()
     }
 
+    /// Hands `command` to the follower. While the core is away one that changes something is
+    /// refused instead ([`Command::refuse`]), and [`Self::take_refused`] says so.
     pub fn send(&self, command: Command) {
+        if !self.model.connected && command.changes_state() {
+            self.refused.set(true);
+            command.refuse(crate::client::NOT_CONNECTED);
+            return;
+        }
         if let Some(commands) = &self.commands {
             let _ = commands.unbounded_send(command);
         }
+    }
+
+    /// Whether a command was refused since the last call, because the core was away.
+    pub fn take_refused(&self) -> bool {
+        self.refused.replace(false)
     }
 
     /// What the last launch said (it failed, or it was asked of another computer), until a

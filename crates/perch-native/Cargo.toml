@@ -142,3 +142,13 @@ harness = false
 name = "mods_agent_control_window"
 path = "tests/mods_agent_control_window.rs"
 harness = false
+
+[[test]]
+name = "workspace_keys_window"
+path = "tests/workspace_keys_window.rs"
+harness = false
+
+[[test]]
+name = "workspace_offline_window"
+path = "tests/workspace_offline_window.rs"
+harness = false

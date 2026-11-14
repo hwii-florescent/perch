@@ -829,6 +829,43 @@ pub enum Command {
     WorktreeJob { verb: &'static str, job_id: String },
 }
 
+/// Why a command that changes something was refused: no connection to the core was up.
+pub const NOT_CONNECTED: &str =
+    "Perch is not connected to its core, so nothing was changed. Try again once it is back.";
+
+/// The questions a screen puts to the core that change nothing there.
+const READS: [&str; 5] = [
+    "fs.browse",
+    "instructions.get",
+    "memory.list",
+    "memory.get",
+    "worktree.list",
+];
+
+impl Command {
+    /// Whether it changes what the core keeps or runs. One of these is never kept for a
+    /// connection that is not up: as the web's socket drops a send while it is closed, so that
+    /// nothing runs minutes later against whatever core is found by then.
+    pub fn changes_state(&self) -> bool {
+        match self {
+            Command::View(_)
+            | Command::ShowTerminals(_)
+            | Command::WindowActive(_)
+            | Command::RefreshHost(_)
+            | Command::UsageGet { .. } => false,
+            Command::Ask { frame, .. } => !READS.contains(&frame["type"].as_str().unwrap_or("")),
+            _ => true,
+        }
+    }
+
+    /// Refused with `why`: a question gets it as its answer; anything else is dropped.
+    pub fn refuse(self, why: &str) {
+        if let Command::Ask { reply, .. } | Command::AddProject { reply, .. } = self {
+            let _ = reply.send(Err(why.into()));
+        }
+    }
+}
+
 /// Where the answer to one request goes.
 pub type Answer = futures::channel::oneshot::Sender<Result<Value, String>>;
 
@@ -894,6 +931,11 @@ const ASKS: &[(&str, &[(&str, Field)])] = &[
             ("startFrom", Field::MaybeText),
             ("parentWorkspaceId", Field::MaybeText),
         ],
+    ),
+    // A program in a new terminal of a workspace on this computer (`workspace.run.v1`).
+    (
+        "workspace.run",
+        &[("workspaceId", Field::Text), ("command", Field::Text)],
     ),
     // This computer's own background create (`worktree.job`): it names no other computer.
     (
@@ -1030,6 +1072,10 @@ fn answer_of(message: &ServerMessage) -> Option<(&str, Result<Value, String>)> {
             }
             Some((request_id, Ok(answer)))
         }
+        ServerMessage::WorkspaceRunStarted {
+            request_id,
+            session_id,
+        } => Some((request_id, Ok(json!({ "sessionId": session_id })))),
         // The core sends the project's snapshot to the connection that created it only.
         ServerMessage::WorkspaceSnapshot { request_id, .. } => Some((request_id, Ok(Value::Null))),
         ServerMessage::Error {
@@ -1219,6 +1265,17 @@ fn publish(state: &State, shown: &mut Option<Model>, updates: &UnboundedSender<U
     updates.unbounded_send(Update::Model(model)).is_ok()
 }
 
+/// The next command: one carried over from before the connection first, then the window's.
+async fn next_command(
+    carried: &mut std::collections::VecDeque<Command>,
+    commands: &mut UnboundedReceiver<Command>,
+) -> Option<Command> {
+    match carried.pop_front() {
+        Some(command) => Some(command),
+        None => commands.next().await,
+    }
+}
+
 /// One connection's life: `Ok` when the window closed, `Err` when the socket dropped. Requests
 /// never wait for their answer here: a launch is a small state machine fed by the same frames
 /// as everything else, so the sidebar keeps following the core while one is in flight.
@@ -1231,6 +1288,16 @@ async fn live(
     launch: &mut Option<Launch>,
 ) -> Result<()> {
     state.connect();
+    // What the window asked while no connection was up: what changes something is refused (it
+    // was asked of a core that may not be this one), the rest is done now.
+    let mut carried = std::collections::VecDeque::new();
+    while let Ok(command) = commands.try_recv() {
+        if command.changes_state() {
+            command.refuse(NOT_CONNECTED);
+        } else {
+            carried.push_back(command);
+        }
+    }
     // The requests waiting on an answer, by id; they go with the connection.
     let mut pending: HashMap<String, Answer> = HashMap::new();
     connection.send(json!({"type": "session.list"})).await?;
@@ -1281,7 +1348,7 @@ async fn live(
                     }
                 }
             }
-            command = commands.next() => match command {
+            command = next_command(&mut carried, commands) => match command {
                 None => return Ok(()),
                 Some(Command::ShowTerminals(show)) => state.show_terminals = show,
                 Some(Command::WindowActive(active)) => state.set_window_active(active),
@@ -1956,6 +2023,71 @@ mod tests {
                 "{types:?}"
             );
         }
+        following.abort();
+    }
+
+    #[tokio::test]
+    async fn what_changes_something_is_never_sent_to_a_core_that_was_away() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let core = Core::with_token(
+            &format!("http://{}/", listener.local_addr().unwrap()),
+            "token",
+        )
+        .unwrap();
+        let (gone_tx, mut gone_rx) = tokio::sync::mpsc::unbounded_channel();
+        let hold = std::sync::Arc::new(tokio::sync::Notify::new());
+        tokio::spawn(fake_core(listener, vec![vec![]], gone_tx, hold.clone()));
+
+        // Asked while no connection is up: a delete, a forced worktree removal, a listing.
+        let (commands_tx, commands) = futures::channel::mpsc::unbounded();
+        let (removed, removal) = futures::channel::oneshot::channel();
+        let (listed, listing) = futures::channel::oneshot::channel();
+        for command in [
+            Command::DeleteSession {
+                session_id: "s1".into(),
+            },
+            Command::Ask {
+                frame: json!({"type": "worktree.remove", "repoPath": "/work",
+                              "path": "/wt/a", "force": true, "deleteBranch": false}),
+                reply: removed,
+            },
+            Command::Ask {
+                frame: json!({"type": "fs.browse"}),
+                reply: listed,
+            },
+        ] {
+            commands_tx.unbounded_send(command).unwrap();
+        }
+        let (updates_tx, _updates) = futures::channel::mpsc::unbounded();
+        let following = tokio::spawn(follow(
+            move || Ok(core.clone()),
+            commands,
+            updates_tx,
+            Duration::from_millis(50),
+        ));
+        assert_eq!(
+            removal.await.unwrap(),
+            Err(NOT_CONNECTED.to_string()),
+            "the removal is refused, not carried over"
+        );
+        // Let the opening requests and the listing arrive before the core goes.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        hold.notify_one();
+        let received: Vec<String> = gone_rx
+            .recv()
+            .await
+            .unwrap()
+            .iter()
+            .map(|text| serde_json::from_str::<Value>(text).unwrap()["type"].to_string())
+            .collect();
+        assert!(received.contains(&"\"fs.browse\"".into()), "{received:?}");
+        assert!(
+            !received
+                .iter()
+                .any(|t| t.contains("delete") || t.contains("worktree")),
+            "{received:?}"
+        );
+        drop(listing);
         following.abort();
     }
 
