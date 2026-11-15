@@ -19,6 +19,8 @@ export default defineConfig({
     alias: [
       { find: "@perch/sdk", replacement: path.join(web, "src/sdk.ts") },
       { find: /^(\.{1,2}\/)+ws$/, replacement: path.join(here, "harness/ws-stub.ts") },
+      // `StockWindow` and the dock draw their stock screens through `StockView`, which needs the build's catalog.
+      { find: /^(\.{1,2}\/)+(components\/)?mod-root$/, replacement: path.join(here, "harness/mod-root-stub.tsx") },
     ],
   },
   server: { host: "127.0.0.1", port: 7810, strictPort: true, fs: { allow: [path.resolve(here, "../..")] } },

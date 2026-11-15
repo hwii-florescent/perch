@@ -1976,7 +1976,7 @@
         {
           "name": "start-link",
           "selector": "[data-testid$=\"-panel\"] button.text-subtext-0",
-          "description": "A small muted link under the buttons: 'Open one automatically: Settings → Empty workspace opens' (and Manage agents in the CLI page); underlined on hover.",
+          "description": "A small muted link under the buttons: 'Open one automatically: Settings \u2192 Empty workspace opens' (and Manage agents in the CLI page); underlined on hover.",
           "text": true,
           "textSized": true
         },
@@ -2756,6 +2756,60 @@
           "description": "Take back this tab (primary), Take back all tabs (soft), or the folded chip's 'Phone size'; 40% opacity while pending.",
           "text": true,
           "textSized": true
+        }
+      ]
+    },
+    "window": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 3,
+      "elements": [
+        {
+          "name": "sidebar-card",
+          "selector": "[data-testid=\"sidebar-card\"]",
+          "description": "The sidebar card: 12px round, the card colour, 8px from the window edge, 240px wide by default."
+        },
+        {
+          "name": "main-card",
+          "selector": "[data-testid=\"main-card\"]",
+          "description": "The main card: takes what the other two leave."
+        },
+        {
+          "name": "tools-card",
+          "selector": "[data-testid=\"tools-card\"]",
+          "description": "The drawer card: 46% of the window (at most 760) by default."
+        },
+        {
+          "name": "sidebar-toggle",
+          "selector": "[data-testid=\"sidebar-collapse-toggle\"]",
+          "description": "The sidebar toggle: 28px, in a card's 44px head."
+        },
+        {
+          "name": "drawer-toggle",
+          "selector": "[data-testid=\"workspace-tools-toggle\"]",
+          "description": "The drawer toggle, in the main card's head while the drawer is closed, else in the drawer's."
+        },
+        {
+          "name": "resize-sidebar",
+          "selector": "[data-testid=\"resize-sidebar\"]",
+          "description": "The gutter that resizes the sidebar: 8px."
+        },
+        {
+          "name": "resize-tools",
+          "selector": "[data-testid=\"resize-tools\"]",
+          "description": "The gutter that resizes the drawer: 8px."
+        },
+        {
+          "name": "tools-tab",
+          "selector": "nav[aria-label=\"Files, Git and Browser\"] > button",
+          "description": "One of the drawer's tabs.",
+          "text": true
+        },
+        {
+          "name": "status-bar",
+          "selector": "footer.status-bar",
+          "description": "The status bar, below the cards on the backdrop."
         }
       ]
     }

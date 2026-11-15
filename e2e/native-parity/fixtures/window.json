@@ -1,0 +1,192 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "window",
+  "note": "The whole desktop window (components/StockWindow.tsx: the sidebar, main and drawer cards on the backdrop, with the status bar below) at the native client's default size. Data: the sidebar fixture's store (dataFrom) with a state's patch on top. The stock sidebar, tab strip, start page and status bar are the stock screens' own source; the terminal of an open session is not drawn (no core). `view.tools` is the drawer's tab as the app keeps it on the device (`perch.workspaceTools`). The reference for `crates/perch-native/tests/workspace_shell.rs`, which draws the same four states.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1100,
+    "height": 720
+  },
+  "window": {
+    "width": 1100,
+    "height": 720
+  },
+  "data": {},
+  "states": [
+    {
+      "id": "empty",
+      "title": "No project: the sidebar's Add a project block beside the start page, the drawer closed",
+      "patch": {
+        "workspaceProjects": [],
+        "workspaces": [],
+        "sessionId": null,
+        "activeWorkspaceId": null,
+        "status": {
+          "cwd": "",
+          "branch": null
+        },
+        "keepSessions": []
+      }
+    },
+    {
+      "id": "session",
+      "title": "A session open: its tab heads the main card",
+      "patch": {
+        "workspaceProjects": [
+          {
+            "id": "p",
+            "hostId": "local",
+            "name": "Work",
+            "path": "/work",
+            "favorite": false,
+            "createdAt": 1767225600000,
+            "updatedAt": 1767225600000,
+            "repoPath": "/work"
+          }
+        ],
+        "workspaces": [
+          {
+            "id": "w1",
+            "projectId": "p",
+            "hostId": "local",
+            "path": "/work",
+            "name": "w1",
+            "dirty": false,
+            "state": "active",
+            "createdAt": 1767225600000,
+            "updatedAt": 1767225600000,
+            "pinned": false
+          }
+        ],
+        "sessionId": "alpha",
+        "activeWorkspaceId": "w1",
+        "status": {
+          "cwd": "/work",
+          "branch": null
+        },
+        "keepSessions": [],
+        "addSessions": [
+          {
+            "id": "alpha",
+            "title": "alpha",
+            "cwd": "/work",
+            "createdAt": 1767225600000,
+            "status": "idle",
+            "hostId": "local",
+            "cliProviderId": "claude",
+            "projectId": "p",
+            "workspaceId": "w1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "collapsed",
+      "title": "The sidebar collapsed: its toggle heads the main card",
+      "patch": {
+        "workspaceProjects": [
+          {
+            "id": "p",
+            "hostId": "local",
+            "name": "Work",
+            "path": "/work",
+            "favorite": false,
+            "createdAt": 1767225600000,
+            "updatedAt": 1767225600000,
+            "repoPath": "/work"
+          }
+        ],
+        "workspaces": [
+          {
+            "id": "w1",
+            "projectId": "p",
+            "hostId": "local",
+            "path": "/work",
+            "name": "w1",
+            "dirty": false,
+            "state": "active",
+            "createdAt": 1767225600000,
+            "updatedAt": 1767225600000,
+            "pinned": false
+          }
+        ],
+        "sessionId": "alpha",
+        "activeWorkspaceId": "w1",
+        "status": {
+          "cwd": "/work",
+          "branch": null
+        },
+        "sidebarCollapsed": true,
+        "keepSessions": [],
+        "addSessions": [
+          {
+            "id": "alpha",
+            "title": "alpha",
+            "cwd": "/work",
+            "createdAt": 1767225600000,
+            "status": "idle",
+            "hostId": "local",
+            "cliProviderId": "claude",
+            "projectId": "p",
+            "workspaceId": "w1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "drawer",
+      "title": "The drawer open on Files",
+      "view": {
+        "tools": "files"
+      },
+      "patch": {
+        "workspaceProjects": [
+          {
+            "id": "p",
+            "hostId": "local",
+            "name": "Work",
+            "path": "/work",
+            "favorite": false,
+            "createdAt": 1767225600000,
+            "updatedAt": 1767225600000,
+            "repoPath": "/work"
+          }
+        ],
+        "workspaces": [
+          {
+            "id": "w1",
+            "projectId": "p",
+            "hostId": "local",
+            "path": "/work",
+            "name": "w1",
+            "dirty": false,
+            "state": "active",
+            "createdAt": 1767225600000,
+            "updatedAt": 1767225600000,
+            "pinned": false
+          }
+        ],
+        "sessionId": "alpha",
+        "activeWorkspaceId": "w1",
+        "status": {
+          "cwd": "/work",
+          "branch": null
+        },
+        "keepSessions": [],
+        "addSessions": [
+          {
+            "id": "alpha",
+            "title": "alpha",
+            "cwd": "/work",
+            "createdAt": 1767225600000,
+            "status": "idle",
+            "hostId": "local",
+            "cliProviderId": "claude",
+            "projectId": "p",
+            "workspaceId": "w1"
+          }
+        ]
+      }
+    }
+  ]
+}

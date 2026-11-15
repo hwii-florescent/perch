@@ -160,6 +160,12 @@ impl Rig {
     fn click(&mut self, x: f32, y: f32) {
         self.press(x, y);
         self.release(x, y);
+        // The pointer leaves, so nothing is drawn as hovered in the next frame.
+        self.send(PlatformInput::MouseMove(MouseMoveEvent {
+            position: point(px(1.), px(HEIGHT - 1.)),
+            pressed_button: None,
+            modifiers: Modifiers::default(),
+        }));
     }
 
     /// Holds the handle at `from`, moves to `to` and lets go.

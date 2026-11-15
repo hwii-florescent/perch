@@ -12,6 +12,7 @@
 //!   header). The box has the size the fixture names; boxes are measured against it.
 //! - `stage`: a screen that floats over the window (a menu, a dialog, the palette, the toasts: they render through a
 //!   portal into `<body>` and are placed against the viewport). The stage is the whole window on the app's backdrop.
+import "./tauri-flag";
 import { useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import "../../../packages/web/src/styles/index.css";
@@ -44,6 +45,8 @@ interface Screen {
   mount: "card" | "stage";
   /** The per-viewer settings (localStorage) a state's `view` selects, written before the screen mounts. */
   storage?: (view: Json) => Record<string, string>;
+  /** What a state's `view` sets in the app's own stores once the screen's source is loaded (a store that read its device settings when it was first imported). */
+  ready?: (view: Json) => Promise<void>;
   /** The props the host gives the screen: the fixture's, plus the callbacks (no-ops: nothing here acts). */
   props?: (fixed: Json) => Json;
   /** A selector that matches once the screen has what its host answered (a listing), waited for before the first step so a step does not act on a screen still loading. */
@@ -190,6 +193,25 @@ function PropsProbe({ props }: { props: Json }) {
 }
 
 const SCREENS: Record<string, Screen> = {
+  window: {
+    // The whole window: `StockWindow` and the status bar under it, as App.tsx lays them, as the Mac app draws it
+    // (`tauri-flag.ts`).
+    load: async () => {
+      const [{ StockWindow, useWindowWidths }, { StockView }] = await Promise.all([import("../../../packages/web/src/components/StockWindow"), import("./mod-root-stub")]);
+      // App.tsx hands the two column widths down as CSS variables.
+      const Window = () => {
+        const { sidebarWidth, toolsWidth } = useWindowWidths();
+        return <div className="flex size-full min-h-0 flex-col" style={{ "--sidebar-width": `${sidebarWidth}px`, "--tools-width": `${toolsWidth}px` } as React.CSSProperties}><StockWindow /><StockView name="status" placeholder={<div className="h-6 shrink-0" />} /></div>;
+      };
+      return { default: Window as unknown as ComponentType<never> };
+    },
+    mount: "stage",
+    ready: async (view) => {
+      // The window's store read the device's drawer tab when it was first imported, which an SDK import did before the fixture's.
+      const { useWindowChrome } = await import("../../../packages/web/src/components/StockWindow");
+      useWindowChrome.getState().setTools(view.tools ? (String(view.tools) as "files") : null);
+    },
+  },
   sidebar: {
     load: () => import("../../../packages/web/src/stock-ui/sidebar/main"),
     mount: "card",
@@ -422,6 +444,7 @@ useBrowserPages.setState({ pages: browserPages ?? {} });
 const props = Object.fromEntries(Object.entries({ ...(fixture.props ?? {}), ...(state.props ?? {}) }).filter(([, value]) => value !== null));
 if (screen.clock !== undefined) { const now = screen.clock; Date.now = () => now; }
 const { default: Component } = await screen.load(state.via);
+await screen.ready?.(state.view ?? {});
 const { Probe } = screen;
 const { width, height } = state.size ?? fixture.size;
 const Shown = Component as ComponentType<Json>;

@@ -428,6 +428,7 @@ cargo test -p perch-native            # everything below
 cargo test -p perch-native --lib      # state reduction, actions, frames, launch correlation and reconnect against a stand-in core, hand-off URL; tab and split model, key resolution, command palette filtering, terminal settings
 cargo test -p perch-native --test sidebar_render    # headless GPUI render of the sidebar (project and By status views, nested rows); no window opens
 cargo test -p perch-native --test workspace_render  # the window drawn offscreen: tabs, a split with different content in each pane, the palette, the terminal settings, attention on a tab, keys.json and chosen keys
+cargo test -p perch-native --test workspace_shell   # the window shell: backdrop, rounded cards, 44 px heads, toggles, the drawer and its tabs, column handles; PERCH_NATIVE_SHOT_DIR=dir saves the four states as PNGs (compare with `PARITY_SCREENS=window npm run parity:web` in e2e, which is not in the default list)
 cargo test -p perch-native --test terminal_session  # a real core as a child process
 cargo test -p perch-native --test workspace_session # two shells in a split against a real core, and the settings round trip
 ```

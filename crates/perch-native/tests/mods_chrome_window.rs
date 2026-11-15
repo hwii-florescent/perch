@@ -273,9 +273,12 @@ fn main() {
     cx.update(|cx| mods::start_in(user.clone(), &workspace, window.into(), cx));
     let mut rig = Rig { cx, window };
 
-    // Nothing open: no strip; the status line is there.
+    // Nothing open: the strip still heads the main card, as the web's does; the status line is there.
     rig.draw();
-    assert!(rig.record("tab-strip").is_none(), "no tab, no strip");
+    assert!(
+        rig.record("tab-strip").is_some(),
+        "the strip heads the main card with no tab"
+    );
     let status = rig.record("status-bar").expect("the status mod draws");
     assert_eq!(
         status.bounds.origin.y + status.bounds.size.height,
