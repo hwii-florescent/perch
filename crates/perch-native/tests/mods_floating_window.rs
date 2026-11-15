@@ -267,6 +267,23 @@ impl Rig {
         self.draw();
     }
 
+    /// The window as drawn, written to `PERCH_NATIVE_SHOT_DIR/<name>.png` when that is set.
+    fn shot(&mut self, name: &str) {
+        let Some(dir) = std::env::var_os("PERCH_NATIVE_SHOT_DIR") else {
+            return;
+        };
+        self.draw();
+        let image = self
+            .cx
+            .update_window(self.window.into(), |_, window: &mut Window, _| {
+                window.render_to_image().expect("offscreen render")
+            })
+            .unwrap();
+        image
+            .save(std::path::Path::new(&dir).join(format!("{name}.png")))
+            .expect("the picture is saved");
+    }
+
     fn open_screens(&mut self) -> Vec<&'static str> {
         self.ws(|ws, _, _| ws.screens_open())
     }
@@ -1031,6 +1048,7 @@ fn new_session(rig: &mut Rig) {
         ),
         "anchored to the + on the start page"
     );
+    rig.shot("cmd-t-start-page");
     rig.press("escape");
 
     // The sidebar's New session is the launcher (a modal), not the strip's menu.
