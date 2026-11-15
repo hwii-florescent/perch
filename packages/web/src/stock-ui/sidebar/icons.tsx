@@ -35,11 +35,6 @@ export const FolderMark = ({ className = "mr-1.5 h-3 w-3 shrink-0 text-subtext-0
   </svg>
 );
 
-/** A session row's ×. */
-export const RowCloseIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6" /></svg>
-);
-
 /** New chat: a pencil over a page. */
 export const NewChatIcon = () => (
   <svg className="mx-auto" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

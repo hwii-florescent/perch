@@ -3,7 +3,7 @@
  *   S1 — "New session" opens a picker of listed projects plus "No project",
  *         with no folder browser; "No project" starts the session in Chats,
  *         a flat chat list after the projects with no scratch-folder row.
- *   S4 — a row's × deletes the session, and so does exiting its terminal:
+ *   S4 — Close in a row's … menu deletes the session, and so does exiting its terminal:
  *         it leaves the sidebar for good.
  *   S5 — a project's "Close all sessions" and "Remove project" delete its
  *         sessions and end what they run; the removed project is gone.
@@ -29,6 +29,12 @@ async function setEmptyWorkspaceAgent(page: Page, agent: string): Promise<void> 
   await expectChoice(select, agent);
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("settings-modal")).toHaveCount(0);
+}
+
+/** A session row's "…" button opens the row menu; Close is in it. */
+async function closeFromRowMenu(page: Page, id: string): Promise<void> {
+  await page.getByTestId(`session-menu-button-${id}`).click();
+  await page.getByTestId("tab-menu-close").click();
 }
 
 async function open(page: Page): Promise<void> {
@@ -61,7 +67,7 @@ test.describe("Session lifecycle", () => {
     await checkCwd();
 
     // Reopen requests the Scratchpad workspace, not an unlisted HOME project.
-    await page.getByTestId(`workspace-session-close-${id}`).click();
+    await closeFromRowMenu(page, id);
     await expect(chats.getByTestId(`workspace-session-${id}`)).toHaveCount(0);
     await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+t" : "Control+Shift+t");
     await expect(terminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
@@ -73,10 +79,10 @@ test.describe("Session lifecycle", () => {
     await expect(page.getByTestId("project-list").getByTitle(fixtureHome(), { exact: true })).toHaveCount(0);
   });
 
-  test("S4. × and exiting the terminal delete the session", async ({ page }) => {
+  test("S4. Close in the row menu and exiting the terminal delete the session", async ({ page }) => {
     await open(page);
     const closed = await startChat(page);
-    await page.getByTestId(`workspace-session-close-${closed}`).click();
+    await closeFromRowMenu(page, closed);
     await expect(page.getByTestId(`workspace-session-${closed}`)).toHaveCount(0);
 
     const exited = await startChat(page);

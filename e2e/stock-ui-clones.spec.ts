@@ -559,7 +559,7 @@ test("a sidebar copy regroups the sessions by agent, then project, with pins fir
       ['from "./icons.js";', 'from "./icons.js";\nimport { AgentGroups } from "./agents.js";'],
       ['list: "In one list" };', 'list: "In one list", agent: "By agent" };'],
       ['saved === "status" || saved === "list" ? saved', 'saved === "status" || saved === "list" || saved === "agent" ? saved'],
-      ['(organize === "list" ? listView : statusView)', '(organize === "agent" ? _jsx(AgentGroups, { sessions: nav.sessions, row: (session, nested) => sessionRow(session, [], "list", nested, "list") }) : organize === "list" ? listView : statusView)'],
+      ['(organize === "list" ? listView : statusView)', '(organize === "agent" ? _jsx(AgentGroups, { sessions: nav.sessions, row: (session, nested) => sessionRow(session, [], "list", "list", "", { nested }) }) : organize === "list" ? listView : statusView)'],
     ]) {
       expect(text).toContain(from);
       text = text.replace(from, to);

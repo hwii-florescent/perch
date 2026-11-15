@@ -14,20 +14,28 @@ import {
   pickFolder, rowActionClass, runCommand, segmentClass, Select, SessionDot, SessionMenu, startSession, useAddProject, useAddProjectRequest, useHosts, useNavigation,
   WorktreeMenu, type ProjectInfo, type SessionInfo, type StatusSection, type WorkspaceInfo,
 } from "@perch/sdk";
-import { Chevron, CheckoutIcon, EllipsisIcon, FolderMark, NewChatIcon, OrganizeIcon, PlusIcon, RowCloseIcon } from "./icons";
+import { Chevron, CheckoutIcon, EllipsisIcon, FolderMark, NewChatIcon, OrganizeIcon, PlusIcon } from "./icons";
 import {
-  BODY, copyText, DOT, ENTRY_BTN, FOCUS, HiddenWorktrees, HOLDABLE, longPress, NESTED_ROW, readFlag, RENAME, RESTORE, Rollup, ROW_BTN, RowMenu, saveFlag,
-  SectionHeading, SESSION, SESSION_TITLE, SPAN, StateBadge, STRONG, WORKSPACE_TITLE, WORKSPACE_TREE, WorktreeJobRows, type MenuItem, type OpenMenu,
+  BODY, copyText, DOT, ENTRY_BTN, FOCUS, HiddenWorktrees, HOLDABLE, longPress, readFlag, RENAME, RESTORE, Rollup, ROW_BTN, RowMenu, saveFlag,
+  SECTION_WORDS, SectionHeading, SESSION, SESSION_TITLE, SPAN, StateBadge, STRONG, WORKSPACE_TITLE, WORKSPACE_TREE, WorktreeJobRows, type MenuItem, type OpenMenu,
 } from "./parts";
 
 // Glyph buttons at the end of a row.
 const PROJECT_ICON = rowActionClass({ reveal: "project" });
-const SESSION_CLOSE = rowActionClass({ reveal: "session" });
+const SESSION_MENU = rowActionClass({ reveal: "session" });
+const FOLD = rowActionClass({ className: "-ml-0.5" });
 
+/** Folded projects, and folded sessions (a lead hiding its sub-sessions), each a list of ids kept per device. */
 const COLLAPSED_KEY = "perch.sidebar.collapsedProjects";
-function readCollapsed(): string[] {
-  try { return JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]") as string[]; } catch { return []; }
+const FOLDED_SESSIONS_KEY = "perch.sidebar.foldedSessions";
+function readIds(key: string): string[] {
+  try { return JSON.parse(localStorage.getItem(key) ?? "[]") as string[]; } catch { return []; }
 }
+const toggledId = (ids: string[], id: string) => (ids.includes(id) ? ids.filter((other) => other !== id) : [...ids, id]);
+
+/** Where a session row sits in its lead's family: a lead with its sub-sessions (`kids`, `folded` when hidden), or
+ * a sub-session (`nested`, `last` for the final one, which ends the connector). */
+type Family = { kids?: SessionInfo[]; folded?: boolean; nested?: boolean; last?: boolean };
 
 /** How the sidebar lists work. "project" is the tree (Project → Workspace → Session), the default; the others are
  * flat views of the same chats. A saved "workspace" (the retired two-section layout) reads as the tree. */
@@ -78,14 +86,15 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   // A folder that isn't a git repo has no worktrees, so its "+" starts a session there.
   const [newSession, setNewSession] = useState<{ project: ProjectInfo; rect: DOMRect } | null>(null);
   // Folded projects hide their workspaces and sessions (per viewer).
-  const [collapsed, setCollapsed] = useState<string[]>(readCollapsed);
-  function toggleCollapsed(projectId: string) {
-    setCollapsed((current) => {
-      const next = current.includes(projectId) ? current.filter((id) => id !== projectId) : [...current, projectId];
-      try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next)); } catch { /* per-viewer convenience */ }
-      return next;
-    });
-  }
+  const [collapsed, setCollapsed] = useState<string[]>(() => readIds(COLLAPSED_KEY));
+  const [foldedSessions, setFoldedSessions] = useState<string[]>(() => readIds(FOLDED_SESSIONS_KEY));
+  const idToggler = (key: string, set: typeof setCollapsed) => (id: string) => set((current) => {
+    const next = toggledId(current, id);
+    saveFlag(key, JSON.stringify(next));
+    return next;
+  });
+  const toggleCollapsed = idToggler(COLLAPSED_KEY, setCollapsed);
+  const toggleFolded = idToggler(FOLDED_SESSIONS_KEY, setFoldedSessions);
 
   function nestHint(workspace: WorkspaceInfo) {
     const label = workspace.shortcut;
@@ -175,56 +184,119 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     runCommand("workspace.open", { id });
     onNavigate?.();
   }
-  const closeSession = (id: string) => runCommand("session.request_close", { id });
 
   /** One chat row. `variant`: the tree's and Quickchat's (state badge), By status's (one line with `detail`), or
-   * the flat list's (its project's name, then the badge). */
-  function sessionRow(session: SessionInfo, siblings: SessionInfo[], group: string, nested: boolean, variant: "tree" | "status" | "list", detail = "") {
+   * the flat list's (its project's name, then the badge). A lead with sub-sessions and the sub-sessions are filled
+   * cards; each sub-session hangs off an elbow connector, and the lead carries the fold chevron. */
+  function sessionRow(session: SessionInfo, siblings: SessionInfo[], group: string, variant: "tree" | "status" | "list", detail = "", family: Family = {}) {
+    const { kids = [], folded = false, nested = false, last = false } = family;
     const active = session.id === sessionId;
+    const lead = kids.length > 0;
+    const lit = active || (folded && kids.some((kid) => kid.id === sessionId));
     const title = session.title || (variant === "tree" && group !== "chats" ? "New session" : "New chat");
-    return (
-      <div {...sessionRowProps(session, siblings, group)} className={cn("group/row flex min-w-0 items-stretch rounded-ui", nested && NESTED_ROW, active ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} data-sub-session={nested || undefined} key={session.id}>
+    const badge = reachable && session.provider !== "terminal" && variant !== "status" && <StateBadge section={session.section} testId={`session-state-${session.id}`} />;
+    // Folded away, a lead still says what needs you among its sub-sessions.
+    const hidden = folded ? (Object.keys(SECTION_WORDS) as StatusSection[]).filter((key) => key !== "idle").map((key) => ({ key, count: kids.filter((kid) => kid.section === key).length })).find((one) => one.count > 0) : undefined;
+    const button = (
+      <button
+        type="button"
+        className={cn(SESSION, lead && "w-auto min-w-0 flex-initial pr-1", variant === "status" && "min-h-9 py-0 pl-[1.875rem] min-[701px]:min-h-6", variant === "tree" && group !== "chats" && !nested && "pl-[1.9rem]", nested && "pl-2", active ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
+        aria-current={active ? "page" : undefined}
+        title={variant === "tree" ? title : session.cwd}
+        data-testid={`workspace-session-${session.id}`}
+        data-session={variant === "status" ? session.id : undefined}
+        onClick={() => pickSession(session.id)}
+      >
+        {variant === "status" ? <>
+          {/* The section says the state, so the row is just the harness and the name. */}
+          <SessionDot plain id={session.id} className="h-4 w-4" />
+          {/* One line: the name, then what it adds (the workspace, or why it needs you), muted. */}
+          <span className="flex min-w-0 flex-1 items-baseline gap-2">
+            <span className="min-w-0 shrink-[2] truncate">{title}</span>
+            {detail && <span className="min-w-0 flex-1 truncate text-[0.62rem] text-subtext-0" data-testid="status-row-detail">{detail}</span>}
+          </span>
+        </> : <>
+          <SessionDot plain id={session.id} className="h-[18px] w-[18px]" />
+          <span className={cn(SESSION_TITLE, lead && "flex-initial")}>{title}</span>
+          {variant === "list" && session.projectName && <span className="min-w-0 max-w-[35%] truncate text-[0.62rem] text-subtext-0" title={session.projectName}>{session.projectName}</span>}
+          {!lead && badge}
+        </>}
+      </button>
+    );
+    const card = (
+      <div
+        className={cn("group/row flex min-w-0 items-stretch rounded-ui", nested && "flex-1", lit ? "bg-surface-1" : cn((lead || nested) && "bg-surface-0", "hover:bg-surface-1 focus-within:bg-surface-1"))}
+        data-sub-session={nested || undefined}
+        key={nested ? undefined : session.id}
+        {...(nested ? {} : sessionRowProps(session, siblings, group))}
+      >
+        {button}
+        {lead && <>
+          <button
+            type="button"
+            className={FOLD}
+            data-testid={`session-fold-${session.id}`}
+            title={folded ? "Show sub-sessions" : "Hide sub-sessions"}
+            aria-label={`${folded ? "Show" : "Hide"} sub-sessions of ${title}`}
+            aria-expanded={!folded}
+            onClick={() => toggleFolded(session.id)}
+          >
+            <Chevron open={!folded} size={10} />
+          </button>
+          {/* The rest of the line stays the row's own button, holding the state at its end. */}
+          <div role="presentation" className="flex flex-1 cursor-pointer items-center justify-end gap-1 px-1 whitespace-nowrap" onClick={(event) => { event.stopPropagation(); pickSession(session.id); }}>
+            {hidden ? <Rollup count={hidden.count} section={hidden.key} testId={`session-rollup-${session.id}`} /> : badge}
+          </div>
+        </>}
         <button
           type="button"
-          className={cn(SESSION, variant === "status" && "min-h-9 py-0 pl-[1.875rem] min-[701px]:min-h-6", variant === "tree" && group !== "chats" && "pl-[1.9rem]", active ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
-          aria-current={active ? "page" : undefined}
-          title={variant === "tree" ? title : session.cwd}
-          data-testid={`workspace-session-${session.id}`}
-          data-session={variant === "status" ? session.id : undefined}
-          onClick={() => pickSession(session.id)}
+          className={cn(SESSION_MENU, active && "opacity-100")}
+          data-testid={`session-menu-button-${session.id}`}
+          title="More"
+          aria-label={`More for ${session.title || (variant === "tree" && group !== "chats" ? "session" : "chat")}`}
+          aria-haspopup="menu"
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            openSessionMenu(session, rect.left, rect.bottom + 4, siblings, group === "chats" || group.startsWith("status:"));
+          }}
         >
-          {variant === "status" ? <>
-            {/* The section says the state, so the row is just the harness and the name. */}
-            <SessionDot plain id={session.id} className="h-4 w-4" />
-            {/* One line: the name, then what it adds (the workspace, or why it needs you), muted. */}
-            <span className="flex min-w-0 flex-1 items-baseline gap-2">
-              <span className="min-w-0 shrink-[2] truncate">{title}</span>
-              {detail && <span className="min-w-0 flex-1 truncate text-[0.62rem] text-subtext-0" data-testid="status-row-detail">{detail}</span>}
-            </span>
-          </> : <>
-            <SessionDot plain id={session.id} className="h-[18px] w-[18px]" />
-            <span className={SESSION_TITLE}>{title}</span>
-            {variant === "list" && session.projectName && <span className="min-w-0 max-w-[35%] truncate text-[0.62rem] text-subtext-0" title={session.projectName}>{session.projectName}</span>}
-            {reachable && session.provider !== "terminal" && <StateBadge section={session.section} testId={`session-state-${session.id}`} />}
-          </>}
-        </button>
-        <button
-          type="button"
-          className={SESSION_CLOSE}
-          data-testid={`workspace-session-close-${session.id}`}
-          title={variant === "tree" && group !== "chats" ? "Close session" : "Close chat"}
-          aria-label={`Close ${session.title || (variant === "tree" && group !== "chats" ? "session" : "chat")}`}
-          onClick={() => closeSession(session.id)}
-        >
-          <RowCloseIcon />
+          <EllipsisIcon />
         </button>
       </div>
     );
+    if (!nested) return card;
+    return (
+      <div {...sessionRowProps(session, siblings, group)} className={cn("flex min-w-0 items-stretch gap-1", variant === "status" ? "pl-[2.35rem]" : group === "chats" ? "pl-[1.2rem]" : "pl-[2.45rem]")} key={session.id}>
+        {/* The elbow: the lead's icon column runs down and turns into this row; the rows before the last go on. */}
+        <span className="-mt-[2px] flex w-3 shrink-0 flex-col" aria-hidden="true" data-testid={`session-elbow-${session.id}`}>
+          <span className="flex-1 rounded-bl-[6px] border-b border-l border-overlay-0" />
+          <span className={cn("flex-1", !last && "border-l border-overlay-0")} />
+        </span>
+        {card}
+      </div>
+    );
+  }
+  /** The rows of a list of chats, each lead followed by its sub-sessions unless it is folded. */
+  function sessionList(list: SessionInfo[], group: string, variant: "tree" | "status", detailOf?: (session: SessionInfo) => string): ReactElement[] {
+    const items = nestSessions(list);
+    const rows: ReactElement[] = [];
+    let folded = false;
+    items.forEach(({ session, nested }, at) => {
+      if (!nested) {
+        const kids: SessionInfo[] = [];
+        for (let next = at + 1; items[next]?.nested; next++) kids.push(items[next]!.session);
+        folded = kids.length > 0 && foldedSessions.includes(session.id);
+        rows.push(sessionRow(session, list, group, variant, detailOf?.(session), { kids, folded }));
+      } else if (!folded) {
+        rows.push(sessionRow(session, list, group, variant, detailOf?.(session), { nested: true, last: !items[at + 1]?.nested }));
+      }
+    });
+    return rows;
   }
   function sessionRows(list: SessionInfo[], group: string): ReactElement {
     return (
       <div className="workspace-entry__sessions flex flex-col gap-[2px] pt-[2px]">
-        {nestSessions(list).map(({ session, nested }) => sessionRow(session, list, group, nested, "tree"))}
+        {sessionList(list, group, "tree")}
       </div>
     );
   }
@@ -335,7 +407,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const listView = (
     <div className="flex flex-col gap-[2px] py-[0.2rem]" data-testid="workspace-session-list">
       {nav.sessions.length === 0 && <div className="px-[0.3rem] py-2 text-[0.7rem] text-subtext-0">No sessions yet.</div>}
-      {nav.sessions.map((session) => sessionRow(session, [], "list", false, "list"))}
+      {nav.sessions.map((session) => sessionRow(session, [], "list", "list"))}
     </div>
   );
 
@@ -355,8 +427,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 <span className="min-w-0 flex-1 truncate py-[3px] text-[12.5px] font-medium text-fg" data-testid="status-project-title">{cluster.name}</span>
                 {cluster.project && !cluster.project.quickchat && projectPlus(cluster.project, cn(PROJECT_ICON, "size-5"))}
               </div>
-              {nestSessions(cluster.sessions).map(({ session, nested }) => sessionRow(session, cluster.sessions, `status:${section.key}:${cluster.id}`, nested, "status",
-                [session.workspaceLabel, section.key === "needs" ? session.needReason : null].filter(Boolean).join(" · ")))}
+              {sessionList(cluster.sessions, `status:${section.key}:${cluster.id}`, "status",
+                (session) => [session.workspaceLabel, section.key === "needs" ? session.needReason : null].filter(Boolean).join(" · "))}
             </div>
           ))}
         </div>
@@ -431,7 +503,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         </div>
         {!chatsCollapsed && chats.length > 0 && (
           <div className="flex flex-col gap-[2px] pt-[2px] pr-[0.3rem] pl-[0.4rem]">
-            {nestSessions(shownChats).map(({ session, nested }) => sessionRow(session, shownChats, "chats", nested, "tree"))}
+            {sessionList(shownChats, "chats", "tree")}
           </div>
         )}
       </div>
