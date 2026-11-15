@@ -649,8 +649,8 @@ strip's actions are the next section.
   compact dots its dot follows its lead's and is set in; By status within one section; Quickchat); in another section it is an ordinary row, so Needs you stays
   complete. "In one list" stays purely chronological. No panel, tab or drawer. A lead with sub-sessions is a filled
   row whose chevron folds them (the folded ids are a per-device list, `perch.sidebar.foldedSessions`, and a folded
-  lead shows the most urgent state among the hidden ones); each sub-session is a filled row hanging off an elbow
-  connector. Every session row's "…" button (hover, focus, or the open row) opens the row menu, where Close is.
+  lead shows the most urgent state among the hidden ones); each sub-session is a filled row as wide as any
+  other, its content set in behind an elbow connector drawn from the lead's icon. Every session row's "…" button (hover, focus, or the open row) opens the row menu, where Close is.
 - *Notes folder.* One per run under the private native directory (`/tmp/perch-native-<uid>/notes/<lead
   session id>/`, 0700), created on first use and removed when the lead is deleted. `perch whoami` and the
   end of `perch guide` give the path; the guide says what it is for. Nothing in it is ever injected into a
