@@ -1072,6 +1072,7 @@ pub fn send_frame(kind: &str, args: &Value) -> Result<Value, String> {
                 .map_err(|e| format!("hosts.upsert takes a computer: {e}"))?;
             Ok(json!({"type": kind, "host": host}))
         }
+        "browser.history.clear" => Ok(json!({"type": kind})),
         "hosts.delete" => {
             let id = args["id"]
                 .as_str()
@@ -1784,18 +1785,26 @@ mod tests {
         );
         // A change the core answers with a broadcast is checked as the core reads it.
         for (kind, args) in [
-            ("settings.update", json!({"patch": {"terminalScrollback": 5000, "defaultCwd": null}})),
+            (
+                "settings.update",
+                json!({"patch": {"terminalScrollback": 5000, "defaultCwd": null}}),
+            ),
             (
                 "hosts.upsert",
                 json!({"host": {"id": "h", "name": "Box", "sshHost": "box", "remotePort": 7788, "enabled": true}}),
             ),
             ("hosts.delete", json!({"id": "h"})),
+            ("browser.history.clear", json!({})),
         ] {
             let frame = send_frame(kind, &args).unwrap_or_else(|e| panic!("{kind}: {e}"));
             serde_json::from_value::<ClientMessage>(frame.clone())
                 .unwrap_or_else(|e| panic!("{frame}: {e}"));
         }
-        assert!(send_frame("settings.update", &json!({"patch": {"terminalScrollback": "lots"}})).is_err());
+        assert!(send_frame(
+            "settings.update",
+            &json!({"patch": {"terminalScrollback": "lots"}})
+        )
+        .is_err());
         assert!(send_frame("hosts.upsert", &json!({"host": {"id": 3}})).is_err());
         assert!(send_frame("session.delete", &json!({"sessionId": "s"})).is_err());
         // Only the questions listed, with their fields as the core takes them.

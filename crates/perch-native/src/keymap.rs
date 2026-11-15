@@ -807,9 +807,17 @@ fn applies_to(shortcut: &Shortcut, context: &str) -> bool {
 
 /// Whether two commands can fire on one key press (`overlaps`): some context has both.
 fn overlaps(a: &Shortcut, b: &Shortcut) -> bool {
-    ["global", "terminal", "editor", "navigator", "directory", "leader", "resize"]
-        .iter()
-        .any(|ctx| applies_to(a, ctx) && applies_to(b, ctx))
+    [
+        "global",
+        "terminal",
+        "editor",
+        "navigator",
+        "directory",
+        "leader",
+        "resize",
+    ]
+    .iter()
+    .any(|ctx| applies_to(a, ctx) && applies_to(b, ctx))
 }
 
 /// The editing keys a terminal gets by default on macOS, in `keys.json`'s notation, and what each
@@ -1038,9 +1046,16 @@ impl Keymap {
             shift,
             key: base,
         };
-        let plain_ok = matches!(target.scope, Scope::Leader | Scope::Resize | Scope::OutsideEditable);
+        let plain_ok = matches!(
+            target.scope,
+            Scope::Leader | Scope::Resize | Scope::OutsideEditable
+        );
         if !plain_ok && !chord.cmd && !chord.ctrl && !chord.alt && !function_key(&chord) {
-            return error(if self.mac { "Include ⌘, ⌃ or ⌥." } else { "Include Ctrl or Alt." });
+            return error(if self.mac {
+                "Include ⌘, ⌃ or ⌥."
+            } else {
+                "Include Ctrl or Alt."
+            });
         }
         if reserved(&chord, self.mac) {
             return error("macOS reserves that key for its menu.");
@@ -1601,7 +1616,9 @@ mod tests {
     fn recording_a_key_moves_it_off_the_commands_that_had_it_and_saves_the_choices() {
         let m = keymap(&[], None);
         // Command+T is New tab's: giving it to Open Settings takes it from New tab.
-        let saved = m.record("global.settings", &pressed("t", &["metaKey"])).unwrap();
+        let saved = m
+            .record("global.settings", &pressed("t", &["metaKey"]))
+            .unwrap();
         assert_eq!(saved["kind"], "saved");
         assert_eq!(saved["keybindings"]["global.settings"], "cmd+t");
         assert_eq!(saved["keybindings"]["tabs.new"], "");
@@ -1610,15 +1627,22 @@ mod tests {
         let chosen: BTreeMap<String, String> =
             serde_json::from_value(saved["keybindings"].clone()).unwrap();
         let after = Keymap::new(chosen, None).with_platform(true);
-        assert_eq!(run(after.resolve(&press("cmd-t"), Context::default())), "global.settings");
+        assert_eq!(
+            run(after.resolve(&press("cmd-t"), Context::default())),
+            "global.settings"
+        );
         // The built-in key is not kept as a choice.
-        let back = after.record("global.settings", &pressed(",", &["metaKey"])).unwrap();
+        let back = after
+            .record("global.settings", &pressed(",", &["metaKey"]))
+            .unwrap();
         assert!(back["keybindings"].get("global.settings").is_none());
         // A modifier alone waits; a plain key and a reserved key are refused with the web's words.
-        assert_eq!(m.record("global.settings", &pressed("Meta", &["metaKey"])), None);
         assert_eq!(
-            m.record("global.settings", &pressed("j", &[]))
-                .unwrap()["text"],
+            m.record("global.settings", &pressed("Meta", &["metaKey"])),
+            None
+        );
+        assert_eq!(
+            m.record("global.settings", &pressed("j", &[])).unwrap()["text"],
             "Include ⌘, ⌃ or ⌥."
         );
         assert_eq!(
@@ -1632,15 +1656,22 @@ mod tests {
             "saved"
         );
         // A key is the one it comes from with Shift: Command+Shift+] arrives as `}`.
-        let shifted = m.record("global.settings", &pressed("}", &["metaKey", "shiftKey"])).unwrap();
+        let shifted = m
+            .record("global.settings", &pressed("}", &["metaKey", "shiftKey"]))
+            .unwrap();
         assert_eq!(shifted["keybindings"]["global.settings"], "cmd+shift+]");
     }
 
     #[test]
     fn settings_rows_show_the_key_each_command_has_and_which_the_person_changed() {
         let m = keymap(&[("global.settings", "cmd+j"), ("tabs.new", "")], None);
-        let rows: Vec<Value> = m.settings_groups().as_array().unwrap().iter()
-            .flat_map(|g| g["rows"].as_array().unwrap().clone()).collect();
+        let rows: Vec<Value> = m
+            .settings_groups()
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|g| g["rows"].as_array().unwrap().clone())
+            .collect();
         let row = |id: &str| rows.iter().find(|r| r["id"] == id).unwrap().clone();
         assert_eq!(row("global.settings")["keys"], "⌘J");
         assert_eq!(row("global.settings")["edited"], true);

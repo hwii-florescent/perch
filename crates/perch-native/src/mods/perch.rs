@@ -981,6 +981,16 @@ impl Perch {
                     }
                 }),
             )
+            // A modal screen keeps Escape for itself (true) or gives it back to the window (false).
+            .function("holdEscape", {
+                let (perch, id) = (self.clone(), id.clone());
+                move |args| {
+                    let held = matches!(args.get(0), Some(HostValue::Bool(true)));
+                    let id = id.to_string();
+                    perch.in_workspace(move |ws, _| ws.hold_escape(&id, held))?;
+                    Ok(HostValue::Null)
+                }
+            })
             // An in-flow screen's own field has the keyboard (true) or let it go (false).
             .function("holdKeyboard", {
                 let (perch, id) = (self.clone(), id.clone());
@@ -1692,7 +1702,17 @@ const OWN: [(&str, &str, &str); 10] = [
 
 /// Window commands beyond the keymap's: the web's ids the window can perform (some under the
 /// name its keys use), and the native ones screens need.
-const WINDOW_COMMANDS: [(&str, &str, &str); 34] = [
+const WINDOW_COMMANDS: [(&str, &str, &str); 36] = [
+    (
+        "handoff.open",
+        "Open a place in the Perch desktop app (a click's choice)",
+        "{place: files | changes | browser | chat | settings}",
+    ),
+    (
+        "link.open",
+        "Open an https link in the browser (a click's choice)",
+        "{url}",
+    ),
     (
         "session.start",
         "Start an agent in a folder on a host",

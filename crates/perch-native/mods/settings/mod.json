@@ -1,0 +1,5 @@
+{
+  "name": "Settings",
+  "description": "The web app's Settings page: its frame (the section list, the search box, Back to app) and every section, each the stock source of its own screen (settings-general, settings-appearance, settings-agents, settings-keyboard, settings-terminal, settings-notifications, settings-hosts, settings-devices) drawn natively through the React runtime, with the web's props saved through the core.",
+  "runtime": "react"
+}

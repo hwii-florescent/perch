@@ -428,6 +428,9 @@ declare module "perch" {
   export function keybindings(): Keybinding[];
   /** `shortcutFor`: the key that runs a command, or null. */
   export function shortcutLabel(command: string): string | null;
+  /** A modal screen keeps Escape for itself (`true`: it gets the key, as a search text to clear or a key being
+   * recorded needs) or gives it back to the window, which dismisses the screen with it. */
+  export function holdEscape(held: boolean): void;
   /** What the window opened this screen with (`{}` for none); a change re-renders the mod. */
   export function props<T = Record<string, unknown>>(): T;
   /** Closes this floating screen with `result`, which the window acts on; no result is a dismissal. */
@@ -519,7 +522,7 @@ declare module "perch" {
   /** The core's settings as it last sent them (`PerchSettings` in `@perch/sdk`), null until it has. */
   export function settings(): Record<string, unknown> | null;
   /** A change to the core: `settings.update` with its `patch` (only the fields that change), `hosts.upsert` with a
-   * `host`, `hosts.delete` with an `id`. Throws when the arguments are not what the core takes. The core answers
+   * `host`, `hosts.delete` with an `id`, `browser.history.clear`. Throws when the arguments are not what the core takes. The core answers
    * with its broadcast, which `settings()` and `hostEntries()` then show. */
   export function send(kind: string, args: Record<string, unknown>): void;
   /** Settings > SSH hosts: the configured computers and each one's connection by id. */

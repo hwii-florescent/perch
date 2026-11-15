@@ -211,6 +211,8 @@ export function copyFor(cx, screen) {
     get length() { return own?.length ?? 0; },
   };
 
+  const escapeReasons = {};
+  let escapeHeld = false;
   // Snapshots by key, read again on `refresh()`.
   const snapshots = new Map();
   const listeners = new Set();
@@ -424,6 +426,36 @@ export function copyFor(cx, screen) {
       }
     },
     shortcutLabel: (id) => perch.shortcutLabel(id),
+    // Settings' pages: the core's settings and computers as it last sent them, what the Keyboard page shows and records,
+    // and a change sent to the core (`send("settings.update", {patch})`, `hosts.upsert`, `hosts.delete`).
+    settings: () => snapshot("settings", () => perch.settings()),
+    hostEntries: () => snapshot("hostEntries", () => perch.hostEntries()),
+    keyboard: () => snapshot("keyboard", () => perch.keyboard()),
+    recordKey: (id, event) => {
+      const { key, metaKey, ctrlKey, altKey, shiftKey } = event;
+      return perch.recordKey(id, { key, metaKey: !!metaKey, ctrlKey: !!ctrlKey, altKey: !!altKey, shiftKey: !!shiftKey });
+    },
+    themes: () => perch.themes(),
+    /** An https link a click on an anchor opens in the browser. */
+    openLink: (url) => { perch.run("link.open", { url: String(url) }).catch(answer((error) => console.error(`perch.run link.open: ${error?.message ?? error}`))); },
+    /** The screen wants Escape for itself (`want`: a search text to clear, a key being recorded) or lets the window
+     * have it again. Two reasons may hold it at once, so the window is told only when they change. */
+    holdEscape(reason, want) {
+      escapeReasons[reason] = !!want;
+      const now = Object.values(escapeReasons).some(Boolean);
+      if (now === escapeHeld) return;
+      escapeHeld = now;
+      try { perch.holdEscape(now); } catch (error) { console.error(`react-runtime: holdEscape: ${error?.message ?? error}`); }
+    },
+    send(kind, args) {
+      try {
+        perch.send(kind, args);
+        return true;
+      } catch (error) {
+        console.error(`perch.send ${kind}: ${error?.message ?? error}`);
+        return false;
+      }
+    },
     /** Settings' "Empty workspace opens" ("" for none), null until the core sent its settings. */
     emptyWorkspaceAgent: () => snapshot("emptyWorkspaceAgent", () => perch.emptyWorkspaceAgent()),
     /** The window's last request for a project's worktree menu, null once taken (`takeWorktreeRequest`). */

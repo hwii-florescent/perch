@@ -338,7 +338,19 @@ function boxStyle(computed, report, viewport = null) {
     s.border_color = colors[0];
     if (colors.some((c) => c.value !== colors[0].value)) report("approximated", "border-color", colors.map((c) => c.value).join(" "), src("border-top-color"), "one border colour");
   }
-  const corners = ["top-left", "top-right", "bottom-right", "bottom-left"].map((c) => length(v[`border-${c}-radius`]) || 0);
+  // A radius in percent is of the box's own size (`50%`: a dot). The engine takes lengths only, so a box of known size gets
+  // its share of the shorter side, and one sized by its content the most a corner can round, which is what 50% makes of it.
+  // ponytail: a percentage above 50% is the same as 50% in CSS too, so the cap holds; a box sized by `%` of its parent has no
+  // size to take a share of here.
+  const radius = (c) => {
+    const out = length(v[`border-${c}-radius`]) || 0;
+    if (typeof out !== "string") return out;
+    const share = parseFloat(out) / 100;
+    const sides = [s.w, s.h].filter((side) => typeof side === "number");
+    if (out === "auto" || !(share > 0)) return 0;
+    return sides.length ? Math.round(Math.min(share, 0.5) * Math.min(...sides) * 100) / 100 : 9999;
+  };
+  const corners = ["top-left", "top-right", "bottom-right", "bottom-left"].map(radius);
   if (corners.every((c) => c === corners[0])) { if (corners[0]) s.rounded = corners[0]; } else ["tl", "tr", "br", "bl"].forEach((c, k) => { if (corners[k]) s[`rounded_${c}`] = corners[k]; });
 
   if (v.opacity !== 1) s.opacity = Math.round(v.opacity * 1000) / 1000;

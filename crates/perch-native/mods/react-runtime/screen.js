@@ -15,6 +15,10 @@
 // `onClose()` from one handler, in either order; the screen closes once, at the end of that turn, with the action's
 // result when there was one (a plain close is the dismissal `null`).
 //
+// Escape (`options.escapeForKeys`): the window dismisses a modal screen with Escape before the screen sees it; a screen
+// that listens for keys on the window (Settings > Keyboard, recording one) keeps Escape while it does, and gives it
+// back when it stops. A screen may also ask for it by `host.holdEscape(reason, want)` (a search text to clear).
+//
 // The keyboard (`options.keyboard`, for a modal screen): the screen takes it when the source focuses one of its
 // elements (an `autoFocus` field, `ref.focus()`, a press on a field), and every key it then gets goes to the focused
 // element as a DOM `keydown`, through the document's listeners, and types into a text field (`handle.key`). Escape is
@@ -191,6 +195,19 @@ export function screen(id, Component, options = {}) {
             copy.enter();
             this.handle.retry();
           });
+        }
+        // A page that listens for keys on the window (the Keyboard page, recording one) gets every key, Escape too.
+        if (options.escapeForKeys) {
+          const listening = this.handle.listensFor("keydown");
+          copy.host.holdEscape("keys", listening);
+          if (listening && this.keys && !this.keys.is_focused() && !this.taking) {
+            this.taking = true;
+            cx.timer.after(0, (task) => {
+              this.taking = false;
+              if (!this.keys.is_focused()) this.keys.focus();
+              task.notify();
+            });
+          }
         }
         if (!this.keys) return drawn;
         // Nothing of its own is focused any more (its form closed), or the keyboard went elsewhere: it lets go.
