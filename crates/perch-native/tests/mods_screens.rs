@@ -21,6 +21,7 @@ use gpui_shell::{HostArguments, HostValue};
 use perch_core::protocol::ServerMessage;
 use perch_native::client::{Command, Update};
 use perch_native::mods::{self, WindowMods, POLL};
+use perch_native::shell;
 use perch_native::sidebar::{Alert, Heard, State, Toast};
 use perch_native::terminal::attach::{FromCore, ToCore};
 use perch_native::ui::{Workspace, SIDEBAR_WIDTH};
@@ -409,8 +410,11 @@ fn main() {
     let root = probe::record("tabs-root").unwrap();
     assert_eq!(
         (root.bounds.origin, root.bounds.size.height),
-        (point(px(SIDEBAR_WIDTH), px(0.)), px(30.)),
-        "where the strip is drawn"
+        (
+            point(px(SIDEBAR_WIDTH + 2. * shell::GUTTER), px(shell::GUTTER)),
+            px(shell::HEAD)
+        ),
+        "where the strip is drawn: the main card's head"
     );
     rig.remove("tabs");
     assert!(rig.record("tabs-count").is_none());

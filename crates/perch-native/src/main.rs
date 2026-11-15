@@ -5,11 +5,13 @@
 //! sets it up from a script (`test_mode.rs`).
 
 use futures::StreamExt;
-use gpui::{prelude::*, px, size, App, Bounds, WindowBounds, WindowOptions};
+use gpui::{
+    point, prelude::*, px, size, App, Bounds, TitlebarOptions, WindowBounds, WindowOptions,
+};
 use perch_native::client::{follow, Core, Update};
 use perch_native::sidebar::{Heard, Model, Toast};
 use perch_native::ui::Workspace;
-use perch_native::{notify, sound};
+use perch_native::{notify, shell, sound};
 use std::time::Duration;
 
 mod test_mode;
@@ -44,6 +46,16 @@ fn main() {
             .open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    // The window draws its own title row (the sidebar card's head); the system's
+                    // lights sit inside it, as the Tauri app places them.
+                    titlebar: Some(TitlebarOptions {
+                        title: Some("Perch".into()),
+                        appears_transparent: true,
+                        traffic_light_position: Some(point(
+                            px(shell::LIGHTS_LEFT),
+                            px(shell::LIGHTS_TOP),
+                        )),
+                    }),
                     // A test window is ordered in without taking the keyboard, and the app is
                     // never activated.
                     focus: test.is_none(),
@@ -54,6 +66,7 @@ fn main() {
                     cx.new(|cx| {
                         Workspace::new(Model::default(), Some(command_tx), cx)
                             .with_core(|| Core::discover(&perchd::server::default_dir()))
+                            .with_window_state(perch_native::mods::user_dir().join(".window.json"))
                     })
                 },
             )

@@ -5,7 +5,7 @@
 import { screen } from "./screen.js";
 import TabBar from "./tabs/main.js";
 
-/** The box the strip fills, as the web lays it on its card. */
-const CARD = { display: "flex", flexDirection: "column", width: "100%", height: "100%", overflow: "hidden", background: "var(--card-bg)", position: "relative" };
+/** The box the strip fills; the window's round card behind it paints the colour, so the corners stay round. */
+const CARD = { display: "flex", flexDirection: "column", width: "100%", height: "100%", overflow: "hidden", background: "transparent", position: "relative" };
 
 export default screen("tabs", TabBar, { container: CARD, props: (raw) => raw });

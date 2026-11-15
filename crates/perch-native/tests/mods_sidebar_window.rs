@@ -17,6 +17,7 @@ use gpui_shell::probe::{self, ProbeRecord};
 use perch_core::protocol::ServerMessage;
 use perch_native::client::{Command, Update};
 use perch_native::mods::{self, WindowMods, POLL};
+use perch_native::shell;
 use perch_native::sidebar::State;
 use perch_native::ui::{OpenSession, Workspace, SIDEBAR_WIDTH};
 use serde_json::{json, Value};
@@ -328,8 +329,8 @@ fn main() {
     let root = rig.record("sidebar-root").expect("the stock sidebar draws");
     assert_eq!(
         (root.bounds.origin.x, root.bounds.size.width),
-        (px(0.), px(SIDEBAR_WIDTH)),
-        "in the sidebar's place"
+        (px(shell::GUTTER), px(SIDEBAR_WIDTH)),
+        "in the sidebar card"
     );
     println!("mods_sidebar_window: failure and recovery ok");
 

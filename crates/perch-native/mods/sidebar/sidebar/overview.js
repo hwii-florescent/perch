@@ -913,7 +913,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }) {
                     _jsx("span", { children: "A project keeps its workspaces, sessions and files together." }),
                     !addOpen && (_jsxs("button", {
                         type: "button",
-                        className: buttonClass({ variant: "soft", size: "sm", className: "mt-[0.35rem] gap-1 rounded-ui text-fg" }),
+                        className: buttonClass({ variant: "soft", size: "sm", className: "mt-[0.35rem] inline-flex items-center gap-1 rounded-ui text-fg" }),
                         onClick: () => setAddOpen(true),
                         "data-testid": "workspace-empty-add",
                         children: [

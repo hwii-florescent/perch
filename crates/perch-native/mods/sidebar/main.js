@@ -18,8 +18,8 @@ import Worktree from "./worktree/main.js";
 sdk.drawFolderBrowserInPlace(FolderBrowser);
 sdk.drawWorktreeInPlace(Worktree);
 
-/** The box the sidebar fills, as the web lays it on its card. */
-const CARD = { display: "flex", flexDirection: "column", width: "100%", height: "100%", overflow: "hidden", background: "var(--card-bg)" };
+/** The box the sidebar fills; the window's round card behind it paints the colour, so the corners stay round. */
+const CARD = { display: "flex", flexDirection: "column", width: "100%", height: "100%", overflow: "hidden", background: "transparent" };
 
 // The keyboard comes to the sidebar while one of its own fields has it (the Add project form), and goes back after.
 export default screen("sidebar", Sidebar, { container: CARD, keyboard: "in-flow", alsoNamed: ["folder-browser", "worktree"] });

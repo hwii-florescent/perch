@@ -1117,7 +1117,7 @@ fn the_size_is_taken_back_from_a_phone_for_one_terminal_or_all() {
     // The grant for c, which is not on screen, arrives: it tells the size it last fitted at
     // once, not when its tab comes back.
     say(&mut h, 2, info(true, false));
-    assert_eq!(asked(&mut rxs[2]), vec![ToCore::Resize(94, 31)]);
+    assert_eq!(asked(&mut rxs[2]), vec![ToCore::Resize(91, 29)]);
     say(&mut h, 2, info(false, true));
 
     // The pane's choices are the phone-size stock screen's, which runs these same commands.
@@ -1345,8 +1345,9 @@ fn a_peek_is_a_terminal_over_the_window() {
     // A click outside closes it.
     h.run("terminal.peek", json!({"id": "bravo"})).unwrap();
     h.draw();
+    // Over the main card's corner, past the sidebar card and its gutters.
     h.click(
-        SIDEBAR_WIDTH + 2.,
+        SIDEBAR_WIDTH + 20.,
         HEIGHT - 4.,
         MouseButton::Left,
         Modifiers::default(),

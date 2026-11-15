@@ -6,7 +6,7 @@
 import { screen } from "./screen.js";
 import StatusBar from "./status/main.js";
 
-/** The box the bar fills, as the web lays it on its card. */
-const CARD = { display: "flex", flexDirection: "column", width: "100%", height: "100%", overflow: "hidden", background: "var(--card-bg)", position: "relative" };
+/** The box the bar fills: the window's full width below the cards, on the backdrop, as the web lays it. */
+const CARD = { display: "flex", flexDirection: "column", width: "100%", height: "100%", overflow: "hidden", background: "transparent", position: "relative" };
 
 export default screen("status", StatusBar, { container: CARD, props: (raw) => raw });

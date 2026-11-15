@@ -31,10 +31,12 @@ use crate::client::{Command, Core};
 use crate::handoff::{open_in_perch, perch_url, Place};
 use crate::keymap::{Context as KeyContext, Hit, Keymap};
 use crate::mods::screens::{self, OnResult, Screens, PANE_HEADER_HEIGHT};
+use crate::mods::theme;
 use crate::settings::{
     self, next_choice, scrollback_from_text, stepped, Change, CONTRAST, MAX_SCROLLBACK,
     MIN_SCROLLBACK, OPACITY, OPTION_AS_ALT, PADDING, TOAST_DELIVERY,
 };
+use crate::shell::{self, Chrome, Tokens, GUTTER, TOGGLE_AFTER, TOGGLE_INSET, TOGGLE_INSET_MAC};
 use crate::sidebar::{navigation, Alert, Heard, Provider, LOCAL};
 use crate::tab_drag::{self, Drop, TabDrag};
 use crate::tabs::{Dir, History, Node, Side, Tabs};
@@ -45,7 +47,7 @@ use crate::terminal::links::{open_in_system, Target};
 use crate::terminal::{Status, TerminalEvent, TerminalView};
 use crate::ui::{
     hint, LaunchFailed, OpenSession, Sidebar, DIM_COLOR, MAIN_BG, SELECTED_BG, SIDEBAR_BG,
-    SIDEBAR_WIDTH, TITLE_COLOR,
+    TITLE_COLOR,
 };
 use crate::zoom::Zoom;
 use futures::channel::mpsc::UnboundedSender;
@@ -91,7 +93,6 @@ fn reattach_delay(attempt: u32) -> Duration {
 /// How long a started split waits for its new session.
 const SPLIT_WAIT: Duration = Duration::from_secs(20);
 pub const TAB_BAR_HEIGHT: f32 = 30.;
-const TAB_BAR_BG: u32 = 0x19191c;
 const OVERLAY_BORDER: u32 = 0x3a3a42;
 const PANE_FOCUS: u32 = 0x4a4a55;
 const PANE_GAP: f32 = 6.;
@@ -255,7 +256,27 @@ pub struct Workspace {
     drop_boxes: Rc<RefCell<DropBoxes>>,
     /// Tells the core whether this window is the one being looked at.
     activation: Option<Subscription>,
+    /// The window's frame: the drawer's tab and the two column widths.
+    chrome: Chrome,
+    /// A column's resize handle is held.
+    column_drag: Option<ColumnDrag>,
+    /// The window's width as last drawn.
+    viewport_width: f32,
     _subscriptions: Vec<Subscription>,
+}
+
+/// Which column a resize handle moves.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Column {
+    Sidebar,
+    Drawer,
+}
+
+/// A resize handle held: where the pointer was and how wide the column was.
+struct ColumnDrag {
+    column: Column,
+    from: f32,
+    start: f32,
 }
 
 /// The strip's box and each shown pane's, as last drawn.
@@ -329,6 +350,9 @@ impl Workspace {
             pointer: Value::Null,
             drop_boxes: Rc::default(),
             activation: None,
+            chrome: Chrome::default(),
+            column_drag: None,
+            viewport_width: 0.0,
             _subscriptions: vec![opened, failed, observed],
         }
     }
@@ -337,6 +361,12 @@ impl Workspace {
     /// area never touches the network.
     pub fn with_core(mut self, locate: impl Fn() -> anyhow::Result<Core> + 'static) -> Self {
         self.locate = Some(Box::new(locate));
+        self
+    }
+
+    /// Keeps the drawer's tab and the column widths in `file`, on this device.
+    pub fn with_window_state(mut self, file: std::path::PathBuf) -> Self {
+        self.chrome = Chrome::kept_in(file);
         self
     }
 
@@ -350,6 +380,11 @@ impl Workspace {
     pub fn with_opener(mut self, opener: Rc<dyn Fn(&Target)>) -> Self {
         self.opener = opener;
         self
+    }
+
+    /// The drawer's tab, or `None` while it is closed.
+    pub fn drawer(&self) -> Option<crate::shell::Tools> {
+        self.chrome.tools()
     }
 
     pub fn sidebar(&self) -> &Entity<Sidebar> {
@@ -1502,9 +1537,8 @@ impl Workspace {
         if self.sidebar.read(cx).visible() {
             want("sidebar", "sidebar".into(), json!({}));
         }
-        if self.tabs.visible().is_some() {
-            want("tabs", "tabs".into(), json!({}));
-        }
+        // The strip heads the main card, with a session open or not.
+        want("tabs", "tabs".into(), json!({}));
         want("status", "status".into(), json!({}));
         if self.tabs.visible().is_none() {
             want("start", "start".into(), self.start_props(cx));
@@ -4131,6 +4165,74 @@ fn setting_row(title: &str, note: &str, control: AnyElement) -> gpui::Div {
         .child(div().flex_none().child(control))
 }
 
+impl Workspace {
+    /// The theme's tokens the window's frame draws with.
+    fn tokens(&self, cx: &App) -> Tokens {
+        Tokens::of(&screens::mods(cx).map_or_else(
+            || theme::resolve(theme::DEFAULT),
+            |(_, perch)| perch.theme(),
+        ))
+    }
+
+    /// The sidebar's width while it is shown, for the drawer's room.
+    fn shown_sidebar(&self, cx: &App) -> Option<f32> {
+        self.sidebar
+            .read(cx)
+            .visible()
+            .then(|| self.chrome.sidebar())
+    }
+
+    /// A press on a column's handle: a double press puts the column back to its default width,
+    /// a single one holds it.
+    fn press_column(&mut self, column: Column, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        let sidebar = self.shown_sidebar(cx);
+        if event.click_count >= 2 {
+            match column {
+                Column::Sidebar => self.chrome.set_sidebar_width(None),
+                Column::Drawer => self.chrome.set_tools_width(None),
+            }
+            self.chrome.keep();
+        } else {
+            let start = match column {
+                Column::Sidebar => self.chrome.sidebar(),
+                Column::Drawer => self.chrome.tools_width(self.viewport_width, sidebar),
+            };
+            self.column_drag = Some(ColumnDrag {
+                column,
+                from: f32::from(event.position.x),
+                start,
+            });
+        }
+        cx.notify();
+    }
+
+    /// The pointer moved while a handle is held.
+    fn drag_column(&mut self, x: Pixels, cx: &mut Context<Self>) {
+        let Some(drag) = &self.column_drag else {
+            return;
+        };
+        let moved = f32::from(x) - drag.from;
+        match drag.column {
+            Column::Sidebar => self.chrome.set_sidebar_width(Some(drag.start + moved)),
+            Column::Drawer => {
+                let (least, most) =
+                    Chrome::tools_range(self.viewport_width, self.shown_sidebar(cx));
+                self.chrome
+                    .set_tools_width(Some((drag.start - moved).clamp(least, most)));
+            }
+        }
+        cx.notify();
+    }
+
+    /// The handle was let go: the width stays and is kept.
+    fn end_column_drag(&mut self, cx: &mut Context<Self>) {
+        if self.column_drag.take().is_some() {
+            self.chrome.keep();
+            cx.notify();
+        }
+    }
+}
+
 impl gpui::Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.viewport_height = f32::from(window.viewport_size().height);
@@ -4227,52 +4329,244 @@ impl gpui::Render for Workspace {
             let sidebar = self.sidebar.read(cx);
             (sidebar.visible(), sidebar.needs_you())
         };
-        let sidebar = if let Some(view) = self.screens.inflow("sidebar").filter(|_| visible) {
-            let (width, _) = self.screens.size("sidebar", cx);
-            div()
-                .flex_none()
-                .w(px(width))
-                .h_full()
-                .child(view)
-                .into_any_element()
-        } else if visible {
-            // The stock `sidebar` mod draws the sidebar; without it its place says why.
-            let why = if screens::mods(cx).is_none() {
-                "Mods are off in this window, so nothing draws the sidebar."
-            } else {
-                "No mod draws the sidebar. The stock one is restored when the app starts."
-            };
-            div()
-                .id("sidebar")
-                .flex_none()
-                .w(px(SIDEBAR_WIDTH))
-                .h_full()
-                .p_3()
-                .bg(rgb(SIDEBAR_BG))
-                .child(hint(why))
-                .into_any_element()
+        self.viewport_width = f32::from(window.viewport_size().width);
+        let tokens = self.tokens(cx);
+        let this = cx.entity();
+        let inset = if cfg!(target_os = "macos") {
+            TOGGLE_INSET_MAC
         } else {
-            // Hidden, the sidebar leaves a control that shows it, with the count that needs you.
-            let toggle = self.sidebar.clone();
-            div()
-                .id("show-sidebar")
-                .cursor_pointer()
-                .p_2()
-                .text_xs()
-                .text_color(rgb(DIM_COLOR))
-                .child(if needs > 0 {
-                    format!("Sidebar · {needs}")
-                } else {
-                    "Sidebar".to_string()
+            TOGGLE_INSET
+        };
+        let toggle_sidebar = {
+            let sidebar = self.sidebar.clone();
+            move |_: &mut Window, cx: &mut App| {
+                sidebar.update(cx, |sidebar, cx| {
+                    sidebar.run_action("global.sidebar", cx);
                 })
-                .on_click(move |_, _, cx| {
-                    toggle.update(cx, |sidebar, cx| {
-                        sidebar.run_action("global.sidebar", cx);
+            }
+        };
+        let toggle_drawer = {
+            let this = this.clone();
+            move |_: &mut Window, cx: &mut App| {
+                this.update(cx, |this, cx| {
+                    this.chrome.toggle_drawer();
+                    cx.notify();
+                })
+            }
+        };
+        let sidebar_card = visible.then(|| {
+            let body = if let Some(view) = self.screens.inflow("sidebar") {
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .child(view)
+                    .into_any_element()
+            } else {
+                // The stock `sidebar` mod draws the sidebar; without it its place says why.
+                let why = if screens::mods(cx).is_none() {
+                    "Mods are off in this window, so nothing draws the sidebar."
+                } else {
+                    "No mod draws the sidebar. The stock one is restored when the app starts."
+                };
+                div()
+                    .id("sidebar")
+                    .flex_1()
+                    .min_h_0()
+                    .p_3()
+                    .child(hint(why))
+                    .into_any_element()
+            };
+            shell::card(tokens)
+                .id("sidebar-card")
+                .flex_none()
+                .w(px(self.chrome.sidebar()))
+                .child(shell::drags_window(shell::head().pl(px(inset))).child(
+                    shell::sidebar_toggle(tokens, false, needs, toggle_sidebar.clone()),
+                ))
+                .child(body)
+                .child(shell::round_corners(tokens.backdrop))
+        });
+        let sidebar_handle = visible.then(|| {
+            let held = self
+                .column_drag
+                .as_ref()
+                .is_some_and(|d| d.column == Column::Sidebar);
+            shell::resize_handle(
+                "resize-sidebar",
+                held,
+                tokens,
+                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                    this.press_column(Column::Sidebar, event, cx)
+                }),
+            )
+        });
+        let tools = self.chrome.tools();
+        let drawer_card = tools.map(|tab| {
+            let width = self
+                .chrome
+                .tools_width(self.viewport_width, self.shown_sidebar(cx));
+            let tabs = shell::Tools::ALL.into_iter().map(|each| {
+                let this = this.clone();
+                shell::tools_tab(each, each == tab, tokens, move |_, cx| {
+                    this.update(cx, |this, cx| {
+                        this.chrome.set_tools(Some(each));
+                        cx.notify();
                     })
                 })
-                .into_any_element()
+            });
+            // The Files, Git and Browser screens are the Perch app's for now.
+            let open = {
+                let this = this.clone();
+                div()
+                    .id("workspace-tools-handoff")
+                    .flex()
+                    .items_center()
+                    .h(px(28.))
+                    .px(px(12.8))
+                    .rounded(px(8.))
+                    .cursor_pointer()
+                    .text_size(px(12.))
+                    .text_color(tokens.text)
+                    .bg(tokens.surface_0)
+                    .hover(move |style| style.bg(tokens.surface_1))
+                    .child("Open in Perch")
+                    .on_click(move |_, _, cx| {
+                        this.update(cx, |this, cx| {
+                            let result = this.hand_off(tab.place());
+                            this.finish(result, cx);
+                        })
+                    })
+            };
+            shell::card(tokens)
+                .id("tools-card")
+                .flex_none()
+                .w(px(width))
+                .child(
+                    shell::head()
+                        .justify_between()
+                        .gap_2()
+                        .px_2()
+                        .child(div().flex().items_center().gap(px(2.)).children(tabs))
+                        .child(shell::drawer_toggle(tokens, toggle_drawer.clone())),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .gap_3()
+                        .px_6()
+                        .child(
+                            div()
+                                .text_size(px(12.))
+                                .text_color(tokens.subtext)
+                                .text_center()
+                                .child(format!(
+                                    "{} for this workspace opens in the Perch app for now.",
+                                    tab.label()
+                                )),
+                        )
+                        .child(open),
+                )
+                .child(shell::round_corners(tokens.backdrop))
+        });
+        let drawer_handle = tools.map(|_| {
+            let held = self
+                .column_drag
+                .as_ref()
+                .is_some_and(|d| d.column == Column::Drawer);
+            shell::resize_handle(
+                "resize-tools",
+                held,
+                tokens,
+                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                    this.press_column(Column::Drawer, event, cx)
+                }),
+            )
+        });
+        // The tab strip heads the main card, with or without a session open.
+        let bar = match self.screens.inflow("tabs") {
+            Some(view) => {
+                let boxes = self.drop_boxes.clone();
+                let measure = canvas(
+                    move |bounds, _, _| boxes.borrow_mut().strip = Some(bounds),
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full();
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .child(view)
+                    .child(measure)
+                    .into_any_element()
+            }
+            // The stock `tabs` mod draws the strip; without it its place says why.
+            None => div()
+                .id("tab-strip-missing")
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .px_2()
+                .flex()
+                .items_center()
+                .child(hint(if screens::mods(cx).is_none() {
+                    "Mods are off in this window, so nothing draws the tab strip."
+                } else {
+                    "No mod draws the tab strip. The stock one is restored when the app starts."
+                }))
+                .into_any_element(),
         };
-        let mut area = div().relative().flex().flex_col().flex_1().min_w_0();
+        let mut main_head = shell::head();
+        if !visible {
+            // With the sidebar closed, its toggle (and the traffic lights' room) heads the main card.
+            main_head = main_head.child(
+                shell::drags_window(
+                    div()
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .h_full()
+                        .pl(px(inset))
+                        .pr(px(TOGGLE_AFTER)),
+                )
+                .child(shell::sidebar_toggle(
+                    tokens,
+                    true,
+                    needs,
+                    toggle_sidebar.clone(),
+                )),
+            );
+        }
+        main_head = main_head.child(bar);
+        if tools.is_none() {
+            main_head = main_head.child(
+                shell::drags_window(
+                    div()
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .h_full()
+                        .pl(px(4.))
+                        .pr(px(8.)),
+                )
+                .child(shell::drawer_toggle(tokens, toggle_drawer.clone())),
+            );
+        }
+        let mut area = shell::card(tokens)
+            .id("main-card")
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .child(main_head);
         match self.tabs.visible() {
             Some(node) => {
                 let split = matches!(node, Node::Split { .. });
@@ -4291,43 +4585,7 @@ impl gpui::Render for Workspace {
                 )
                 .absolute()
                 .size_full();
-                let bar = match self.screens.inflow("tabs") {
-                    Some(view) => {
-                        let (_, height) = self.screens.size("tabs", cx);
-                        let boxes = self.drop_boxes.clone();
-                        let measure = canvas(
-                            move |bounds, _, _| boxes.borrow_mut().strip = Some(bounds),
-                            |_, _, _, _| {},
-                        )
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .size_full();
-                        div()
-                            .relative()
-                            .flex_none()
-                            .h(px(height))
-                            .child(view)
-                            .child(measure)
-                            .into_any_element()
-                    }
-                    // The stock `tabs` mod draws the strip; without it its place says why.
-                    None => div()
-                        .id("tab-strip-missing")
-                        .flex_none()
-                        .h(px(TAB_BAR_HEIGHT))
-                        .px_2()
-                        .flex()
-                        .items_center()
-                        .bg(rgb(TAB_BAR_BG))
-                        .child(hint(if screens::mods(cx).is_none() {
-                            "Mods are off in this window, so nothing draws the tab strip."
-                        } else {
-                            "No mod draws the tab strip. The stock one is restored when the app starts."
-                        }))
-                        .into_any_element(),
-                };
-                area = area.child(bar).child(
+                area = area.child(
                     div()
                         .relative()
                         .flex_1()
@@ -4363,10 +4621,11 @@ impl gpui::Render for Workspace {
                 area = area.child(start);
             }
         }
-        if let Some(view) = self.screens.inflow("status") {
+        // Below the cards, on the backdrop, the whole window wide.
+        let status = self.screens.inflow("status").map(|view| {
             let (_, height) = self.screens.size("status", cx);
-            area = area.child(div().flex_none().w_full().h(px(height)).child(view));
-        }
+            div().flex_none().w_full().h(px(height)).child(view)
+        });
         let notice = self
             .notice
             .clone()
@@ -4444,11 +4703,44 @@ impl gpui::Render for Workspace {
             .left_0()
             .size_full()
         });
+        // A handle held: the window follows the pointer wherever it is, until it is let go.
+        let columns = self.column_drag.is_some().then(|| {
+            let this = cx.entity().downgrade();
+            canvas(
+                |_, _, _| {},
+                move |_, _, window, _| {
+                    let moved = this.clone();
+                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                        if phase != DispatchPhase::Capture {
+                            return;
+                        }
+                        let _ = moved.update(cx, |this, cx| {
+                            if event.pressed_button == Some(MouseButton::Left) {
+                                this.drag_column(event.position.x, cx);
+                            } else {
+                                this.end_column_drag(cx);
+                            }
+                        });
+                    });
+                    let released = this.clone();
+                    window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+                            let _ = released.update(cx, |this, cx| this.end_column_drag(cx));
+                        }
+                    });
+                },
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+        });
         div()
             .relative()
             .flex()
+            .flex_col()
             .size_full()
-            .bg(rgb(MAIN_BG))
+            .bg(tokens.backdrop)
             .key_context("Workspace")
             .track_focus(&self.root_focus)
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
@@ -4456,11 +4748,31 @@ impl gpui::Render for Workspace {
                     cx.stop_propagation();
                 }
             }))
-            .child(sidebar)
-            .child(area.children(overlays))
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .px(px(GUTTER))
+                    .pt(px(GUTTER))
+                    .children(sidebar_card)
+                    .children(sidebar_handle)
+                    .child(
+                        area.children(overlays)
+                            .child(shell::round_corners(tokens.backdrop)),
+                    )
+                    .children(drawer_handle)
+                    .children(drawer_card),
+            )
+            .children(status)
+            // The gutter above the cards is title bar too.
+            .child(shell::drags_window(
+                div().absolute().top_0().left_0().w_full().h(px(GUTTER)),
+            ))
             // Over the whole window: it opens where the pointer was, in window coordinates.
             .children(floating)
             .children(follow)
+            .children(columns)
     }
 }
 

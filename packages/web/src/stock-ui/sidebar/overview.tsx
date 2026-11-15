@@ -771,7 +771,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           <strong className="text-[0.77rem] font-semibold text-fg">Add a project</strong>
           <span>A project keeps its workspaces, sessions and files together.</span>
           {!addOpen && (
-            <button type="button" className={buttonClass({ variant: "soft", size: "sm", className: "mt-[0.35rem] gap-1 rounded-ui text-fg" })} onClick={() => setAddOpen(true)} data-testid="workspace-empty-add">
+            <button type="button" className={buttonClass({ variant: "soft", size: "sm", className: "mt-[0.35rem] inline-flex items-center gap-1 rounded-ui text-fg" })} onClick={() => setAddOpen(true)} data-testid="workspace-empty-add">
               <PlusIcon size={12} />
               Register folder
             </button>

@@ -49,6 +49,11 @@ path = "tests/terminal_session.rs"
 harness = false
 
 [[test]]
+name = "workspace_shell"
+path = "tests/workspace_shell.rs"
+harness = false
+
+[[test]]
 name = "mods_sidebar_window"
 path = "tests/mods_sidebar_window.rs"
 harness = false

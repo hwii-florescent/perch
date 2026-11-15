@@ -9,6 +9,7 @@ pub mod keymap;
 pub mod mods;
 pub mod notify;
 pub mod settings;
+pub mod shell;
 pub mod sidebar;
 pub mod sound;
 pub mod tab_drag;
