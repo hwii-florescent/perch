@@ -766,12 +766,13 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       )}
 
       {organize === "project" && projectCount === 0 && !nav.loading && (
-        <div className="grid justify-items-start gap-[0.32rem] px-3 py-[1.1rem] text-[0.68rem] text-subtext-0">
-          <span className="text-[1.3rem] leading-none text-accent" aria-hidden="true">＋</span>
-          <strong className="text-[0.77rem] text-fg">Add a project</strong>
+        <div className="grid justify-items-start gap-[0.32rem] px-3 py-4 text-[0.68rem] text-subtext-0 min-[701px]:px-4">
+          <FolderMark className="mb-[0.15rem] size-5 text-accent" />
+          <strong className="text-[0.77rem] font-semibold text-fg">Add a project</strong>
           <span>A project keeps its workspaces, sessions and files together.</span>
           {!addOpen && (
-            <button type="button" className={buttonClass({ variant: "soft", size: "sm", className: "mt-[0.18rem] text-fg" })} onClick={() => setAddOpen(true)} data-testid="workspace-empty-add">
+            <button type="button" className={buttonClass({ variant: "soft", size: "sm", className: "mt-[0.35rem] gap-1 rounded-ui text-fg" })} onClick={() => setAddOpen(true)} data-testid="workspace-empty-add">
+              <PlusIcon size={12} />
               Register folder
             </button>
           )}

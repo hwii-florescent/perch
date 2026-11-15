@@ -903,24 +903,23 @@ export function WorkspaceOverview({ compact = false, onNavigate }) {
                 ]
             })),
             organize === "project" && projectCount === 0 && !nav.loading && (_jsxs("div", {
-                className: "grid justify-items-start gap-[0.32rem] px-3 py-[1.1rem] text-[0.68rem] text-subtext-0",
+                className: "grid justify-items-start gap-[0.32rem] px-3 py-4 text-[0.68rem] text-subtext-0 min-[701px]:px-4",
                 children: [
-                    _jsx("span", {
-                        className: "text-[1.3rem] leading-none text-accent",
-                        "aria-hidden": "true",
-                        children: "\uFF0B"
-                    }),
+                    _jsx(FolderMark, { className: "mb-[0.15rem] size-5 text-accent" }),
                     _jsx("strong", {
-                        className: "text-[0.77rem] text-fg",
+                        className: "text-[0.77rem] font-semibold text-fg",
                         children: "Add a project"
                     }),
                     _jsx("span", { children: "A project keeps its workspaces, sessions and files together." }),
-                    !addOpen && (_jsx("button", {
+                    !addOpen && (_jsxs("button", {
                         type: "button",
-                        className: buttonClass({ variant: "soft", size: "sm", className: "mt-[0.18rem] text-fg" }),
+                        className: buttonClass({ variant: "soft", size: "sm", className: "mt-[0.35rem] gap-1 rounded-ui text-fg" }),
                         onClick: () => setAddOpen(true),
                         "data-testid": "workspace-empty-add",
-                        children: "Register folder"
+                        children: [
+                            _jsx(PlusIcon, { size: 12 }),
+                            "Register folder"
+                        ]
                     }))
                 ]
             })),
