@@ -293,6 +293,12 @@ impl Tabs {
         true
     }
 
+    /// Show no tab (the start page), keeping the others open.
+    pub fn hide(&mut self) {
+        self.active = None;
+        self.zoomed = false;
+    }
+
     /// The tab at `index` (1 is first); `None` counts from the end (`tabs.last`).
     pub fn jump(&mut self, index: Option<usize>) -> bool {
         let id = match index {

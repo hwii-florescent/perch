@@ -300,20 +300,8 @@ impl Workspace {
             this.pending_split = None;
             cx.notify();
         });
-        // The sidebar's own changes (hiding it, a count, a session's state) redraw the window. A
-        // New session asked for (`sessions.new`, `nests.scratchpad`) opens the `new-session` screen;
-        // with no mod drawing one, the window says so.
-        let observed = cx.observe(&sidebar, |this, sidebar, cx| {
-            let target = sidebar.update(cx, |sidebar, _| sidebar.take_new_session());
-            if let Some(target) = target {
-                if this.screens.has("new-session", cx) {
-                    this.open_new_session(target, None, cx);
-                } else {
-                    this.notice = Some("No mod draws the New session screen.".into());
-                }
-            }
-            cx.notify()
-        });
+        // The sidebar's own changes (hiding it, a count, a session's state) redraw the window.
+        let observed = cx.observe(&sidebar, |_, _, cx| cx.notify());
         Self {
             sidebar,
             locate: None,
@@ -1452,50 +1440,6 @@ impl Workspace {
         }
     }
 
-    /// The New session screen for `target` (`NewSessionScreenProps`), anchored at `at`.
-    fn open_new_session(
-        &mut self,
-        target: crate::actions::NewSession,
-        at: Option<Point<Pixels>>,
-        cx: &mut Context<Self>,
-    ) {
-        let model = self.sidebar.read(cx).model();
-        let cwds: Vec<String> = model
-            .hosts
-            .iter()
-            .find(|h| h.id == target.host_id)
-            .map(|host| {
-                host.projects
-                    .iter()
-                    .filter(|p| crate::actions::startable(host, p) && !p.quickchat)
-                    .map(|p| p.path.clone())
-                    .collect()
-            })
-            .unwrap_or_default();
-        let anchor = at.map_or(
-            json!({ "x": 0, "y": 0, "width": 0, "height": 0 }),
-            |at| json!({ "x": f32::from(at.x), "y": f32::from(at.y), "width": 0, "height": 0 }),
-        );
-        let host = target.host_id.clone();
-        self.open_screen(
-            "new-session",
-            json!({ "hostId": host, "projectCwds": cwds, "anchorRect": anchor }),
-            at,
-            Some(Box::new(move |this, result, _, cx| {
-                let Some(agent) = result.get("agent").and_then(Value::as_str) else {
-                    return;
-                };
-                let cwd = result
-                    .get("cwd")
-                    .and_then(Value::as_str)
-                    .map(str::to_string);
-                let outcome = this.start_session(&host, cwd, agent, cx);
-                this.finish(outcome, cx);
-            })),
-            cx,
-        );
-    }
-
     /// The web's `startSession`: `agent` in `cwd` on `host_id` (no folder: a Quickchat), over the
     /// launch the New session panel sends.
     fn start_session(
@@ -2161,7 +2105,10 @@ impl Workspace {
             "global.help" | "global.helpPlain" => self.open_keybind_help(cx),
             // As the web's Cmd+Shift+T and the sidebar's New session: the launcher, for the
             // sidebar's target.
-            "sessions.new" if self.screens.has("launcher", cx) => {
+            "sessions.new" => {
+                if !self.screens.has("launcher", cx) {
+                    return Err("No mod draws the launcher.".into());
+                }
                 let target = self.sidebar.update(cx, |sidebar, cx| {
                     sidebar.run_action("sessions.new", cx);
                     sidebar.take_new_session()
@@ -2471,9 +2418,28 @@ impl Workspace {
                     })
                 });
             }
-            "quickchat.new" => {
-                self.sidebar
-                    .update(cx, |sidebar, cx| sidebar.run_action("nests.scratchpad", cx));
+            // As the web's `newScratchpad`: the Quickchat project's start page, which picks the agent.
+            "quickchat.new" | "nests.scratchpad" => {
+                let target = self.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.run_action("nests.scratchpad", cx);
+                    sidebar.take_new_session()
+                });
+                let chats = target
+                    .and_then(|t| t.project_id)
+                    .ok_or("There is no Quickchat on this computer.")?;
+                let focused = screens::mods(cx)
+                    .and_then(|(_, perch)| {
+                        let result = perch.run_own("project.focus", &json!({ "id": chats }))?;
+                        perch.flush(cx);
+                        Some(result)
+                    })
+                    .ok_or("No mod shows the navigation.")?;
+                focused?;
+                self.tabs.hide();
+                // The terminal that had the keyboard is off screen: the window takes it, so keys
+                // (Cmd+T) still reach the commands.
+                self.root_focus.focus(window, cx);
+                self.after_change(cx);
             }
             "overlay.close" => {
                 if let Some(top) = self.screens.top_modal() {
@@ -2658,17 +2624,14 @@ impl Workspace {
                     sidebar.send(Command::UsageRedeemReset { account_id })
                 });
             }
-            // With a New session screen, the sidebar's target opens it instead of its panel.
             // As the web's Cmd+T: the tab strip opens its New session menu at its "+", for the
-            // shown workspace. With no strip drawn, the sidebar's target opens the menu.
+            // shown workspace, with a session open or not.
             "tabs.new" | "tab.new" => {
-                if self.tabs.visible().is_some() && self.screens.has("tabs", cx) {
-                    self.new_tab_asks += 1;
-                    cx.notify();
-                } else {
-                    self.sidebar
-                        .update(cx, |sidebar, cx| sidebar.run_action("sessions.new", cx));
+                if !self.screens.has("tabs", cx) {
+                    return Err("No mod draws the tab strip.".into());
                 }
+                self.new_tab_asks += 1;
+                cx.notify();
             }
             "tabs.next" | "tab.next" => {
                 self.tabs.step(1);

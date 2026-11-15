@@ -284,8 +284,12 @@ impl Perch {
         };
         if changed {
             let mut data = self.0.data.borrow_mut();
+            // A session on screen decides the workspace; with none, the workspace just focused
+            // (Quickchat's start page) stays.
+            if open.is_some() {
+                data.workspace_id = None;
+            }
             data.session_id = open.map(|o| o.1);
-            data.workspace_id = None;
             drop(data);
             self.bump(VIEW);
         }

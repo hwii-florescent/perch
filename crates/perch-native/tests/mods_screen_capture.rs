@@ -198,7 +198,7 @@ fn write_mod(dir: &Path, id: &str, text: &str) {
 /// The props the window's own openers give the screen mods, against the web's.
 fn openers_give_the_web_fields(scratch: &Path) {
     let user = scratch.join("native-mods");
-    for id in ["navigator", "pane-menu", "confirm", "toast", "new-session"] {
+    for id in ["navigator", "pane-menu", "confirm", "toast"] {
         write_mod(&user, id, PLAIN);
     }
     let navigator = ScreenFixture::load("navigator");
@@ -332,18 +332,6 @@ fn openers_give_the_web_fields(scratch: &Path) {
     });
     let web = ScreenFixture::load("toast").expected("done")["notifications"][0].clone();
     check("toast item (notification)", &web, &item, &[]);
-    rig.close_all();
-
-    // New quickchat opens the unscoped New session panel (the sidebar's New is the launcher).
-    rig.ws(|ws, window, cx| ws.run_command("nests.scratchpad", None, window, cx))
-        .unwrap();
-    let native = rig.props("new-session");
-    let web = ScreenFixture::load("new-session").expected("unscoped")["props"].clone();
-    check("new-session (sidebar's New)", &web, &native, &[VIEWPORT]);
-    // The folders differ by design: the web's callers offer one project (a project row's +) or
-    // none, and this fixture state lists three by hand; the native sidebar's New offers every
-    // project the host can start in.
-    assert_eq!(native["hostId"], web["hostId"]);
     rig.close_all();
 
     assert!(failures.is_empty(), "{}", failures.join("\n"));

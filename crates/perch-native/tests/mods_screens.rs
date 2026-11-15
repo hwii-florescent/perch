@@ -160,19 +160,6 @@ export default class extends View {
 }
 "##;
 
-const NEW_SESSION: &str = r##"
-import { View, div } from "gpui-kit";
-import * as perch from "perch";
-export default class extends View {
-  render() {
-    const props = perch.props();
-    return div().id("new-root").size_full().bg("#303030")
-      .child(div().id("new-start").w(100).h(30).bg("#00ff00")
-        .on_click(() => perch.close({ cwd: props.projectCwds[0], agent: "claude" })));
-  }
-}
-"##;
-
 fn message(value: Value) -> ServerMessage {
     serde_json::from_value(value).unwrap()
 }
@@ -714,26 +701,15 @@ fn main() {
     rig.press("cmd-p");
     assert!(rig.ws(|ws, _, _| ws.screens_open()).is_empty());
 
-    // New quickchat opens New session as a screen in place of the sidebar's panel; what it
-    // picks is launched.
-    rig.write("new-session", NEW_SESSION);
-    rig.ws(|ws, window, cx| ws.run_command("nests.scratchpad", None, window, cx))
+    // New quickchat opens no menu: with no Quickchat project it says so. Cmd+T asks the tab strip,
+    // which draws the menu itself.
+    let refused = rig.ws(|ws, window, cx| ws.run_command("nests.scratchpad", None, window, cx));
+    assert!(refused.is_err_and(|e| e.contains("Quickchat")));
+    let asks = rig.ws(|ws, _, _| ws.new_tab_asks());
+    rig.ws(|ws, window, cx| ws.run_command("tabs.new", None, window, cx))
         .unwrap();
-    rig.draw();
-    let props = rig
-        .ws(|ws, _, _| ws.screen_props("new-session").cloned())
-        .unwrap();
-    assert_eq!(
-        (&props["hostId"], &props["projectCwds"]),
-        (&json!("local"), &json!(["/work"]))
-    );
-    rig.asked();
-    rig.click("new-start");
-    let launched = rig.asked().into_iter().any(|c| {
-        matches!(c, Command::Launch { cwd, provider, .. }
-            if cwd.as_deref() == Some("/work") && provider == "claude")
-    });
-    assert!(launched, "the New session screen's pick is launched");
+    assert_eq!(rig.ws(|ws, _, _| ws.new_tab_asks()), asks + 1);
+    assert!(rig.ws(|ws, _, _| ws.screens_open()).is_empty());
 
     // startSession: the launch the New session panel sends.
     rig.asked();

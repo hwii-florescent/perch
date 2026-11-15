@@ -56,6 +56,8 @@ fn message(value: Value) -> ServerMessage {
 fn state() -> State {
     let project = json!({"id": "p", "hostId": "local", "name": "Work", "path": "/work",
         "favorite": false, "createdAt": 0, "updatedAt": 0});
+    let chats = json!({"id": "chats", "hostId": "local", "name": "Quickchat",
+        "path": "/home/dev/.perch/scratch", "favorite": false, "createdAt": 0, "updatedAt": 0});
     let mut state = State::default();
     state.connect();
     state.apply(&message(json!({
@@ -63,7 +65,12 @@ fn state() -> State {
         "capabilities": ["workspace.snapshot", "inbound.v1"]})));
     state.apply(&message(json!({
         "type": "project.list", "requestId": "r", "hostId": "local", "snapshotEpoch": "e",
-        "snapshotRevision": 1, "projects": [project]})));
+        "snapshotRevision": 1, "projects": [project, chats]})));
+    state.apply(&message(json!({
+        "type": "workspace.snapshot", "requestId": "r", "hostId": "local", "snapshotEpoch": "e",
+        "snapshotRevision": 1, "projects": [project, chats], "workspaces": [{"id": "wc",
+        "projectId": "chats", "hostId": "local", "path": "/home/dev/.perch/scratch", "name": "main",
+        "dirty": false, "state": "active", "createdAt": 0, "updatedAt": 0, "pinned": false}]})));
     let sessions: Vec<Value> = ["alpha", "bravo"]
         .iter()
         .enumerate()
@@ -941,78 +948,19 @@ fn confirm(rig: &mut Rig) {
     println!("confirm: ok");
 }
 
-/// The unscoped New session menu, as New quickchat opens it (Cmd+Shift+T is the launcher).
-fn open_new_session(rig: &mut Rig) {
-    rig.ws(|ws, window, cx| ws.run_command("nests.scratchpad", None, window, cx))
-        .unwrap();
-    rig.draw();
-}
-
-fn launched(rig: &mut Rig) -> Vec<(String, Option<String>, String)> {
-    rig.asked()
-        .into_iter()
-        .filter_map(|c| match c {
-            Command::Launch {
-                host_id,
-                cwd,
-                provider,
-            } => Some((host_id, cwd, provider)),
-            _ => None,
-        })
-        .collect()
-}
-
 fn new_session(rig: &mut Rig) {
-    // New quickchat opens the stock menu, unscoped: the agent picker, then the computer's
-    // project and No project.
-    open_new_session(rig);
-    assert_eq!(rig.open_screens(), ["new-session"]);
-    assert!(rig.record("launcher").is_some(), "the menu is drawn");
-    assert!(rig.record("agent-select").is_some());
-    assert_eq!(rig.keys("project-option"), ["0", "none"]);
-
-    // Escape closes it and the terminal has the keyboard again.
-    rig.press("escape");
-    assert!(rig.open_screens().is_empty(), "Escape closed it");
-    assert!(rig.terminal_focused());
-
-    // A press outside closes it, and nothing beneath takes that press.
-    let before = rig.opened.borrow().len();
-    open_new_session(rig);
-    rig.mouse(20., HEIGHT - 20.);
-    assert!(rig.open_screens().is_empty(), "the press outside closed it");
-    assert_eq!(
-        rig.opened.borrow().len(),
-        before,
-        "nothing beneath was pressed"
-    );
-
-    // A project starts the picked agent (the last pick, Claude) in its folder.
-    rig.asked();
-    open_new_session(rig);
-    rig.click("project-option:0");
-    assert!(rig.open_screens().is_empty(), "the pick closed it");
-    assert_eq!(
-        launched(rig),
-        [("local".into(), Some("/work".into()), "claude".into())]
-    );
-
-    // No project starts a Quickchat.
-    open_new_session(rig);
-    rig.click("project-option:none");
-    assert_eq!(launched(rig), [("local".into(), None, "claude".into())]);
-
+    let cmd_t = if cfg!(target_os = "macos") {
+        "cmd-t"
+    } else {
+        "ctrl-t"
+    };
     // Cmd+T, as the web's: the tab strip opens the menu for its workspace's folder (home here, with
     // no workspace open), below its "+".
     let plus = rig
         .record("tab-new")
         .expect("the tab strip draws its +")
         .bounds;
-    rig.press(if cfg!(target_os = "macos") {
-        "cmd-t"
-    } else {
-        "ctrl-t"
-    });
+    rig.press(cmd_t);
     assert_eq!(rig.open_screens(), ["new-session"]);
     let props = rig
         .ws(|ws, _, _| ws.screen_props("new-session").cloned())
@@ -1037,42 +985,66 @@ fn new_session(rig: &mut Rig) {
         rig.record("launcher-filter").is_some(),
         "the scoped launcher"
     );
+    assert!(rig.record("agent-select").is_none(), "no unscoped form");
+
+    // Escape closes it and the terminal has the keyboard again.
     rig.press("escape");
-    assert!(rig.open_screens().is_empty());
+    assert!(rig.open_screens().is_empty(), "Escape closed it");
     assert!(rig.terminal_focused());
 
-    // The agent dropdown is the web's: a press lists the agents under it, a pick is what starts.
-    // Its rows match the parity table's launcher rows, so they carry those names here.
-    open_new_session(rig);
-    let trigger = rig.record("agent-select").expect("the dropdown").bounds;
-    assert!(rig.record("launcher-option").is_none(), "closed at first");
-    rig.click("agent-select");
-    let rows: Vec<_> = ["launcher-option", "launcher-option@1"]
-        .iter()
-        .map(|name| {
-            rig.record(name)
-                .expect("Claude and Codex are listed")
-                .bounds
-        })
-        .collect();
-    assert!(
-        rows[0].origin.y >= trigger.origin.y + trigger.size.height,
-        "below the dropdown"
-    );
-    assert!(rig.record("launcher-option@2").is_none(), "two agents");
-    assert_eq!(rig.open_screens(), ["new-session"], "the menu stays");
-    rig.asked();
-    rig.click("launcher-option@1");
-    assert!(
-        rig.record("launcher-option").is_none(),
-        "a pick closes the list"
-    );
-    rig.click("project-option:0");
+    // A press outside closes it, and nothing beneath takes that press.
+    rig.press(cmd_t);
+    let before = rig.opened.borrow().len();
+    rig.mouse(20., HEIGHT - 20.);
+    assert!(rig.open_screens().is_empty(), "the press outside closed it");
     assert_eq!(
-        launched(rig),
-        [("local".into(), Some("/work".into()), "codex".into())],
-        "Codex, as picked"
+        rig.opened.borrow().len(),
+        before,
+        "nothing beneath was pressed"
     );
+
+    // New quickchat shows the Quickchat project's start page and opens no menu; Cmd+T there opens
+    // the same menu at the "+", for the folder it shows, and never at the window's corner.
+    rig.ws(|ws, window, cx| ws.run_command("nests.scratchpad", None, window, cx))
+        .unwrap();
+    rig.draw();
+    assert!(rig.open_screens().is_empty(), "Quickchat opens no menu");
+    assert_eq!(rig.shown(), None, "no session is shown: the start page");
+    let plus = rig
+        .record("tab-new")
+        .expect("the strip is drawn on the start page")
+        .bounds;
+    rig.press(cmd_t);
+    assert_eq!(rig.open_screens(), ["new-session"]);
+    let props = rig
+        .ws(|ws, _, _| ws.screen_props("new-session").cloned())
+        .unwrap();
+    assert_eq!(props["fixedCwd"], "/home/dev/.perch/scratch");
+    assert_eq!(
+        (props["anchorRect"]["x"].as_f64(), props["anchorRect"]["y"].as_f64()),
+        (
+            Some(f32::from(plus.origin.x).into()),
+            Some(f32::from(plus.origin.y).into())
+        ),
+        "anchored to the + on the start page"
+    );
+    rig.press("escape");
+
+    // The sidebar's New session is the launcher (a modal), not the strip's menu.
+    rig.ws(|ws, window, cx| ws.run_command("sessions.new", None, window, cx))
+        .unwrap();
+    rig.draw();
+    assert_eq!(rig.open_screens(), ["launcher"]);
+    rig.press("escape");
+    assert!(rig.open_screens().is_empty());
+
+    // Back to the session the later steps use.
+    rig.ws(|ws, _, cx| {
+        ws.sidebar().update(cx, |s, cx| {
+            s.open("local".into(), "alpha".into(), Some("claude".into()), cx)
+        })
+    });
+    rig.draw();
     println!("new-session: ok");
 }
 
