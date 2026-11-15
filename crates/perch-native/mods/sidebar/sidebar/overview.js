@@ -197,7 +197,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }) {
         const hidden = folded ? Object.keys(SECTION_WORDS).filter((key) => key !== "idle").map((key) => ({ key, count: kids.filter((kid) => kid.section === key).length })).find((one) => one.count > 0) : undefined;
         const button = (_jsx("button", {
             type: "button",
-            className: cn(SESSION, lead && "w-auto min-w-0 flex-initial pr-1", variant === "status" && "min-h-9 py-0 pl-[1.875rem] min-[701px]:min-h-6", variant === "tree" && group !== "chats" && !nested && "pl-[1.9rem]", nested && "pl-2", active ? "workspace-entry__session--active text-fg" : "text-subtext-0"),
+            className: cn(SESSION, lead && "w-auto min-w-0 flex-initial pr-1", variant === "status" && "min-h-9 py-0 min-[701px]:min-h-6", variant === "status" && !nested && "pl-[1.875rem]", variant === "tree" && group !== "chats" && !nested && "pl-[1.525rem]", nested && "pl-1", active ? "workspace-entry__session--active text-fg" : "text-subtext-0"),
             "aria-current": active ? "page" : undefined,
             title: variant === "tree" ? title : session.cwd,
             "data-testid": `workspace-session-${session.id}`,
@@ -233,11 +233,20 @@ export function WorkspaceOverview({ compact = false, onNavigate }) {
                         children: session.projectName
                     }), !lead && badge] })
         }));
-        const card = (_jsxs("div", {
-            className: cn("group/row flex min-w-0 items-stretch rounded-ui", nested && "flex-1", lit ? "bg-surface-1" : cn((lead || nested) && "bg-surface-0", "hover:bg-surface-1 focus-within:bg-surface-1")),
+        return (_jsxs("div", {
+            className: cn("group/row flex min-w-0 items-stretch rounded-ui", lit ? "bg-surface-1" : cn((lead || nested) && "bg-surface-0", "hover:bg-surface-1 focus-within:bg-surface-1")),
             "data-sub-session": nested || undefined,
-            ...(nested ? {} : sessionRowProps(session, siblings, group)),
+            ...sessionRowProps(session, siblings, group),
             children: [
+                nested && (_jsxs("span", {
+                    className: cn("-mt-[2px] flex w-2.5 shrink-0 flex-col", variant === "status" ? "ml-[2.375rem]" : group === "chats" ? "ml-[1.15rem]" : "ml-[2.025rem]"),
+                    "aria-hidden": "true",
+                    "data-testid": `session-elbow-${session.id}`,
+                    children: [
+                        _jsx("span", { className: "flex-1 rounded-bl-[6px] border-b border-l border-overlay-0" }),
+                        _jsx("span", { className: cn("flex-1", !last && "border-l border-overlay-0") })
+                    ]
+                })),
                 button,
                 lead && _jsxs(_Fragment, { children: [_jsx("button", {
                             type: "button",
@@ -275,20 +284,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }) {
                     children: _jsx(EllipsisIcon, {})
                 })
             ]
-        }, nested ? undefined : session.id));
-        if (!nested)
-            return card;
-        return (_createElement("div", { ...sessionRowProps(session, siblings, group), className: cn("flex min-w-0 items-stretch gap-1", variant === "status" ? "pl-[2.35rem]" : group === "chats" ? "pl-[1.2rem]" : "pl-[2.45rem]"), key: session.id },
-            _jsxs("span", {
-                className: "-mt-[2px] flex w-3 shrink-0 flex-col",
-                "aria-hidden": "true",
-                "data-testid": `session-elbow-${session.id}`,
-                children: [
-                    _jsx("span", { className: "flex-1 rounded-bl-[6px] border-b border-l border-overlay-0" }),
-                    _jsx("span", { className: cn("flex-1", !last && "border-l border-overlay-0") })
-                ]
-            }),
-            card));
+        }, session.id));
     }
     /** The rows of a list of chats, each lead followed by its sub-sessions unless it is folded. */
     function sessionList(list, group, variant, detailOf) {
@@ -718,7 +714,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }) {
                         onBlur: () => setRenamingProjectId(null)
                     })) : (_jsxs("button", {
                         type: "button",
-                        className: cn(ROW_BTN, "min-h-8 flex-1 cursor-pointer gap-[0.45rem] rounded-ui bg-transparent py-[3px] pr-3 pl-3 text-fg", single && "workspace-entry__button", single && single.id === activeWorkspaceId && "workspace-entry__button--active", FOCUS),
+                        className: cn(ROW_BTN, "min-h-8 flex-1 cursor-pointer gap-[0.45rem] rounded-ui bg-transparent py-[3px] pr-3 pl-1.5 text-fg", single && "workspace-entry__button", single && single.id === activeWorkspaceId && "workspace-entry__button--active", FOCUS),
                         "data-testid": `project-toggle-${project.id}`,
                         "aria-expanded": collapsible ? !projectCollapsed : undefined,
                         onClick: onHeaderClick,
