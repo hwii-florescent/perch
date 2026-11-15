@@ -559,6 +559,12 @@ impl Workspace {
         answer
     }
 
+    /// Sends the core a change a screen made (`client::send_frame`'s kinds): a setting or a
+    /// computer. The sidebar follows the core's broadcast, not this request.
+    pub fn send_to_core(&self, frame: Value, cx: &App) {
+        self.sidebar.read(cx).send(Command::Send(frame));
+    }
+
     /// Registers `path` on `host_id` as a project, as the sidebar's Add project form does
     /// (`useAddProject().add`): pending until the core answers, then success or its error. Ignored
     /// while one is pending.

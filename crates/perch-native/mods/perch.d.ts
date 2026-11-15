@@ -468,7 +468,11 @@ declare module "perch" {
    * path?}`: `{path, parent?, entries}`, a remote host's listing routed by the core), `instructions.get` and
    * `instructions.set` (`{scope, id, text?, folders?}`: the Instructions state), `memory.list`, `memory.get`,
    * `memory.set`, `memory.delete` and `memory.enable` (`{projectId, name?, text?, baseRevision?, enabled?}`: the
-   * memory state, or `{file?, error?}` for `memory.get`). The fields are the core's messages' own.
+   * memory state, or `{file?, error?}` for `memory.get`), and for Settings' pages `device.list`, `device.pair.start`,
+   * `device.pair.cancel` (the paired devices, or the pairing code), `device.revoke` (`{deviceId}`), `phone.access.get`,
+   * `machine.hosts`, `machine.probe` and `machine.install` (`{sshHost}`), `agent.models.list`, `agent.manifest.list`
+   * and `agent.provider.configure` (`{hostId?, providerId, enabled?, isDefault?}`). The fields are the core's
+   * messages' own.
    */
   export function ask(kind: string, args: Record<string, unknown>): Promise<unknown>;
   /** Whether computer `hostId`'s core (default this one) has `capability` (its `server.info`), e.g.
@@ -512,6 +516,27 @@ declare module "perch" {
   export function pointerFollow(): { token: string; seq: number; phase: "move" | "up" | "cancel"; x: number; y: number } | null;
   /** `usePaneLook`. */
   export function paneLook(): PaneLook;
+  /** The core's settings as it last sent them (`PerchSettings` in `@perch/sdk`), null until it has. */
+  export function settings(): Record<string, unknown> | null;
+  /** A change to the core: `settings.update` with its `patch` (only the fields that change), `hosts.upsert` with a
+   * `host`, `hosts.delete` with an `id`. Throws when the arguments are not what the core takes. The core answers
+   * with its broadcast, which `settings()` and `hostEntries()` then show. */
+  export function send(kind: string, args: Record<string, unknown>): void;
+  /** Settings > SSH hosts: the configured computers and each one's connection by id. */
+  export function hostEntries(): { hosts: Record<string, unknown>[]; hostStates: Record<string, { state: string; error?: string }> };
+  /** Settings > Keyboard: every command with its key, grouped as the web groups them, and whether any key is changed
+   * from its default. */
+  export function keyboard(): {
+    groups: { id: string; title: string; rows: { id: string; description: string; keys: string; edited: boolean }[] }[];
+    hasOverrides: boolean;
+  };
+  /** What recording `event` (the DOM keydown's `key`, `metaKey`, `ctrlKey`, `altKey`, `shiftKey`) gives command `id`:
+   * null for a modifier alone; `{kind: "error", text}`; or `{kind: "saved", note?, keybindings}`, the choices to save
+   * with `send("settings.update", {patch: {keybindings}})`. */
+  export function recordKey(
+    id: string,
+    event: { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean },
+  ): { kind: "error"; text: string } | { kind: "saved"; note?: string; keybindings: Record<string, string> } | null;
   /** `usePlanUsage`: plan usage as the core last answered `usage.get` (`run("usage.get")` asks), with the last
    * `usage.redeemResult`; `{ usage: [], updatedAt: 0, spend: null, redeemResult: null }` until it answers. */
   export function planUsage(): {

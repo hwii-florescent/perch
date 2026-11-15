@@ -771,6 +771,47 @@ pub fn effective_spec(
     }
 }
 
+/// `chord` in the settings' notation (`cmd+shift+]`), as the web's recorder writes it.
+fn chord_spec(chord: &Chord) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if chord.cmd {
+        parts.push("cmd");
+    }
+    if chord.ctrl {
+        parts.push("ctrl");
+    }
+    if chord.alt {
+        parts.push("alt");
+    }
+    if chord.shift {
+        parts.push("shift");
+    }
+    parts.push(&chord.key);
+    parts.join("+")
+}
+
+/// Whether `shortcut` applies where the keyboard is `context` (`shortcutAppliesTo`).
+fn applies_to(shortcut: &Shortcut, context: &str) -> bool {
+    match shortcut.scope {
+        Scope::Leader => context == "leader",
+        Scope::Resize => context == "resize",
+        _ if matches!(context, "leader" | "resize") => false,
+        Scope::Any => true,
+        Scope::OutsideTerminal => !matches!(context, "terminal" | "navigator"),
+        Scope::OutsideEditable => context == "global",
+        Scope::Terminal => context == "terminal",
+        Scope::Directory => context == "directory",
+        Scope::Navigator => context == "navigator",
+    }
+}
+
+/// Whether two commands can fire on one key press (`overlaps`): some context has both.
+fn overlaps(a: &Shortcut, b: &Shortcut) -> bool {
+    ["global", "terminal", "editor", "navigator", "directory", "leader", "resize"]
+        .iter()
+        .any(|ctx| applies_to(a, ctx) && applies_to(b, ctx))
+}
+
 /// The editing keys a terminal gets by default on macOS, in `keys.json`'s notation, and what each
 /// types: readline's line start, line end and delete to line start (herdr's `cmd-left`,
 /// `cmd-right` and `cmd-backspace`). The Option chords are not here: the web sends the program
@@ -924,6 +965,116 @@ impl Keymap {
             }
         }
         rows
+    }
+
+    /// Settings > Keyboard's groups (`KeybindingsSection`): every command of the table with its
+    /// key as the person has it (`""` for none) and whether they changed it from the default.
+    /// The jump ranges are rows of their own here, one per key, as in the web's table.
+    pub fn settings_groups(&self) -> Value {
+        const GROUPS: [(&str, &str); 9] = [
+            ("global", "Global"),
+            ("tabs", "Tabs"),
+            ("nests", "Workspaces and projects"),
+            ("panes", "Splits and panes"),
+            ("terminal", "Terminal"),
+            ("navigator", "Navigator"),
+            ("directory", "Folder picker"),
+            ("leader", "Leader and follow-up keys"),
+            ("resize", "Resize mode"),
+        ];
+        let groups: Vec<Value> = GROUPS
+            .iter()
+            .map(|(id, title)| {
+                let rows: Vec<Value> = all_shortcuts()
+                    .filter(|s| help_group(s.id) == *id)
+                    .map(|s| {
+                        let keys = effective_spec(&s, &self.chosen, self.mac)
+                            .map(|c| self.format(&c))
+                            .unwrap_or_default();
+                        serde_json::json!({
+                            "id": s.id, "description": s.title, "keys": keys,
+                            "edited": self.chosen.contains_key(s.id),
+                        })
+                    })
+                    .collect();
+                serde_json::json!({ "id": id, "title": title, "rows": rows })
+            })
+            .collect();
+        Value::Array(groups)
+    }
+
+    /// What recording gives command `id` when the person pressed `key` (`recordCombo`, then
+    /// `commit` in the web's `KeybindingsSection`): `None` for a modifier alone (keep waiting);
+    /// `{kind: "error", text}` for a key that cannot be bound; else `{kind: "saved", note?,
+    /// keybindings}`, the choices to save, with the key taken off the commands that had it.
+    pub fn record(&self, id: &str, event: &Value) -> Option<Value> {
+        let error = |text: &str| Some(serde_json::json!({ "kind": "error", "text": text }));
+        let target = all_shortcuts().find(|s| s.id == id)?;
+        // The DOM event the page was given: its `key` and four modifier flags.
+        let name = event["key"].as_str()?;
+        let flag = |field: &str| event[field].as_bool().unwrap_or(false);
+        if matches!(name, "Meta" | "Control" | "Shift" | "Alt") {
+            return None;
+        }
+        let named = match name {
+            " " => "space",
+            "ArrowUp" => "up",
+            "ArrowDown" => "down",
+            "ArrowLeft" => "left",
+            "ArrowRight" => "right",
+            "PageUp" => "pageup",
+            "PageDown" => "pagedown",
+            other => other,
+        };
+        let (base, shift) = base_key(named, flag("shiftKey"));
+        let m = (flag("metaKey"), flag("ctrlKey"), flag("altKey"));
+        if !valid_key(&base) || base == "escape" {
+            return error("That key can't be used.");
+        }
+        let chord = Chord {
+            cmd: m.0,
+            ctrl: m.1,
+            alt: m.2,
+            shift,
+            key: base,
+        };
+        let plain_ok = matches!(target.scope, Scope::Leader | Scope::Resize | Scope::OutsideEditable);
+        if !plain_ok && !chord.cmd && !chord.ctrl && !chord.alt && !function_key(&chord) {
+            return error(if self.mac { "Include ⌘, ⌃ or ⌥." } else { "Include Ctrl or Alt." });
+        }
+        if reserved(&chord, self.mac) {
+            return error("macOS reserves that key for its menu.");
+        }
+        let spec = chord_spec(&chord);
+        let mut next = self.chosen.clone();
+        // The commands that fire with it on the same key lose it (`shortcutsBoundTo`).
+        let taken: Vec<Shortcut> = all_shortcuts()
+            .filter(|other| other.id != id && overlaps(&target, other))
+            .filter(|other| effective_spec(other, &self.chosen, self.mac).as_ref() == Some(&chord))
+            .collect();
+        for other in &taken {
+            next.insert(other.id.to_string(), String::new());
+        }
+        let builtin = match target.keys {
+            [both] => Some(*both),
+            [for_mac, other] => Some(if self.mac { *for_mac } else { *other }),
+            _ => None,
+        };
+        let is_builtin = builtin
+            .filter(|b| !b.is_empty())
+            .and_then(|b| parse_combo(b, self.mac))
+            .as_ref()
+            == Some(&chord);
+        if is_builtin {
+            next.remove(id);
+        } else {
+            next.insert(id.to_string(), spec);
+        }
+        let note = (!taken.is_empty()).then(|| {
+            let names: Vec<&str> = taken.iter().map(|t| t.title).collect();
+            format!("Moved from \"{}\".", names.join("\", \""))
+        });
+        Some(serde_json::json!({ "kind": "saved", "note": note, "keybindings": next }))
     }
 
     /// What the help writes before a mode's key: the leader chord's (`⌃Space, `), and for resize
@@ -1436,6 +1587,66 @@ mod tests {
             run(m.resolve(&press("cmd-left"), IN_TERMINAL)),
             "terminal.scrollTop"
         );
+    }
+
+    fn pressed(key: &str, flags: &[&str]) -> Value {
+        let mut event = json!({ "key": key });
+        for flag in flags {
+            event[*flag] = json!(true);
+        }
+        event
+    }
+
+    #[test]
+    fn recording_a_key_moves_it_off_the_commands_that_had_it_and_saves_the_choices() {
+        let m = keymap(&[], None);
+        // Command+T is New tab's: giving it to Open Settings takes it from New tab.
+        let saved = m.record("global.settings", &pressed("t", &["metaKey"])).unwrap();
+        assert_eq!(saved["kind"], "saved");
+        assert_eq!(saved["keybindings"]["global.settings"], "cmd+t");
+        assert_eq!(saved["keybindings"]["tabs.new"], "");
+        assert!(saved["note"].as_str().unwrap().starts_with("Moved from \""));
+        // What the person saved is what the window then does for that key.
+        let chosen: BTreeMap<String, String> =
+            serde_json::from_value(saved["keybindings"].clone()).unwrap();
+        let after = Keymap::new(chosen, None).with_platform(true);
+        assert_eq!(run(after.resolve(&press("cmd-t"), Context::default())), "global.settings");
+        // The built-in key is not kept as a choice.
+        let back = after.record("global.settings", &pressed(",", &["metaKey"])).unwrap();
+        assert!(back["keybindings"].get("global.settings").is_none());
+        // A modifier alone waits; a plain key and a reserved key are refused with the web's words.
+        assert_eq!(m.record("global.settings", &pressed("Meta", &["metaKey"])), None);
+        assert_eq!(
+            m.record("global.settings", &pressed("j", &[]))
+                .unwrap()["text"],
+            "Include ⌘, ⌃ or ⌥."
+        );
+        assert_eq!(
+            m.record("global.settings", &pressed("q", &["metaKey"]))
+                .unwrap()["text"],
+            "macOS reserves that key for its menu."
+        );
+        // A leader follow-up may be a plain key.
+        assert_eq!(
+            m.record("leader.splitRight", &pressed("v", &[])).unwrap()["kind"],
+            "saved"
+        );
+        // A key is the one it comes from with Shift: Command+Shift+] arrives as `}`.
+        let shifted = m.record("global.settings", &pressed("}", &["metaKey", "shiftKey"])).unwrap();
+        assert_eq!(shifted["keybindings"]["global.settings"], "cmd+shift+]");
+    }
+
+    #[test]
+    fn settings_rows_show_the_key_each_command_has_and_which_the_person_changed() {
+        let m = keymap(&[("global.settings", "cmd+j"), ("tabs.new", "")], None);
+        let rows: Vec<Value> = m.settings_groups().as_array().unwrap().iter()
+            .flat_map(|g| g["rows"].as_array().unwrap().clone()).collect();
+        let row = |id: &str| rows.iter().find(|r| r["id"] == id).unwrap().clone();
+        assert_eq!(row("global.settings")["keys"], "⌘J");
+        assert_eq!(row("global.settings")["edited"], true);
+        assert_eq!(row("tabs.new")["keys"], "");
+        assert_eq!(row("global.navigator")["keys"], "⌘P");
+        assert_eq!(row("global.navigator")["edited"], false);
     }
 
     #[test]

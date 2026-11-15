@@ -354,6 +354,8 @@ pub struct State {
     /// What each remote computer's `host.info` said it can do.
     host_capabilities: HashMap<String, Vec<String>>,
     snapshots: HashMap<String, SnapshotState>,
+    /// The core's settings as it sent them (`settings.current`), once it has.
+    settings: Option<Value>,
     /// `settings.theme`, once the core has sent it.
     theme: Option<String>,
     /// `settings.emptyWorkspaceAgent`: the pane a new workspace starts with ("" for none).
@@ -698,6 +700,7 @@ impl State {
                 }
             }
             ServerMessage::SettingsCurrent { settings } => {
+                self.settings = serde_json::to_value(settings).ok();
                 self.sound_enabled = settings.sound_enabled;
                 self.theme = Some(settings.theme.clone());
                 self.empty_agent = Some(settings.empty_workspace_agent.clone());
@@ -920,6 +923,7 @@ impl State {
             needs_events: self.needs_events.clone(),
             viewing: self.viewing.clone(),
             held: self.held.clone(),
+            settings: self.settings.clone(),
             theme: self.theme.clone(),
             empty_agent: self.empty_agent.clone(),
             worktree_jobs: self.worktree_jobs.clone(),
