@@ -384,7 +384,7 @@
         {
           "name": "session-row",
           "selector": "div[class~=\"group/row\"]",
-          "description": "One session row: button plus its close button.",
+          "description": "One session row: its button, a lead's chevron, and its \"...\" button.",
           "key": {
             "find": "button[data-testid^=\"workspace-session-\"]:not([data-testid^=\"workspace-session-close-\"])",
             "attr": "data-testid",
@@ -468,14 +468,44 @@
           }
         },
         {
-          "name": "session-close-button",
-          "selector": "[data-testid^=\"workspace-session-close-\"]",
-          "description": "The row's close button, shown on hover.",
+          "name": "session-menu-button",
+          "selector": "[data-testid^=\"session-menu-button-\"]",
+          "description": "The row's \"...\" button, shown on hover, focus or when the row is the open one.",
           "hoverOnly": true,
           "key": {
             "self": true,
             "attr": "data-testid",
-            "strip": "workspace-session-close-"
+            "strip": "session-menu-button-"
+          }
+        },
+        {
+          "name": "session-fold-button",
+          "selector": "[data-testid^=\"session-fold-\"]",
+          "description": "The chevron after a lead's title that folds its sub-sessions.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "session-fold-"
+          }
+        },
+        {
+          "name": "session-elbow",
+          "selector": "[data-testid^=\"session-elbow-\"]",
+          "description": "The connector that takes a sub-session's row off its lead's icon column.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "session-elbow-"
+          }
+        },
+        {
+          "name": "session-rollup",
+          "selector": "[data-testid^=\"session-rollup-\"]",
+          "description": "A folded lead's most urgent state among its hidden sub-sessions.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "session-rollup-"
           }
         },
         {

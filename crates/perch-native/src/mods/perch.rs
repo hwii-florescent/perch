@@ -51,6 +51,8 @@ pub struct SidebarSettings {
     pub sort_by_attention: bool,
     pub show_terminals: bool,
     pub collapsed_projects: Vec<String>,
+    /// Sessions folded over their sub-sessions.
+    pub folded_sessions: Vec<String>,
 }
 
 impl Default for SidebarSettings {
@@ -61,6 +63,7 @@ impl Default for SidebarSettings {
             sort_by_attention: true,
             show_terminals: false,
             collapsed_projects: Vec::new(),
+            folded_sessions: Vec::new(),
         }
     }
 }
@@ -72,6 +75,7 @@ impl SidebarSettings {
             "sortByAttention": self.sort_by_attention,
             "showTerminals": self.show_terminals,
             "collapsedProjects": self.collapsed_projects,
+            "foldedSessions": self.folded_sessions,
         })
     }
 
@@ -103,6 +107,16 @@ impl SidebarSettings {
                                 .collect::<Option<Vec<_>>>()
                         })
                         .ok_or("collapsedProjects is a list of project ids")?
+                }
+                "foldedSessions" => {
+                    next.folded_sessions = value
+                        .as_array()
+                        .and_then(|list| {
+                            list.iter()
+                                .map(|v| v.as_str().map(str::to_string))
+                                .collect::<Option<Vec<_>>>()
+                        })
+                        .ok_or("foldedSessions is a list of session ids")?
                 }
                 other => return Err(format!("no sidebar setting {other}")),
             }
@@ -2189,10 +2203,12 @@ mod tests {
     fn sidebar_settings_take_the_web_names_and_refuse_a_wrong_value_whole() {
         let mut settings = SidebarSettings::default();
         settings
-            .patch(&json!({"organize": "status", "collapsedProjects": ["p-1"]}))
+            .patch(&json!({"organize": "status", "collapsedProjects": ["p-1"], "foldedSessions": ["s-1"]}))
             .unwrap();
         assert_eq!(settings.organize, "status");
         assert_eq!(settings.collapsed_projects, ["p-1"]);
+        assert_eq!(settings.folded_sessions, ["s-1"]);
+        assert!(settings.patch(&json!({"foldedSessions": [1]})).is_err());
         let before = settings.clone();
         assert!(settings
             .patch(&json!({"showTerminals": true, "organize": "tree"}))

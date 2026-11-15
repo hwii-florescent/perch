@@ -90,6 +90,44 @@
         "activeWorkspaceId": null,
         "hostStates": { "buildbox": { "type": "host.info", "hostId": "buildbox", "name": "buildbox", "state": "error", "error": "ssh: connect to host buildbox.lan port 22: Operation timed out" } }
       }
+    },
+    {
+      "id": "family-unfolded",
+      "title": "A session with two sub-sessions: the lead is a filled row with its chevron, each sub-session hangs off an elbow",
+      "view": { "organize": "project", "sortByAttention": true, "showTerminals": false, "collapsedProjects": ["p-perch", "p-api", "p-site", "p-chats"], "foldedSessions": [] },
+      "patch": {
+        "addSessions": [
+          { "id": "s-fam-lead", "title": "Plan the trip", "cwd": "/Users/dev/notes", "createdAt": 1767247260000, "status": "idle", "hostId": "local", "cliProviderId": "claude", "projectId": "p-notes", "workspaceId": "w-notes" },
+          { "id": "s-fam-kid-1", "title": "Book flights", "cwd": "/Users/dev/notes", "createdAt": 1767247260000, "status": "idle", "hostId": "local", "cliProviderId": "claude", "projectId": "p-notes", "workspaceId": "w-notes", "parentSessionId": "s-fam-lead" },
+          { "id": "s-fam-kid-2", "title": "Find hotels", "cwd": "/Users/dev/notes", "createdAt": 1767247320000, "status": "idle", "hostId": "local", "cliProviderId": "claude", "projectId": "p-notes", "workspaceId": "w-notes", "parentSessionId": "s-fam-lead" }
+        ]
+      }
+    },
+    {
+      "id": "family-folded",
+      "title": "The same lead folded: its sub-sessions are hidden and the one that needs the person shows as a rollup on the lead",
+      "view": { "organize": "project", "sortByAttention": true, "showTerminals": false, "collapsedProjects": ["p-perch", "p-api", "p-site", "p-chats"], "foldedSessions": ["s-fam-lead"] },
+      "patch": {
+        "addSessions": [
+          { "id": "s-fam-lead", "title": "Plan the trip", "cwd": "/Users/dev/notes", "createdAt": 1767247260000, "status": "idle", "hostId": "local", "cliProviderId": "claude", "projectId": "p-notes", "workspaceId": "w-notes" },
+          { "id": "s-fam-kid-1", "title": "Book flights", "cwd": "/Users/dev/notes", "createdAt": 1767247260000, "status": "idle", "hostId": "local", "cliProviderId": "claude", "projectId": "p-notes", "workspaceId": "w-notes", "parentSessionId": "s-fam-lead" },
+          { "id": "s-fam-kid-2", "title": "Find hotels", "cwd": "/Users/dev/notes", "createdAt": 1767247320000, "status": "idle", "hostId": "local", "cliProviderId": "claude", "projectId": "p-notes", "workspaceId": "w-notes", "parentSessionId": "s-fam-lead", "blocked": true }
+        ]
+      }
+    },
+    {
+      "id": "family-open-child",
+      "title": "A sub-session is the open one: its \"...\" button shows without the pointer",
+      "view": { "organize": "project", "sortByAttention": true, "showTerminals": false, "collapsedProjects": ["p-perch", "p-api", "p-site", "p-chats"], "foldedSessions": [] },
+      "patch": {
+        "sessionId": "s-fam-kid-1",
+        "activeWorkspaceId": "w-notes",
+        "addSessions": [
+          { "id": "s-fam-lead", "title": "Plan the trip", "cwd": "/Users/dev/notes", "createdAt": 1767247260000, "status": "idle", "hostId": "local", "cliProviderId": "claude", "projectId": "p-notes", "workspaceId": "w-notes" },
+          { "id": "s-fam-kid-1", "title": "Book flights", "cwd": "/Users/dev/notes", "createdAt": 1767247260000, "status": "idle", "hostId": "local", "cliProviderId": "claude", "projectId": "p-notes", "workspaceId": "w-notes", "parentSessionId": "s-fam-lead" },
+          { "id": "s-fam-kid-2", "title": "Find hotels", "cwd": "/Users/dev/notes", "createdAt": 1767247320000, "status": "idle", "hostId": "local", "cliProviderId": "claude", "projectId": "p-notes", "workspaceId": "w-notes", "parentSessionId": "s-fam-lead" }
+        ]
+      }
     }
   ]
 }

@@ -111,7 +111,7 @@ impl Fixture {
     }
 
     /// The store's data for state `id`: the base data with the state's patch over it (sessions
-    /// and host states merged by id, every other key replaced).
+    /// and host states merged by id, `addSessions` appended, every other key replaced).
     pub fn data(&self, id: &str) -> Value {
         let mut data = self.0["data"].clone();
         let patch = self.state(id)["patch"]
@@ -130,6 +130,13 @@ impl Fixture {
                         for (field, v) in change.as_object().into_iter().flatten() {
                             session[field] = v.clone();
                         }
+                    }
+                }
+                "addSessions" => {
+                    if let (Some(list), Some(more)) =
+                        (data["sessions"].as_array_mut(), value.as_array())
+                    {
+                        list.extend(more.iter().cloned());
                     }
                 }
                 "hostStates" => {
@@ -153,6 +160,12 @@ impl Fixture {
         settings.sort_by_attention = view["sortByAttention"].as_bool().unwrap_or(true);
         settings.show_terminals = view["showTerminals"].as_bool().unwrap_or(false);
         settings.collapsed_projects = view["collapsedProjects"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect();
+        settings.folded_sessions = view["foldedSessions"]
             .as_array()
             .into_iter()
             .flatten()

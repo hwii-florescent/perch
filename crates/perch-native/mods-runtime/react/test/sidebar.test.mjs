@@ -79,6 +79,51 @@ test("a project header click folds the project, and again unfolds it", async () 
   }
 });
 
+test("a lead's chevron folds its sub-sessions, keeps the fold per viewer and unfolds them again", async () => {
+  const { handle, perch } = await mountSidebar("family-unfolded", "dark");
+  try {
+    const rows = () => namedInstances(tree(handle.description)).instances.filter((i) => i.def.name === "session-row").map((i) => i.key);
+    assert.deepEqual(rows().filter((key) => key.startsWith("s-fam-")).sort(), ["s-fam-kid-1", "s-fam-kid-2", "s-fam-lead"]);
+    assert.equal(namedInstances(tree(handle.description)).instances.filter((i) => i.def.name === "session-elbow").length, 2, "an elbow for each sub-session");
+    handle.click(find(handle, "session-fold-button", "s-fam-lead").node.id);
+    assert.deepEqual(rows().filter((key) => key.startsWith("s-fam-")), ["s-fam-lead"], "folded: only the lead stays");
+    assert.equal(find(handle, "session-fold-button", "s-fam-lead").getAttribute("aria-expanded"), "false");
+    assert.deepEqual(JSON.parse(perch.storage.getItem("perch.sidebar.foldedSessions")), ["s-fam-lead"], "kept per viewer");
+    handle.click(find(handle, "session-fold-button", "s-fam-lead").node.id);
+    assert.equal(rows().filter((key) => key.startsWith("s-fam-")).length, 3, "unfolded again");
+    assert.deepEqual(JSON.parse(perch.storage.getItem("perch.sidebar.foldedSessions")), []);
+    assert.deepEqual(perch.commands, [], "folding is arrangement, not a command");
+  } finally {
+    handle.unmount();
+  }
+});
+
+test("a folded lead shows the state of the sub-sessions it hides", async () => {
+  const { handle } = await mountSidebar("family-folded", "dark");
+  try {
+    const rollup = find(handle, "session-rollup", "s-fam-lead");
+    assert.equal(rollup.text(), "Needs you");
+  } finally {
+    handle.unmount();
+  }
+});
+
+test("a session row's menu button opens the host's session menu for that row, below the button", async () => {
+  const { handle, perch } = await mountSidebar("family-open-child", "dark");
+  try {
+    const button = find(handle, "session-menu-button", "s-fam-kid-1");
+    handle.setBounds(button.node.id, { x: 200, y: 100, width: 24, height: 24 });
+    handle.click(button.node.id);
+    const [open] = perch.overlays;
+    assert.equal(open?.kind, "session-menu");
+    assert.equal(open.props.id, "s-fam-kid-1");
+    assert.deepEqual([open.props.x, open.props.y], [200, 128], "anchored at the button");
+    assert.equal(perch.commands.length, 0, "opening the menu closes nothing");
+  } finally {
+    handle.unmount();
+  }
+});
+
 test("a session row click opens the session through the host", async () => {
   const { handle, perch } = await mountSidebar("by-project", "dark");
   try {

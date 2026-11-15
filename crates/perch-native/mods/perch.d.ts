@@ -157,6 +157,7 @@ declare module "perch" {
     sortByAttention: boolean;
     showTerminals: boolean;
     collapsedProjects: string[];
+    foldedSessions: string[];
   }
 
   export interface StatusLine {

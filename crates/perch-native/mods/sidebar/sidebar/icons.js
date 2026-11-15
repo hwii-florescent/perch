@@ -85,18 +85,6 @@ export const FolderMark = ({ className = "mr-1.5 h-3 w-3 shrink-0 text-subtext-0
     focusable: "false",
     children: _jsx("path", { d: "M2 5V4a1 1 0 0 1 1-1h3l2 2h5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5Z" })
 }));
-/** A session row's ×. */
-export const RowCloseIcon = () => (_jsx("svg", {
-    width: "12",
-    height: "12",
-    viewBox: "0 0 12 12",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: "1.3",
-    strokeLinecap: "round",
-    "aria-hidden": "true",
-    children: _jsx("path", { d: "m3 3 6 6m0-6-6 6" })
-}));
 /** New chat: a pencil over a page. */
 export const NewChatIcon = () => (_jsx("svg", {
     className: "mx-auto",

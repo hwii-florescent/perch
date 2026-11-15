@@ -55,7 +55,7 @@ fn diff(path: &str, web: &Value, native: &Value, out: &mut Vec<String>) {
 fn navigation_and_hosts_match_the_web_for_every_fixture_state() {
     let fixture = parity::Fixture::load(&parity::fixture_path("sidebar"));
     let states = fixture.states();
-    assert_eq!(states.len(), 5, "the sidebar fixture's five states");
+    assert_eq!(states.len(), 8, "the sidebar fixture's eight states");
     let mut failures = Vec::new();
     for state in &states {
         let expected_path = parity::parity_dir()

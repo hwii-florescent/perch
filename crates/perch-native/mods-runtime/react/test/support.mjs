@@ -47,6 +47,7 @@ export function perchDouble(ref, view) {
     "perch.sidebar.sort": view.sortByAttention ? "attention" : "manual",
     "perch.sidebar.showTerminals": view.showTerminals ? "1" : "0",
     "perch.sidebar.collapsedProjects": JSON.stringify(view.collapsedProjects ?? []),
+    "perch.sidebar.foldedSessions": JSON.stringify(view.foldedSessions ?? []),
   });
   const { navigation, hosts } = ref.sdk;
   const sessions = new Map();

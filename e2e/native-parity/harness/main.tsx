@@ -220,6 +220,7 @@ const SCREENS: Record<string, Screen> = {
       "perch.sidebar.sort": view.sortByAttention ? "attention" : "manual",
       "perch.sidebar.showTerminals": view.showTerminals ? "1" : "0",
       "perch.sidebar.collapsedProjects": JSON.stringify(view.collapsedProjects ?? []),
+      "perch.sidebar.foldedSessions": JSON.stringify(view.foldedSessions ?? []),
     }),
     Probe: SidebarProbe,
   },

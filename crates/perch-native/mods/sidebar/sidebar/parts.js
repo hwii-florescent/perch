@@ -44,8 +44,6 @@ export const SPAN = "overflow-hidden text-[12px] text-ellipsis whitespace-nowrap
 export const BODY = "grid min-w-0 flex-1 gap-[0.1rem]";
 export const JOB_ACTION = buttonClass({ size: "xs" });
 export const RESTORE = buttonClass({ size: "xs", tone: "warn", className: "mt-0 mr-[0.3rem] mb-[0.3rem] ml-[0.5rem]" });
-/** A sub-session's row sits under its lead's, set in with a rule: the family reads as one group. */
-export const NESTED_ROW = "ml-4 border-l border-surface-1";
 /** Stops iOS from selecting text / showing its callout while a row is held. */
 export const HOLDABLE = "select-none [-webkit-touch-callout:none]";
 /** Right-click / ⋯ menu for a project or workspace row (Orca's sidebar context menu, trimmed to what perch does). */

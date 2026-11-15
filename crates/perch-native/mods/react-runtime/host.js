@@ -157,6 +157,7 @@ const SETTINGS = {
   "perch.sidebar.sort": [(s) => (s.sortByAttention ? "attention" : "manual"), (v) => ({ sortByAttention: v === "attention" })],
   "perch.sidebar.showTerminals": [(s) => (s.showTerminals ? "1" : "0"), (v) => ({ showTerminals: v === "1" })],
   "perch.sidebar.collapsedProjects": [(s) => JSON.stringify(s.collapsedProjects), (v) => ({ collapsedProjects: parseList(v) })],
+  "perch.sidebar.foldedSessions": [(s) => JSON.stringify(s.foldedSessions), (v) => ({ foldedSessions: parseList(v) })],
 };
 function parseList(text) {
   try {
