@@ -1021,7 +1021,10 @@ fn new_session(rig: &mut Rig) {
         .unwrap();
     assert_eq!(props["fixedCwd"], "/home/dev/.perch/scratch");
     assert_eq!(
-        (props["anchorRect"]["x"].as_f64(), props["anchorRect"]["y"].as_f64()),
+        (
+            props["anchorRect"]["x"].as_f64(),
+            props["anchorRect"]["y"].as_f64()
+        ),
         (
             Some(f32::from(plus.origin.x).into()),
             Some(f32::from(plus.origin.y).into())
