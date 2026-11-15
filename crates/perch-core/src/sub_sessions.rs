@@ -262,6 +262,46 @@ pub fn check_model(model: &str) -> Result<&str, String> {
     }
 }
 
+/// The longest name a sub-session is given: the width of the sidebar's own auto-title.
+const NAME_MAX_CHARS: usize = 40;
+
+/// The name a spawned sub-session shows in the sidebar, its tab, `perch list` and its lead's notes:
+/// the `--name` it was given, else the first sentence of its task. One line, at most about
+/// [`NAME_MAX_CHARS`] characters, cut at a word where that keeps half of it.
+pub fn session_name(name: Option<&str>, task: &str) -> String {
+    let source = match name.map(str::trim).filter(|name| !name.is_empty()) {
+        Some(name) => name,
+        None => first_sentence(task),
+    };
+    let text = source
+        .split_whitespace()
+        .filter(|word| !word.chars().any(char::is_control))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if text.chars().count() <= NAME_MAX_CHARS {
+        return text;
+    }
+    let head: String = text.chars().take(NAME_MAX_CHARS - 1).collect();
+    let cut = match head.rfind(' ') {
+        Some(at) if head[..at].chars().count() >= NAME_MAX_CHARS / 2 => &head[..at],
+        _ => head.as_str(),
+    };
+    format!("{}…", cut.trim_end_matches([' ', ',', ';', ':']))
+}
+
+/// A task's first sentence: up to the first line break or the first `.`, `?` or `!` that a space
+/// follows (a path's dots do not end it), without that full stop.
+fn first_sentence(task: &str) -> &str {
+    let task = task.trim();
+    let mut end = task.find('\n').unwrap_or(task.len());
+    for mark in [". ", "? ", "! "] {
+        if let Some(at) = task[..end].find(mark) {
+            end = end.min(at + usize::from(mark != ". "));
+        }
+    }
+    task[..end].trim().trim_end_matches('.')
+}
+
 /// An idempotency key names one spawn request so a retry cannot start a second child.
 pub fn check_key(key: &str) -> Result<&str, String> {
     let valid = !key.is_empty()
@@ -415,6 +455,34 @@ pub fn fallback_report(last_message: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sub_session_is_named_by_its_name_or_its_tasks_first_sentence() {
+        assert_eq!(
+            session_name(Some("  Editor research "), "x"),
+            "Editor research"
+        );
+        assert_eq!(
+            session_name(Some(" "), "Fix the parser. Then test."),
+            "Fix the parser"
+        );
+        assert_eq!(session_name(None, "Is it slow? Measure it."), "Is it slow?");
+        assert_eq!(
+            session_name(None, "Audit the docs\nin docs/"),
+            "Audit the docs"
+        );
+        // A path's dots do not end the sentence; a long one is cut at a word, marked.
+        let long = session_name(
+            None,
+            "Read plans/brief.md and fix why sub-session notes reach the lead late. More.",
+        );
+        assert_eq!(long, "Read plans/brief.md and fix why…");
+        assert!(long.chars().count() <= NAME_MAX_CHARS);
+        // One long word is cut where it must be.
+        let path = session_name(None, &format!("/{}", "a".repeat(80)));
+        assert_eq!(path.chars().count(), NAME_MAX_CHARS);
+        assert!(path.ends_with('…'));
+    }
 
     fn context() -> SpawnContext {
         SpawnContext {

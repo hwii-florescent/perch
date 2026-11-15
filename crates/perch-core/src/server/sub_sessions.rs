@@ -93,6 +93,8 @@ pub(super) struct SpawnRequest {
     pub agent: String,
     pub model: Option<String>,
     pub task: String,
+    /// `--name`; without one the child is named from its task (`sub_sessions::session_name`).
+    pub name: Option<String>,
     pub key: String,
     pub worktree: bool,
     /// Minutes of silence before `perch list` marks the child quiet; `None` = the default.
@@ -129,10 +131,19 @@ impl SpawnRequest {
             agent: agent.to_string(),
             model,
             task,
+            name: body["name"].as_str().map(str::to_string),
             key,
             worktree: body["worktree"].as_bool().unwrap_or(false),
             quiet_after,
         })
+    }
+}
+
+/// Name a new child after its work (`sub_sessions::session_name`) through the auto-title path, so the
+/// sidebar, its tab and `perch list` show it and a later rename still wins.
+fn name_child(db: &HistoryDb, child: &str, name: Option<&str>, task: &str) {
+    if let Err(error) = db.set_cli_title(child, &sub_sessions::session_name(name, task)) {
+        tracing::warn!(%error, "could not name a sub-session");
     }
 }
 
@@ -227,6 +238,12 @@ pub(super) async fn start(
         }
         Reserved::New(row) => row,
     };
+    name_child(
+        &app.db,
+        &row.child_session_id,
+        request.name.as_deref(),
+        &request.task,
+    );
     if let Some(minutes) = request.quiet_after {
         if let Err(error) = app.db.set_quiet_after(&row.child_session_id, minutes) {
             tracing::warn!(%error, "could not keep a sub-session's quiet threshold");
@@ -861,6 +878,32 @@ pub(super) mod tests {
 
     /// The spawn, list and stop routes over real HTTP against a booted core, up to the point of
     /// starting an agent: what is refused, what is recorded, what a retry returns.
+    #[test]
+    fn a_new_child_is_named_after_its_work_and_a_rename_still_wins() {
+        let root = std::env::temp_dir().join(format!("perch-sub-name-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let db = HistoryDb::open(root.join("history.sqlite")).unwrap();
+        let title = |id: &str| db.get_session_row(id).unwrap().unwrap().title;
+        let (workspace, _) = lead_with_child(&db, &root, SubState::Starting);
+        // A launched agent's session is listed once its terminal is active.
+        db.mark_cli_activity("child").unwrap();
+        name_child(&db, "child", None, "Fix the parser. Then run the tests.");
+        assert_eq!(title("child"), "Fix the parser");
+        db.set_title_override("child", "Parser work").unwrap();
+        assert_eq!(title("child"), "Parser work");
+
+        db.create_session_in_workspace("named", &workspace, &root.to_string_lossy())
+            .unwrap();
+        db.mark_cli_activity("named").unwrap();
+        name_child(
+            &db,
+            "named",
+            Some("Editor research"),
+            "Research only. Change nothing.",
+        );
+        assert_eq!(title("named"), "Editor research");
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn spawn_list_and_stop_enforce_their_rules_over_http() {
         let root = std::env::temp_dir().join(format!("perch-sub-http-{}", Uuid::new_v4()));
