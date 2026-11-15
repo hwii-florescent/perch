@@ -846,8 +846,6 @@ pub struct TargetFacts {
     /// A question or approval is open.
     pub request_open: bool,
     pub is_lead: bool,
-    /// Children of this receiver that are working, or whose state cannot be read.
-    pub working_children: usize,
 }
 
 /// Why a delivery is waiting. Nothing is written while one holds.
@@ -863,7 +861,6 @@ pub enum Wait {
     /// Some client sent input to its terminal in the last moments, or none has been heard since
     /// Perch started: unknown is recent. Retried on a later pass.
     RecentInput,
-    WorkingChildren(usize),
     /// Busy, and Perch has no way into the running turn of this CLI (neither a follow-up queue nor a
     /// steer): the message waits for the turn to end.
     NoFollowUpQueue(String),
@@ -879,10 +876,6 @@ impl Wait {
             Self::NotIdle => "the receiver is not idle".into(),
             Self::Input(why) => why.clone(),
             Self::RecentInput => "someone is typing in its terminal, or did a moment ago".into(),
-            Self::WorkingChildren(count) => format!(
-                "{count} sub-session{} still working",
-                if *count == 1 { " is" } else { "s are" }
-            ),
             Self::NoFollowUpQueue(agent) => format!(
                 "the receiver is working and Perch cannot put a message into a running {agent} \
                  turn, so it gets this when its turn ends"
@@ -894,7 +887,8 @@ impl Wait {
 /// Where a message goes, or why it waits, over what is known and before the checks that need the
 /// terminal. An idle receiver starts a turn; a busy one whose CLI has a follow-up queue gets the
 /// message there; a busy Claude or Codex gets it as a steer into the running turn (owner, same day);
-/// any other busy one waits. Never over a question or approval; unknown is not idle.
+/// any other busy one waits. Never over a question or approval; unknown is not idle. A lead is no
+/// exception: an idle lead gets a report at once, whatever its other children are doing.
 pub fn route(facts: &TargetFacts) -> Result<Handoff, Wait> {
     if !facts.alive {
         return Err(Wait::NotRunning);
@@ -905,27 +899,19 @@ pub fn route(facts: &TargetFacts) -> Result<Handoff, Wait> {
     if facts.blocked || facts.request_open {
         return Err(Wait::Blocked);
     }
-    let handoff = if facts.running {
+    if facts.running {
         if facts.followup_queue {
-            Handoff::QueuedInAgent
+            Ok(Handoff::QueuedInAgent)
         } else if can_steer(&facts.agent) {
-            Handoff::Steered
+            Ok(Handoff::Steered)
         } else {
-            return Err(Wait::NoFollowUpQueue(facts.agent.clone()));
+            Err(Wait::NoFollowUpQueue(facts.agent.clone()))
         }
     } else if facts.idle {
-        Handoff::Started
+        Ok(Handoff::Started)
     } else {
-        return Err(Wait::NotIdle);
-    };
-    if facts.is_lead {
-        // An idle lead whose children work is woken by the last of them, not by each; a busy lead
-        // only has the message queued behind (or steered into) its turn.
-        if handoff == Handoff::Started && facts.working_children > 0 {
-            return Err(Wait::WorkingChildren(facts.working_children));
-        }
+        Err(Wait::NotIdle)
     }
-    Ok(handoff)
 }
 
 #[cfg(test)]
@@ -1267,9 +1253,9 @@ mod tests {
     }
 
     #[test]
-    fn a_busy_lead_accepts_a_steer_even_with_working_children() {
+    fn a_busy_lead_accepts_a_steer() {
         let lead = TargetFacts {
-            working_children: 2,
+            is_lead: true,
             ..busy("claude")
         };
         assert_eq!(route(&lead), Ok(Handoff::Steered));
@@ -1294,9 +1280,9 @@ mod tests {
     }
 
     #[test]
-    fn a_busy_lead_gets_a_follow_up_even_with_working_children() {
+    fn a_busy_lead_gets_a_follow_up() {
         let lead = TargetFacts {
-            working_children: 2,
+            is_lead: true,
             ..busy("pi")
         };
         assert_eq!(route(&lead), Ok(Handoff::QueuedInAgent));
@@ -1351,23 +1337,8 @@ mod tests {
     }
 
     #[test]
-    fn only_an_idle_lead_waits_for_its_working_children() {
-        assert_eq!(
-            wait_reason(&TargetFacts {
-                working_children: 2,
-                ..idle_lead()
-            }),
-            Some(Wait::WorkingChildren(2))
-        );
-        // A child has no working-children wait.
-        assert_eq!(
-            wait_reason(&TargetFacts {
-                is_lead: false,
-                working_children: 3,
-                ..idle_lead()
-            }),
-            None
-        );
+    fn an_idle_lead_starts_a_turn_like_any_other_receiver() {
+        assert_eq!(route(&idle_lead()), Ok(Handoff::Started));
     }
 
     #[test]
@@ -1381,17 +1352,9 @@ mod tests {
             Wait::NoFollowUpQueue("codex".into()),
             Wait::Input("a person is typing".into()),
             Wait::RecentInput,
-            Wait::WorkingChildren(1),
-            Wait::WorkingChildren(3),
         ] {
             assert!(!wait.reason().is_empty());
         }
-        assert!(Wait::WorkingChildren(1)
-            .reason()
-            .contains("1 sub-session is"));
-        assert!(Wait::WorkingChildren(3)
-            .reason()
-            .contains("3 sub-sessions are"));
     }
 
     fn report(text: &str, source: ReportSource, model: Option<&str>) -> Report {

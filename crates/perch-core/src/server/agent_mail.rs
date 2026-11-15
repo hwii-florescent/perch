@@ -19,7 +19,7 @@ use crate::agent_mail::{
     Wait,
 };
 use crate::db::{Cancelled, Enqueued, MailRow, NewMail};
-use crate::sub_sessions::{Report, ReportSource, SubState};
+use crate::sub_sessions::{Report, ReportSource};
 use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -533,22 +533,6 @@ impl AppWorld<'_> {
             provider,
         ))
     }
-
-    /// Is this child working, as far as the lead's wait is concerned? A launch in flight is; so is
-    /// a running child whose state cannot be read, because unknown is not idle.
-    fn child_working(&self, row: &crate::db::SubSessionRow) -> bool {
-        match row.state {
-            SubState::Starting => true,
-            SubState::Running => {
-                let state = self
-                    .target_key(&row.child_session_id)
-                    .and_then(|(key, _)| self.0.agent_runtime.snapshot(&key).ok())
-                    .map(|snapshot| snapshot.state);
-                matches!(state, Some(AgentState::Working) | None)
-            }
-            _ => false,
-        }
-    }
 }
 
 fn mail_client() -> Result<ClientIdentity, String> {
@@ -600,14 +584,6 @@ impl World for AppWorld<'_> {
             blocked: snapshot.as_ref().is_some_and(|s| s.blocked),
             request_open: snapshot.as_ref().is_some_and(|s| s.request.is_some()),
             is_lead,
-            working_children: if is_lead {
-                children
-                    .iter()
-                    .filter(|row| self.child_working(row))
-                    .count()
-            } else {
-                0
-            },
         }
     }
 
@@ -826,6 +802,7 @@ pub(super) async fn run_deliveries(app: AppState) {
 mod tests {
     use super::*;
     use crate::agent_identity::IdentityStore;
+    use crate::sub_sessions::SubState;
     use std::cell::{Cell, RefCell};
 
     /// A world with nothing real behind it: the receiver's facts and the outcome of a write are
@@ -1315,7 +1292,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_lead_gets_reports_beyond_the_old_wake_limit_when_no_child_works() {
+    async fn a_lead_gets_reports_beyond_the_old_wake_limit() {
         let run = run();
         run.db
             .enqueue_note(
@@ -1326,15 +1303,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let world = Fake::idle(Live::Known(Some(run.lead_incarnation.clone())), true);
-        // A working child holds the note; the lead is told why.
-        world.facts.borrow_mut().working_children = 1;
-        let Pass::Waiting(reason) = pass(&run.db, &world, "lead", 0) else {
-            panic!()
-        };
-        assert!(reason.contains("still working"), "{reason}");
-        assert!(world.written.borrow().is_empty());
-        // Idle and nothing working: one roster.
-        world.facts.borrow_mut().working_children = 0;
+        // A newer note from the same child replaces the waiting one: one roster.
         run.db
             .enqueue_note(
                 ("child", "codex", "fix the parser"),
@@ -1371,6 +1340,26 @@ mod tests {
         }
         assert_eq!(world.written.borrow().len(), 102);
         assert!(run.db.queued_mail_for("lead").unwrap().is_empty());
+    }
+
+    /// Seen live: an idle lead with one long-running child got no report from its other children
+    /// until it started a turn of its own. A report reaches an idle lead on the first pass.
+    #[tokio::test]
+    async fn an_idle_lead_gets_a_report_at_once_while_another_child_still_works() {
+        let run = run();
+        run.db
+            .enqueue_note(("child", "codex", "t"), ("lead", "claude"), "done")
+            .unwrap()
+            .unwrap();
+        // The child that sent it is the run's only one, and it is still running: an idle lead takes
+        // the report all the same (an older build held it until the lead was busy).
+        assert_eq!(run.db.sub_sessions_in_run("lead").unwrap().len(), 1);
+        let world = Fake::idle(Live::Known(Some(run.lead_incarnation.clone())), true);
+        let Pass::Sent { ids, reply } = pass(&run.db, &world, "lead", 0) else {
+            panic!("an idle lead must not wait for its other children")
+        };
+        settle(&run.db, &ids, reply).await;
+        assert_eq!(world.written.borrow().len(), 1);
     }
 
     #[tokio::test]
