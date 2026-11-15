@@ -7,6 +7,19 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-15 — Sub-session reports reach an idle lead at once, in plain lines, under the child's name (owner)
+
+- An idle lead gets each report as soon as it is sent, whatever its other children are doing. The earlier
+  rule (an idle lead is woken by the last working child, not each) let one long-running child hold every
+  other report until the lead began a turn of its own. A busy lead still has it queued behind or steered
+  into its turn.
+- The roster loses its disclaimer: `──── Sub-session reports (HH:MM UTC) ────`, then one line per child,
+  `- <name> (<short id>) · <status>: <report>`, then the closing rule. Peer messages keep their sender header
+  and quoted body but drop the same kind of sentence. The rule line first and the quoting stay.
+- Spawned sessions are named after their work: `perch spawn|suggest --name <text>`, else the task's first
+  sentence (about 40 characters). The name is the session's title in the sidebar, tabs, `perch list` and
+  the notes; a later rename wins.
+
 ## 2026-11-15 — Sub-sessions in the sidebar: elbow connector, filled cards, "…" menu (owner)
 
 Owner direction with a reference picture. In the stock sidebar (both apps): a session with sub-sessions is a filled

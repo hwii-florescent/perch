@@ -62,24 +62,29 @@ fn mail_json(row: &MailRow) -> Value {
     })
 }
 
-/// What a sender is called in a header: a child by its task, any other session by its title.
+/// What a sender is called in a header and a note: its session's name (a child's is set from its work
+/// when it starts, `sub_sessions::session_name`); a child that has none, by its task's first sentence.
 pub(super) fn sender_label(app: &AppState, session_id: &str, provider: &str) -> String {
+    let title = app
+        .db
+        .get_session_row(session_id)
+        .ok()
+        .flatten()
+        .map(|row| row.title)
+        .unwrap_or_default();
     if let Ok(Some(child)) = app.db.sub_session(session_id) {
-        let line = child.task.lines().next().unwrap_or_default();
-        let label = agent_mail::clean_label(line, provider);
+        let name = if title.trim().is_empty() {
+            crate::sub_sessions::session_name(None, &child.task)
+        } else {
+            title
+        };
+        let label = agent_mail::clean_label(&name, provider);
         // A child that was reset is still this child; say which of its conversations is speaking.
         return match app.db.conversation_ordinal(session_id) {
             Ok(ordinal) if ordinal > 1 => format!("{label} (conversation {ordinal})"),
             _ => label,
         };
     }
-    let title = app
-        .db
-        .list_sessions()
-        .ok()
-        .and_then(|rows| rows.into_iter().find(|row| row.id == session_id))
-        .map(|row| row.title)
-        .unwrap_or_default();
     agent_mail::clean_label(&title, provider)
 }
 
@@ -264,7 +269,7 @@ fn note_lead(app: &AppState, child: &AgentKey, status: ChildStatus, report: Opti
         return;
     };
     let label = sender_label(app, &child.session_id, &child.agent_id);
-    let body = agent_mail::note_line(&label, &child.agent_id, &child.session_id, status, report);
+    let body = agent_mail::note_line(&label, &child.session_id, status, report);
     match app.db.enqueue_note(
         (&child.session_id, &child.agent_id, &label),
         (&lead, &lead_row.cli_provider_id.unwrap_or_default()),
@@ -1315,8 +1320,9 @@ mod tests {
             panic!()
         };
         settle(&run.db, &ids, reply).await;
-        assert!(world.written.borrow()[0]
-            .starts_with("──── Perch status from your sub-sessions (01:00 UTC)"));
+        assert!(
+            world.written.borrow()[0].starts_with("──── Sub-session reports (01:00 UTC) ────\n")
+        );
         assert!(world.written.borrow()[0].contains("- child finished again."));
         assert_eq!(
             run.db.mail_wakes("lead").unwrap(),

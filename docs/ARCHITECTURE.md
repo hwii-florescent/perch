@@ -593,20 +593,26 @@ contract the tests hold it to.
   "cancelled by sender". Once `delivering` it cannot be taken back. Receivers that end (identity revoked on
   a confirmed exit, session deleted) turn their queued mail `undelivered`; deleting a lead deletes the
   run's mail with it (its children become ordinary sessions, like their records).
-- *Envelope and neutralising.* The prompt always begins with Perch's own header naming the sender (title,
-  provider, session, kind) and saying the text is from another agent, not a person, and approves nothing;
-  the body follows as a quoted block, every line prefixed, so a leading `/`, `!` or `#` can never be a
-  command or a mode switch (the prompt starts with a `────` rule line, never a character from the
-  sender). Peer text is data; the guide tells agents the
+- *Envelope and neutralising.* The prompt always begins with Perch's own header naming the sender (name,
+  provider, session, kind); the body follows as a quoted block, every line prefixed, so a leading `/`, `!`
+  or `#` can never be a command or a mode switch (the prompt starts with a `────` rule line, never a
+  character from the sender). The standing disclaimer sentence under the header was dropped (owner,
+  2026-11-15); `parse_envelope` still reads banners written with it. Peer text is data; the guide tells agents the
   same. A message never answers a dialog and never approves anything: delivery refuses while one is open.
 - *Notes from children.* When a child's turn ends, it becomes blocked, or its exit is confirmed, Perch
   queues a `note` for its lead: status words, whether it is waiting on a person (Perch's own state), and
-  the first 400 characters of its own `perch report`, else the cheap model's summary (`Summary by <model>`),
-  else of its last message, each labelled a claim (a finished turn is noted even when the child said and
-  reported nothing: "It has reported nothing"). The summary is kept before the note is queued, so a slow or
+  the first 400 characters of its own `perch report`, else the cheap model's summary (`summary by <model>`),
+  else of its last message (a finished turn is noted even when the child said and reported nothing:
+  "nothing reported"). Each is one line: the child's session name and short id, its status, then what it
+  said (`Editor research (0407a72d) · reported: ...`). The summary is kept before the note is queued, so a slow or
   absent model only delays a note, never changes what it can say. A
   newer note from the same child replaces one still queued. Queued notes of a lead go in **one** delivery
-  (a roster, one line per child, headed as status rather than instruction); messages go one per delivery.
+  (a roster headed `──── Sub-session reports (HH:MM UTC) ────`, one line per child, with no disclaimer:
+  owner, 2026-11-15); messages go one per delivery.
+- *Sub-session names.* A spawned or suggested child gets a name: `perch spawn|suggest --name`, else the
+  task's first sentence cut to about 40 characters (`sub_sessions::session_name`). It is written as the
+  session's auto-title (`cli_title`), so the sidebar, tabs, `perch list` and the notes show it and a
+  person's rename (`title_override`) still wins. A suggestion keeps its name until Start.
 - *No wake cap* (owner decision 2026-11-09). Reports and quiet-child notes keep reaching the lead
   throughout a run, subject to the existing process and input checks. The legacy
   `runLimits.wakes` / `maxLeadWakesPerRun` setting and historical delivery counts no longer gate
