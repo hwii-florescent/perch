@@ -7,6 +7,15 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-15 — Mods in the native client are trusted code, as on the web (owner)
+
+Extends "Mods: trusted JavaScript" (2026-11-08) to the native client's mod engine. Any mod, stock or a
+person's own copy, may use every `perch.ask` request and `perch.runCommand` the web allows, including
+force-removing a worktree, deleting a branch, changing memory and `project.new` running a program. They are
+not limited to built-in mods, because a person's copies of the stock mods need the same calls. The
+engine's own guards stay: pictures only from the mod's folders, state changes refused while disconnected,
+and `workspace.run` kept out of `perch.ask`.
+
 ## 2026-11-12 — A native desktop client in GPUI, with Ghostty's engine on both sides (owner)
 
 Owner direction, to remove the web engine's cost from the desktop (about 270 MB measured 2026-11-11).
@@ -66,7 +75,7 @@ Session/Files/Git bottom bar" phone item below and the single global `chatMode` 
 
 ## 2026-11-09 — Terminal and dock chrome, the browser toolbar and the phone's screens are stock screens; phone screens are opt-in per phone (SDK 1.10)
 
-Plan: `plans/261108-2212-cloneable-stock-ui/` phase 5. Owner direction: convert the terminal toolbar, the agent
+Plan (removed, in git history): `plans/261108-2212-cloneable-stock-ui/` phase 5. Owner direction: convert the terminal toolbar, the agent
 control chip and banners, the dock's tab and group buttons and the browser toolbar unless an engine boundary makes it
 impossible; phones get their own screens and mods, opt-in per phone, never the desktop's by default. Supersedes the
 "Terminal authority" and "Engines" items of the 1.9 entry below for the parts named here.
@@ -114,7 +123,7 @@ impossible; phones get their own screens and mods, opt-in per phone, never the d
     to the five `stock:mobile-*` screens.
   - *Placeholders:* loading lines and the layout-only "No session is focused" and stack strip.
 
-Plan: `plans/261108-2212-cloneable-stock-ui/` phase 4 (closing slice). Owner direction: convert the remaining desktop
+Plan (removed, in git history): `plans/261108-2212-cloneable-stock-ui/` phase 4 (closing slice). Owner direction: convert the remaining desktop
 screens and list every other hard-coded desktop surface here as a host-owned boundary with its reason.
 - **Screens.** `stock:start` (the empty main area: connecting, home, a workspace's start picker, the CLI start panel;
   host route `components/StartScreen.tsx`, which replaces `NoSessionPanel`, `CliStartPanel`, `StartCard` and
@@ -156,7 +165,7 @@ screens and list every other hard-coded desktop surface here as a host-owned bou
 
 ## 2026-11-09 — Settings pages, Perch's window as a layout, kept windows and package keys (SDK 1.8)
 
-Plan: `plans/261108-2212-cloneable-stock-ui/` phase 4 (third slice). Closes the "Open" line of the entry below.
+Plan (removed, in git history): `plans/261108-2212-cloneable-stock-ui/` phase 4 (third slice). Closes the "Open" line of the entry below.
 - **Settings pages are stock screens; the frame and Mods are not.** `stock:settings-general`, `-appearance`,
   `-agents`, `-keyboard`, `-terminal`, `-notifications`, `-hosts`, `-devices` and `-permissions` each get the saved
   settings and Perch's actions as props (`components/settingsRoutes.tsx`, `SettingsPage.tsx`). The engines behind
@@ -184,7 +193,7 @@ Plan: `plans/261108-2212-cloneable-stock-ui/` phase 4 (third slice). Closes the 
 
 ## 2026-11-09 — Every dialog and menu is a stock screen; data and actions travel as props (SDK 1.7)
 
-Plan: `plans/261108-2212-cloneable-stock-ui/` phase 4 (second slice). Extends "On-demand screens are compiled stock"
+Plan (removed, in git history): `plans/261108-2212-cloneable-stock-ui/` phase 4 (second slice). Extends "On-demand screens are compiled stock"
 and "Nested owners" below.
 - **Screens.** `stock:dialog`, `select`, `tab-menu` (also the SDK's `SessionMenu`), `pane-menu`, `file-menu` (also
   `NewFilePrompt`), `new-session`, `launcher`, `navigator`, `folder-browser`, `worktree`, `instructions`, `memory`,
@@ -207,7 +216,7 @@ and "Nested owners" below.
 
 ## 2026-11-09 — Mod data, terminal reads, confirmation and notifications as stock screens, safe start
 
-Plan: `plans/261108-2212-cloneable-stock-ui/` phases 3 (rest) and 4 (first slice). SDK 1.6. Supersedes the "Open"
+Plan (removed, in git history): `plans/261108-2212-cloneable-stock-ui/` phases 3 (rest) and 4 (first slice). SDK 1.6. Supersedes the "Open"
 line of the entry below.
 - **Durable mod data is the person's, per package id, outside the package** (`mod_data.rs`): `mod-data/<id>/<key>.json`
   in Perch's folder, a stock screen under `@stock-<name>`. Keys are 1-120 of `A-Za-z0-9._-`, not starting with a dot;
@@ -253,7 +262,7 @@ built when the first package loads (`registerHostModule` takes a function), neve
 
 ## 2026-11-09 — Files, chat and the drawer browser are stock screens; terminals compose by moving, not copying
 
-Plan: `plans/261108-2212-cloneable-stock-ui/phase-03-resource-surfaces.md` (second slice). SDK 1.5.
+Plan (removed, in git history): `plans/261108-2212-cloneable-stock-ui/phase-03-resource-surfaces.md` (second slice). SDK 1.5.
 - **`stock:files`, `stock:chat`, `stock:browser`.** The Files explorer and file editor, the native chat and the
   drawer's browser strip are packages on `@perch/sdk` alone, shown through `StockView` wherever Perch drew them;
   `perch mod use` puts a clone there. Their state stays the host's: drafts and saves in `filesystemStore`
@@ -285,7 +294,7 @@ Plan: `plans/261108-2212-cloneable-stock-ui/phase-03-resource-surfaces.md` (seco
 
 ## 2026-11-09 — Unsent work belongs to the host, not to a screen's code; the review is a stock screen
 
-Plan: `plans/261108-2212-cloneable-stock-ui/phase-03-resource-surfaces.md`. A screen whose code can be edited,
+Plan (removed, in git history): `plans/261108-2212-cloneable-stock-ui/phase-03-resource-surfaces.md`. A screen whose code can be edited,
 reloaded, swapped for a clone or released while hidden cannot own what a person would lose with it.
 - **Native chat composer (`chatComposer.ts`).** The draft (text, staged files and the operation id a send of
   exactly that draft carries), the message in flight and the answered-prompt receipts are kept per chat
@@ -318,7 +327,7 @@ reloaded, swapped for a clone or released while hidden cannot own what a person 
 
 ## 2026-11-09 — A clone takes a stock screen's place through `use`, beside the chosen layout
 
-Settles "use my clone for this screen", left open by the entry below. Plan: `plans/261108-2212-cloneable-stock-ui/phase-02-navigation.md`.
+Settles "use my clone for this screen", left open by the entry below. Plan (removed, in git history): `plans/261108-2212-cloneable-stock-ui/phase-02-navigation.md`.
 - **Shape: one map in `layout-state.json`, not a layout field and not a setting.** `use` maps `stock:<name>` to
   one of the person's packages (`perch mod use stock:tabs my-tabs`, `mods.set` op `use` with `target`; `stock`
   or an empty target puts Perch's own back). Evidence: the stock window has no layout file to carry a field
@@ -342,7 +351,7 @@ Settles "use my clone for this screen", left open by the entry below. Plan: `pla
 ## 2026-11-09 — Stock screens are cloneable packages on one small SDK (owner direction)
 
 Amends "Examples, not shipped defaults" and "Slots" below; the rest of the mods entry stands. Plan:
-`plans/261108-2212-cloneable-stock-ui/` (owner answers in its `validation.md`).
+`plans/261108-2212-cloneable-stock-ui/` (removed, in git history; owner answers in its `validation.md`).
 - **Perch's own screens ship as packages.** A stock screen is TSX in `packages/web/src/stock-ui/<id>/`
   that `npm run build` exports to readable plain JS (comments kept) in the web build; Perch runs that
   exported package, not a compiled copy. First: the keybind help (`stock:keybind-help`); then the status
