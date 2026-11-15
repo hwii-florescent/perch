@@ -1,0 +1,56 @@
+{
+  "props": {
+    "hostId": "local",
+    "projects": [
+      {
+        "id": "p-perch",
+        "name": "perch",
+        "path": "/Users/dev/code/clients/a-very-long-organisation-name/services/payments-gateway-production-checkout/perch",
+        "workspace": {
+          "id": "w-perch-main",
+          "path": "/Users/dev/code/clients/a-very-long-organisation-name/services/payments-gateway-production-checkout/perch"
+        }
+      },
+      {
+        "id": "p-api",
+        "name": "api-server",
+        "path": "/Users/dev/code/clients/a-very-long-organisation-name/api-server",
+        "workspace": {
+          "id": "w-api-main",
+          "path": "/Users/dev/code/clients/a-very-long-organisation-name/api-server"
+        }
+      },
+      {
+        "id": "p-notes",
+        "name": "notes",
+        "path": "/Users/dev/notes",
+        "workspace": {
+          "id": "w-notes",
+          "path": "/Users/dev/notes"
+        }
+      }
+    ],
+    "activeProjectId": "p-perch"
+  },
+  "agentChoices": {
+    "connected": true,
+    "discovery": true,
+    "choices": [
+      {
+        "id": "claude",
+        "label": "Claude",
+        "isDefault": true
+      },
+      {
+        "id": "codex",
+        "label": "Codex"
+      },
+      {
+        "id": "pi",
+        "label": "Pi"
+      }
+    ],
+    "lastChoice": "claude",
+    "state": "ready"
+  }
+}

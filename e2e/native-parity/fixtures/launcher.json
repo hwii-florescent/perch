@@ -121,6 +121,42 @@
       "title": "Opened: 'New session in...', the projects with their paths, Add project and No project (muted, with its Quickchat note); the project on screen is highlighted; keys 1 to 6"
     },
     {
+      "id": "long-path",
+      "title": "Projects with paths longer than the row: the name stays whole on one line and the path is cut with an ellipsis at its end",
+      "props": {
+        "projects": [
+          {
+            "id": "p-perch",
+            "name": "perch",
+            "path": "/Users/dev/code/clients/a-very-long-organisation-name/services/payments-gateway-production-checkout/perch",
+            "workspace": {
+              "id": "w-perch-main",
+              "path": "/Users/dev/code/clients/a-very-long-organisation-name/services/payments-gateway-production-checkout/perch"
+            }
+          },
+          {
+            "id": "p-api",
+            "name": "api-server",
+            "path": "/Users/dev/code/clients/a-very-long-organisation-name/api-server",
+            "workspace": {
+              "id": "w-api-main",
+              "path": "/Users/dev/code/clients/a-very-long-organisation-name/api-server"
+            }
+          },
+          {
+            "id": "p-notes",
+            "name": "notes",
+            "path": "/Users/dev/notes",
+            "workspace": {
+              "id": "w-notes",
+              "path": "/Users/dev/notes"
+            }
+          }
+        ],
+        "activeProjectId": "p-perch"
+      }
+    },
+    {
       "id": "projects-filtered",
       "title": "'api' typed: the list narrows to the rows whose name or path contain it, the key numbers are gone",
       "steps": [

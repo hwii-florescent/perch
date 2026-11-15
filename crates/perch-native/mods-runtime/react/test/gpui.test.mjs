@@ -175,6 +175,24 @@ test("a packed row lays its items on device pixels by their measured text widths
   assert.equal(left.get(wraps.children[0])?.w, undefined);
 });
 
+test("a box sized by its own text neither wraps nor shrinks, and an auto margin keeps the row's gap", () => {
+  const box = (style, children = []) => ({ kind: "div", style, children });
+  const text = (t) => ({ kind: "text", text: t });
+  // "perch" measures 36.08px, which a device pixel rounds to 36: under the line GPUI lays the text in.
+  const measure = (t) => (t === "perch" ? 36.08 : 7);
+  const label = box({ flex_shrink: 0 }, [text("perch")]);
+  const key = box({}, [text("1")]);
+  const detail = box({ ml: "auto", min_w: 0, text_ellipsis: true }, [text("/Users/dev/code/perch")]);
+  const row = box({ display: "flex", gap_x: 8, whitespace: "nowrap", text_size: 12 }, [label, detail, key]);
+  const overrides = new Map();
+  snapRows([row], 2, measure, overrides);
+  assert.equal(overrides.get(label).whitespace, "nowrap", "the label's text cannot break");
+  assert.equal(overrides.get(key).whitespace, "nowrap");
+  assert.equal(overrides.get(key).flex_shrink, 0, "a squeezed row cannot shrink it below its text");
+  assert.equal(overrides.get(detail)?.flex_shrink, undefined, "the item that may shrink still does");
+  assert.equal(overrides.get(row).gap_x, undefined, "an auto margin cannot hold the gap, so the row keeps its own");
+});
+
 test("a line that ends in an ellipsis lays the boxes inside it on device pixels; its own text is left to GPUI", () => {
   const box = (style, children = []) => ({ kind: "div", style, children });
   const text = (t) => ({ kind: "text", text: t });

@@ -82,6 +82,8 @@ const point = (event) => ({ clientX: event?.position?.x ?? 0, clientY: event?.po
 
 /** Nodes inside one that takes pointer events: a press on one is that node's, as the page's event target. */
 const UNDER_POINTER = new WeakSet();
+/** Nodes inside a scroll area: a scroll area among them takes the wheel itself (see `toGpui`). */
+const IN_SCROLL = new WeakSet();
 
 /** The node a press at `event` is on: the innermost node under `id` that recorded this press (`handle.pressed`),
  * else `id`. GPUI calls the innermost listener first, so the record is there when `id`'s listener runs. */
@@ -165,6 +167,14 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
       handle.document.itemBounds = (id) => (ids.includes(id) ? kit.scroll.item_bounds?.(ids.indexOf(id)) ?? null : null);
     }
   }
+
+  // GPUI hands a wheel step to every scroll area under the pointer, so a list in a scrolling dialog would move the
+  // dialog as well; the list takes the step alone.
+  // ponytail: at the end of the inner area the step does not pass on to the outer one, as a browser's does; reading
+  // the inner area's extent would allow that.
+  const scroller = node.style.overflow_x === "scroll" || node.style.overflow_y === "scroll";
+  if (scroller && IN_SCROLL.has(node)) el = el.on_scroll_wheel((_event, cx) => cx.stop_propagation?.());
+  if (scroller || IN_SCROLL.has(node)) for (const child of node.children ?? []) if (child.kind !== "text") IN_SCROLL.add(child);
 
   // A press on a text field puts the keyboard in it, as a browser does, and keeps its box (a list anchored to it).
   if (node.kind === "input" && !node.disabled) {
@@ -406,7 +416,8 @@ export function snapRows(roots, scale, measure, overrides) {
       const gap = px(node.style.gap_x);
       const flow = fresh();
       // A gap goes into the items' margins, which a line of text has not: such a row keeps GPUI's gap.
-      const carry = !(gap && kids.some((kid) => kid.kind === "text"));
+      // Nor into an `auto` margin, which is not a length: the gap would be lost when the margin has no room.
+      const carry = !(gap && kids.some((kid) => kid.kind === "text" || !Number.isFinite(px(kid.style.ml))));
       set(node, { border_l: stack(flow, px(node.style.border_l)), pl: stack(flow, px(node.style.pl)) });
       if (carry && gap) set(node, { gap_x: 0 });
       kids.forEach((kid, i) => {
@@ -421,8 +432,18 @@ export function snapRows(roots, scale, measure, overrides) {
         const own = kid.kind === "text" ? fonts.get(node) ?? {} : null;
         const w = kid.kind === "text" ? width(kid, own, !!node.tabular) : widths.get(kid);
         const fixed = kid.kind === "text" || !(kid.style.flex_grow > 0);
-        if (fixed && Number.isFinite(w)) set(kid, { w: stack(flow, w) });
-        else Object.assign(flow, fresh());
+        if (fixed && Number.isFinite(w)) {
+          const step = { w: stack(flow, w) };
+          // A box sized by its own single-line text is that text's width rounded to a device pixel, which can be a
+          // hair under what GPUI lays the text out in (it rounds a line's width up to a whole logical pixel): the
+          // text would break a letter onto a second line, and a squeezed row would shrink the box below its text.
+          // CSS gives such an item its content as its minimum, so it neither wraps nor shrinks.
+          if (kid.kind !== "text" && typeof kid.style.w !== "number" && kid.style.min_w === undefined) {
+            step.whitespace = "nowrap";
+            step.flex_shrink = 0;
+          }
+          set(kid, step);
+        } else Object.assign(flow, fresh());
         if (kid.kind !== "text") {
           const mr = stack(flow, px(kid.style.mr));
           if (Number.isFinite(mr)) set(kid, { mr });
