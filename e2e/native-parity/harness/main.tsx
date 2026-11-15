@@ -29,7 +29,7 @@ import "../../../packages/web/src/sdk";
 import { SessionMenu, useAgentChoices, useHosts, useKeybindings, useNavigation, useNotifications, usePaneLook, usePlanUsage, useStatusLine, useWorkspaceTabs, useZoom } from "@perch/sdk";
 
 type Json = Record<string, unknown>;
-interface Step { type?: { selector: string; text: string }; key?: { selector?: string; key: string }; click?: string }
+interface Step { type?: { selector: string; text: string }; key?: { selector?: string; key: string }; click?: string; scroll?: { selector: string; y: number } }
 interface State { id: string; title?: string; view?: Json; patch?: Json; props?: Json; size?: { width: number; height: number }; window?: { width: number; height: number }; via?: string; steps?: Step[] }
 interface Fixture {
   size: { width: number; height: number };
@@ -487,6 +487,9 @@ for (const step of state.steps ?? []) {
     target.dispatchEvent(new KeyboardEvent("keydown", { key: step.key.key, bubbles: true, cancelable: true }));
   } else if (step.click) {
     ((await found<HTMLElement>(step.click, "click")) as HTMLElement).click();
+  } else if (step.scroll) {
+    // The wheel over a scroll area, `y` logical pixels down.
+    ((await found<HTMLElement>(step.scroll.selector, "scroll")) as HTMLElement).scrollTop = step.scroll.y;
   }
   await frames();
 }

@@ -1,0 +1,168 @@
+{
+  "props": {
+    "hostId": "local",
+    "home": "/Users/dev",
+    "tree": {
+      "/": {
+        "entries": [
+          {
+            "name": "Applications",
+            "path": "/Applications",
+            "isGitRepo": false
+          },
+          {
+            "name": "Library",
+            "path": "/Library",
+            "isGitRepo": false
+          },
+          {
+            "name": "System",
+            "path": "/System",
+            "isGitRepo": false
+          },
+          {
+            "name": "Users",
+            "path": "/Users",
+            "isGitRepo": false
+          },
+          {
+            "name": "opt",
+            "path": "/opt",
+            "isGitRepo": false
+          },
+          {
+            "name": "private",
+            "path": "/private",
+            "isGitRepo": false
+          },
+          {
+            "name": "usr",
+            "path": "/usr",
+            "isGitRepo": false
+          }
+        ]
+      },
+      "/Users/dev": {
+        "parent": "/Users",
+        "entries": [
+          {
+            "name": "Desktop",
+            "path": "/Users/dev/Desktop",
+            "isGitRepo": false
+          },
+          {
+            "name": "Documents",
+            "path": "/Users/dev/Documents",
+            "isGitRepo": false
+          },
+          {
+            "name": "Downloads",
+            "path": "/Users/dev/Downloads",
+            "isGitRepo": false
+          },
+          {
+            "name": "code",
+            "path": "/Users/dev/code",
+            "isGitRepo": false
+          },
+          {
+            "name": "dotfiles",
+            "path": "/Users/dev/dotfiles",
+            "isGitRepo": true
+          },
+          {
+            "name": "notes",
+            "path": "/Users/dev/notes",
+            "isGitRepo": true
+          }
+        ]
+      },
+      "/Users/dev/code": {
+        "parent": "/Users/dev",
+        "entries": [
+          {
+            "name": "api-server",
+            "path": "/Users/dev/code/api-server",
+            "isGitRepo": true
+          },
+          {
+            "name": "api-server-wt",
+            "path": "/Users/dev/code/api-server-wt",
+            "isGitRepo": false
+          },
+          {
+            "name": "archive",
+            "path": "/Users/dev/code/archive",
+            "isGitRepo": false
+          },
+          {
+            "name": "dotfiles",
+            "path": "/Users/dev/code/dotfiles",
+            "isGitRepo": true
+          },
+          {
+            "name": "experiments",
+            "path": "/Users/dev/code/experiments",
+            "isGitRepo": false
+          },
+          {
+            "name": "infra-notes",
+            "path": "/Users/dev/code/infra-notes",
+            "isGitRepo": false
+          },
+          {
+            "name": "perch",
+            "path": "/Users/dev/code/perch",
+            "isGitRepo": true
+          },
+          {
+            "name": "perch-wt",
+            "path": "/Users/dev/code/perch-wt",
+            "isGitRepo": false
+          },
+          {
+            "name": "playground",
+            "path": "/Users/dev/code/playground",
+            "isGitRepo": false
+          },
+          {
+            "name": "scratch-site",
+            "path": "/Users/dev/code/scratch-site",
+            "isGitRepo": true
+          },
+          {
+            "name": "terminal-ui",
+            "path": "/Users/dev/code/terminal-ui",
+            "isGitRepo": true
+          },
+          {
+            "name": "the-nested-workspace-checkout-of-the-feature-branch",
+            "path": "/Users/dev/code/the-nested-workspace-checkout-of-the-feature-branch",
+            "isGitRepo": false
+          },
+          {
+            "name": "website",
+            "path": "/Users/dev/code/website",
+            "isGitRepo": true
+          },
+          {
+            "name": "zig-notes",
+            "path": "/Users/dev/code/zig-notes",
+            "isGitRepo": false
+          }
+        ]
+      }
+    }
+  },
+  "steps": [
+    {
+      "click": "[data-testid=\"dir-browser-entry-code\"]"
+    },
+    {
+      "scroll": {
+        "selector": "[data-testid=\"dir-browser\"] div.overflow-y-auto",
+        "y": 60
+      }
+    }
+  ]
+}

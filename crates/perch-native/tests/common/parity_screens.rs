@@ -684,6 +684,31 @@ fn draw(cx: &mut HeadlessAppContext, window: gpui::AnyWindowHandle) {
 /// Frames drawn for a screen to settle (`draw`).
 const SETTLE_FRAMES: usize = 4;
 
+/// One wheel turn over the middle of the element the probe recorded as `name`, `y` pixels down.
+fn scroll_over(cx: &mut HeadlessAppContext, window: gpui::AnyWindowHandle, name: &str, y: f32) {
+    draw(cx, window);
+    let at = probe::record(name)
+        .unwrap_or_else(|| panic!("{name} is drawn"))
+        .bounds;
+    let position = point(
+        at.origin.x + at.size.width / 2.,
+        at.origin.y + at.size.height / 2.,
+    );
+    cx.update_window(window, |_, window: &mut Window, cx| {
+        window.dispatch_event(
+            PlatformInput::ScrollWheel(gpui::ScrollWheelEvent {
+                position,
+                delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-y))),
+                modifiers: Modifiers::default(),
+                touch_phase: gpui::TouchPhase::Moved,
+            }),
+            cx,
+        );
+    })
+    .unwrap();
+    cx.run_until_parked();
+}
+
 fn click(cx: &mut HeadlessAppContext, window: gpui::AnyWindowHandle, name: &str) {
     draw(cx, window);
     let at = probe::record(name)
@@ -728,7 +753,7 @@ fn press(cx: &mut HeadlessAppContext, window: gpui::AnyWindowHandle, keystroke: 
 
 /// Does a fixture state's `steps` in the window, as events: a `type` clicks its field, selects
 /// what is in it and types the text a key at a time, a `key` presses one key where the keyboard
-/// is, a `click` clicks.
+/// is, a `click` clicks, a `scroll` turns the wheel over an element.
 fn run_steps(
     cx: &mut HeadlessAppContext,
     window: gpui::AnyWindowHandle,
@@ -774,6 +799,13 @@ fn run_steps(
             press(cx, window, Keystroke::parse(&spec).unwrap());
         } else if let Some(selector) = step.get("click").and_then(Value::as_str) {
             click(cx, window, &named(screen, selector));
+        } else if let Some(scroll) = step.get("scroll") {
+            scroll_over(
+                cx,
+                window,
+                &named(screen, scroll["selector"].as_str().unwrap()),
+                scroll["y"].as_f64().unwrap_or_default() as f32,
+            );
         } else {
             panic!("a step this helper does not know: {step}");
         }

@@ -188,6 +188,24 @@
       ]
     },
     {
+      "id": "nested-scrolled",
+      "title": "The same folder with the wheel turned 60 px over the list: the list moves under its top edge and nothing else does (the breadcrumb, the filter and Use this folder stay)",
+      "view": {
+        "lastPath": "/Users/dev"
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"dir-browser-entry-code\"]"
+        },
+        {
+          "scroll": {
+            "selector": "[data-testid=\"dir-browser\"] div.overflow-y-auto",
+            "y": 60
+          }
+        }
+      ]
+    },
+    {
       "id": "filtered",
       "title": "'pe' typed in that folder: only the subfolders whose name contains it",
       "view": {

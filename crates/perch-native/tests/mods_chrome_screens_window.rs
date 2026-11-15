@@ -180,6 +180,41 @@ impl Rig {
     }
 
     /// A click in the middle of what is named `name`.
+    /// The window as drawn, written to `PERCH_NATIVE_SHOT_DIR/<name>.png` when that is set.
+    fn shot(&mut self, name: &str) {
+        let Some(dir) = std::env::var_os("PERCH_NATIVE_SHOT_DIR") else {
+            return;
+        };
+        self.draw();
+        let image = self
+            .cx
+            .update_window(self.window.into(), |_, window: &mut Window, _| {
+                window.render_to_image().expect("offscreen render")
+            })
+            .unwrap();
+        image
+            .save(std::path::Path::new(&dir).join(format!("{name}.png")))
+            .expect("the picture is saved");
+    }
+
+    /// One wheel step down (three lines) at `(x, y)`.
+    fn scroll(&mut self, x: f32, y: f32) {
+        self.cx
+            .update_window(self.window.into(), |_, window: &mut Window, cx| {
+                window.dispatch_event(
+                    PlatformInput::ScrollWheel(gpui::ScrollWheelEvent {
+                        position: point(px(x), px(y)),
+                        delta: gpui::ScrollDelta::Lines(point(0., -3.)),
+                        modifiers: Modifiers::default(),
+                        touch_phase: gpui::TouchPhase::Moved,
+                    }),
+                    cx,
+                );
+            })
+            .unwrap();
+        self.cx.run_until_parked();
+    }
+
     fn click(&mut self, name: &str) {
         let at = self
             .record(name)
@@ -592,6 +627,58 @@ fn open_add_project(rig: &mut Rig) {
         rig.record("folder-browser-filter").is_some(),
         "the form is open"
     );
+}
+
+/// Twenty folders under `/home/dev`: more than the list's 260 px shows.
+fn many_listing(path: Option<&str>) -> Value {
+    let entries: Vec<Value> = (0..20)
+        .map(|i| json!({"name": format!("folder-{i:02}"), "path": format!("/home/dev/folder-{i:02}"), "isGitRepo": false}))
+        .collect();
+    json!({"path": path.unwrap_or("/home/dev"), "parent": "/home", "entries": entries})
+}
+
+/// The Add project dialog with more folders than fit: a wheel over the list scrolls the list and
+/// nothing else, so the title, the name field and the path stay where they are.
+fn add_project_scroll(rig: &mut Rig) {
+    rig.asked();
+    rig.click("add-project-button");
+    answer_listings(rig, many_listing);
+    let top = |rig: &mut Rig, name: &str| {
+        f32::from(
+            rig.record(name)
+                .unwrap_or_else(|| panic!("{name} is drawn"))
+                .bounds
+                .origin
+                .y,
+        )
+    };
+    let (crumbs, first, use_it) = (
+        top(rig, "folder-browser-crumbs"),
+        top(rig, "folder-browser-entry:folder-00"),
+        top(rig, "folder-browser-use"),
+    );
+    let list = rig.record("folder-browser-list").unwrap().bounds;
+    assert!(
+        f32::from(list.size.height) <= 260.,
+        "the list is cut at 260 px: {list:?}"
+    );
+    rig.shot("add-project-before");
+    for _ in 0..2 {
+        rig.scroll(500., 380.);
+    }
+    rig.shot("add-project-scrolled");
+    assert!(
+        top(rig, "folder-browser-entry:folder-00") < first - 50.,
+        "the list scrolled"
+    );
+    assert_eq!(top(rig, "folder-browser-crumbs"), crumbs, "the path stayed");
+    assert_eq!(
+        top(rig, "folder-browser-use"),
+        use_it,
+        "Use this folder stayed"
+    );
+    rig.press("escape");
+    assert!(rig.record("folder-browser").is_none(), "Escape closed it");
 }
 
 fn folder_browser(rig: &mut Rig) {
@@ -1218,6 +1305,7 @@ fn main() {
     keybind_help(&mut rig);
     launcher(&mut rig);
     folder_browser(&mut rig);
+    add_project_scroll(&mut rig);
     instructions(&mut rig);
     memory(&mut rig);
     worktree(&mut rig);
