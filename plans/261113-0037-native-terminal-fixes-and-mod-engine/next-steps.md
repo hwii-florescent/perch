@@ -5,7 +5,7 @@ the rest of the old plans (all of it is in git history or the owner's Trash).
 
 ## Where the work is
 
-- Integration branch `feat/native-mods` at `29935133`, worktree `/Users/hwiii/Github/perch-wt/native-mods`.
+- Integration branch `feat/native-mods` at `cad60d78` (the window shell, 2026-11-15: `window-shell-brief.md`, side-by-sides in `window-shell/`), worktree `/Users/hwiii/Github/perch-wt/native-mods`.
   It is 134 commits ahead of `main` and has nothing `main` lacks. Not merged, never pushed.
 - The piece worktrees under `/Users/hwiii/Github/perch-wt/` (`a-input`, `b-engine`, `c-reference`, `d2-react`)
   are kept with their branches.
