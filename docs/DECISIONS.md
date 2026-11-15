@@ -7,6 +7,20 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-15 — A stopped sub-session closes like a person's Close (owner)
+
+Owner, after `perch stop` left stopped children's tabs and rows behind ("Agent unavailable", and
+`reconnecting [stopped]` after a core restart) in both apps:
+
+- A **confirmed** stop of a sub-session (`perch stop`, a person's Stop in its menu, a stopped or
+  deleted lead) closes it in every window: its tabs and its sidebar row go. An unconfirmed stop
+  changes nothing and says so.
+- The lead keeps what the run keeps: `perch list` still shows the child, as `exited` with dispatch
+  `stopped`, its title and its last report. Deleting the lead deletes its closed children too.
+- After a core restart a stopped child is never `reconnecting`. Stopped children left open by an
+  older build are closed on the next start; nothing else is touched.
+- A child that exits on its own is not closed by this rule.
+
 ## 2026-11-15 — Sub-session reports reach an idle lead at once, in plain lines, under the child's name (owner)
 
 - An idle lead gets each report as soon as it is sent, whatever its other children are doing. The earlier

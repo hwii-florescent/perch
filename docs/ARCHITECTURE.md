@@ -480,11 +480,19 @@ the core, not the agent, decides:
   leaves nothing behind.
 - *Stop* is by the lead for its own children only. The record goes `stopping`, the core terminates the
   process and confirms it is gone (`stop_confirmed`, like session delete), and only then records
-  `stopped` and lets the exit be observed. A person stopping a lead (terminal kill) stops its live
-  children the same way. Deleting a lead (also what archiving its Workspace does, which deletes the Workspace's
-  sessions) first stops its live children, each confirmed; if one cannot be shown stopped (a stop not
-  confirmed, a launch still in flight) the delete is refused and the lead and its records are kept. The
-  stopped children then remain as ordinary sessions without a parent; deleting a child drops its record.
+  `stopped`. A person stopping a lead (terminal kill) stops its live children the same way.
+- *A confirmed stop closes the child* like a person's Close (`session::close_stopped_child`): its
+  agents and shells end, its runtime records and saved snapshot go (so no restart restores it as
+  `reconnecting`), and `session.deleted` reaches every window, which drops its tabs and sidebar row.
+  Its session row, report, title and sub-session record stay; the record's `stopped` state keeps it
+  out of every session list (`SESSION_VISIBILITY_FILTER`), and `perch list` shows it `exited`. The
+  same applies when `stop_unknown` later settles to `stopped`. An unconfirmed stop changes nothing. On
+  start, a `stopped` child that still has a runtime record or a shell (stopped by an older build) is
+  closed by the same rule; nothing else is touched. Deleting a lead (also what archiving its Workspace
+  does, which deletes the Workspace's sessions) first stops its live children, each confirmed; if one
+  cannot be shown stopped (a stop not confirmed, a launch still in flight) the delete is refused and the
+  lead and its records are kept. Its closed children are deleted with it; children that exited on their
+  own remain as ordinary sessions without a parent. Deleting a child drops its record.
   **Esc in the chat is not a stop:** it interrupts the lead's own turn (a keystroke into its prompt), and
   its children keep running; only a terminal kill, a delete and `perch stop` stop them.
 - *`--worktree`*: after the child is recorded, the core makes a new checkout of the lead's repository,
