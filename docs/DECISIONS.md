@@ -7,6 +7,14 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-15 — Sub-sessions in the sidebar: elbow connector, filled cards, "…" menu (owner)
+
+Owner direction with a reference picture. In the stock sidebar (both apps): a session with sub-sessions is a filled
+rounded row with a chevron that folds its sub-sessions; each sub-session is an indented filled row with an elbow
+connector ("└") from the parent instead of the bracket-shaped left border. Every session row shows a "…" button
+(on hover, focus or when active) that opens the row's existing menu; it **replaces the hover ×**, so Close is in that
+menu, plus the existing close shortcut and middle-click.
+
 ## 2026-11-15 — Mods in the native client are trusted code, as on the web (owner)
 
 Extends "Mods: trusted JavaScript" (2026-11-08) to the native client's mod engine. Any mod, stock or a
