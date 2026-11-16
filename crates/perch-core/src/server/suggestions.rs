@@ -1354,7 +1354,6 @@ mod tests {
             .unwrap();
         run.db.set_limits(crate::sub_sessions::RunLimits {
             live: 1,
-            total: 1,
             ..Default::default()
         });
         let (status, answer) = call(&run, "spawn", &run.lead_token, body("s2")).await;

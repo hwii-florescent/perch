@@ -535,9 +535,10 @@ export interface SettingsData {
   reporterOmpModel?: string;
   /**
    * Per-run sub-session limits (Settings > Sub-sessions). Absent from an older core = today's defaults:
-   * 4 live, 8 total, 50 messages, 3 interrupts per sub-session, 10 waiting cards.
+   * 4 live, 50 messages, 3 interrupts per sub-session, 10 waiting cards.
    */
   maxLiveSubSessions?: number;
+  /** @deprecated Legacy field; a run has no total limit. */
   maxSubSessions?: number;
   maxMessagesPerRun?: number;
   /** @deprecated Legacy field; automatic lead deliveries are unlimited. */
@@ -595,6 +596,7 @@ export interface SettingsPatch {
   reporterPiModel?: string;
   reporterOmpModel?: string;
   maxLiveSubSessions?: number;
+  /** @deprecated Accepted for compatibility and ignored; a run has no total limit. */
   maxSubSessions?: number;
   maxMessagesPerRun?: number;
   /** @deprecated Accepted for compatibility; does not limit delivery. */
