@@ -200,7 +200,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     const button = (
       <button
         type="button"
-        className={cn(SESSION, lead && "w-auto min-w-0 flex-initial pr-1", variant === "status" && "min-h-9 py-0 pl-[1.875rem] min-[701px]:min-h-6", variant === "tree" && group !== "chats" && !nested && "pl-[1.9rem]", nested && "pl-2", active ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
+        className={cn(SESSION, lead && "w-auto min-w-0 flex-initial pr-1", variant === "status" && "min-h-9 py-0 min-[701px]:min-h-6", variant === "status" && !nested && "pl-[1.875rem]", variant === "tree" && group !== "chats" && !nested && "pl-[1.525rem]", nested && "pl-1", active ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
         aria-current={active ? "page" : undefined}
         title={variant === "tree" ? title : session.cwd}
         data-testid={`workspace-session-${session.id}`}
@@ -223,13 +223,22 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         </>}
       </button>
     );
-    const card = (
+    return (
       <div
-        className={cn("group/row flex min-w-0 items-stretch rounded-ui", nested && "flex-1", lit ? "bg-surface-1" : cn((lead || nested) && "bg-surface-0", "hover:bg-surface-1 focus-within:bg-surface-1"))}
+        className={cn("group/row flex min-w-0 items-stretch rounded-ui", lit ? "bg-surface-1" : cn((lead || nested) && "bg-surface-0", "hover:bg-surface-1 focus-within:bg-surface-1"))}
         data-sub-session={nested || undefined}
-        key={nested ? undefined : session.id}
-        {...(nested ? {} : sessionRowProps(session, siblings, group))}
+        key={session.id}
+        {...sessionRowProps(session, siblings, group)}
       >
+        {/* A sub-session spans the row like any other; only its elbow and content are indented. The elbow comes
+          * down from the lead's icon column (row padding + half the 18px icon) and turns into this row; the rows
+          * before the last go on. */}
+        {nested && (
+          <span className={cn("-mt-[2px] flex w-2.5 shrink-0 flex-col", variant === "status" ? "ml-[2.375rem]" : group === "chats" ? "ml-[1.15rem]" : "ml-[2.025rem]")} aria-hidden="true" data-testid={`session-elbow-${session.id}`}>
+            <span className="flex-1 rounded-bl-[6px] border-b border-l border-overlay-0" />
+            <span className={cn("flex-1", !last && "border-l border-overlay-0")} />
+          </span>
+        )}
         {button}
         {lead && <>
           <button
@@ -262,17 +271,6 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         >
           <EllipsisIcon />
         </button>
-      </div>
-    );
-    if (!nested) return card;
-    return (
-      <div {...sessionRowProps(session, siblings, group)} className={cn("flex min-w-0 items-stretch gap-1", variant === "status" ? "pl-[2.35rem]" : group === "chats" ? "pl-[1.2rem]" : "pl-[2.45rem]")} key={session.id}>
-        {/* The elbow: the lead's icon column runs down and turns into this row; the rows before the last go on. */}
-        <span className="-mt-[2px] flex w-3 shrink-0 flex-col" aria-hidden="true" data-testid={`session-elbow-${session.id}`}>
-          <span className="flex-1 rounded-bl-[6px] border-b border-l border-overlay-0" />
-          <span className={cn("flex-1", !last && "border-l border-overlay-0")} />
-        </span>
-        {card}
       </div>
     );
   }
@@ -647,7 +645,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
               type="button"
               className={cn(
                 ROW_BTN,
-                "min-h-8 flex-1 cursor-pointer gap-[0.45rem] rounded-ui bg-transparent py-[3px] pr-3 pl-3 text-fg",
+                "min-h-8 flex-1 cursor-pointer gap-[0.45rem] rounded-ui bg-transparent py-[3px] pr-3 pl-1.5 text-fg",
                 single && "workspace-entry__button",
                 single && single.id === activeWorkspaceId && "workspace-entry__button--active",
                 FOCUS,

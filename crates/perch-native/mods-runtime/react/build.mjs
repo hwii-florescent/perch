@@ -9,6 +9,8 @@
 //!     re-exporting a namespace of `runtime.mjs`;
 //!   - `agent-icons.js`: the web's agent marks;
 //!   - `host.js` and `screen.js` there are written by hand and left alone.
+//! - `settings/settings-<page>/*.js` for the sections of the Settings page ([`NATIVE_ONLY`], `settings/main.js` and
+//!   `react-runtime/settings-props.js` are by hand);
 //! - `<screen>/<screen>/*.js` for every id in [`SCREENS`]: that stock screen as the app exports it
 //!   (`packages/web/scripts/export-stock-ui.mjs`), and `<screen>/<other>/*.js` for a stock screen drawn inside it
 //!   ([`ALSO`]). `<screen>/main.js` and `<screen>/mod.json` are written by hand.
@@ -61,6 +63,12 @@ export const SCREENS = [
   "phone-size",
   "agent-control",
 ];
+/** Screens with no stock source of their own, drawn by hand from other stock screens (`ALSO`): the Settings page's frame
+ * is Perch's own component in the web (`SettingsPage.tsx`), not a stock screen, so its folder holds only what is written
+ * by hand and the exported sources of its sections. */
+export const NATIVE_ONLY = ["settings"];
+/** Every screen folder the build writes into. */
+const FOLDERS = [...SCREENS, ...NATIVE_ONLY];
 /** Other stock screens a screen's folder carries, by the screen: they draw inside it (the close guard asks its question
  * through the confirmation, with its own rows in it; the New session menu draws the tab strip's icons; the dialog draws
  * the file menu's name prompts). */
@@ -71,9 +79,10 @@ export const ALSO = {
   confirm: ["close-guard"],
   "new-session": ["tabs"],
   dialog: ["file-menu"],
+  settings: ["settings-general", "settings-appearance", "settings-agents", "settings-keyboard", "settings-terminal", "settings-notifications", "settings-hosts", "settings-devices"],
 };
 /** Files under the folders the build writes that it does not write. */
-const HAND_WRITTEN = new Set([`${RUNTIME}/host.js`, `${RUNTIME}/screen.js`, ...SCREENS.flatMap((id) => [`${id}/main.js`, `${id}/mod.json`])]);
+const HAND_WRITTEN = new Set([`${RUNTIME}/host.js`, `${RUNTIME}/screen.js`, `${RUNTIME}/settings-props.js`, ...FOLDERS.flatMap((id) => [`${id}/main.js`, `${id}/mod.json`])]);
 const requireWeb = createRequire(path.join(web, "package.json"));
 const load = async (name) => import(pathToFileURL(requireWeb.resolve(name)).href);
 
@@ -224,8 +233,8 @@ async function screenFiles() {
   const { exportStockUi } = await import(pathToFileURL(path.join(web, "scripts/export-stock-ui.mjs")).href);
   const files = exportStockUi({ sourceDir: path.join(web, "src/stock-ui"), sdkTypesFile: path.join(web, "src/perch-sdk.d.ts") });
   const out = [];
-  for (const screen of SCREENS) {
-    for (const id of [screen, ...(ALSO[screen] ?? [])]) {
+  for (const screen of FOLDERS) {
+    for (const id of [...(NATIVE_ONLY.includes(screen) ? [] : [screen]), ...(ALSO[screen] ?? [])]) {
       const own = [...files].filter(([rel]) => rel.startsWith(`${id}/`) && rel.endsWith(".js"));
       if (!own.length) throw new Error(`packages/web/src/stock-ui has no screen ${id}`);
       for (const [rel, bytes] of own) out.push([`${screen}/${rel}`, Buffer.from(bytes).toString("utf8")]);
@@ -321,7 +330,7 @@ export function differences(files, dir = OUT) {
     if (!fs.existsSync(file)) out.push(`missing ${name}`);
     else if (fs.readFileSync(file, "utf8") !== text) out.push(`changed ${name}`);
   }
-  for (const folder of [RUNTIME, ...SCREENS]) {
+  for (const folder of [RUNTIME, ...FOLDERS]) {
     for (const rel of listFiles(path.join(dir, folder))) {
       const name = `${folder}/${rel}`;
       if (!files.has(name) && !HAND_WRITTEN.has(name) && !path.basename(name).startsWith(".")) out.push(`extra ${name}`);
@@ -352,7 +361,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
         fs.writeFileSync(path.join(OUT, name), text);
       }
       const size = (name) => `${(Buffer.byteLength(files.get(name)) / 1024).toFixed(1)} KiB`;
-      console.log(`wrote ${files.size} files in ${path.relative(repo, OUT)} (${[RUNTIME, ...SCREENS].join(", ")}): runtime.mjs ${size(`${RUNTIME}/runtime.mjs`)}`);
+      console.log(`wrote ${files.size} files in ${path.relative(repo, OUT)} (${[RUNTIME, ...FOLDERS].join(", ")}): runtime.mjs ${size(`${RUNTIME}/runtime.mjs`)}`);
     }
   } catch (error) {
     console.error(error instanceof Error ? error.stack : error);

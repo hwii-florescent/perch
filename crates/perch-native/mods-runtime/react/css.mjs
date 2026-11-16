@@ -22,6 +22,7 @@ const UA_RULES = [
   ["html", { display: "block", "font-size": "16px", "font-family": "Times", color: "#000000", "line-height": "normal" }],
   ["body", { display: "block", margin: "8px" }],
   ["div, section, aside, p, nav, header, footer, main, ul, ol, li, form, label[hidden]", { display: "block" }],
+  ["datalist, template, script, style, head, title", { display: "none" }],
   ["p", { "margin-top": "1em", "margin-bottom": "1em" }],
   ["strong, b", { "font-weight": "bold" }],
   ["em, i", { "font-style": "italic" }],

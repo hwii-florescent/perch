@@ -56,6 +56,8 @@ pub struct Store {
     pub viewing: Option<String>,
     /// The chat kept in Done while it is read (`holdFinished`).
     pub held: Option<String>,
+    /// The core's settings as it sent them, camelCase as the web reads them; null until it has.
+    pub settings: Option<serde_json::Value>,
     /// `settings.theme`.
     pub theme: Option<String>,
     /// `settings.emptyWorkspaceAgent`, once the core has sent it.

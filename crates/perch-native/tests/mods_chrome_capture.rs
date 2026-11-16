@@ -12,7 +12,7 @@ mod parity_screens;
 use parity_screens::ScreenFixture;
 use std::time::Instant;
 
-const SCREENS: [&str; 9] = [
+const SCREENS: [&str; 10] = [
     "tabs",
     "status",
     "pane-header",
@@ -22,6 +22,7 @@ const SCREENS: [&str; 9] = [
     "terminal-search",
     "phone-size",
     "agent-control",
+    "settings",
 ];
 
 fn main() {

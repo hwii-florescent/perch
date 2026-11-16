@@ -1,0 +1,176 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "settings",
+  "note": "Settings as the Mac app draws it: the whole window at the native client's default size, the section list on the left (room for the traffic lights), the search and the chosen section on the right (components/SettingsPage.tsx; each section is the stock screen `settingsRoutes.tsx` binds). Data: the sidebar fixture's store (dataFrom: the computers) with `settings` (the core's `settings.current`) and the agents the host lists; nothing answers a core, so a section that asks for something (devices, the notification models) shows what it shows with no answer. A section is chosen by `steps`; the page opens on General. Permissions is the Mac app's own section and is not drawn here (no Tauri bridge in the reference); Mods is Perch's recovery page.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1100,
+    "height": 720
+  },
+  "window": {
+    "width": 1100,
+    "height": 720
+  },
+  "data": {
+    "settings": {
+      "defaultCwd": null,
+      "theme": "perch",
+      "soundEnabled": true,
+      "toastDelivery": "app",
+      "chatMode": "cli",
+      "terminalScrollback": 10000,
+      "terminalLoginShell": false,
+      "droppedPathDoubleQuotes": false,
+      "emptyWorkspaceAgent": "",
+      "keybindings": {},
+      "warnCloseAgent": true,
+      "previewTabs": true,
+      "tabShape": "square",
+      "minimumContrast": 1,
+      "clipboardWrite": true,
+      "copyOnSelect": true,
+      "paneScrollbars": true,
+      "terminalPadding": [
+        4,
+        4
+      ],
+      "terminalOpacity": 1,
+      "optionAsAlt": "auto",
+      "soundDone": "",
+      "soundBlocked": ""
+    },
+    "agentManifestsByHost": {
+      "local": {
+        "state": "ready",
+        "manifests": [
+          {
+            "id": "claude",
+            "displayName": "Claude",
+            "supportedModes": [
+              "cli"
+            ],
+            "resumability": "none",
+            "capabilities": [
+              "interactiveTerminal"
+            ],
+            "statusDetection": "hooks",
+            "available": true,
+            "enabled": true,
+            "isDefault": true
+          },
+          {
+            "id": "codex",
+            "displayName": "Codex",
+            "supportedModes": [
+              "cli"
+            ],
+            "resumability": "none",
+            "capabilities": [
+              "interactiveTerminal"
+            ],
+            "statusDetection": "hooks",
+            "available": true,
+            "enabled": true
+          },
+          {
+            "id": "pi",
+            "displayName": "Pi",
+            "supportedModes": [
+              "cli"
+            ],
+            "resumability": "none",
+            "capabilities": [
+              "interactiveTerminal"
+            ],
+            "statusDetection": "hooks",
+            "available": true,
+            "enabled": true
+          }
+        ]
+      }
+    },
+    "settingsOpen": true,
+    "settingsPage": "main"
+  },
+  "states": [
+    {
+      "id": "general",
+      "title": "General: the page as it opens"
+    },
+    {
+      "id": "appearance",
+      "title": "Appearance",
+      "steps": [
+        {
+          "click": "[data-testid=\"settings-nav-appearance\"]"
+        }
+      ]
+    },
+    {
+      "id": "agents",
+      "title": "Agents: the catalog the host lists",
+      "steps": [
+        {
+          "click": "[data-testid=\"settings-nav-agents\"]"
+        }
+      ]
+    },
+    {
+      "id": "keyboard",
+      "title": "Keyboard: the commands and their keys",
+      "steps": [
+        {
+          "click": "[data-testid=\"settings-nav-keyboard\"]"
+        }
+      ]
+    },
+    {
+      "id": "terminal",
+      "title": "Terminal",
+      "steps": [
+        {
+          "click": "[data-testid=\"settings-nav-terminal\"]"
+        }
+      ]
+    },
+    {
+      "id": "notifications",
+      "title": "Notifications",
+      "steps": [
+        {
+          "click": "[data-testid=\"settings-nav-notifications\"]"
+        }
+      ]
+    },
+    {
+      "id": "hosts",
+      "title": "SSH hosts: the computers Perch reaches",
+      "steps": [
+        {
+          "click": "[data-testid=\"settings-nav-hosts\"]"
+        }
+      ]
+    },
+    {
+      "id": "devices",
+      "title": "Devices",
+      "steps": [
+        {
+          "click": "[data-testid=\"settings-nav-devices\"]"
+        }
+      ]
+    },
+    {
+      "id": "search",
+      "title": "A search narrows every section to the rows that match",
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"settings-search\"]",
+            "text": "scroll"
+          }
+        }
+      ]
+    }
+  ]
+}

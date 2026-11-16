@@ -786,6 +786,9 @@ pub enum Command {
     /// What a session does with messages from other sessions (`inbound.act` `set_mode`): `accept`,
     /// `hold` or `refuse`. The menu follows the session list's `inboundMode`, not this request.
     InboundMode { session_id: String, mode: String },
+    /// A message the core answers with a broadcast, not a reply (`frame`, from [`send_frame`]):
+    /// a setting or a computer's change. The sidebar follows what the core then says.
+    Send(Value),
     /// A question for the core (`frame`, from [`ask_frame`], given a request id here), answered
     /// with what the core says to it or why not. A dropped connection drops `reply`.
     Ask { frame: Value, reply: Answer },
@@ -834,12 +837,17 @@ pub const NOT_CONNECTED: &str =
     "Perch is not connected to its core, so nothing was changed. Try again once it is back.";
 
 /// The questions a screen puts to the core that change nothing there.
-const READS: [&str; 5] = [
+const READS: [&str; 10] = [
     "fs.browse",
     "instructions.get",
     "memory.list",
     "memory.get",
     "worktree.list",
+    "device.list",
+    "phone.access.get",
+    "machine.hosts",
+    "agent.models.list",
+    "agent.manifest.list",
 ];
 
 impl Command {
@@ -890,6 +898,28 @@ const ASKS: &[(&str, &[(&str, Field)])] = &[
         ],
     ),
     ("memory.list", &[("projectId", Field::Text)]),
+    // Settings' pages: the paired devices and the pairing code, who can reach this computer, the
+    // ssh look at a computer, the models of each harness and each computer's agent list. All
+    // answered under the request id.
+    ("device.list", &[]),
+    ("device.pair.start", &[]),
+    ("device.pair.cancel", &[]),
+    ("device.revoke", &[("deviceId", Field::Text)]),
+    ("phone.access.get", &[]),
+    ("machine.hosts", &[]),
+    ("machine.probe", &[("sshHost", Field::Text)]),
+    ("machine.install", &[("sshHost", Field::Text)]),
+    ("agent.models.list", &[]),
+    ("agent.manifest.list", &[("hostId", Field::Host)]),
+    (
+        "agent.provider.configure",
+        &[
+            ("hostId", Field::Host),
+            ("providerId", Field::Text),
+            ("enabled", Field::MaybeFlag),
+            ("isDefault", Field::MaybeFlag),
+        ],
+    ),
     (
         "memory.get",
         &[("projectId", Field::Text), ("name", Field::Text)],
@@ -978,6 +1008,8 @@ enum Field {
     Scope,
     /// A computer: left out for this one, as the web client does.
     Host,
+    /// A flag, or null to leave it out.
+    MaybeFlag,
 }
 
 /// The frame for question `kind` with `args`' fields, checked against [`ASKS`] (its request
@@ -999,6 +1031,8 @@ pub fn ask_frame(kind: &str, args: &Value) -> Result<Value, String> {
                 .filter(|host| *host != LOCAL)
                 .map(Value::from),
             Field::Flag => Some(value.as_bool().ok_or_else(bad)?.into()),
+            Field::MaybeFlag if value.is_null() => None,
+            Field::MaybeFlag => Some(value.as_bool().ok_or_else(bad)?.into()),
             Field::Scope => Some(
                 value
                     .as_str()
@@ -1021,12 +1055,41 @@ pub fn ask_frame(kind: &str, args: &Value) -> Result<Value, String> {
     Ok(frame)
 }
 
+/// The frame for change `kind` with `args` (`settings.update` with its `patch`, `hosts.upsert`
+/// with its `host`, `hosts.delete` with its `id`), checked as the core reads it. The core
+/// answers each with a broadcast (`settings.current`, `hosts.updated`), not under a request id.
+pub fn send_frame(kind: &str, args: &Value) -> Result<Value, String> {
+    match kind {
+        "settings.update" => {
+            let patch = &args["patch"];
+            serde_json::from_value::<perch_core::protocol::SettingsPatch>(patch.clone())
+                .map_err(|e| format!("settings.update takes a settings patch: {e}"))?;
+            Ok(json!({"type": kind, "patch": patch}))
+        }
+        "hosts.upsert" => {
+            let host = &args["host"];
+            serde_json::from_value::<perch_core::protocol::SshHostEntry>(host.clone())
+                .map_err(|e| format!("hosts.upsert takes a computer: {e}"))?;
+            Ok(json!({"type": kind, "host": host}))
+        }
+        "browser.history.clear" => Ok(json!({"type": kind})),
+        "hosts.delete" => {
+            let id = args["id"]
+                .as_str()
+                .ok_or_else(|| "hosts.delete needs id as text.".to_string())?;
+            Ok(json!({"type": kind, "id": id}))
+        }
+        _ => Err(format!("The core is not sent {kind:?} from a screen.")),
+    }
+}
+
 impl Field {
     fn word(self) -> &'static str {
         match self {
             Field::Text => "text",
             Field::MaybeText | Field::Host => "text or null",
             Field::Flag => "true or false",
+            Field::MaybeFlag => "true, false or null",
             Field::Texts => "a list of text",
             Field::Scope => "\"project\" or \"workspace\"",
         }
@@ -1040,6 +1103,21 @@ fn answer_of(message: &ServerMessage) -> Option<(&str, Result<Value, String>)> {
         ServerMessage::InstructionsState { request_id, .. }
         | ServerMessage::MemoryState { request_id, .. }
         | ServerMessage::MemoryFileState { request_id, .. } => {
+            let mut state = serde_json::to_value(message).unwrap_or(Value::Null);
+            if let Some(state) = state.as_object_mut() {
+                state.remove("type");
+                state.remove("requestId");
+            }
+            Some((request_id, Ok(state)))
+        }
+        // Settings' pages read these as the core sent them (without their kind and request id).
+        ServerMessage::DevicePairCode { request_id, .. }
+        | ServerMessage::DeviceListResult { request_id, .. }
+        | ServerMessage::PhoneAccessStatus { request_id, .. }
+        | ServerMessage::MachineHosts { request_id, .. }
+        | ServerMessage::MachineResult { request_id, .. }
+        | ServerMessage::AgentModelsList { request_id, .. }
+        | ServerMessage::AgentManifestList { request_id, .. } => {
             let mut state = serde_json::to_value(message).unwrap_or(Value::Null);
             if let Some(state) = state.as_object_mut() {
                 state.remove("type");
@@ -1412,6 +1490,9 @@ async fn live(
                 Some(Command::UsageGet { force }) => {
                     connection.send(json!({"type": "usage.get", "force": force})).await?;
                 }
+                Some(Command::Send(frame)) => {
+                    connection.send(frame).await?;
+                }
                 Some(Command::Ask { mut frame, reply }) => {
                     let id = connection.request_id();
                     frame["requestId"] = json!(id);
@@ -1639,6 +1720,20 @@ mod tests {
                 json!({"scope": "workspace", "id": "w", "text": "t", "folders": ["/a"]}),
             ),
             ("memory.list", json!({"projectId": "p"})),
+            ("device.list", json!({})),
+            ("device.pair.start", json!({})),
+            ("device.pair.cancel", json!({})),
+            ("device.revoke", json!({"deviceId": "d"})),
+            ("phone.access.get", json!({})),
+            ("machine.hosts", json!({})),
+            ("machine.probe", json!({"sshHost": "box"})),
+            ("machine.install", json!({"sshHost": "box"})),
+            ("agent.models.list", json!({})),
+            ("agent.manifest.list", json!({"hostId": "build-box"})),
+            (
+                "agent.provider.configure",
+                json!({"hostId": "local", "providerId": "claude", "enabled": false, "isDefault": null}),
+            ),
             ("memory.get", json!({"projectId": "p", "name": "a.md"})),
             (
                 "memory.set",
@@ -1688,6 +1783,30 @@ mod tests {
             json!({"type": "fs.browse"}),
             "this computer is left out"
         );
+        // A change the core answers with a broadcast is checked as the core reads it.
+        for (kind, args) in [
+            (
+                "settings.update",
+                json!({"patch": {"terminalScrollback": 5000, "defaultCwd": null}}),
+            ),
+            (
+                "hosts.upsert",
+                json!({"host": {"id": "h", "name": "Box", "sshHost": "box", "remotePort": 7788, "enabled": true}}),
+            ),
+            ("hosts.delete", json!({"id": "h"})),
+            ("browser.history.clear", json!({})),
+        ] {
+            let frame = send_frame(kind, &args).unwrap_or_else(|e| panic!("{kind}: {e}"));
+            serde_json::from_value::<ClientMessage>(frame.clone())
+                .unwrap_or_else(|e| panic!("{frame}: {e}"));
+        }
+        assert!(send_frame(
+            "settings.update",
+            &json!({"patch": {"terminalScrollback": "lots"}})
+        )
+        .is_err());
+        assert!(send_frame("hosts.upsert", &json!({"host": {"id": 3}})).is_err());
+        assert!(send_frame("session.delete", &json!({"sessionId": "s"})).is_err());
         // Only the questions listed, with their fields as the core takes them.
         assert!(ask_frame("session.delete", &json!({"sessionId": "s"})).is_err());
         assert!(

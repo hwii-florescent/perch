@@ -36,7 +36,7 @@ export const SESSION = `${ROW_BTN} min-h-8 flex-1 cursor-pointer gap-2 rounded-u
 export const SESSION_TITLE = "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap";
 export const RENAME = "mx-[0.3rem] my-1 w-[calc(100%_-_0.6rem)] rounded-ui bg-surface-0 px-[0.3rem] focus:[outline:1px_solid_var(--accent)] py-[0.2rem] text-[0.76rem] text-fg [font-family:inherit] [font-weight:inherit] [line-height:inherit]";
 export const DOT = "shrink-0 text-[0.58rem] text-subtext-0";
-export const ENTRY_BTN = `workspace-entry__button ${ROW_BTN} min-h-8 cursor-pointer gap-[0.45rem] rounded-ui py-[3px] pr-3 pl-3 text-fg ${FOCUS}`;
+export const ENTRY_BTN = `workspace-entry__button ${ROW_BTN} min-h-8 cursor-pointer gap-[0.45rem] rounded-ui py-[3px] pr-3 pl-1.5 text-fg ${FOCUS}`;
 export const STRONG = "overflow-hidden text-[14px] font-semibold text-ellipsis whitespace-nowrap text-fg min-[701px]:text-[12.5px] min-[701px]:font-medium";
 export const WORKSPACE_TITLE = "min-w-0 overflow-hidden text-[13px] font-medium text-ellipsis whitespace-nowrap min-[701px]:text-[12px]";
 export const WORKSPACE_TREE = "workspace-tree flex flex-col gap-[2px]";
@@ -190,7 +190,7 @@ export function HiddenWorktrees({ workspaces, projectId }) {
     const count = workspaces.length;
     return (_jsxs("div", { children: [_jsxs("button", {
                 type: "button",
-                className: "w-full cursor-pointer pt-1 pr-[0.45rem] pb-1 pl-[1.45rem] text-left text-[0.62rem] text-overlay-1 [background:none] [border:0] [font-family:inherit] hover:text-accent focus-visible:text-accent",
+                className: "w-full cursor-pointer pt-1 pr-[0.45rem] pb-1 pl-[1.075rem] text-left text-[0.62rem] text-overlay-1 [background:none] [border:0] [font-family:inherit] hover:text-accent focus-visible:text-accent",
                 "aria-expanded": open,
                 "data-testid": `workspace-hidden-${projectId}`,
                 onClick: () => setOpen(!open),
@@ -200,7 +200,7 @@ export function HiddenWorktrees({ workspaces, projectId }) {
                     count === 1 ? "" : "s"
                 ]
             }), open && workspaces.map((workspace) => (_jsxs("div", {
-                className: "flex items-center gap-[0.35rem] py-[3px] pr-3 pl-[1.45rem]",
+                className: "flex items-center gap-[0.35rem] py-[3px] pr-3 pl-[1.075rem]",
                 title: workspace.path,
                 children: [
                     _jsxs("span", {

@@ -273,8 +273,19 @@ export function mount(perch, Component, options = {}) {
       // A browser's default action: a click on a form's submit button submits the form.
       const form = type === "click" && !event.defaultPrevented ? submits(target) : null;
       if (form) handle.dispatch(form, "submit", {});
+      // ... and a click on a link (or in one) to an https address opens it outside, as the web's `_blank` does.
+      if (type === "click" && !event.defaultPrevented) {
+        for (let node = target; node; node = node.parentNode) {
+          if (node.tagName !== "a") continue;
+          const href = node.props?.href;
+          if (typeof href === "string" && /^https:\/\/\S+$/.test(href)) perch.openLink?.(href);
+          break;
+        }
+      }
       return !event.defaultPrevented;
     },
+    /** Whether the source listens for `type` on `window` or `document` (a page recording a key press does). */
+    listensFor: (type) => [document, window].some((target) => target.listeners.some((l) => l.type === type)),
     /** A key pressed while the screen has the keyboard (`init`: the DOM's `key`, modifiers, `repeat`), at the
      * focused element. When nothing prevented it and that element is a text field, the key edits the field as a
      * browser would: a character is typed at the end (or replaces the text when all of it is selected), Backspace
