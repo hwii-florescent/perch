@@ -566,6 +566,8 @@ export function shortcutFor(event: KeyboardEvent, scope?: Sdk.ShortcutScope): Sd
   return found ? { id: found.id, scope: found.scope ?? "global" } : null;
 }
 export { menuDivider as menuDividerClass } from "./components/ui/menu";
+import { Submenu } from "./components/ui/submenu";
+export { Submenu };
 
 // 1.5: layout content inside a package's own view, with the window layout's nodes. Its terminals are Perch's engines
 // (`PersistentTerminal`, `PersistentAgentTerminal`), borrowed: one already on screen moves in and back, so a package
@@ -613,7 +615,7 @@ export function sdkSurface(): typeof Sdk {
   usePaneLook, agentStateColor, tabStateClass: TAB_PANE_CLASS, segmentClass, AgentIcon, PageIcon, TabDragLayer,
   useHosts, useNavigation, nestSessions, useSessionFolders, useAddProject, useAddProjectRequest, pickFolder,
   SessionDot, HostStateDot, SessionMenu, WorktreeMenu, InstructionsDialog, MemoryDialog, FolderBrowser: DirectoryBrowser, Dialog, ConfirmDialog, Select,
-  menuItemClass, rowActionClass, buttonClass: button, beginReorderDrag,
+  menuItemClass, Submenu, rowActionClass, buttonClass: button, beginReorderDrag,
   useResourceState, newId, FileIcon, GitMarker, useGitReview,
   terminals: terminalRecords, useTerminals, readTerminal, fetchTerminal, sendToTerminal, layoutTree, focus: focusInfo, useModData,
   useNotifications, iconButton: ICON_BUTTON, useAgentChoices, shortcutFor, menuDividerClass: menuDivider,

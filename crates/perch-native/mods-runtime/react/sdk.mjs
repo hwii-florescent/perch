@@ -21,11 +21,14 @@ import StockSelect from "../../../../packages/web/src/stock-ui/select/main.tsx";
 import StockEditorMenu from "../../../../packages/web/src/stock-ui/editor-menu/main.tsx";
 import { SELECT } from "../../../../packages/web/src/components/ui/settings.ts";
 import { Chevron } from "../../../../packages/web/src/components/ui/chevron.tsx";
+import { Submenu } from "../../../../packages/web/src/components/ui/submenu.tsx";
 import { DOT_GLYPH, sessionDotState } from "../../../../packages/web/src/statusDot.ts";
 import { isNestedIn, nestUnderLeads } from "../../../../packages/web/src/sidebarOrder.ts";
 import { computeAnchoredPopoverStyle, useDismissOnOutsideClick } from "../../../../packages/web/src/components/popoverPosition.ts";
 import { PageIcon } from "../../../../packages/web/src/components/PageIcon.tsx";
 import { FileAsset as NativeFileAsset } from "./fileAsset.mjs";
+import { FileIcon, GitMarker } from "../../../../packages/web/src/components/fileDecorations.tsx";
+import { assetKind } from "../../../../packages/web/src/components/workspaceFileKind.ts";
 
 /** The SDK version this surface implements (`perch-sdk.d.ts`'s navigation part). */
 export const version = "1.3.0";
@@ -46,7 +49,7 @@ function host() {
 }
 const subscribe = (listener) => host().subscribe?.(listener) ?? (() => {});
 
-export { Chevron, cn, menuPanel, CloseIcon, EllipsisIcon, GearIcon, PlusIcon, HostStateDot, PageIcon, useDismissOnOutsideClick };
+export { Chevron, cn, menuPanel, Submenu, CloseIcon, EllipsisIcon, GearIcon, PlusIcon, HostStateDot, PageIcon, useDismissOnOutsideClick };
 export const anchoredPopoverStyle = computeAnchoredPopoverStyle;
 // Settings' pages (1.8): the host's own parts and class strings, so the pages draw as the web's (`sdkSettings.ts`), and
 // `SettingsQuery`, the search text the Settings shell provides. The QR is the web's own component.
@@ -393,6 +396,44 @@ export const beginReorderDrag = (event, options) => {
 // ---- chrome (1.2: tabs, status bar, pane header) ------------------------------------------------------------------
 
 export const useWorkspaceTabs = () => useHostSnapshot((perch) => perch.workspaceTabs());
+
+// ---- files ----------------------------------------------------------------------------------------------------
+
+export { FileIcon, GitMarker, assetKind };
+// ponytail: stand-ins until the native engines land: Markdown shows its source (the token renderer replaces
+// `MarkdownPreview`) and the entry menu is not offered yet. `FileAsset` is the media viewer below.
+
+export function MarkdownPreview({ content }) {
+  return createElement("pre", { className: "m-0 min-h-0 flex-1 overflow-auto p-3 whitespace-pre-wrap text-fg" }, content);
+}
+export const FileEntryMenu = () => null;
+
+const NO_MARKS = new Map();
+const FILE_ACTIONS = ["requestTree", "searchFiles", "openFile", "reloadFile", "requestPreview", "updateDraft", "saveFile", "overwriteFile", "setWrap"];
+/** `useWorkspaceFiles`: a workspace's files as the window's store keeps them (listings, documents with their drafts,
+ * previews, the last search), its Git marks with `{git: true}`, and the store's actions. An action runs once the
+ * current call has unwound and returns null (the web's request ids are not used by a screen). */
+export function useWorkspaceFiles(workspaceId, options = {}) {
+  const data = useHostSnapshot((perch) => perch.workspaceFiles(workspaceId));
+  const withGit = !!options.git;
+  const marks = data.git?.decorations;
+  const decorations = useMemo(() => (withGit && marks?.length ? new Map(marks) : NO_MARKS), [marks, withGit]);
+  const actions = useMemo(() => Object.fromEntries(FILE_ACTIONS.map((action) => [action, (...args) => {
+    host().filesDo(action, workspaceId, ...args);
+    return null;
+  }])), [workspaceId]);
+  return useMemo(() => ({
+    workspace: data.workspace,
+    connected: data.connected,
+    trees: data.trees,
+    documents: data.documents,
+    previews: data.previews,
+    search: data.search ?? undefined,
+    wrap: data.wrap,
+    git: { ...data.git, decorations },
+    actions,
+  }), [data, decorations, actions]);
+}
 export const useStatusLine = () => useHostSnapshot((perch) => perch.statusLine());
 export const useZoom = () => useHostSnapshot((perch) => perch.zoom());
 export const usePaneLook = () => useHostSnapshot((perch) => perch.paneLook());
@@ -481,11 +522,20 @@ function GotoLine({ onGo, onClose }) {
  * and reload) parks the old one, and unmounting parks it. The store's `value` goes in as an outside edit (no undo
  * entry, no change event) only when it differs from what the editor last reported; user edits leave through
  * `onChange`. Keys (save, find, go to line) and typing rules are the editor's own, in Rust.
+ *
+ * A workspace file's document (`docKey` `<workspace>\0<path>\0<reload epoch>`, as the files screen makes it) is kept
+ * in step by the window itself: each edit reaches its store at once and the store's text reaches the editor, so a key
+ * costs this screen nothing. Then `value` is only the text it opens with, `onChange` is not called, and the caret
+ * comes from the window's snapshot of the workspace's files.
  */
 export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, label, path, docKey, onAskAgent, ref }) {
   const editor = host().editor;
   const latest = useRef(null);
   latest.current = { onChange, onSave, onCaret, onAskAgent };
+  const [workspaceId, , epoch] = String(docKey).split("\0");
+  const fileKept = !!editor && epoch !== undefined && /^\d+$/.test(epoch);
+  const keptCaret = useHostSnapshot((perch) => (fileKept ? perch.workspaceFiles(workspaceId)?.carets?.[docKey] ?? null : null));
+  useEffect(() => { if (keptCaret) latest.current.onCaret?.({ line: keptCaret.line, col: keptCaret.col }); }, [keptCaret?.line, keptCaret?.col]); // eslint-disable-line react-hooks/exhaustive-deps
   // The text the editor and the store last agreed on: the store echoing it back is not an outside edit.
   const known = useRef(value);
   const [menu, setMenu] = useState(null);
@@ -522,7 +572,7 @@ export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, l
   }, [docKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!editor || value === known.current) return;
+    if (!editor || fileKept || value === known.current) return;
     known.current = value;
     editor.setValue(docKey, value, { external: true });
   }, [docKey, value]); // eslint-disable-line react-hooks/exhaustive-deps

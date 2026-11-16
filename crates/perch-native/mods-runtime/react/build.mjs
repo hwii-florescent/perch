@@ -62,6 +62,7 @@ export const SCREENS = [
   "terminal-search",
   "phone-size",
   "agent-control",
+  "files",
   "browser",
   "browser-toolbar",
 ];

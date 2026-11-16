@@ -6,7 +6,8 @@
 //! Pointer events: the deepest node with a pointer handler takes a press (`cx.stop_propagation()`), and the DOM-shaped
 //! event then bubbles through the React tree, so ancestors see it as on the web; its target is that node rather than
 //! a plain child without handlers. A press also stores the node's box (`event.bounds`), which `getBoundingClientRect`
-//! returns when the click that follows opens a menu under it. A press outside an overlay is a `pointerdown` on the
+//! returns when the click that follows opens a menu under it. A press outside an overlay (its box and the absolute boxes
+//! in it, a submenu past its edge) is a `pointerdown` on the
 //! document (what a menu listens for to close).
 //!
 //! Ids: a node the parity table names has that name (`name` or `name:key`; a name for an element's own text is a box
@@ -119,6 +120,9 @@ const drawn = (child) => child.style?.display !== "hidden";
  * pointer over such a group is reported to the script, which describes the tree again. Every other group variant is
  * drawn by the engine alone. Set by `describeToGpui` for the tree it builds. */
 let layoutGroups = new Set();
+/** The overlay being built: its own box and every shown absolute box inside it, which may lie past its edge (a
+ * submenu beside a menu). A press is outside the overlay only when it is outside all of them. */
+let outside = null;
 function groupsChangingLayout(node, out = new Set()) {
   for (const { group, style } of node.group_hover ?? []) if ("display" in style) out.add(group);
   for (const child of node.children ?? []) if (child.kind !== "text") groupsChangingLayout(child, out);
@@ -143,6 +147,9 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   text = { ...text };
   for (const key of ["text_size", "line_height", "whitespace", "text_ellipsis"]) if (node.style[key] !== undefined) text[key] = node.style[key];
   const events = new Set(node.events ?? []);
+  const region = overlay ? { count: 0, hits: new Set(), at: null } : !unseen && !node.pointer_none && node.style.position === "absolute" ? outside : null;
+  const regionIndex = region ? region.count++ : -1;
+  if (overlay) outside = region;
   let el;
   if (node.kind === "image" && !node.markup) el = kit.image(node.src);
   else el = kit.div();
@@ -157,7 +164,7 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
       .child(layer().group_hover(over, (s) => s.invisible()).child(files.icon(`~icon-${node.id}`, node.markup, color)))
       .child(layer().invisible().group_hover(over, (s) => s.visible()).child(files.icon(`~icon-${node.id}-hover`, node.markup, hovered)));
   } else if (node.markup) el = el.child(files.icon(`~icon-${node.id}`, node.markup, node.kind === "svg" ? color : ""));
-  const id = engineId(node, events, overlay);
+  const id = engineId(node, events, !!region);
   if (id) el = el.id(id);
   // Its laid-out box is kept for the source, which measured it (`HostDocument.measure`).
   if (node.measure) el = el.measure(node.measure);
@@ -208,6 +215,9 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   // scrolls (GPUI hands a step to every scroll area under the pointer, covered or not).
   const covers = (overlay && !node.pointer_none) || node.blocks_pointer;
   if ((scroller && IN_SCROLL.has(node)) || covers) el = el.on_scroll_wheel((_event, cx) => cx.stop_propagation?.());
+  // `onScroll`: a wheel step over a scroll area that listens is its `scroll` event. The boxes the listener reads
+  // (`getBoundingClientRect`) are the last frame's, so they show the area one step behind.
+  if (scroller && events.has("scroll")) el = el.on_scroll_wheel((_event, cx) => { handle.dispatch(node.id, "scroll", {}); cx.notify(); });
   if (scroller || IN_SCROLL.has(node)) for (const child of node.children ?? []) if (child.kind !== "text") IN_SCROLL.add(child);
 
   // A press on a text field puts the keyboard in it, as a browser does, and keeps its box (a list anchored to it).
@@ -271,7 +281,21 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   // reads the pointer (a long press measuring how far it moved) costs no new description.
   if (events.has("mouse_move")) el = el.on_mouse_move((event) => { handle.dispatch(node.id, "pointermove", { ...point(event), pointerType: "mouse" }); });
   if (node.track_hover && layoutGroups.has(node.group)) el = el.on_hover((on, cx) => { handle.hover(node.id, on); cx.notify(); });
-  if (overlay) el = el.on_mouse_down_out((event, cx) => { handle.dispatch(handle.document.body.id, "pointerdown", { ...point(event), pointerType: "mouse" }); handle.dispatch(handle.document.body.id, "mousedown", point(event)); cx.notify(); });
+  // GPUI calls each box's handler for a press outside that box; the press is the document's once every box of the
+  // overlay has called it for the same point.
+  if (region) {
+    el = el.on_mouse_down_out((event, cx) => {
+      const at = point(event);
+      const where = `${at.clientX},${at.clientY}`;
+      if (region.at !== where) { region.at = where; region.hits = new Set(); }
+      region.hits.add(regionIndex);
+      if (region.hits.size < region.count) return;
+      region.at = null;
+      handle.dispatch(handle.document.body.id, "pointerdown", { ...at, pointerType: "mouse" });
+      handle.dispatch(handle.document.body.id, "mousedown", at);
+      cx.notify();
+    });
+  }
   // A name for the element's own text (a bare text node in the page) goes on a box around that text. A line of
   // text that cannot wrap sits in a box of the CSS line height: GPUI rounds a line height to whole pixels when it
   // lays text out, so without the box every line would add up to half a pixel. (Wrapping text keeps GPUI's height,
@@ -366,6 +390,7 @@ export function lineHeightPx(text) {
 export function describeToGpui(description, kit, handle, files, scale = 0, windowLayer = false) {
   const roots = [description.root, ...description.overlays];
   layoutGroups = new Set();
+  outside = null;
   for (const root of roots) groupsChangingLayout(root, layoutGroups);
   const snapped = scale > 0 ? snapColumns(roots, scale) : new Map();
   if (scale > 0 && files.measure) snapRows(roots, scale, files.measure, snapped);

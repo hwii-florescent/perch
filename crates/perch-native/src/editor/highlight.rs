@@ -238,7 +238,6 @@ impl Job {
         let rows = self.text.lines_len();
         let start = self.text.line_start_offset(self.from);
         let text = self.text.slice(start..).to_string();
-        let slow = Duration::from_nanos(SLOW_LINE_NANOS.load(Ordering::Relaxed));
         let mut kinds = Kinds::default();
         let mut state = self.state;
         let mut previous: Option<Arc<State>> = None;
@@ -250,8 +249,10 @@ impl Job {
             if self.current.load(Ordering::Acquire) != self.generation {
                 return;
             }
-            if !slow.is_zero() {
-                std::thread::sleep(slow);
+            // Read per line, so a test can end a slowed parse by setting the delay back to zero.
+            let slow = SLOW_LINE_NANOS.load(Ordering::Relaxed);
+            if slow != 0 {
+                std::thread::sleep(Duration::from_nanos(slow));
             }
             let line = lines.next().unwrap_or("");
             let start = shared(&mut previous, &state);

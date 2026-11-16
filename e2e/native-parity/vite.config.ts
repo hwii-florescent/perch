@@ -23,6 +23,6 @@ export default defineConfig({
       { find: /^(\.{1,2}\/)+(components\/)?mod-root$/, replacement: path.join(here, "harness/mod-root-stub.tsx") },
     ],
   },
-  server: { host: "127.0.0.1", port: 7810, strictPort: true, fs: { allow: [path.resolve(here, "../..")] } },
+  server: { host: "127.0.0.1", port: Number(process.env.PERCH_PARITY_PORT ?? 7810), strictPort: true, fs: { allow: [path.resolve(here, "../..")] } },
   plugins: [react(), tailwindcss()],
 });

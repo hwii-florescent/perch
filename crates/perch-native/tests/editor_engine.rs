@@ -3,8 +3,10 @@
 //! the web's `CodeEditor.tsx` promises (user edits heard as changes, caret out, a store value applied without an
 //! undo entry or a change event, undo, parked state restored by key, at most 32 parked), that a theme switch recolours
 //! an open editor, that typing stays quick while a slow background parse runs, and the timing budgets: typing in a
-//! highlighted 1,000-line file at most 4 ms per key and frame, 10,000 lines at most 8 ms, colours everywhere within
-//! 300 ms of opening (failing above twice those in a release build; debug builds only report).
+//! highlighted 1,000-line file at most 4 ms per key and frame, 10,000 lines at most 8 ms, every line coloured within
+//! 500 ms of opening (off the UI thread), and the lines on screen coloured in the first frame (failing above twice
+//! those in a release build, or one frame late, and at the budgets themselves with `PERCH_BUDGET_STRICT=1`; debug
+//! builds only report).
 //!
 //! `PERCH_EDITOR_REPORT=1` prints the numbers. `PERCH_EDITOR_LINES=1000,10000,50000` picks the timed sizes;
 //! `PERCH_EDITOR_UNCAPPED=1` lifts the 300,000-character highlight cap, to time the highlighter on the measurement
@@ -403,7 +405,9 @@ fn a_theme_switch_recolours_an_open_editor(rig: &mut Rig) {
 }
 
 fn typing_stays_quick_during_a_slow_parse(rig: &mut Rig) {
-    highlight::slow_background_parse_for_tests(Duration::from_micros(500));
+    // 20 ms a line makes the 2,000-line parse take 40 s, so it is still running when the keys arrive however slow
+    // the machine is; setting the delay back to zero below lets it finish at once.
+    highlight::slow_background_parse_for_tests(Duration::from_millis(20));
     let area = rig.open("doc-slow", "src/s.rs", &short_rust(2_000));
     rig.click(point(area.origin.x + px(200.), area.origin.y + px(100.)));
     assert!(
@@ -421,7 +425,7 @@ fn typing_stays_quick_during_a_slow_parse(rig: &mut Rig) {
     report(&format!(
         "typing during a slow background parse: worst key and frame {worst:?}; parse still running after the keys: {still}"
     ));
-    // A 2,000-line parse at 0.5 ms a line takes a second: typing never waited for it.
+    // Typing never waited for the 40 s parse.
     assert!(
         worst < Duration::from_millis(500),
         "typing waited for the parse: {worst:?}"
@@ -433,6 +437,15 @@ fn typing_stays_quick_during_a_slow_parse(rig: &mut Rig) {
 fn report(line: &str) {
     if std::env::var_os("PERCH_EDITOR_REPORT").is_some() {
         println!("{line}");
+    }
+}
+
+/// How far over a budget a release run may go: twice it for noisy machines, none when strict.
+fn margin() -> u32 {
+    if std::env::var("PERCH_BUDGET_STRICT").as_deref() == Ok("1") {
+        1
+    } else {
+        2
     }
 }
 
@@ -472,12 +485,12 @@ fn timings(rig: &mut Rig) {
                 _ => Duration::from_millis(8),
             };
             assert!(
-                mean <= budget * 2,
+                mean <= budget * margin(),
                 "{lines} lines: {mean:?} per key, budget {budget:?}"
             );
             if lines <= 10_000 {
                 assert!(
-                    coloured <= Duration::from_millis(600),
+                    coloured <= Duration::from_millis(500) * margin(),
                     "{lines} lines coloured in {coloured:?}"
                 );
             }
@@ -486,6 +499,42 @@ fn timings(rig: &mut Rig) {
         rig.editors().release(&key);
     }
     highlight::set_max_highlight_chars_for_tests(highlight::MAX_HIGHLIGHT_CHARS);
+}
+
+/// The lines on screen are coloured in the first frame: the parse that runs on the UI thread when a file opens covers
+/// them, and the rest of the file follows off it. The first frame of a second opening of the same 10,000-line file is
+/// compared with the fully coloured picture of the first.
+fn visible_lines_are_coloured_in_the_first_frame(rig: &mut Rig) {
+    let text = short_rust(10_000);
+    rig.open_from_rust("visible-done", "src/v.rs", &text);
+    rig.until_coloured();
+    let coloured = rig.picture();
+    rig.close();
+    rig.editors().release("visible-done");
+
+    rig.open_from_rust("visible", "src/v.rs", &text);
+    let mut late = 0;
+    while rig.picture() != coloured && late < 10 {
+        late += 1;
+        rig.step(false);
+    }
+    rig.until_coloured();
+    assert_eq!(
+        rig.picture(),
+        coloured,
+        "both openings draw the same coloured picture"
+    );
+    report(&format!(
+        "editor 10000 lines: the lines on screen were coloured {late} frame(s) after the first"
+    ));
+    if !cfg!(debug_assertions) {
+        assert!(
+            late < margin(),
+            "the lines on screen were coloured {late} frame(s) after the first"
+        );
+    }
+    rig.close();
+    rig.editors().release("visible");
 }
 
 fn main() {
@@ -533,6 +582,8 @@ fn main() {
     println!("ok: a theme switch recolours an open editor");
     typing_stays_quick_during_a_slow_parse(&mut rig);
     println!("ok: typing stays quick during a slow background parse");
+    visible_lines_are_coloured_in_the_first_frame(&mut rig);
+    println!("ok: the lines on screen are coloured in the first frame");
     timings(&mut rig);
     println!("ok: editor timings");
     let _ = std::fs::remove_dir_all(&scratch);

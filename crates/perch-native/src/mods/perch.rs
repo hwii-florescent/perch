@@ -205,6 +205,8 @@ struct Attached {
 struct Shared {
     data: RefCell<Data>,
     revisions: RefCell<HashMap<String, u64>>,
+    /// Bumped with every part: a screen that saw this value has nothing new to read (`revision`).
+    revision: Cell<u64>,
     /// Per mod id, the revision of each part it read when it last rendered.
     reads: RefCell<HashMap<String, HashMap<String, u64>>>,
     hosts: RefCell<Vec<ModHost>>,
@@ -236,6 +238,7 @@ impl Perch {
         Self(Rc::new(Shared {
             data: RefCell::default(),
             revisions: RefCell::default(),
+            revision: Cell::default(),
             reads: RefCell::default(),
             hosts: RefCell::default(),
             asker: RefCell::default(),
@@ -468,6 +471,10 @@ impl Perch {
                 let rest: Vec<Value> = (2..args.len())
                     .filter_map(|i| args.get(i).map(from_host))
                     .collect();
+                // A screen drawn with no window (the parity capture) has no store to act on.
+                if runner.0.attached.borrow().is_none() {
+                    return Ok(HostValue::Null);
+                }
                 runner.in_workspace(move |ws, cx| {
                     let text = |i: usize| {
                         rest.get(i)
@@ -634,6 +641,7 @@ impl Perch {
     }
 
     fn bump(&self, part: &str) {
+        self.0.revision.set(self.0.revision.get() + 1);
         *self
             .0
             .revisions
@@ -1260,6 +1268,10 @@ impl Perch {
                 Ok(to_host(&json))
             })
             .function("theme", reader(THEME, |perch, _| perch.theme_tokens()))
+            .function("revision", {
+                let perch = self.clone();
+                move |_| Ok(HostValue::Number(perch.0.revision.get() as f64))
+            })
             .function(
                 "themeName",
                 reader(THEME, |perch, _| json!(perch.theme().name)),
@@ -1915,11 +1927,16 @@ const OWN: [(&str, &str, &str); 10] = [
 
 /// Window commands beyond the keymap's: the web's ids the window can perform (some under the
 /// name its keys use), and the native ones screens need.
-const WINDOW_COMMANDS: [(&str, &str, &str); 37] = [
+const WINDOW_COMMANDS: [(&str, &str, &str); 38] = [
     (
         "files.extract",
         "Extract a workspace's archive beside it",
         "{workspaceId, path}",
+    ),
+    (
+        "file.open",
+        "Open a workspace's file in a tab (its preview tab with preview: true)",
+        "{workspaceId, path, preview?}",
     ),
     (
         "handoff.open",

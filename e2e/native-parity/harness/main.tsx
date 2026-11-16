@@ -236,6 +236,25 @@ const SCREENS: Record<string, Screen> = {
     }),
     Probe: PropsProbe,
   },
+  files: {
+    load: () => import("../../../packages/web/src/stock-ui/files/main"),
+    mount: "card",
+    // The workspace's files as the store keeps them, and store actions that ask no core for anything.
+    ready: async (view) => {
+      const { useWorkspaceFilesStore } = await import("../../../packages/web/src/filesystemStore");
+      const id = String(view.workspace);
+      const files = view.files as { trees: Json; documents: Json; previews: Json; search: Json | null; wrap: boolean };
+      const none = () => null;
+      useWorkspaceFilesStore.setState({
+        trees: { [id]: files.trees }, documents: { [id]: files.documents }, previews: { [id]: files.previews },
+        searches: files.search ? { [id]: files.search } : {}, wrap: files.wrap,
+        requestTree: none, searchFiles: none, openFile: none, reloadFile: none, requestPreview: none,
+        updateDraft: () => {}, saveFile: none, overwriteFile: none,
+      } as never);
+    },
+    props: (fixed) => ({ ...fixed, onOpenFile: noop, onPathChange: noop }),
+    Probe: PropsProbe,
+  },
   "tab-menu": {
     load: () => import("../../../packages/web/src/stock-ui/tab-menu/main"),
     mount: "stage",
@@ -497,9 +516,15 @@ const listed = screen.listed?.(props);
 if (listed && state.steps?.length) await found(listed, "listing");
 for (const step of state.steps ?? []) {
   if (step.type) {
-    const input = (await found<HTMLInputElement>(step.type.selector, "type")) as HTMLInputElement;
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, step.type.text);
-    input.dispatchEvent(new Event("input", { bubbles: true }));
+    // A screen clears its search as it opens (an effect); on a busy machine that can land after the text went in, so
+    // the text goes in again until it stays.
+    for (let tries = 0; tries < 20; tries++) {
+      const input = (await found<HTMLInputElement>(step.type.selector, "type")) as HTMLInputElement;
+      if (input.value === step.type.text) break;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, step.type.text);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      await frames();
+    }
   } else if (step.key) {
     const target = await found(step.key.selector, "key");
     target.dispatchEvent(new KeyboardEvent("keydown", { key: step.key.key, bubbles: true, cancelable: true }));

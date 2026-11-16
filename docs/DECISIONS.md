@@ -7,6 +7,27 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-16 — The Files explorer draws only the rows around the view (lead)
+
+The stock Files screen's tree (both apps) is one flat list of rows indented by depth, as the nested folders were,
+and a long tree draws only the rows in view plus a chunk of 16 on each side; the rest keep their height. Nothing
+visible changes: same rows, indents, states and test ids. A file row keeps its chevron's room as an empty box rather
+than a hidden chevron. Forced by the native client, where a 1,000-file root could not be drawn whole within the
+screen's time budget.
+
+## 2026-11-16 — "Show beside" is one row with a submenu (owner)
+
+The tab menu (both apps) no longer lists a "Show beside <tab>" row per open tab. One "Show beside" row with a chevron
+opens the open tabs beside the menu, as a native menu's submenu: on hover, a click, Right arrow, Enter or Space; Up
+and Down move, Left arrow or Escape close it back to the row. The submenu is a reusable `components/ui/submenu.tsx`
+(exported in the SDK). The per-tab rows keep their `tab-split-with-<id>` test ids.
+
+## 2026-11-16 — Session rows have no fill at rest (owner)
+
+Supersedes the "filled cards" part of the 2026-11-15 sub-session decision below. In the stock sidebar (both apps) no
+session row, lead or sub-session, is filled at rest: only the active row and a hovered or focused one are. The elbow
+connector, the fold chevron and the "…" menu stay.
+
 ## 2026-11-16 — No per-run total of sub-sessions; the live limit stays (owner)
 
 Owner: with "Live sub-sessions per run" bounding how many run at once, the total per run
@@ -50,6 +71,27 @@ rounded row with a chevron that folds its sub-sessions; each sub-session is an i
 connector ("└") from the parent instead of the bracket-shaped left border. Every session row shows a "…" button
 (on hover, focus or when active) that opens the row's existing menu; it **replaces the hover ×**, so Close is in that
 menu, plus the existing close shortcut and middle-click.
+
+## 2026-11-15 — Native Files, editor, Git and review: host engines under stock screens (lead, delegated by the owner)
+
+The owner agreed to the direction (Files, Git and review stay React stock screens on the native mod engine; a native
+GPUI editor fills CodeMirror's host-owned slot; a web view only for browser panes, created on first use; PDF, audio and
+video open in Quick Look or the default app) and left the plan's open choices to the lead, who adopted these:
+
+- The review's diff is a native `DiffView` engine written for Perch (virtualized rows, comment threads drawn from
+  data), placed by `stock:review`; React rows cannot open a useful diff natively (500 lines took 1.9 s).
+- The editor's syntax highlighting is Perch's own incremental highlighter in `perch-native`; the vendored adapter
+  stays as shipped.
+- The file store (drafts, versions, conflicts) and the Git/review store are the host's, in Rust, so unsent work
+  outlives a screen reload or a mod swap.
+- A GPUI menu, dialog or palette over a browser pane hides the live page and draws a still snapshot in its place.
+- Memory budgets of the native client (physical footprint, hidden window): idle 120 MB; a 10,000-line file +35 MB;
+  a 5,000-line review +80 MB; a browser pane +100 MB, all of it returned within 5 s of the last pane closing (within
+  10 MB); a Files tree of 5,000 entries +60 MB. `scripts/measure-native-memory.sh` fails over them.
+- The parity gate fails on any failing state not in `e2e/native-parity/accepted-failures.json`, and on a listed state
+  that passes again.
+- A person's pass on a lit screen (input methods, real typing, Quick Look, browser pane focus) is required before
+  this work merges into `main`.
 
 ## 2026-11-15 — Mods in the native client are trusted code, as on the web (owner)
 

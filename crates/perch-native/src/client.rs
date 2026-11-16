@@ -544,6 +544,22 @@ impl Connection {
         .await
     }
 
+    /// Add a local folder as a project and wait for the core to confirm it.
+    pub async fn create_project(&mut self, path: &str) -> Result<()> {
+        let id = self.request_id();
+        self.send(create_project_frame(&id, LOCAL, path, None))
+            .await?;
+        self.reply(Some(&id), |m| match m {
+            ServerMessage::ProjectUpdated { request_id, .. }
+                if request_id.as_deref() == Some(id.as_str()) =>
+            {
+                Some(())
+            }
+            _ => None,
+        })
+        .await
+    }
+
     /// Ask the core for something; the answer arrives through [`Connection::next`].
     pub async fn request(&mut self, request: &Request) -> Result<String> {
         let id = self.request_id();

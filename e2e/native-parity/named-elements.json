@@ -1548,7 +1548,30 @@
         {
           "name": "tab-menu-item",
           "selector": "[data-testid=\"tab-split-menu\"] > button",
-          "description": "One row: Rename tab, Split right / below with new terminal, a 'Show beside' row, Show this tab full size, Separate all tabs, an opener's row, Stop agent (red), Close tab (red); disabled rows are 40% opacity.",
+          "description": "One row: Rename tab, Split right / below with new terminal, Show this tab full size, Separate all tabs, an opener's row, Stop agent (red), Close tab (red); disabled rows are 40% opacity.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-menu-show-beside",
+          "selector": "[data-testid=\"tab-menu-show-beside\"]",
+          "description": "The 'Show beside' row with its chevron; it opens the list of open tabs beside the menu (hover, click, Right arrow or Enter).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-menu-beside-list",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"]",
+          "description": "The list of open tabs, beside the menu's right edge (left when there is no room), on the menu's surface with its shadow; it scrolls past the window's height."
+        },
+        {
+          "name": "tab-menu-beside-item",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button",
+          "description": "One open tab to show beside this one.",
           "key": {
             "self": true,
             "attr": "data-testid"
@@ -1558,23 +1581,17 @@
         },
         {
           "name": "tab-menu-item-label",
-          "selector": "[data-testid=\"tab-split-menu\"] > button > span.block",
-          "description": "The name inside a Show beside row, cut with an ellipsis.",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button > span.block",
+          "description": "The name inside an open tab's row, cut with an ellipsis.",
           "key": {
-            "closest": "[data-testid=\"tab-split-menu\"] > button",
+            "closest": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button",
             "attr": "data-testid"
           },
           "text": true
         },
         {
-          "name": "tab-menu-heading",
-          "selector": "[data-testid=\"tab-split-menu\"] > p",
-          "description": "The small line over the Show beside rows.",
-          "text": true
-        },
-        {
           "name": "tab-menu-empty",
-          "selector": "[data-testid=\"tab-split-menu\"] > div:not(.h-px)",
+          "selector": "[data-testid=\"tab-menu-empty\"]",
           "description": "No other open tab available.",
           "text": true
         },
@@ -1862,7 +1879,30 @@
         {
           "name": "tab-menu-item",
           "selector": "[data-testid=\"tab-split-menu\"] > button",
-          "description": "One row: Rename tab, Split right / below with new terminal, a 'Show beside' row, Show this tab full size, Separate all tabs, a sidebar row (Move up, Move down), an inbound choice, Close tab (red); disabled rows are 40% opacity.",
+          "description": "One row: Rename tab, Split right / below with new terminal, Show this tab full size, Separate all tabs, a sidebar row (Move up, Move down), an inbound choice, Close tab (red); disabled rows are 40% opacity.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-menu-show-beside",
+          "selector": "[data-testid=\"tab-menu-show-beside\"]",
+          "description": "The 'Show beside' row with its chevron; it opens the list of open tabs beside the menu (hover, click, Right arrow or Enter).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-menu-beside-list",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"]",
+          "description": "The list of open tabs, beside the menu's right edge (left when there is no room), on the menu's surface with its shadow; it scrolls past the window's height."
+        },
+        {
+          "name": "tab-menu-beside-item",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button",
+          "description": "One open tab to show beside this one.",
           "key": {
             "self": true,
             "attr": "data-testid"
@@ -1872,23 +1912,17 @@
         },
         {
           "name": "tab-menu-item-label",
-          "selector": "[data-testid=\"tab-split-menu\"] > button > span.block",
-          "description": "The name inside a Show beside row, cut with an ellipsis.",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button > span.block",
+          "description": "The name inside an open tab's row, cut with an ellipsis.",
           "key": {
-            "closest": "[data-testid=\"tab-split-menu\"] > button",
+            "closest": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button",
             "attr": "data-testid"
           },
           "text": true
         },
         {
-          "name": "tab-menu-heading",
-          "selector": "[data-testid=\"tab-split-menu\"] > p",
-          "description": "The small line over the Show beside rows.",
-          "text": true
-        },
-        {
           "name": "tab-menu-empty",
-          "selector": "[data-testid=\"tab-split-menu\"] > div:not(.h-px)",
+          "selector": "[data-testid=\"tab-menu-empty\"]",
           "description": "No other open tab available.",
           "text": true
         },
@@ -2006,7 +2040,7 @@
         {
           "name": "start-link",
           "selector": "[data-testid$=\"-panel\"] button.text-subtext-0",
-          "description": "A small muted link under the buttons: 'Open one automatically: Settings \u2192 Empty workspace opens' (and Manage agents in the CLI page); underlined on hover.",
+          "description": "A small muted link under the buttons: 'Open one automatically: Settings → Empty workspace opens' (and Manage agents in the CLI page); underlined on hover.",
           "text": true,
           "textSized": true
         },
@@ -2936,6 +2970,99 @@
           "description": "A section's name above its matching rows while searching.",
           "text": true,
           "textSized": true
+        }
+      ]
+    },
+    "files": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 3,
+      "elements": [
+        {
+          "name": "files-explorer",
+          "selector": "[data-testid=\"workspace-files-view\"]",
+          "description": "The explorer layout: the tree under its header, filling the drawer's body."
+        },
+        {
+          "name": "files-tree",
+          "selector": "[data-testid=\"workspace-file-tree-scroll\"]",
+          "description": "The tree's scroll area."
+        },
+        {
+          "name": "files-entry",
+          "selector": "[data-testid^=\"workspace-file-entry-\"]",
+          "description": "One entry's row: 22px, 13px text, 12px in from the left, 8px more per level; filled when selected.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "workspace-file-entry-"
+          }
+        },
+        {
+          "name": "files-entry-icon",
+          "selector": "[data-testid^=\"workspace-file-entry-\"] > svg[data-file-icon]",
+          "description": "The entry's file or folder icon, 14px.",
+          "key": {
+            "closest": "[data-testid^=\"workspace-file-entry-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-file-entry-"
+          }
+        },
+        {
+          "name": "files-entry-name",
+          "selector": "[data-testid^=\"workspace-file-entry-\"] > span.flex-1",
+          "description": "The entry's name, cut with an ellipsis.",
+          "key": {
+            "closest": "[data-testid^=\"workspace-file-entry-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-file-entry-"
+          },
+          "text": true
+        },
+        {
+          "name": "files-pane",
+          "selector": "[data-testid=\"workspace-file-pane\"]",
+          "description": "The editor layout: one file's header, its bars and its editor, filling the tab's pane."
+        },
+        {
+          "name": "files-file-title",
+          "selector": ".workspace-files__file-title > span:first-child",
+          "description": "The file's path in its header, muted.",
+          "text": true
+        },
+        {
+          "name": "files-dirty",
+          "selector": ".workspace-files__file-title > span[title=\"Unsaved changes\"]",
+          "description": "The dot after the path while the draft is unsaved."
+        },
+        {
+          "name": "files-save",
+          "selector": ".workspace-files__save",
+          "description": "Save: muted while saved, full colour with an unsaved draft.",
+          "text": true
+        },
+        {
+          "name": "files-conflict",
+          "selector": "[data-testid=\"workspace-file-conflict\"]",
+          "description": "The conflict bar: tinted red, its title, what to do, the two versions and the three choices."
+        },
+        {
+          "name": "files-conflict-title",
+          "selector": "[data-testid=\"workspace-file-conflict\"] > strong",
+          "description": "“File changed on disk.” in red.",
+          "text": true
+        },
+        {
+          "name": "files-conflict-action",
+          "selector": "[data-testid=\"workspace-file-conflict\"] button",
+          "description": "Compare, Reload disk, Overwrite disk (in red).",
+          "text": true
+        },
+        {
+          "name": "files-editor",
+          "selector": "[data-testid=\"workspace-file-editor-area\"]",
+          "description": "The editor's box (CodeMirror on the web, the editor engine natively): gated on its box only."
         }
       ]
     }

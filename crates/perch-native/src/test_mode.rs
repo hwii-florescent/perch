@@ -8,6 +8,11 @@
 //!   run in order once the core has been heard from: `open <session id>` shows that session as a
 //!   tab, `split right|down` starts a terminal beside the focused one, `pause <ms>` waits.
 //!   Blank lines and lines starting with `#` are skipped.
+//! - Files, review and browser steps: `files <workspace id>` shows that workspace's files,
+//!   `file <workspace id> <path> [preview]` opens a file (relative to the workspace) as a tab,
+//!   `review <workspace id>` opens its review, `browser <http(s) url>` opens a browser pane, and
+//!   `close [<tab id>]` closes that tab or the focused one. Each is carried out by its own function
+//!   below; until the feature behind it is built, that function reports the step as missing.
 //!
 //! The terminal never asks the system which Option key is down in this mode (it sees none), so a
 //! run does not depend on the real keyboard.
@@ -25,6 +30,23 @@ pub enum Step {
     Open(String),
     Split(Direction),
     Pause(Duration),
+    Files {
+        workspace: String,
+    },
+    File {
+        workspace: String,
+        path: String,
+        preview: bool,
+    },
+    Review {
+        workspace: String,
+    },
+    Browser {
+        url: String,
+    },
+    Close {
+        tab: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,6 +128,29 @@ pub fn parse_script(text: &str) -> Result<Vec<Step>, String> {
                     .parse()
                     .map(|ms| Step::Pause(Duration::from_millis(ms)))
                     .map_err(|_| format!("pause takes milliseconds, not {ms:?}")),
+                ["files", workspace] => Ok(Step::Files {
+                    workspace: workspace.to_string(),
+                }),
+                ["file", workspace, path, rest @ ..] if matches!(rest, [] | ["preview"]) => {
+                    Ok(Step::File {
+                        workspace: workspace.to_string(),
+                        path: path.to_string(),
+                        preview: !rest.is_empty(),
+                    })
+                }
+                ["review", workspace] => Ok(Step::Review {
+                    workspace: workspace.to_string(),
+                }),
+                ["browser", url] if url.starts_with("http://") || url.starts_with("https://") => {
+                    Ok(Step::Browser {
+                        url: url.to_string(),
+                    })
+                }
+                ["browser", url] => Err(format!("browser takes an http(s) address, not {url:?}")),
+                ["close"] => Ok(Step::Close { tab: None }),
+                ["close", tab] => Ok(Step::Close {
+                    tab: Some(tab.to_string()),
+                }),
                 _ => Err(format!("not a step: {line:?}")),
             }
         })
@@ -123,6 +168,15 @@ pub async fn run(steps: Vec<Step>, window: WindowHandle<Workspace>, cx: &mut Asy
             }
             Step::Open(id) => open(id, window, cx).await,
             Step::Split(direction) => split(*direction, window, cx).await,
+            Step::Files { workspace } => show_files(workspace, window, cx).await,
+            Step::File {
+                workspace,
+                path,
+                preview,
+            } => open_file(workspace, path, *preview, window, cx).await,
+            Step::Review { workspace } => open_review(workspace, window, cx).await,
+            Step::Browser { url } => open_browser(url, window, cx).await,
+            Step::Close { tab } => close_tab(tab.as_deref(), window, cx).await,
         };
         if !done {
             eprintln!(
@@ -192,6 +246,135 @@ async fn split(direction: Direction, window: WindowHandle<Workspace>, cx: &mut A
     started && until(cx, |cx| shown(window, cx).len() > before).await
 }
 
+// The openers for files, review and browser steps. Each feature fills in its own function; until
+// then the step is reported as missing and the run fails, so a measurement never passes by
+// silently skipping the state it was asked for.
+
+fn missing(step: &str) -> bool {
+    eprintln!("perch-native-test: the {step} step is not in this build");
+    false
+}
+
+/// `files <workspace id>`: that workspace's files are shown.
+async fn show_files(workspace: &str, window: WindowHandle<Workspace>, cx: &mut AsyncApp) -> bool {
+    use perch_native::files::store::Load;
+    let asked = window.update(cx, |ws, _, cx| ws.show_files(workspace, cx));
+    asked.is_ok()
+        && until(cx, |cx| {
+            window
+                .read_with(cx, |ws, _| {
+                    ws.files()
+                        .tree(workspace, "")
+                        .is_some_and(|t| t.state == Load::Ready)
+                })
+                .unwrap_or(false)
+        })
+        .await
+}
+
+/// `file <workspace id> <path> [preview]`: the file is open as a tab (a preview tab if asked) and
+/// its content is drawn.
+async fn open_file(
+    workspace: &str,
+    path: &str,
+    preview: bool,
+    window: WindowHandle<Workspace>,
+    cx: &mut AsyncApp,
+) -> bool {
+    use perch_native::files::store::DocState;
+    let id = format!("{workspace}\n{path}");
+    let asked = window.update(cx, |ws, _, cx| ws.open_file(workspace, path, preview, cx));
+    asked.is_ok()
+        && until(cx, |cx| {
+            window
+                .read_with(cx, |ws, _| {
+                    ws.tabs().shown().contains(&id)
+                        && ws
+                            .files()
+                            .document(workspace, path)
+                            .is_some_and(|d| d.state == DocState::Ready)
+                })
+                .unwrap_or(false)
+        })
+        .await
+}
+
+/// `review <workspace id>`: the workspace's review is open with its diff drawn.
+async fn open_review(
+    _workspace: &str,
+    _window: WindowHandle<Workspace>,
+    _cx: &mut AsyncApp,
+) -> bool {
+    missing("review")
+}
+
+/// `browser <url>`: a browser pane shows the page.
+async fn open_browser(url: &str, window: WindowHandle<Workspace>, cx: &mut AsyncApp) -> bool {
+    // A workspace must be known (the core's lists) before a tab can be opened in it.
+    let args = serde_json::json!({ "url": url });
+    let opened = until(cx, |cx| {
+        window
+            .update(cx, |workspace, window, cx| {
+                workspace
+                    .run_command("browser.open", Some(&args), window, cx)
+                    .is_ok()
+            })
+            .unwrap_or(false)
+    })
+    .await;
+    // The page is made where its pane is drawn. A window that gets no display frames (hidden, or the display
+    // asleep) never draws on its own, so draw one each time it is looked at, until the page lives.
+    opened
+        && until(cx, |cx| {
+            let _ = gpui::AppContext::update_window(cx, window.into(), |_, window, cx| {
+                let _ = window.draw(cx);
+            });
+            window
+                .read_with(cx, |workspace, _| {
+                    let tab = workspace
+                        .tabs()
+                        .shown()
+                        .iter()
+                        .any(|id| perch_native::workspace::is_browser_tab(id));
+                    let live = workspace
+                        .browser_pages()
+                        .is_some_and(|pages| pages.borrow().live_views() > 0);
+                    tab && live
+                })
+                .unwrap_or(false)
+        })
+        .await
+}
+
+/// `close [<tab id>]`: that tab, or the focused one, is closed and gone from the strip.
+async fn close_tab(tab: Option<&str>, window: WindowHandle<Workspace>, cx: &mut AsyncApp) -> bool {
+    let Some(id) = tab.map(str::to_string).or_else(|| {
+        window
+            .read_with(cx, |workspace, _| {
+                workspace.tabs().active().map(str::to_string)
+            })
+            .ok()
+            .flatten()
+    }) else {
+        return false;
+    };
+    let args = serde_json::json!({ "id": id });
+    let closed = window
+        .update(cx, |workspace, window, cx| {
+            workspace
+                .run_command("tabs.close", Some(&args), window, cx)
+                .is_ok()
+        })
+        .unwrap_or(false);
+    closed
+        && until(cx, |cx| {
+            window
+                .read_with(cx, |workspace, _| !workspace.tabs().contains(&id))
+                .unwrap_or(false)
+        })
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,8 +410,66 @@ mod tests {
 
     #[test]
     fn a_step_that_is_not_understood_is_refused() {
-        for bad in ["open", "open a b", "split left", "pause soon", "dance"] {
+        for bad in [
+            "open",
+            "open a b",
+            "split left",
+            "pause soon",
+            "dance",
+            "files",
+            "file w",
+            "file w a.rs pinned",
+            "review",
+            "browser file:///etc/hosts",
+            "browser",
+            "close a b",
+        ] {
             assert!(parse_script(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn parses_file_review_browser_close_steps() {
+        let steps = parse_script(
+            "files w1; file w1 src/main.rs; file w1 README.md preview\nreview w1\nbrowser http://127.0.0.1:9/page.html; close; close t-2",
+        )
+        .unwrap();
+        let file = |path: &str, preview| Step::File {
+            workspace: "w1".into(),
+            path: path.into(),
+            preview,
+        };
+        assert_eq!(
+            steps,
+            [
+                Step::Files {
+                    workspace: "w1".into()
+                },
+                file("src/main.rs", false),
+                file("README.md", true),
+                Step::Review {
+                    workspace: "w1".into()
+                },
+                Step::Browser {
+                    url: "http://127.0.0.1:9/page.html".into()
+                },
+                Step::Close { tab: None },
+                Step::Close {
+                    tab: Some("t-2".into())
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_browser_step_without_http_url() {
+        for url in [
+            "file:///etc/hosts",
+            "perch://x",
+            "127.0.0.1:9",
+            "javascript:alert(1)",
+        ] {
+            assert!(parse_script(&format!("browser {url}")).is_err(), "{url}");
         }
     }
 

@@ -14,7 +14,7 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 //! (docs/MOD-SDK.md).
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { buttonClass as button, menuDividerClass as menuDivider, menuItemClass as menuItem, menuPanel } from "@perch/sdk";
+import { buttonClass as button, cn, menuDividerClass as menuDivider, menuItemClass as menuItem, menuPanel, Submenu } from "@perch/sdk";
 export default function TabMenu({ x, y, onClose, self, canSplitNew, canSplitMore, offered, inSplit, canStopAgent, extraItems, actions }) {
     const ref = useRef(null);
     const renameRef = useRef(null);
@@ -41,7 +41,11 @@ export default function TabMenu({ x, y, onClose, self, canSplitNew, canSplitMore
         }
     }, [renaming]);
     const left = Math.max(8, Math.min(x, window.innerWidth - 288));
-    const top = Math.max(8, Math.min(y, window.innerHeight - 48 - 36 * (offered.length + extraItems.length + 7)));
+    const top = Math.max(8, Math.min(y, window.innerHeight - 48 - 36 * (extraItems.length + 8)));
+    // "Show beside" opens its list of tabs beside the menu: on the side with room, and upward when the row is low.
+    const besideRow = top + 14 + 36 * (self.kind === "session" ? 3 : 2);
+    const listHeight = 12 + 36 * offered.length;
+    const besideUp = window.innerHeight - besideRow < listHeight && besideRow > window.innerHeight / 2;
     const then = (run) => () => { run(); onClose(); };
     function commitRename() {
         if (self.kind === "session" && name.trim())
@@ -50,10 +54,10 @@ export default function TabMenu({ x, y, onClose, self, canSplitNew, canSplitMore
     }
     return createPortal(_jsx("div", {
         ref: ref,
-        className: `${menuPanel} overflow-y-auto max-[700px]:[&_button]:min-h-11`,
+        className: cn(menuPanel, "overflow-visible max-[700px]:[&_button]:min-h-11"),
         "aria-label": "Tab actions",
         "data-testid": "tab-split-menu",
-        style: { position: "fixed", top, left, zIndex: 9999, width: 280, maxWidth: "calc(100vw - 16px)", maxHeight: window.innerHeight - top - 8 },
+        style: { position: "fixed", top, left, zIndex: 9999, width: 280, maxWidth: "calc(100vw - 16px)" },
         children: renaming ? _jsxs("form", {
             className: "flex gap-2 p-2",
             onSubmit: (event) => { event.preventDefault(); commitRename(); },
@@ -89,22 +93,15 @@ export default function TabMenu({ x, y, onClose, self, canSplitNew, canSplitMore
                         direction,
                         " with new terminal"
                     ]
-                }, direction)), _jsx("div", { className: menuDivider }), offered.length > 0 && _jsx("p", {
-                    className: "m-0 px-[0.9rem] py-1 text-xs text-subtext-0",
-                    children: "Show an open tab beside this one"
-                }), offered.map((entry) => (_jsx("button", {
-                    type: "button",
-                    className: menuItem(),
-                    "data-testid": `tab-split-with-${entry.id}`,
-                    onClick: then(() => actions.showBeside(entry.id)),
-                    children: _jsxs("span", {
-                        className: "block truncate",
-                        children: [
-                            "Show beside ",
-                            entry.label
-                        ]
-                    })
-                }, entry.id))), offered.length === 0 && !inSplit && _jsx("div", {
+                }, direction)), _jsx("div", { className: menuDivider }), offered.length > 0 && (_jsx(Submenu, {
+                    label: "Show beside",
+                    testId: "tab-menu-show-beside",
+                    side: left + 280 + 240 + 8 > window.innerWidth ? "left" : "right",
+                    up: besideUp,
+                    maxHeight: besideUp ? besideRow + 36 - 8 : window.innerHeight - besideRow - 8,
+                    items: offered.map((entry) => ({ key: entry.id, label: entry.label, testId: `tab-split-with-${entry.id}`, onSelect: then(() => actions.showBeside(entry.id)) }))
+                })), offered.length === 0 && !inSplit && _jsx("div", {
+                    "data-testid": "tab-menu-empty",
                     className: "px-[0.9rem] py-[0.45rem] text-[0.82rem] text-subtext-0",
                     children: "No other open tab available"
                 }), inSplit && (_jsxs(_Fragment, { children: [offered.length > 0 && _jsx("div", { className: menuDivider }), _jsx("button", {

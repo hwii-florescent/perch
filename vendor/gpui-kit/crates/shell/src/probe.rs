@@ -47,6 +47,17 @@ pub struct ProbeRecord {
 
 thread_local! {
     static RECORDS: RefCell<BTreeMap<SharedString, ProbeRecord>> = const { RefCell::new(BTreeMap::new()) };
+    static NAMED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Whether scripts name their elements for the probe ([`crate::probing`]); on by default.
+pub fn named() -> bool {
+    NAMED.with(std::cell::Cell::get)
+}
+
+/// Turns naming off (a test timing what a release build does) or back on.
+pub fn set_named(on: bool) {
+    NAMED.with(|named| named.set(on));
 }
 
 /// Forgets every record.
