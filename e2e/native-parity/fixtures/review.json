@@ -1,11 +1,11 @@
 {
   "schema": "perch-native-parity-fixture/1",
   "screen": "review",
-  "note": "The review (stock-ui/review, `stock:review`) of workspace w-perch-main, filling the window as the native client places it until review tabs exist; the web reference draws the same source in a 1280x800 box on the app's backdrop. Its data is the workspace's Git review as the store keeps it (`useGitReview`): `review` is the `WorkspaceGitReviewState` (status, diff, comments) that both the web's `useWorkspaceGitReviewStore` and the native window's Git store hold for the workspace; the actions answer nothing, so nothing loads over it. The diff is `DiffView`: the web's rows and Perch's native diff view, named row by row (file headers, hunk headers, lines with their comment threads). `selection` clicks the first line; `comment-thread` has one comment on src/sidebar.ts line 12 (new side).",
+  "note": "The review (stock-ui/review, `stock:review`) of workspace w-perch-main, in a review tab's pane (960x720), the box the app lays a tab's screen in; the native client places the same screen in its review tabs and the drawer's Git tab. Its data is the workspace's Git review as the store keeps it (`useGitReview`): `review` is the `WorkspaceGitReviewState` (status, diff, comments) that both the web's `useWorkspaceGitReviewStore` and the native window's Git store hold for the workspace; the actions answer nothing, so nothing loads over it. The diff is `DiffView`: the web's rows and Perch's native diff view, named row by row (file headers, hunk headers, lines with their comment threads). `selection` clicks the first line; `comment-thread` has one comment on src/sidebar.ts line 12 (new side).",
   "dataFrom": "sidebar",
   "size": {
-    "width": 1280,
-    "height": 800
+    "width": 960,
+    "height": 720
   },
   "window": {
     "width": 1280,

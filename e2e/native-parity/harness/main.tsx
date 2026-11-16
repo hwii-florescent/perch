@@ -377,7 +377,7 @@ const SCREENS: Record<string, Screen> = {
     // The workspace's review as the store keeps it: the fixture's `review` is its `WorkspaceGitReviewState`. The actions
     // answer nothing (a preview resolves null), so nothing loads over the fixture's data.
     load: () => import("../../../packages/web/src/stock-ui/review/main"),
-    mount: "stage",
+    mount: "card",
     props: ({ review, ...fixed }) => {
       const quiet = new Proxy({}, { get: () => () => Promise.resolve(null) });
       useWorkspaceGitReviewStore.setState({
