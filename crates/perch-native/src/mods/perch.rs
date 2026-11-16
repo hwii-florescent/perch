@@ -189,6 +189,8 @@ struct Data {
     props: HashMap<String, Value>,
     /// Each workspace's files as the window's store last published them (`FileStore::snapshot`).
     files: HashMap<String, Value>,
+    /// Each workspace's review as the window's Git store last published it.
+    git: HashMap<String, Value>,
 }
 
 /// Where window commands run.
@@ -460,6 +462,154 @@ impl Perch {
                     )
                 })?;
                 Ok(HostValue::Null)
+            })
+    }
+
+    /// Publishes workspace `workspace_id`'s review (`useGitReview`'s state fields, the diff and comments
+    /// included). Call [`Self::flush`] after.
+    pub fn set_git_review(&self, workspace_id: &str, review: &crate::git::store::WorkspaceReview) {
+        // ponytail: the whole diff becomes JSON on every change of the review (a status refresh too); if a
+        // 20,000-line diff costs too much here, keep the diff's JSON by `diff_revision`.
+        let mut value = serde_json::to_value(review).unwrap_or_else(|_| json!({}));
+        value["diff"] = review
+            .diff
+            .as_deref()
+            .and_then(|d| serde_json::to_value(d).ok())
+            .unwrap_or(Value::Null);
+        value["comments"] = serde_json::to_value(&*review.comments).unwrap_or_else(|_| json!([]));
+        self.0
+            .data
+            .borrow_mut()
+            .git
+            .insert(workspace_id.to_string(), value);
+        self.bump(&format!("git:{workspace_id}"));
+    }
+
+    /// The revision of what `gitReview(workspaceId)` answers: it moves with the review and the sidebar's store.
+    fn git_review_revision(&self, workspace_id: &str) -> u64 {
+        let git = self
+            .0
+            .revisions
+            .borrow()
+            .get(&format!("git:{workspace_id}"))
+            .copied()
+            .unwrap_or(0);
+        git.wrapping_mul(1 << 32)
+            .wrapping_add(self.store().revision)
+    }
+
+    /// `useGitReview(workspaceId)`'s data, without its actions (the SDK binds those to `gitDo`).
+    fn git_review(&self, workspace_id: &str) -> Value {
+        let store = self.store();
+        let data = self.0.data.borrow();
+        let mut review = data.git.get(workspace_id).cloned().unwrap_or_else(|| {
+            json!({ "statusState": "idle", "diffState": "idle", "actionState": "idle", "diff": null,
+                    "comments": [], "refs": [], "batchDelivery": null, "lastAgentTurn": null })
+        });
+        let workspace = store.workspaces.iter().find(|w| w.id == workspace_id);
+        let scope = workspace_id
+            .strip_prefix("term:")
+            .and_then(|rest| rest.split(':').next());
+        let targets: Vec<Value> = store
+            .sessions
+            .iter()
+            .filter(|s| {
+                s.workspace_id.as_deref() == Some(workspace_id)
+                    || scope == Some(s.id.as_str())
+                    || workspace.is_some_and(|w| s.host_id == w.host_id && s.cwd == w.path)
+            })
+            .map(|s| {
+                let title = if s.title.is_empty() {
+                    "New session"
+                } else {
+                    &s.title
+                };
+                json!({ "id": s.id, "title": title, "agent": s.cli_provider_id })
+            })
+            .collect();
+        let remote_name = store
+            .sessions
+            .iter()
+            .find(|s| s.workspace_id.as_deref() == Some(workspace_id))
+            .and_then(|s| s.cwd.trim_end_matches('/').rsplit('/').next())
+            .map(str::to_string);
+        review["ready"] = json!(crate::git::can_take(
+            data.model.connected,
+            &store,
+            workspace_id
+        ));
+        review["workspaceName"] = json!(workspace.map(|w| w.name.clone()).or(remote_name));
+        review["startSnapshot"] = json!(workspace.and_then(|w| w.start_snapshot.clone()));
+        review["sessions"] = json!(targets);
+        review["currentRevision"] = review["diff"]["sourceRevision"].clone();
+        review["revision"] = json!(self.git_review_revision(workspace_id));
+        review
+    }
+
+    /// The `perch` functions of the review screen: `gitReview(workspaceId)`, `gitReviewRevision(workspaceId)`
+    /// (cheap: the SDK asks for the review again only when it moved) and `gitDo(action, workspaceId, ...args)`,
+    /// which runs one of `useGitReview`'s actions on the window's Git store and settles with its value (a preview
+    /// receipt, a packet or a delivery; null for the rest).
+    fn git_functions(&self, id: &Rc<str>, module: HostModule) -> HostModule {
+        let (reader, reader_id) = (self.clone(), id.clone());
+        let (counter, counter_id) = (self.clone(), id.clone());
+        let doer = self.clone();
+        module
+            .function("gitReview", move |args| {
+                let workspace_id = args.string(0)?.to_string();
+                reader.read(&reader_id, STORE);
+                reader.read(&reader_id, &format!("git:{workspace_id}"));
+                Ok(to_host(&reader.git_review(&workspace_id)))
+            })
+            .function("gitReviewRevision", move |args| {
+                let workspace_id = args.string(0)?.to_string();
+                counter.read(&counter_id, STORE);
+                counter.read(&counter_id, &format!("git:{workspace_id}"));
+                Ok(HostValue::Number(
+                    counter.git_review_revision(&workspace_id) as f64,
+                ))
+            })
+            .async_function("gitDo", move |args| {
+                let action = args.string(0)?.to_string();
+                let workspace_id = args.string(1)?.to_string();
+                let rest: Vec<Value> = (2..args.len())
+                    .filter_map(|i| args.get(i).map(from_host))
+                    .collect();
+                let focused = doer.0.data.borrow().session_id.clone();
+                let (tx, rx) = futures::channel::oneshot::channel();
+                gpui_shell::with_current_app(|cx| {
+                    cx.defer(move |cx| {
+                        let Some(git) = crate::git::host(cx) else {
+                            let _ = tx.send(Err("Git is not kept in this window.".to_string()));
+                            return;
+                        };
+                        let waiter = git.run(
+                            &workspace_id,
+                            |store, ready, out| {
+                                git_action(
+                                    store,
+                                    &action,
+                                    &workspace_id,
+                                    &rest,
+                                    focused,
+                                    ready,
+                                    out,
+                                )
+                            },
+                            cx,
+                        );
+                        let _ = tx.send(waiter.map(|ticket| git.wait(ticket)));
+                    })
+                })
+                .ok_or_else(|| HostError::new("No app to reach the window in."))?;
+                Ok(async move {
+                    let waiter = match rx.await {
+                        Ok(Ok(waiter)) => waiter,
+                        Ok(Err(error)) => return Err(HostError::new(error)),
+                        Err(_) => return Ok(HostValue::Null),
+                    };
+                    Ok(to_host(&waiter.await.unwrap_or(Value::Null)))
+                })
             })
     }
 
@@ -890,7 +1040,7 @@ impl Perch {
         let (close, close_id) = (self.clone(), id.clone());
         let opener = self.clone();
         let (notifier, notify_id) = (self.clone(), id.clone());
-        self.files_functions(&id, HostModule::new("perch"))
+        self.git_functions(&id, self.files_functions(&id, HostModule::new("perch")))
             .function("props", move |_| {
                 props.read(&props_id, &format!("props:{props_id}"));
                 let value = props.0.data.borrow().props.get(&*props_id).cloned();
@@ -2357,6 +2507,121 @@ fn module_body(file: &str) -> String {
     let start = file.find('{').map_or(0, |at| at + 1);
     let end = file.rfind('}').unwrap_or(file.len());
     file[start..end].to_string()
+}
+
+/// Runs `useGitReview` action `action` on `store` for workspace `id` with the script's `args`: the ticket a
+/// promise waits on (`Ok(None)` settles null at once), or why the arguments are wrong.
+fn git_action(
+    store: &mut crate::git::store::GitReviewStore,
+    action: &str,
+    id: &str,
+    args: &[Value],
+    focused: Option<String>,
+    ready: bool,
+    out: &mut Vec<crate::git::store::Effect>,
+) -> Result<Option<crate::git::store::Ticket>, String> {
+    use perch_core::review::ReviewSide;
+    let text = |i: usize| {
+        args.get(i)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    let number = |i: usize| args.get(i).and_then(Value::as_u64).unwrap_or(0);
+    let paths = |i: usize| -> Vec<String> {
+        args.get(i)
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|p| p.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    Ok(match action {
+        "refreshStatus" => store.refresh_status(id, ready, out),
+        "selectAgentSession" => {
+            let session = args.first().and_then(Value::as_str).map(str::to_string);
+            store.select_agent_session(id, session, ready, out);
+            None
+        }
+        "loadDiff" => {
+            let target = serde_json::from_value(args.first().cloned().unwrap_or(Value::Null))
+                .map_err(|e| format!("loadDiff: {e}"))?;
+            let path = args.get(1).and_then(Value::as_str).map(str::to_string);
+            let options = args.get(2).cloned().unwrap_or(Value::Null);
+            store.load_diff(
+                id,
+                target,
+                path,
+                options["includeUntracked"].as_bool().unwrap_or(true),
+                options["ignoreWhitespace"].as_bool().unwrap_or(false),
+                options["contextLines"].as_u64().unwrap_or(3) as u32,
+                ready,
+                out,
+            )
+        }
+        "stage" | "unstage" => {
+            store.path_action(id, &format!("git.{action}"), paths(0), ready, out);
+            None
+        }
+        "discardPreview" => store.discard_preview(id, &text(0), paths(1), ready, out),
+        "discard" => {
+            store.discard(id, &text(0), ready, out);
+            None
+        }
+        "commitPreview" => store.commit_preview(id, &text(0), ready, out),
+        "commit" => {
+            store.commit(id, &text(0), &text(1), ready, out);
+            None
+        }
+        "listComments" => store.list_comments(id, ready, out),
+        "listRefs" => store.list_refs(id, ready, out),
+        "createComment" => {
+            let input = args.first().cloned().unwrap_or(Value::Null);
+            let side: ReviewSide = serde_json::from_value(input["side"].clone())
+                .map_err(|e| format!("createComment: {e}"))?;
+            let new = crate::git::store::NewComment {
+                id: input["id"]
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(new_id),
+                path: input["path"].as_str().unwrap_or("").to_string(),
+                side,
+                start: input["start"].as_u64().unwrap_or(0) as u32,
+                end: input["end"].as_u64().unwrap_or(0) as u32,
+                body: input["body"].as_str().unwrap_or("").to_string(),
+            };
+            store.create_comment(id, new, focused.as_deref(), ready, out);
+            None
+        }
+        "updateComment" => {
+            store.update_comment(id, &text(0), &text(1), number(2), ready, out);
+            None
+        }
+        "resolveComment" => {
+            let resolved = args.get(1).and_then(Value::as_bool).unwrap_or(false);
+            store.resolve_comment(id, &text(0), resolved, number(2), ready, out);
+            None
+        }
+        "deleteComment" => {
+            store.delete_comment(id, &text(0), number(1), ready, out);
+            None
+        }
+        "previewBatch" => store.preview_batch(id, args.first().unwrap_or(&Value::Null), ready, out),
+        "sendBatch" => store.send_batch(id, &text(0), &text(1), ready, out),
+        other => return Err(format!("No Git action {other}.")),
+    })
+}
+
+/// A new comment's id, `comment-<unique>` as the web's store makes it.
+fn new_id() -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("comment-{nanos:x}-{n}")
 }
 
 pub fn to_host(value: &Value) -> HostValue {

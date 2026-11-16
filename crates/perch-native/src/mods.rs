@@ -484,6 +484,8 @@ pub struct WindowMods {
     pub editors: crate::editor::Editors,
     /// The engine kinds screens place by key (`perch-engine`), `editor` among them.
     pub engines: engines::Engines,
+    /// The review diffs screens place (`perch-diff`), by key.
+    pub diffs: crate::diff::host::Diffs,
 }
 
 impl gpui::Global for WindowMods {}
@@ -516,15 +518,20 @@ pub fn start_in(
     let perch = perch::Perch::new();
     perch.register(&host);
     perch.attach(workspace, window, cx);
+    crate::git::install(workspace, cx);
     let editors = crate::editor::Editors::default();
     editors.register(&host);
     let engines = host.engines().clone();
     engines.register("editor", editors.clone());
+    let diffs = crate::diff::host::Diffs::default();
+    diffs.register(&host);
+    engines.register("diff", diffs.clone());
     cx.set_global(WindowMods {
         host,
         perch,
         editors,
         engines,
+        diffs,
     });
 }
 

@@ -10,7 +10,7 @@ import { loadSidebar, repo } from "./support.mjs";
 // The host module `settings-props.js` reaches through `host.js` exists only inside the window's engine; nothing here calls it.
 registerHooks({
   resolve(specifier, context, next) {
-    if (specifier === "perch" || specifier === "perch-react" || specifier === "perch-engine") return { url: `data:text/javascript,export const Icon=0,bounds=0,forgetBounds=0,textWidth=0,Engine=0,focus=0,focused=0,release=0`, shortCircuit: true, format: "module" };
+    if (specifier === "perch" || specifier === "perch-react" || specifier === "perch-engine" || specifier === "perch-diff") return { url: `data:text/javascript,export const Icon=0,bounds=0,forgetBounds=0,textWidth=0,Engine=0,focus=0,focused=0,release=0,open=0,setProps=0,events=0,seq=0`, shortCircuit: true, format: "module" };
     return next(specifier, context);
   },
 });

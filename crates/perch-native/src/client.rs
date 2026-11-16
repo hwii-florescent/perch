@@ -1167,6 +1167,24 @@ fn answer_of(message: &ServerMessage) -> Option<(&str, Result<Value, String>)> {
             }
             Some((request_id, Ok(answer)))
         }
+        // A Git or review answer: the message's own fields, as the web's store reads them.
+        ServerMessage::GitStatusResult { request_id, .. }
+        | ServerMessage::GitRefsResult { request_id, .. }
+        | ServerMessage::GitDiffResult { request_id, .. }
+        | ServerMessage::GitActionResult { request_id, .. }
+        | ServerMessage::GitPreviewResult { request_id, .. }
+        | ServerMessage::ReviewListResult { request_id, .. }
+        | ServerMessage::ReviewCommentResult { request_id, .. }
+        | ServerMessage::ReviewDeleteResult { request_id, .. }
+        | ServerMessage::ReviewBatchPreviewResult { request_id, .. }
+        | ServerMessage::ReviewBatchSendResult { request_id, .. } => {
+            let mut answer = serde_json::to_value(message).unwrap_or(Value::Null);
+            if let Some(answer) = answer.as_object_mut() {
+                answer.remove("requestId");
+                answer.remove("type");
+            }
+            Some((request_id, Ok(answer)))
+        }
         ServerMessage::WorkspaceRunStarted {
             request_id,
             session_id,
@@ -1203,6 +1221,8 @@ pub enum Update {
     Alert(Heard),
     /// A message for the window's file store (`files::store`): an `fs.*` reply or `fs.changed`.
     Files(Box<ServerMessage>),
+    /// A review delivery for the window's Git store (`git::store`), broadcast with no request.
+    Review(Box<ServerMessage>),
 }
 
 /// Whether the window's file store reads `message`. `fs.browse` stays a screen's question.
@@ -1441,6 +1461,11 @@ async fn live(
                 let message = message?;
                 if for_files(&message)
                     && updates.unbounded_send(Update::Files(Box::new(message.clone()))).is_err()
+                {
+                    return Ok(());
+                }
+                if matches!(message, ServerMessage::ReviewBatchDelivery { .. })
+                    && updates.unbounded_send(Update::Review(Box::new(message.clone()))).is_err()
                 {
                     return Ok(());
                 }

@@ -34,6 +34,7 @@
 import * as perch from "perch";
 import { Icon, bounds, forgetBounds, textWidth } from "perch-react";
 import * as engines from "perch-engine";
+import * as diffs from "perch-diff";
 import { ICONS, LETTERS, LETTER } from "./agent-icons.js";
 
 export const INERT = [
@@ -218,6 +219,7 @@ export function copyFor(cx, screen) {
   let escapeHeld = false;
   // Snapshots by key, read again on `refresh()`.
   const snapshots = new Map();
+  const reviews = new Map();
   const listeners = new Set();
   const focusListeners = new Set();
   const openOverlays = new Set();
@@ -347,6 +349,16 @@ export function copyFor(cx, screen) {
     // `useWorkspaceFiles`: one workspace's files from the window's store, and its actions run there.
     workspaceFiles: (id) => snapshot(`workspaceFiles:${id}`, () => perch.workspaceFiles(id)),
     filesDo: (action, workspaceId, ...args) => perch.filesDo(action, workspaceId, ...args),
+    // `useGitReview`: one workspace's review from the window's Git store, read again only when it moved (a diff
+    // can be 20,000 lines), and its actions run there. `diff` drives the review's diff engine by key.
+    gitReview: (id) => {
+      const revision = perch.gitReviewRevision(id);
+      let entry = reviews.get(id);
+      if (!entry || entry.revision !== revision) reviews.set(id, (entry = { revision, value: perch.gitReview(id) }));
+      return entry.value;
+    },
+    gitDo: (action, workspaceId, ...args) => perch.gitDo(action, workspaceId, ...args),
+    diff: diffs,
     statusLine: () => snapshot("statusLine", () => perch.statusLine()),
     zoom: () => snapshot("zoom", () => perch.zoom()),
     paneLook: () => snapshot("paneLook", () => perch.paneLook()),

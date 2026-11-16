@@ -422,6 +422,16 @@ declare module "perch" {
    * `requestTree(path)`, `searchFiles(query)`, `openFile(path, force?)`, `reloadFile(path)`, `requestPreview(path)`,
    * `updateDraft(path, content)`, `saveFile(path)`, `overwriteFile(path)`, `extractArchive(path)`, `setWrap(on)`. */
   export function filesDo(action: string, workspaceId: string, ...args: unknown[]): void;
+  /** `useGitReview(workspaceId)`'s data from the window's Git store (`gitReviewStore`'s state fields, the diff and its
+   * comments included), with `ready` (connected, and the host offers Git), the workspace's name and start snapshot,
+   * the sessions a packet can go to, and `revision`. Re-read when the review or the sidebar's store moves. */
+  export function gitReview(workspaceId: string): Record<string, unknown> & { ready: boolean; revision: number };
+  /** The `revision` `gitReview` would answer now, without building the review. */
+  export function gitReviewRevision(workspaceId: string): number;
+  /** Runs `useGitReview` action `action` (`refreshStatus`, `loadDiff`, `stage`, `discardPreview`, `commit`,
+   * `createComment`, `previewBatch`, `sendBatch`, ...) on the window's Git store; settles with its preview,
+   * packet or delivery, null for the rest. */
+  export function gitDo(action: string, workspaceId: string, ...args: unknown[]): Promise<unknown>;
   /** What has the keyboard, and the panes on screen. */
   export function focus(): Focus;
   /** Every session on every computer, as a terminal record. */

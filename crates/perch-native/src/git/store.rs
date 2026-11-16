@@ -177,6 +177,13 @@ impl GitReviewStore {
         self.workspaces.get(id).cloned().unwrap_or_default()
     }
 
+    /// Each workspace's revision, to find the ones that moved since a reader last looked.
+    pub fn revisions(&self) -> impl Iterator<Item = (&str, u64)> {
+        self.workspaces
+            .iter()
+            .map(|(id, s)| (id.as_str(), s.revision))
+    }
+
     pub fn pending_count(&self) -> usize {
         self.pending.len()
     }
