@@ -235,8 +235,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           * before the last go on. */}
         {nested && (
           <span className={cn("-mt-[2px] flex w-2.5 shrink-0 flex-col", variant === "status" ? "ml-[2.375rem]" : group === "chats" ? "ml-[1.15rem]" : "ml-[2.025rem]")} aria-hidden="true" data-testid={`session-elbow-${session.id}`}>
-            <span className="flex-1 rounded-bl-[6px] border-b border-l border-overlay-0" />
-            <span className={cn("flex-1", !last && "border-l border-overlay-0")} />
+            <span className="flex-1 rounded-bl-[6px] border-b border-l border-overlay-1" />
+            <span className={cn("flex-1", !last && "border-l border-overlay-1")} />
           </span>
         )}
         {button}

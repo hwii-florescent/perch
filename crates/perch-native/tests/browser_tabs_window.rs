@@ -122,7 +122,7 @@ impl Rig {
     }
 }
 
-const PAGE: &str = "w1\nhttps://example.com/";
+const PAGE: &str = "w1\n\0browser\nhttps://example.com/";
 
 fn a_tab_opens_its_page_where_its_pane_is_drawn() {
     let mut rig = Rig::new();
@@ -133,6 +133,12 @@ fn a_tab_opens_its_page_where_its_pane_is_drawn() {
     )
     .unwrap();
     assert_eq!(rig.shown(), [PAGE]);
+    assert!(perch_native::workspace::is_browser_tab(PAGE));
+    assert_eq!(
+        perch_native::workspace::file_tab(PAGE),
+        None,
+        "a browser tab is never a file's"
+    );
     let log = rig.take();
     assert!(
         log[0].starts_with(&format!("{PAGE} create https://example.com/ zoom 1")),
@@ -164,7 +170,7 @@ fn another_tab_hides_the_page_and_closing_ends_it() {
     rig.run("browser.open", json!({"workspaceId": "w1"}))
         .unwrap();
     let blank = rig.shown().pop().unwrap();
-    assert!(blank.starts_with("w1\nblank:"), "{blank}");
+    assert!(blank.starts_with("w1\n\0browser\nblank:"), "{blank:?}");
     let log = rig.take();
     assert!(log.contains(&format!("{PAGE} hide")), "{log:?}");
     assert!(

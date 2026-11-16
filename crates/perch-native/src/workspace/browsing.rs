@@ -2,8 +2,8 @@
 //! history and suggestions, the page polls and (macOS) the key monitor. The pages themselves are
 //! [`crate::browser::Browsers`], shared with the slots that draw them (`browser::slot`).
 //!
-//! A browser tab's id is the web's file tab key of kind `browser`: `<workspace id>\n<url>`, or
-//! `<workspace id>\nblank:<n>` for one opened empty; the page's key is the tab id. The drawer's page is
+//! A browser tab's id is the web's file tab key of kind `browser` (`fileTabKey`): `<workspace id>\n\0browser\n<url>`,
+//! or `<workspace id>\n\0browser\nblank:<n>` for one opened empty; the page's key is the tab id. The drawer's page is
 //! `drawer\n<id>`. The pages are made the first time one is wanted, with the window's WebKit factory (or, in tests,
 //! the pages given to [`Workspace::with_browser_pages`]); none exist, and WebKit never starts, until then.
 
@@ -34,14 +34,17 @@ pub(super) struct Browsing {
     blanks: u64,
 }
 
+/// What follows a browser tab id's workspace (`fileTabKey`'s kind marker).
+const BROWSER: &str = "\0browser\n";
+
 /// Whether tab `id` is a browser tab.
 pub fn is_browser_tab(id: &str) -> bool {
-    id.split_once('\n').is_some_and(|(_, path)| {
-        path.starts_with("blank:")
-            || ["http://", "https://", "file://", "about:"]
-                .iter()
-                .any(|scheme| path.starts_with(scheme))
-    })
+    browser_path(id).is_some()
+}
+
+/// A browser tab's path: the address it was opened at, or `blank:<n>`.
+fn browser_path(id: &str) -> Option<&str> {
+    id.split_once('\n')?.1.strip_prefix(BROWSER)
 }
 
 /// Only web pages go into the history (as the web's `webUrl`).
@@ -453,7 +456,7 @@ impl Workspace {
         )
     }
 
-    /// A browser tab's name: its page's title, else its address's host, else "New tab".
+    /// A browser tab's name (the web's `tabName`): its page's title, else its address's host, else "New browser".
     pub(super) fn browser_title(&self, id: &str) -> Option<String> {
         if !is_browser_tab(id) {
             return None;
@@ -465,7 +468,9 @@ impl Workspace {
             .map(|p| p.borrow().meta(id))
             .unwrap_or_default();
         let url = if meta.url.is_empty() {
-            id.split_once('\n').map(|(_, p)| p).unwrap_or("")
+            browser_path(id)
+                .filter(|p| !p.starts_with("blank:"))
+                .unwrap_or("")
         } else {
             &meta.url
         };
@@ -473,8 +478,30 @@ impl Workspace {
             Some(meta.title.trim().to_string())
                 .filter(|t| !t.is_empty())
                 .or_else(|| crate::browser::address::url_host(url))
-                .unwrap_or_else(|| "New tab".into()),
+                .unwrap_or_else(|| "New browser".into()),
         )
+    }
+
+    /// `useWorkspaceTabs`' entry for each browser tab (the web's `tabInfo`), by tab id.
+    pub fn browser_tabs(&self) -> Value {
+        let pages = self.browsing.pages.as_ref().map(|p| p.borrow());
+        let tabs = self.tabs.strip().iter().filter_map(|id| {
+            let path = browser_path(id)?;
+            let workspace = id.split_once('\n')?.0;
+            let meta = pages.as_ref().map(|p| p.meta(id)).unwrap_or_default();
+            let blank = path.starts_with("blank:");
+            let url = if meta.url.is_empty() && !blank { path.to_string() } else { meta.url.clone() };
+            Some((
+                id.clone(),
+                json!({
+                    "id": id, "kind": "browser", "label": self.browser_title(id), "title": path,
+                    "dirty": false, "preview": false, "path": path, "workspaceId": workspace,
+                    "url": (!url.is_empty()).then_some(url), "icon": (!meta.icon.is_empty()).then_some(meta.icon),
+                    "blank": blank,
+                }),
+            ))
+        });
+        Value::Object(tabs.collect())
     }
 
     /// Close browser tab `id`: its page ends (closing is how its memory returns).
@@ -502,7 +529,7 @@ impl Workspace {
                 format!("blank:{}-{}", std::process::id(), self.browsing.blanks)
             }
         };
-        let id = format!("{workspace}\n{path}");
+        let id = format!("{workspace}\n{BROWSER}{path}");
         let started = !path.starts_with("blank:");
         if let Some(pages) = &self.browsing.pages {
             let mut pages = pages.borrow_mut();

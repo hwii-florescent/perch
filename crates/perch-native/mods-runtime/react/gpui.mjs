@@ -204,7 +204,10 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   // ponytail: at the end of the inner area the step does not pass on to the outer one, as a browser's does; reading
   // the inner area's extent would allow that.
   const scroller = node.style.overflow_x === "scroll" || node.style.overflow_y === "scroll";
-  if (scroller && IN_SCROLL.has(node)) el = el.on_scroll_wheel((_event, cx) => cx.stop_propagation?.());
+  // A box over the page takes the wheel as it takes the pointer: nothing behind a dialog's backdrop or a toast card
+  // scrolls (GPUI hands a step to every scroll area under the pointer, covered or not).
+  const covers = (overlay && !node.pointer_none) || node.blocks_pointer;
+  if ((scroller && IN_SCROLL.has(node)) || covers) el = el.on_scroll_wheel((_event, cx) => cx.stop_propagation?.());
   if (scroller || IN_SCROLL.has(node)) for (const child of node.children ?? []) if (child.kind !== "text") IN_SCROLL.add(child);
 
   // A press on a text field puts the keyboard in it, as a browser does, and keeps its box (a list anchored to it).
