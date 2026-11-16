@@ -40,6 +40,7 @@ fn main() {
             ));
     });
     gpui_platform::application().run(move |cx: &mut App| {
+        notify::init();
         let (width, height) = test.as_ref().and_then(|t| t.size).unwrap_or((1100., 720.));
         let bounds = Bounds::centered(None, size(px(width), px(height)), cx);
         let window = cx
@@ -103,9 +104,14 @@ fn main() {
             while let Some(update) = update_rx.next().await {
                 // A sound is due: play it here, not in the view, so no test ever does.
                 if let Update::Alert(heard) = update {
-                    announce(heard, silent, sound::play, notify::show, |heard| {
-                        workspace.update(cx, |workspace, cx| workspace.toast(heard, cx))
-                    });
+                    announce(
+                        heard,
+                        silent,
+                        notify::available(),
+                        sound::play,
+                        notify::show,
+                        |heard| workspace.update(cx, |workspace, cx| workspace.toast(heard, cx)),
+                    );
                     continue;
                 }
                 if let Update::Files(message) = update {
@@ -121,10 +127,13 @@ fn main() {
 }
 
 /// What a due alert does: its sound and its system notification are for a person, so `silent`
-/// (a scripted test run) skips both; the window's own toast is not.
+/// (a scripted test run) skips both; the window's own toast is not. Without a bundle
+/// (`bundled` false) a system notification would carry another app's name, so the window's
+/// toast stands in for it.
 fn announce(
     heard: Heard,
     silent: bool,
+    bundled: bool,
     play: impl FnOnce(&Heard),
     show: impl FnOnce(&str),
     toast: impl FnOnce(Heard),
@@ -134,9 +143,9 @@ fn announce(
     }
     match heard.toast {
         Toast::Off => {}
-        Toast::System if !silent => show(&heard.text()),
-        Toast::System => {}
-        Toast::App => toast(heard),
+        Toast::System if silent => {}
+        Toast::System if bundled => show(&heard.text()),
+        Toast::System | Toast::App => toast(heard),
     }
 }
 
@@ -159,11 +168,12 @@ mod tests {
     }
 
     /// How many times it played, posted a notification and showed a toast.
-    fn run(toast: Toast, silent: bool) -> (u32, u32, u32) {
+    fn run(toast: Toast, silent: bool, bundled: bool) -> (u32, u32, u32) {
         let (played, shown, toasted) = (Cell::new(0), Cell::new(0), Cell::new(0));
         announce(
             heard(toast),
             silent,
+            bundled,
             |_| played.set(played.get() + 1),
             |_| shown.set(shown.get() + 1),
             |_| toasted.set(toasted.get() + 1),
@@ -173,10 +183,26 @@ mod tests {
 
     #[test]
     fn a_test_run_plays_no_sound_and_posts_no_notification() {
-        assert_eq!(run(Toast::System, false), (1, 1, 0));
-        assert_eq!(run(Toast::System, true), (0, 0, 0));
-        assert_eq!(run(Toast::App, true), (0, 0, 1), "the window's toast stays");
-        assert_eq!(run(Toast::Off, true), (0, 0, 0));
-        assert_eq!(run(Toast::Off, false), (1, 0, 0));
+        assert_eq!(run(Toast::System, false, true), (1, 1, 0));
+        assert_eq!(run(Toast::System, true, true), (0, 0, 0));
+        assert_eq!(
+            run(Toast::App, true, true),
+            (0, 0, 1),
+            "the window's toast stays"
+        );
+        assert_eq!(run(Toast::Off, true, true), (0, 0, 0));
+        assert_eq!(run(Toast::Off, false, true), (1, 0, 0));
+    }
+
+    #[test]
+    fn without_a_bundle_the_window_toasts_instead_of_a_system_notification() {
+        assert_eq!(run(Toast::System, false, false), (1, 0, 1));
+        assert_eq!(
+            run(Toast::System, true, false),
+            (0, 0, 0),
+            "a test run stays quiet"
+        );
+        assert_eq!(run(Toast::App, false, false), (1, 0, 1));
+        assert_eq!(run(Toast::Off, false, false), (1, 0, 0));
     }
 }
