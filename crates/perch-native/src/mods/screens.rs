@@ -315,7 +315,6 @@ impl Floating {
 /// The window's screens: which mods exist, the in-flow copies on screen and the floating ones open.
 #[derive(Default)]
 pub struct Screens {
-    /// Whether a mod exists for an id, and when that was looked at.
     /// Whether each screen's mod was found, and at which [`ModHost::files_generation`].
     present: RefCell<HashMap<&'static str, (bool, u64)>>,
     inflow: HashMap<String, Entity<ModView>>,

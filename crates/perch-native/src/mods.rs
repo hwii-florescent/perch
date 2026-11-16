@@ -15,9 +15,10 @@
 //! A [`ModView`] is one mod as a GPUI view the workspace can place anywhere. It looks at the mod's
 //! files when the file system says something under the mods folder changed (one watcher per
 //! host, [`POLL`] after the event), and reloads it in place when they did; when the user adds or
-//! removes an override folder it switches source. Nothing runs while no file changes. A new version that throws while loading never replaces
-//! the one on screen ([`ModView::load_error`]); one that throws in `render()` leaves the last good
-//! render drawn under the shell's error banner ([`ModView::render_error`]). A mod gets no more
+//! removes an override folder it switches source. Nothing runs while no file changes. A new
+//! version that throws while loading never replaces the one on screen ([`ModView::load_error`]);
+//! one that throws in `render()` leaves the last good render drawn under the shell's error banner
+//! ([`ModView::render_error`]). A mod gets no more
 //! than a web mod ([`ModHost::policy_for`]): it reads its own folder, writes and keeps
 //! `localStorage` only in `<user dir>/.data/<id>/`, may write the clipboard but not read it, and
 //! runs nothing and reaches no network. A folder with a `gpui-shell.json` is refused, as the

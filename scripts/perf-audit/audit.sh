@@ -61,7 +61,7 @@ PY
   (cd "$SCR/work/code" && git init -q && git add -A && git -c user.name=a -c user.email=a@localhost commit -qm f)
   envs=$(run_env)
   # shellcheck disable=SC2086
-  env -i $envs PERCH_PORT="$(free_port)" "$CORE" --headless > "$SCR/logs/core.log" 2>&1 &
+  env -i $envs ${CORE_ENV:-} PERCH_PORT="$(free_port)" "$CORE" --headless > "$SCR/logs/core.log" 2>&1 &
   echo $! > "$SCR/core.pid"
   wait_for "core" 30 test -s "$SCR/daemon/core.json" || exit 1
   sleep 1
