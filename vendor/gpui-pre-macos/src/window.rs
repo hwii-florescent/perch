@@ -1,5 +1,5 @@
 use crate::{
-    BoolExt, MacDisplay, NSRange, NSStringExt, TISCopyCurrentKeyboardInputSource,
+    BoolExt, FrameDemand, MacDisplay, NSRange, NSStringExt, TISCopyCurrentKeyboardInputSource,
     TISGetInputSourceProperty, WindowFrameSource, events::platform_input_from_native,
     kTISPropertyInputSourceIsASCIICapable, kTISPropertyInputSourceType, kTISTypeKeyboardInputMode,
     ns_string, renderer,
@@ -665,6 +665,8 @@ struct MacWindowState {
     cursor_style: CursorStyle,
     cursor_visible: Arc<AtomicBool>,
     frame_source: Option<WindowFrameSource>,
+    // PERCH: pauses `frame_source` while nothing wants a frame (see `FrameDemand`).
+    frame_demand: Arc<FrameDemand>,
     renderer: renderer::Renderer,
     request_frame_callback: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     event_callback: Option<Box<dyn FnMut(PlatformInput) -> gpui::DispatchEventResult>>,
@@ -833,6 +835,7 @@ impl MacWindowState {
 
     fn start_display_link(&mut self) {
         self.stop_display_link();
+        self.frame_demand.reset();
         unsafe {
             if !self
                 .native_window
@@ -1098,6 +1101,7 @@ impl MacWindow {
                 cursor_style: CursorStyle::Arrow,
                 cursor_visible,
                 frame_source: None,
+                frame_demand: Arc::default(),
                 renderer: renderer::new_renderer(
                     renderer_context,
                     native_window as *mut _,
@@ -2011,6 +2015,23 @@ impl PlatformWindow for MacWindow {
         }
     }
 
+    // PERCH: GPUI's core calls this when the window wants a frame; while the display link is
+    // paused it delivers the request through the frame source (which restarts the link).
+    fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
+        let mut lock = self.0.as_ref().lock();
+        let data = lock.native_view.as_ptr() as *mut c_void;
+        let requests = lock
+            .frame_source
+            .get_or_insert_with(|| WindowFrameSource::new(data, step))
+            .requests();
+        let demand = lock.frame_demand.clone();
+        Some(Rc::new(move || {
+            if demand.demand() {
+                requests.merge_data(1);
+            }
+        }))
+    }
+
     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>) {
         self.0.as_ref().lock().request_frame_callback = Some(callback);
     }
@@ -2112,6 +2133,8 @@ impl PlatformWindow for MacWindow {
 
     fn draw(&self, scene: &gpui::Scene) {
         let mut this = self.0.lock();
+        // PERCH: a drawn frame (a forced one too) counts as wanted.
+        this.frame_demand.demand();
         this.renderer.draw(scene);
     }
 
@@ -3314,6 +3337,19 @@ extern "C" fn step(view: *mut c_void) {
     let window_state = unsafe { get_window_state(&*view) };
     let mut lock = window_state.lock();
 
+    // PERCH: a request the frame waker delivered while the link was paused restarts the link;
+    // one that cannot start (the window is covered) is dropped, as vsyncs are while covered.
+    if lock.frame_demand.begin_frame() {
+        lock.start_display_link();
+        if !lock
+            .frame_source
+            .as_ref()
+            .is_some_and(WindowFrameSource::is_running)
+        {
+            return;
+        }
+    }
+
     if let Some(mut callback) = lock.request_frame_callback.take() {
         let (signal_at, signal_source) = lock
             .frame_source
@@ -3329,7 +3365,12 @@ extern "C" fn step(view: *mut c_void) {
             signal_source,
             ..Default::default()
         });
-        window_state.lock().request_frame_callback = Some(callback);
+        let mut lock = window_state.lock();
+        lock.request_frame_callback = Some(callback);
+        // PERCH: nothing wanted the last few vsyncs: pause until something does.
+        if lock.frame_demand.end_frame() {
+            lock.stop_display_link();
+        }
     }
 }
 

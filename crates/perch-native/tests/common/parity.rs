@@ -412,8 +412,8 @@ pub fn elements(
 /// a native mod asks for the system font by that name and the web asks for it by this stack.
 const WEB_SYSTEM_FONT: &str = "-apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif";
 
-/// The web's monospace stack, which a native mod draws in Menlo: the first face of the stack the
-/// engine finds (`ui-monospace` and SF Mono are not fonts it can ask for by name).
+/// The web's monospace stack: `ui-monospace` is CoreText's monospaced system face (SF Mono) in WebKit, which the
+/// engine asks for as `.AppleSystemUIFontMonospaced`. A native mod drawn in `Menlo` is not this stack and fails.
 const WEB_MONO_FONT: &str =
     "ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace";
 
@@ -422,7 +422,8 @@ pub fn web_family(family: &str) -> String {
         ".SystemUIFont" => WEB_SYSTEM_FONT.into(),
         // The runtime's name for a bare `system-ui` (a form control's own face): the same face.
         ".AppleSystemUIFont" => "system-ui".into(),
-        "Menlo" => WEB_MONO_FONT.into(),
+        // The monospaced system face (the editor's, and a mod's `font-mono`): SF Mono, `ui-monospace` in WebKit.
+        ".AppleSystemUIFontMonospaced" => WEB_MONO_FONT.into(),
         _ => family.into(),
     }
 }

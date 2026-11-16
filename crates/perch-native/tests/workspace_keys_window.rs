@@ -206,8 +206,12 @@ fn history(rig: &mut Rig) {
     rig.open("alpha");
     rig.open("bravo");
     rig.open("charlie");
+    // Back and Forward are per workspace: charlie's own has nothing before it.
     assert!(rig.press(back));
-    assert_eq!(rig.active().as_deref(), Some("bravo"));
+    assert_eq!(rig.active().as_deref(), Some("charlie"));
+    rig.open("bravo");
+    assert!(rig.press(back));
+    assert_eq!(rig.active().as_deref(), Some("alpha"));
     assert!(rig.terminal_focused(), "the terminal has the keyboard");
     assert!(rig.press(back));
     assert_eq!(rig.active().as_deref(), Some("alpha"));

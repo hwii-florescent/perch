@@ -56,11 +56,16 @@ const OUTLINE = ["outline-style", "outline-width", "outline-color"];
 /** Engine families for the CSS stacks the app uses. */
 const SYSTEM = /(-apple-system|blinkmacsystemfont|system-ui|segoe ui|sans-serif|times)/i;
 const MONO = /(ui-monospace|sfmono|sf mono|menlo|monospace)/i;
+/** The app's monospace stack leads with `ui-monospace`, which WebKit draws in CoreText's monospaced system face (SF
+ * Mono): the engine asks for it by that name, as the file editor does. A list whose first face is `Menlo`, or the
+ * bare `monospace` generic, is WebKit's own default fixed face, Menlo. */
+const SYSTEM_MONO = /^\s*["']?(ui-monospace|sfmono-regular|sf mono)["']?\s*(,|$)/i;
 /** A bare `system-ui` (a form control's own face, WebKit's `-webkit-small-control`) is CoreText's
  * `.AppleSystemUIFont`: the face `.SystemUIFont` resolves to, kept under its own name so a capture tells the two
  * requests apart. CoreText has no family named `system-ui`. */
 const ENGINE_FAMILY = (family) =>
-  MONO.test(family) ? "Menlo"
+  SYSTEM_MONO.test(family ?? "") ? ".AppleSystemUIFontMonospaced"
+    : MONO.test(family) ? "Menlo"
     : /^\s*system-ui\s*$/i.test(family ?? "") ? ".AppleSystemUIFont"
     : SYSTEM.test(family) ? ".SystemUIFont" : familyOut(family).split(",")[0].trim();
 
@@ -497,32 +502,25 @@ function reportDeclarations(computed, report) {
  * it and its ancestors: computed once and reused until one of them changes (`HostElement.version`). */
 function ownPart(element, parentComputed, inheritedText, ctx) {
   const where = label(element);
-  const reports = [];
-  const report = (kind, property, value, source, note) => reports.push([kind, property, value, source ?? "(user agent)", where, note]);
-  const computed = ctx.cascade.compute(element, parentComputed);
-  const tokens = {};
-  const base = boxStyle(computed, report, ctx.viewport);
-  const shift = base[SHIFT];
-  reportDeclarations(computed, report);
-  const wanted = textWanted(computed, ctx.measure);
-  const ownText = textStyle(computed, wanted, inheritedText);
-  const style = encode({ ...base, ...ownText }, tokens);
-  const extra = {};
+  // What the element's rules match, kept across its computes below (`Cascade.matching`).
+  const memo = {};
+  const computed = ctx.cascade.compute(element, parentComputed, new Set(), null, memo);
   // Interaction variants: the element's own `hover:`, `focus:`/`focus-visible:` and `active:` styles.
   const variantRules = ctx.cascade.matching(element, "*").filter((rule) => rule.states.subject.size);
-  for (const [key, states] of [["hover", ["hover"]], ["focus", ["focus", "focus-visible"]], ["active", ["active", "hover"]]]) {
+  const variants = [];
+  for (const [key, states] of VARIANTS) {
     if (!variantRules.some((rule) => states.some((state) => rule.states.subject.has(state)))) continue;
-    const variant = ctx.cascade.compute(element, parentComputed, new Set(states));
-    const vTokens = {};
-    const vStyle = encode({ ...boxStyle(variant, () => {}), ...textStyle(variant, textWanted(variant, ctx.measure), inheritedText) }, vTokens);
-    if (key === "focus") reportDeclarations(variant, report);
-    const changed = diff(style, vStyle);
-    if (Object.keys(changed).length) {
-      extra[key] = changed;
-      const changedTokens = Object.fromEntries(Object.entries(vTokens).filter(([k]) => k in changed));
-      if (Object.keys(changedTokens).length) extra[`${key}_tokens`] = changedTokens;
-    }
+    variants.push([key, ctx.cascade.compute(element, parentComputed, new Set(states), null, memo)]);
   }
+  // The engine styles follow from the computed styles alone (the same objects for elements computed alike, a list's
+  // rows), the inherited text and whether the element is hidden: worked out once per such combination.
+  const memoKey = `${objectId(computed.shared)}|${objectId(inheritedText)}|${+!!computed.element.hidden}|${variants.map(([key, v]) => `${key}${objectId(v.shared)}`).join(",")}`;
+  let styled = (ctx.cascade.styled ??= new Map()).get(memoKey);
+  if (!styled) ctx.cascade.styled.set(memoKey, (styled = engineStyles(computed, variants, inheritedText, ctx)));
+  const { style, tokens, shift, childText } = styled;
+  const reports = styled.reports.map(([kind, property, value, source, note]) => [kind, property, value, source, where, note]);
+  const report = (kind, property, value, source, note) => reports.push([kind, property, value, source ?? "(user agent)", where, note]);
+  const extra = { ...styled.extra };
   // Hover groups: an element whose hover a rule reads (`group/row`) names a group, and a descendant those rules style
   // (`group-hover/row:opacity-100`) carries what it looks like while each such ancestor is under the pointer. The engine
   // draws both from its hitboxes (`group`, `group_hover`), so moving the pointer runs no script and describes nothing.
@@ -556,7 +554,7 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
   if (/^(anywhere|break-word)$/.test(String(computed.values["overflow-wrap"] ?? ""))) extra.break_anywhere = true;
   // A vertical scroller draws the app's scrollbar (`::-webkit-scrollbar`, `--scrollbar-size` wide) beside its content
   // when that overflows; the engine's scrollbars take no room, so the width is kept for the translator.
-  if (base.overflow_y === "scroll") {
+  if (styled.scrolls) {
     const size = Number.parseFloat(computed.customs?.["--scrollbar-size"] ?? "");
     if (size > 0) extra.scrollbar = size;
   }
@@ -569,7 +567,46 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
   // A form's submit button submits it on a click, with or without a handler of its own.
   if (!events.includes("click") && submits(element)) events.push("click");
   if (events.length) extra.events = events;
-  return { computed, style, tokens, extra, meta: meta(element), reports, childText: inheritText(inheritedText, ownText), where, shift };
+  return { computed, style, tokens, extra, meta: meta(element), reports, childText, where, shift };
+}
+
+/** The interaction variants an element may have, and the states each assumes on it. */
+const VARIANTS = [["hover", ["hover"]], ["focus", ["focus", "focus-visible"]], ["active", ["active", "hover"]]];
+
+/** A number per object, for keys made of object identities. */
+const OBJECT_IDS = new WeakMap();
+let nextObjectId = 0;
+function objectId(object) {
+  let id = OBJECT_IDS.get(object);
+  if (id === undefined) OBJECT_IDS.set(object, (id = ++nextObjectId));
+  return id;
+}
+
+/** An element's engine styles from its computed style and its variants' (`[key, computed]`): `style`, `tokens`,
+ * `shift`, `ownText`, the variants' changes (`extra`), whether it scrolls vertically, and its findings without the
+ * element they are about (`reports`). Pure: shared by every element computed alike. */
+function engineStyles(computed, variants, inheritedText, ctx) {
+  const reports = [];
+  const report = (kind, property, value, source, note) => reports.push([kind, property, value, source ?? "(user agent)", note]);
+  const tokens = {};
+  const base = boxStyle(computed, report, ctx.viewport);
+  reportDeclarations(computed, report);
+  const wanted = textWanted(computed, ctx.measure);
+  const ownText = textStyle(computed, wanted, inheritedText);
+  const style = encode({ ...base, ...ownText }, tokens);
+  const extra = {};
+  for (const [key, variant] of variants) {
+    const vTokens = {};
+    const vStyle = encode({ ...boxStyle(variant, () => {}), ...textStyle(variant, textWanted(variant, ctx.measure), inheritedText) }, vTokens);
+    if (key === "focus") reportDeclarations(variant, report);
+    const changed = diff(style, vStyle);
+    if (Object.keys(changed).length) {
+      extra[key] = changed;
+      const changedTokens = Object.fromEntries(Object.entries(vTokens).filter(([k]) => k in changed));
+      if (Object.keys(changedTokens).length) extra[`${key}_tokens`] = changedTokens;
+    }
+  }
+  return { style, tokens, shift: base[SHIFT], childText: inheritText(inheritedText, ownText), extra, scrolls: base.overflow_y === "scroll", reports };
 }
 
 /** The boxes `::before` and `::after` rules draw inside `element` (whose computed style is `computed`): a box for

@@ -1083,6 +1083,7 @@ export default screen("tabs", Hidden, { container: { position: "relative", width
 
     let host = ModHost::new(dir.clone()).expect("the mod host starts");
     // Every React screen's host imports `perch-editor`, `perch-diff` and `perch-media`, as the window lends them.
+    // The engines draw in their slots (`perch-engine`), as in the window.
     let editors = perch_native::editor::Editors::default();
     editors.register(&host);
     let diffs = perch_native::diff::host::Diffs::default();
@@ -1229,6 +1230,7 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
     seed_storage(&user, drawn, fixture, capture.state);
     let host = ModHost::new(user).expect("the mod host starts");
     // Every React screen's host imports `perch-editor` and `perch-diff`, as the window lends them.
+    // The engines draw in their slots (`perch-engine`), as in the window.
     let editors = perch_native::editor::Editors::default();
     editors.register(&host);
     let diffs = perch_native::diff::host::Diffs::default();

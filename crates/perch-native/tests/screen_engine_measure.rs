@@ -346,8 +346,8 @@ fn main() {
     // gets faster.
     if sessions == SESSIONS {
         for (what, took, ceiling) in [
-            ("first draw", first, 1300),
-            ("update", update, 110),
+            ("first draw", first, 900),
+            ("update", update, 80),
             ("refresh frame", refresh, 25),
         ] {
             assert!(

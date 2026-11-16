@@ -13,10 +13,13 @@
 //!   read only `mods/`, so neither ever sees these. A user folder with a stock mod's id replaces it.
 //!
 //! A [`ModView`] is one mod as a GPUI view the workspace can place anywhere. It looks at the mod's
-//! files every [`POLL`] and reloads it in place when they change; when the user adds or removes an
-//! override folder it switches source. A new version that throws while loading never replaces
-//! the one on screen ([`ModView::load_error`]); one that throws in `render()` leaves the last good
-//! render drawn under the shell's error banner ([`ModView::render_error`]). A mod gets no more
+//! files when the file system says something under the mods folder changed (one watcher per
+//! [`ModHost::watched`] host, [`SETTLE`] after the event; a test's host looks every [`POLL`]),
+//! and reloads it in place when they did; when the user adds or removes an override folder it
+//! switches source. Nothing runs while no file changes. A new
+//! version that throws while loading never replaces the one on screen ([`ModView::load_error`]);
+//! one that throws in `render()` leaves the last good render drawn under the shell's error banner
+//! ([`ModView::render_error`]). A mod gets no more
 //! than a web mod ([`ModHost::policy_for`]): it reads its own folder, writes and keeps
 //! `localStorage` only in `<user dir>/.data/<id>/`, may write the clipboard but not read it, and
 //! runs nothing and reaches no network. A folder with a `gpui-shell.json` is refused, as the
@@ -35,6 +38,8 @@ pub mod screens;
 pub mod theme;
 
 use anyhow::{anyhow, Context as _, Result};
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
+use futures::StreamExt as _;
 use gpui::{div, prelude::*, AnyView, App, Context, Entity, Task, WeakEntity, Window};
 use gpui_shell::policy::Policy;
 use gpui_shell::{Capabilities, HostModule, ScriptView, ShellRoot, ShellRuntime};
@@ -43,10 +48,16 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 
-/// How often a shown mod's files are looked at. A save shows within this.
+/// How often a test's mod host ([`ModHost::new`]) looks at a shown mod's files.
 pub const POLL: Duration = Duration::from_millis(250);
+
+/// How long after a file event a watched host's mod looks at its files: a save is often several
+/// events, taken together.
+const SETTLE: Duration = Duration::from_millis(50);
 
 /// The stock mods: path under `crates/perch-native/mods/`, and the file. Every file in that folder
 /// must be listed here (a unit test checks).
@@ -551,18 +562,39 @@ pub fn start(
     window: gpui::AnyWindowHandle,
     cx: &mut App,
 ) {
-    start_in(user_dir(), workspace, window, cx);
+    start_host(ModHost::watched(user_dir()), workspace, window, cx);
 }
 
-/// [`start`] with the mods of `dir` (a test's scratch folder).
+/// [`start`] with the mods of `dir` (a test's scratch folder), looked at every [`POLL`]: a test's
+/// executor takes no wakes from the file system's thread.
 pub fn start_in(
     dir: PathBuf,
     workspace: &Entity<crate::workspace::Workspace>,
     window: gpui::AnyWindowHandle,
     cx: &mut App,
 ) {
+    start_host(ModHost::new(dir), workspace, window, cx);
+}
+
+/// [`start`] with the mods of `dir`, watched as the app's are: a mod looks at its files only when the file system
+/// says they changed, which a test's executor never hears, so nothing it does depends on a poll.
+pub fn start_watched_in(
+    dir: PathBuf,
+    workspace: &Entity<crate::workspace::Workspace>,
+    window: gpui::AnyWindowHandle,
+    cx: &mut App,
+) {
+    start_host(ModHost::watched(dir), workspace, window, cx);
+}
+
+fn start_host(
+    host: Result<ModHost>,
+    workspace: &Entity<crate::workspace::Workspace>,
+    window: gpui::AnyWindowHandle,
+    cx: &mut App,
+) {
     init(cx);
-    let host = match ModHost::new(dir) {
+    let host = match host {
         Ok(host) => host,
         Err(error) => {
             eprintln!("perch-native: mods are off: {error:#}");
@@ -605,6 +637,12 @@ type ModuleFactory = Rc<dyn Fn(&str) -> HostModule>;
 
 struct Inner {
     user_dir: PathBuf,
+    changes: Arc<Changes>,
+    /// `None` for a test's host, or when the system would not watch the folder (said on
+    /// stderr): views then look every [`POLL`].
+    watcher: RefCell<Option<notify::RecommendedWatcher>>,
+    /// Folders outside `user_dir` watched for a linked mod folder (the watcher does not follow links).
+    watched: RefCell<HashSet<PathBuf>>,
     runtime: Rc<ShellRuntime>,
     modules: RefCell<Vec<ModuleFactory>>,
     views: RefCell<Vec<WeakEntity<ModView>>>,
@@ -618,11 +656,35 @@ pub struct ModHost(Rc<Inner>);
 
 impl ModHost {
     /// Writes the stock mods out under `user_dir/.stock/` and starts a runtime for them.
+    /// Its views look at their files every [`POLL`]; the app's host is [`Self::watched`].
     pub fn new(user_dir: PathBuf) -> Result<Self> {
+        Self::with_watcher(user_dir, false)
+    }
+
+    /// A host whose views look at their files only when the file system says they changed. The
+    /// file system's thread wakes them, so this is the app's host, not a test executor's.
+    pub fn watched(user_dir: PathBuf) -> Result<Self> {
+        Self::with_watcher(user_dir, true)
+    }
+
+    fn with_watcher(user_dir: PathBuf, watched: bool) -> Result<Self> {
         write_stock(&user_dir.join(".stock"), STOCK)?;
         let runtime = ShellRuntime::new_isolated().context("could not start the mod runtime")?;
+        let changes = Arc::new(Changes::default());
+        let watcher = watched
+            .then(|| watch(&user_dir, &changes))
+            .and_then(|watcher| {
+                watcher
+                    .map_err(|error| {
+                        eprintln!("perch-native: mod files are not watched: {error:#}")
+                    })
+                    .ok()
+            });
         let host = Self(Rc::new(Inner {
             user_dir,
+            changes,
+            watcher: RefCell::new(watcher),
+            watched: RefCell::default(),
             runtime,
             modules: RefCell::default(),
             views: RefCell::default(),
@@ -640,6 +702,43 @@ impl ModHost {
 
     pub fn user_dir(&self) -> &Path {
         &self.0.user_dir
+    }
+
+    /// How many times the mods' files changed (as the watcher saw it), to compare with an earlier
+    /// count.
+    pub fn files_generation(&self) -> u64 {
+        self.0.changes.generation.load(Ordering::SeqCst)
+    }
+
+    /// Whether the file system tells this host's views about changes ([`Self::watched`]).
+    pub fn is_watched(&self) -> bool {
+        self.0.watcher.borrow().is_some()
+    }
+
+    /// How many times this host's views looked at their mods' files, for tests that bound it.
+    pub fn file_checks(&self) -> u64 {
+        self.0.changes.checks.load(Ordering::SeqCst)
+    }
+
+    /// Watches a mod folder found through a link out of the mods folder, which the folder's
+    /// watcher does not follow.
+    fn watch_linked(&self, dir: &Path) {
+        let Ok(real) = dir.canonicalize() else { return };
+        let root = self
+            .0
+            .user_dir
+            .canonicalize()
+            .unwrap_or_else(|_| self.0.user_dir.clone());
+        if real.starts_with(&root) || !self.0.watched.borrow_mut().insert(real.clone()) {
+            return;
+        }
+        if let Some(watcher) = self.0.watcher.borrow_mut().as_mut() {
+            if let Err(error) =
+                notify::Watcher::watch(watcher, &real, notify::RecursiveMode::Recursive)
+            {
+                eprintln!("perch-native: {} is not watched: {error}", real.display());
+            }
+        }
     }
 
     /// What the mods' runtime has spent so far (script renders, materializations), for tests
@@ -702,6 +801,7 @@ impl ModHost {
         cx: &mut App,
     ) -> Entity<ModView> {
         let host = self.clone();
+        let mut changes = self.is_watched().then(|| self.0.changes.subscribe());
         let key = key.to_string();
         let id = id.to_string();
         let entity = cx.new(|cx| {
@@ -712,11 +812,24 @@ impl ModHost {
                 shown: None,
                 tried: None,
                 load_error: None,
+                restarted: None,
+                stopped: None,
+                watching: None,
+                _retry: Task::ready(()),
                 _poll: Task::ready(()),
             };
             view.check(window, cx);
             view._poll = cx.spawn_in(window, async move |this, cx| loop {
-                cx.background_executor().timer(POLL).await;
+                match changes.as_mut() {
+                    Some(changes) => {
+                        if changes.next().await.is_none() {
+                            break;
+                        }
+                        cx.background_executor().timer(SETTLE).await;
+                        while changes.try_recv().is_ok() {}
+                    }
+                    None => cx.background_executor().timer(POLL).await,
+                }
                 if this
                     .update_in(cx, |view, window, cx| view.check(window, cx))
                     .is_err()
@@ -800,8 +913,19 @@ pub struct ModView {
     /// The source and file stamp last acted on, so a broken version is tried once per change.
     tried: Option<(PathBuf, Stamp)>,
     load_error: Option<String>,
+    /// When the copy last started afresh after a call into it was stopped half-way.
+    restarted: Option<Instant>,
+    /// Why that call was stopped: still reported (`error`) by the fresh copy, until the mod's files change.
+    stopped: Option<String>,
+    /// The script view whose stops this copy follows ([`Self::watch_stops`]), and the subscription doing it.
+    watching: Option<(gpui::EntityId, gpui::Subscription)>,
+    /// A look again once a copy stopped too soon after its last fresh start may start afresh.
+    _retry: Task<()>,
     _poll: Task<()>,
 }
+
+/// How often a copy stopped half-way may start afresh.
+const RESTART_EVERY: Duration = Duration::from_secs(5);
 
 impl ModView {
     pub fn id(&self) -> &str {
@@ -830,9 +954,12 @@ impl ModView {
         error
     }
 
-    /// The load error, else the render error.
+    /// The load error, else the render error, else why a call was stopped before the copy started afresh.
     pub fn error(&self, cx: &App) -> Option<String> {
-        self.load_error.clone().or_else(|| self.render_error(cx))
+        self.load_error
+            .clone()
+            .or_else(|| self.render_error(cx))
+            .or_else(|| self.stopped.clone())
     }
 
     /// The shell's view of the mod, for tests and tools that read its description.
@@ -840,6 +967,65 @@ impl ModView {
         let root = &self.shown.as_ref()?.root;
         let content: AnyView = root.read(cx).content().clone();
         content.downcast::<ScriptView>().ok()
+    }
+
+    /// Whether a call into the copy (an event, a timer, a task) was stopped past its time budget, so it is to start
+    /// afresh. What the call was doing is half done: a React commit cut short leaves the screen's tree stuck (the
+    /// Files drawer stayed blank), and a cut cannot be caught in the script. A copy starts afresh at most once per
+    /// [`RESTART_EVERY`]; one stopped again sooner keeps its notice until then.
+    fn stopped_half_way(&mut self, cx: &App) -> bool {
+        let stopped = self
+            .script_view(cx)
+            .is_some_and(|view| view.read(cx).was_stopped());
+        if !stopped
+            || self
+                .restarted
+                .is_some_and(|at| at.elapsed() < RESTART_EVERY)
+        {
+            return false;
+        }
+        eprintln!(
+            "perch-native: mod {} was stopped half-way and starts afresh",
+            self.key
+        );
+        self.stopped = self.render_error(cx);
+        self.restarted = Some(Instant::now());
+        true
+    }
+
+    /// Follows the shown script view: a call into it stopped past its time budget makes the copy look again at once
+    /// ([`Self::check`] starts it afresh), not at the next change of its files, which in the app (a watched host)
+    /// may never come. One stopped again within [`RESTART_EVERY`] looks again when that has passed.
+    fn watch_stops(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(view) = self.script_view(cx) else {
+            self.watching = None;
+            return;
+        };
+        if self
+            .watching
+            .as_ref()
+            .is_some_and(|(id, _)| *id == view.entity_id())
+        {
+            return;
+        }
+        let subscription = cx.observe_in(&view, window, |this, view, window, cx| {
+            if !view.read(cx).was_stopped() {
+                return;
+            }
+            let wait = this
+                .restarted
+                .map(|at| RESTART_EVERY.saturating_sub(at.elapsed()))
+                .unwrap_or_default();
+            if wait.is_zero() {
+                this.check(window, cx);
+                return;
+            }
+            this._retry = cx.spawn_in(window, async move |this, cx| {
+                cx.background_executor().timer(wait).await;
+                let _ = this.update_in(cx, |this, window, cx| this.check(window, cx));
+            });
+        });
+        self.watching = Some((view.entity_id(), subscription));
     }
 
     /// Looks at the mod's files and loads, reloads or switches source when they changed.
@@ -850,12 +1036,17 @@ impl ModView {
             }
             return;
         };
-        // ponytail: a stat per file on the window's thread every poll; a mod folder holds a
-        // handful. A large one would want an OS file watcher (herdr-app uses `notify`).
+        self.host.0.changes.checks.fetch_add(1, Ordering::SeqCst);
+        self.host.watch_linked(&info.dir);
         let stamp = stamp(&info.dir);
         let current = Some((info.dir.clone(), stamp));
-        if self.tried == current {
+        let restart = self.stopped_half_way(cx);
+        if self.tried == current && !restart {
+            self.watch_stops(window, cx);
             return;
+        }
+        if self.tried != current {
+            self.stopped = None;
         }
         self.tried = current;
         let outcome = match &self.shown {
@@ -865,13 +1056,14 @@ impl ModView {
                 "{} in a mod folder is not allowed: a Perch mod imports only its own files",
                 gpui_shell::plugin::MANIFEST_FILE
             )),
-            Some(shown) if shown.dir == info.dir => {
+            Some(shown) if shown.dir == info.dir && !restart => {
                 let root = shown.root.clone();
                 self.host.0.runtime.reload_now(&root, window, cx)
             }
             _ => self.load(&info, window, cx),
         };
         self.load_error = outcome.err().map(|error| format!("{error:#}"));
+        self.watch_stops(window, cx);
         if let Some(error) = &self.load_error {
             let kept = if self.shown.is_some() {
                 "kept its last version"
@@ -924,6 +1116,50 @@ impl Render for ModView {
             (None, None) => view,
         }
     }
+}
+
+/// File changes under a host's mods folder: counted, and passed to every view's task.
+#[derive(Default)]
+struct Changes {
+    generation: AtomicU64,
+    checks: AtomicU64,
+    wakers: Mutex<Vec<UnboundedSender<()>>>,
+}
+
+impl Changes {
+    fn changed(&self) {
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        let mut wakers = self.wakers.lock().unwrap_or_else(PoisonError::into_inner);
+        wakers.retain(|waker| waker.unbounded_send(()).is_ok());
+    }
+
+    fn subscribe(&self) -> UnboundedReceiver<()> {
+        let (waker, changes) = futures::channel::mpsc::unbounded();
+        self.wakers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(waker);
+        changes
+    }
+}
+
+/// Watches `dir` (the system's file events, off the window's thread). What mods keep in
+/// `.data/` (their `localStorage`) is not a change to a mod.
+fn watch(dir: &Path, changes: &Arc<Changes>) -> Result<notify::RecommendedWatcher> {
+    use notify::Watcher as _;
+    let data = [dir.join(".data"), dir.canonicalize()?.join(".data")];
+    let changes = changes.clone();
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        if let Ok(event) = &event {
+            let ours = |path: &PathBuf| data.iter().any(|data| path.starts_with(data));
+            if event.kind.is_access() || (!event.paths.is_empty() && event.paths.iter().all(ours)) {
+                return;
+            }
+        }
+        changes.changed();
+    })?;
+    watcher.watch(dir, notify::RecursiveMode::Recursive)?;
+    Ok(watcher)
 }
 
 /// What a folder's files looked like: each counted file's path, size and modified time.

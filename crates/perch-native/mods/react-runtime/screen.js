@@ -42,7 +42,7 @@
 // This file is written by hand and shared by every React screen (`mods/react-runtime/`, which the mod host writes into
 // each screen's folder); `build.mjs` leaves it alone.
 import { copyFor, files, naming, runningHost } from "./host.js";
-import { View, div, image, unchanged } from "gpui-kit";
+import { View, div, image, renderGeneration, reuse, unchanged } from "gpui-kit";
 import { ScrollHandle } from "gpui-base";
 import { close, inRegion as inRegionOf, props as screenProps, scale } from "perch";
 import { describeToGpui, mount, NAMED_ELEMENTS, sdk } from "./runtime.mjs";
@@ -50,7 +50,8 @@ import { describeToGpui, mount, NAMED_ELEMENTS, sdk } from "./runtime.mjs";
 // This folder's `@perch/sdk` calls the host of this folder's running copy, whichever screen loads after it.
 sdk.bindHost(runningHost);
 
-const KIT = { div, image };
+// `reuse`/`renderGeneration`: unchanged subtrees keep the last frame's elements (`toGpui` in the runtime).
+const KIT = { div, image, reuse, renderGeneration };
 
 // The result the screen closes with at the end of this turn (`undefined`: none yet).
 let ending;
@@ -153,14 +154,20 @@ export function screen(id, Component, options = {}) {
           });
         });
       }
-      this.raw = JSON.stringify(screenProps());
       this.mounts = 0;
+      this.mountTree();
+      // Where `scrollIntoView()` leaves its request (a handle can only be made here, not while drawing).
+      this.kit = { ...KIT, scroll: ScrollHandle.new() };
+    }
+
+    /** Mounts the source's tree with the props the window gives now. */
+    mountTree() {
+      const { copy } = this;
+      this.raw = JSON.stringify(screenProps());
       const props = { ...toProps(JSON.parse(this.raw)), key: this.mounts };
       const handle = mount(copy.host, Component, { container: options.container, names: naming() ? namesOf(id, options) : null, props });
       copy.attach(handle);
       this.handle = entered(copy, handle);
-      // Where `scrollIntoView()` leaves its request (a handle can only be made here, not while drawing).
-      this.kit = { ...KIT, scroll: ScrollHandle.new() };
     }
 
     /** The window let this copy go: its tree unmounts and its listeners and timers go with it. */
@@ -180,6 +187,10 @@ export function screen(id, Component, options = {}) {
     render(cx) {
       const { copy } = this;
       return copy.asRender(() => {
+        // A call into React was cut past its time budget and React was replaced (`renderer.mjs`, `fresh`): the tree
+        // is mounted again, as on a first mount; what the window keeps (drafts, listings) is not lost.
+        // ponytail: the dead tree's subscriptions stay in the copy until it closes; a cut is rare.
+        if (this.handle.dead()) this.mountTree();
         // `render()` has a 50 ms script budget per frame (an event or a timer has 500 ms), so catching up with new
         // data or props, which re-renders React and describes the tree again, runs in a timer, and this frame draws
         // the last description. The engine runs `render()` again when something the screen read changed.
@@ -211,11 +222,13 @@ export function screen(id, Component, options = {}) {
         // `mode`: how the elements are wrapped for the keyboard, part of what the kept frame was built with.
         const draw = (mode, wrap) => {
           if (same && mode === this.mode) return unchanged();
-          this.look = look;
-          this.mode = mode;
           // Vertical lengths are laid on the window's device pixels (`snapColumns` in the runtime).
           // A screen in a region of the window (a sidebar, a status bar) portals into the window's layer.
-          return wrap(describeToGpui(this.handle.description, this.kit, this.handle, files, scale(), inRegion));
+          const built = wrap(describeToGpui(this.handle.description, this.kit, this.handle, files, scale(), inRegion));
+          // Only a build that finished is one to keep: one the engine cut off (its time budget) drew nothing.
+          this.look = look;
+          this.mode = mode;
+          return built;
         };
         // Effects that measured a box older than the tree run again once this frame has laid it out.
         if (this.handle.drawing?.()) {

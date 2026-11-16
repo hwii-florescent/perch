@@ -1625,6 +1625,7 @@ async fn live(
                     connection.send(delete_frame(&session_id)).await?;
                 }
                 Some(Command::SetOrder { host_id, projects, sessions }) => {
+                    state.set_order(&host_id, projects.clone(), sessions.clone());
                     let id = connection.request_id();
                     connection.send(order_frame(&id, &host_id, projects, sessions)).await?;
                 }

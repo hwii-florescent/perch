@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 const STEP_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL: Duration = Duration::from_millis(100);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Step {
     Open(String),
     Split(Direction),
@@ -47,6 +47,15 @@ pub enum Step {
     Close {
         tab: Option<String>,
     },
+    /// Measurement: run a workspace command with optional JSON arguments.
+    Command {
+        name: String,
+        args: Option<serde_json::Value>,
+    },
+    /// Measurement: patch the sidebar's view settings (`setSidebarSettings`).
+    Sidebar(serde_json::Value),
+    /// Measurement: resize the window to this many points.
+    Resize(f32, f32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -147,6 +156,28 @@ pub fn parse_script(text: &str) -> Result<Vec<Step>, String> {
                     })
                 }
                 ["browser", url] => Err(format!("browser takes an http(s) address, not {url:?}")),
+                ["command", name, ..] => {
+                    let rest = line.splitn(3, char::is_whitespace).nth(2).map(str::trim);
+                    let args = rest
+                        .filter(|r| !r.is_empty())
+                        .map(serde_json::from_str)
+                        .transpose()
+                        .map_err(|e| format!("command arguments are JSON: {e}"))?;
+                    Ok(Step::Command {
+                        name: name.to_string(),
+                        args,
+                    })
+                }
+                ["resize", wh] => parse_size(wh).map(|(w, h)| Step::Resize(w, h)),
+                ["sidebar", ..] => {
+                    let rest = line
+                        .split_once(char::is_whitespace)
+                        .map(|x| x.1)
+                        .unwrap_or("");
+                    serde_json::from_str(rest)
+                        .map(Step::Sidebar)
+                        .map_err(|e| format!("sidebar takes a JSON patch: {e}"))
+                }
                 ["close"] => Ok(Step::Close { tab: None }),
                 ["close", tab] => Ok(Step::Close {
                     tab: Some(tab.to_string()),
@@ -161,7 +192,36 @@ pub fn parse_script(text: &str) -> Result<Vec<Step>, String> {
 /// not happen within [`STEP_TIMEOUT`] ends the process with status 1.
 pub async fn run(steps: Vec<Step>, window: WindowHandle<Workspace>, cx: &mut AsyncApp) {
     for (number, step) in steps.iter().enumerate() {
+        if !matches!(step, Step::Pause(_)) {
+            eprintln!(
+                "perf-step t={:.1} n={} {step:?}",
+                gpui::perf_log::now_ms(),
+                number + 1
+            );
+        }
         let done = match step {
+            Step::Command { name, args } => {
+                let result = window.update(cx, |workspace, window, cx| {
+                    workspace.run_command(name, args.as_ref(), window, cx)
+                });
+                if !matches!(result, Ok(Ok(()))) {
+                    eprintln!("perch-native-test: command {name} said {result:?}");
+                }
+                true
+            }
+            Step::Resize(w, h) => window
+                .update(cx, |_, window, _| {
+                    window.resize(gpui::size(gpui::px(*w), gpui::px(*h)))
+                })
+                .is_ok(),
+            Step::Sidebar(patch) => cx.update(|cx| {
+                let perch = cx.global::<perch_native::mods::WindowMods>().perch.clone();
+                let mut settings = perch.sidebar();
+                let ok = settings.patch(patch).is_ok();
+                perch.set_sidebar(settings);
+                perch.flush(cx);
+                ok
+            }),
             Step::Pause(wait) => {
                 cx.background_executor().timer(*wait).await;
                 true

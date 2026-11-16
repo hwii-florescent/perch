@@ -1831,6 +1831,7 @@ impl Window {
                     || input_rate_tracker.borrow_mut().is_high_rate();
 
                 let should_draw = invalidator.is_dirty() || force_render;
+                let perf_started = Instant::now();
                 if should_draw {
                     measure("frame duration", || {
                         handle
@@ -1852,6 +1853,7 @@ impl Window {
                         .log_err();
                 }
 
+                perf_log::frame(should_draw, perf_started, request_frame_options.signal_at);
                 handle
                     .update(&mut cx, |_, window, _| {
                         if window.invalidator.is_dirty()
@@ -9524,5 +9526,45 @@ mod inspector_tests {
             }
         })
         .expect("closed inspector has no bookkeeping and no style overrides");
+    }
+}
+
+/// PERCH: measurement only. With `PERCH_NATIVE_PERF=1`, each frame request the platform delivers
+/// is logged on stderr: whether it drew, the draw's time, and how late the main thread served the
+/// display's signal.
+pub mod perf_log {
+    use std::sync::OnceLock;
+    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+    /// Whether `PERCH_NATIVE_PERF` is set (read once).
+    pub fn enabled() -> bool {
+        static ON: OnceLock<bool> = OnceLock::new();
+        *ON.get_or_init(|| std::env::var_os("PERCH_NATIVE_PERF").is_some())
+    }
+
+    /// Wall-clock milliseconds, to line frames up with other logs.
+    pub fn now_ms() -> f64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs_f64() * 1000.)
+            .unwrap_or(0.)
+    }
+
+    /// Logs one frame request: whether it drew, how long it took, how late it ran.
+    pub fn frame(drew: bool, started: Instant, signal_at: Option<Instant>) {
+        if !enabled() {
+            return;
+        }
+        let draw = started.elapsed().as_secs_f64() * 1000.;
+        let lag = signal_at
+            .map(|at| started.saturating_duration_since(at).as_secs_f64() * 1000.)
+            .unwrap_or(-1.);
+        eprintln!(
+            "perf-frame t={:.1} drew={} draw={:.2} lag={:.2}",
+            now_ms(),
+            drew as u8,
+            draw,
+            lag
+        );
     }
 }

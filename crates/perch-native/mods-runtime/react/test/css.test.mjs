@@ -37,3 +37,16 @@ test("font: inherit sets each font longhand to inherit; a full font value is kep
   assert.ok(expand("font", "inherit").every(([, v]) => v === "inherit"));
   assert.deepEqual(expand("font", "12px serif"), [["font", "12px serif"]]);
 });
+
+test("rules are narrowed per tag and class list, not per id: a list of rows with unique ids shares one entry", async () => {
+  const { StyleSheet } = await import("../css.mjs");
+  const { HostElement } = await import("../dom.mjs");
+  const sheet = new StyleSheet({ rules: [[".row", null, 0, [["color", "red"]]], ["#only", null, 0, [["color", "blue"]]], [":root", null, 0, [["color", "green"]]]] });
+  const rows = Array.from({ length: 50 }, (_, i) => new HostElement("div", { className: "row", id: `row-${i}` }));
+  const before = sheet.candidateCache.size;
+  const sources = rows.map((row) => sheet.candidates(row).map((rule) => rule.source));
+  assert.equal(sheet.candidateCache.size - before, 1);
+  // The id rule is still a candidate (whether it matches is decided per element); `:root` is not, on a `div`.
+  assert.ok(sources[0].some((s) => s.includes("#only")) && sources[0].includes("row"));
+  assert.ok(!sources[0].some((s) => s.includes(":root")));
+});

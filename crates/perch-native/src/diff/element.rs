@@ -30,7 +30,8 @@ use std::rc::Rc;
 const REM: f32 = 16.;
 const CODE_SIZE: f32 = 0.75 * REM;
 const LINE_HEIGHT: f32 = CODE_SIZE * 1.5;
-const MONO: &str = "Menlo";
+/// The web's `ui-monospace`: CoreText's monospaced system face (SF Mono), as the file editor draws.
+const MONO: &str = ".AppleSystemUIFontMonospaced";
 /// Under this width the gutters narrow (`@container(max-width:700px)`).
 const NARROW: f32 = 700.;
 
@@ -473,8 +474,8 @@ impl DiffView {
     /// The shared width of unwrapped lines: both numbers, the marker and the widest code.
     fn content_width(&self) -> f32 {
         let (number, marker) = self.gutters();
-        // ponytail: Menlo's advance is 0.602 em; a measured advance would replace this if the mono face changes.
-        2. * number + marker + self.rows.widest as f32 * CODE_SIZE * 0.602
+        // ponytail: SF Mono's advance is 0.6 em; a measured advance would replace this if the mono face changes.
+        2. * number + marker + self.rows.widest as f32 * CODE_SIZE * 0.6
     }
 }
 
@@ -523,9 +524,8 @@ struct Frame {
 /// old number, a removed one no new number) has no text, so its bottom edge stands in for its
 /// baseline, and the line grows by that much above its text: the line height less the text's
 /// baseline in it. In the web's mono face (`ui-monospace`, SF Mono) at 12 px on an 18 px line that
-/// is 4.47 px. ponytail: a constant taken from the web, because this view draws Menlo (the runtime's
-/// mono, `describe.mjs`), whose own metrics give 4.85 px and drift half a pixel per changed line;
-/// it is right only for that face and size. Upgrade: draw the diff in SF Mono and measure it.
+/// is 4.47 px. ponytail: a constant taken from the web for that face at that size, the only one the
+/// review draws. Upgrade: measure it from the face's ascent if the code size becomes a setting.
 const EMPTY_CELL_DROP: f32 = 4.47;
 
 /// The row kinds the parity probe names, as an index: file header, hunk header, line, thread, other.
@@ -548,7 +548,7 @@ fn probed(name: String, background: Option<Hsla>, text: Hsla, element: AnyElemen
     let mut style = gpui::StyleRefinement::default();
     style.text.color = Some(text);
     style.background = background.map(Into::into);
-    gpui_shell::probed(name.into(), style, element)
+    gpui_shell::probe_wrap(name.into(), style, element)
 }
 
 impl Frame {

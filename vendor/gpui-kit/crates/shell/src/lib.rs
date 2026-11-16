@@ -99,10 +99,8 @@ pub fn probing() -> bool {
     false
 }
 
-/// PERCH: `element` named `name` for [`probe`] while probing, with `style`'s colours and font as
-/// its recorded look (a native element naming what it draws, as a script's `.id(...)` does);
-/// `element` unchanged otherwise, and always in a build without `render-test-support`.
-pub fn probed(
+/// PERCH: [`probe::wrap`] while [`probing`], else `element` unchanged (release builds have no probe).
+pub fn probe_wrap(
     name: gpui::SharedString,
     style: gpui::StyleRefinement,
     element: gpui::AnyElement,

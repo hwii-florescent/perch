@@ -190,7 +190,13 @@ pub struct Notice {
 pub struct Workspace {
     sidebar: Entity<Sidebar>,
     locate: Option<Locate>,
+    /// The strip of the workspace on screen (`tabs_of`): the tabs, splits and active tab of that
+    /// workspace only, as the web's strip lists a workspace's own sessions and files.
     tabs: Tabs,
+    /// The workspace `tabs` and `history` belong to; empty before any is shown.
+    tabs_of: String,
+    /// The strips and histories of the other workspaces, each as it was left.
+    parked: HashMap<String, (Tabs, History)>,
     panes: HashMap<String, Pane>,
     /// A split that was asked for and waits for its new terminal to be opened.
     pending_split: Option<(Side, Instant)>,
@@ -323,6 +329,7 @@ impl Workspace {
         let observed = cx.observe(&sidebar, |this, sidebar, cx| {
             this.close_deleted(cx);
             this.open_sub_sessions(cx);
+            this.follow_order(cx);
             let connected = sidebar.read(cx).model().connected;
             this.files_connected(connected, cx);
             this.refresh_bridge(cx);
@@ -334,6 +341,8 @@ impl Workspace {
             sidebar,
             locate: None,
             tabs: Tabs::default(),
+            tabs_of: String::new(),
+            parked: HashMap::new(),
             panes: HashMap::new(),
             pending_split: None,
             put_away: HashSet::new(),
@@ -395,9 +404,73 @@ impl Workspace {
     pub fn with_window_state(mut self, file: std::path::PathBuf) -> Self {
         self.chrome = Chrome::kept_in(file);
         for id in self.chrome.files().to_vec() {
-            self.tabs.append(&id);
+            let workspace = id.split_once('\n').map_or("", |(w, _)| w).to_string();
+            self.parked.entry(workspace).or_default().0.append(&id);
         }
         self
+    }
+
+    /// Show workspace `key`'s strip and history: the one on screen is put aside as it is (its
+    /// active tab too) and the workspace's own comes back, empty when it never had one.
+    fn enter_workspace(&mut self, key: &str) {
+        if self.tabs_of == key {
+            return;
+        }
+        let left = (
+            std::mem::take(&mut self.tabs),
+            std::mem::take(&mut self.history),
+        );
+        let away = std::mem::replace(&mut self.tabs_of, key.to_string());
+        if left.0 != Tabs::default() {
+            self.parked.insert(away, left);
+        }
+        (self.tabs, self.history) = self.parked.remove(key).unwrap_or_default();
+    }
+
+    /// The workspace tab `id` belongs to: a file, review or browser tab names it in its id, a
+    /// session is in the one the core records (an older record, the one at its folder). Empty when
+    /// the session is unknown.
+    fn tab_workspace(&self, id: &str, cx: &App) -> String {
+        if let Some((workspace, _)) = id.split_once('\n') {
+            return workspace.to_string();
+        }
+        let store = &self.sidebar.read(cx).model().store;
+        let Some(session) = store.sessions.iter().find(|s| s.id == id) else {
+            return String::new();
+        };
+        match &session.workspace_id {
+            Some(w) => w.clone(),
+            None => store
+                .workspaces
+                .iter()
+                .find(|w| navigation::in_workspace(session, w))
+                .map_or_else(
+                    || format!("{}:{}", session.host_id, session.cwd),
+                    |w| w.id.clone(),
+                ),
+        }
+    }
+
+    /// Put the strip of tab `id`'s workspace on screen before the tab is opened or shown.
+    fn enter_for(&mut self, id: &str, cx: &App) {
+        let workspace = self.tab_workspace(id, cx);
+        if !workspace.is_empty() {
+            self.enter_workspace(&workspace);
+        }
+    }
+
+    /// Every workspace's strip, the one on screen first.
+    fn every_tabs(&self) -> impl Iterator<Item = &Tabs> {
+        std::iter::once(&self.tabs).chain(self.parked.values().map(|(tabs, _)| tabs))
+    }
+
+    /// Take tab `id` out of every workspace's strip: a session the core deleted goes from
+    /// wherever it was open.
+    fn close_everywhere(&mut self, id: &str) {
+        self.tabs.close(id);
+        for (tabs, _) in self.parked.values_mut() {
+            tabs.close(id);
+        }
     }
 
     /// Copy and paste through `clipboard` instead of the system's.
@@ -629,6 +702,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let id = format!("{workspace_id}\n{path}");
+        self.enter_workspace(workspace_id);
         if preview {
             self.tabs.open_preview(&id, |other| {
                 file_tab(other).is_some_and(|(w, _)| w == workspace_id)
@@ -1355,6 +1429,7 @@ impl Workspace {
             .session_to_open(id)
             .ok_or("That session is gone.")?;
         self.ensure_pane(&open, cx);
+        self.enter_for(id, cx);
         self.tabs.open(id);
         Ok(())
     }
@@ -1491,7 +1566,9 @@ impl Workspace {
         }
         match drag.drop {
             Drop::Strip(Some(slot)) => {
+                let before = self.strip_sessions(cx);
                 self.tabs.move_tab(&drag.id, slot + 1);
+                self.save_strip(before, cx);
             }
             Drop::Pane {
                 target,
@@ -1990,6 +2067,7 @@ impl Workspace {
     fn on_open(&mut self, event: &OpenSession, cx: &mut Context<Self>) {
         let id = event.session_id.clone();
         self.put_away.remove(&id);
+        self.enter_for(&id, cx);
         let side = self
             .pending_split
             .take()
@@ -2007,6 +2085,7 @@ impl Workspace {
             None => self.tabs.open(&id),
         }
         self.open_sub_sessions(cx);
+        self.follow_order(cx);
         self.keep_in_bounds(cx);
         self.note_shown();
         cx.notify();
@@ -2119,7 +2198,7 @@ impl Workspace {
             // asked too long ago to be waiting still.
             TerminalEvent::Ended => {
                 if self.panes.contains_key(id) {
-                    self.tabs.close(id);
+                    self.close_everywhere(id);
                     self.panes.remove(id);
                     self.notice = None;
                     self.after_change(cx);
@@ -2150,11 +2229,78 @@ impl Workspace {
             return;
         }
         for id in &gone {
-            self.tabs.close(id);
+            self.close_everywhere(id);
             self.panes.remove(id);
         }
         self.notice = None;
         self.after_change(cx);
+    }
+
+    /// Every strip's sessions in the order the sidebar lists them (`workspaceTabs`): oldest
+    /// first, then the core's chat order, each sub-session after its lead. Files keep their slots.
+    fn follow_order(&mut self, cx: &mut Context<Self>) {
+        let sidebar = self.sidebar.read(cx);
+        let store = &sidebar.model().store;
+        let strips =
+            std::iter::once(&mut self.tabs).chain(self.parked.values_mut().map(|(t, _)| t));
+        for tabs in strips {
+            let mut done: HashSet<String> = HashSet::new();
+            for id in tabs.strip().to_vec() {
+                if done.contains(&id) {
+                    continue;
+                }
+                let Some(session) = store.sessions.iter().find(|s| s.id == id) else {
+                    continue;
+                };
+                let order = navigation::shown_strip_of_workspace(store, session);
+                tabs.follow(&order);
+                done.extend(order);
+            }
+        }
+    }
+
+    /// The strip's sessions, in its order.
+    fn strip_sessions(&self, cx: &App) -> Vec<String> {
+        let store = &self.sidebar.read(cx).model().store;
+        self.tabs
+            .strip()
+            .iter()
+            .filter(|id| store.sessions.iter().any(|s| s.id == **id))
+            .cloned()
+            .collect()
+    }
+
+    /// A drag in the strip moved a tab (`saveTabStrip`): when the sessions' order changed, that is
+    /// the core's chat order too, so the sidebar and every other screen follow. Only this strip's
+    /// sessions are written; the rest of the core's list keeps its place.
+    fn save_strip(&mut self, before: Vec<String>, cx: &mut Context<Self>) {
+        let after = self.strip_sessions(cx);
+        if before == after || after.is_empty() {
+            return;
+        }
+        self.sidebar.update(cx, |sidebar, cx| {
+            let store = &sidebar.model().store;
+            let host = store
+                .sessions
+                .iter()
+                .find(|s| s.id == after[0])
+                .map(|s| s.host_id.clone())
+                .unwrap_or_else(|| LOCAL.into());
+            let live: HashSet<String> = store
+                .sessions
+                .iter()
+                .filter(|s| s.host_id == host)
+                .map(|s| s.id.clone())
+                .collect();
+            let after: Vec<String> = after.into_iter().filter(|id| live.contains(id)).collect();
+            let core = store
+                .order
+                .get(&host)
+                .map(|o| o.1.clone())
+                .unwrap_or_default();
+            let sessions = navigation::write_scope(&core, &after, Some(&live));
+            sidebar.set_order(host, None, Some(sessions), cx);
+        });
     }
 
     /// Every sub-session of a lead with a tab here has a tab too, as the web's strip lists every
@@ -2777,8 +2923,8 @@ impl Workspace {
                         "{target} is on another computer, so {id} was not moved."
                     ));
                 }
-                // ponytail: the group is the sidebar's siblings, not also each workspace's strip
-                // order as the web's `moveChat` refills; the native strip keeps no order of its own.
+                // The siblings are the sidebar's rows, which are the strip's order: the strip
+                // follows the core's order ([`Self::follow_order`]), so no refill is needed.
                 // Only this computer's sessions go into its order: an unknown id is left out.
                 let mut group: Vec<String> =
                     siblings.into_iter().filter(|s| live.contains(s)).collect();
@@ -2794,10 +2940,8 @@ impl Workspace {
                     .unwrap_or_default();
                 let moved = navigation::move_beside(&group, &id, &target, after);
                 let sessions = navigation::write_scope(&core, &moved, Some(&live));
-                self.sidebar.read(cx).send(Command::SetOrder {
-                    host_id: host,
-                    projects: None,
-                    sessions: Some(sessions),
+                self.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.set_order(host, None, Some(sessions), cx)
                 });
             }
             "project.move" => {
@@ -2828,10 +2972,9 @@ impl Workspace {
                     .map(|o| o.0.clone())
                     .unwrap_or_default();
                 let order = navigation::move_beside(&shown, &moved.id, &target.id, after);
-                self.sidebar.read(cx).send(Command::SetOrder {
-                    host_id: moved.host_id,
-                    projects: Some(navigation::write_scope(&core, &order, None)),
-                    sessions: None,
+                let projects = navigation::write_scope(&core, &order, None);
+                self.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.set_order(moved.host_id, Some(projects), None, cx)
                 });
             }
             "project.close" => {
@@ -2874,16 +3017,38 @@ impl Workspace {
             }
             "workspace.open" => {
                 let id = self.known_workspace(text("id"), cx)?;
-                // Its session last shown here, else the workspace's start page.
+                // Its strip comes back as it was left. What it showed last is shown again, else
+                // its newest session, else the workspace's start page.
+                let on_screen = self.tabs_of == id;
+                self.enter_workspace(&id);
                 let store = self.sidebar.read(cx).model().store.clone();
-                let last = self.tabs.strip().iter().rev().find(|tab| {
-                    store
-                        .sessions
+                let is_session = |tab: &String| store.sessions.iter().any(|s| s.id == *tab);
+                let newest = || {
+                    self.tabs
+                        .strip()
                         .iter()
-                        .any(|s| s.id == **tab && s.workspace_id.as_deref() == Some(id.as_str()))
-                });
-                match last.cloned() {
-                    Some(tab) => self.show_session(&tab, cx)?,
+                        .rev()
+                        .find(|tab| is_session(tab))
+                        .cloned()
+                };
+                // A workspace already on screen shows its newest session; one switched to shows
+                // what it showed when it was left.
+                let last = if on_screen {
+                    newest()
+                } else {
+                    // (A session the core no longer lists is not a place to go back to.)
+                    self.tabs
+                        .active()
+                        .filter(|tab| tab.contains('\n') || is_session(&tab.to_string()))
+                        .map(str::to_string)
+                        .or_else(newest)
+                };
+                match last {
+                    Some(tab) if is_session(&tab) => self.show_session(&tab, cx)?,
+                    Some(tab) => {
+                        self.tabs.show(&tab);
+                        self.after_change(cx);
+                    }
                     None => {
                         self.run_command(
                             "workspace.focus",
@@ -3034,6 +3199,7 @@ impl Workspace {
                         perch.unfocus_workspace();
                         perch.flush(cx);
                     }
+                    self.enter_workspace("");
                     self.tabs.hide();
                     self.root_focus.focus(window, cx);
                     self.after_change(cx);
@@ -3048,11 +3214,53 @@ impl Workspace {
                     })
                     .ok_or("No mod shows the navigation.")?;
                 focused?;
+                if let Some(workspace) =
+                    screens::mods(cx).and_then(|(_, perch)| perch.shown_place().1)
+                {
+                    self.enter_workspace(&workspace);
+                }
                 self.tabs.hide();
                 // The terminal that had the keyboard is off screen: the window takes it, so keys
                 // (Cmd+T) still reach the commands.
                 self.root_focus.focus(window, cx);
                 self.after_change(cx);
+            }
+            // The project's start page (its home): the project is shown and no tab stays on
+            // screen, as `workspace.open` does for a workspace without a session.
+            "project.home" => {
+                let project = text("projectId").ok_or("This command needs {projectId, name}.")?;
+                let focused = screens::mods(cx)
+                    .and_then(|(_, perch)| {
+                        let result = perch.run_own("project.focus", &json!({ "id": project }))?;
+                        perch.flush(cx);
+                        Some(result)
+                    })
+                    .ok_or("No mod shows the navigation.")?;
+                focused?;
+                self.tabs.hide();
+                self.root_focus.focus(window, cx);
+                self.after_change(cx);
+            }
+            // As the web's: a previewed file's tab is kept (a tab that is not a preview stays as
+            // it is), whichever tab is named.
+            "tab.pin" => {
+                let id = text("id").ok_or("This command needs {id}.")?;
+                if !self.tabs.contains(id) {
+                    return Err(format!("No tab {id}."));
+                }
+                if self.tabs.pin(id) {
+                    cx.notify();
+                }
+            }
+            "workspace.files" => {
+                let id = self.known_workspace(text("id"), cx)?;
+                self.show_files(&id, cx);
+            }
+            // The drawer's Git tab (this client hands the Git view to the Perch app).
+            "workspace.git" => {
+                self.known_workspace(text("id"), cx)?;
+                self.chrome.set_tools(Some(shell::Tools::Git));
+                cx.notify();
             }
             // What this client cannot do is the desktop app's, or the browser's, on a click.
             "handoff.open" => {
@@ -3348,12 +3556,14 @@ impl Workspace {
                     .map(str::to_string)
                     .or_else(|| self.tabs.active().map(str::to_string))
                     .ok_or("There is no tab to move.")?;
+                let before = self.strip_sessions(cx);
                 if !self.tabs.move_tab(&id, index) {
                     return Err(format!(
                         "This command needs {{index: 1-{}}}.",
                         self.tabs.strip().len()
                     ));
                 }
+                self.save_strip(before, cx);
             }
             "panes.splitRight" => self.split(Side::Right, cx)?,
             "panes.splitDown" => self.split(Side::Down, cx)?,
@@ -4129,11 +4339,14 @@ impl Workspace {
         )
     }
 
-    /// Zoom every terminal, shown or kept, and say the level.
+    /// Zoom every terminal, shown or kept, and the file editors, and say the level.
     fn zoom_to(&mut self, zoom: Zoom, cx: &mut Context<Self>) {
         self.zoom = zoom;
         for view in self.panes.values().filter_map(|pane| pane.view.as_ref()) {
             view.update(cx, |view, cx| view.set_zoom(zoom.factor(), cx));
+        }
+        if let Some(mods) = cx.try_global::<crate::mods::WindowMods>() {
+            mods.editors.set_zoom(zoom.factor());
         }
         self.notice = Some(format!("Zoom {}%", (zoom.factor() * 100.0).round()));
         cx.notify();
@@ -4415,12 +4628,13 @@ impl Workspace {
     /// review or a page does not.
     fn keep_file_tabs(&mut self) {
         let files = self
-            .tabs
-            .strip()
-            .iter()
-            .filter(|id| {
-                file_tab(id).is_some_and(|(_, path)| !path.is_empty() && !path.starts_with('\0'))
-                    && !self.tabs.is_preview(id)
+            .every_tabs()
+            .flat_map(|tabs| {
+                tabs.strip().iter().filter(|id| {
+                    file_tab(id)
+                        .is_some_and(|(_, path)| !path.is_empty() && !path.starts_with('\0'))
+                        && !tabs.is_preview(id)
+                })
             })
             .cloned()
             .collect();

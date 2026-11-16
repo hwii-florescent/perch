@@ -3,6 +3,7 @@
 //! frames go to the core, the core's `fs.*` messages and connection changes come in, and the
 //! draft debounce runs on the window's clock. Media in the file pane is [`media`] (Quick Look on macOS).
 
+pub mod markdown;
 pub mod media;
 #[cfg(target_os = "macos")]
 pub mod quick_look;

@@ -37,6 +37,7 @@ import * as engines from "perch-engine";
 import * as diffs from "perch-diff";
 import * as editors from "perch-editor";
 import * as media from "perch-media";
+import * as markdown from "perch-markdown";
 import { ICONS, LETTERS, LETTER } from "./agent-icons.js";
 
 export const INERT = [
@@ -454,6 +455,8 @@ export function copyFor(cx, screen) {
     // `FileAsset`: a file's folder on this computer and its extraction, and `perch-media` (images, Quick Look).
     mediaFile: (workspaceId, path) => snapshot(`mediaFile:${workspaceId}\n${path}`, () => perch.mediaFile(workspaceId, path)),
     media,
+    // `MarkdownPreview`: the window's Markdown engine (`perch-markdown`).
+    markdown,
     statusLine: () => snapshot("statusLine", () => perch.statusLine()),
     zoom: () => snapshot("zoom", () => perch.zoom()),
     paneLook: () => snapshot("paneLook", () => perch.paneLook()),
@@ -583,8 +586,15 @@ export function copyFor(cx, screen) {
     startSession: (hostId, cwd, agent) => {
       perch.startSession(hostId, cwd ?? undefined, agent).catch(answer((error) => console.error(`perch.startSession: ${error?.message ?? error}`)));
     },
+    // A command the window refuses (one it does not know throws at once) is logged, never thrown: the caller's own
+    // next step (a menu's `onClose`) still runs.
     command(name, args) {
-      perch.run(name, args && Object.keys(args).length ? args : undefined).catch(answer((error) => console.error(`perch.run ${name}: ${error?.message ?? error}`)));
+      const failed = answer((error) => console.error(`perch.run ${name}: ${error?.message ?? error}`));
+      try {
+        perch.run(name, args && Object.keys(args).length ? args : undefined).catch(failed);
+      } catch (error) {
+        failed(error);
+      }
       return true;
     },
     // The web's own marks (`agent-icons.js`, rendered from its `AgentIcon`); a provider without one gets the letter

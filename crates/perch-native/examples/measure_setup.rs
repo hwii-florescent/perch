@@ -13,7 +13,11 @@ fn main() -> Result<()> {
     let (count, cwd): (usize, Option<&str>) = match args.as_slice() {
         [_, verb, count] if verb == "create" => (count.parse().context("the count")?, None),
         [_, verb, dir] if verb == "workspace" => (1, Some(dir.as_str())),
-        _ => bail!("usage: measure_setup create <count> | measure_setup workspace <dir>"),
+        [_, verb, provider] if verb == "agent" => return agent(provider),
+        [_, verb, id, provider, text] if verb == "type" => return type_into(id, provider, text),
+        _ => bail!(
+            "usage: measure_setup create <count> | workspace <dir> | agent <provider> | type <session> <provider> <text>"
+        ),
     };
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -33,4 +37,41 @@ fn main() -> Result<()> {
             }
             Ok(())
         })
+}
+
+fn runtime() -> Result<tokio::runtime::Runtime> {
+    Ok(tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?)
+}
+
+/// Starts a session running `provider`'s agent, prints its id, and after 15 s prints the screen
+/// it shows (its banner names the model) on stderr.
+fn agent(provider: &str) -> Result<()> {
+    runtime()?.block_on(async {
+        let core = Core::discover(&perchd::server::default_dir())?;
+        let mut connection = core.connect().await?;
+        let id = connection.create_session(None, None).await?;
+        let terminal = connection.open_terminal_as(&id, provider, 100, 30).await?;
+        println!("{id}");
+        tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+        connection.release_terminal(&terminal).await?;
+        let terminal = connection.open_terminal_as(&id, provider, 100, 30).await?;
+        eprintln!("{}", terminal.replay);
+        connection.release_terminal(&terminal).await
+    })
+}
+
+/// Types `text` and Enter into session `id`'s `provider` terminal.
+fn type_into(id: &str, provider: &str, text: &str) -> Result<()> {
+    runtime()?.block_on(async {
+        let core = Core::discover(&perchd::server::default_dir())?;
+        let mut connection = core.connect().await?;
+        let terminal = connection.open_terminal_as(id, provider, 100, 30).await?;
+        connection.terminal_input(&terminal, text, false).await?;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        connection.terminal_input(&terminal, "\r", false).await?;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        connection.release_terminal(&terminal).await
+    })
 }

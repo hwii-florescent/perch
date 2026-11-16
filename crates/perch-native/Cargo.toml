@@ -39,6 +39,8 @@ syntect = { version = "5.3.0", default-features = false, features = ["parsing", 
 usvg = { version = "0.46", default-features = false }
 # WHATWG URL parsing for browser pages' addresses, the version GPUI already builds.
 url = "2"
+# Mod hot reload: the system's file events (FSEvents), the version herdr-app's gpui-kit names.
+notify = "8.2"
 
 # Browser pages: a WebKit child view (the version the Tauri app locks), with the AppKit calls wry does not make.
 # Quick Look: the Foundation and AppKit versions GPUI's macOS platform already builds.
@@ -67,6 +69,21 @@ harness = false
 [[test]]
 name = "files_window"
 path = "tests/files_window.rs"
+harness = false
+
+[[test]]
+name = "files_markdown_window"
+path = "tests/files_markdown_window.rs"
+harness = false
+
+[[test]]
+name = "files_drawer"
+path = "tests/files_drawer.rs"
+harness = false
+
+[[test]]
+name = "files_drawer_core"
+path = "tests/files_drawer_core.rs"
 harness = false
 
 [[test]]
@@ -130,8 +147,18 @@ path = "tests/mods_responsive.rs"
 harness = false
 
 [[test]]
+name = "workspace_tabs_window"
+path = "tests/workspace_tabs_window.rs"
+harness = false
+
+[[test]]
 name = "mods_sidebar_actions"
 path = "tests/mods_sidebar_actions.rs"
+harness = false
+
+[[test]]
+name = "tab_order_window"
+path = "tests/tab_order_window.rs"
 harness = false
 
 [[test]]
@@ -142,6 +169,11 @@ harness = false
 [[test]]
 name = "mods_chrome_window"
 path = "tests/mods_chrome_window.rs"
+harness = false
+
+[[test]]
+name = "mods_window_commands"
+path = "tests/mods_window_commands.rs"
 harness = false
 
 [[test]]

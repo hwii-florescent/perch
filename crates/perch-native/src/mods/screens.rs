@@ -323,8 +323,8 @@ impl Floating {
 /// The window's screens: which mods exist, the in-flow copies on screen and the floating ones open.
 #[derive(Default)]
 pub struct Screens {
-    /// Whether a mod exists for an id, and when that was looked at.
-    present: RefCell<HashMap<&'static str, (bool, Instant)>>,
+    /// Whether each screen's mod was found, at which [`ModHost::files_generation`] and when.
+    present: RefCell<HashMap<&'static str, (bool, u64, Instant)>>,
     inflow: HashMap<String, Entity<ModView>>,
     pub floating: Vec<Floating>,
     /// Copies that left the window since the last draw, closed at the next (closing needs the window).
@@ -367,14 +367,20 @@ impl Screens {
             return false;
         };
         let mut present = self.present.borrow_mut();
-        if let Some((found, at)) = present.get(screen.id) {
-            if at.elapsed() < POLL {
+        let generation = host.files_generation();
+        if let Some((found, seen, at)) = present.get(screen.id) {
+            // A watched host says when files change; a test's host is looked at every POLL.
+            let fresh = if host.is_watched() {
+                *seen == generation
+            } else {
+                at.elapsed() < POLL
+            };
+            if fresh {
                 return *found;
             }
         }
-        // ponytail: one stat per screen per POLL while drawing; a folder watcher would push it.
         let found = host.find(screen.id).is_some();
-        present.insert(screen.id, (found, Instant::now()));
+        present.insert(screen.id, (found, generation, Instant::now()));
         found
     }
 
@@ -539,14 +545,23 @@ impl Screens {
         self.floating.iter().rev().find(|f| f.modal()).map(|f| f.id)
     }
 
-    /// Why open screen `id` is not drawn as its mod means: the mod would not load, or its last render threw.
+    /// Why screen `id` is not drawn as its mod means: the mod would not load, its last render threw, or a call into
+    /// it was stopped past its time budget. A floating screen when open, else every in-flow copy of it (`files`,
+    /// `files#drawer`, `files#<tab id>`), each error after its key.
     pub fn error(&self, id: &str, cx: &App) -> Option<String> {
-        // An in-flow copy by its key (`review#<tab id>`).
-        if let Some(view) = self.inflow.get(id) {
-            return view.read(cx).error(cx);
+        if let Some(open) = self.floating.iter().find(|f| f.id == id) {
+            return open.view.as_ref()?.read(cx).error(cx);
         }
-        let view = self.floating.iter().find(|f| f.id == id)?.view.as_ref()?;
-        view.read(cx).error(cx)
+        let mut errors: Vec<String> = self
+            .inflow
+            .iter()
+            .filter(|(key, _)| {
+                *key == id || key.strip_prefix(id).is_some_and(|k| k.starts_with('#'))
+            })
+            .filter_map(|(key, view)| Some(format!("{key:?}: {}", view.read(cx).error(cx)?)))
+            .collect();
+        errors.sort();
+        (!errors.is_empty()).then(|| errors.join("\n"))
     }
 
     /// Whether open screen `id` keeps Escape for itself.

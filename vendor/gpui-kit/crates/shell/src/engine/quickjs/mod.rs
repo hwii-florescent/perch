@@ -1131,6 +1131,9 @@ pub(crate) mod exports {
         "Background",
         // PERCH: what `render()` returns when its description has not changed.
         "unchanged",
+        // PERCH: a subtree of the view's last description, kept rather than built again.
+        "reuse",
+        "renderGeneration",
     ];
 
     /// Components, layout helpers and the theme, all owned by `gpui-base`.
@@ -1374,6 +1377,9 @@ pub struct ShellRuntime {
     /// `Persistent` handle must be released while the context still exists.
     /// QuickJS aborts the process if a value outlives its runtime.
     callbacks: RefCell<CallbackArena<Persistent<Function<'static>>>>,
+    /// PERCH: the description the view being rendered published last, which `reuse()` copies
+    /// subtrees from. Set only while that view's `render()` runs.
+    reuse_from: RefCell<Option<RenderSnapshot>>,
     components: FrozenComponentRegistry,
     component_state_proof: String,
     interactive_inline_layout: Cell<bool>,
@@ -1732,6 +1738,7 @@ impl ShellRuntime {
 
         let runtime = Rc::new(Self {
             callbacks: RefCell::new(CallbackArena::default()),
+            reuse_from: RefCell::new(None),
             components,
             component_state_proof,
             interactive_inline_layout: Cell::new(false),
@@ -3157,6 +3164,34 @@ impl ShellRuntime {
     /// PERCH: [`Self::build_snapshot`], or `None` when the script returned `unchanged()`: nothing is
     /// published, the open callback generation is dropped, and the caller keeps its snapshot.
     pub(crate) fn build_or_keep_snapshot(
+        self: &Rc<Self>,
+        object: &ViewObject,
+        view: Option<Entity<ScriptView>>,
+        policy: Rc<crate::policy::Policy>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<Option<RenderSnapshot>> {
+        self.build_reusing(object, view, policy, None, window, cx)
+    }
+
+    /// PERCH: [`Self::build_or_keep_snapshot`], where `reuse()` may copy subtrees of `previous` (the
+    /// view's live description).
+    pub(crate) fn build_reusing(
+        self: &Rc<Self>,
+        object: &ViewObject,
+        view: Option<Entity<ScriptView>>,
+        policy: Rc<crate::policy::Policy>,
+        previous: Option<RenderSnapshot>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<Option<RenderSnapshot>> {
+        let outer = self.reuse_from.replace(previous);
+        let built = self.build_snapshot_once(object, view, policy, window, cx);
+        *self.reuse_from.borrow_mut() = outer;
+        built
+    }
+
+    fn build_snapshot_once(
         self: &Rc<Self>,
         object: &ViewObject,
         view: Option<Entity<ScriptView>>,
@@ -5293,6 +5328,33 @@ impl ShellRuntime {
     fn push_op(&self, id: SpecId, op: SpecOp) -> Result<(), crate::spec::SpecError> {
         self.arena.borrow_mut().push_op(id, op)
     }
+
+    /// PERCH: copies the subtree `id` of the view's last description into the one being built,
+    /// its handlers registered again for this build; `None` when that description is not the one
+    /// of `generation` (the ids the script kept are for another) or the subtree cannot be copied.
+    fn reuse(&self, id: SpecId, generation: u64) -> Option<SpecId> {
+        let source = self.reuse_from.borrow().clone()?;
+        if source.generation() != generation || !self.callbacks.borrow().is_building() {
+            return None;
+        }
+        let view = scope::current_view().map(|view| view.downgrade());
+        let application = scope::current_application_generation();
+        let registered_in = scope::current_generation();
+        self.arena.borrow_mut().copy_subtree(
+            source.arena(),
+            id,
+            |old| {
+                let entry = self.callbacks.borrow().get(old)?;
+                Some(self.callbacks.borrow_mut().push(CallbackEntry {
+                    value: entry.value,
+                    view: view.clone(),
+                    application: application.clone(),
+                    registered_in,
+                }))
+            },
+            |old| self.callbacks.borrow().get(old).is_some(),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -6995,6 +7057,13 @@ globalThis.__gpui = (() => {
     __element: element,
     View,
     unchanged: () => UNCHANGED,
+    // PERCH: the element `id` of the view's live description (built in render `generation`), copied
+    // into this one with its handlers; null when that description is not the one of `generation`.
+    reuse: (id, generation) => {
+      const copied = __reuse(id, generation);
+      return copied === null || copied === undefined ? null : element(copied);
+    },
+    renderGeneration: () => __renderGeneration(),
     div: () => element(__div()),
     h_flex: () => element(__h_flex()),
     v_flex: () => element(__v_flex()),
@@ -7841,6 +7910,28 @@ impl ShellRuntime {
                 "__attach",
                 Func::from(move |ctx: Ctx<'_>, id: u32, child: u32| -> JsResult<()> {
                     upgrade(&attach_runtime, &ctx)?.attach(&ctx, id, child)
+                }),
+            )?;
+
+            let reuse_runtime = runtime.clone();
+            globals.set(
+                "__reuse",
+                Func::from(
+                    move |ctx: Ctx<'_>, id: u32, generation: f64| -> JsResult<Option<u32>> {
+                        Ok(upgrade(&reuse_runtime, &ctx)?.reuse(id, generation as u64))
+                    },
+                ),
+            )?;
+
+            let generation_runtime = runtime.clone();
+            globals.set(
+                "__renderGeneration",
+                Func::from(move |ctx: Ctx<'_>| -> JsResult<Option<f64>> {
+                    Ok(upgrade(&generation_runtime, &ctx)?
+                        .callbacks
+                        .borrow()
+                        .building_generation()
+                        .map(|generation| generation as f64))
                 }),
             )?;
 
