@@ -508,10 +508,21 @@ struct Frame {
     offset_x: f32,
     content_width: f32,
     gutters: (f32, f32),
+    /// The view's width at the last paint (the web's `100cqi`).
+    view_width: f32,
     cursor: Option<usize>,
     focused: bool,
     edit: Option<(String, gpui::Entity<TextareaState>)>,
 }
+
+/// The web lines up a line's cells on their baselines; an empty number cell (an added line has no
+/// old number, a removed one no new number) has no text, so its bottom edge stands in for its
+/// baseline, and the line grows by that much above its text: the line height less the text's
+/// baseline in it. In the web's mono face (`ui-monospace`, SF Mono) at 12 px on an 18 px line that
+/// is 4.47 px. ponytail: a constant taken from the web, because this view draws Menlo (the runtime's
+/// mono, `describe.mjs`), whose own metrics give 4.85 px and drift half a pixel per changed line;
+/// it is right only for that face and size. Upgrade: draw the diff in SF Mono and measure it.
+const EMPTY_CELL_DROP: f32 = 4.47;
 
 /// The row kinds the parity probe names, as an index: file header, hunk header, line, thread, other.
 fn probe_kind(row: &Row) -> usize {
@@ -563,8 +574,9 @@ impl Frame {
             ),
             Row::Line { .. } => {
                 let line = self.row(ix);
+                let tint = self.line_tint(ix);
                 let Some(Row::Thread { comments, .. }) = rows.get(ix + 1) else {
-                    return probed(name("git-diff-line", ix), None, c.text, line);
+                    return probed(name("git-diff-line", ix), tint, c.text, line);
                 };
                 let thread = probed(
                     name("git-line-comments", ix + 1),
@@ -572,14 +584,16 @@ impl Frame {
                     c.text,
                     self.thread(ix + 1, comments),
                 );
+                // The line's tint runs behind its thread too, as the web's grid does.
                 let both = div()
                     .flex()
                     .flex_col()
                     .w_full()
+                    .when_some(tint, |d, tint| d.bg(tint))
                     .child(line)
                     .child(thread)
                     .into_any_element();
-                probed(name("git-diff-line", ix), None, c.text, both)
+                probed(name("git-diff-line", ix), tint, c.text, both)
             }
             Row::Binary { .. } => self.row(ix),
         }
@@ -725,6 +739,34 @@ impl Frame {
         }
     }
 
+    /// The background of line row `ix`: its kind's tint, or the selection's on a context line.
+    fn line_tint(&self, ix: usize) -> Option<Hsla> {
+        let diff = self.diff.as_deref()?;
+        let Row::Line {
+            file,
+            hunk,
+            line,
+            side,
+            number,
+        } = &self.rows.rows[ix]
+        else {
+            return None;
+        };
+        let f = &diff.files[*file];
+        let path = file_path_for_side(f, *side);
+        let selected = number.is_some_and(|n| {
+            self.props
+                .selection
+                .as_ref()
+                .is_some_and(|s| s.path == path && s.side == *side && s.start <= n && n <= s.end)
+        });
+        match f.hunks[*hunk].lines[*line].kind {
+            DiffLineKind::Addition => Some(self.tints.addition),
+            DiffLineKind::Deletion => Some(self.tints.deletion),
+            DiffLineKind::Context => selected.then_some(self.tints.selected),
+        }
+    }
+
     fn line_row(
         &self,
         ix: usize,
@@ -832,11 +874,17 @@ impl Frame {
                     .child(marker),
             )
             .child(code);
+        let drop = if line.old_line.is_none() || line.new_line.is_none() {
+            EMPTY_CELL_DROP
+        } else {
+            0.
+        };
         div()
             .id(("git-diff-line", ix))
             .group("git-line")
             .relative()
             .w_full()
+            .pt(px(drop))
             .overflow_hidden()
             .when_some(bg, |d, bg| d.bg(bg))
             .hover(move |s| s.bg(hover))
@@ -858,13 +906,29 @@ impl Frame {
     }
 
     fn thread(&self, ix: usize, comments: &[usize]) -> AnyElement {
-        let (number_w, marker_w) = self.gutters;
+        // The web's `ml-[6.1rem]` (5.2rem narrow), at most 42rem wide and never past the view's edge, in the
+        // line's mono text at its 1.5 line height.
+        let narrow = self.view_width > 0. && self.view_width <= NARROW;
+        let (left, room) = if narrow {
+            (5.2 * REM, 5.6 * REM)
+        } else {
+            (6.1 * REM, 6.9 * REM)
+        };
+        let widest = if narrow {
+            self.view_width - room
+        } else {
+            (42. * REM).min(self.view_width - room)
+        };
         div()
             .id(("git-line-comments", ix))
             .mt(px(0.2 * REM))
             .mr(px(0.7 * REM))
             .mb(px(0.35 * REM))
-            .ml(px(2. * number_w + marker_w + 0.35 * REM))
+            .ml(px(left))
+            .when(self.view_width > 0., |d| d.max_w(px(widest.max(0.))))
+            .font_family(MONO)
+            .text_size(px(CODE_SIZE))
+            .line_height(gpui::relative(1.5))
             .children(comments.iter().map(|&i| self.card(&self.comments[i])))
             .into_any_element()
     }
@@ -1033,6 +1097,7 @@ impl Render for DiffView {
             offset_x: self.offset_x,
             content_width: self.content_width(),
             gutters: self.gutters(),
+            view_width: self.width.get(),
             cursor: self.cursor,
             focused: self.focus.is_focused(window),
             edit: self.edit.clone(),

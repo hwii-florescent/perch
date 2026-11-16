@@ -2972,6 +2972,63 @@
           "textSized": true
         }
       ]
+    },
+    "review": {
+      "root": "[data-testid=\"workspace-git-review\"]",
+      "minElements": 4,
+      "elements": [
+        {
+          "name": "review-root",
+          "selector": "[data-testid=\"workspace-git-review\"]",
+          "description": "The whole review: the box every other box is measured against."
+        },
+        {
+          "name": "git-refresh",
+          "selector": "[data-testid=\"git-refresh\"]",
+          "description": "The header's Refresh button.",
+          "textSized": true
+        },
+        {
+          "name": "git-status",
+          "selector": "[data-testid=\"git-status\"]",
+          "description": "The rail of changed files beside the diff."
+        },
+        {
+          "name": "git-diff",
+          "selector": "[data-testid=\"git-diff\"]",
+          "description": "The diff's scroll surface: on the native client, the DiffView engine slot by its box."
+        },
+        {
+          "name": "git-diff-empty",
+          "selector": "[data-testid=\"git-diff-empty\"]",
+          "description": "The note shown when the comparison has no changes."
+        },
+        {
+          "name": "git-file-header",
+          "selector": "[data-testid=\"git-diff\"] article > header",
+          "description": "A file's header row in the diff (path, status), in order."
+        },
+        {
+          "name": "git-hunk-header",
+          "selector": "[data-testid=\"git-diff\"] section > div:first-child",
+          "description": "A hunk's header row (the @@ line), in order."
+        },
+        {
+          "name": "git-diff-line",
+          "selector": "[data-testid=\"git-diff-line\"]",
+          "description": "A line of the diff, in order; it holds the comment thread under it."
+        },
+        {
+          "name": "git-line-comments",
+          "selector": "[data-testid=\"git-line-comments\"]",
+          "description": "The comment thread under a line, in order."
+        },
+        {
+          "name": "git-comment-composer",
+          "selector": "[data-testid=\"git-comment-composer\"]",
+          "description": "The composer pinned below the diff once lines are selected."
+        }
+      ]
     }
   }
 }

@@ -513,8 +513,9 @@ fn interactions(cx: HeadlessAppContext) -> HeadlessAppContext {
         },
         320.,
     );
-    let rows = rig.rows();
-    let line = first_row(&rows, |r| matches!(r, Row::Line { .. }));
+    // The same context line (the same diff): an added or removed line sits lower by the empty
+    // number cell's drop, so only like is compared with like.
+    let line = context;
     assert!(
         rig.row_bounds(line).size.height > unwrapped,
         "wrapped lines break at a narrow width"

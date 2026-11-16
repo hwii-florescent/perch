@@ -17,6 +17,7 @@ import { useLayoutEffect, useRef, useState, type ComponentType, type ReactNode }
 import { createRoot } from "react-dom/client";
 import "../../../packages/web/src/styles/index.css";
 import { usePerchStore } from "../../../packages/web/src/store";
+import { useWorkspaceGitReviewStore } from "../../../packages/web/src/gitReviewStore";
 import { useFileTabs } from "../../../packages/web/src/fileTabs";
 import { useSplitSets } from "../../../packages/web/src/splitSets";
 import { useBrowserPages } from "../../../packages/web/src/browserPages";
@@ -352,6 +353,21 @@ const SCREENS: Record<string, Screen> = {
     },
     mount: "stage",
     Probe: NewSessionProbe,
+  },
+  review: {
+    // The workspace's review as the store keeps it: the fixture's `review` is its `WorkspaceGitReviewState`. The actions
+    // answer nothing (a preview resolves null), so nothing loads over the fixture's data.
+    load: () => import("../../../packages/web/src/stock-ui/review/main"),
+    mount: "stage",
+    props: ({ review, ...fixed }) => {
+      const quiet = new Proxy({}, { get: () => () => Promise.resolve(null) });
+      useWorkspaceGitReviewStore.setState({
+        workspaces: { [String(fixed.workspaceId)]: review as never },
+        getWorkspaceActions: () => quiet as never,
+      });
+      return fixed;
+    },
+    Probe: PropsProbe,
   },
   "terminal-search": {
     load: async () => {
