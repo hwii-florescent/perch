@@ -17,7 +17,7 @@
 //! and the workspaces whose snapshot moved ([`FileStore::take_changed`]).
 
 use perch_core::filesystem::{DirectoryEntry, FileMetadata, PreviewKind};
-use perch_core::protocol::{FileBuffer, FileBufferSummary, ServerMessage};
+use perch_core::protocol::{FileBuffer, FileBufferSummary, FsMutateOp, ServerMessage};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -207,6 +207,18 @@ pub struct BufferList {
     pub request_id: Option<String>,
 }
 
+/// One `fs.mutate` (create, rename, copy or delete an entry), answered or not. Nothing is ever
+/// overwritten: the core refuses a clash.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Mutation {
+    pub workspace_id: String,
+    pub op: FsMutateOp,
+    pub path: String,
+    pub to: Option<String>,
+    /// The core's refusal, or why it could not be asked.
+    pub error: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Kind {
     Search,
@@ -285,6 +297,8 @@ pub struct FileStore {
     timers: HashMap<Key, Instant>,
     sent: Vec<Value>,
     changed: HashSet<String>,
+    mutations: HashMap<String, Mutation>,
+    mutated: Vec<Mutation>,
 }
 
 /// A workspace-relative path as the store keys it: no `./`, no leading or trailing slash.
@@ -661,6 +675,44 @@ impl FileStore {
         id
     }
 
+    /// Asks the core to create, rename, copy or delete one entry (`fs.mutate`). Its answer, or
+    /// why it could not be asked, is in [`Self::take_mutated`]; once done, the folders it touched
+    /// are listed again.
+    pub fn mutate(
+        &mut self,
+        workspace_id: &str,
+        op: FsMutateOp,
+        path: &str,
+        to: Option<&str>,
+    ) -> Option<String> {
+        let mut mutation = Mutation {
+            workspace_id: workspace_id.into(),
+            op,
+            path: normalize(path),
+            to: to.map(normalize),
+            error: None,
+        };
+        if workspace_id.is_empty() || !self.connected {
+            mutation.error = Some("Disconnected. Reconnect and try again.".into());
+            self.mutated.push(mutation);
+            return None;
+        }
+        self.next_id += 1;
+        let id = format!("fs-{}", self.next_id);
+        let mut frame = json!({"type": "fs.mutate", "requestId": id, "workspaceId": workspace_id, "op": op, "path": mutation.path});
+        if let Some(to) = &mutation.to {
+            frame["to"] = json!(to);
+        }
+        self.send(frame);
+        self.mutations.insert(id.clone(), mutation);
+        Some(id)
+    }
+
+    /// The mutations answered (or refused before asking) since the last call.
+    pub fn take_mutated(&mut self) -> Vec<Mutation> {
+        std::mem::take(&mut self.mutated)
+    }
+
     pub fn extract_archive(&mut self, workspace_id: &str, path: &str) -> Option<String> {
         if self.extraction(workspace_id, path).map(|e| e.state) == Some(Load::Loading) {
             return None;
@@ -978,6 +1030,11 @@ impl FileStore {
     /// Forgets every request in flight (their replies can no longer arrive) but no text; a save
     /// that waited on a buffer write waits for the reconnect instead.
     fn invalidate_on_disconnect(&mut self) {
+        for (_, mut mutation) in std::mem::take(&mut self.mutations) {
+            mutation.error =
+                Some("Connection lost. Refresh the folder to check whether it was done.".into());
+            self.mutated.push(mutation);
+        }
         for (_, save) in std::mem::take(&mut self.save_after_buffer) {
             self.save_after_reconnect
                 .insert((save.workspace_id.clone(), save.path.clone()), save);
@@ -1117,6 +1174,26 @@ impl FileStore {
     /// Takes one of the core's `fs.*` messages; false when it is not one this store reads.
     pub fn handle(&mut self, message: &ServerMessage, now: Instant) -> bool {
         use ServerMessage as M;
+        if let M::FsMutateResult { request_id, .. } | M::FsError { request_id, .. } = message {
+            if let Some(mut mutation) = self.mutations.remove(request_id) {
+                if let M::FsError { message, .. } = message {
+                    mutation.error = Some(message.clone());
+                }
+                // The folders it touched are listed again (a refused one may have changed too).
+                let parent =
+                    |path: &str| path.rsplit_once('/').map_or("", |(dir, _)| dir).to_string();
+                let mut dirs = vec![parent(&mutation.path)];
+                dirs.extend(mutation.to.as_deref().map(parent));
+                dirs.dedup();
+                for dir in dirs {
+                    if self.tree(&mutation.workspace_id, &dir).is_some() {
+                        self.request_tree(&mutation.workspace_id, &dir);
+                    }
+                }
+                self.mutated.push(mutation);
+                return true;
+            }
+        }
         if let M::FsChanged {
             workspace_id,
             path,

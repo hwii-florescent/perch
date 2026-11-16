@@ -26,14 +26,6 @@
       "reason": "The check box shrinks to 9.5 px in its row."
     },
     {
-      "state": "pane-header/corner/dark",
-      "reason": "Needs file tabs."
-    },
-    {
-      "state": "pane-header/corner/light",
-      "reason": "Needs file tabs."
-    },
-    {
       "state": "phone-size/notice/dark",
       "reason": "The x glyph's line is 19 px against the web's 18."
     },
@@ -99,11 +91,11 @@
     },
     {
       "state": "tabs/files-and-pages/dark",
-      "reason": "Needs file tabs."
+      "reason": "Needs the review and browser tabs in the strip."
     },
     {
       "state": "tabs/files-and-pages/light",
-      "reason": "Needs file tabs."
+      "reason": "Needs the review and browser tabs in the strip."
     },
     {
       "state": "files/image/dark",

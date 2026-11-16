@@ -1,6 +1,9 @@
 """Memory budgets of the native client (docs/TESTING.md), checked against the results file of
 scripts/measure-native-memory.sh: one `app state value` line per measurement, MB medians of the
-hidden window under `native-hidden1`, and `native-hidden1-helpers-gone h 1|0` for the closed pane.
+hidden window under `native-hidden1` (or, from an --offscreen run, `native-offscreen`), and
+`native-hidden1-webcontent-gone h 1|0` for the closed pane. An offscreen run presents every frame into
+GPU targets a hidden window does not hold, so its idle footprint is not judged against the idle budget:
+only the growth over its own idle is.
 
     python3 -I scripts/native-memory-budgets.py <results.tsv>   prints the table, exits 1 when over
     python3 -I scripts/native-memory-budgets.py --self-test
@@ -10,12 +13,13 @@ import sys
 IDLE_MB = 120
 OVER_IDLE_MB = {"t": ("files, 5,000 entries", 60), "e": ("10,000-line file open", 35),
                 "f": ("review, 5,000 lines", 80), "g": ("one browser pane", 100)}
-CLOSED_PANE_MB = 10
+CLOSED_PANE_MB = 40  # client plus the GPU and Networking helpers WebKit keeps for the app's life
 
 
 def judge(rows):
     """rows: {(app, state): value} -> (table lines, every budget held)."""
-    get = lambda s: rows.get(("native-hidden1", s))
+    app = "native-hidden1" if any(a == "native-hidden1" for a, _ in rows) else "native-offscreen"
+    get = lambda s: rows.get((app, s))
     idle, lines, ok_all = get("a"), [], True
 
     def check(label, measured, limit, ok):
@@ -23,7 +27,9 @@ def judge(rows):
         ok_all &= ok
         lines.append(f"{label:30}{measured:>16}{limit:>22}  {'ok' if ok else 'OVER'}")
 
-    if idle is not None:
+    if idle is not None and app == "native-offscreen":
+        lines.append(f"{'a idle (offscreen, not judged)':30}{idle:>13.1f} MB")
+    elif idle is not None:
         check("a idle", f"{idle:.1f} MB", f"{IDLE_MB} MB", idle <= IDLE_MB)
     for s, (name, budget) in OVER_IDLE_MB.items():
         if get(s) is None:
@@ -34,21 +40,24 @@ def judge(rows):
     if get("h") is not None:
         if idle is None:
             raise ValueError("state h needs state a in the same run for its budget")
-        gone = rows.get(("native-hidden1-helpers-gone", "h")) == 1
-        check("h pane closed: helpers gone", "yes" if gone else "no", "within 5 s", gone)
+        gone = rows.get(("native-hidden1-webcontent-gone", "h")) == 1
+        check("h pane closed: WebContent gone", "yes" if gone else "no", "within 5 s", gone)
         check("h pane closed: memory", f"+{get('h') - idle:.1f} MB", f"+{CLOSED_PANE_MB} MB",
               get("h") - idle <= CLOSED_PANE_MB)
     return lines, ok_all
 
 
 def self_test():
-    rows = lambda **kv: {(("native-hidden1-helpers-gone" if k == "gone" else "native-hidden1"), "h" if k == "gone" else k): v for k, v in kv.items()}
-    assert judge(rows(a=115, e=140, g=210, h=120, gone=1))[1]
+    rows = lambda **kv: {(("native-hidden1-webcontent-gone" if k == "gone" else "native-hidden1"), "h" if k == "gone" else k): v for k, v in kv.items()}
+    assert judge(rows(a=115, e=140, g=210, h=155, gone=1))[1]
     assert not judge(rows(a=115, e=150.1))[1], "e over +35"
     assert not judge(rows(a=120.1))[1], "idle over 120"
-    assert not judge(rows(a=115, h=120, gone=0))[1], "helpers left"
-    assert not judge(rows(a=115, h=125.1, gone=1))[1], "closed pane kept memory"
+    assert not judge(rows(a=115, h=120, gone=0))[1], "WebContent left"
+    assert not judge(rows(a=115, h=155.1, gone=1))[1], "closed pane kept memory"
     assert judge(rows(a=115, b=300))[1], "states without a budget are not judged"
+    offscreen = lambda e: {("native-offscreen", "a"): 230.0, ("native-offscreen", "e"): e}
+    assert judge(offscreen(265))[1], "an offscreen run's idle is not judged"
+    assert not judge(offscreen(265.1))[1], "an offscreen run's growth is judged by the same budgets"
     try:
         judge(rows(e=140))
         raise AssertionError("a budget over idle needs idle")

@@ -509,6 +509,13 @@ impl Perch {
                             "saveFile" => drop(store.save_file(w, &text(0), None)),
                             "overwriteFile" => drop(store.overwrite_file(w, &text(0))),
                             "extractArchive" => drop(store.extract_archive(w, &text(0))),
+                            // `mutate(op, path, to?)`: an op the core does not know is not sent.
+                            "mutate" => {
+                                if let Ok(op) = serde_json::from_value(json!(text(0))) {
+                                    let to = rest.get(2).and_then(Value::as_str);
+                                    drop(store.mutate(w, op, &text(1), to));
+                                }
+                            }
                             "setWrap" => store.set_wrap(
                                 rest.first().and_then(Value::as_bool).unwrap_or(false),
                                 w,

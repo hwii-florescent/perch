@@ -17,6 +17,7 @@ import { GHOST_BUTTON, ICON_BUTTON } from "../../../../packages/web/src/componen
 import { CloseIcon, EllipsisIcon, GearIcon, PlusIcon } from "../../../../packages/web/src/components/ui/icons.tsx";
 import { HostStateDot } from "../../../../packages/web/src/components/HostStateDot.tsx";
 import StockDialog from "../../../../packages/web/src/stock-ui/dialog/main.tsx";
+import { FILE_PREVIEW_MAX_CHARS, markdownElements, previewSource } from "./markdown.mjs";
 import StockSelect from "../../../../packages/web/src/stock-ui/select/main.tsx";
 import StockEditorMenu from "../../../../packages/web/src/stock-ui/editor-menu/main.tsx";
 import { SELECT } from "../../../../packages/web/src/components/ui/settings.ts";
@@ -400,13 +401,18 @@ export const useWorkspaceTabs = () => useHostSnapshot((perch) => perch.workspace
 // ---- files ----------------------------------------------------------------------------------------------------
 
 export { FileIcon, GitMarker, assetKind };
-// ponytail: stand-ins until the native engines land: Markdown shows its source (the token renderer replaces
-// `MarkdownPreview`) and the entry menu is not offered yet. `FileAsset` is the media viewer below.
-
-export function MarkdownPreview({ content }) {
-  return createElement("pre", { className: "m-0 min-h-0 flex-1 overflow-auto p-3 whitespace-pre-wrap text-fg" }, content);
+/** The rendered preview of the live draft (`markdown.mjs`), in the web's box. A relative image is a placeholder too:
+ * the native window has no confined file route for it yet. */
+export function MarkdownPreview({ path, content }) {
+  const { source, truncated } = previewSource(content ?? "");
+  const elements = useMemo(() => markdownElements(source, (url) => runCommand("link.open", { url })), [source]);
+  return createElement("div", { className: "min-h-0 min-w-0 flex-1 overflow-auto px-4 py-3 text-[0.8rem]", tabIndex: 0, role: "region", "aria-label": `Rendered preview of ${path}`, "data-testid": "workspace-markdown-preview" },
+    truncated && createElement("p", { role: "status", className: "mt-0 text-[0.7rem] text-yellow", "data-testid": "workspace-markdown-truncated" },
+      `This document is large: only the first ${FILE_PREVIEW_MAX_CHARS.toLocaleString()} characters are rendered. Switch to Source to see all of it.`),
+    createElement("div", { className: "message__markdown file-markdown" }, elements));
 }
-export const FileEntryMenu = () => null;
+/** The explorer's right-click menu and its prompts: the window's `dialog` screen (`file-menu` in it). */
+export const FileEntryMenu = overlay("file-menu");
 
 const NO_MARKS = new Map();
 const FILE_ACTIONS = ["requestTree", "searchFiles", "openFile", "reloadFile", "requestPreview", "updateDraft", "saveFile", "overwriteFile", "setWrap"];

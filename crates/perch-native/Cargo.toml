@@ -68,6 +68,11 @@ path = "tests/files_window.rs"
 harness = false
 
 [[test]]
+name = "files_restart"
+path = "tests/files_restart.rs"
+harness = false
+
+[[test]]
 name = "browser_pane"
 path = "tests/browser_pane.rs"
 harness = false
