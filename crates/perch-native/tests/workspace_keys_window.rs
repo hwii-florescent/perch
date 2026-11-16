@@ -582,6 +582,79 @@ fn new_project_running(rig: &mut Rig) {
     println!("new project running: ok");
 }
 
+/// Closing the last tab: the terminal that goes lets go of the keyboard, even while something
+/// still holds its view, and the window keeps it, so its keys still work.
+fn close_last_tab(rig: &mut Rig) {
+    rig.open("alpha");
+    let mut closed = Vec::new();
+    while rig.active().is_some() {
+        let handle = rig.ws(|ws, _, cx| ws.terminal().expect("a terminal").focus_handle(cx));
+        rig.ws(|ws, window, cx| ws.run_command("tabs.close", None, window, cx))
+            .unwrap();
+        rig.draw();
+        if rig.ws(|ws, _, _| ws.screens_open()) == ["confirm"] {
+            rig.press("enter");
+        }
+        closed.push(handle);
+        assert!(closed.len() < 20, "the tabs close");
+    }
+    let held = rig.ws(|_, window, _| closed.iter().any(|h| h.is_focused(window)));
+    assert!(!held, "no closed terminal keeps the keyboard");
+    assert!(
+        rig.ws(|_, window, cx| window.focused(cx).is_some()),
+        "the window has it"
+    );
+    assert!(
+        rig.press(if MAC { "cmd-b" } else { "ctrl-b" }),
+        "its keys still work"
+    );
+    rig.press(if MAC { "cmd-b" } else { "ctrl-b" });
+    println!("close last tab: ok");
+}
+
+/// A workspace key landing on a workspace with no session shows its start page, as the web's
+/// `openEmptyWorkspace`: no tab of the other workspace stays on screen.
+fn empty_workspace(rig: &mut Rig) {
+    let mut more = state();
+    more.apply(&message(json!({
+        "type": "project.list", "requestId": "r2", "hostId": "local", "snapshotEpoch": "e",
+        "snapshotRevision": 2, "projects": [
+            {"id": "p", "hostId": "local", "name": "Work", "path": "/work", "favorite": false,
+             "createdAt": 0, "updatedAt": 0},
+            {"id": "q", "hostId": "local", "name": "Empty", "path": "/empty", "favorite": false,
+             "createdAt": 1, "updatedAt": 1}]})));
+    more.apply(&message(json!({
+        "type": "workspace.snapshot", "requestId": "r2", "hostId": "local", "snapshotEpoch": "e",
+        "snapshotRevision": 2,
+        "projects": [
+            {"id": "p", "hostId": "local", "name": "Work", "path": "/work", "favorite": false,
+             "createdAt": 0, "updatedAt": 0},
+            {"id": "q", "hostId": "local", "name": "Empty", "path": "/empty", "favorite": false,
+             "createdAt": 1, "updatedAt": 1}],
+        "workspaces": [
+            {"id": "w1", "projectId": "p", "hostId": "local", "path": "/work", "name": "main",
+             "dirty": false, "state": "active", "createdAt": 0, "updatedAt": 0, "pinned": false},
+            {"id": "w2", "projectId": "q", "hostId": "local", "path": "/empty", "name": "main",
+             "dirty": false, "state": "active", "createdAt": 1, "updatedAt": 1, "pinned": false}]})));
+    rig.ws(|ws, _, cx| {
+        ws.sidebar()
+            .update(cx, |s, cx| s.apply(Update::Model(more.model()), cx))
+    });
+    rig.open("alpha");
+    assert!(rig.active().is_some());
+    let mut seen_empty = false;
+    for _ in 0..4 {
+        assert!(rig.press("ctrl-shift-down"), "the workspace key is taken");
+        if rig.active().is_none() {
+            seen_empty = true;
+            assert!(rig.drawn("start-card") || rig.ws(|ws, _, _| ws.tabs().visible().is_none()));
+            break;
+        }
+    }
+    assert!(seen_empty, "the empty workspace shows its start page");
+    println!("empty workspace: ok");
+}
+
 fn main() {
     let scratch: PathBuf =
         std::env::temp_dir().join(format!("perch-keys-window-{}", std::process::id()));
@@ -598,6 +671,8 @@ fn main() {
     held_keyboard(&mut rig);
     close_untabbed(&mut rig);
     new_project_running(&mut rig);
+    empty_workspace(&mut rig);
+    close_last_tab(&mut rig);
 
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())

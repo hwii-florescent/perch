@@ -217,6 +217,9 @@ pub struct Workspace {
     /// The window's own keyboard focus, held while nothing in it has the keyboard (nothing open),
     /// so its keys still reach the window, as a page's reach the document.
     root_focus: gpui::FocusHandle,
+    /// The terminal the window last gave the keyboard to. When it is no longer on screen (its tab
+    /// closed, the last one too) and still has the keyboard, the window takes it back.
+    given_keyboard: Option<gpui::WeakFocusHandle>,
     notifications: Vec<Notification>,
     next_notification: u64,
     /// Cmd+T asks the tab strip mod for a new tab this many times (`perch.requests()`).
@@ -312,6 +315,7 @@ impl Workspace {
             screens: Screens::default(),
             screen_focus: cx.focus_handle(),
             root_focus: cx.focus_handle(),
+            given_keyboard: None,
             notifications: Vec::new(),
             next_notification: 0,
             new_tab_asks: 0,
@@ -2263,8 +2267,7 @@ impl Workspace {
             }
             "workspace.open" => {
                 let id = self.known_workspace(text("id"), cx)?;
-                // Its session last shown here, else the workspace alone (the native window has no
-                // start screen).
+                // Its session last shown here, else the workspace's start page.
                 let store = self.sidebar.read(cx).model().store.clone();
                 let last = self.tabs.strip().iter().rev().find(|tab| {
                     store
@@ -2275,7 +2278,17 @@ impl Workspace {
                 match last.cloned() {
                     Some(tab) => self.show_session(&tab, cx)?,
                     None => {
-                        self.run_command("workspace.focus", Some(&json!({ "id": id })), window, cx)?
+                        self.run_command(
+                            "workspace.focus",
+                            Some(&json!({ "id": id })),
+                            window,
+                            cx,
+                        )?;
+                        // Its start page: no tab of another workspace stays on screen, and the
+                        // window takes the keyboard from the terminal that goes.
+                        self.tabs.hide();
+                        self.root_focus.focus(window, cx);
+                        self.after_change(cx);
                     }
                 }
             }
@@ -2786,11 +2799,30 @@ impl Workspace {
                         }
                     }
                     None => {
-                        let handled = self
-                            .sidebar
-                            .update(cx, |sidebar, cx| sidebar.run_action(name, cx));
+                        let (handled, empty) = self.sidebar.update(cx, |sidebar, cx| {
+                            (sidebar.run_action(name, cx), sidebar.take_workspace())
+                        });
                         if !handled {
                             return Err(format!("No command {name}."));
+                        }
+                        // A workspace with no session: its start page, as the web's
+                        // `openEmptyWorkspace`. A project shown as one place names its checkout.
+                        if let Some(place) = empty {
+                            let store = self.sidebar.read(cx).model().store.clone();
+                            let id = if store.workspaces.iter().any(|w| w.id == place) {
+                                Some(place)
+                            } else {
+                                crate::sidebar::navigation::landing_workspace(&store, &place, None)
+                                    .map(|(id, _)| id)
+                            };
+                            if let Some(id) = id {
+                                self.run_command(
+                                    "workspace.open",
+                                    Some(&json!({ "id": id })),
+                                    window,
+                                    cx,
+                                )?;
+                            }
                         }
                     }
                 }
@@ -3820,8 +3852,16 @@ impl gpui::Render for Workspace {
                 .and_then(|pane| pane.view.as_ref());
             if let Some(view) = peeked.or_else(|| self.terminal()) {
                 let handle = view.focus_handle(cx);
+                self.given_keyboard = Some(handle.downgrade());
                 if !handle.is_focused(window) {
                     window.defer(cx, move |window, cx| handle.focus(window, cx));
+                }
+            } else if let Some(gone) = self.given_keyboard.take().and_then(|h| h.upgrade()) {
+                // No terminal on screen: the one that had the keyboard lets go of it, as a page's
+                // removed element does, and the window keeps it so its keys still work.
+                if gone.is_focused(window) {
+                    let root = self.root_focus.clone();
+                    window.defer(cx, move |window, cx| root.focus(window, cx));
                 }
             }
         } else if self.screens.top_modal().is_some() && window.focused(cx).is_none() {

@@ -65,6 +65,9 @@ pub struct Sidebar {
     /// A command that changes something was refused since the window last asked, because the
     /// core was away.
     refused: std::cell::Cell<bool>,
+    /// A workspace an action moved to with no session of it to show; the window shows its start
+    /// page ([`Self::take_workspace`]).
+    workspace: Option<String>,
 }
 
 impl EventEmitter<OpenSession> for Sidebar {}
@@ -83,6 +86,7 @@ impl Sidebar {
             commands,
             launched: None,
             refused: Default::default(),
+            workspace: None,
         }
     }
 
@@ -137,6 +141,7 @@ impl Sidebar {
                 host_id,
                 session_id,
             }) => self.open(host_id, session_id, None, cx),
+            Some(Outcome::Workspace(id)) => self.workspace = Some(id),
             Some(Outcome::Nothing) => {}
         }
         cx.notify();
@@ -241,6 +246,11 @@ impl Sidebar {
     }
 
     /// Takes the New session panel's target, for a screen drawn in the panel's place.
+    /// The workspace the last action moved to with no session of it, which the window opens.
+    pub fn take_workspace(&mut self) -> Option<String> {
+        self.workspace.take()
+    }
+
     pub fn take_new_session(&mut self) -> Option<crate::actions::NewSession> {
         self.nav.new_session.take()
     }

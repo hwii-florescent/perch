@@ -149,6 +149,9 @@ pub enum Outcome {
         host_id: String,
         session_id: String,
     },
+    /// Show this workspace (or project, for one shown as a single place) with no session of it:
+    /// its start page, as the web's `openEmptyWorkspace`.
+    Workspace(String),
 }
 
 /// The sidebar's view state: what is picked, shown or folded. The core's facts live in the
@@ -316,7 +319,7 @@ impl Nav {
                 host_id: host_id.clone(),
                 session_id: session_id.clone(),
             },
-            None => Outcome::Nothing,
+            None => Outcome::Workspace(stop.id.clone()),
         }
     }
 
@@ -646,8 +649,11 @@ mod tests {
         nav.selected = Some((LOCAL.into(), "s1".into()));
         assert_eq!(nav.run("nests.next", &model), open("s3"));
         nav.selected = Some((LOCAL.into(), "s3".into()));
-        // b2 has no session: the key still lands there.
-        assert_eq!(nav.run("nests.next", &model), Some(Outcome::Nothing));
+        // b2 has no session: the key still lands there, on its start page.
+        assert_eq!(
+            nav.run("nests.next", &model),
+            Some(Outcome::Workspace("b2".into()))
+        );
         assert_eq!(nav.workspace.as_deref(), Some("b2"));
         nav.selected = None;
         assert_eq!(
@@ -660,14 +666,14 @@ mod tests {
         nav.workspace = Some("a".into());
         assert_eq!(
             nav.run("nests.prev", &model),
-            Some(Outcome::Nothing),
+            Some(Outcome::Workspace("b2".into())),
             "back to b2"
         );
         assert_eq!(nav.workspace.as_deref(), Some("b2"));
         nav.workspace = None;
         assert_eq!(
             nav.run("nests.prev", &model),
-            Some(Outcome::Nothing),
+            Some(Outcome::Workspace("b2".into())),
             "none picked: the last"
         );
         assert_eq!(nav.workspace.as_deref(), Some("b2"));
