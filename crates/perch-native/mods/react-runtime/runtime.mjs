@@ -1248,7 +1248,7 @@ function W0() {
   return Bf || (Bf = 1, Eo.exports = $0()), Eo.exports;
 }
 var te = W0();
-const F0 = /* @__PURE__ */ fc(te), x4 = /* @__PURE__ */ oc({
+const F0 = /* @__PURE__ */ fc(te), w4 = /* @__PURE__ */ oc({
   __proto__: null,
   default: F0
 }, [te]);
@@ -9344,7 +9344,7 @@ const jb = /* @__PURE__ */ new Set([
   "align-content",
   "outline-offset",
   "background-image"
-]), Ob = /(-apple-system|blinkmacsystemfont|system-ui|segoe ui|sans-serif|times)/i, Db = /(ui-monospace|sfmono|sf mono|menlo|monospace)/i, Bb = (n) => Db.test(n) ? "Menlo" : /^\s*system-ui\s*$/i.test(n ?? "") ? ".AppleSystemUIFont" : Ob.test(n) ? ".SystemUIFont" : Ab(n).split(",")[0].trim(), Hb = {
+]), Ob = /(-apple-system|blinkmacsystemfont|system-ui|segoe ui|sans-serif|times)/i, Db = /(ui-monospace|sfmono|sf mono|menlo|monospace)/i, Bb = /^\s*["']?(ui-monospace|sfmono-regular|sf mono)["']?\s*(,|$)/i, Hb = (n) => Bb.test(n ?? "") ? ".AppleSystemUIFontMonospaced" : Db.test(n) ? "Menlo" : /^\s*system-ui\s*$/i.test(n ?? "") ? ".AppleSystemUIFont" : Ob.test(n) ? ".SystemUIFont" : Ab(n).split(",")[0].trim(), Ub = {
   click: ["onClick", "onClickCapture"],
   double_click: ["onDoubleClick"],
   context_menu: ["onContextMenu"],
@@ -9364,7 +9364,7 @@ const jb = /* @__PURE__ */ new Set([
   const i = n.parentElement;
   return i && i.tagName !== "body" ? `${mc(i)} > ${n.tagName}` : n.tagName;
 };
-class Ub {
+class qb {
   constructor() {
     this.map = /* @__PURE__ */ new Map();
   }
@@ -9386,14 +9386,14 @@ const wn = (n) => {
     if ("px" in n) return Math.round(Math.min(Math.max(n.px, -9999), 9999) * 100) / 100;
     if ("pct" in n) return `${Math.round(n.pct * 1e3) / 1e3}%`;
   }
-}, qb = /^(text|search|url|email|tel|password|number)$/, Lb = 162.13 / 12.8;
-function Gb(n, a) {
+}, Lb = /^(text|search|url|email|tel|password|number)$/, Gb = 162.13 / 12.8;
+function Yb(n, a) {
   const r = typeof n == "object" && /^min\((.*)\)$/.exec(String(n?.expr ?? "").trim());
   if (!r) return;
   const i = ct(r[1], ",").map((s) => Jn(s.trim(), { fontSize: a })).filter((s) => s && !s.pct && !s.num).map((s) => s.px);
   return i.length ? Math.min(...i) : void 0;
 }
-function Yb(n, a) {
+function Qb(n, a) {
   if (typeof n != "object" || !n?.expr) return !1;
   const r = Jn(n.expr, { fontSize: a["font-size"] }), i = (a["margin-left"]?.px ?? NaN) + (a["margin-right"]?.px ?? NaN);
   return !!r && !r.num && r.pct === 100 && Math.abs(r.px + i) < 0.01;
@@ -9435,7 +9435,7 @@ function Jf(n, a, r, i = !1) {
   h && (a.ml = (a.ml ?? 0) + h), v && (a.mt = (a.mt ?? 0) + v);
 }
 const Ip = Symbol("perch.shift");
-function Qb(n, a, r) {
+function Vb(n, a, r) {
   const i = n.ownerDocument, s = i?.measure?.(n) ?? null;
   if (s) {
     const [[f, u], [m, h]] = r, v = f + u / 100 * s.width, y = m + h / 100 * s.height;
@@ -9472,11 +9472,11 @@ function wi(n, a, r = null) {
   v && (s.self = v);
   for (const [H, X] of [["w", "width"], ["h", "height"], ["min_w", "min-width"], ["min_h", "min-height"], ["max_w", "max-width"], ["max_h", "max-height"]]) {
     const W = i[X], D = wn(W);
-    if (D === void 0 && X === "width" && Yb(W, i)) {
+    if (D === void 0 && X === "width" && Qb(W, i)) {
       s.self = "stretch", a("approximated", X, W.expr, c(X), "stretched across its parent, inside its margins");
       continue;
     }
-    const g = D === void 0 && /^max-/.test(X) ? Gb(W, i["font-size"]) : void 0;
+    const g = D === void 0 && /^max-/.test(X) ? Yb(W, i["font-size"]) : void 0;
     if (g !== void 0) {
       s[H] = g, a("approximated", X, W.expr, c(X), "the fixed bound of min()");
       continue;
@@ -9545,10 +9545,10 @@ function wi(n, a, r = null) {
   }
   return i["text-overflow"] === "ellipsis" && (s.text_ellipsis = !0), i["text-decoration-line"] === "underline" ? s.underline = !0 : i["text-decoration-line"] && i["text-decoration-line"] !== "none" && a("unsupported", "text-decoration-line", i["text-decoration-line"], c("text-decoration-line")), s;
 }
-const Vb = { "tabular-nums": "tnum", "proportional-nums": "pnum", "lining-nums": "lnum", "oldstyle-nums": "onum", "slashed-zero": "zero", "diagonal-fractions": "frac", "stacked-fractions": "afrc", ordinal: "ordn" };
+const Kb = { "tabular-nums": "tnum", "proportional-nums": "pnum", "lining-nums": "lnum", "oldstyle-nums": "onum", "slashed-zero": "zero", "diagonal-fractions": "frac", "stacked-fractions": "afrc", ordinal: "ordn" };
 function Pp(n) {
   if (!n || n === "normal") return "";
-  const a = String(n).trim().split(/\s+/).map((r) => Vb[r]);
+  const a = String(n).trim().split(/\s+/).map((r) => Kb[r]);
   return a.every(Boolean) ? a.join(",") : null;
 }
 function ki(n, a) {
@@ -9559,7 +9559,7 @@ function ki(n, a) {
     font_features: Pp(r["font-variant-numeric"]) ?? "",
     font_weight: r["font-weight"],
     line_height: i.factor !== void 0 ? { factor: i.factor } : { px: Math.round(Ql(r, a) * 1e3) / 1e3 },
-    font_family: Bb(r["font-family"]),
+    font_family: Hb(r["font-family"]),
     italic: r["font-style"] === "italic" || r["font-style"] === "oblique",
     whitespace: r["white-space"] === "nowrap" || r["white-space"] === "pre" ? "nowrap" : "normal",
     text_align: { center: "center", right: "right", end: "right" }[r["text-align"]] ?? "left"
@@ -9573,7 +9573,7 @@ function _i(n, a, r) {
   const c = $f(a.line_height, a.text_size), f = r.line_height ? $f(r.line_height, a.text_size) : NaN;
   return (s("line_height", ["line-height"]) || !(Math.abs(c - f) <= 1e-3)) && (i.line_height = a.line_height), i;
 }
-const Kb = (n, a) => ({ ...n, ...a });
+const Zb = (n, a) => ({ ...n, ...a });
 function Si(n, a) {
   const r = {};
   for (const [i, s] of Object.entries(n))
@@ -9665,13 +9665,13 @@ function Wf(n, a) {
     }
   }
 }
-function Zb(n, a, r, i) {
+function Xb(n, a, r, i) {
   const s = mc(n), c = {}, f = i.cascade.compute(n, a, /* @__PURE__ */ new Set(), null, c), u = i.cascade.matching(n, "*").filter((O) => O.states.subject.size), m = [];
-  for (const [O, H] of Xb)
+  for (const [O, H] of Jb)
     u.some((X) => H.some((W) => X.states.subject.has(W))) && m.push([O, i.cascade.compute(n, a, new Set(H), null, c)]);
   const h = `${Mo(f.shared)}|${Mo(r)}|${+!!f.element.hidden}|${m.map(([O, H]) => `${O}${Mo(H.shared)}`).join(",")}`;
   let v = (i.cascade.styled ??= /* @__PURE__ */ new Map()).get(h);
-  v || i.cascade.styled.set(h, v = $b(f, m, r, i));
+  v || i.cascade.styled.set(h, v = Wb(f, m, r, i));
   const { style: y, tokens: b, shift: S, childText: E } = v, R = v.reports.map(([O, H, X, W, D]) => [O, H, X, W, s, D]), N = { ...v.extra };
   if (i.cascade.sheet.tracks(n, "hover") && (N.group = If(n), N.track_hover = !0), i.cascade.sheet.readsAncestor(n, "hover"))
     for (let O = n.parentNode; O?.state; O = O.parentNode) {
@@ -9695,16 +9695,16 @@ function Zb(n, a, r, i) {
     O > 0 && (N.scrollbar = O);
   }
   f.values["pointer-events"] !== "none" && a?.values["pointer-events"] === "none" && (N.blocks_pointer = !0), f.values["pointer-events"] === "none" && (N.pointer_none = !0);
-  const M = Object.entries(Hb).filter(([, O]) => O.some((H) => typeof n.props[H] == "function")).map(([O]) => O);
-  return !M.includes("click") && Yo(n) && M.push("click"), M.length && (N.events = M), { computed: f, style: y, tokens: b, extra: N, meta: a1(n), reports: R, childText: E, where: s, shift: S };
+  const M = Object.entries(Ub).filter(([, O]) => O.some((H) => typeof n.props[H] == "function")).map(([O]) => O);
+  return !M.includes("click") && Yo(n) && M.push("click"), M.length && (N.events = M), { computed: f, style: y, tokens: b, extra: N, meta: l1(n), reports: R, childText: E, where: s, shift: S };
 }
-const Xb = [["hover", ["hover"]], ["focus", ["focus", "focus-visible"]], ["active", ["active", "hover"]]], Ff = /* @__PURE__ */ new WeakMap();
-let Jb = 0;
+const Jb = [["hover", ["hover"]], ["focus", ["focus", "focus-visible"]], ["active", ["active", "hover"]]], Ff = /* @__PURE__ */ new WeakMap();
+let $b = 0;
 function Mo(n) {
   let a = Ff.get(n);
-  return a === void 0 && Ff.set(n, a = ++Jb), a;
+  return a === void 0 && Ff.set(n, a = ++$b), a;
 }
-function $b(n, a, r, i) {
+function Wb(n, a, r, i) {
   const s = [], c = (b, S, E, R, N) => s.push([b, S, E, R ?? "(user agent)", N]), f = {}, u = wi(n, c, i.viewport);
   Wf(n, c);
   const m = ki(n, i.measure), h = _i(n, m, r), v = Si({ ...u, ...h }, f), y = {};
@@ -9719,9 +9719,9 @@ function $b(n, a, r, i) {
       Object.keys(M).length && (y[`${b}_tokens`] = M);
     }
   }
-  return { style: v, tokens: f, shift: u[Ip], childText: Kb(r, h), extra: y, scrolls: u.overflow_y === "scroll", reports: s };
+  return { style: v, tokens: f, shift: u[Ip], childText: Zb(r, h), extra: y, scrolls: u.overflow_y === "scroll", reports: s };
 }
-function Wb(n, a, r, i) {
+function Fb(n, a, r, i) {
   const s = { before: null, after: null };
   for (const c of ["before", "after"]) {
     if (!i.cascade.matching(n, /* @__PURE__ */ new Set(), c).length) continue;
@@ -9732,15 +9732,15 @@ function Wb(n, a, r, i) {
   }
   return s;
 }
-const If = (n) => `~g${n.id}`, Fb = ["pt", "pr", "pb", "pl", "mt", "mr", "mb", "ml", "border_t", "border_r", "border_b", "border_l", "bg"];
-function Ib(n) {
-  return n.kind === "div" && n[Zt] === "inline" && !n.events?.length && !n.meta?.attrs?.["data-testid"] && !Fb.some((a) => n.style?.[a]) && n.children?.every((a) => a.kind === "text");
+const If = (n) => `~g${n.id}`, Ib = ["pt", "pr", "pb", "pl", "mt", "mr", "mb", "ml", "border_t", "border_r", "border_b", "border_l", "bg"];
+function Pb(n) {
+  return n.kind === "div" && n[Zt] === "inline" && !n.events?.length && !n.meta?.attrs?.["data-testid"] && !Ib.some((a) => n.style?.[a]) && n.children?.every((a) => a.kind === "text");
 }
 function ti(n, a) {
   const r = n[a], i = { ...r, style: { ...r.style } };
   return Object.defineProperty(i, Zt, { value: r[Zt] }), n[a] = i, i;
 }
-function Pb(n) {
+function e1(n) {
   const a = [];
   for (let r = n.parentElement; r?.parentElement; r = r.parentElement) {
     const i = r.parentElement.children;
@@ -9749,7 +9749,7 @@ function Pb(n) {
   return a.join("");
 }
 function tm(n, a, r, i, s = 0, c = !0, f = !0, u = 0) {
-  const m = i.cascade.sheet.depends(n), h = m.pos ? `${+c}${+f}${m.nth ? `:${u}` : ""}` : "", v = m.ancPos ? Pb(n) : "";
+  const m = i.cascade.sheet.depends(n), h = m.pos ? `${+c}${+f}${m.nth ? `:${u}` : ""}` : "", v = m.ancPos ? e1(n) : "";
   let y = i.cache.get(n);
   const b = y && y.version === n.version && y.parentValues === a?.values && y.inheritedText === r && y.pos === h && y.ancPos === v && (!m.anc || s <= y.at);
   if (b && y.node && y.stamp === n.stamp && !y.volatile && (!y.subAnc || s <= y.subAt)) {
@@ -9757,32 +9757,32 @@ function tm(n, a, r, i, s = 0, c = !0, f = !0, u = 0) {
     return y.node;
   }
   if (!b) {
-    const N = Zb(n, a, r, i);
+    const N = Xb(n, a, r, i);
     y && hc(y.part.childText, N.childText) && (N.childText = y.part.childText), y = { version: n.version, parentValues: a?.values, inheritedText: r, pos: h, ancPos: v, at: i.now, part: N }, i.cache.set(n, y);
   }
-  const S = i.log.length, E = { volatile: !!y.part.shift || m.ancPos, subAnc: m.anc }, R = e1(n, y, i, Math.max(s, n.attrStamp), E);
+  const S = i.log.length, E = { volatile: !!y.part.shift || m.ancPos, subAnc: m.anc }, R = t1(n, y, i, Math.max(s, n.attrStamp), E);
   return Object.assign(y, { node: R, stamp: n.stamp, subAt: i.now, log: i.log.slice(S), volatile: E.volatile, subAnc: E.subAnc }), R;
 }
-function e1(n, a, r, i, s) {
+function t1(n, a, r, i, s) {
   const { computed: c, tokens: f, extra: u, reports: m, childText: h, where: v } = a.part;
   for (const x of m) r.add(...x);
   const y = (x, _, T, z, j) => r.add(x, _, T, z, v, j), b = { ...a.part.style };
-  a.part.shift && Qb(n, b, a.part.shift);
+  a.part.shift && Vb(n, b, a.part.shift);
   const S = { kind: "div", id: n.id, style: b, tokens: f, meta: a.part.meta, ...u };
   Object.defineProperty(S, Zt, { value: c.values.display }), n.measured && n.ownerDocument?.measureKey && (S.measure = n.ownerDocument.measureKey(n));
   const E = n.tagName;
   if (n.props["data-perch-engine"] != null)
     return S.kind = "engine", S.engine = String(n.props["data-perch-engine"]), S.key = String(n.props["data-perch-key"] ?? ""), S;
   if (E === "svg")
-    return S.kind = n.props["data-perch-image"] ? "image" : "svg", S.markup = r1(n), S;
+    return S.kind = n.props["data-perch-image"] ? "image" : "svg", S.markup = i1(n), S;
   if (E === "input" || E === "textarea" || E === "select") {
     S.kind = "input", S.input_type = E === "input" ? String(n.props.type ?? "text") : E;
     for (const T of ["placeholder", "checked", "disabled"]) n.props[T] !== void 0 && (S[T] = n.props[T]);
-    if (/^(checkbox|radio)$/.test(S.input_type) && (S.checked = n.checked), E !== "select" && (S.value = n.value), E === "input" && qb.test(S.input_type) && (S.field_w = Lb * c.values["font-size"]), E === "textarea" && b.h === void 0) {
+    if (/^(checkbox|radio)$/.test(S.input_type) && (S.checked = n.checked), E !== "select" && (S.value = n.value), E === "input" && Lb.test(S.input_type) && (S.field_w = Gb * c.values["font-size"]), E === "textarea" && b.h === void 0) {
       const T = c.values, z = ($) => $ && typeof $ == "object" && "px" in $ ? $.px : 0, j = ($) => T[`border-${$}-style`] === "none" ? 0 : z(T[`border-${$}-width`]), V = Number(n.props.rows) > 0 ? Math.floor(Number(n.props.rows)) : 2;
       b.h = V * Ql(T, r.measure) + z(T["padding-top"]) + z(T["padding-bottom"]) + j("top") + j("bottom");
     }
-    const { before: x, after: _ } = Wb(n, c, h, r);
+    const { before: x, after: _ } = Fb(n, c, h, r);
     return (x || _) && (S.children = [x, _].filter(Boolean)), S;
   }
   if (E === "img") {
@@ -9825,7 +9825,7 @@ function e1(n, a, r, i, s) {
         delete _.style.min_w, delete _.style.flex_grow, delete _.style.flex_basis, delete _.style.overflow_x, delete _.style.overflow_y;
       }
   }
-  if (!b.display && M && N.some((x) => x.kind !== "text") && N.every((x) => x.kind === "text" || Ib(x))) {
+  if (!b.display && M && N.some((x) => x.kind !== "text") && N.every((x) => x.kind === "text" || Pb(x))) {
     const x = N.map((_) => _.kind === "text" ? _.text : _.children.map((T) => T.text).join("")).join("");
     y("approximated", "display", "inline text elements in a line of text", "(inline formatting)", "their text joined to the line, in its font"), N.splice(0, N.length, { kind: "text", text: x });
   }
@@ -9867,12 +9867,12 @@ function e1(n, a, r, i, s) {
     }
   return S.children = N, S;
 }
-function t1(n, a) {
+function n1(n, a) {
   if (!a) return null;
   let i = (a.self ? n : a.closest ? Hp(n, a.closest) : a.find ? Zl(n, a.find)[0] : null)?.getAttribute(a.attr) ?? null;
   return i && a.strip && i.startsWith(a.strip) && (i = i.slice(a.strip.length)), i;
 }
-function n1(n, a, r) {
+function a1(n, a, r) {
   const i = a.map((f) => [f, ji(f.selector)]), s = /* @__PURE__ */ new Map(), c = (f) => {
     for (const u of f.children) {
       const m = r.get(u.id);
@@ -9880,7 +9880,7 @@ function n1(n, a, r) {
         for (const [h, v] of i) {
           const y = h.textRange ? "range_name" : "name";
           if (h.textRange && m[y] != null || !v.some((R) => Uo(u, R))) continue;
-          const b = t1(u, h.key), S = b == null ? s.get(h.name) ?? 0 : 0;
+          const b = n1(u, h.key), S = b == null ? s.get(h.name) ?? 0 : 0;
           b == null && s.set(h.name, S + 1);
           const E = b != null ? `${h.name}:${b}` : S ? `${h.name}@${S}` : h.name;
           m[y] == null ? m[y] = E : (m.also ??= []).push(E);
@@ -9896,7 +9896,7 @@ function Pf(n, a, r) {
   return i(n["padding-top"]) + s + u;
 }
 const ep = (n, a) => a === "uppercase" ? n.toUpperCase() : a === "lowercase" ? n.toLowerCase() : a === "capitalize" ? n.replace(/\b\p{L}/gu, (r) => r.toUpperCase()) : n, am = /* @__PURE__ */ new Set(["children", "style", "className", "key", "ref", "dangerouslySetInnerHTML"]);
-function a1(n) {
+function l1(n) {
   const a = {};
   for (const [r, i] of Object.entries(n.props)) {
     if (am.has(r) || typeof i == "function" || i === void 0 || i === null || typeof i == "object") continue;
@@ -9907,39 +9907,39 @@ function a1(n) {
   }
   return { tag: n.tagName, classes: n.classList, attrs: a };
 }
-const l1 = (n) => n === "className" ? "class" : /^(viewBox|preserveAspectRatio|gradientUnits|gradientTransform|patternUnits|xmlns)$/.test(n) ? n : n.replace(/[A-Z]/g, (a) => `-${a.toLowerCase()}`), tp = (n) => String(n).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-function r1(n) {
+const r1 = (n) => n === "className" ? "class" : /^(viewBox|preserveAspectRatio|gradientUnits|gradientTransform|patternUnits|xmlns)$/.test(n) ? n : n.replace(/[A-Z]/g, (a) => `-${a.toLowerCase()}`), tp = (n) => String(n).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+function i1(n) {
   if (n.props["data-perch-markup"]) return String(n.props["data-perch-markup"]);
   const a = (r) => {
     const i = [];
     for (const [c, f] of Object.entries(r.props))
-      am.has(c) || typeof f == "function" || f === void 0 || f === null || f === !1 || typeof f == "object" || c.startsWith("data-") || c.startsWith("aria-") || c === "focusable" || c === "role" || c === "title" || i.push(`${l1(c)}="${tp(f === !0 ? "" : f)}"`);
+      am.has(c) || typeof f == "function" || f === void 0 || f === null || f === !1 || typeof f == "object" || c.startsWith("data-") || c.startsWith("aria-") || c === "focusable" || c === "role" || c === "title" || i.push(`${r1(c)}="${tp(f === !0 ? "" : f)}"`);
     r.tagName === "svg" && !r.props.xmlns && i.unshift('xmlns="http://www.w3.org/2000/svg"');
     const s = r.childNodes.map((c) => c instanceof Oi ? tp(c.data) : a(c)).join("");
     return `<${r.tagName}${i.length ? ` ${i.join(" ")}` : ""}>${s}</${r.tagName}>`;
   };
   return a(n);
 }
-function i1(n) {
+function s1(n) {
   const a = n.theme?.() ?? {}, r = {};
   for (const i of Kp) a[i] && (r[i] = a[i]);
   return r;
 }
-const s1 = { font_features: "" };
-function o1(n, a, r, i = {}, s = null) {
-  const c = i1(a), f = a.viewport?.() ?? { width: 1e3, height: 800 }, u = JSON.stringify([c, f]);
+const o1 = { font_features: "" };
+function c1(n, a, r, i = {}, s = null) {
+  const c = s1(a), f = a.viewport?.() ?? { width: 1e3, height: 800 }, u = JSON.stringify([c, f]);
   (i.look !== u || i.sheet !== r) && Object.assign(i, { look: u, sheet: r, cache: /* @__PURE__ */ new WeakMap(), cascade: new Nb(r, { theme: c, viewport: f }), top: null });
-  const { cascade: m, cache: h } = i, v = new Ub(), y = [], S = { cascade: m, cache: h, viewport: f, findings: v, log: y, add: (...M) => {
+  const { cascade: m, cache: h } = i, v = new qb(), y = [], S = { cascade: m, cache: h, viewport: f, findings: v, log: y, add: (...M) => {
     y.push(M), v.add(...M);
   }, now: Lo(), measure: a.lineHeight ? (M) => a.lineHeight(M) : null };
   i.top ??= m.compute(n.body, m.compute(n.documentElement, null));
-  const E = n.body.children, R = E.map((M, O) => tm(M, i.top, s1, S, 0, O === 0, O === E.length - 1, O));
+  const E = n.body.children, R = E.map((M, O) => tm(M, i.top, o1, S, 0, O === 0, O === E.length - 1, O));
   if (s?.length) {
     const M = /* @__PURE__ */ new Map(), O = (H) => {
       H.id && (M.set(H.id, H), delete H.name, delete H.range_name, delete H.also);
       for (const X of H.children ?? []) O(X);
     };
-    R.forEach(O), n1(n, s, M);
+    R.forEach(O), a1(n, s, M);
   }
   const N = /* @__PURE__ */ new Set();
   for (const M of [n, n.defaultView])
@@ -9952,7 +9952,7 @@ const Ia = { layers: ["properties", "theme", "base", "utilities"], properties: {
 //! `virtual:perch-css-table`), parsed once on first use.
 const Pa = globalThis[Symbol.for("perch.styleSheets")] ??= /* @__PURE__ */ new Map();
 let Hl = null;
-function c1() {
+function u1() {
   return Hl || (Hl = Ia.digest && Pa.get(Ia.digest) || new vb(Ia), Ia.digest && !Pa.has(Ia.digest) && (Pa.size >= 4 && Pa.delete(Pa.keys().next().value), Pa.set(Ia.digest, Hl)), Hl);
 }
 //! The React renderer: React 19 through `react-reconciler` onto the retained host tree of `dom.mjs`, so a stock
@@ -9966,7 +9966,7 @@ function c1() {
 //! cascade reads for group variants, and `flush()` runs pending effects. An event is a discrete update: React
 //! commits it before `dispatch` returns.
 let Xn = nl.NoEventPriority;
-function u1(n, a) {
+function d1(n, a) {
   const r = /* @__PURE__ */ new Set([...Object.keys(n), ...Object.keys(a)]);
   for (const i of r) {
     if (i === "children") continue;
@@ -9976,7 +9976,7 @@ function u1(n, a) {
   }
   return !1;
 }
-const d1 = (n) => !n.props.disabled && (/^(button|input|select|textarea)$/.test(n.tagName) || n.tagName === "a" && n.props.href != null || n.props.tabIndex != null);
+const f1 = (n) => !n.props.disabled && (/^(button|input|select|textarea)$/.test(n.tagName) || n.tagName === "a" && n.props.href != null || n.props.tabIndex != null);
 function np(n, a) {
   for (const r of B0(a.dangerouslySetInnerHTML?.__html, n.ownerDocument) ?? []) n.appendChild(r);
   return n;
@@ -10041,7 +10041,7 @@ const lm = {
       for (const s of [...n.childNodes]) n.removeChild(s);
       np(n, i);
     }
-    u1(r, i) && n.touch();
+    d1(r, i) && n.touch();
   },
   commitTextUpdate: (n, a, r) => {
     n.data = String(r);
@@ -10102,7 +10102,7 @@ let bt = Vp(lm), Jo = 0;
 function ap() {
   bt.isAlreadyRendering() && (bt = Vp(lm), Jo += 1, Xn = nl.NoEventPriority);
 }
-const $l = (n, a, r = null) => bt.createPortal(n, a, null, r), f1 = {
+const $l = (n, a, r = null) => bt.createPortal(n, a, null, r), p1 = {
   click: "onClick",
   dblclick: "onDoubleClick",
   contextmenu: "onContextMenu",
@@ -10121,11 +10121,11 @@ const $l = (n, a, r = null) => bt.createPortal(n, a, null, r), f1 = {
   change: "onChange",
   submit: "onSubmit",
   scroll: "onScroll"
-}, p1 = /* @__PURE__ */ new Set(["click", "dblclick", "mousedown", "mouseup"]), m1 = /* @__PURE__ */ new Set(["button", "input", "select", "textarea", "fieldset"]), h1 = (n) => {
-  for (let a = n; a instanceof $e; a = a.parentNode) if (a.props.disabled && m1.has(a.tagName)) return !0;
+}, m1 = /* @__PURE__ */ new Set(["click", "dblclick", "mousedown", "mouseup"]), h1 = /* @__PURE__ */ new Set(["button", "input", "select", "textarea", "fieldset"]), g1 = (n) => {
+  for (let a = n; a instanceof $e; a = a.parentNode) if (a.props.disabled && h1.has(a.tagName)) return !0;
   return !1;
 };
-class g1 {
+class b1 {
   constructor(a, r, i) {
     Object.assign(this, { clientX: 0, clientY: 0, button: 0, buttons: 0, pointerType: "mouse", key: "", code: "", shiftKey: !1, metaKey: !1, ctrlKey: !1, altKey: !1, repeat: !1, isComposing: !1, keyCode: 0 }, r), this.type = a, this.target = i, this.currentTarget = null, this.defaultPrevented = !1, this.propagationStopped = !1, this.timeStamp = Date.now();
   }
@@ -10155,11 +10155,11 @@ function ni(n, a, r) {
   for (const { type: i, listener: s, capture: c } of [...n.listeners ?? []])
     i === a.type && c === r && s.call(n, a);
   if (n instanceof $e) {
-    const i = f1[a.type], s = i && n.props[r ? `${i}Capture` : i];
+    const i = p1[a.type], s = i && n.props[r ? `${i}Capture` : i];
     typeof s == "function" && s(a);
   }
 }
-function w4(n, a, r = {}) {
+function k4(n, a, r = {}) {
   const { document: i, window: s, globals: c } = G0(n), f = new $e("div", { id: "root", style: r.container ?? {} }, i);
   i.body.appendChild(f);
   const u = [];
@@ -10176,7 +10176,7 @@ function w4(n, a, r = {}) {
     for (const T of x) _ = y.cascade.compute(T, _);
     return _.values;
   };
-  const R = () => (S += 1, m = o1(i, n, c1(), y, r.names), v = h(), n.render?.(m), m);
+  const R = () => (S += 1, m = c1(i, n, u1(), y, r.names), v = h(), n.render?.(m), m);
   ap();
   const N = Jo, M = () => (ap(), N === Jo), O = () => {
     M() && (bt.flushPassiveEffects(), bt.flushSyncWork(), h() !== v && R());
@@ -10220,8 +10220,8 @@ function w4(n, a, r = {}) {
     /** Runs a DOM event of `type` at node `id`; false when the node is gone. */
     dispatch(w, x, _ = {}) {
       const T = typeof w == "string" ? W(w) : w;
-      if (!T || p1.has(x) && h1(T)) return !1;
-      const z = new g1(x, _, T), j = [];
+      if (!T || m1.has(x) && g1(T)) return !1;
+      const z = new b1(x, _, T), j = [];
       for (let U = T; U; U = x === "scroll" ? null : U.parentNode) j.push(U);
       const V = [...j, i, s];
       D(() => {
@@ -10301,7 +10301,7 @@ function w4(n, a, r = {}) {
     // screen's ordinary buttons do not take the keyboard from a terminal.
     pressFocus(w) {
       let _ = typeof w == "string" ? W(w) : w;
-      for (; _ && !(_ instanceof $e && typeof _.props.onKeyDown == "function" && d1(_)); ) _ = _.parentNode;
+      for (; _ && !(_ instanceof $e && typeof _.props.onKeyDown == "function" && f1(_)); ) _ = _.parentNode;
       !_ || _ === i.activeElement || (g.focus(_.id), _.state.pointerFocus = !0, _.touch(), R());
     },
     /** The engine is drawing the latest description: the boxes measured in this frame's layout are the tree's.
@@ -10329,10 +10329,10 @@ function w4(n, a, r = {}) {
 }
 //! `react-dom` for a screen on the native renderer: `createPortal` (into `document.body`, the overlay layer) and
 //! `flushSync`. Nothing of the browser renderer.
-const rm = (n) => bt.flushSyncFromReconciler(n), b1 = { createPortal: $l, flushSync: rm }, k4 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const rm = (n) => bt.flushSyncFromReconciler(n), v1 = { createPortal: $l, flushSync: rm }, _4 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   createPortal: $l,
-  default: b1,
+  default: v1,
   flushSync: rm
 }, Symbol.toStringTag, { value: "Module" }));
 function im(n) {
@@ -10348,36 +10348,36 @@ function sm() {
   for (var n, a, r = 0, i = "", s = arguments.length; r < s; r++) (n = arguments[r]) && (a = im(n)) && (i && (i += " "), i += a);
   return i;
 }
-const v1 = (n, a) => {
+const y1 = (n, a) => {
   const r = new Array(n.length + a.length);
   for (let i = 0; i < n.length; i++)
     r[i] = n[i];
   for (let i = 0; i < a.length; i++)
     r[n.length + i] = a[i];
   return r;
-}, y1 = (n, a) => ({
+}, x1 = (n, a) => ({
   classGroupId: n,
   validator: a
 }), om = (n = /* @__PURE__ */ new Map(), a = null, r) => ({
   nextPart: n,
   validators: a,
   classGroupId: r
-}), zi = "-", lp = [], x1 = "arbitrary..", w1 = (n) => {
-  const a = _1(n), {
+}), zi = "-", lp = [], w1 = "arbitrary..", k1 = (n) => {
+  const a = S1(n), {
     conflictingClassGroups: r,
     conflictingClassGroupModifiers: i
   } = n;
   return {
     getClassGroupId: (f) => {
       if (f.startsWith("[") && f.endsWith("]"))
-        return k1(f);
+        return _1(f);
       const u = f.split(zi), m = u[0] === "" && u.length > 1 ? 1 : 0;
       return cm(u, m, a);
     },
     getConflictingClassGroupIds: (f, u) => {
       if (u) {
         const m = i[f], h = r[f];
-        return m ? h ? v1(h, m) : m : h || lp;
+        return m ? h ? y1(h, m) : m : h || lp;
       }
       return r[f] || lp;
     }
@@ -10399,16 +10399,16 @@ const v1 = (n, a) => {
     if (v.validator(u))
       return v.classGroupId;
   }
-}, k1 = (n) => n.slice(1, -1).indexOf(":") === -1 ? void 0 : (() => {
+}, _1 = (n) => n.slice(1, -1).indexOf(":") === -1 ? void 0 : (() => {
   const a = n.slice(1, -1), r = a.indexOf(":"), i = a.slice(0, r);
-  return i ? x1 + i : void 0;
-})(), _1 = (n) => {
+  return i ? w1 + i : void 0;
+})(), S1 = (n) => {
   const {
     theme: a,
     classGroups: r
   } = n;
-  return S1(r, a);
-}, S1 = (n, a) => {
+  return E1(r, a);
+}, E1 = (n, a) => {
   const r = om();
   for (const i in n) {
     const s = n[i];
@@ -10419,28 +10419,28 @@ const v1 = (n, a) => {
   const s = n.length;
   for (let c = 0; c < s; c++) {
     const f = n[c];
-    E1(f, a, r, i);
+    z1(f, a, r, i);
   }
-}, E1 = (n, a, r, i) => {
+}, z1 = (n, a, r, i) => {
   if (typeof n == "string") {
-    z1(n, a, r);
+    N1(n, a, r);
     return;
   }
   if (typeof n == "function") {
-    N1(n, a, r, i);
+    T1(n, a, r, i);
     return;
   }
-  T1(n, a, r, i);
-}, z1 = (n, a, r) => {
+  C1(n, a, r, i);
+}, N1 = (n, a, r) => {
   const i = n === "" ? a : um(a, n);
   i.classGroupId = r;
-}, N1 = (n, a, r, i) => {
-  if (C1(n)) {
+}, T1 = (n, a, r, i) => {
+  if (A1(n)) {
     gc(n(i), a, r, i);
     return;
   }
-  a.validators === null && (a.validators = []), a.validators.push(y1(r, n));
-}, T1 = (n, a, r, i) => {
+  a.validators === null && (a.validators = []), a.validators.push(x1(r, n));
+}, C1 = (n, a, r, i) => {
   const s = Object.entries(n), c = s.length;
   for (let f = 0; f < c; f++) {
     const [u, m] = s[f];
@@ -10455,7 +10455,7 @@ const v1 = (n, a) => {
     u || (u = om(), r.nextPart.set(f, u)), r = u;
   }
   return r;
-}, C1 = (n) => "isThemeGetter" in n && n.isThemeGetter === !0, A1 = (n) => {
+}, A1 = (n) => "isThemeGetter" in n && n.isThemeGetter === !0, M1 = (n) => {
   if (n < 1)
     return {
       get: () => {
@@ -10479,13 +10479,13 @@ const v1 = (n, a) => {
       c in r ? r[c] = f : s(c, f);
     }
   };
-}, $o = "!", rp = ":", M1 = [], ip = (n, a, r, i, s) => ({
+}, $o = "!", rp = ":", R1 = [], ip = (n, a, r, i, s) => ({
   modifiers: n,
   hasImportantModifier: a,
   baseClassName: r,
   maybePostfixModifierPosition: i,
   isExternal: s
-}), R1 = (n) => {
+}), j1 = (n) => {
   const {
     prefix: a,
     experimentalParseClassName: r
@@ -10522,7 +10522,7 @@ const v1 = (n, a) => {
   };
   if (a) {
     const s = a + rp, c = i;
-    i = (f) => f.startsWith(s) ? c(f.slice(s.length)) : ip(M1, !1, f, void 0, !0);
+    i = (f) => f.startsWith(s) ? c(f.slice(s.length)) : ip(R1, !1, f, void 0, !0);
   }
   if (r) {
     const s = i;
@@ -10532,7 +10532,7 @@ const v1 = (n, a) => {
     });
   }
   return i;
-}, j1 = (n) => {
+}, O1 = (n) => {
   const a = /* @__PURE__ */ new Map();
   return n.orderSensitiveModifiers.forEach((r, i) => {
     a.set(r, 1e6 + i);
@@ -10545,26 +10545,26 @@ const v1 = (n, a) => {
     }
     return s.length > 0 && (s.sort(), i.push(...s)), i;
   };
-}, O1 = (n) => ({
-  cache: A1(n.cacheSize),
-  parseClassName: R1(n),
-  sortModifiers: j1(n),
-  postfixLookupClassGroupIds: D1(n),
-  ...w1(n)
-}), D1 = (n) => {
+}, D1 = (n) => ({
+  cache: M1(n.cacheSize),
+  parseClassName: j1(n),
+  sortModifiers: O1(n),
+  postfixLookupClassGroupIds: B1(n),
+  ...k1(n)
+}), B1 = (n) => {
   const a = /* @__PURE__ */ Object.create(null), r = n.postfixLookupClassGroups;
   if (r)
     for (let i = 0; i < r.length; i++)
       a[r[i]] = !0;
   return a;
-}, B1 = /\s+/, H1 = (n, a) => {
+}, H1 = /\s+/, U1 = (n, a) => {
   const {
     parseClassName: r,
     getClassGroupId: i,
     getConflictingClassGroupIds: s,
     sortModifiers: c,
     postfixLookupClassGroupIds: f
-  } = a, u = [], m = n.trim().split(B1);
+  } = a, u = [], m = n.trim().split(H1);
   let h = "";
   for (let v = m.length - 1; v >= 0; v -= 1) {
     const y = m[v], {
@@ -10609,7 +10609,7 @@ const v1 = (n, a) => {
     h = y + (h.length > 0 ? " " + h : h);
   }
   return h;
-}, U1 = (...n) => {
+}, q1 = (...n) => {
   let a = 0, r, i, s = "";
   for (; a < n.length; )
     (r = n[a++]) && (i = dm(r)) && (s && (s += " "), s += i);
@@ -10621,34 +10621,34 @@ const v1 = (n, a) => {
   for (let i = 0; i < n.length; i++)
     n[i] && (a = dm(n[i])) && (r && (r += " "), r += a);
   return r;
-}, q1 = (n, ...a) => {
+}, L1 = (n, ...a) => {
   let r, i, s, c;
   const f = (m) => {
     const h = a.reduce((v, y) => y(v), n());
-    return r = O1(h), i = r.cache.get, s = r.cache.set, c = u, u(m);
+    return r = D1(h), i = r.cache.get, s = r.cache.set, c = u, u(m);
   }, u = (m) => {
     const h = i(m);
     if (h)
       return h;
-    const v = H1(m, r);
+    const v = U1(m, r);
     return s(m, v), v;
   };
-  return c = f, (...m) => c(U1(...m));
-}, L1 = [], Ie = (n) => {
-  const a = (r) => r[n] || L1;
+  return c = f, (...m) => c(q1(...m));
+}, G1 = [], Ie = (n) => {
+  const a = (r) => r[n] || G1;
   return a.isThemeGetter = !0, a.themeKey = n, a;
-}, fm = /^\[(?:(\w[\w-]*):)?(.+)\]$/i, pm = /^\((?:(\w[\w-]*):)?(.+)\)$/i, G1 = /^\d+(?:\.\d+)?\/\d+(?:\.\d+)?$/, Y1 = /^(\d+(\.\d+)?)?(xs|sm|md|lg|xl)$/, Q1 = /\d+(%|px|r?em|[sdl]?v([hwib]|min|max)|pt|pc|in|cm|mm|cap|ch|ex|r?lh|cq(w|h|i|b|min|max))|\b(calc|min|max|clamp)\(.+\)|^0$/, V1 = /^(rgba?|hsla?|hwb|(ok)?(lab|lch)|color-mix|color|light-dark)\(.+\)$/, K1 = /^(inset_)?-?((\d+)?\.?(\d+)[a-z]+|0)_-?((\d+)?\.?(\d+)[a-z]+|0)/, Z1 = /^(url|image|image-set|cross-fade|element|(repeating-)?(linear|radial|conic)-gradient)\(.+\)$/, Gn = (n) => G1.test(n), ye = (n) => !!n && !Number.isNaN(Number(n)), tn = (n) => !!n && Number.isInteger(Number(n)), Ro = (n) => n.endsWith("%") && ye(n.slice(0, -1)), xn = (n) => Y1.test(n), mm = () => !0, X1 = (n) => (
+}, fm = /^\[(?:(\w[\w-]*):)?(.+)\]$/i, pm = /^\((?:(\w[\w-]*):)?(.+)\)$/i, Y1 = /^\d+(?:\.\d+)?\/\d+(?:\.\d+)?$/, Q1 = /^(\d+(\.\d+)?)?(xs|sm|md|lg|xl)$/, V1 = /\d+(%|px|r?em|[sdl]?v([hwib]|min|max)|pt|pc|in|cm|mm|cap|ch|ex|r?lh|cq(w|h|i|b|min|max))|\b(calc|min|max|clamp)\(.+\)|^0$/, K1 = /^(rgba?|hsla?|hwb|(ok)?(lab|lch)|color-mix|color|light-dark)\(.+\)$/, Z1 = /^(inset_)?-?((\d+)?\.?(\d+)[a-z]+|0)_-?((\d+)?\.?(\d+)[a-z]+|0)/, X1 = /^(url|image|image-set|cross-fade|element|(repeating-)?(linear|radial|conic)-gradient)\(.+\)$/, Gn = (n) => Y1.test(n), ye = (n) => !!n && !Number.isNaN(Number(n)), tn = (n) => !!n && Number.isInteger(Number(n)), Ro = (n) => n.endsWith("%") && ye(n.slice(0, -1)), xn = (n) => Q1.test(n), mm = () => !0, J1 = (n) => (
   // `colorFunctionRegex` check is necessary because color functions can have percentages in them which which would be incorrectly classified as lengths.
   // For example, `hsl(0 0% 0%)` would be classified as a length without this check.
   // I could also use lookbehind assertion in `lengthUnitRegex` but that isn't supported widely enough.
-  Q1.test(n) && !V1.test(n)
-), bc = () => !1, J1 = (n) => K1.test(n), $1 = (n) => Z1.test(n), W1 = (n) => !re(n) && !ie(n), F1 = (n) => n.startsWith("@container") && (n[10] === "/" && n[11] !== void 0 || n[11] === "s" && n[16] !== void 0 && n.startsWith("-size/", 10) || n[11] === "n" && n[18] !== void 0 && n.startsWith("-normal/", 10)), I1 = (n) => $n(n, bm, bc), re = (n) => fm.test(n), ga = (n) => $n(n, vm, X1), sp = (n) => $n(n, iv, ye), P1 = (n) => $n(n, xm, mm), ev = (n) => $n(n, ym, bc), op = (n) => $n(n, hm, bc), tv = (n) => $n(n, gm, $1), ai = (n) => $n(n, wm, J1), ie = (n) => pm.test(n), Ul = (n) => _a(n, vm), nv = (n) => _a(n, ym), cp = (n) => _a(n, hm), av = (n) => _a(n, bm), lv = (n) => _a(n, gm), li = (n) => _a(n, wm, !0), rv = (n) => _a(n, xm, !0), $n = (n, a, r) => {
+  V1.test(n) && !K1.test(n)
+), bc = () => !1, $1 = (n) => Z1.test(n), W1 = (n) => X1.test(n), F1 = (n) => !re(n) && !ie(n), I1 = (n) => n.startsWith("@container") && (n[10] === "/" && n[11] !== void 0 || n[11] === "s" && n[16] !== void 0 && n.startsWith("-size/", 10) || n[11] === "n" && n[18] !== void 0 && n.startsWith("-normal/", 10)), P1 = (n) => $n(n, bm, bc), re = (n) => fm.test(n), ga = (n) => $n(n, vm, J1), sp = (n) => $n(n, sv, ye), ev = (n) => $n(n, xm, mm), tv = (n) => $n(n, ym, bc), op = (n) => $n(n, hm, bc), nv = (n) => $n(n, gm, W1), ai = (n) => $n(n, wm, $1), ie = (n) => pm.test(n), Ul = (n) => _a(n, vm), av = (n) => _a(n, ym), cp = (n) => _a(n, hm), lv = (n) => _a(n, bm), rv = (n) => _a(n, gm), li = (n) => _a(n, wm, !0), iv = (n) => _a(n, xm, !0), $n = (n, a, r) => {
   const i = fm.exec(n);
   return i ? i[1] ? a(i[1]) : r(i[2]) : !1;
 }, _a = (n, a, r = !1) => {
   const i = pm.exec(n);
   return i ? i[1] ? a(i[1]) : r : !1;
-}, hm = (n) => n === "position" || n === "percentage", gm = (n) => n === "image" || n === "url", bm = (n) => n === "length" || n === "size" || n === "bg-size", vm = (n) => n === "length", iv = (n) => n === "number", ym = (n) => n === "family-name", xm = (n) => n === "number" || n === "weight", wm = (n) => n === "shadow", sv = () => {
+}, hm = (n) => n === "position" || n === "percentage", gm = (n) => n === "image" || n === "url", bm = (n) => n === "length" || n === "size" || n === "bg-size", vm = (n) => n === "length", sv = (n) => n === "number", ym = (n) => n === "family-name", xm = (n) => n === "number" || n === "weight", wm = (n) => n === "shadow", ov = () => {
   const n = Ie("color"), a = Ie("font"), r = Ie("text"), i = Ie("font-weight"), s = Ie("tracking"), c = Ie("leading"), f = Ie("breakpoint"), u = Ie("container"), m = Ie("spacing"), h = Ie("radius"), v = Ie("shadow"), y = Ie("inset-shadow"), b = Ie("text-shadow"), S = Ie("drop-shadow"), E = Ie("blur"), R = Ie("perspective"), N = Ie("aspect"), M = Ie("ease"), O = Ie("animate"), H = () => ["auto", "avoid", "all", "avoid-page", "page", "left", "right", "column"], X = () => [
     "center",
     "top",
@@ -10673,7 +10673,7 @@ const v1 = (n, a) => {
     position: [ie, re]
   }], J = () => ["no-repeat", {
     repeat: ["", "x", "y", "space", "round"]
-  }], ae = () => ["auto", "cover", "contain", av, I1, {
+  }], ae = () => ["auto", "cover", "contain", lv, P1, {
     size: [ie, re]
   }], oe = () => [Ro, Ul, ga], ce = () => [
     // Deprecated since Tailwind CSS v4.0.0
@@ -10702,7 +10702,7 @@ const v1 = (n, a) => {
       container: [xn],
       "drop-shadow": [xn],
       ease: ["in", "out", "in-out"],
-      font: [W1],
+      font: [F1],
       "font-weight": ["thin", "extralight", "light", "normal", "medium", "semibold", "bold", "extrabold", "black"],
       "inset-shadow": [xn],
       leading: ["none", "tight", "snug", "normal", "relaxed", "loose"],
@@ -10742,7 +10742,7 @@ const v1 = (n, a) => {
        * Container Name
        * @see https://tailwindcss.com/docs/responsive-design#named-containers
        */
-      "container-named": [F1],
+      "container-named": [I1],
       /**
        * Columns
        * @see https://tailwindcss.com/docs/columns
@@ -11508,7 +11508,7 @@ const v1 = (n, a) => {
        * @see https://tailwindcss.com/docs/font-weight
        */
       "font-weight": [{
-        font: [i, rv, P1]
+        font: [i, iv, ev]
       }],
       /**
        * Font Stretch
@@ -11522,7 +11522,7 @@ const v1 = (n, a) => {
        * @see https://tailwindcss.com/docs/font-family
        */
       "font-family": [{
-        font: [nv, ev, a]
+        font: [av, tv, a]
       }],
       /**
        * Font Feature Settings
@@ -11792,7 +11792,7 @@ const v1 = (n, a) => {
           }, tn, ie, re],
           radial: ["", ie, re],
           conic: ["", tn, ie, re]
-        }, lv, tv]
+        }, rv, nv]
       }],
       /**
        * Background Color
@@ -13336,14 +13336,14 @@ const v1 = (n, a) => {
     postfixLookupClassGroups: ["container-type"],
     orderSensitiveModifiers: ["*", "**", "after", "backdrop", "before", "details-content", "file", "first-letter", "first-line", "marker", "placeholder", "selection"]
   };
-}, ov = /* @__PURE__ */ q1(sv);
+}, cv = /* @__PURE__ */ L1(ov);
 function Oe(...n) {
-  return ov(sm(n));
+  return cv(sm(n));
 }
-function cv(n, a, r) {
+function uv(n, a, r) {
   return n.filter((i, s) => s !== a && (i.start + i.end) / 2 < r).length;
 }
-function uv(n, a, r, i) {
+function dv(n, a, r, i) {
   const s = n.map(() => 0), c = n[a];
   if (!c) return s;
   const f = n[a + 1], u = n[a - 1], m = c.end - c.start + (f ? f.start - c.end : u ? c.start - u.end : 0);
@@ -13352,15 +13352,15 @@ function uv(n, a, r, i) {
   }), s[a] = Math.min(Math.max(i, n[0].start - c.start), n[n.length - 1].end - c.end), s;
 }
 const up = ["transform", "transition", "zIndex", "filter", "pointerEvents", "position"];
-function dv(n, a) {
+function fv(n, a) {
   for (let r = n.parentElement; r; r = r.parentElement) {
     const i = getComputedStyle(r)[a === "x" ? "overflowX" : "overflowY"];
     if ((i === "auto" || i === "scroll") && (a === "x" ? r.scrollWidth > r.clientWidth : r.scrollHeight > r.clientHeight)) return r;
   }
   return null;
 }
-function fv(n, a, r, i) {
-  const s = n[a] ? dv(n[a], r) : null, c = () => s ? r === "x" ? s.scrollLeft : s.scrollTop : 0, f = (N) => (r === "x" ? N.clientX : N.clientY) + c(), u = f(i), m = c(), h = n.map((N) => {
+function pv(n, a, r, i) {
+  const s = n[a] ? fv(n[a], r) : null, c = () => s ? r === "x" ? s.scrollLeft : s.scrollTop : 0, f = (N) => (r === "x" ? N.clientX : N.clientY) + c(), u = f(i), m = c(), h = n.map((N) => {
     const M = N.getBoundingClientRect();
     return r === "x" ? { start: M.left + m, end: M.right + m } : { start: M.top + m, end: M.bottom + m };
   }), v = n.map((N) => up.map((M) => N.style[M])), y = typeof matchMedia == "function" && matchMedia("(prefers-reduced-motion: reduce)").matches, b = r === "x" ? "translateX" : "translateY";
@@ -13374,7 +13374,7 @@ function fv(n, a, r, i) {
     getComputedStyle(N).position === "static" && (N.style.position = "relative"), N.style.zIndex = "30", N.style.filter = "drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45))";
   });
   const R = (N, M) => {
-    E.to = N, uv(h, a, N, M).forEach((O, H) => {
+    E.to = N, dv(h, a, N, M).forEach((O, H) => {
       n[H].style.transform = O ? `${b}(${O}px)` : "";
     });
   };
@@ -13383,7 +13383,7 @@ function fv(n, a, r, i) {
     get to() {
       return E.to;
     },
-    slot: (N) => cv(h, a, f(N)),
+    slot: (N) => uv(h, a, f(N)),
     apply: (N, M) => {
       S || R(N, f(M) - u);
     },
@@ -13397,9 +13397,9 @@ function fv(n, a, r, i) {
     }
   };
 }
-const pv = 5;
+const mv = 5;
 let jo = !1;
-function mv(n, a) {
+function hv(n, a) {
   if (n.button !== 0 || jo) return;
   const r = { clientX: n.clientX, clientY: n.clientY }, i = n.currentTarget, s = n.pointerId;
   let c = null, f, u = !1;
@@ -13416,9 +13416,9 @@ function mv(n, a) {
     window.addEventListener("click", R, { capture: !0, once: !0 }), setTimeout(() => window.removeEventListener("click", R, !0), 0), f?.(), a.onEnd(E, c);
   }, v = (E) => {
     if (!c) {
-      if (Math.hypot(E.clientX - r.clientX, E.clientY - r.clientY) < pv) return;
+      if (Math.hypot(E.clientX - r.clientX, E.clientY - r.clientY) < mv) return;
       const R = a.items();
-      c = fv(R, a.from(R), a.axis, r), jo = !0, document.body.style.cursor = "grabbing", document.body.style.userSelect = "none";
+      c = pv(R, a.from(R), a.axis, r), jo = !0, document.body.style.cursor = "grabbing", document.body.style.userSelect = "none";
       try {
         i.setPointerCapture(s);
       } catch {
@@ -13460,7 +13460,7 @@ const km = typeof navigator < "u" && /Mac/i.test(navigator.platform), Ni = {
   end: "End"
 };
 for (let n = 1; n <= 12; n++) Ni[`f${n}`] = `F${n}`;
-const hv = Object.fromEntries(Object.entries(Ni).map(([n, a]) => [a, n])), gv = {
+const gv = Object.fromEntries(Object.entries(Ni).map(([n, a]) => [a, n])), bv = {
   up: "↑",
   down: "↓",
   left: "←",
@@ -13475,9 +13475,9 @@ const hv = Object.fromEntries(Object.entries(Ni).map(([n, a]) => [a, n])), gv = 
   home: "Home",
   end: "End"
 };
-function bv(n) {
+function vv(n) {
   const a = /^Key([A-Z])$/.exec(n) ?? /^Digit(\d)$/.exec(n);
-  return a ? a[1].toLowerCase() : hv[n];
+  return a ? a[1].toLowerCase() : gv[n];
 }
 const dp = /* @__PURE__ */ new Map();
 function _m(n, a = km) {
@@ -13500,11 +13500,11 @@ new Set(["cmd+q", "cmd+h", "cmd+alt+h", "cmd+m", "cmd+ctrl+f", "cmd+z", "cmd+shi
   const a = _m(n, !0);
   return [a.cmd && "cmd", a.ctrl && "ctrl", a.alt && "alt", a.shift && "shift", a.code].filter(Boolean).join("+");
 }));
-function vv(n, a = km) {
-  const r = _m(n, a), i = yv(bv(r.code) ?? "");
+function yv(n, a = km) {
+  const r = _m(n, a), i = xv(vv(r.code) ?? "");
   return a ? `${r.ctrl ? "⌃" : ""}${r.alt ? "⌥" : ""}${r.shift ? "⇧" : ""}${r.cmd ? "⌘" : ""}${i}` : [r.ctrl && "Ctrl", r.alt && "Alt", r.shift && "Shift", i].filter(Boolean).join("+");
 }
-const yv = (n) => gv[n] ?? n.toUpperCase(), fp = (n) => typeof n == "boolean" ? `${n}` : n === 0 ? "0" : n, pp = sm, Bi = (n, a) => (r) => {
+const xv = (n) => bv[n] ?? n.toUpperCase(), fp = (n) => typeof n == "boolean" ? `${n}` : n === 0 ? "0" : n, pp = sm, Bi = (n, a) => (r) => {
   var i;
   if (a?.variants == null) return pp(n, r?.class, r?.className);
   const { variants: s, defaultVariants: c } = a, f = Object.keys(s).map((h) => {
@@ -13533,7 +13533,7 @@ const yv = (n) => gv[n] ?? n.toUpperCase(), fp = (n) => typeof n == "boolean" ? 
     ] : h;
   }, []);
   return pp(n, f, m, r?.class, r?.className);
-}, xv = Bi(
+}, wv = Bi(
   "flex cursor-pointer items-center self-stretch rounded-none [border:0] [font-family:inherit] [transition:color_0.1s_ease,background_0.1s_ease] disabled:cursor-not-allowed disabled:opacity-40",
   {
     variants: {
@@ -13544,7 +13544,7 @@ const yv = (n) => gv[n] ?? n.toUpperCase(), fp = (n) => typeof n == "boolean" ? 
     },
     defaultVariants: { active: !1 }
   }
-), wv = Bi(
+), kv = Bi(
   "mx-0.5 grid size-6 shrink-0 cursor-pointer place-items-center self-center rounded-ui bg-transparent p-0 leading-none text-subtext-0 [border:0] [font-family:inherit] [font-size:inherit] [font-weight:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg",
   {
     variants: {
@@ -13558,10 +13558,10 @@ const yv = (n) => gv[n] ?? n.toUpperCase(), fp = (n) => typeof n == "boolean" ? 
     defaultVariants: { reveal: "always", tone: "default" }
   }
 );
-function kv({ className: n, ...a } = {}) {
-  return Oe(wv(a), n);
+function _v({ className: n, ...a } = {}) {
+  return Oe(kv(a), n);
 }
-const Sm = "shrink-0 cursor-pointer rounded-ui bg-transparent px-[0.2rem] py-[0.1rem] text-[0.8rem] leading-none text-subtext-0 [font-family:inherit] [border:none] [transition:color_0.1s_ease,background_0.1s_ease] hover:bg-surface-1 hover:text-accent", Wl = "cursor-pointer rounded-ui bg-transparent text-subtext-0 [border:0] [font-family:inherit] [transition:color_0.1s_ease,background_0.1s_ease] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg disabled:cursor-not-allowed disabled:opacity-40", _v = Bi(`${Wl} shrink-0 focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:-2px]`, {
+const Sm = "shrink-0 cursor-pointer rounded-ui bg-transparent px-[0.2rem] py-[0.1rem] text-[0.8rem] leading-none text-subtext-0 [font-family:inherit] [border:none] [transition:color_0.1s_ease,background_0.1s_ease] hover:bg-surface-1 hover:text-accent", Wl = "cursor-pointer rounded-ui bg-transparent text-subtext-0 [border:0] [font-family:inherit] [transition:color_0.1s_ease,background_0.1s_ease] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg disabled:cursor-not-allowed disabled:opacity-40", Sv = Bi(`${Wl} shrink-0 focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:-2px]`, {
   variants: {
     // `soft` is a ghost button on a resting fill, for empty-state calls to action;
     // `primary` is the one filled button of a surface.
@@ -13585,27 +13585,27 @@ const Sm = "shrink-0 cursor-pointer rounded-ui bg-transparent px-[0.2rem] py-[0.
   },
   defaultVariants: { variant: "ghost", size: "md", tone: "default" }
 });
-function Sv({ className: n, ...a } = {}) {
-  return Oe(_v(a), n);
+function Ev({ className: n, ...a } = {}) {
+  return Oe(Sv(a), n);
 }
 const Hi = "overflow-hidden rounded-ui bg-surface-1 py-[0.3rem] shadow-[0_8px_24px_rgba(0,0,0,0.45)]", Wo = Bi(
   "pane-context-menu__item block w-full cursor-pointer bg-transparent px-[0.9rem] py-[0.45rem] text-left text-[0.82rem] [border:none] [font-family:inherit] [transition:background_0.1s_ease] hover:bg-surface-0 disabled:cursor-not-allowed disabled:bg-transparent disabled:opacity-40",
   { variants: { danger: { true: "text-red", false: "text-fg" } }, defaultVariants: { danger: !1 } }
-), Ev = "my-1 h-px bg-overlay-0";
-function zv({ size: n = 14, className: a }) {
+), zv = "my-1 h-px bg-overlay-0";
+function Nv({ size: n = 14, className: a }) {
   return /* @__PURE__ */ te.jsxs("svg", { className: a, width: n, height: n, viewBox: "0 0 16 16", fill: "currentColor", "aria-hidden": "true", children: [
     /* @__PURE__ */ te.jsx("circle", { cx: "3.5", cy: "8", r: "1.1" }),
     /* @__PURE__ */ te.jsx("circle", { cx: "8", cy: "8", r: "1.1" }),
     /* @__PURE__ */ te.jsx("circle", { cx: "12.5", cy: "8", r: "1.1" })
   ] });
 }
-function Nv({ size: n = 16, className: a }) {
+function Tv({ size: n = 16, className: a }) {
   return /* @__PURE__ */ te.jsxs("svg", { className: a, width: n, height: n, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: "1.3", strokeLinejoin: "round", "aria-hidden": "true", children: [
     /* @__PURE__ */ te.jsx("path", { d: "M6.6 1.8h2.8l.4 1.6 1.1.6 1.5-.6 1.4 2.4-1.2 1.1v1.3l1.2 1.1-1.4 2.4-1.5-.6-1.1.6-.4 1.6H6.6l-.4-1.6-1.1-.6-1.5.6-1.4-2.4 1.2-1.1V7.3L2.2 6.2l1.4-2.4 1.5.6 1.1-.6z" }),
     /* @__PURE__ */ te.jsx("circle", { cx: "8", cy: "8", r: "2" })
   ] });
 }
-function Tv({ size: n = 14, className: a }) {
+function Cv({ size: n = 14, className: a }) {
   return /* @__PURE__ */ te.jsx("svg", { className: a, width: n, height: n, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round", "aria-hidden": "true", children: /* @__PURE__ */ te.jsx("path", { d: "M3.5 3.5l9 9M12.5 3.5l-9 9" }) });
 }
 function Em({ size: n = 14, className: a }) {
@@ -13617,7 +13617,7 @@ const mp = {
   error: "host-state--error bg-red",
   disabled: "host-state--disabled bg-subtext-0"
 };
-function Cv({ state: n, error: a }) {
+function Av({ state: n, error: a }) {
   return /* @__PURE__ */ te.jsx(
     "span",
     {
@@ -13626,7 +13626,7 @@ function Cv({ state: n, error: a }) {
     }
   );
 }
-function Av({ title: n, onClose: a, children: r, testId: i }) {
+function Mv({ title: n, onClose: a, children: r, testId: i }) {
   return $l(
     /* @__PURE__ */ te.jsx(
       "div",
@@ -13679,14 +13679,14 @@ function ze(n, a = "") {
   }, getRegex: () => new RegExp(r, a) };
   return i;
 }
-var Mv = ((n = "") => {
+var Rv = ((n = "") => {
   try {
     return !!new RegExp("(?<=1)(?<!1)" + n);
   } catch {
     return !1;
   }
-})(), mt = { codeRemoveIndent: /^(?: {1,4}| {0,3}\t)/gm, outputLinkReplace: /\\([\[\]])/g, indentCodeCompensation: /^(\s+)(?:```)/, beginningSpace: /^\s+/, endingHash: /#$/, startingSpaceChar: /^ /, endingSpaceChar: / $/, nonSpaceChar: /[^ ]/, newLineCharGlobal: /\n/g, tabCharGlobal: /\t/g, multipleSpaceGlobal: /\s+/g, blankLine: /^[ \t]*$/, doubleBlankLine: /\n[ \t]*\n[ \t]*$/, blockquoteStart: /^ {0,3}>/, blockquoteSetextReplace: /\n {0,3}((?:=+|-+) *)(?=\n|$)/g, blockquoteSetextReplace2: /^ {0,3}>[ \t]?/gm, listReplaceNesting: /^ {1,4}(?=( {4})*[^ ])/g, listIsTask: /^\[[ xX]\] +\S/, listReplaceTask: /^\[[ xX]\] +/, listTaskCheckbox: /\[[ xX]\]/, anyLine: /\n.*\n/, hrefBrackets: /^<(.*)>$/, tableDelimiter: /[:|]/, tableAlignChars: /^\||\| *$/g, tableRowBlankLine: /\n[ \t]*$/, tableAlignRight: /^ *-+: *$/, tableAlignCenter: /^ *:-+: *$/, tableAlignLeft: /^ *:-+ *$/, startATag: /^<a /i, endATag: /^<\/a>/i, startPreScriptTag: /^<(pre|code|kbd|script)(\s|>)/i, endPreScriptTag: /^<\/(pre|code|kbd|script)(\s|>)/i, startAngleBracket: /^</, endAngleBracket: />$/, pedanticHrefTitle: /^([^'"]*[^\s])\s+(['"])(.*)\2/, unicodeAlphaNumeric: /[\p{L}\p{N}]/u, escapeTest: /[&<>"']/, escapeReplace: /[&<>"']/g, escapeTestNoEncode: /[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/, escapeReplaceNoEncode: /[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/g, caret: /(^|[^\[])\^/g, percentDecode: /%25/g, findPipe: /\|/g, splitPipe: / \|/, slashPipe: /\\\|/g, carriageReturn: /\r\n|\r/g, spaceLine: /^ +$/gm, notSpaceStart: /^\S*/, endingNewline: /\n$/, listItemRegex: (n) => new RegExp(`^( {0,3}${n})((?:[	 ][^\\n]*)?(?:\\n|$))`), nextBulletRegex: el((n) => new RegExp(`^ {0,${n}}(?:[*+-]|\\d{1,9}[.)])((?:[ 	][^\\n]*)?(?:\\n|$))`)), hrRegex: el((n) => new RegExp(`^ {0,${n}}((?:- *){3,}|(?:_ *){3,}|(?:\\* *){3,})(?:\\n+|$)`)), fencesBeginRegex: el((n) => new RegExp(`^ {0,${n}}(?:\`\`\`|~~~)`)), headingBeginRegex: el((n) => new RegExp(`^ {0,${n}}#`)), htmlBeginRegex: el((n) => new RegExp(`^ {0,${n}}<(?:[a-z].*>|!--)`, "i")), blockquoteBeginRegex: el((n) => new RegExp(`^ {0,${n}}>`)) }, Rv = /^(?:[ \t]*(?:\n|$))+/, jv = /^((?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|$))*)?)+/, Ov = /^ {0,3}(`{3,}(?=[^`\n]*(?:\n|$))|~{3,})([^\n]*)(?:\n|$)(?:|([\s\S]*?)(?:\n|$))(?: {0,3}\1[~`]* *(?=\n|$)|$)/, Fl = /^ {0,3}((?:-[\t ]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})(?:\n+|$)/, Dv = /^ {0,3}(#{1,6})(?=\s|$)(.*)(?:\n+|$)/, yc = / {0,3}(?:[*+-]|\d{1,9}[.)])/, Nm = /^(?!bull |blockCode|fences|blockquote|heading|html|table)((?:.|\n(?!\s*?\n|bull |blockCode|fences|blockquote|heading|html|table))+?)\n {0,3}(=+|-+) *(?:\n+|$)/, Tm = ze(Nm).replace(/bull/g, yc).replace(/blockCode/g, /(?: {4}| {0,3}\t)/).replace(/fences/g, / {0,3}(?:`{3,}|~{3,})/).replace(/blockquote/g, / {0,3}>/).replace(/heading/g, / {0,3}#{1,6}(?:\s|$)/).replace(/html/g, / {0,3}<[^\n>]+>\n/).replace(/\|table/g, "").getRegex(), Bv = ze(Nm).replace(/bull/g, yc).replace(/blockCode/g, /(?: {4}| {0,3}\t)/).replace(/fences/g, / {0,3}(?:`{3,}|~{3,})/).replace(/blockquote/g, / {0,3}>/).replace(/heading/g, / {0,3}#{1,6}(?:\s|$)/).replace(/html/g, / {0,3}<[^\n>]+>\n/).replace(/table/g, / {0,3}\|?(?:[:\- ]*\|)+[\:\- ]*\n/).getRegex(), xc = /^([^\n]+(?:\n(?!hr|heading|lheading|blockquote|fences|list|html|table|[ \t]+\n)[^\n]+)*)/, Hv = /^[^\n]+/, wc = /(?!\s*\])(?:\\[\s\S]|[^\[\]\\])+/, Uv = ze(/^ {0,3}\[(label)\]: *(?:\n[ \t]*)?([^<\s][^\s]*|<.*?>)(?:(?: +(?:\n[ \t]*)?| *\n[ \t]*)(title))? *(?:\n+|$)/).replace("label", wc).replace("title", /(?:"(?:\\"?|[^"\\])*"|'[^'\n]*(?:\n[^'\n]+)*\n?'|\([^()]*\))/).getRegex(), qv = ze(/^(bull)([ \t][^\n]*?)?(?:\n|$)/).replace(/bull/g, yc).getRegex(), Ui = "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul", kc = /<!--(?:-?>|[\s\S]*?(?:-->|$))/, Lv = ze("^ {0,3}(?:<(script|pre|style|textarea)[\\s>][\\s\\S]*?(?:</\\1>[^\\n]*\\n*|$)|comment[^\\n]*(\\n+|$)|<\\?[\\s\\S]*?(?:\\?>[^\\n]*\\n*|$)|<![A-Z][\\s\\S]*?(?:>[^\\n]*\\n*|$)|<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>[^\\n]*\\n*|$)|</?(tag)(?: +|\\n|/?>)[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$)|<(?!script|pre|style|textarea)([a-z][\\w-]*)(?:attribute)*? */?>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$)|</(?!script|pre|style|textarea)[a-z][\\w-]*\\s*>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$))", "i").replace("comment", kc).replace("tag", Ui).replace("attribute", / +[a-zA-Z:_][\w.:-]*(?: *= *"[^"\n]*"| *= *'[^'\n]*'| *= *[^\s"'=<>`]+)?/).getRegex(), Cm = (n) => ze(xc).replace("hr", Fl).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("|lheading", "").replace("|table", "").replace("blockquote", " {0,3}>").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~~~)[^\\n]*\\n").replace("list", n).replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", Ui).getRegex(), Gv = Cm(/ {0,3}(?:[*+-]|1[.)])[ \t]+[^ \t\n]/), Yv = Cm(/ {0,3}(?:[*+-]|\d{1,9}[.)])(?:[ \t]|\n|$)/), Qv = ze(/^( {0,3}> ?(paragraph|[^\n]*)(?:\n|$))+/).replace("paragraph", Yv).getRegex(), _c = { blockquote: Qv, code: jv, def: Uv, fences: Ov, heading: Dv, hr: Fl, html: Lv, lheading: Tm, list: qv, newline: Rv, paragraph: Gv, table: ya, text: Hv }, hp = ze("^ *([^\\n ].*)\\n {0,3}((?:\\| *)?:?-+:? *(?:\\| *:?-+:? *)*(?:\\| *)?)(?:\\n((?:(?! *\\n|hr|heading|blockquote|code|fences|list|html).*(?:\\n|$))*)\\n*|$)").replace("hr", Fl).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("blockquote", " {0,3}>").replace("code", "(?: {4}| {0,3}	)[^\\n]").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~~~)[^\\n]*\\n").replace("list", " {0,3}(?:[*+-]|1[.)])[ \\t]").replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", Ui).getRegex(), Vv = { ..._c, lheading: Bv, table: hp, paragraph: ze(xc).replace("hr", Fl).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("|lheading", "").replace("table", hp).replace("blockquote", " {0,3}>").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~~~)[^\\n]*\\n").replace("list", " {0,3}(?:[*+-]|1[.)])[ \\t]+[^ \\t\\n]").replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", Ui).getRegex() }, Kv = { ..._c, html: ze(`^ *(?:comment *(?:\\n|\\s*$)|<(tag)[\\s\\S]+?</\\1> *(?:\\n{2,}|\\s*$)|<tag(?:"[^"]*"|'[^']*'|\\s[^'"/>\\s]*)*?/?> *(?:\\n{2,}|\\s*$))`).replace("comment", kc).replace(/tag/g, "(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\\b)\\w+(?!:|[^\\w\\s@]*@)\\b").getRegex(), def: /^ *\[([^\]]+)\]: *<?([^\s>]+)>?(?: +(["(][^\n]+[")]))? *(?:\n+|$)/, heading: /^(#{1,6})(.*)(?:\n+|$)/, fences: ya, lheading: /^(.+?)\n {0,3}(=+|-+) *(?:\n+|$)/, paragraph: ze(xc).replace("hr", Fl).replace("heading", ` *#{1,6} *[^
-]`).replace("lheading", Tm).replace("|table", "").replace("blockquote", " {0,3}>").replace("|fences", "").replace("|list", "").replace("|html", "").replace("|tag", "").getRegex() }, Zv = /^\\([!"#$%&'()*+,\-./:;<=>?@\[\]\\^_`{|}~])/, Xv = /^(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/, Am = /^( {2,}|\\)\n(?!\s*$)/, Jv = /^(`+|[^`])(?:(?= {2,}\n)|[\s\S]*?(?:(?=[\\<!\[`*_]|\b_|$)|[^ ](?= {2,}\n)))/, al = /[\p{P}\p{S}]/u, qi = /[\s\p{P}\p{S}]/u, Sc = /[^\s\p{P}\p{S}]/u, $v = ze(/^((?![*_])punctSpace)/, "u").replace(/punctSpace/g, qi).getRegex(), Mm = /(?!~)[\p{P}\p{S}]/u, Wv = /(?!~)[\s\p{P}\p{S}]/u, Fv = /(?:[^\s\p{P}\p{S}]|~)/u, Iv = ze(/link|precode-code|html/, "g").replace("link", /\[(?:[^\[\]`]|(?<a>`+)[^`]+\k<a>(?!`))*?\]\((?:\\[\s\S]|[^\\\(\)]|\((?:\\[\s\S]|[^\\\(\)])*\))*\)/).replace("precode-", Mv ? "(?<!`)()" : "(^^|[^`])").replace("code", /(?<b>`+)[^`]+\k<b>(?!`)/).replace("html", /<(?! )[^<>]*?>/).getRegex(), Rm = /^(?:\*+(?:((?!\*)punct)|([^\s*]))?)|^_+(?:((?!_)punct)|([^\s_]))?/, Pv = ze(Rm, "u").replace(/punct/g, al).getRegex(), ey = ze(Rm, "u").replace(/punct/g, Mm).getRegex(), jm = "^[^_*]*?__[^_*]*?\\*[^_*]*?(?=__)|[^*]+(?=[^*])|(?!\\*)punct(\\*+)(?=[\\s]|$)|notPunctSpace(\\*+)(?!\\*)(?=punctSpace|$)|(?!\\*)punctSpace(\\*+)(?=notPunctSpace)|[\\s](\\*+)(?!\\*)(?=punct)|(?!\\*)punct(\\*+)(?!\\*)(?=punct)|notPunctSpace(\\*+)(?=notPunctSpace)", ty = ze(jm, "gu").replace(/notPunctSpace/g, Sc).replace(/punctSpace/g, qi).replace(/punct/g, al).getRegex(), ny = ze(jm, "gu").replace(/notPunctSpace/g, Fv).replace(/punctSpace/g, Wv).replace(/punct/g, Mm).getRegex(), ay = ze("^[^_*]*?\\*\\*[^_*]*?_[^_*]*?(?=\\*\\*)|[^_]+(?=[^_])|(?!_)punct(_+)(?=[\\s]|$)|notPunctSpace(_+)(?!_)(?=punctSpace|$)|(?!_)punctSpace(_+)(?=notPunctSpace)|[\\s](_+)(?!_)(?=punct)|(?!_)punct(_+)(?!_)(?=punct)", "gu").replace(/notPunctSpace/g, Sc).replace(/punctSpace/g, qi).replace(/punct/g, al).getRegex(), ly = ze(/^~~?(?:((?!~)punct)|[^\s~])/, "u").replace(/punct/g, al).getRegex(), ry = "^[^~]+(?=[^~])|(?!~)punct(~~?)(?=[\\s]|$)|notPunctSpace(~~?)(?!~)(?=punctSpace|$)|(?!~)punctSpace(~~?)(?=notPunctSpace)|[\\s](~~?)(?!~)(?=punct)|(?!~)punct(~~?)(?!~)(?=punct)|notPunctSpace(~~?)(?=notPunctSpace)", iy = ze(ry, "gu").replace(/notPunctSpace/g, Sc).replace(/punctSpace/g, qi).replace(/punct/g, al).getRegex(), sy = ze(/\\(punct)/, "gu").replace(/punct/g, al).getRegex(), oy = ze(/^<(scheme:[^\s\x00-\x1f<>]*|email)>/).replace("scheme", /[a-zA-Z][a-zA-Z0-9+.-]{1,31}/).replace("email", /[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+(@)[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+(?![-_])/).getRegex(), cy = ze(kc).replace("(?:-->|$)", "-->").getRegex(), uy = ze("^comment|^</[a-zA-Z][\\w:-]*\\s*>|^<[a-zA-Z][\\w-]*(?:attribute)*?\\s*/?>|^<\\?[\\s\\S]*?\\?>|^<![a-zA-Z]+\\s[\\s\\S]*?>|^<!\\[CDATA\\[[\\s\\S]*?\\]\\]>").replace("comment", cy).replace("attribute", /\s+[a-zA-Z:_][\w.:-]*(?:\s*=\s*"[^"]*"|\s*=\s*'[^']*'|\s*=\s*[^\s"'=<>`]+)?/).getRegex(), Ti = /(?:\[(?:\\[\s\S]|[^\[\]\\])*\]|\\[\s\S]|`+(?!`)[^`]*?`+(?!`)|``+(?=\])|[^\[\]\\`])*?/, dy = ze(/^!?\[(label)\]\(\s*(href)(?:(?:[ \t]+(?:\n[ \t]*)?|\n[ \t]*)(title))?\s*\)/).replace("label", Ti).replace("href", /<(?:\\.|[^\n<>\\])+>|[^ \t\n\x00-\x1f]+|(?=\))/).replace("title", /"(?:\\"?|[^"\\])*"|'(?:\\'?|[^'\\])*'|\((?:\\\)?|[^)\\])*\)/).getRegex(), Om = ze(/^!?\[(label)\]\[(ref)\]/).replace("label", Ti).replace("ref", wc).getRegex(), Dm = ze(/^!?\[(ref)\](?:\[\])?/).replace("ref", wc).getRegex(), fy = ze("reflink|nolink(?!\\()", "g").replace("reflink", Om).replace("nolink", Dm).getRegex(), gp = /[hH][tT][tT][pP][sS]?|[fF][tT][pP]/, Ec = { _backpedal: ya, anyPunctuation: sy, autolink: oy, blockSkip: Iv, br: Am, code: Xv, del: ya, delLDelim: ya, delRDelim: ya, emStrongLDelim: Pv, emStrongRDelimAst: ty, emStrongRDelimUnd: ay, escape: Zv, link: dy, nolink: Dm, punctuation: $v, reflink: Om, reflinkSearch: fy, tag: uy, text: Jv, url: ya }, py = { ...Ec, link: ze(/^!?\[(label)\]\((.*?)\)/).replace("label", Ti).getRegex(), reflink: ze(/^!?\[(label)\]\s*\[([^\]]*)\]/).replace("label", Ti).getRegex() }, Fo = { ...Ec, emStrongRDelimAst: ny, emStrongLDelim: ey, delLDelim: ly, delRDelim: iy, url: ze(/^((?:protocol):\/\/|www\.)(?:[a-zA-Z0-9\-]+\.?)+[^\s<]*|^email/).replace("protocol", gp).replace("email", /[A-Za-z0-9._+-]+(@)[a-zA-Z0-9-_]+(?:\.[a-zA-Z0-9-_]*[a-zA-Z0-9])+(?![-_])/).getRegex(), _backpedal: /(?:[^?!.,:;*_'"~()&]+|\([^)]*\)|&(?![a-zA-Z0-9]+;$)|[?!.,:;*_'"~)]+(?!$))+/, del: /^(~~?)(?=[^\s~])((?:\\[\s\S]|[^\\])*?(?:\\[\s\S]|[^\s~\\]))\1(?=[^~]|$)/, text: ze(/^(`+|~+|[^`~])(?:(?=[`~])|(?= {2,}\n)|(?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)|[\s\S]*?(?:(?=[\\<!\[`*~_]|\b_|protocol:\/\/|www\.|$)|[^ ](?= {2,}\n)|[^a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-](?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)))/).replace("protocol", gp).getRegex() }, my = { ...Fo, br: ze(Am).replace("{2,}", "*").getRegex(), text: ze(Fo.text).replace("\\b_", "\\b_| {2,}\\n").replace(/\{2,\}/g, "*").getRegex() }, ri = { normal: _c, gfm: Vv, pedantic: Kv }, ql = { normal: Ec, gfm: Fo, breaks: my, pedantic: py }, hy = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }, bp = (n) => hy[n];
+})(), mt = { codeRemoveIndent: /^(?: {1,4}| {0,3}\t)/gm, outputLinkReplace: /\\([\[\]])/g, indentCodeCompensation: /^(\s+)(?:```)/, beginningSpace: /^\s+/, endingHash: /#$/, startingSpaceChar: /^ /, endingSpaceChar: / $/, nonSpaceChar: /[^ ]/, newLineCharGlobal: /\n/g, tabCharGlobal: /\t/g, multipleSpaceGlobal: /\s+/g, blankLine: /^[ \t]*$/, doubleBlankLine: /\n[ \t]*\n[ \t]*$/, blockquoteStart: /^ {0,3}>/, blockquoteSetextReplace: /\n {0,3}((?:=+|-+) *)(?=\n|$)/g, blockquoteSetextReplace2: /^ {0,3}>[ \t]?/gm, listReplaceNesting: /^ {1,4}(?=( {4})*[^ ])/g, listIsTask: /^\[[ xX]\] +\S/, listReplaceTask: /^\[[ xX]\] +/, listTaskCheckbox: /\[[ xX]\]/, anyLine: /\n.*\n/, hrefBrackets: /^<(.*)>$/, tableDelimiter: /[:|]/, tableAlignChars: /^\||\| *$/g, tableRowBlankLine: /\n[ \t]*$/, tableAlignRight: /^ *-+: *$/, tableAlignCenter: /^ *:-+: *$/, tableAlignLeft: /^ *:-+ *$/, startATag: /^<a /i, endATag: /^<\/a>/i, startPreScriptTag: /^<(pre|code|kbd|script)(\s|>)/i, endPreScriptTag: /^<\/(pre|code|kbd|script)(\s|>)/i, startAngleBracket: /^</, endAngleBracket: />$/, pedanticHrefTitle: /^([^'"]*[^\s])\s+(['"])(.*)\2/, unicodeAlphaNumeric: /[\p{L}\p{N}]/u, escapeTest: /[&<>"']/, escapeReplace: /[&<>"']/g, escapeTestNoEncode: /[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/, escapeReplaceNoEncode: /[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/g, caret: /(^|[^\[])\^/g, percentDecode: /%25/g, findPipe: /\|/g, splitPipe: / \|/, slashPipe: /\\\|/g, carriageReturn: /\r\n|\r/g, spaceLine: /^ +$/gm, notSpaceStart: /^\S*/, endingNewline: /\n$/, listItemRegex: (n) => new RegExp(`^( {0,3}${n})((?:[	 ][^\\n]*)?(?:\\n|$))`), nextBulletRegex: el((n) => new RegExp(`^ {0,${n}}(?:[*+-]|\\d{1,9}[.)])((?:[ 	][^\\n]*)?(?:\\n|$))`)), hrRegex: el((n) => new RegExp(`^ {0,${n}}((?:- *){3,}|(?:_ *){3,}|(?:\\* *){3,})(?:\\n+|$)`)), fencesBeginRegex: el((n) => new RegExp(`^ {0,${n}}(?:\`\`\`|~~~)`)), headingBeginRegex: el((n) => new RegExp(`^ {0,${n}}#`)), htmlBeginRegex: el((n) => new RegExp(`^ {0,${n}}<(?:[a-z].*>|!--)`, "i")), blockquoteBeginRegex: el((n) => new RegExp(`^ {0,${n}}>`)) }, jv = /^(?:[ \t]*(?:\n|$))+/, Ov = /^((?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|$))*)?)+/, Dv = /^ {0,3}(`{3,}(?=[^`\n]*(?:\n|$))|~{3,})([^\n]*)(?:\n|$)(?:|([\s\S]*?)(?:\n|$))(?: {0,3}\1[~`]* *(?=\n|$)|$)/, Fl = /^ {0,3}((?:-[\t ]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})(?:\n+|$)/, Bv = /^ {0,3}(#{1,6})(?=\s|$)(.*)(?:\n+|$)/, yc = / {0,3}(?:[*+-]|\d{1,9}[.)])/, Nm = /^(?!bull |blockCode|fences|blockquote|heading|html|table)((?:.|\n(?!\s*?\n|bull |blockCode|fences|blockquote|heading|html|table))+?)\n {0,3}(=+|-+) *(?:\n+|$)/, Tm = ze(Nm).replace(/bull/g, yc).replace(/blockCode/g, /(?: {4}| {0,3}\t)/).replace(/fences/g, / {0,3}(?:`{3,}|~{3,})/).replace(/blockquote/g, / {0,3}>/).replace(/heading/g, / {0,3}#{1,6}(?:\s|$)/).replace(/html/g, / {0,3}<[^\n>]+>\n/).replace(/\|table/g, "").getRegex(), Hv = ze(Nm).replace(/bull/g, yc).replace(/blockCode/g, /(?: {4}| {0,3}\t)/).replace(/fences/g, / {0,3}(?:`{3,}|~{3,})/).replace(/blockquote/g, / {0,3}>/).replace(/heading/g, / {0,3}#{1,6}(?:\s|$)/).replace(/html/g, / {0,3}<[^\n>]+>\n/).replace(/table/g, / {0,3}\|?(?:[:\- ]*\|)+[\:\- ]*\n/).getRegex(), xc = /^([^\n]+(?:\n(?!hr|heading|lheading|blockquote|fences|list|html|table|[ \t]+\n)[^\n]+)*)/, Uv = /^[^\n]+/, wc = /(?!\s*\])(?:\\[\s\S]|[^\[\]\\])+/, qv = ze(/^ {0,3}\[(label)\]: *(?:\n[ \t]*)?([^<\s][^\s]*|<.*?>)(?:(?: +(?:\n[ \t]*)?| *\n[ \t]*)(title))? *(?:\n+|$)/).replace("label", wc).replace("title", /(?:"(?:\\"?|[^"\\])*"|'[^'\n]*(?:\n[^'\n]+)*\n?'|\([^()]*\))/).getRegex(), Lv = ze(/^(bull)([ \t][^\n]*?)?(?:\n|$)/).replace(/bull/g, yc).getRegex(), Ui = "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul", kc = /<!--(?:-?>|[\s\S]*?(?:-->|$))/, Gv = ze("^ {0,3}(?:<(script|pre|style|textarea)[\\s>][\\s\\S]*?(?:</\\1>[^\\n]*\\n*|$)|comment[^\\n]*(\\n+|$)|<\\?[\\s\\S]*?(?:\\?>[^\\n]*\\n*|$)|<![A-Z][\\s\\S]*?(?:>[^\\n]*\\n*|$)|<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>[^\\n]*\\n*|$)|</?(tag)(?: +|\\n|/?>)[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$)|<(?!script|pre|style|textarea)([a-z][\\w-]*)(?:attribute)*? */?>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$)|</(?!script|pre|style|textarea)[a-z][\\w-]*\\s*>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$))", "i").replace("comment", kc).replace("tag", Ui).replace("attribute", / +[a-zA-Z:_][\w.:-]*(?: *= *"[^"\n]*"| *= *'[^'\n]*'| *= *[^\s"'=<>`]+)?/).getRegex(), Cm = (n) => ze(xc).replace("hr", Fl).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("|lheading", "").replace("|table", "").replace("blockquote", " {0,3}>").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~~~)[^\\n]*\\n").replace("list", n).replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", Ui).getRegex(), Yv = Cm(/ {0,3}(?:[*+-]|1[.)])[ \t]+[^ \t\n]/), Qv = Cm(/ {0,3}(?:[*+-]|\d{1,9}[.)])(?:[ \t]|\n|$)/), Vv = ze(/^( {0,3}> ?(paragraph|[^\n]*)(?:\n|$))+/).replace("paragraph", Qv).getRegex(), _c = { blockquote: Vv, code: Ov, def: qv, fences: Dv, heading: Bv, hr: Fl, html: Gv, lheading: Tm, list: Lv, newline: jv, paragraph: Yv, table: ya, text: Uv }, hp = ze("^ *([^\\n ].*)\\n {0,3}((?:\\| *)?:?-+:? *(?:\\| *:?-+:? *)*(?:\\| *)?)(?:\\n((?:(?! *\\n|hr|heading|blockquote|code|fences|list|html).*(?:\\n|$))*)\\n*|$)").replace("hr", Fl).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("blockquote", " {0,3}>").replace("code", "(?: {4}| {0,3}	)[^\\n]").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~~~)[^\\n]*\\n").replace("list", " {0,3}(?:[*+-]|1[.)])[ \\t]").replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", Ui).getRegex(), Kv = { ..._c, lheading: Hv, table: hp, paragraph: ze(xc).replace("hr", Fl).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("|lheading", "").replace("table", hp).replace("blockquote", " {0,3}>").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~~~)[^\\n]*\\n").replace("list", " {0,3}(?:[*+-]|1[.)])[ \\t]+[^ \\t\\n]").replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", Ui).getRegex() }, Zv = { ..._c, html: ze(`^ *(?:comment *(?:\\n|\\s*$)|<(tag)[\\s\\S]+?</\\1> *(?:\\n{2,}|\\s*$)|<tag(?:"[^"]*"|'[^']*'|\\s[^'"/>\\s]*)*?/?> *(?:\\n{2,}|\\s*$))`).replace("comment", kc).replace(/tag/g, "(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\\b)\\w+(?!:|[^\\w\\s@]*@)\\b").getRegex(), def: /^ *\[([^\]]+)\]: *<?([^\s>]+)>?(?: +(["(][^\n]+[")]))? *(?:\n+|$)/, heading: /^(#{1,6})(.*)(?:\n+|$)/, fences: ya, lheading: /^(.+?)\n {0,3}(=+|-+) *(?:\n+|$)/, paragraph: ze(xc).replace("hr", Fl).replace("heading", ` *#{1,6} *[^
+]`).replace("lheading", Tm).replace("|table", "").replace("blockquote", " {0,3}>").replace("|fences", "").replace("|list", "").replace("|html", "").replace("|tag", "").getRegex() }, Xv = /^\\([!"#$%&'()*+,\-./:;<=>?@\[\]\\^_`{|}~])/, Jv = /^(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/, Am = /^( {2,}|\\)\n(?!\s*$)/, $v = /^(`+|[^`])(?:(?= {2,}\n)|[\s\S]*?(?:(?=[\\<!\[`*_]|\b_|$)|[^ ](?= {2,}\n)))/, al = /[\p{P}\p{S}]/u, qi = /[\s\p{P}\p{S}]/u, Sc = /[^\s\p{P}\p{S}]/u, Wv = ze(/^((?![*_])punctSpace)/, "u").replace(/punctSpace/g, qi).getRegex(), Mm = /(?!~)[\p{P}\p{S}]/u, Fv = /(?!~)[\s\p{P}\p{S}]/u, Iv = /(?:[^\s\p{P}\p{S}]|~)/u, Pv = ze(/link|precode-code|html/, "g").replace("link", /\[(?:[^\[\]`]|(?<a>`+)[^`]+\k<a>(?!`))*?\]\((?:\\[\s\S]|[^\\\(\)]|\((?:\\[\s\S]|[^\\\(\)])*\))*\)/).replace("precode-", Rv ? "(?<!`)()" : "(^^|[^`])").replace("code", /(?<b>`+)[^`]+\k<b>(?!`)/).replace("html", /<(?! )[^<>]*?>/).getRegex(), Rm = /^(?:\*+(?:((?!\*)punct)|([^\s*]))?)|^_+(?:((?!_)punct)|([^\s_]))?/, ey = ze(Rm, "u").replace(/punct/g, al).getRegex(), ty = ze(Rm, "u").replace(/punct/g, Mm).getRegex(), jm = "^[^_*]*?__[^_*]*?\\*[^_*]*?(?=__)|[^*]+(?=[^*])|(?!\\*)punct(\\*+)(?=[\\s]|$)|notPunctSpace(\\*+)(?!\\*)(?=punctSpace|$)|(?!\\*)punctSpace(\\*+)(?=notPunctSpace)|[\\s](\\*+)(?!\\*)(?=punct)|(?!\\*)punct(\\*+)(?!\\*)(?=punct)|notPunctSpace(\\*+)(?=notPunctSpace)", ny = ze(jm, "gu").replace(/notPunctSpace/g, Sc).replace(/punctSpace/g, qi).replace(/punct/g, al).getRegex(), ay = ze(jm, "gu").replace(/notPunctSpace/g, Iv).replace(/punctSpace/g, Fv).replace(/punct/g, Mm).getRegex(), ly = ze("^[^_*]*?\\*\\*[^_*]*?_[^_*]*?(?=\\*\\*)|[^_]+(?=[^_])|(?!_)punct(_+)(?=[\\s]|$)|notPunctSpace(_+)(?!_)(?=punctSpace|$)|(?!_)punctSpace(_+)(?=notPunctSpace)|[\\s](_+)(?!_)(?=punct)|(?!_)punct(_+)(?!_)(?=punct)", "gu").replace(/notPunctSpace/g, Sc).replace(/punctSpace/g, qi).replace(/punct/g, al).getRegex(), ry = ze(/^~~?(?:((?!~)punct)|[^\s~])/, "u").replace(/punct/g, al).getRegex(), iy = "^[^~]+(?=[^~])|(?!~)punct(~~?)(?=[\\s]|$)|notPunctSpace(~~?)(?!~)(?=punctSpace|$)|(?!~)punctSpace(~~?)(?=notPunctSpace)|[\\s](~~?)(?!~)(?=punct)|(?!~)punct(~~?)(?!~)(?=punct)|notPunctSpace(~~?)(?=notPunctSpace)", sy = ze(iy, "gu").replace(/notPunctSpace/g, Sc).replace(/punctSpace/g, qi).replace(/punct/g, al).getRegex(), oy = ze(/\\(punct)/, "gu").replace(/punct/g, al).getRegex(), cy = ze(/^<(scheme:[^\s\x00-\x1f<>]*|email)>/).replace("scheme", /[a-zA-Z][a-zA-Z0-9+.-]{1,31}/).replace("email", /[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+(@)[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+(?![-_])/).getRegex(), uy = ze(kc).replace("(?:-->|$)", "-->").getRegex(), dy = ze("^comment|^</[a-zA-Z][\\w:-]*\\s*>|^<[a-zA-Z][\\w-]*(?:attribute)*?\\s*/?>|^<\\?[\\s\\S]*?\\?>|^<![a-zA-Z]+\\s[\\s\\S]*?>|^<!\\[CDATA\\[[\\s\\S]*?\\]\\]>").replace("comment", uy).replace("attribute", /\s+[a-zA-Z:_][\w.:-]*(?:\s*=\s*"[^"]*"|\s*=\s*'[^']*'|\s*=\s*[^\s"'=<>`]+)?/).getRegex(), Ti = /(?:\[(?:\\[\s\S]|[^\[\]\\])*\]|\\[\s\S]|`+(?!`)[^`]*?`+(?!`)|``+(?=\])|[^\[\]\\`])*?/, fy = ze(/^!?\[(label)\]\(\s*(href)(?:(?:[ \t]+(?:\n[ \t]*)?|\n[ \t]*)(title))?\s*\)/).replace("label", Ti).replace("href", /<(?:\\.|[^\n<>\\])+>|[^ \t\n\x00-\x1f]+|(?=\))/).replace("title", /"(?:\\"?|[^"\\])*"|'(?:\\'?|[^'\\])*'|\((?:\\\)?|[^)\\])*\)/).getRegex(), Om = ze(/^!?\[(label)\]\[(ref)\]/).replace("label", Ti).replace("ref", wc).getRegex(), Dm = ze(/^!?\[(ref)\](?:\[\])?/).replace("ref", wc).getRegex(), py = ze("reflink|nolink(?!\\()", "g").replace("reflink", Om).replace("nolink", Dm).getRegex(), gp = /[hH][tT][tT][pP][sS]?|[fF][tT][pP]/, Ec = { _backpedal: ya, anyPunctuation: oy, autolink: cy, blockSkip: Pv, br: Am, code: Jv, del: ya, delLDelim: ya, delRDelim: ya, emStrongLDelim: ey, emStrongRDelimAst: ny, emStrongRDelimUnd: ly, escape: Xv, link: fy, nolink: Dm, punctuation: Wv, reflink: Om, reflinkSearch: py, tag: dy, text: $v, url: ya }, my = { ...Ec, link: ze(/^!?\[(label)\]\((.*?)\)/).replace("label", Ti).getRegex(), reflink: ze(/^!?\[(label)\]\s*\[([^\]]*)\]/).replace("label", Ti).getRegex() }, Fo = { ...Ec, emStrongRDelimAst: ay, emStrongLDelim: ty, delLDelim: ry, delRDelim: sy, url: ze(/^((?:protocol):\/\/|www\.)(?:[a-zA-Z0-9\-]+\.?)+[^\s<]*|^email/).replace("protocol", gp).replace("email", /[A-Za-z0-9._+-]+(@)[a-zA-Z0-9-_]+(?:\.[a-zA-Z0-9-_]*[a-zA-Z0-9])+(?![-_])/).getRegex(), _backpedal: /(?:[^?!.,:;*_'"~()&]+|\([^)]*\)|&(?![a-zA-Z0-9]+;$)|[?!.,:;*_'"~)]+(?!$))+/, del: /^(~~?)(?=[^\s~])((?:\\[\s\S]|[^\\])*?(?:\\[\s\S]|[^\s~\\]))\1(?=[^~]|$)/, text: ze(/^(`+|~+|[^`~])(?:(?=[`~])|(?= {2,}\n)|(?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)|[\s\S]*?(?:(?=[\\<!\[`*~_]|\b_|protocol:\/\/|www\.|$)|[^ ](?= {2,}\n)|[^a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-](?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)))/).replace("protocol", gp).getRegex() }, hy = { ...Fo, br: ze(Am).replace("{2,}", "*").getRegex(), text: ze(Fo.text).replace("\\b_", "\\b_| {2,}\\n").replace(/\{2,\}/g, "*").getRegex() }, ri = { normal: _c, gfm: Kv, pedantic: Zv }, ql = { normal: Ec, gfm: Fo, breaks: hy, pedantic: my }, gy = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }, bp = (n) => gy[n];
 function nn(n, a) {
   if (a) {
     if (mt.escapeTest.test(n)) return n.replace(mt.escapeReplace, bp);
@@ -13727,7 +13727,7 @@ function xp(n) {
   return a.length - r <= 2 ? n : a.slice(0, r + 1).join(`
 `);
 }
-function gy(n, a) {
+function by(n, a) {
   if (n.indexOf(a[1]) === -1) return -1;
   let r = 0;
   for (let i = 0; i < n.length; i++) if (n[i] === "\\") i++;
@@ -13735,7 +13735,7 @@ function gy(n, a) {
   else if (n[i] === a[1] && (r--, r < 0)) return i;
   return r > 0 ? -2 : -1;
 }
-function by(n, a = 0) {
+function vy(n, a = 0) {
   let r = a, i = "";
   for (let s of n) if (s === "	") {
     let c = 4 - r % 4;
@@ -13749,7 +13749,7 @@ function wp(n, a, r, i, s) {
   let m = { type: n[0].charAt(0) === "!" ? "image" : "link", raw: r, href: c, title: f, text: u, tokens: i.inlineTokens(u) };
   return i.state.inLink = !1, m;
 }
-function vy(n, a, r) {
+function yy(n, a, r) {
   let i = n.match(r.other.indentCodeCompensation);
   if (i === null) return a;
   let s = i[1];
@@ -13783,7 +13783,7 @@ var Ci = class {
   fences(n) {
     let a = this.rules.block.fences.exec(n);
     if (a) {
-      let r = a[0], i = vy(r, a[3] || "", this.rules);
+      let r = a[0], i = yy(r, a[3] || "", this.rules);
       return { type: "code", raw: r, lang: a[2] ? a[2].trim().replace(this.rules.inline.anyPunctuation, "$1") : a[2], text: i };
     }
   }
@@ -13854,7 +13854,7 @@ ${v}` : v;
         let m = !1, h = "", v = "";
         if (!(a = c.exec(n)) || this.rules.block.hr.test(n)) break;
         h = a[0], n = n.substring(h.length);
-        let y = by(a[2].split(`
+        let y = vy(a[2].split(`
 `, 1)[0], a[1].length), b = n.split(`
 `, 1)[0], S = !y.trim(), E = 0;
         if (this.options.pedantic ? (E = 2, v = y.trimStart()) : S ? E = a[1].length + 1 : (E = y.search(this.rules.other.nonSpaceChar), E = E > 4 ? 1 : E, v = y.slice(E), E += a[1].length), S && this.rules.other.blankLine.test(b) && (h += b + `
@@ -13973,7 +13973,7 @@ ${v}` : v;
         let c = Yn(r.slice(0, -1), "\\");
         if ((r.length - c.length) % 2 === 0) return;
       } else {
-        let c = gy(a[2], "()");
+        let c = by(a[2], "()");
         if (c === -2) return;
         if (c > -1) {
           let f = (a[0].indexOf("!") === 0 ? 5 : 4) + a[1].length + c;
@@ -14625,7 +14625,7 @@ ${n}</tr>
   provideParser(n = this.block) {
     return n ? Xt.parse : Xt.parseInline;
   }
-}, yy = class {
+}, xy = class {
   defaults = vc();
   options = this.setOptions;
   parse = this.parseMarkdown(!0);
@@ -14785,7 +14785,7 @@ Please report this to https://github.com/markedjs/marked.`, n) {
       throw r;
     };
   }
-}, ka = new yy();
+}, ka = new xy();
 function Re(n, a) {
   return ka.parse(n, a);
 }
@@ -14824,23 +14824,23 @@ Ht.lex;
 //! http(s) address and opens on an explicit click through the window (`link.open`); any other keeps its address as
 //! its title, as the web's does.
 const pi = 2e5;
-function xy(n) {
+function wy(n) {
   if (n.length <= pi) return { source: n, truncated: !1 };
   const a = n.lastIndexOf(`
 `, pi);
   return { source: n.slice(0, a > 0 ? a : pi), truncated: !0 };
 }
-const wy = (n, a, r) => {
+const ky = (n, a, r) => {
   const i = r.startsWith("data:") ? "data URL" : r.length > 200 ? `${r.slice(0, 200)}…` : r;
   return `[${n}${a ? `: ${a}` : ""}]${i ? ` ${i}` : ""}`;
 };
 function xa(n, a) {
-  return (n ?? []).map((r, i) => ky(r, i, a));
+  return (n ?? []).map((r, i) => _y(r, i, a));
 }
 function ba(n, a) {
   return n.tokens ? xa(n.tokens, a) : n.text;
 }
-function ky(n, a, r) {
+function _y(n, a, r) {
   switch (n.type) {
     case "space":
       return null;
@@ -14898,7 +14898,7 @@ function ky(n, a, r) {
       return L.createElement("a", { key: a, href: i, rel: "noopener noreferrer", onClick: s }, ba(n, r));
     }
     case "image":
-      return L.createElement("span", { key: a, className: "md-placeholder" }, wy("image", n.text, n.href ?? ""));
+      return L.createElement("span", { key: a, className: "md-placeholder" }, ky("image", n.text, n.href ?? ""));
     // Raw HTML is never parsed: it is drawn as written.
     case "html":
       return n.block ? L.createElement("p", { key: a }, n.text) : n.text;
@@ -14906,7 +14906,7 @@ function ky(n, a, r) {
       return n.raw ?? null;
   }
 }
-function _y(n, a = 4e3) {
+function Sy(n, a = 4e3) {
   const r = [];
   let i = 0, s = 0, c = null, f = !1;
   for (; s < n.length; ) {
@@ -14916,7 +14916,7 @@ function _y(n, a = 4e3) {
   }
   return r.push(n.slice(i)), r;
 }
-function Sy(n) {
+function Ey(n) {
   const a = new Ht({ gfm: !0 }), r = [], i = () => r.findLast((s) => s.type !== "space");
   return {
     add(s) {
@@ -14928,8 +14928,8 @@ function Sy(n) {
     elements: () => xa(r, n)
   };
 }
-const ii = 4, Qn = 8, Ey = "flex w-full cursor-pointer items-center justify-between gap-3 px-[0.9rem] py-[0.4rem] text-left text-[0.82rem] text-fg max-[700px]:min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-40", kp = (n) => n.text ?? (typeof n.label == "string" ? n.label : n.value);
-function zy({ value: n, onChange: a, options: r, className: i, ariaLabel: s, testId: c, id: f, title: u, disabled: m, placeholder: h, freeText: v, onKeyDown: y }) {
+const ii = 4, Qn = 8, zy = "flex w-full cursor-pointer items-center justify-between gap-3 px-[0.9rem] py-[0.4rem] text-left text-[0.82rem] text-fg max-[700px]:min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-40", kp = (n) => n.text ?? (typeof n.label == "string" ? n.label : n.value);
+function Ny({ value: n, onChange: a, options: r, className: i, ariaLabel: s, testId: c, id: f, title: u, disabled: m, placeholder: h, freeText: v, onKeyDown: y }) {
   const b = L.useId(), [S, E] = L.useState(!1), [R, N] = L.useState(-1), [M, O] = L.useState(!1), H = L.useRef(null), X = L.useRef(null), [W, D] = L.useState({}), g = L.useRef({ text: "", at: 0 }), w = v && M && n ? r.filter((Q) => kp(Q).toLowerCase().includes(n.toLowerCase()) || Q.value.toLowerCase().includes(n.toLowerCase())) : r, x = r.find((Q) => Q.value === n), _ = (Q) => `${b}-${Q}`;
   function T(Q) {
     m || (N(Q), E(!0));
@@ -15096,7 +15096,7 @@ function zy({ value: n, onChange: a, options: r, className: i, ariaLabel: s, tes
               "aria-selected": Q.value === n,
               "aria-disabled": Q.disabled || void 0,
               "data-value": Q.value,
-              className: Oe(Ey, Z === R && !Q.disabled && "bg-surface-0"),
+              className: Oe(zy, Z === R && !Q.disabled && "bg-surface-0"),
               onMouseEnter: () => {
                 Q.disabled || N(Z);
               },
@@ -15114,8 +15114,8 @@ function zy({ value: n, onChange: a, options: r, className: i, ariaLabel: s, tes
     )
   ] });
 }
-const _p = 230, Ny = 370;
-function Ty({ x: n, y: a, readOnly: r, canUndo: i, canRedo: s, hasSelection: c, onClose: f, actions: u }) {
+const _p = 230, Ty = 370;
+function Cy({ x: n, y: a, readOnly: r, canUndo: i, canRedo: s, hasSelection: c, onClose: f, actions: u }) {
   const m = L.useRef(null);
   Je(() => {
     const b = (E) => {
@@ -15140,7 +15140,7 @@ function Ty({ x: n, y: a, readOnly: r, canUndo: i, canRedo: s, hasSelection: c, 
         "data-testid": "editor-context-menu",
         style: {
           position: "fixed",
-          top: Math.max(8, Math.min(a, window.innerHeight - Ny - 8)),
+          top: Math.max(8, Math.min(a, window.innerHeight - Ty - 8)),
           left: Math.max(8, Math.min(n, window.innerWidth - _p - 8)),
           zIndex: 9999,
           minWidth: _p
@@ -15168,11 +15168,11 @@ function Ty({ x: n, y: a, readOnly: r, canUndo: i, canRedo: s, hasSelection: c, 
     document.body
   );
 }
-const Cy = "box-border min-h-[44px] cursor-pointer rounded-ui bg-transparent px-[0.7rem] py-[0.45rem] text-subtext-0 no-underline [border:0] [font-family:inherit] [font-weight:inherit] [line-height:inherit] text-[0.85rem] hover:bg-surface-1 hover:text-fg focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px] disabled:cursor-default disabled:opacity-[0.55]", Ay = "m-0 mt-[0.4rem] text-[0.78rem] text-subtext-0", My = "m-0 mb-2 text-[0.82rem] text-subtext-0", Bm = "rounded-ui bg-surface-1 text-fg [font-family:inherit]", Nc = `${Bm} px-2 py-[0.3rem] text-[0.8rem] max-[700px]:min-h-11 focus:[outline:1px_solid_var(--accent)]`, Ry = `${Nc} min-w-[5.5rem] shrink-0`, Tc = `${Bm} min-w-0 px-[0.55rem] py-[0.35rem] text-[0.82rem] max-[700px]:min-h-11 focus:[outline:1px_solid_var(--accent)]`, jy = `${Tc} flex-1 max-[700px]:flex-[1_1_100%]`, Oy = `${Tc} w-20 flex-[0_0_5rem] max-[700px]:w-24 max-[700px]:flex-[1_1_6rem]`, Dy = `${Tc} flex-[1_1_100%]`, By = "flex flex-wrap items-center gap-[0.4rem]", Hy = "m-0 mb-2 flex list-none flex-col gap-[0.3rem] p-0", Uy = "flex items-center gap-2 max-[700px]:flex-wrap rounded-ui bg-surface-1 px-2 py-[0.35rem] text-[0.82rem]", qy = `settings-modal__host-row ${Uy}`, Ly = "min-w-0 overflow-hidden font-semibold text-ellipsis whitespace-nowrap text-fg", Gy = "min-w-0 flex-1 max-[700px]:basis-full overflow-hidden text-[0.78rem] text-ellipsis whitespace-nowrap text-subtext-0", Hm = "shrink-0 cursor-pointer rounded-ui px-[0.7rem] py-[0.35rem] max-[700px]:min-h-11 text-[0.82rem] font-semibold text-panel-bg [border:none] [font-family:inherit] [transition:opacity_0.12s_ease] hover:opacity-[0.85]", Yy = `${Hm} bg-accent`, Qy = `${Hm} ml-auto bg-red`;
+const Ay = "box-border min-h-[44px] cursor-pointer rounded-ui bg-transparent px-[0.7rem] py-[0.45rem] text-subtext-0 no-underline [border:0] [font-family:inherit] [font-weight:inherit] [line-height:inherit] text-[0.85rem] hover:bg-surface-1 hover:text-fg focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px] disabled:cursor-default disabled:opacity-[0.55]", My = "m-0 mt-[0.4rem] text-[0.78rem] text-subtext-0", Ry = "m-0 mb-2 text-[0.82rem] text-subtext-0", Bm = "rounded-ui bg-surface-1 text-fg [font-family:inherit]", Nc = `${Bm} px-2 py-[0.3rem] text-[0.8rem] max-[700px]:min-h-11 focus:[outline:1px_solid_var(--accent)]`, jy = `${Nc} min-w-[5.5rem] shrink-0`, Tc = `${Bm} min-w-0 px-[0.55rem] py-[0.35rem] text-[0.82rem] max-[700px]:min-h-11 focus:[outline:1px_solid_var(--accent)]`, Oy = `${Tc} flex-1 max-[700px]:flex-[1_1_100%]`, Dy = `${Tc} w-20 flex-[0_0_5rem] max-[700px]:w-24 max-[700px]:flex-[1_1_6rem]`, By = `${Tc} flex-[1_1_100%]`, Hy = "flex flex-wrap items-center gap-[0.4rem]", Uy = "m-0 mb-2 flex list-none flex-col gap-[0.3rem] p-0", qy = "flex items-center gap-2 max-[700px]:flex-wrap rounded-ui bg-surface-1 px-2 py-[0.35rem] text-[0.82rem]", Ly = `settings-modal__host-row ${qy}`, Gy = "min-w-0 overflow-hidden font-semibold text-ellipsis whitespace-nowrap text-fg", Yy = "min-w-0 flex-1 max-[700px]:basis-full overflow-hidden text-[0.78rem] text-ellipsis whitespace-nowrap text-subtext-0", Hm = "shrink-0 cursor-pointer rounded-ui px-[0.7rem] py-[0.35rem] max-[700px]:min-h-11 text-[0.82rem] font-semibold text-panel-bg [border:none] [font-family:inherit] [transition:opacity_0.12s_ease] hover:opacity-[0.85]", Qy = `${Hm} bg-accent`, Vy = `${Hm} ml-auto bg-red`;
 function Cc({ open: n, size: a = 12, className: r }) {
   return /* @__PURE__ */ te.jsx("svg", { className: r, width: a, height: a, viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.3", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", children: /* @__PURE__ */ te.jsx("path", { d: n ? "M2.5 4.5 6 8l3.5-3.5" : "M4.5 2.5 8 6l-3.5 3.5" }) });
 }
-function Vy({ label: n, items: a, testId: r, side: i = "right", up: s = !1, maxHeight: c = 320 }) {
+function Ky({ label: n, items: a, testId: r, side: i = "right", up: s = !1, maxHeight: c = 320 }) {
   const [f, u] = L.useState(!1), [m, h] = L.useState(!1), v = L.useRef(null), y = L.useRef(null), b = () => [...y.current?.querySelectorAll('[role="menuitem"]') ?? []];
   Je(() => {
     f && m && (b()[0]?.focus(), h(!1));
@@ -15224,7 +15224,7 @@ function Vy({ label: n, items: a, testId: r, side: i = "right", up: s = !1, maxH
     )
   ] });
 }
-function Ky(n) {
+function Zy(n) {
   return n.blocked && !n.stale ? "blocked" : n.status === "running" && !n.stale ? "working" : n.unseen ? "done" : "idle";
 }
 const ec = {
@@ -15242,14 +15242,14 @@ const ec = {
 function tc(n, a) {
   return !!n.parentSessionId && n.parentSessionId !== n.id && a.some((r) => r.id === n.parentSessionId);
 }
-function Zy(n) {
+function Xy(n) {
   const a = /* @__PURE__ */ new Map();
   for (const r of n)
     tc(r, n) && a.set(r.parentSessionId, [...a.get(r.parentSessionId) ?? [], r]);
   return a.size ? n.filter((r) => !tc(r, n)).flatMap((r) => [r, ...a.get(r.id) ?? []]) : n;
 }
 const si = 6, Sp = 8;
-function Xy(n, a = {}) {
+function Jy(n, a = {}) {
   const { minWidth: r = 220, align: i = "right", minSpaceAbove: s = 100 } = a, c = n.getBoundingClientRect(), f = window.innerWidth, u = window.innerHeight, m = i === "right" ? { right: Math.max(0, f - c.right) } : { left: Math.max(0, c.left) }, h = c.top - si - Sp, v = u - c.bottom - si - Sp;
   return h >= s ? {
     position: "fixed",
@@ -15282,18 +15282,18 @@ function Um(n, a, r, i) {
     };
   }, [n]);
 }
-function Jy({ icon: n, fallback: a }) {
+function $y({ icon: n, fallback: a }) {
   const [r, i] = L.useState(!1);
   return Je(() => i(!1), [n]), !n || r ? /* @__PURE__ */ te.jsx(te.Fragment, { children: a }) : /* @__PURE__ */ te.jsx("img", { src: n, alt: "", width: 14, height: 14, className: "size-[14px] rounded-[2px] object-contain", referrerPolicy: "no-referrer", onError: () => i(!0) });
 }
-const $y = ["application/zip", "application/x-tar", "application/gzip"];
+const Wy = ["application/zip", "application/x-tar", "application/gzip"];
 function qm(n) {
   const a = n ?? "";
   if (a.startsWith("image/")) return "image";
   if (a.startsWith("video/")) return "video";
   if (a.startsWith("audio/")) return "audio";
   if (a === "application/pdf") return "pdf";
-  if ($y.includes(a)) return "archive";
+  if (Wy.includes(a)) return "archive";
 }
 //! `FileAsset` for the native client: the web's `WorkspaceFileAsset` (same markup and classes, so the parity gate
 //! names the same boxes) with what a browser did natively done by the host's `perch-media` module (`perch.media`):
@@ -15304,20 +15304,20 @@ function qm(n) {
 //! From the host: `perch.media` (the module), `perch.mediaFile(workspaceId, path)` →
 //! `{ root: string | null, extraction: { state, destination?, error? } | null }` (`root` is the workspace's absolute
 //! folder on this computer, null for a remote workspace), and the command `files.extract { workspaceId, path }`.
-const Wy = 50 * 1024 * 1024, Ep = 1.25, Fy = 0.05, Iy = 16384, Py = "inline-flex items-center justify-center", oi = Oe(Wl, Py, "min-h-8 min-w-8 px-2 text-[0.75rem] max-[700px]:min-h-11 max-[700px]:min-w-11"), Oo = Oe(Wl, "inline-flex min-h-8 items-center px-2"), ex = { pdf: "PDF document", audio: "Audio", video: "Video" };
-let tx = 0;
-function nx(n) {
+const Fy = 50 * 1024 * 1024, Ep = 1.25, Iy = 0.05, Py = 16384, ex = "inline-flex items-center justify-center", oi = Oe(Wl, ex, "min-h-8 min-w-8 px-2 text-[0.75rem] max-[700px]:min-h-11 max-[700px]:min-w-11"), Oo = Oe(Wl, "inline-flex min-h-8 items-center px-2"), tx = { pdf: "PDF document", audio: "Audio", video: "Video" };
+let nx = 0;
+function ax(n) {
   return n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
-function ax(n, a, r) {
-  const i = a ? Math.min(8, Iy / Math.max(a.width, a.height)) : 1, s = r === "in" ? n * Ep : r === "out" ? n / Ep : 1;
-  return Math.min(i, Math.max(Math.min(Fy, i), s));
+function lx(n, a, r) {
+  const i = a ? Math.min(8, Py / Math.max(a.width, a.height)) : 1, s = r === "in" ? n * Ep : r === "out" ? n / Ep : 1;
+  return Math.min(i, Math.max(Math.min(Iy, i), s));
 }
-function lx(n, a) {
+function rx(n, a) {
   return typeof n != "string" || !n.startsWith("/") ? null : `${n.replace(/\/+$/, "")}/${a.replace(/^\/+/, "")}`;
 }
-function rx({ media: n, workspaceId: a, metadata: r, onFail: i }) {
-  const s = L.useMemo(() => `media-${++tx}`, []), [c, f] = L.useState(null), [u, m] = L.useState("fit");
+function ix({ media: n, workspaceId: a, metadata: r, onFail: i }) {
+  const s = L.useMemo(() => `media-${++nx}`, []), [c, f] = L.useState(null), [u, m] = L.useState("fit");
   Je(() => {
     let E = !0;
     return n.open(s, { workspaceId: a, path: r.path, mediaType: r.mediaType ?? "", size: r.size }).then((R) => {
@@ -15330,7 +15330,7 @@ function rx({ media: n, workspaceId: a, metadata: r, onFail: i }) {
   }, [s]), Je(() => {
     n.setZoom(s, u === "fit" ? null : u);
   }, [s, u]);
-  const h = c !== null && c.width > 0 && c.height > 0, v = () => u !== "fit" ? u : n.fitScale(s) ?? 1, y = (E) => m(ax(v(), c, E)), b = (E) => {
+  const h = c !== null && c.width > 0 && c.height > 0, v = () => u !== "fit" ? u : n.fitScale(s) ?? 1, y = (E) => m(lx(v(), c, E)), b = (E) => {
     if (!(E.metaKey || E.ctrlKey || E.altKey || !h)) {
       if (E.key === "+" || E.key === "=") y("in");
       else if (E.key === "-") y("out");
@@ -15359,8 +15359,8 @@ function rx({ media: n, workspaceId: a, metadata: r, onFail: i }) {
     }, c === null ? L.createElement("span", { className: "m-auto text-[0.8rem] text-subtext-0", role: "status" }, "Loading…") : L.createElement("div", { className: "relative min-h-0 min-w-0 flex-1", "data-perch-engine": "image", "data-perch-key": s, "data-testid": "workspace-file-image" }))
   );
 }
-function ix({ workspaceId: n, metadata: a, perch: r }) {
-  const [i, s] = L.useState(!1), c = r.mediaFile?.(n, a.path) ?? { root: null, extraction: null }, f = c.extraction, u = qm(a.mediaType), m = lx(c.root, a.path), h = m === null, v = u === "archive", y = u === "image" && a.size > Wy, b = u !== void 0 && !v && !h && !y;
+function sx({ workspaceId: n, metadata: a, perch: r }) {
+  const [i, s] = L.useState(!1), c = r.mediaFile?.(n, a.path) ?? { root: null, extraction: null }, f = c.extraction, u = qm(a.mediaType), m = rx(c.root, a.path), h = m === null, v = u === "archive", y = u === "image" && a.size > Fy, b = u !== void 0 && !v && !h && !y;
   let S = "Open this file in Quick Look or its default app.";
   h ? S = "Use your SSH tools to download this file. Perch will not open a remote path on this machine." : v && (S = "Extract into a new folder beside this archive. Existing files are never overwritten.");
   let E = "No preview for this file type";
@@ -15394,16 +15394,16 @@ function ix({ workspaceId: n, metadata: a, perch: r }) {
       { className: "grid flex-1 content-center justify-items-center gap-2 p-5 text-center text-[0.8rem] text-subtext-0" },
       L.createElement("strong", { className: "text-fg" }, E),
       L.createElement("span", null, S)
-    ) : u === "image" ? L.createElement(rx, { media: r.media, workspaceId: n, metadata: a, onFail: () => s(!0) }) : N && L.createElement(
+    ) : u === "image" ? L.createElement(ix, { media: r.media, workspaceId: n, metadata: a, onFail: () => s(!0) }) : N && L.createElement(
       "div",
       { className: "grid flex-1 content-center justify-items-center gap-2 p-5 text-center text-[0.8rem] text-subtext-0", "data-testid": "workspace-file-card" },
       L.createElement("strong", { className: "text-fg" }, a.name),
-      L.createElement("span", null, `${ex[u]} · ${nx(a.size)}`),
+      L.createElement("span", null, `${tx[u]} · ${ax(a.size)}`),
       L.createElement("span", null, "Perch does not play or render this file. Open it in Quick Look or its default app.")
     )
   );
 }
-function sx(n, a = !1) {
+function ox(n, a = !1) {
   const r = n.toLowerCase();
   if (a) return { kind: /^(node_modules|packages|crates|vendor)$/.test(r) ? "package" : r === "lib" ? "library" : "folder", tone: "text-subtext-0" };
   if (/^(package\.json|cargo\.toml|go\.mod|pyproject\.toml|gemfile|composer\.json)$/.test(r)) return { kind: "package", tone: "text-peach" };
@@ -15434,7 +15434,7 @@ function sx(n, a = !1) {
   }, c = n.includes(".") && Object.hasOwn(s, i) ? s[i] : void 0;
   return c ? { kind: "language", tone: c[1], text: c[0] } : /\.(html?|vue|svelte)$/.test(r) ? { kind: "code", tone: "text-peach" } : { kind: "file", tone: "text-subtext-0" };
 }
-const ox = {
+const cx = {
   file: "M9 2H3v12h10V6zM9 2v4h4",
   folder: "M2 5V4a1 1 0 0 1 1-1h3l2 2h5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5Z",
   package: "m8 1 6 3.5v7L8 15l-6-3.5v-7zM2 4.5 8 8l6-3.5M8 8v7M5 2.75l6 3.5v3",
@@ -15446,15 +15446,15 @@ const ox = {
   branch: "M4 4.5v7M4 9h4a4 4 0 0 0 4-4v-.5",
   image: "M2 2h12v12H2zM2 11l4-4 3 3 2-2 3 3"
 };
-function cx({ name: n, directory: a = !1, open: r = !1 }) {
-  const { kind: i, tone: s, text: c } = sx(n, a);
+function ux({ name: n, directory: a = !1, open: r = !1 }) {
+  const { kind: i, tone: s, text: c } = ox(n, a);
   return /* @__PURE__ */ te.jsxs("svg", { className: Oe("size-[calc(14px*var(--zoom,1))] shrink-0", s), "data-file-icon": i, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: "1.25", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", children: [
     i === "react" ? /* @__PURE__ */ te.jsxs(te.Fragment, { children: [
       /* @__PURE__ */ te.jsx("ellipse", { cx: "8", cy: "8", rx: "7", ry: "2.5" }),
       /* @__PURE__ */ te.jsx("ellipse", { cx: "8", cy: "8", rx: "7", ry: "2.5", transform: "rotate(60 8 8)" }),
       /* @__PURE__ */ te.jsx("ellipse", { cx: "8", cy: "8", rx: "7", ry: "2.5", transform: "rotate(120 8 8)" }),
       /* @__PURE__ */ te.jsx("circle", { cx: "8", cy: "8", r: "1" })
-    ] }) : c ? /* @__PURE__ */ te.jsx("text", { x: "8", y: "11", textAnchor: "middle", fill: "currentColor", stroke: "none", fontSize: "8", fontWeight: "600", fontFamily: "var(--font-mono)", children: c }) : /* @__PURE__ */ te.jsx("path", { d: i === "folder" && r ? "M2 5V3h4l2 2h5v2M2 7h13l-2 6H2z" : ox[i] }),
+    ] }) : c ? /* @__PURE__ */ te.jsx("text", { x: "8", y: "11", textAnchor: "middle", fill: "currentColor", stroke: "none", fontSize: "8", fontWeight: "600", fontFamily: "var(--font-mono)", children: c }) : /* @__PURE__ */ te.jsx("path", { d: i === "folder" && r ? "M2 5V3h4l2 2h5v2M2 7h13l-2 6H2z" : cx[i] }),
     i === "branch" && /* @__PURE__ */ te.jsxs(te.Fragment, { children: [
       /* @__PURE__ */ te.jsx("circle", { cx: "4", cy: "3", r: "1.5" }),
       /* @__PURE__ */ te.jsx("circle", { cx: "4", cy: "13", r: "1.5" }),
@@ -15463,20 +15463,20 @@ function cx({ name: n, directory: a = !1, open: r = !1 }) {
     i === "image" && /* @__PURE__ */ te.jsx("circle", { cx: "10.5", cy: "5", r: "1" })
   ] });
 }
-const ux = { unmodified: "", modified: "M", added: "A", deleted: "D", renamed: "R", copied: "C", typeChanged: "T", untracked: "U", ignored: "I", conflicted: "!" }, zp = (n) => typeof n == "string" ? ux[n] ?? "?" : "?", Np = (n) => typeof n == "string" ? n === "unmodified" ? "unmodified" : n === "typeChanged" ? "type changed" : n : `unknown (${n.unknown})`;
-function dx(n) {
+const dx = { unmodified: "", modified: "M", added: "A", deleted: "D", renamed: "R", copied: "C", typeChanged: "T", untracked: "U", ignored: "I", conflicted: "!" }, zp = (n) => typeof n == "string" ? dx[n] ?? "?" : "?", Np = (n) => typeof n == "string" ? n === "unmodified" ? "unmodified" : n === "typeChanged" ? "type changed" : n : `unknown (${n.unknown})`;
+function fx(n) {
   const a = zp(n.index), r = zp(n.worktree), i = a === "!" || r === "!", s = i ? "!" : n.staged && n.unstaged ? `${a || "?"}/${r || "?"}` : n.staged ? a : r || a, c = `Git · Index: ${Np(n.index)}; working tree: ${Np(n.worktree)}${n.originalPath ? `; from ${n.originalPath}` : ""}`, f = i || s.includes("D") ? "text-red" : s === "U" || s === "A" || s === "C" ? "text-green" : s.includes("?") || s === "I" ? "text-subtext-0" : "text-yellow";
   return { label: s, title: c, tone: f };
 }
-function fx({ decoration: n, directory: a = !1 }) {
+function px({ decoration: n, directory: a = !1 }) {
   if (!n) return null;
   if (a && n.containsChanges) return /* @__PURE__ */ te.jsx("span", { className: Oe("ml-1 size-1 shrink-0 rounded-full", n.conflicted ? "bg-red" : "bg-yellow"), role: "img", "aria-label": n.conflicted ? "Contains Git conflicts" : "Contains Git changes", title: n.conflicted ? "Contains Git conflicts" : "Contains Git changes", "data-testid": "file-git-summary" });
   if (!n.entry) return null;
-  const { label: r, title: i, tone: s } = dx(n.entry);
+  const { label: r, title: i, tone: s } = fx(n.entry);
   return r ? /* @__PURE__ */ te.jsx("span", { className: Oe("ml-1 shrink-0 text-[10px] tabular-nums [font-family:var(--font-mono)]", s), "aria-label": i, title: i, "data-testid": "file-git-marker", children: r }) : null;
 }
-const px = "mode-switch group ml-auto flex items-center gap-[0.4rem] bg-transparent p-[0.2rem] [border:none] [font-family:inherit]", Lm = "text-[0.72rem] font-semibold tracking-[0.03em] text-overlay-1 uppercase [transition:color_0.15s_ease]", mx = `${Lm} group-aria-[checked=false]:text-accent`, hx = `${Lm} group-aria-checked:text-accent`, gx = "relative h-[1.3rem] w-[2.4rem] shrink-0 rounded-[999px] border border-overlay-0 bg-surface-1 [transition:background_0.15s_ease] group-aria-checked:border-accent group-aria-checked:bg-panel-bg", bx = "absolute top-px left-px h-[1.1rem] w-[1.1rem] rounded-[50%] bg-fg [box-shadow:0_1px_2px_rgba(0,0,0,0.3)] [transition:transform_0.15s_ease,background_0.15s_ease] group-aria-checked:bg-accent group-aria-checked:[transform:translateX(1.1rem)]";
-function vx({
+const mx = "mode-switch group ml-auto flex items-center gap-[0.4rem] bg-transparent p-[0.2rem] [border:none] [font-family:inherit]", Lm = "text-[0.72rem] font-semibold tracking-[0.03em] text-overlay-1 uppercase [transition:color_0.15s_ease]", hx = `${Lm} group-aria-[checked=false]:text-accent`, gx = `${Lm} group-aria-checked:text-accent`, bx = "relative h-[1.3rem] w-[2.4rem] shrink-0 rounded-[999px] border border-overlay-0 bg-surface-1 [transition:background_0.15s_ease] group-aria-checked:border-accent group-aria-checked:bg-panel-bg", vx = "absolute top-px left-px h-[1.1rem] w-[1.1rem] rounded-[50%] bg-fg [box-shadow:0_1px_2px_rgba(0,0,0,0.3)] [transition:transform_0.15s_ease,background_0.15s_ease] group-aria-checked:bg-accent group-aria-checked:[transform:translateX(1.1rem)]";
+function yx({
   mode: n,
   onChange: a,
   testId: r = "mode-switch",
@@ -15487,7 +15487,7 @@ function vx({
     "button",
     {
       type: "button",
-      className: px,
+      className: mx,
       "data-testid": r,
       role: "switch",
       "aria-checked": s,
@@ -15495,9 +15495,9 @@ function vx({
       disabled: i,
       onClick: () => a(s ? "ui" : "cli"),
       children: [
-        /* @__PURE__ */ te.jsx("span", { className: Oe("mode-switch__label mode-switch__label--ui", mx), children: "UI" }),
-        /* @__PURE__ */ te.jsx("span", { className: Oe("mode-switch__track", gx), children: /* @__PURE__ */ te.jsx("span", { className: Oe("mode-switch__thumb", bx) }) }),
-        /* @__PURE__ */ te.jsx("span", { className: Oe("mode-switch__label mode-switch__label--cli", hx), children: "CLI" })
+        /* @__PURE__ */ te.jsx("span", { className: Oe("mode-switch__label mode-switch__label--ui", hx), children: "UI" }),
+        /* @__PURE__ */ te.jsx("span", { className: Oe("mode-switch__track", bx), children: /* @__PURE__ */ te.jsx("span", { className: Oe("mode-switch__thumb", vx) }) }),
+        /* @__PURE__ */ te.jsx("span", { className: Oe("mode-switch__label mode-switch__label--cli", gx), children: "CLI" })
       ]
     }
   );
@@ -15630,16 +15630,16 @@ const ll = function(n, a) {
     let x = null;
     switch (w) {
       case "Numeric":
-        x = yx(g);
-        break;
-      case "Alphanumeric":
         x = xx(g);
         break;
-      case "Byte":
+      case "Alphanumeric":
         x = wx(g);
         break;
-      case "Kanji":
+      case "Byte":
         x = kx(g);
+        break;
+      case "Kanji":
+        x = _x(g);
         break;
       default:
         throw "mode:" + w;
@@ -15692,7 +15692,7 @@ const ll = function(n, a) {
   }, v.createDataURL = function(g, w) {
     g = g || 2, w = typeof w > "u" ? g * 4 : w;
     const x = v.getModuleCount() * g + w * 2, _ = w, T = x - w;
-    return zx(x, x, function(z, j) {
+    return Nx(x, x, function(z, j) {
       if (_ <= z && z < T && _ <= j && j < T) {
         const V = Math.floor((z - _) / g), $ = Math.floor((j - _) / g);
         return v.isDark($, V) ? 0 : 1;
@@ -15786,7 +15786,7 @@ ll.stringToBytes = function(n) {
 };
 ll.createStringToBytes = function(n, a) {
   const r = (function() {
-    const s = Sx(n), c = function() {
+    const s = Ex(n), c = function() {
       const m = s.read();
       if (m == -1) throw "eof";
       return m;
@@ -16316,7 +16316,7 @@ const pt = {
     const s = Math.floor(a / 8);
     n.length <= s && n.push(0), i && (n[s] |= 128 >>> a % 8), a += 1;
   }, r;
-}, yx = function(n) {
+}, xx = function(n) {
   const a = pt.MODE_NUMBER, r = n, i = {};
   i.getMode = function() {
     return a;
@@ -16340,7 +16340,7 @@ const pt = {
     throw "illegal char :" + f;
   };
   return i;
-}, xx = function(n) {
+}, wx = function(n) {
   const a = pt.MODE_ALPHA_NUM, r = n, i = {};
   i.getMode = function() {
     return a;
@@ -16385,7 +16385,7 @@ const pt = {
     }
   };
   return i;
-}, wx = function(n) {
+}, kx = function(n) {
   const a = pt.MODE_8BIT_BYTE, r = ll.stringToBytes(n), i = {};
   return i.getMode = function() {
     return a;
@@ -16395,7 +16395,7 @@ const pt = {
     for (let c = 0; c < r.length; c += 1)
       s.put(r[c], 8);
   }, i;
-}, kx = function(n) {
+}, _x = function(n) {
   const a = pt.MODE_KANJI, r = ll.stringToBytes;
   (function(c, f) {
     const u = r(c);
@@ -16445,7 +16445,7 @@ const pt = {
       i > 0 && (r += ","), r += n[i];
     return r += "]", r;
   }, a;
-}, _x = function() {
+}, Sx = function() {
   let n = 0, a = 0, r = 0, i = "";
   const s = {}, c = function(u) {
     i += String.fromCharCode(f(u & 63));
@@ -16476,7 +16476,7 @@ const pt = {
   }, s.toString = function() {
     return i;
   }, s;
-}, Sx = function(n) {
+}, Ex = function(n) {
   const a = n;
   let r = 0, i = 0, s = 0;
   const c = {};
@@ -16511,7 +16511,7 @@ const pt = {
     throw "c:" + u;
   };
   return c;
-}, Ex = function(n, a) {
+}, zx = function(n, a) {
   const r = n, i = a, s = new Array(n * a), c = {};
   c.setPixel = function(h, v, y) {
     s[v * r + h] = y;
@@ -16569,20 +16569,20 @@ const pt = {
     }, y;
   };
   return c;
-}, zx = function(n, a, r) {
-  const i = Ex(n, a);
+}, Nx = function(n, a, r) {
+  const i = zx(n, a);
   for (let u = 0; u < a; u += 1)
     for (let m = 0; m < n; m += 1)
       i.setPixel(m, u, r(m, u));
   const s = Gm();
   i.write(s);
-  const c = _x(), f = s.toByteArray();
+  const c = Sx(), f = s.toByteArray();
   for (let u = 0; u < f.length; u += 1)
     c.writeByte(f[u]);
   return c.flush(), "data:image/gif;base64," + c;
 };
 ll.stringToBytes;
-function Nx({ text: n }) {
+function Tx({ text: n }) {
   const { size: a, path: r } = L.useMemo(() => {
     const i = ll(0, "M");
     i.addData(n), i.make();
@@ -16609,7 +16609,7 @@ function Nx({ text: n }) {
   );
 }
 const Jl = L.createContext(""), nc = (n, a) => typeof n == "string" && n.toLowerCase().includes(a);
-function Tx({ title: n, children: a, testId: r, ariaLabel: i }) {
+function Cx({ title: n, children: a, testId: r, ariaLabel: i }) {
   const s = L.useContext(Jl), c = s !== "" && nc(n, s);
   return (
     // While searching, a group with no matching row (and no matching title) hides itself.
@@ -16619,7 +16619,7 @@ function Tx({ title: n, children: a, testId: r, ariaLabel: i }) {
     ] })
   );
 }
-function Cx({ title: n, description: a, children: r, testId: i }) {
+function Ax({ title: n, description: a, children: r, testId: i }) {
   const s = L.useContext(Jl);
   return s && !nc(n, s) && !nc(a, s) ? null : /* @__PURE__ */ te.jsxs("div", { "data-setting-row": !0, "data-testid": i, className: "flex items-center justify-between gap-6 py-[0.8rem] max-[700px]:flex-wrap max-[700px]:gap-y-2", children: [
     /* @__PURE__ */ te.jsxs("div", { className: "min-w-0 max-[700px]:flex-1 max-[700px]:basis-56", children: [
@@ -16629,7 +16629,7 @@ function Cx({ title: n, description: a, children: r, testId: i }) {
     r && /* @__PURE__ */ te.jsx("div", { className: "flex shrink-0 items-center gap-2", children: r })
   ] });
 }
-function Ax({ checked: n, onChange: a, testId: r, label: i }) {
+function Mx({ checked: n, onChange: a, testId: r, label: i }) {
   return /* @__PURE__ */ te.jsx(
     "input",
     {
@@ -16646,47 +16646,47 @@ function Ax({ checked: n, onChange: a, testId: r, label: i }) {
 //! The Settings pages' shared parts for `@perch/sdk` 1.8 (`sdk.ts` re-exports and lists them). Each wraps the host
 //! component or class string the pages are drawn with and owns no state. `SettingsGroup` and `SettingRow` are the
 //! host's own, so the Settings search (`SettingsQuery`) filters a copy's rows exactly as it filters Perch's.
-const Mx = () => L.useContext(Jl), Rx = {
+const Rx = () => L.useContext(Jl), jx = {
   select: Nc,
-  selectHost: Ry,
-  input: jy,
-  inputPort: Oy,
-  inputWide: Dy,
-  addRow: By,
-  list: Hy,
-  hostRow: qy,
-  name: Ly,
-  addr: Gy,
-  muted: Ay,
-  empty: My,
-  primary: Yy,
-  danger: Qy,
-  catalogToggle: Cy
+  selectHost: jy,
+  input: Oy,
+  inputPort: Dy,
+  inputWide: By,
+  addRow: Hy,
+  list: Uy,
+  hostRow: Ly,
+  name: Gy,
+  addr: Yy,
+  muted: My,
+  empty: Ry,
+  primary: Qy,
+  danger: Vy,
+  catalogToggle: Ay
 };
 //! State the host keeps for a resource rather than for one view of it (`useResourceState`, `@perch/sdk` 1.4): a
 //! review's unsent commit message and comment, its pending batch and its operation id, keyed by the screen's
 //! own name for the resource (`review:<workspace>:commit`). Every view and copy that names the same key shares the
 //! value, and it outlives a reload or swap of the screen's code, a released hidden copy and the phone/desktop
 //! layouts trading places. In memory: a page reload starts empty (durable drafts live in their own services).
-const jx = 512, ln = /* @__PURE__ */ new Map(), Kl = /* @__PURE__ */ new Map();
+const Ox = 512, ln = /* @__PURE__ */ new Map(), Kl = /* @__PURE__ */ new Map();
 function Ym(n, a) {
   ln.delete(n), ln.set(n, a);
   for (const r of ln.keys()) {
-    if (ln.size <= jx) break;
+    if (ln.size <= Ox) break;
     Kl.get(r)?.size || ln.delete(r);
   }
 }
-function Ox(n, a) {
+function Dx(n, a) {
   return ln.has(n) ? ln.get(n) : a;
 }
-function Dx(n, a, r) {
-  const i = Ox(n, r), s = typeof a == "function" ? a(i) : a;
+function Bx(n, a, r) {
+  const i = Dx(n, r), s = typeof a == "function" ? a(i) : a;
   if (!(ln.has(n) && Object.is(s, i))) {
     Ym(n, s);
     for (const c of [...Kl.get(n) ?? []]) c();
   }
 }
-function Bx(n, a) {
+function Hx(n, a) {
   if (typeof n != "string" || !n) throw new Error("useResourceState needs a non-empty key.");
   ln.has(n) || Ym(n, a);
   const r = L.useCallback((c) => {
@@ -16694,10 +16694,10 @@ function Bx(n, a) {
     return Kl.set(n, f), f.add(c), () => {
       f.delete(c), f.size || Kl.delete(n);
     };
-  }, [n]), i = L.useSyncExternalStore(r, () => ln.get(n)), s = L.useCallback((c) => Dx(n, c, a), [n]);
+  }, [n]), i = L.useSyncExternalStore(r, () => ln.get(n)), s = L.useCallback((c) => Bx(n, c, a), [n]);
   return [i, s];
 }
-const Hx = "[--radius:var(--radius-pane)] rounded-soft bg-surface-1/70 shadow-[0_6px_20px_rgba(0,0,0,0.3)] backdrop-blur-xl backdrop-saturate-150", Ux = "hover:bg-transparent hover:text-subtext-0 active:bg-surface-1 active:text-fg";
+const Ux = "[--radius:var(--radius-pane)] rounded-soft bg-surface-1/70 shadow-[0_6px_20px_rgba(0,0,0,0.3)] backdrop-blur-xl backdrop-saturate-150", qx = "hover:bg-transparent hover:text-subtext-0 active:bg-surface-1 active:text-fg";
 //! `@perch/sdk` for the native client: the surface a stock screen imports (the navigation part, 1.3), with every
 //! call going to one abstract host object, `globalThis.perch`, read when called (so a host or a test sets it before
 //! mounting). Class helpers, icons, `cn`, `keyLabel` and the host dot are the app's own modules, compiled in, so the
@@ -16705,9 +16705,9 @@ const Hx = "[--radius:var(--radius-pane)] rounded-soft bg-surface-1/70 shadow-[0
 //! (`perch.navigation(options)`, `perch.hosts()`, ...), which must return the same object until the data changes.
 //! Menus and dialogs Perch draws itself (session menu, new session menu, confirm, select, folder browser,
 //! instructions, memory) open through `perch.openOverlay(kind, props)`; their callbacks are plain functions.
-const qx = "1.3.0";
+const Lx = "1.3.0";
 let mi = null;
-const Lx = (n) => {
+const Gx = (n) => {
   mi = n;
 };
 function ve() {
@@ -16715,22 +16715,22 @@ function ve() {
   if (!n) throw new Error("@perch/sdk: no perch host (globalThis.perch) is set");
   return n;
 }
-const Gx = (n) => ve().subscribe?.(n) ?? (() => {
-}), Yx = Xy;
-function Qx() {
+const Yx = (n) => ve().subscribe?.(n) ?? (() => {
+}), Qx = Jy;
+function Vx() {
   return typeof globalThis.crypto?.randomUUID == "function" ? globalThis.crypto.randomUUID() : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (n) => {
     const a = Math.floor(Math.random() * 16);
     return (n === "x" ? a : a & 3 | 8).toString(16);
   });
 }
-const Qm = globalThis.perch?.isMac !== !1, ac = (n) => vv(n, ve().isMac !== !1), Vx = (n) => xv(n), Kx = ({ className: n, ...a } = {}) => Oe(kv(a), n), Zx = Sv, Vm = (n) => Wo(n), hi = Ev, Xx = Wl, Jx = Sm, $x = (n) => ec[n].color, Wx = (n, a) => ve().shortcutFor?.(n, a) ?? null, Fx = (n) => ve().shortcutLabel?.(n) ?? null, Il = (n, a) => ve().command(n, a ?? {}) !== !1, Ix = (n, a, r) => ve().startSession?.(n, a, r), Px = globalThis.perch?.pickFolder ? (n) => ve().pickFolder(n) : null;
+const Qm = globalThis.perch?.isMac !== !1, ac = (n) => yv(n, ve().isMac !== !1), Kx = (n) => wv(n), Zx = ({ className: n, ...a } = {}) => Oe(_v(a), n), Xx = Ev, Vm = (n) => Wo(n), hi = zv, Jx = Wl, $x = Sm, Wx = (n) => ec[n].color, Fx = (n, a) => ve().shortcutFor?.(n, a) ?? null, Ix = (n) => ve().shortcutLabel?.(n) ?? null, Il = (n, a) => ve().command(n, a ?? {}) !== !1, Px = (n, a, r) => ve().startSession?.(n, a, r), ew = globalThis.perch?.pickFolder ? (n) => ve().pickFolder(n) : null;
 function Qe(n) {
   const a = L.useRef(n);
-  return a.current = n, L.useSyncExternalStore(Gx, () => a.current(ve()));
+  return a.current = n, L.useSyncExternalStore(Yx, () => a.current(ve()));
 }
-const Km = (n = {}) => Qe((a) => a.navigation({ showTerminals: !!n.showTerminals, sortByAttention: !!n.sortByAttention })), ew = () => Qe((n) => n.hosts()), tw = () => Qe((n) => n.sessionFolders());
-function nw() {
-  const n = Qe((a) => a.addProject?.() ?? aw);
+const Km = (n = {}) => Qe((a) => a.navigation({ showTerminals: !!n.showTerminals, sortByAttention: !!n.sortByAttention })), tw = () => Qe((n) => n.hosts()), nw = () => Qe((n) => n.sessionFolders());
+function aw() {
+  const n = Qe((a) => a.addProject?.() ?? lw);
   return {
     status: n.status ?? "idle",
     error: n.error,
@@ -16741,20 +16741,20 @@ function nw() {
     clear: () => ve().clearAddProject?.()
   };
 }
-const aw = Object.freeze({ status: "idle" }), Zm = "perch.lastAgentChoice", lw = Object.freeze({ connected: !1, discovery: !1, state: "ready", choices: [] }), rw = () => {
+const lw = Object.freeze({ status: "idle" }), Zm = "perch.lastAgentChoice", rw = Object.freeze({ connected: !1, discovery: !1, state: "ready", choices: [] }), iw = () => {
   const n = ve().storage?.getItem(Zm);
   return n === "claude" || n === "codex" ? n : "claude";
-}, iw = Object.freeze({ items: [] });
-function sw() {
-  const n = Qe((a) => a.notifications?.() ?? iw);
+}, sw = Object.freeze({ items: [] });
+function ow() {
+  const n = Qe((a) => a.notifications?.() ?? sw);
   return L.useMemo(() => ({
     items: n.items ?? [],
     open: (a) => ve().command("notification.open", { id: a }),
     dismiss: (a) => ve().command("notification.dismiss", { id: a })
   }), [n]);
 }
-function ow(n) {
-  const a = Qe((s) => s.agentChoices?.(n) ?? lw), [r, i] = L.useState(rw);
+function cw(n) {
+  const a = Qe((s) => s.agentChoices?.(n) ?? rw), [r, i] = L.useState(iw);
   return L.useMemo(() => ({
     connected: !!a.connected,
     discovery: !!a.discovery,
@@ -16768,17 +16768,17 @@ function ow(n) {
     manage: () => ve().command("agents.manage", {})
   }), [a, r]);
 }
-function cw(n) {
+function uw(n) {
   Je(() => ve().onRequest?.("add-project", n) ?? void 0, [n]);
 }
-function uw(n) {
+function dw(n) {
   const a = n.map((r) => ({ id: r.id, parentSessionId: r.parentId, session: r }));
-  return Zy(a).map((r) => ({ session: r.session, nested: tc(r, a) }));
+  return Xy(a).map((r) => ({ session: r.session, nested: tc(r, a) }));
 }
-function dw({ id: n, plain: a, className: r }) {
+function fw({ id: n, plain: a, className: r }) {
   const i = Qe((h) => h.session(n));
   if (!i) return null;
-  const s = i.state ?? Ky(i), c = ec[s]?.color ?? ec.unknown.color, f = i.provider, u = f === "claude" || f === "claude-agent-teams" || f === "omp", m = a ? Oe("agent-mark", "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full leading-none", r) : Oe("agent-status-dot", `agent-status-dot--${s}`, "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-[1.5px] bg-panel-bg leading-none", r);
+  const s = i.state ?? Zy(i), c = ec[s]?.color ?? ec.unknown.color, f = i.provider, u = f === "claude" || f === "claude-agent-teams" || f === "omp", m = a ? Oe("agent-mark", "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full leading-none", r) : Oe("agent-status-dot", `agent-status-dot--${s}`, "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-[1.5px] bg-panel-bg leading-none", r);
   return L.createElement(
     "span",
     { className: m, style: a ? void 0 : { borderColor: c }, "data-provider": f ?? "unknown", title: a ? f ?? "Agent" : `${f ?? "Agent"} · ${s}`, "aria-hidden": "true" },
@@ -16789,8 +16789,8 @@ function Xm({ provider: n, size: a = 14 }) {
   const r = ve().agentIcon?.(n, a) ?? null, i = r?.markup ?? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5" fill="currentColor"/></svg>';
   return L.createElement("svg", { width: a, height: a, "aria-hidden": "true", "data-agent-icon": n ?? "unknown", "data-perch-markup": i, ...r && r.tint === !1 ? { "data-perch-image": "true" } : {} });
 }
-const fw = ({ children: n }) => L.createElement(L.Fragment, null, n);
-function pw(n, a) {
+const pw = ({ children: n }) => L.createElement(L.Fragment, null, n);
+function mw(n, a) {
   const r = L.useRef(a);
   return r.current = a, Je(() => {
     const i = ve();
@@ -16803,32 +16803,32 @@ function pw(n, a) {
   }, [n]), null;
 }
 const Wn = (n) => function(r) {
-  return pw(n, r);
-}, mw = Wn("session-menu"), hw = Wn("new-session-menu"), gw = Wn("confirm");
+  return mw(n, r);
+}, hw = Wn("session-menu"), gw = Wn("new-session-menu"), bw = Wn("confirm");
 let Jm = null;
-const bw = (n) => {
+const vw = (n) => {
   Jm = n;
 };
-function vw(n) {
-  return L.createElement(Jm ?? gw, n);
+function yw(n) {
+  return L.createElement(Jm ?? bw, n);
 }
-function yw({ className: n = Nc, ...a }) {
-  return L.createElement(zy, { ...a, className: n });
+function xw({ className: n = Nc, ...a }) {
+  return L.createElement(Ny, { ...a, className: n });
 }
 let lc = null;
-const xw = (n) => {
+const ww = (n) => {
   lc = n;
-}, ww = Wn("folder-browser");
-function kw(n) {
-  return lc ? L.createElement(lc, { ...n, browse: (a) => ve().browse(n.hostId, a) }) : L.createElement(ww, n);
+}, kw = Wn("folder-browser");
+function _w(n) {
+  return lc ? L.createElement(lc, { ...n, browse: (a) => ve().browse(n.hostId, a) }) : L.createElement(kw, n);
 }
-const _w = Wn("instructions"), Sw = Wn("memory"), Ew = Av;
+const Sw = Wn("instructions"), Ew = Wn("memory"), zw = Mv;
 let Ac = null;
-const zw = (n) => {
+const Nw = (n) => {
   Ac = n;
 };
-function Nw(n) {
-  if (Ac) return L.createElement(Cw, n);
+function Tw(n) {
+  if (Ac) return L.createElement(Aw, n);
   const { hostId: a, path: r, className: i } = n, s = L.useRef(null);
   return L.createElement(
     "button",
@@ -16849,7 +16849,7 @@ const $m = "Perch did not answer.";
 function ci(n) {
   return n ? n.type === "worktree.error" ? { error: n.message, dirty: !!n.dirty } : n.error ? { error: String(n.error) } : {} : { error: $m };
 }
-function Tw(n, a, r = ve()) {
+function Cw(n, a, r = ve()) {
   const i = (s) => {
     for (const c of s ?? []) {
       if (c.path === a) return c;
@@ -16875,13 +16875,13 @@ function Wm(n, a, r, i = ve()) {
   }, m = () => {
     if (!c) {
       if (Date.now() >= s) return u();
-      Tw(n, a, i) && (u(), i.startSession?.(n, a, r));
+      Cw(n, a, i) && (u(), i.startSession?.(n, a, r));
     }
   }, h = setTimeout(u, Ap);
   f = i.subscribe?.(m) ?? (() => {
   }), m();
 }
-function Cw({ hostId: n, path: a, className: r, worktrees: i, request: s, parentChoices: c, emptyAgent: f, ...u }) {
+function Aw({ hostId: n, path: a, className: r, worktrees: i, request: s, parentChoices: c, emptyAgent: f, ...u }) {
   const [m, h] = L.useState(i), v = (_) => !!ve().coreCan?.(_, n), y = Km(), b = `${n}:${a}`, S = L.useMemo(() => {
     if (Array.isArray(c)) return c;
     if (!v("workspace.nest")) return [];
@@ -16935,14 +16935,14 @@ function Cw({ hostId: n, path: a, className: r, worktrees: i, request: s, parent
     actions: x
   });
 }
-const Aw = (n, a) => {
+const Mw = (n, a) => {
   if (!ve().followPointer?.(n)) return;
   const r = a.items();
   for (const i of r) i.getBoundingClientRect();
-  r[0]?.parentElement?.getBoundingClientRect(), mv(n, a);
-}, Mw = () => Qe((n) => n.workspaceTabs());
-function Rw({ path: n, content: a }) {
-  const { source: r, truncated: i } = xy(a ?? ""), s = L.useMemo(() => _y(r), [r]), c = L.useMemo(() => Sy((v) => Il("link.open", { url: v })), [r]), [f, u] = L.useState({ lexer: null, count: 0 }), m = f.lexer === c ? f.count : 0;
+  r[0]?.parentElement?.getBoundingClientRect(), hv(n, a);
+}, Rw = () => Qe((n) => n.workspaceTabs());
+function jw({ path: n, content: a }) {
+  const { source: r, truncated: i } = wy(a ?? ""), s = L.useMemo(() => Sy(r), [r]), c = L.useMemo(() => Ey((v) => Il("link.open", { url: v })), [r]), [f, u] = L.useState({ lexer: null, count: 0 }), m = f.lexer === c ? f.count : 0;
   Je(() => {
     if (m >= s.length) return;
     const v = () => {
@@ -16967,9 +16967,9 @@ function Rw({ path: n, content: a }) {
     L.createElement("div", { className: "message__markdown file-markdown" }, h)
   );
 }
-const jw = Wn("file-menu"), Ow = /* @__PURE__ */ new Map(), Dw = ["requestTree", "searchFiles", "openFile", "reloadFile", "requestPreview", "updateDraft", "saveFile", "overwriteFile", "setWrap"];
-function Bw(n, a = {}) {
-  const r = Qe((h) => h.workspaceFiles(n)), i = !!a.git, s = r.git?.decorations, c = L.useMemo(() => i && s?.length ? new Map(s) : Ow, [s, i]), f = L.useMemo(() => Object.fromEntries(Dw.map((h) => [h, (...v) => (ve().filesDo(h, n, ...v), null)])), [n]), u = Qe((h) => !!h.contextBridgeAvailable?.(n)), m = L.useMemo(() => u ? (h) => {
+const Ow = Wn("file-menu"), Dw = /* @__PURE__ */ new Map(), Bw = ["requestTree", "searchFiles", "openFile", "reloadFile", "requestPreview", "updateDraft", "saveFile", "overwriteFile", "setWrap"];
+function Hw(n, a = {}) {
+  const r = Qe((h) => h.workspaceFiles(n)), i = !!a.git, s = r.git?.decorations, c = L.useMemo(() => i && s?.length ? new Map(s) : Dw, [s, i]), f = L.useMemo(() => Object.fromEntries(Bw.map((h) => [h, (...v) => (ve().filesDo(h, n, ...v), null)])), [n]), u = Qe((h) => !!h.contextBridgeAvailable?.(n)), m = L.useMemo(() => u ? (h) => {
     if (h.kind !== "editor") return ve().askAgent(n, h);
     const v = ve().workspaceFiles(n)?.documents?.[h.path];
     return ve().askAgent(n, { ...h, dirty: v?.content !== v?.savedContent });
@@ -16987,9 +16987,9 @@ function Bw(n, a = {}) {
     askAgent: m
   }), [r, c, f, m]);
 }
-const Hw = () => Qe((n) => n.statusLine()), Uw = () => Qe((n) => n.zoom()), qw = () => Qe((n) => n.paneLook()), Lw = () => Qe((n) => n.keybindings?.() ?? []), Gw = Object.freeze({ usage: Object.freeze([]), updatedAt: 0, spend: null, redeemResult: null });
-function Yw(n) {
-  const a = !!n?.keepFresh, r = Qe((s) => s.statusLine?.().connected ?? !1), i = Qe((s) => s.planUsage?.() ?? Gw);
+const Uw = () => Qe((n) => n.statusLine()), qw = () => Qe((n) => n.zoom()), Lw = () => Qe((n) => n.paneLook()), Gw = () => Qe((n) => n.keybindings?.() ?? []), Yw = Object.freeze({ usage: Object.freeze([]), updatedAt: 0, spend: null, redeemResult: null });
+function Qw(n) {
+  const a = !!n?.keepFresh, r = Qe((s) => s.statusLine?.().connected ?? !1), i = Qe((s) => s.planUsage?.() ?? Yw);
   return Je(() => {
     if (!a || !r) return;
     let s;
@@ -16999,19 +16999,19 @@ function Yw(n) {
     return c(), () => clearTimeout(s);
   }, [a, r]), i;
 }
-const Qw = () => ve().command("usage.get", { force: !0 }), Vw = (n) => ve().command("usage.redeemReset", { accountId: n }), Kw = () => Il("app.zoom_reset"), Zw = {
+const Vw = () => ve().command("usage.get", { force: !0 }), Kw = (n) => ve().command("usage.redeemReset", { accountId: n }), Zw = () => Il("app.zoom_reset"), Xw = {
   focused: "bg-[color-mix(in_srgb,var(--text)_10%,var(--panel-bg))] hover:bg-[color-mix(in_srgb,var(--text)_10%,var(--panel-bg))] text-fg font-semibold",
   visible: "bg-transparent text-subtext-0 hover:bg-surface-0 hover:text-fg",
   hidden: "bg-transparent text-subtext-0 hover:bg-surface-0 hover:text-fg"
-}, Xw = (n, a, r) => ve().beginTabDrag?.(n, a, r);
-function Jw(n) {
+}, Jw = (n, a, r) => ve().beginTabDrag?.(n, a, r);
+function $w(n) {
   Je(() => ve().onRequest?.("new-tab", n) ?? void 0, [n]);
 }
-const $w = (n) => Il("browser.open", { workspaceId: n }), Ww = (n, a) => Il("file.open", { workspaceId: n, path: a }), Fw = () => null, Iw = () => null, Pw = Wn("new-file");
-function e4(n) {
-  return L.createElement(ix, { ...n, perch: ve() });
+const Ww = (n) => Il("browser.open", { workspaceId: n }), Fw = (n, a) => Il("file.open", { workspaceId: n, path: a }), Iw = () => null, Pw = () => null, e4 = Wn("new-file");
+function t4(n) {
+  return L.createElement(sx, { ...n, perch: ve() });
 }
-function t4(n, a) {
+function n4(n, a) {
   const r = n.selection(a);
   if (r) return r;
   const i = n.value(a), s = i.split(`
@@ -17019,7 +17019,7 @@ function t4(n, a) {
 `) && i.length ? 1 : 0);
   return { text: i, startLine: 1, endLine: Math.max(1, s) };
 }
-function n4({ onGo: n, onClose: a }) {
+function a4({ onGo: n, onClose: a }) {
   const [r, i] = L.useState(""), s = (c) => {
     c?.preventDefault?.();
     const [f, u] = r.split(":").map((m) => Number.parseInt(m, 10));
@@ -17043,7 +17043,7 @@ function n4({ onGo: n, onClose: a }) {
     L.createElement("button", { type: "button", className: Wl, onClick: s }, "OK")
   );
 }
-function a4({ value: n, onChange: a, onSave: r, onCaret: i, readOnly: s, wrap: c, label: f, path: u, docKey: m, onAskAgent: h, ref: v }) {
+function l4({ value: n, onChange: a, onSave: r, onCaret: i, readOnly: s, wrap: c, label: f, path: u, docKey: m, onAskAgent: h, ref: v }) {
   const y = ve().editor, b = L.useRef(null);
   b.current = { onChange: a, onSave: r, onCaret: i, onAskAgent: h };
   const [S, , E] = String(m).split("\0"), R = !!y && E !== void 0 && /^\d+$/.test(E), N = Qe((x) => R ? x.workspaceFiles(S)?.carets?.[m] ?? null : null);
@@ -17052,7 +17052,7 @@ function a4({ value: n, onChange: a, onSave: r, onCaret: i, readOnly: s, wrap: c
   }, [N?.line, N?.col]);
   const M = L.useRef(n), [O, H] = L.useState(null), [X, W] = L.useState(!1), D = () => {
     if (!y || !b.current.onAskAgent) return;
-    const { text: x, startLine: _, endLine: T } = t4(y, m);
+    const { text: x, startLine: _, endLine: T } = n4(y, m);
     b.current.onAskAgent(x, _, T);
   };
   if (L.useImperativeHandle(v, () => ({
@@ -17086,7 +17086,7 @@ function a4({ value: n, onChange: a, onSave: r, onCaret: i, readOnly: s, wrap: c
   return L.createElement(
     "div",
     { className: "relative flex h-full min-h-0 min-w-0 flex-1 flex-col", "aria-label": f },
-    X && L.createElement(n4, {
+    X && L.createElement(a4, {
       onGo: (x, _) => {
         W(!1), y.goTo(m, x, _), y.focus(m);
       },
@@ -17095,7 +17095,7 @@ function a4({ value: n, onChange: a, onSave: r, onCaret: i, readOnly: s, wrap: c
       }
     }),
     L.createElement("div", { "data-perch-engine": "editor", "data-perch-key": m, className: "min-h-0 min-w-0 flex-1" }),
-    O && L.createElement(Ty, {
+    O && L.createElement(Cy, {
       x: O.x,
       y: O.y,
       readOnly: !!s,
@@ -17122,9 +17122,9 @@ function a4({ value: n, onChange: a, onSave: r, onCaret: i, readOnly: s, wrap: c
     })
   );
 }
-const l4 = Object.freeze({ pages: [], shownId: null, tabCount: 0 });
-function r4(n) {
-  const a = Qe((r) => r.browserPages?.(n) ?? l4);
+const r4 = Object.freeze({ pages: [], shownId: null, tabCount: 0 });
+function i4(n) {
+  const a = Qe((r) => r.browserPages?.(n) ?? r4);
   return L.useMemo(() => {
     const r = (i, s) => ve().command(i, { workspaceId: n, ...s });
     return {
@@ -17144,7 +17144,7 @@ function r4(n) {
     };
   }, [a, n]);
 }
-function i4({ pageId: n, active: a }) {
+function s4({ pageId: n, active: a }) {
   const r = `drawer
 ${n}`;
   return Je(() => {
@@ -17156,102 +17156,102 @@ ${n}`;
     style: { display: "flex", flex: "1 1 0%", minHeight: 0, minWidth: 0 }
   });
 }
-const _4 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const S4 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   AgentIcon: Xm,
-  BrowserPage: i4,
+  BrowserPage: s4,
   Chevron: Cc,
-  CloseIcon: Tv,
-  CodeEditor: a4,
-  ConfirmDialog: vw,
-  Dialog: Ew,
-  EllipsisIcon: zv,
-  FileAsset: e4,
-  FileEntryMenu: jw,
-  FileIcon: cx,
-  FolderBrowser: kw,
-  GearIcon: Nv,
-  GitMarker: fx,
-  HostStateDot: Cv,
-  InstructionsDialog: _w,
-  MarkdownPreview: Rw,
-  MemoryDialog: Sw,
-  ModeSwitch: vx,
-  NewFilePrompt: Pw,
-  NewSessionMenu: hw,
-  PageIcon: Jy,
+  CloseIcon: Cv,
+  CodeEditor: l4,
+  ConfirmDialog: yw,
+  Dialog: zw,
+  EllipsisIcon: Nv,
+  FileAsset: t4,
+  FileEntryMenu: Ow,
+  FileIcon: ux,
+  FolderBrowser: _w,
+  GearIcon: Tv,
+  GitMarker: px,
+  HostStateDot: Av,
+  InstructionsDialog: Sw,
+  MarkdownPreview: jw,
+  MemoryDialog: Ew,
+  ModeSwitch: yx,
+  NewFilePrompt: e4,
+  NewSessionMenu: gw,
+  PageIcon: $y,
   PlusIcon: Em,
-  QrCode: Nx,
-  Select: yw,
-  SessionDot: dw,
-  SessionMenu: mw,
-  SettingRow: Cx,
-  SettingsGroup: Tx,
+  QrCode: Tx,
+  Select: xw,
+  SessionDot: fw,
+  SessionMenu: hw,
+  SettingRow: Ax,
+  SettingsGroup: Cx,
   SettingsQuery: Jl,
-  Slot: fw,
-  Submenu: Vy,
-  Switch: Ax,
-  TabDragLayer: Iw,
-  TabMenu: Fw,
-  WorktreeMenu: Nw,
-  agentStateColor: $x,
-  anchoredPopoverStyle: Yx,
+  Slot: pw,
+  Submenu: Ky,
+  Switch: Mx,
+  TabDragLayer: Pw,
+  TabMenu: Iw,
+  WorktreeMenu: Tw,
+  agentStateColor: Wx,
+  anchoredPopoverStyle: Qx,
   assetKind: qm,
-  beginReorderDrag: Aw,
-  beginTabDrag: Xw,
-  bindHost: Lx,
-  buttonClass: Zx,
+  beginReorderDrag: Mw,
+  beginTabDrag: Jw,
+  bindHost: Gx,
+  buttonClass: Xx,
   cn: Oe,
-  drawConfirmationsInPlace: bw,
-  drawFolderBrowserInPlace: xw,
-  drawWorktreeInPlace: zw,
-  ghostButton: Xx,
-  glassClass: Hx,
-  iconButton: Jx,
+  drawConfirmationsInPlace: vw,
+  drawFolderBrowserInPlace: ww,
+  drawWorktreeInPlace: Nw,
+  ghostButton: Jx,
+  glassClass: Ux,
+  iconButton: $x,
   isMac: Qm,
   keyLabel: ac,
   menuDividerClass: hi,
   menuItemClass: Vm,
   menuPanel: Hi,
-  nestSessions: uw,
-  newId: Qx,
-  openBrowserTab: $w,
-  openFileTab: Ww,
-  pickFolder: Px,
-  redeemUsageReset: Vw,
-  refreshUsage: Qw,
-  resetZoom: Kw,
-  rowActionClass: Kx,
+  nestSessions: dw,
+  newId: Vx,
+  openBrowserTab: Ww,
+  openFileTab: Fw,
+  pickFolder: ew,
+  redeemUsageReset: Kw,
+  refreshUsage: Vw,
+  resetZoom: Zw,
+  rowActionClass: Zx,
   runCommand: Il,
-  segmentClass: Vx,
-  settingsClass: Rx,
-  shortcutFor: Wx,
-  shortcutLabel: Fx,
+  segmentClass: Kx,
+  settingsClass: jx,
+  shortcutFor: Fx,
+  shortcutLabel: Ix,
   startPaneWhenReady: Wm,
-  startSession: Ix,
-  tabStateClass: Zw,
-  tapButtonClass: Ux,
-  useAddProject: nw,
-  useAddProjectRequest: cw,
-  useAgentChoices: ow,
-  useBrowserPages: r4,
+  startSession: Px,
+  tabStateClass: Xw,
+  tapButtonClass: qx,
+  useAddProject: aw,
+  useAddProjectRequest: uw,
+  useAgentChoices: cw,
+  useBrowserPages: i4,
   useDismissOnOutsideClick: Um,
   useHostSnapshot: Qe,
-  useHosts: ew,
-  useKeybindings: Lw,
+  useHosts: tw,
+  useKeybindings: Gw,
   useNavigation: Km,
-  useNewTabRequest: Jw,
-  useNotifications: sw,
-  usePaneLook: qw,
-  usePlanUsage: Yw,
-  useResourceState: Bx,
-  useSessionFolders: tw,
-  useSettingsQuery: Mx,
-  useStatusLine: Hw,
-  useWorkspaceFiles: Bw,
-  useWorkspaceTabs: Mw,
-  useZoom: Uw,
-  version: qx
+  useNewTabRequest: $w,
+  useNotifications: ow,
+  usePaneLook: Lw,
+  usePlanUsage: Qw,
+  useResourceState: Hx,
+  useSessionFolders: nw,
+  useSettingsQuery: Rx,
+  useStatusLine: Uw,
+  useWorkspaceFiles: Hw,
+  useWorkspaceTabs: Rw,
+  useZoom: qw,
+  version: Lx
 }, Symbol.toStringTag, { value: "Module" }));
 //! The description as GPUI elements: one gpui-kit builder chain per node, for a mod's `render()`. Every key the
 //! description can carry has exactly one entry in `STYLE` (a key it does not know throws, so a new key cannot be
@@ -17318,7 +17318,7 @@ const Mc = {
 };
 for (const n of ["w", "h", "min_w", "min_h", "max_w", "max_h", "top", "right", "bottom", "left", "pt", "pr", "pb", "pl", "mt", "mr", "mb", "ml", "gap_x", "gap_y", "border_t", "border_r", "border_b", "border_l", "rounded_tl", "rounded_tr", "rounded_br", "rounded_bl"])
   Mc[n] = (a, r) => a[n](r);
-const S4 = Object.keys(Mc);
+const E4 = Object.keys(Mc);
 function Do(n, a) {
   for (const [r, i] of Object.entries(a)) {
     const s = Mc[r];
@@ -17332,7 +17332,7 @@ function Mp(n, a, r) {
   const i = n.pressed, s = va(r);
   return i && i.x === s.clientX && i.y === s.clientY ? i.id : a;
 }
-function s4(n, a, r) {
+function o4(n, a, r) {
   if (n.name) return n.name;
   if (!(a.size || n.hover || n.focus || n.active || n.track_hover && Mi.has(n.group) || r)) return null;
   const i = n.meta?.attrs["data-testid"];
@@ -17353,18 +17353,18 @@ function Im(n, a = /* @__PURE__ */ new Set()) {
   return a;
 }
 let an = null;
-const o4 = (n, a, r, i, s, c, f) => `${+a}|${r}|${i.text_size}|${i.line_height}|${i.whitespace}|${i.text_ellipsis}|${+s}|${c ? `${c.group}|${c.color}` : ""}|${+rc.has(n)}|${+gi.has(n)}|${f.get(n)?.flex_basis ?? ""}`, jp = /* @__PURE__ */ new WeakMap();
+const c4 = (n, a, r, i, s, c, f) => `${+a}|${r}|${i.text_size}|${i.line_height}|${i.whitespace}|${i.text_ellipsis}|${+s}|${c ? `${c.group}|${c.color}` : ""}|${+rc.has(n)}|${+gi.has(n)}|${f.get(n)?.flex_basis ?? ""}`, jp = /* @__PURE__ */ new WeakMap();
 function Pm(n) {
   let a = jp.get(n);
   return a === void 0 && (a = n.style.overflow_x === "scroll" || n.style.overflow_y === "scroll" || (n.children ?? []).some((r) => r.kind !== "text" && Pm(r)), jp.set(n, a)), a;
 }
 function eh(n, a, r, i) {
-  let s = c4(a.get(n), r.get(n));
+  let s = u4(a.get(n), r.get(n));
   if (n.kind === "text") return s;
   for (const c of n.children ?? []) eh(c, a, r, i) || (s = !1);
   return s && i.add(n), s;
 }
-function c4(n, a) {
+function u4(n, a) {
   if (n === a) return !0;
   if (!n || !a) return !1;
   const r = Object.keys(n);
@@ -17374,16 +17374,16 @@ function c4(n, a) {
 }
 function sc(n, a, r, i, s = !1, c = !1, f = null, u = {}, m = !1, h = /* @__PURE__ */ new Map(), v = null) {
   if (n.kind === "text") return h.get(n)?.text ?? n.text;
-  const y = an && !s && !Pm(n) ? o4(n, c, f, u, m, v, h) : null;
+  const y = an && !s && !Pm(n) ? c4(n, c, f, u, m, v, h) : null;
   if (y !== null && an.clean.has(n)) {
     const S = an.from.get(n), E = S?.key === y ? a.reuse(S.id, an.generation) : null;
     if (E)
       return an.next.set(n, { id: E.__id, key: y }), E;
   }
-  const b = u4(n, a, r, i, s, c, f, u, m, h, v);
+  const b = d4(n, a, r, i, s, c, f, u, m, h, v);
   return y !== null && an.next.set(n, { id: b.__id, key: y }), b;
 }
-function u4(n, a, r, i, s, c, f, u, m, h, v) {
+function d4(n, a, r, i, s, c, f, u, m, h, v) {
   const y = rc.has(n);
   c ||= n.style.opacity === 0 || n.style.visibility === "invisible" || n.style.display === "hidden", c && (n.name || n.range_name) && (n = { ...n, name: void 0, range_name: void 0, also: void 0 }), n.style.text_color !== void 0 && (v = null), f = n.style.text_color ?? f;
   const b = !!n.hover?.text_color && lh(n), S = n.group ?? (b ? `~g${n.id}` : null);
@@ -17396,7 +17396,7 @@ function u4(n, a, r, i, s, c, f, u, m, h, v) {
     const { group: z, color: j } = v, V = () => a.div().absolute().top(0).left(0).size_full();
     M = M.child(V().group_hover(z, ($) => $.invisible()).child(i.icon(`~icon-${n.id}`, n.markup, f))).child(V().invisible().group_hover(z, ($) => $.visible()).child(i.icon(`~icon-${n.id}-hover`, n.markup, j)));
   } else n.markup && (M = M.child(i.icon(`~icon-${n.id}`, n.markup, n.kind === "svg" ? f : "")));
-  const O = s4(n, E, !!R);
+  const O = o4(n, E, !!R);
   if (O && (M = M.id(O)), n.measure && (M = M.measure(n.measure)), n.name && M.also_named) for (const z of n.also ?? []) M = M.also_named(z);
   M = Do(M, { ...n.style, ...h.get(n) });
   const H = u.whitespace !== "nowrap" && !u.text_ellipsis;
@@ -17461,7 +17461,7 @@ function u4(n, a, r, i, s, c, f, u, m, h, v) {
     const z = n.value ? String(n.value) : String(n.placeholder ?? "");
     let j = a.div().whitespace_nowrap().overflow_x_hidden();
     const V = wa(u);
-    V && (j = j.h(V)), !n.value && f && (j = j.text_color(f4(f))), z && (M = M.child(j.child(n.input_type === "password" && n.value ? "•".repeat([...z].length) : z))), n.field_w && (M = M.child(a.div().w(n.field_w).h(0)));
+    V && (j = j.h(V)), !n.value && f && (j = j.text_color(p4(f))), z && (M = M.child(j.child(n.input_type === "password" && n.value ? "•".repeat([...z].length) : z))), n.field_w && (M = M.child(a.div().w(n.field_w).h(0)));
   }
   const w = u.whitespace === "nowrap" ? wa(u) : null, x = n.style.display === "flex" && !String(n.style.flex_direction ?? "row").startsWith("col");
   let _ = !n.range_name;
@@ -17473,14 +17473,14 @@ function u4(n, a, r, i, s, c, f, u, m, h, v) {
     const $ = !_ && (z.kind === "text" || !z.meta), U = z.kind === "text" ? h.get(z)?.h ?? w : null, K = z.kind === "text" ? h.get(z)?.w : void 0;
     if ($ || U || K !== void 0) {
       let I = a.div();
-      $ && (I = I.id(n.range_name)), $ && !x && n.style.display === "flex" && (I = I[`self_${d4[u.text_align] ?? "start"}`]().max_w("100%")), U && (I = I.h(U)), K !== void 0 && (I = I.w(K).flex_none().whitespace_nowrap()), V = I.child(V), _ ||= $;
+      $ && (I = I.id(n.range_name)), $ && !x && n.style.display === "flex" && (I = I[`self_${f4[u.text_align] ?? "start"}`]().max_w("100%")), U && (I = I.h(U)), K !== void 0 && (I = I.w(K).flex_none().whitespace_nowrap()), V = I.child(V), _ ||= $;
     }
     M = M.child(V);
   }
   return M;
 }
-const d4 = { center: "center", right: "end", end: "end" };
-function f4(n) {
+const f4 = { center: "center", right: "end", end: "end" };
+function p4(n) {
   const a = String(n);
   if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(a)) return n;
   const r = a.length === 9 ? Number.parseInt(a.slice(7), 16) : 255;
@@ -17498,12 +17498,12 @@ function wa(n) {
   const a = n.line_height;
   return typeof a == "string" && a.endsWith("px") ? Number.parseFloat(a) : typeof a == "number" && typeof n.text_size == "number" ? a * n.text_size : null;
 }
-function E4(n, a, r, i, s = 0, c = !1) {
+function z4(n, a, r, i, s = 0, c = !1) {
   const f = [n.root, ...n.overlays];
   Mi = /* @__PURE__ */ new Set(), ic = null;
   for (const b of f) Im(b, Mi);
-  const u = s > 0 ? y4(f, s) : /* @__PURE__ */ new Map();
-  s > 0 && i.measure && p4(f, s, i.measure, u), b4(f, u), g4(f, u), i.measure && h4(f, i.measure, u);
+  const u = s > 0 ? x4(f, s) : /* @__PURE__ */ new Map();
+  s > 0 && i.measure && m4(f, s, i.measure, u), v4(f, u), b4(f, u), i.measure && g4(f, i.measure, u);
   const m = a.reuse && a.renderGeneration ? r.retained ??= { built: /* @__PURE__ */ new Map(), overrides: /* @__PURE__ */ new Map(), generation: -1 } : null, h = new Map(u);
   m && n.root && (an = { from: m.built, generation: m.generation, clean: /* @__PURE__ */ new Set(), next: /* @__PURE__ */ new Map() }, eh(n.root, u, m.overrides, an.clean));
   let v;
@@ -17516,7 +17516,7 @@ function E4(n, a, r, i, s = 0, c = !1) {
   for (const b of n.overlays) y = y.child(sc(b, a, r, i, !0, !1, null, {}, !1, u));
   return y === v ? v : v.child(y);
 }
-function p4(n, a, r, i) {
+function m4(n, a, r, i) {
   (ui.scale !== a || ui.measure !== r) && (ui = { scale: a, measure: r, widths: /* @__PURE__ */ new WeakMap(), fonts: /* @__PURE__ */ new WeakMap(), keys: /* @__PURE__ */ new WeakMap(), visits: /* @__PURE__ */ new WeakMap() });
   const { widths: s, fonts: c, keys: f, visits: u } = ui, m = [], h = (O, H) => i.set(O, { ...i.get(O), ...H }), v = (O, H) => {
     m.push(O, H), h(O, H);
@@ -17587,8 +17587,8 @@ function p4(n, a, r, i) {
     O && (b(O, {}, !1), M(O));
 }
 let ui = { scale: 0, measure: null };
-const m4 = /(?<= +)(?=[^ ])|(?<=[\p{L}\p{N}]-)(?=[\p{L}\p{N}])/u;
-function h4(n, a, r) {
+const h4 = /(?<= +)(?=[^ ])|(?<=[\p{L}\p{N}]-)(?=[\p{L}\p{N}])/u;
+function g4(n, a, r) {
   const i = ["text_size", "font_weight", "font_family", "italic", "line_height"], s = (v) => typeof v == "number" ? v : 0, c = (v, y) => y && Ri(y) && !Ut(y) && v.style.position !== "absolute" && !["start", "center", "end"].includes(v.style.self) && !["start", "center", "end"].includes(y.style.items);
   di.measure !== a && (di = { measure: a, walks: /* @__PURE__ */ new WeakMap() });
   const f = [], u = (v, y) => {
@@ -17617,7 +17617,7 @@ function h4(n, a, r) {
         for (const _ of g.text.split(`
 `)) {
           let T = "";
-          for (const z of _.split(m4)) {
+          for (const z of _.split(h4)) {
             if (X(T + z)) {
               T += z;
               continue;
@@ -17640,7 +17640,7 @@ function h4(n, a, r) {
   for (const v of n) m(v, null, NaN, {});
 }
 let di = { measure: null };
-function g4(n, a) {
+function b4(n, a) {
   const r = (i, s) => {
     if (!i || i.kind === "text" || !Mt(i)) return;
     const c = i.style, f = c.position === "absolute" ? c.w === void 0 && (c.left === void 0 || c.right === void 0) : s && typeof c.w != "number";
@@ -17653,7 +17653,7 @@ function g4(n, a) {
   };
   for (const i of n) r(i, !1);
 }
-function b4(n, a) {
+function v4(n, a) {
   const r = a.heights ?? /* @__PURE__ */ new Map(), i = (m) => r.get(m), s = (m) => {
     const h = i(m);
     if (Number.isFinite(h)) return h;
@@ -17686,8 +17686,8 @@ function b4(n, a) {
   };
   for (const m of n) u(m, null);
 }
-const v4 = ["text_size", "line_height", "whitespace", "text_ellipsis"], se = (n) => n == null ? 0 : typeof n == "number" ? n : NaN, Ri = (n) => n.style.display === "flex" ? n.style.flex_direction === "col" : !0, Ut = (n) => n.style.display === "flex" && (n.style.flex_direction ?? "row") === "row", Jt = (n) => n.kind === "text" || Mt(n) && n.style.position !== "absolute";
-function y4(n, a) {
+const y4 = ["text_size", "line_height", "whitespace", "text_ellipsis"], se = (n) => n == null ? 0 : typeof n == "number" ? n : NaN, Ri = (n) => n.style.display === "flex" ? n.style.flex_direction === "col" : !0, Ut = (n) => n.style.display === "flex" && (n.style.flex_direction ?? "row") === "row", Jt = (n) => n.kind === "text" || Mt(n) && n.style.position !== "absolute";
+function x4(n, a) {
   Bo.scale !== a && (Bo = rh(a));
   const { heights: r, texts: i, textKeys: s, visits: c, places: f } = Bo, u = /* @__PURE__ */ new Map(), m = [], h = (D, g) => {
     const w = u.get(D);
@@ -17706,7 +17706,7 @@ function y4(n, a) {
     const w = `${g.text_size}|${g.line_height}|${g.whitespace}|${g.text_ellipsis}`;
     if (s.get(D) === w && r.has(D)) return r.get(D);
     let x = g;
-    for (const V of v4) D.style[V] !== void 0 && D.style[V] !== x[V] && (x === g && (x = { ...g }), x[V] = D.style[V]);
+    for (const V of y4) D.style[V] !== void 0 && D.style[V] !== x[V] && (x === g && (x = { ...g }), x[V] = D.style[V]);
     s.set(D, w), i.set(D, x);
     const _ = D.style, T = (D.children ?? []).filter(Jt), z = T.map((V) => b(V, x));
     let j;
@@ -17814,15 +17814,15 @@ function y4(n, a) {
 }
 const rh = (n) => ({ scale: n, heights: /* @__PURE__ */ new WeakMap(), texts: /* @__PURE__ */ new WeakMap(), textKeys: /* @__PURE__ */ new WeakMap(), visits: /* @__PURE__ */ new WeakMap(), places: /* @__PURE__ */ new WeakMap() });
 let Bo = rh(0);
-const z4 = { sidebar: [{ name: "sidebar-root", selector: "aside.sidebar" }, { name: "sidebar-content", selector: "aside.sidebar > div:first-child" }, { name: "host-switcher", selector: '[data-testid="host-switcher"]' }, { name: "host-chip", selector: '[data-testid="host-switcher"] > div' }, { name: "host-badge", selector: ".sidebar__env-badge" }, { name: "host-name", selector: ".sidebar__env-host" }, { name: "host-meta", selector: '[data-testid="host-switcher"] > div > div:first-child > span:nth-child(3)' }, { name: "host-line", selector: ".sidebar__env-cwd" }, { name: "host-caret", selector: '[data-testid="host-switcher"] > span[aria-hidden="true"]' }, { name: "new-session-button", selector: 'button[data-testid^="new-session-"]', key: { self: !0, attr: "data-testid", strip: "new-session-" } }, { name: "new-session-icon", selector: 'button[data-testid^="new-session-"] > svg' }, { name: "new-session-label", selector: 'button[data-testid^="new-session-"]', textRange: !0 }, { name: "new-session-shortcut", selector: 'button[data-testid^="new-session-"] > span' }, { name: "overview", selector: '[data-testid="workspace-overview"]' }, { name: "overview-header", selector: '[data-testid="workspace-overview"] > div:first-child' }, { name: "overview-title", selector: '[data-testid="workspace-overview"] > div:first-child > div:first-child > span:first-child' }, { name: "needs-you-button", selector: '[data-testid="workspace-needs-you"]' }, { name: "organize-button", selector: '[data-testid="workspace-organize"]' }, { name: "organize-icon", selector: '[data-testid="workspace-organize"] > svg' }, { name: "add-project-button", selector: '[data-testid="workspace-add-project"]' }, { name: "add-project-icon", selector: '[data-testid="workspace-add-project"] > svg' }, { name: "add-project-label", selector: '[data-testid="workspace-add-project"]', textRange: !0 }, { name: "project-list", selector: '[data-testid="project-list"]' }, { name: "project", selector: ".workspace-project", key: { self: !0, attr: "data-testid", strip: "workspace-project-" } }, { name: "project-header", selector: ".workspace-project > div:first-child", key: { closest: ".workspace-project", attr: "data-testid", strip: "workspace-project-" } }, { name: "project-toggle", selector: '[data-testid^="project-toggle-"]', key: { self: !0, attr: "data-testid", strip: "project-toggle-" } }, { name: "project-chevron", selector: '[data-testid^="project-toggle-"] > svg:not([data-testid])', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-folder-icon", selector: '[data-testid="project-folder-icon"]', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-name", selector: '[data-testid^="project-toggle-"] strong', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-branch", selector: '[data-testid^="project-toggle-"] > span.whitespace-nowrap', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-dirty-mark", selector: '[data-testid^="project-toggle-"] > span[title="Uncommitted changes"]', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-rollup", selector: '[data-testid^="project-rollup-"]', key: { self: !0, attr: "data-testid", strip: "project-rollup-" } }, { name: "project-rollup-badge", selector: '[data-testid^="project-rollup-"] > span', key: { closest: '[data-testid^="project-rollup-"]', attr: "data-testid", strip: "project-rollup-" } }, { name: "project-menu-button", selector: '[data-testid^="workspace-project-menu-"]', key: { self: !0, attr: "data-testid", strip: "workspace-project-menu-" } }, { name: "project-add-button", selector: ".workspace-project > div:first-child .worktree-menu__btn", key: { closest: ".workspace-project", attr: "data-testid", strip: "workspace-project-" } }, { name: "project-workspaces", selector: ".workspace-project__workspaces", key: { closest: ".workspace-project", attr: "data-testid", strip: "workspace-project-" } }, { name: "workspace", selector: '[data-testid="workspace-tree-root"] [data-testid^="workspace-entry-"]', key: { self: !0, attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-button", selector: '[data-testid="workspace-tree-root"] button.workspace-entry__button', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-icon", selector: '[data-testid="workspace-tree-root"] [data-testid="workspace-checkout-icon"]', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-name", selector: '[data-testid="workspace-tree-root"] strong[title="Double-click to rename"]', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-branch", selector: '[data-testid="workspace-tree-root"] button.workspace-entry__button > span.items-baseline > span', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-dirty-mark", selector: '[data-testid="workspace-tree-root"] button.workspace-entry__button > span[title="Uncommitted changes"]', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-pinned-label", selector: '[data-testid="workspace-tree-root"] button.workspace-entry__button > span.shrink-0:not([title])', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "hidden-worktrees-button", selector: '[data-testid^="workspace-hidden-"]', key: { self: !0, attr: "data-testid", strip: "workspace-hidden-" } }, { name: "session-row", selector: 'div[class~="group/row"]', key: { find: 'button[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])', attr: "data-testid", strip: "workspace-session-" } }, { name: "session-button", selector: 'button[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])', key: { self: !0, attr: "data-testid", strip: "workspace-session-" } }, { name: "session-mark", selector: ".agent-mark", key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "session-mark-icon", selector: ".agent-mark > span > *", key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "session-title", selector: 'button[data-testid^="workspace-session-"] > span.whitespace-nowrap', key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "status-row-title", selector: "button[data-session] span.truncate:not([data-testid])", key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "status-row-detail", selector: '[data-testid="status-row-detail"]', key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "session-state-badge", selector: '[data-testid^="session-state-"]', key: { self: !0, attr: "data-testid", strip: "session-state-" } }, { name: "session-menu-button", selector: '[data-testid^="session-menu-button-"]', key: { self: !0, attr: "data-testid", strip: "session-menu-button-" } }, { name: "session-fold-button", selector: '[data-testid^="session-fold-"]', key: { self: !0, attr: "data-testid", strip: "session-fold-" } }, { name: "session-elbow", selector: '[data-testid^="session-elbow-"]', key: { self: !0, attr: "data-testid", strip: "session-elbow-" } }, { name: "session-rollup", selector: '[data-testid^="session-rollup-"]', key: { self: !0, attr: "data-testid", strip: "session-rollup-" } }, { name: "chats", selector: '[data-testid="workspace-chats"]' }, { name: "chats-header", selector: '[data-testid="workspace-chats"] > div:first-child' }, { name: "chats-toggle", selector: '[data-testid="workspace-chats-collapse"]' }, { name: "chats-label", selector: '[data-testid="workspace-chats-collapse"]', textRange: !0 }, { name: "chats-chevron", selector: '[data-testid="workspace-chats-collapse"] > svg' }, { name: "chats-menu-button", selector: '[data-testid="workspace-chats-menu"]' }, { name: "chats-new-button", selector: '[data-testid="workspace-chats-new"]' }, { name: "chats-new-icon", selector: '[data-testid="workspace-chats-new"] > svg' }, { name: "status-view", selector: '[data-testid="workspace-status-view"]' }, { name: "status-section", selector: '[data-testid^="status-section-"]:not([data-testid^="status-section-title-"])', key: { self: !0, attr: "data-testid", strip: "status-section-" } }, { name: "status-heading", selector: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', key: { self: !0, attr: "data-testid" } }, { name: "status-heading-dot", selector: '[data-testid^="status-section-title-"] > span:first-child, [data-testid="status-no-sessions-title"] > span:first-child', key: { closest: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', attr: "data-testid" } }, { name: "status-heading-label", selector: '[data-testid^="status-section-title-"] > span:nth-child(2), [data-testid="status-no-sessions-title"] > span:nth-child(2)', key: { closest: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', attr: "data-testid" } }, { name: "status-heading-count", selector: '[data-testid^="status-section-title-"] > span[aria-label], [data-testid="status-no-sessions-title"] > span[aria-label]', key: { closest: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', attr: "data-testid" } }, { name: "status-heading-note", selector: '[data-testid^="status-section-title-"] > span.truncate, [data-testid="status-no-sessions-title"] > span.truncate', key: { closest: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', attr: "data-testid" } }, { name: "status-project", selector: 'div[data-testid^="status-project-"]', key: { self: !0, attr: "data-testid", strip: "status-project-" } }, { name: "status-project-header", selector: 'div[data-testid^="status-project-"] > div:first-child', key: { closest: 'div[data-testid^="status-project-"]', attr: "data-testid", strip: "status-project-" } }, { name: "status-project-icon", selector: 'div[data-testid^="status-project-"] > div:first-child > svg', key: { closest: 'div[data-testid^="status-project-"]', attr: "data-testid", strip: "status-project-" } }, { name: "status-project-title", selector: '[data-testid="status-project-title"]', key: { closest: 'div[data-testid^="status-project-"]', attr: "data-testid", strip: "status-project-" } }, { name: "status-empty-project", selector: '[data-testid^="status-empty-project-"]', key: { self: !0, attr: "data-testid", strip: "status-empty-project-" } }, { name: "status-empty-project-icon", selector: '[data-testid^="status-empty-project-"] > button:first-child > svg', key: { closest: '[data-testid^="status-empty-project-"]', attr: "data-testid", strip: "status-empty-project-" } }, { name: "status-empty-project-title", selector: '[data-testid^="status-empty-project-"] > button > span.whitespace-nowrap', key: { closest: '[data-testid^="status-empty-project-"]', attr: "data-testid", strip: "status-empty-project-" } }, { name: "settings-bar", selector: "aside.sidebar > div:last-child" }, { name: "settings-gear", selector: '[data-testid="settings-gear"]' }, { name: "settings-gear-icon", selector: '[data-testid="settings-gear"] > svg' }], tabs: [{ name: "tab-strip", selector: '[data-testid="tab-bar"]' }, { name: "tab-slot", selector: "[data-tab-entry]", key: { self: !0, attr: "data-tab-entry" } }, { name: "tab-separator", selector: '[data-testid="tab-separator"]', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab", selector: "button.tab-bar__tab", key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-icon", selector: 'button.tab-bar__tab > span[aria-hidden="true"]', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-icon-glyph", selector: 'button.tab-bar__tab > span[aria-hidden="true"] > *', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-label", selector: "button.tab-bar__tab > span.truncate", key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-dirty", selector: 'button.tab-bar__tab > span[aria-label="unsaved changes"]', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-close", selector: '[data-tab-entry] > button[aria-label^="Close"]', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-close-glyph", selector: '[data-tab-entry] > button[aria-label^="Close"] > svg', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-new", selector: '[data-testid="tab-new"]' }, { name: "tab-new-glyph", selector: '[data-testid="tab-new"] > svg' }], status: [{ name: "status-bar", selector: "footer.status-bar" }, { name: "status-location", selector: ".status-bar__location" }, { name: "status-dot", selector: ".status-bar__location > span:first-child" }, { name: "status-host", selector: '[data-testid="status-host"]' }, { name: "status-cwd", selector: ".status-item--cwd" }, { name: "status-branch", selector: ".status-bar__branch" }, { name: "status-branch-icon", selector: ".status-bar__branch > svg" }, { name: "status-branch-name", selector: ".status-bar__branch > span" }, { name: "status-details", selector: ".status-bar__details" }, { name: "zoom-indicator", selector: '[data-testid="zoom-indicator"]' }, { name: "status-detail", selector: ".status-bar__details > span" }, { name: "status-usage", selector: ".status-bar__usage" }, { name: "usage-summary", selector: '[data-testid="usage-summary"]' }, { name: "usage-unavailable", selector: '[data-testid="usage-summary"] > span:only-child' }, { name: "usage-account", selector: '[data-testid="usage-summary"] > span.flex' }, { name: "usage-account-name", selector: '[data-testid="usage-summary"] > span.flex > span:first-child' }, { name: "usage-window", selector: '[data-testid="usage-summary"] > span.flex > span:not(:first-child)' }, { name: "status-connection", selector: '[data-testid="status-connection"]' }, { name: "status-connection-glyph", selector: '[data-testid="status-connection"] > svg' }], navigator: [{ name: "navigator-scrim", selector: "body > div.fixed.inset-0" }, { name: "navigator-panel", selector: '[data-testid="navigator"]' }, { name: "navigator-input", selector: '[data-testid="navigator-input"]' }, { name: "navigator-chips", selector: '[data-testid="navigator"] > div:nth-child(2)' }, { name: "navigator-chip", selector: '[data-testid^="navigator-filter-"]', key: { self: !0, attr: "data-testid", strip: "navigator-filter-" } }, { name: "navigator-list", selector: '[data-testid="navigator"] > div:nth-child(3)' }, { name: "navigator-notice", selector: '[data-testid="navigator"] > div:nth-child(3) > p[role]' }, { name: "navigator-empty", selector: '[data-testid="navigator"] div.text-center' }, { name: "navigator-command", selector: '[data-testid^="navigator-command-"]', key: { self: !0, attr: "data-testid", strip: "navigator-command-" } }, { name: "navigator-command-title", selector: '[data-testid^="navigator-command-"] > span:first-child', key: { closest: '[data-testid^="navigator-command-"]', attr: "data-testid", strip: "navigator-command-" } }, { name: "navigator-command-detail", selector: '[data-testid^="navigator-command-"] > span:last-child', key: { closest: '[data-testid^="navigator-command-"]', attr: "data-testid", strip: "navigator-command-" } }, { name: "navigator-row", selector: '[data-testid^="navigator-row-"]', key: { self: !0, attr: "data-testid", strip: "navigator-row-" } }, { name: "navigator-row-dot", selector: '[data-testid^="navigator-row-"] > :first-child', key: { closest: '[data-testid^="navigator-row-"]', attr: "data-testid", strip: "navigator-row-" } }, { name: "navigator-row-title", selector: '[data-testid^="navigator-row-"] > span:nth-child(2)', key: { closest: '[data-testid^="navigator-row-"]', attr: "data-testid", strip: "navigator-row-" } }, { name: "navigator-row-detail", selector: '[data-testid^="navigator-row-"] > span:last-child', key: { closest: '[data-testid^="navigator-row-"]', attr: "data-testid", strip: "navigator-row-" } }, { name: "navigator-note", selector: '[data-testid="navigator"] > p:last-child' }], "pane-menu": [{ name: "pane-menu", selector: '[data-testid="pane-context-menu"]' }, { name: "pane-menu-item", selector: '[data-testid="pane-context-menu"] > button', key: { self: !0, attr: "data-testid", strip: "pane-menu-" } }, { name: "pane-menu-divider", selector: '[data-testid="pane-context-menu"] > div.h-px' }, { name: "pane-menu-rename-row", selector: '[data-testid="pane-context-menu"] > div.flex' }, { name: "pane-menu-rename-input", selector: '[data-testid="pane-menu-rename-input"]' }, { name: "pane-menu-rename-confirm", selector: '[data-testid="pane-menu-rename-confirm"]' }], confirm: [{ name: "confirm-scrim", selector: "body > div.fixed.inset-0" }, { name: "confirm-panel", selector: '[data-testid="confirm-dialog"]' }, { name: "confirm-message", selector: ".confirm-dialog__message" }, { name: "confirm-extra", selector: '[data-testid="confirm-dialog"] > :not(.confirm-dialog__message):not(div.flex)' }, { name: "confirm-buttons", selector: '[data-testid="confirm-dialog"] > div.flex' }, { name: "confirm-cancel", selector: '[data-testid="confirm-cancel"]' }, { name: "confirm-accept", selector: '[data-testid="confirm-accept"]' }], dialog: [{ name: "dialog-scrim", selector: "body > div.fixed.inset-0" }, { name: "dialog-panel", selector: '[data-testid="file-name-dialog"]' }, { name: "dialog-title", selector: '[data-testid="file-name-dialog"] > h2' }, { name: "dialog-input", selector: '[data-testid="file-name-input"]' }, { name: "dialog-hint", selector: '[data-testid="file-name-dialog"] > p:not([role])' }, { name: "dialog-error", selector: '[data-testid="file-name-dialog"] > p[role="alert"]' }, { name: "dialog-buttons", selector: '[data-testid="file-name-dialog"] > div.flex' }, { name: "dialog-cancel", selector: '[data-testid="file-name-dialog"] > div.flex > button:first-child' }, { name: "dialog-confirm", selector: '[data-testid="file-name-confirm"]' }], toast: [{ name: "toast-stack", selector: '[data-testid="toast"]' }, { name: "toast-card", selector: '[data-testid="toast"] .animate-toast-in' }, { name: "toast-open", selector: '[data-testid^="toast-"]:not([data-testid^="toast-dismiss-"])' }, { name: "toast-mark", selector: '[data-testid^="toast-"]:not([data-testid^="toast-dismiss-"]) > :first-child' }, { name: "toast-heading", selector: '[data-testid^="toast-"]:not([data-testid^="toast-dismiss-"]) > span.min-w-0 > span:first-child' }, { name: "toast-detail", selector: '[data-testid^="toast-"]:not([data-testid^="toast-dismiss-"]) > span.min-w-0 > span:nth-child(2)' }, { name: "toast-dismiss", selector: '[data-testid^="toast-dismiss-"]' }, { name: "toast-dismiss-glyph", selector: '[data-testid^="toast-dismiss-"] > svg' }], "pane-header": [{ name: "pane-header", selector: '[data-testid^="pane-header-"]', key: { self: !0, attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-icon", selector: '[data-testid^="pane-header-"] > span.shrink-0:not([data-testid])', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-icon-glyph", selector: '[data-testid^="pane-header-"] > span.shrink-0:not([data-testid]) > *', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-name", selector: '[data-testid^="pane-header-"] > span.truncate', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-state", selector: '[data-testid^="pane-header-"] > span.flex[title]', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-state-dot", selector: '[data-testid^="pane-header-"] > span.flex[title] > span.rounded-full', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-state-word", selector: '[data-testid^="pane-header-"] > span.flex[title] > span.truncate', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-controls", selector: '[data-testid^="tile-controls-"]', key: { self: !0, attr: "data-testid", strip: "tile-controls-" } }, { name: "pane-expand", selector: '[data-testid^="tile-expand-"]', key: { self: !0, attr: "data-testid", strip: "tile-expand-" } }, { name: "pane-expand-glyph", selector: '[data-testid^="tile-expand-"] > svg', key: { closest: '[data-testid^="tile-expand-"]', attr: "data-testid", strip: "tile-expand-" } }, { name: "pane-close", selector: '[data-testid^="tile-close-"]', key: { self: !0, attr: "data-testid", strip: "tile-close-" } }, { name: "pane-close-glyph", selector: '[data-testid^="tile-close-"] > svg', key: { closest: '[data-testid^="tile-close-"]', attr: "data-testid", strip: "tile-close-" } }, { name: "pane-corner", selector: "div.pointer-events-auto.absolute" }], "new-session": [{ name: "launcher", selector: ".new-session-popover" }, { name: "launcher-filter", selector: '[data-testid="new-tab-filter"]' }, { name: "launcher-list", selector: "#new-tab-launcher-list" }, { name: "launcher-option", selector: '[role="option"]', key: { self: !0, attr: "data-testid" } }, { name: "launcher-option-icon", selector: '[role="option"] > :first-child:not(span.flex-1):not(kbd)', key: { closest: '[role="option"]', attr: "data-testid" } }, { name: "launcher-option-label", selector: '[role="option"] > span.flex-1', key: { closest: '[role="option"]', attr: "data-testid" } }, { name: "launcher-option-key", selector: '[role="option"] > kbd', key: { closest: '[role="option"]', attr: "data-testid" } }, { name: "launcher-note", selector: ".new-session-popover p[role]" }, { name: "agent-select", selector: '[data-testid="new-session-popover-agent"]' }, { name: "agent-manage", selector: ".new-session-popover > div:first-child > button:not([data-testid])" }, { name: "project-option", selector: '[data-testid^="project-option-"]', key: { self: !0, attr: "data-testid", strip: "project-option-" } }, { name: "project-option-name", selector: '[data-testid^="project-option-"]', key: { closest: '[data-testid^="project-option-"]', attr: "data-testid", strip: "project-option-" }, textRange: !0 }, { name: "project-option-path", selector: '[data-testid^="project-option-"] > span', key: { closest: '[data-testid^="project-option-"]', attr: "data-testid", strip: "project-option-" } }], "tab-menu": [{ name: "tab-menu", selector: '[data-testid="tab-split-menu"]' }, { name: "tab-menu-item", selector: '[data-testid="tab-split-menu"] > button', key: { self: !0, attr: "data-testid" } }, { name: "tab-menu-show-beside", selector: '[data-testid="tab-menu-show-beside"]' }, { name: "tab-menu-beside-list", selector: '[data-testid="tab-split-menu"] [role="menu"]' }, { name: "tab-menu-beside-item", selector: '[data-testid="tab-split-menu"] [role="menu"] > button', key: { self: !0, attr: "data-testid" } }, { name: "tab-menu-item-label", selector: '[data-testid="tab-split-menu"] [role="menu"] > button > span.block', key: { closest: '[data-testid="tab-split-menu"] [role="menu"] > button', attr: "data-testid" } }, { name: "tab-menu-empty", selector: '[data-testid="tab-menu-empty"]' }, { name: "tab-menu-divider", selector: '[data-testid="tab-split-menu"] > div.h-px' }, { name: "tab-menu-rename-form", selector: '[data-testid="tab-split-menu"] > form' }, { name: "tab-menu-rename-input", selector: '[data-testid="tab-menu-rename-input"]' }, { name: "tab-menu-rename-save", selector: '[data-testid="tab-split-menu"] > form > button' }], select: [{ name: "select-field", selector: '[data-testid="select-demo"]' }, { name: "select-field-label", selector: '[data-testid="select-demo"] > span.truncate' }, { name: "select-chevron", selector: '[data-testid="select-demo"] > svg' }, { name: "select-list", selector: '[role="listbox"]' }, { name: "select-option", selector: '[role="listbox"] > [role="option"]', key: { self: !0, attr: "data-value" } }, { name: "select-option-label", selector: '[role="listbox"] > [role="option"] > span.truncate', key: { closest: '[role="option"]', attr: "data-value" } }, { name: "select-option-check", selector: '[role="listbox"] > [role="option"] > span[aria-hidden]', key: { closest: '[role="option"]', attr: "data-value" } }], "keybind-help": [{ name: "keybind-help-scrim", selector: "body > div.fixed.inset-0" }, { name: "keybind-help-panel", selector: '[data-testid="keybind-help"]' }, { name: "keybind-help-header", selector: '[data-testid="keybind-help"] > div:first-child' }, { name: "keybind-help-title", selector: '[data-testid="keybind-help"] h2' }, { name: "keybind-help-close", selector: '[aria-label="Close keybind help"]' }, { name: "keybind-help-close-glyph", selector: '[aria-label="Close keybind help"] > svg' }, { name: "keybind-help-search", selector: '[data-testid="keybind-help-search"]' }, { name: "keybind-help-list", selector: '[data-testid="keybind-help"] > div:last-child' }, { name: "keybind-help-empty", selector: '[data-testid="keybind-help"] div.text-center' }, { name: "keybind-help-group", selector: '[data-testid="keybind-help"] section' }, { name: "keybind-help-group-title", selector: '[data-testid="keybind-help"] section > h3' }, { name: "keybind-help-row", selector: '[data-testid="keybind-help"] li' }, { name: "keybind-help-keys", selector: '[data-testid="keybind-help"] li > kbd' }, { name: "keybind-help-description", selector: '[data-testid="keybind-help"] li > span' }], launcher: [{ name: "launcher-scrim", selector: "body > div.fixed.inset-0" }, { name: "launcher-panel", selector: '[data-testid="new-session-dialog"]' }, { name: "launcher-title", selector: '[data-testid="new-session-dialog"] > p' }, { name: "launcher-filter", selector: '[data-testid="new-session-filter"]' }, { name: "launcher-list", selector: "#new-session-list" }, { name: "launcher-row", selector: '[data-testid^="new-session-row-"]', key: { self: !0, attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-row-icon", selector: '[data-testid^="new-session-row-"] > :first-child:not(span):not(kbd)', key: { closest: '[data-testid^="new-session-row-"]', attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-row-label", selector: '[data-testid^="new-session-row-"] > span.shrink-0', key: { closest: '[data-testid^="new-session-row-"]', attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-row-detail", selector: '[data-testid^="new-session-row-"] > span.ml-auto', key: { closest: '[data-testid^="new-session-row-"]', attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-row-key", selector: '[data-testid^="new-session-row-"] > kbd', key: { closest: '[data-testid^="new-session-row-"]', attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-note", selector: "#new-session-list > p" }], "session-menu": [{ name: "tab-menu", selector: '[data-testid="tab-split-menu"]' }, { name: "tab-menu-item", selector: '[data-testid="tab-split-menu"] > button', key: { self: !0, attr: "data-testid" } }, { name: "tab-menu-show-beside", selector: '[data-testid="tab-menu-show-beside"]' }, { name: "tab-menu-beside-list", selector: '[data-testid="tab-split-menu"] [role="menu"]' }, { name: "tab-menu-beside-item", selector: '[data-testid="tab-split-menu"] [role="menu"] > button', key: { self: !0, attr: "data-testid" } }, { name: "tab-menu-item-label", selector: '[data-testid="tab-split-menu"] [role="menu"] > button > span.block', key: { closest: '[data-testid="tab-split-menu"] [role="menu"] > button', attr: "data-testid" } }, { name: "tab-menu-empty", selector: '[data-testid="tab-menu-empty"]' }, { name: "tab-menu-divider", selector: '[data-testid="tab-split-menu"] > div.h-px' }], "tab-drag": [{ name: "tab-drag-layer", selector: '[data-testid="tab-drag-layer"]' }, { name: "tab-drag-pane", selector: '[data-testid="tab-drag-layer"] > div.bg-surface-1\\/30' }, { name: "tab-drop-zone", selector: '[data-testid="tab-drop-zone"]', key: { self: !0, attr: "data-zone" } }, { name: "tab-drop-label", selector: '[data-testid="tab-drop-zone"] > span' }, { name: "tab-drag-ghost", selector: '[data-testid="tab-drag-ghost"]' }], start: [{ name: "start-panel", selector: '[data-testid="no-session-panel"], [data-testid="cli-start-panel"]' }, { name: "start-column", selector: '[data-testid$="-panel"] > div' }, { name: "start-logo", selector: '[data-testid="no-session-panel"] img' }, { name: "start-name", selector: '[data-testid$="-panel"] h1, [data-testid="no-session-panel"] h1, [data-testid="no-session-panel"] h2' }, { name: "start-hint", selector: '[data-testid$="-panel"] p' }, { name: "start-target", selector: '[data-testid="workspace-start-target"], [data-testid="cli-start-target"]' }, { name: "start-action", selector: '[data-testid="home-add-project"], [data-testid="no-session-create"], [data-testid^="workspace-start-"]:not([data-testid="workspace-start-target"]), [data-testid^="cli-start-agent-"]', key: { self: !0, attr: "data-testid" } }, { name: "start-status", selector: '[role="status"], [role="alert"]' }, { name: "start-status-action", selector: '[role="status"] > button, [role="alert"] > button' }, { name: "start-link", selector: '[data-testid$="-panel"] button.text-subtext-0' }, { name: "start-shortcut-row", selector: '[data-testid="no-session-panel"] dl > div' }, { name: "start-shortcut-label", selector: '[data-testid="no-session-panel"] dl dt' }, { name: "start-shortcut-key", selector: '[data-testid="no-session-panel"] dl kbd' }], "folder-browser": [{ name: "folder-browser", selector: '[data-testid="dir-browser"]' }, { name: "folder-browser-mode-toggle", selector: '[data-testid="dir-browser-mode-toggle"]' }, { name: "folder-browser-up", selector: '[data-testid="dir-browser-up"]' }, { name: "folder-browser-crumbs", selector: '[data-testid="dir-browser"] span.min-w-0.flex-1' }, { name: "folder-browser-crumb", selector: '[data-testid="dir-browser"] span.min-w-0.flex-1 button' }, { name: "folder-browser-filter", selector: '[data-testid="dir-browser-filter"]' }, { name: "folder-browser-list", selector: '[data-testid="dir-browser"] div.overflow-y-auto' }, { name: "folder-browser-entry", selector: '[data-testid^="dir-browser-entry-"]', key: { self: !0, attr: "data-testid", strip: "dir-browser-entry-" } }, { name: "folder-browser-entry-name", selector: '[data-testid^="dir-browser-entry-"] > span:first-child', key: { closest: '[data-testid^="dir-browser-entry-"]', attr: "data-testid", strip: "dir-browser-entry-" } }, { name: "folder-browser-git", selector: '[data-testid^="dir-browser-entry-"] > span:last-child:not(:first-child)', key: { closest: '[data-testid^="dir-browser-entry-"]', attr: "data-testid", strip: "dir-browser-entry-" } }, { name: "folder-browser-note", selector: '[data-testid="dir-browser"] div.overflow-y-auto > div' }, { name: "folder-browser-use", selector: '[data-testid="dir-browser-use"]' }, { name: "folder-browser-path-input", selector: '[data-testid="project-path-input"]' }], instructions: [{ name: "instructions-scrim", selector: "body > div.fixed.inset-0" }, { name: "instructions-panel", selector: '[data-testid="instructions-dialog"]' }, { name: "instructions-title", selector: '[data-testid="instructions-dialog"] > h2' }, { name: "instructions-intro", selector: '[data-testid="instructions-dialog"] > p' }, { name: "instructions-label", selector: '[data-testid="instructions-dialog"] > label > span:first-child' }, { name: "instructions-count", selector: '[data-testid="instructions-count"]' }, { name: "instructions-text", selector: '[data-testid="instructions-text"]' }, { name: "instructions-folders", selector: '[data-testid="instructions-folders"]' }, { name: "instructions-error", selector: '[data-testid="instructions-error"]' }, { name: "instructions-cancel", selector: '[data-testid="instructions-dialog"] > div.flex.justify-end > button:first-child' }, { name: "instructions-save", selector: '[data-testid="instructions-save"]' }], memory: [{ name: "memory-scrim", selector: "body > div.fixed.inset-0", key: { self: !0, attr: "data-testid" } }, { name: "memory-panel", selector: '[data-testid="memory-dialog"]' }, { name: "memory-title", selector: '[data-testid="memory-dialog"] > h2' }, { name: "memory-intro", selector: '[data-testid="memory-dialog"] > p' }, { name: "memory-caps", selector: '[data-testid="memory-caps"]' }, { name: "memory-new", selector: '[data-testid="memory-new"]' }, { name: "memory-enabled", selector: '[data-testid="memory-enabled"]' }, { name: "memory-enabled-label", selector: '[data-testid="memory-dialog"] > label.flex > span' }, { name: "memory-note", selector: '[data-testid="memory-dialog"] > span.text-subtext-0' }, { name: "memory-row", selector: '[data-testid^="memory-row-"]', key: { self: !0, attr: "data-testid", strip: "memory-row-" } }, { name: "memory-open", selector: '[data-testid^="memory-open-"]', key: { self: !0, attr: "data-testid", strip: "memory-open-" } }, { name: "memory-file-title", selector: '[data-testid^="memory-row-"] button > span:first-child', key: { closest: '[data-testid^="memory-row-"]', attr: "data-testid", strip: "memory-row-" } }, { name: "memory-file-summary", selector: '[data-testid^="memory-row-"] button > span.truncate', key: { closest: '[data-testid^="memory-row-"]', attr: "data-testid", strip: "memory-row-" } }, { name: "memory-file-meta", selector: '[data-testid^="memory-row-"] button > span:last-child', key: { closest: '[data-testid^="memory-row-"]', attr: "data-testid", strip: "memory-row-" } }, { name: "memory-delete", selector: '[data-testid^="memory-delete-"]', key: { self: !0, attr: "data-testid", strip: "memory-delete-" } }, { name: "memory-error", selector: '[data-testid="memory-error"]' }, { name: "memory-close", selector: '[data-testid="memory-dialog"] > div.flex.justify-end > button' }, { name: "memory-file-name", selector: '[data-testid="memory-file-name"]' }, { name: "memory-name", selector: '[data-testid="memory-name"]' }, { name: "memory-count", selector: '[data-testid="memory-count"]' }, { name: "memory-text", selector: '[data-testid="memory-text"]' }, { name: "memory-conflict", selector: '[data-testid="memory-conflict"]' }, { name: "memory-reload", selector: '[data-testid="memory-reload"]' }, { name: "memory-back", selector: '[data-testid="memory-back"]' }, { name: "memory-save", selector: '[data-testid="memory-save"]' }, { name: "memory-confirm", selector: '[data-testid="confirm-dialog"]' }, { name: "memory-confirm-message", selector: ".confirm-dialog__message" }], worktree: [{ name: "worktree-plus", selector: '[data-testid^="worktree-menu-"]' }, { name: "worktree-popover", selector: '[role="dialog"][aria-label="Git worktrees"]' }, { name: "worktree-heading", selector: '[role="dialog"][aria-label="Git worktrees"] > div:first-child > span:first-child' }, { name: "worktree-project", selector: '[role="dialog"][aria-label="Git worktrees"] > div:first-child > span:last-child' }, { name: "worktree-list", selector: '[role="dialog"][aria-label="Git worktrees"] > div.overflow-y-auto' }, { name: "worktree-note", selector: '[role="dialog"][aria-label="Git worktrees"] > div.overflow-y-auto > div:not(.worktree-menu__entry)' }, { name: "worktree-entry", selector: '[data-testid^="worktree-entry-"]', key: { self: !0, attr: "data-testid", strip: "worktree-entry-" } }, { name: "worktree-entry-branch", selector: ".worktree-menu__entry-branch", key: { closest: '[data-testid^="worktree-entry-"]', attr: "data-testid", strip: "worktree-entry-" } }, { name: "worktree-badge", selector: '[data-testid^="worktree-entry-"] .worktree-menu__entry-branch > span', key: { closest: '[data-testid^="worktree-entry-"]', attr: "data-testid", strip: "worktree-entry-" } }, { name: "worktree-entry-path", selector: ".worktree-menu__entry-path", key: { closest: '[data-testid^="worktree-entry-"]', attr: "data-testid", strip: "worktree-entry-" } }, { name: "worktree-open", selector: '[data-testid^="worktree-open-"]', key: { self: !0, attr: "data-testid", strip: "worktree-open-" } }, { name: "worktree-remove", selector: '[data-testid^="worktree-remove-"]', key: { self: !0, attr: "data-testid", strip: "worktree-remove-" } }, { name: "worktree-error", selector: '[data-testid="worktree-error"]' }, { name: "worktree-new", selector: '[data-testid="worktree-new"]' }, { name: "worktree-name-input", selector: '[data-testid="worktree-name-input"]' }, { name: "worktree-start-input", selector: '[data-testid="worktree-start-input"]' }, { name: "worktree-branch-input", selector: '[data-testid="worktree-branch-input"]' }, { name: "worktree-parent-select", selector: '[data-testid="worktree-parent-select"]' }, { name: "worktree-new-branch", selector: '[data-testid="worktree-new-branch"]' }, { name: "worktree-path-input", selector: '[data-testid="worktree-path-input"]' }, { name: "worktree-agent-select", selector: '[data-testid="worktree-agent-select"]' }, { name: "worktree-create-cancel", selector: '[data-testid="worktree-create-cancel"]' }, { name: "worktree-create-submit", selector: '[data-testid="worktree-create-submit"]' }, { name: "worktree-confirm", selector: '[data-testid="confirm-dialog"]' }, { name: "worktree-confirm-message", selector: ".confirm-dialog__message" }, { name: "worktree-confirm-accept", selector: '[data-testid="confirm-accept"]' }, { name: "worktree-confirm-cancel", selector: '[data-testid="confirm-cancel"]' }], "terminal-search": [{ name: "terminal-frame", selector: '[data-testid="persistent-agent-terminal"]' }, { name: "term-search", selector: '[data-testid="term-search"]' }, { name: "term-search-input", selector: '[data-testid="term-search-input"]' }, { name: "term-search-button", selector: '[data-testid="term-search"] > button', key: { self: !0, attr: "title" } }], "agent-control": [{ name: "terminal-frame", selector: '[data-testid="persistent-agent-terminal"]' }, { name: "agent-control-chip", selector: '[data-testid="agent-control-chip"]' }, { name: "agent-control-label", selector: '[data-testid="agent-control-chip"] > span' }, { name: "agent-control-button", selector: '[data-testid="agent-control-chip"] > button' }, { name: "agent-control-error", selector: ".terminal__cli-error" }, { name: "agent-control-ended", selector: ".terminal__exited", key: { self: !0, attr: "data-testid" } }, { name: "agent-control-ended-text", selector: ".terminal__exited-text" }, { name: "agent-control-ended-button", selector: ".terminal__exited-actions > button", key: { self: !0, attr: "data-testid" } }], "phone-size": [{ name: "terminal-frame", selector: '[data-testid="persistent-agent-terminal"]' }, { name: "phone-size-notice", selector: '[data-testid="phone-size-notice"]' }, { name: "phone-size-chip", selector: '[data-testid="phone-size-chip"]' }, { name: "phone-size-heading", selector: '[data-testid="phone-size-notice"] span.font-semibold' }, { name: "phone-size-text", selector: '[data-testid="phone-size-notice"] span:not(.font-semibold)' }, { name: "phone-size-fold", selector: '[aria-label="Keep phone size and hide this"]' }, { name: "phone-size-button", selector: '[data-testid="phone-size-notice"] div.flex.flex-wrap > button, [data-testid="phone-size-chip"] > button' }], window: [{ name: "sidebar-card", selector: '[data-testid="sidebar-card"]' }, { name: "main-card", selector: '[data-testid="main-card"]' }, { name: "tools-card", selector: '[data-testid="tools-card"]' }, { name: "sidebar-toggle", selector: '[data-testid="sidebar-collapse-toggle"]' }, { name: "drawer-toggle", selector: '[data-testid="workspace-tools-toggle"]' }, { name: "resize-sidebar", selector: '[data-testid="resize-sidebar"]' }, { name: "resize-tools", selector: '[data-testid="resize-tools"]' }, { name: "tools-tab", selector: 'nav[aria-label="Files, Git and Browser"] > button' }, { name: "status-bar", selector: "footer.status-bar" }], settings: [{ name: "settings-modal", selector: '[data-testid="settings-modal"]' }, { name: "settings-nav-card", selector: '[data-testid="settings-modal"] > nav' }, { name: "settings-close", selector: '[data-testid="settings-close"]' }, { name: "settings-nav", selector: 'nav [data-testid^="settings-nav-"]', key: { self: !0, attr: "data-testid", strip: "settings-nav-" } }, { name: "settings-main-card", selector: '[data-testid="settings-modal"] > main' }, { name: "settings-search", selector: '[data-testid="settings-search"]' }, { name: "settings-title", selector: '[data-testid="settings-modal"] > main h1' }, { name: "settings-body", selector: '[data-testid="settings-modal"] .settings-modal__body' }, { name: "settings-group-title", selector: '[data-testid="settings-modal"] > main h3' }, { name: "settings-group-card", selector: '[data-testid="settings-modal"] > main section > div.rounded-ui' }, { name: "settings-row", selector: '[data-testid="settings-modal"] [data-setting-row]' }, { name: "settings-row-title", selector: '[data-testid="settings-modal"] [data-setting-row] > div:first-child > div:first-child' }, { name: "settings-row-description", selector: '[data-testid="settings-modal"] [data-setting-row] > div:first-child > div:nth-child(2)' }, { name: "settings-result-title", selector: '[data-testid^="settings-result-"] > h2' }], files: [{ name: "files-explorer", selector: '[data-testid="workspace-files-view"]' }, { name: "files-tree", selector: '[data-testid="workspace-file-tree-scroll"]' }, { name: "files-entry", selector: '[data-testid^="workspace-file-entry-"]', key: { self: !0, attr: "data-testid", strip: "workspace-file-entry-" } }, { name: "files-entry-icon", selector: '[data-testid^="workspace-file-entry-"] > svg[data-file-icon]', key: { closest: '[data-testid^="workspace-file-entry-"]', attr: "data-testid", strip: "workspace-file-entry-" } }, { name: "files-entry-name", selector: '[data-testid^="workspace-file-entry-"] > span.flex-1', key: { closest: '[data-testid^="workspace-file-entry-"]', attr: "data-testid", strip: "workspace-file-entry-" } }, { name: "files-pane", selector: '[data-testid="workspace-file-pane"]' }, { name: "files-file-title", selector: ".workspace-files__file-title > span:first-child" }, { name: "files-dirty", selector: '.workspace-files__file-title > span[title="Unsaved changes"]' }, { name: "files-save", selector: ".workspace-files__save" }, { name: "files-markdown-view", selector: '[aria-label="Markdown view"]' }, { name: "files-markdown-preview", selector: '[data-testid="workspace-markdown-preview"]' }, { name: "files-conflict", selector: '[data-testid="workspace-file-conflict"]' }, { name: "files-conflict-title", selector: '[data-testid="workspace-file-conflict"] > strong' }, { name: "files-conflict-action", selector: '[data-testid="workspace-file-conflict"] button' }, { name: "files-editor", selector: '[data-testid="workspace-file-editor-area"]' }, { name: "editor-text", selector: '[data-testid="workspace-file-editor-area"] .cm-scroller' }, { name: "files-asset", selector: '[data-testid="workspace-file-asset"]' }, { name: "files-asset-header", selector: '[data-testid="workspace-file-asset"] > header' }, { name: "files-asset-title", selector: '[data-testid="workspace-file-asset"] > header > strong' }, { name: "files-image-viewer", selector: '[data-testid="workspace-image-viewer"]' }, { name: "files-image-toolbar", selector: '[data-testid="workspace-image-viewer"] > [role="toolbar"]' }, { name: "files-image-status", selector: '[data-testid="workspace-image-info"]' }] };
+const N4 = { sidebar: [{ name: "sidebar-root", selector: "aside.sidebar" }, { name: "sidebar-content", selector: "aside.sidebar > div:first-child" }, { name: "host-switcher", selector: '[data-testid="host-switcher"]' }, { name: "host-chip", selector: '[data-testid="host-switcher"] > div' }, { name: "host-badge", selector: ".sidebar__env-badge" }, { name: "host-name", selector: ".sidebar__env-host" }, { name: "host-meta", selector: '[data-testid="host-switcher"] > div > div:first-child > span:nth-child(3)' }, { name: "host-line", selector: ".sidebar__env-cwd" }, { name: "host-caret", selector: '[data-testid="host-switcher"] > span[aria-hidden="true"]' }, { name: "new-session-button", selector: 'button[data-testid^="new-session-"]', key: { self: !0, attr: "data-testid", strip: "new-session-" } }, { name: "new-session-icon", selector: 'button[data-testid^="new-session-"] > svg' }, { name: "new-session-label", selector: 'button[data-testid^="new-session-"]', textRange: !0 }, { name: "new-session-shortcut", selector: 'button[data-testid^="new-session-"] > span' }, { name: "overview", selector: '[data-testid="workspace-overview"]' }, { name: "overview-header", selector: '[data-testid="workspace-overview"] > div:first-child' }, { name: "overview-title", selector: '[data-testid="workspace-overview"] > div:first-child > div:first-child > span:first-child' }, { name: "needs-you-button", selector: '[data-testid="workspace-needs-you"]' }, { name: "organize-button", selector: '[data-testid="workspace-organize"]' }, { name: "organize-icon", selector: '[data-testid="workspace-organize"] > svg' }, { name: "add-project-button", selector: '[data-testid="workspace-add-project"]' }, { name: "add-project-icon", selector: '[data-testid="workspace-add-project"] > svg' }, { name: "add-project-label", selector: '[data-testid="workspace-add-project"]', textRange: !0 }, { name: "project-list", selector: '[data-testid="project-list"]' }, { name: "project", selector: ".workspace-project", key: { self: !0, attr: "data-testid", strip: "workspace-project-" } }, { name: "project-header", selector: ".workspace-project > div:first-child", key: { closest: ".workspace-project", attr: "data-testid", strip: "workspace-project-" } }, { name: "project-toggle", selector: '[data-testid^="project-toggle-"]', key: { self: !0, attr: "data-testid", strip: "project-toggle-" } }, { name: "project-chevron", selector: '[data-testid^="project-toggle-"] > svg:not([data-testid])', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-folder-icon", selector: '[data-testid="project-folder-icon"]', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-name", selector: '[data-testid^="project-toggle-"] strong', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-branch", selector: '[data-testid^="project-toggle-"] > span.whitespace-nowrap', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-dirty-mark", selector: '[data-testid^="project-toggle-"] > span[title="Uncommitted changes"]', key: { closest: '[data-testid^="project-toggle-"]', attr: "data-testid", strip: "project-toggle-" } }, { name: "project-rollup", selector: '[data-testid^="project-rollup-"]', key: { self: !0, attr: "data-testid", strip: "project-rollup-" } }, { name: "project-rollup-badge", selector: '[data-testid^="project-rollup-"] > span', key: { closest: '[data-testid^="project-rollup-"]', attr: "data-testid", strip: "project-rollup-" } }, { name: "project-menu-button", selector: '[data-testid^="workspace-project-menu-"]', key: { self: !0, attr: "data-testid", strip: "workspace-project-menu-" } }, { name: "project-add-button", selector: ".workspace-project > div:first-child .worktree-menu__btn", key: { closest: ".workspace-project", attr: "data-testid", strip: "workspace-project-" } }, { name: "project-workspaces", selector: ".workspace-project__workspaces", key: { closest: ".workspace-project", attr: "data-testid", strip: "workspace-project-" } }, { name: "workspace", selector: '[data-testid="workspace-tree-root"] [data-testid^="workspace-entry-"]', key: { self: !0, attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-button", selector: '[data-testid="workspace-tree-root"] button.workspace-entry__button', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-icon", selector: '[data-testid="workspace-tree-root"] [data-testid="workspace-checkout-icon"]', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-name", selector: '[data-testid="workspace-tree-root"] strong[title="Double-click to rename"]', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-branch", selector: '[data-testid="workspace-tree-root"] button.workspace-entry__button > span.items-baseline > span', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-dirty-mark", selector: '[data-testid="workspace-tree-root"] button.workspace-entry__button > span[title="Uncommitted changes"]', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "workspace-pinned-label", selector: '[data-testid="workspace-tree-root"] button.workspace-entry__button > span.shrink-0:not([title])', key: { closest: '[data-testid^="workspace-entry-"]', attr: "data-testid", strip: "workspace-entry-" } }, { name: "hidden-worktrees-button", selector: '[data-testid^="workspace-hidden-"]', key: { self: !0, attr: "data-testid", strip: "workspace-hidden-" } }, { name: "session-row", selector: 'div[class~="group/row"]', key: { find: 'button[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])', attr: "data-testid", strip: "workspace-session-" } }, { name: "session-button", selector: 'button[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])', key: { self: !0, attr: "data-testid", strip: "workspace-session-" } }, { name: "session-mark", selector: ".agent-mark", key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "session-mark-icon", selector: ".agent-mark > span > *", key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "session-title", selector: 'button[data-testid^="workspace-session-"] > span.whitespace-nowrap', key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "status-row-title", selector: "button[data-session] span.truncate:not([data-testid])", key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "status-row-detail", selector: '[data-testid="status-row-detail"]', key: { closest: 'button[data-testid^="workspace-session-"]', attr: "data-testid", strip: "workspace-session-" } }, { name: "session-state-badge", selector: '[data-testid^="session-state-"]', key: { self: !0, attr: "data-testid", strip: "session-state-" } }, { name: "session-menu-button", selector: '[data-testid^="session-menu-button-"]', key: { self: !0, attr: "data-testid", strip: "session-menu-button-" } }, { name: "session-fold-button", selector: '[data-testid^="session-fold-"]', key: { self: !0, attr: "data-testid", strip: "session-fold-" } }, { name: "session-elbow", selector: '[data-testid^="session-elbow-"]', key: { self: !0, attr: "data-testid", strip: "session-elbow-" } }, { name: "session-rollup", selector: '[data-testid^="session-rollup-"]', key: { self: !0, attr: "data-testid", strip: "session-rollup-" } }, { name: "chats", selector: '[data-testid="workspace-chats"]' }, { name: "chats-header", selector: '[data-testid="workspace-chats"] > div:first-child' }, { name: "chats-toggle", selector: '[data-testid="workspace-chats-collapse"]' }, { name: "chats-label", selector: '[data-testid="workspace-chats-collapse"]', textRange: !0 }, { name: "chats-chevron", selector: '[data-testid="workspace-chats-collapse"] > svg' }, { name: "chats-menu-button", selector: '[data-testid="workspace-chats-menu"]' }, { name: "chats-new-button", selector: '[data-testid="workspace-chats-new"]' }, { name: "chats-new-icon", selector: '[data-testid="workspace-chats-new"] > svg' }, { name: "status-view", selector: '[data-testid="workspace-status-view"]' }, { name: "status-section", selector: '[data-testid^="status-section-"]:not([data-testid^="status-section-title-"])', key: { self: !0, attr: "data-testid", strip: "status-section-" } }, { name: "status-heading", selector: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', key: { self: !0, attr: "data-testid" } }, { name: "status-heading-dot", selector: '[data-testid^="status-section-title-"] > span:first-child, [data-testid="status-no-sessions-title"] > span:first-child', key: { closest: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', attr: "data-testid" } }, { name: "status-heading-label", selector: '[data-testid^="status-section-title-"] > span:nth-child(2), [data-testid="status-no-sessions-title"] > span:nth-child(2)', key: { closest: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', attr: "data-testid" } }, { name: "status-heading-count", selector: '[data-testid^="status-section-title-"] > span[aria-label], [data-testid="status-no-sessions-title"] > span[aria-label]', key: { closest: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', attr: "data-testid" } }, { name: "status-heading-note", selector: '[data-testid^="status-section-title-"] > span.truncate, [data-testid="status-no-sessions-title"] > span.truncate', key: { closest: '[data-testid^="status-section-title-"], [data-testid="status-no-sessions-title"]', attr: "data-testid" } }, { name: "status-project", selector: 'div[data-testid^="status-project-"]', key: { self: !0, attr: "data-testid", strip: "status-project-" } }, { name: "status-project-header", selector: 'div[data-testid^="status-project-"] > div:first-child', key: { closest: 'div[data-testid^="status-project-"]', attr: "data-testid", strip: "status-project-" } }, { name: "status-project-icon", selector: 'div[data-testid^="status-project-"] > div:first-child > svg', key: { closest: 'div[data-testid^="status-project-"]', attr: "data-testid", strip: "status-project-" } }, { name: "status-project-title", selector: '[data-testid="status-project-title"]', key: { closest: 'div[data-testid^="status-project-"]', attr: "data-testid", strip: "status-project-" } }, { name: "status-empty-project", selector: '[data-testid^="status-empty-project-"]', key: { self: !0, attr: "data-testid", strip: "status-empty-project-" } }, { name: "status-empty-project-icon", selector: '[data-testid^="status-empty-project-"] > button:first-child > svg', key: { closest: '[data-testid^="status-empty-project-"]', attr: "data-testid", strip: "status-empty-project-" } }, { name: "status-empty-project-title", selector: '[data-testid^="status-empty-project-"] > button > span.whitespace-nowrap', key: { closest: '[data-testid^="status-empty-project-"]', attr: "data-testid", strip: "status-empty-project-" } }, { name: "settings-bar", selector: "aside.sidebar > div:last-child" }, { name: "settings-gear", selector: '[data-testid="settings-gear"]' }, { name: "settings-gear-icon", selector: '[data-testid="settings-gear"] > svg' }], tabs: [{ name: "tab-strip", selector: '[data-testid="tab-bar"]' }, { name: "tab-slot", selector: "[data-tab-entry]", key: { self: !0, attr: "data-tab-entry" } }, { name: "tab-separator", selector: '[data-testid="tab-separator"]', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab", selector: "button.tab-bar__tab", key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-icon", selector: 'button.tab-bar__tab > span[aria-hidden="true"]', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-icon-glyph", selector: 'button.tab-bar__tab > span[aria-hidden="true"] > *', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-label", selector: "button.tab-bar__tab > span.truncate", key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-dirty", selector: 'button.tab-bar__tab > span[aria-label="unsaved changes"]', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-close", selector: '[data-tab-entry] > button[aria-label^="Close"]', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-close-glyph", selector: '[data-tab-entry] > button[aria-label^="Close"] > svg', key: { closest: "[data-tab-entry]", attr: "data-tab-entry" } }, { name: "tab-new", selector: '[data-testid="tab-new"]' }, { name: "tab-new-glyph", selector: '[data-testid="tab-new"] > svg' }], status: [{ name: "status-bar", selector: "footer.status-bar" }, { name: "status-location", selector: ".status-bar__location" }, { name: "status-dot", selector: ".status-bar__location > span:first-child" }, { name: "status-host", selector: '[data-testid="status-host"]' }, { name: "status-cwd", selector: ".status-item--cwd" }, { name: "status-branch", selector: ".status-bar__branch" }, { name: "status-branch-icon", selector: ".status-bar__branch > svg" }, { name: "status-branch-name", selector: ".status-bar__branch > span" }, { name: "status-details", selector: ".status-bar__details" }, { name: "zoom-indicator", selector: '[data-testid="zoom-indicator"]' }, { name: "status-detail", selector: ".status-bar__details > span" }, { name: "status-usage", selector: ".status-bar__usage" }, { name: "usage-summary", selector: '[data-testid="usage-summary"]' }, { name: "usage-unavailable", selector: '[data-testid="usage-summary"] > span:only-child' }, { name: "usage-account", selector: '[data-testid="usage-summary"] > span.flex' }, { name: "usage-account-name", selector: '[data-testid="usage-summary"] > span.flex > span:first-child' }, { name: "usage-window", selector: '[data-testid="usage-summary"] > span.flex > span:not(:first-child)' }, { name: "status-connection", selector: '[data-testid="status-connection"]' }, { name: "status-connection-glyph", selector: '[data-testid="status-connection"] > svg' }], navigator: [{ name: "navigator-scrim", selector: "body > div.fixed.inset-0" }, { name: "navigator-panel", selector: '[data-testid="navigator"]' }, { name: "navigator-input", selector: '[data-testid="navigator-input"]' }, { name: "navigator-chips", selector: '[data-testid="navigator"] > div:nth-child(2)' }, { name: "navigator-chip", selector: '[data-testid^="navigator-filter-"]', key: { self: !0, attr: "data-testid", strip: "navigator-filter-" } }, { name: "navigator-list", selector: '[data-testid="navigator"] > div:nth-child(3)' }, { name: "navigator-notice", selector: '[data-testid="navigator"] > div:nth-child(3) > p[role]' }, { name: "navigator-empty", selector: '[data-testid="navigator"] div.text-center' }, { name: "navigator-command", selector: '[data-testid^="navigator-command-"]', key: { self: !0, attr: "data-testid", strip: "navigator-command-" } }, { name: "navigator-command-title", selector: '[data-testid^="navigator-command-"] > span:first-child', key: { closest: '[data-testid^="navigator-command-"]', attr: "data-testid", strip: "navigator-command-" } }, { name: "navigator-command-detail", selector: '[data-testid^="navigator-command-"] > span:last-child', key: { closest: '[data-testid^="navigator-command-"]', attr: "data-testid", strip: "navigator-command-" } }, { name: "navigator-row", selector: '[data-testid^="navigator-row-"]', key: { self: !0, attr: "data-testid", strip: "navigator-row-" } }, { name: "navigator-row-dot", selector: '[data-testid^="navigator-row-"] > :first-child', key: { closest: '[data-testid^="navigator-row-"]', attr: "data-testid", strip: "navigator-row-" } }, { name: "navigator-row-title", selector: '[data-testid^="navigator-row-"] > span:nth-child(2)', key: { closest: '[data-testid^="navigator-row-"]', attr: "data-testid", strip: "navigator-row-" } }, { name: "navigator-row-detail", selector: '[data-testid^="navigator-row-"] > span:last-child', key: { closest: '[data-testid^="navigator-row-"]', attr: "data-testid", strip: "navigator-row-" } }, { name: "navigator-note", selector: '[data-testid="navigator"] > p:last-child' }], "pane-menu": [{ name: "pane-menu", selector: '[data-testid="pane-context-menu"]' }, { name: "pane-menu-item", selector: '[data-testid="pane-context-menu"] > button', key: { self: !0, attr: "data-testid", strip: "pane-menu-" } }, { name: "pane-menu-divider", selector: '[data-testid="pane-context-menu"] > div.h-px' }, { name: "pane-menu-rename-row", selector: '[data-testid="pane-context-menu"] > div.flex' }, { name: "pane-menu-rename-input", selector: '[data-testid="pane-menu-rename-input"]' }, { name: "pane-menu-rename-confirm", selector: '[data-testid="pane-menu-rename-confirm"]' }], confirm: [{ name: "confirm-scrim", selector: "body > div.fixed.inset-0" }, { name: "confirm-panel", selector: '[data-testid="confirm-dialog"]' }, { name: "confirm-message", selector: ".confirm-dialog__message" }, { name: "confirm-extra", selector: '[data-testid="confirm-dialog"] > :not(.confirm-dialog__message):not(div.flex)' }, { name: "confirm-buttons", selector: '[data-testid="confirm-dialog"] > div.flex' }, { name: "confirm-cancel", selector: '[data-testid="confirm-cancel"]' }, { name: "confirm-accept", selector: '[data-testid="confirm-accept"]' }], dialog: [{ name: "dialog-scrim", selector: "body > div.fixed.inset-0" }, { name: "dialog-panel", selector: '[data-testid="file-name-dialog"]' }, { name: "dialog-title", selector: '[data-testid="file-name-dialog"] > h2' }, { name: "dialog-input", selector: '[data-testid="file-name-input"]' }, { name: "dialog-hint", selector: '[data-testid="file-name-dialog"] > p:not([role])' }, { name: "dialog-error", selector: '[data-testid="file-name-dialog"] > p[role="alert"]' }, { name: "dialog-buttons", selector: '[data-testid="file-name-dialog"] > div.flex' }, { name: "dialog-cancel", selector: '[data-testid="file-name-dialog"] > div.flex > button:first-child' }, { name: "dialog-confirm", selector: '[data-testid="file-name-confirm"]' }], toast: [{ name: "toast-stack", selector: '[data-testid="toast"]' }, { name: "toast-card", selector: '[data-testid="toast"] .animate-toast-in' }, { name: "toast-open", selector: '[data-testid^="toast-"]:not([data-testid^="toast-dismiss-"])' }, { name: "toast-mark", selector: '[data-testid^="toast-"]:not([data-testid^="toast-dismiss-"]) > :first-child' }, { name: "toast-heading", selector: '[data-testid^="toast-"]:not([data-testid^="toast-dismiss-"]) > span.min-w-0 > span:first-child' }, { name: "toast-detail", selector: '[data-testid^="toast-"]:not([data-testid^="toast-dismiss-"]) > span.min-w-0 > span:nth-child(2)' }, { name: "toast-dismiss", selector: '[data-testid^="toast-dismiss-"]' }, { name: "toast-dismiss-glyph", selector: '[data-testid^="toast-dismiss-"] > svg' }], "pane-header": [{ name: "pane-header", selector: '[data-testid^="pane-header-"]', key: { self: !0, attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-icon", selector: '[data-testid^="pane-header-"] > span.shrink-0:not([data-testid])', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-icon-glyph", selector: '[data-testid^="pane-header-"] > span.shrink-0:not([data-testid]) > *', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-name", selector: '[data-testid^="pane-header-"] > span.truncate', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-state", selector: '[data-testid^="pane-header-"] > span.flex[title]', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-state-dot", selector: '[data-testid^="pane-header-"] > span.flex[title] > span.rounded-full', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-header-state-word", selector: '[data-testid^="pane-header-"] > span.flex[title] > span.truncate', key: { closest: '[data-testid^="pane-header-"]', attr: "data-testid", strip: "pane-header-" } }, { name: "pane-controls", selector: '[data-testid^="tile-controls-"]', key: { self: !0, attr: "data-testid", strip: "tile-controls-" } }, { name: "pane-expand", selector: '[data-testid^="tile-expand-"]', key: { self: !0, attr: "data-testid", strip: "tile-expand-" } }, { name: "pane-expand-glyph", selector: '[data-testid^="tile-expand-"] > svg', key: { closest: '[data-testid^="tile-expand-"]', attr: "data-testid", strip: "tile-expand-" } }, { name: "pane-close", selector: '[data-testid^="tile-close-"]', key: { self: !0, attr: "data-testid", strip: "tile-close-" } }, { name: "pane-close-glyph", selector: '[data-testid^="tile-close-"] > svg', key: { closest: '[data-testid^="tile-close-"]', attr: "data-testid", strip: "tile-close-" } }, { name: "pane-corner", selector: "div.pointer-events-auto.absolute" }], "new-session": [{ name: "launcher", selector: ".new-session-popover" }, { name: "launcher-filter", selector: '[data-testid="new-tab-filter"]' }, { name: "launcher-list", selector: "#new-tab-launcher-list" }, { name: "launcher-option", selector: '[role="option"]', key: { self: !0, attr: "data-testid" } }, { name: "launcher-option-icon", selector: '[role="option"] > :first-child:not(span.flex-1):not(kbd)', key: { closest: '[role="option"]', attr: "data-testid" } }, { name: "launcher-option-label", selector: '[role="option"] > span.flex-1', key: { closest: '[role="option"]', attr: "data-testid" } }, { name: "launcher-option-key", selector: '[role="option"] > kbd', key: { closest: '[role="option"]', attr: "data-testid" } }, { name: "launcher-note", selector: ".new-session-popover p[role]" }, { name: "agent-select", selector: '[data-testid="new-session-popover-agent"]' }, { name: "agent-manage", selector: ".new-session-popover > div:first-child > button:not([data-testid])" }, { name: "project-option", selector: '[data-testid^="project-option-"]', key: { self: !0, attr: "data-testid", strip: "project-option-" } }, { name: "project-option-name", selector: '[data-testid^="project-option-"]', key: { closest: '[data-testid^="project-option-"]', attr: "data-testid", strip: "project-option-" }, textRange: !0 }, { name: "project-option-path", selector: '[data-testid^="project-option-"] > span', key: { closest: '[data-testid^="project-option-"]', attr: "data-testid", strip: "project-option-" } }], "tab-menu": [{ name: "tab-menu", selector: '[data-testid="tab-split-menu"]' }, { name: "tab-menu-item", selector: '[data-testid="tab-split-menu"] > button', key: { self: !0, attr: "data-testid" } }, { name: "tab-menu-show-beside", selector: '[data-testid="tab-menu-show-beside"]' }, { name: "tab-menu-beside-list", selector: '[data-testid="tab-split-menu"] [role="menu"]' }, { name: "tab-menu-beside-item", selector: '[data-testid="tab-split-menu"] [role="menu"] > button', key: { self: !0, attr: "data-testid" } }, { name: "tab-menu-item-label", selector: '[data-testid="tab-split-menu"] [role="menu"] > button > span.block', key: { closest: '[data-testid="tab-split-menu"] [role="menu"] > button', attr: "data-testid" } }, { name: "tab-menu-empty", selector: '[data-testid="tab-menu-empty"]' }, { name: "tab-menu-divider", selector: '[data-testid="tab-split-menu"] > div.h-px' }, { name: "tab-menu-rename-form", selector: '[data-testid="tab-split-menu"] > form' }, { name: "tab-menu-rename-input", selector: '[data-testid="tab-menu-rename-input"]' }, { name: "tab-menu-rename-save", selector: '[data-testid="tab-split-menu"] > form > button' }], select: [{ name: "select-field", selector: '[data-testid="select-demo"]' }, { name: "select-field-label", selector: '[data-testid="select-demo"] > span.truncate' }, { name: "select-chevron", selector: '[data-testid="select-demo"] > svg' }, { name: "select-list", selector: '[role="listbox"]' }, { name: "select-option", selector: '[role="listbox"] > [role="option"]', key: { self: !0, attr: "data-value" } }, { name: "select-option-label", selector: '[role="listbox"] > [role="option"] > span.truncate', key: { closest: '[role="option"]', attr: "data-value" } }, { name: "select-option-check", selector: '[role="listbox"] > [role="option"] > span[aria-hidden]', key: { closest: '[role="option"]', attr: "data-value" } }], "keybind-help": [{ name: "keybind-help-scrim", selector: "body > div.fixed.inset-0" }, { name: "keybind-help-panel", selector: '[data-testid="keybind-help"]' }, { name: "keybind-help-header", selector: '[data-testid="keybind-help"] > div:first-child' }, { name: "keybind-help-title", selector: '[data-testid="keybind-help"] h2' }, { name: "keybind-help-close", selector: '[aria-label="Close keybind help"]' }, { name: "keybind-help-close-glyph", selector: '[aria-label="Close keybind help"] > svg' }, { name: "keybind-help-search", selector: '[data-testid="keybind-help-search"]' }, { name: "keybind-help-list", selector: '[data-testid="keybind-help"] > div:last-child' }, { name: "keybind-help-empty", selector: '[data-testid="keybind-help"] div.text-center' }, { name: "keybind-help-group", selector: '[data-testid="keybind-help"] section' }, { name: "keybind-help-group-title", selector: '[data-testid="keybind-help"] section > h3' }, { name: "keybind-help-row", selector: '[data-testid="keybind-help"] li' }, { name: "keybind-help-keys", selector: '[data-testid="keybind-help"] li > kbd' }, { name: "keybind-help-description", selector: '[data-testid="keybind-help"] li > span' }], launcher: [{ name: "launcher-scrim", selector: "body > div.fixed.inset-0" }, { name: "launcher-panel", selector: '[data-testid="new-session-dialog"]' }, { name: "launcher-title", selector: '[data-testid="new-session-dialog"] > p' }, { name: "launcher-filter", selector: '[data-testid="new-session-filter"]' }, { name: "launcher-list", selector: "#new-session-list" }, { name: "launcher-row", selector: '[data-testid^="new-session-row-"]', key: { self: !0, attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-row-icon", selector: '[data-testid^="new-session-row-"] > :first-child:not(span):not(kbd)', key: { closest: '[data-testid^="new-session-row-"]', attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-row-label", selector: '[data-testid^="new-session-row-"] > span.shrink-0', key: { closest: '[data-testid^="new-session-row-"]', attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-row-detail", selector: '[data-testid^="new-session-row-"] > span.ml-auto', key: { closest: '[data-testid^="new-session-row-"]', attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-row-key", selector: '[data-testid^="new-session-row-"] > kbd', key: { closest: '[data-testid^="new-session-row-"]', attr: "data-testid", strip: "new-session-row-" } }, { name: "launcher-note", selector: "#new-session-list > p" }], "session-menu": [{ name: "tab-menu", selector: '[data-testid="tab-split-menu"]' }, { name: "tab-menu-item", selector: '[data-testid="tab-split-menu"] > button', key: { self: !0, attr: "data-testid" } }, { name: "tab-menu-show-beside", selector: '[data-testid="tab-menu-show-beside"]' }, { name: "tab-menu-beside-list", selector: '[data-testid="tab-split-menu"] [role="menu"]' }, { name: "tab-menu-beside-item", selector: '[data-testid="tab-split-menu"] [role="menu"] > button', key: { self: !0, attr: "data-testid" } }, { name: "tab-menu-item-label", selector: '[data-testid="tab-split-menu"] [role="menu"] > button > span.block', key: { closest: '[data-testid="tab-split-menu"] [role="menu"] > button', attr: "data-testid" } }, { name: "tab-menu-empty", selector: '[data-testid="tab-menu-empty"]' }, { name: "tab-menu-divider", selector: '[data-testid="tab-split-menu"] > div.h-px' }], "tab-drag": [{ name: "tab-drag-layer", selector: '[data-testid="tab-drag-layer"]' }, { name: "tab-drag-pane", selector: '[data-testid="tab-drag-layer"] > div.bg-surface-1\\/30' }, { name: "tab-drop-zone", selector: '[data-testid="tab-drop-zone"]', key: { self: !0, attr: "data-zone" } }, { name: "tab-drop-label", selector: '[data-testid="tab-drop-zone"] > span' }, { name: "tab-drag-ghost", selector: '[data-testid="tab-drag-ghost"]' }], start: [{ name: "start-panel", selector: '[data-testid="no-session-panel"], [data-testid="cli-start-panel"]' }, { name: "start-column", selector: '[data-testid$="-panel"] > div' }, { name: "start-logo", selector: '[data-testid="no-session-panel"] img' }, { name: "start-name", selector: '[data-testid$="-panel"] h1, [data-testid="no-session-panel"] h1, [data-testid="no-session-panel"] h2' }, { name: "start-hint", selector: '[data-testid$="-panel"] p' }, { name: "start-target", selector: '[data-testid="workspace-start-target"], [data-testid="cli-start-target"]' }, { name: "start-action", selector: '[data-testid="home-add-project"], [data-testid="no-session-create"], [data-testid^="workspace-start-"]:not([data-testid="workspace-start-target"]), [data-testid^="cli-start-agent-"]', key: { self: !0, attr: "data-testid" } }, { name: "start-status", selector: '[role="status"], [role="alert"]' }, { name: "start-status-action", selector: '[role="status"] > button, [role="alert"] > button' }, { name: "start-link", selector: '[data-testid$="-panel"] button.text-subtext-0' }, { name: "start-shortcut-row", selector: '[data-testid="no-session-panel"] dl > div' }, { name: "start-shortcut-label", selector: '[data-testid="no-session-panel"] dl dt' }, { name: "start-shortcut-key", selector: '[data-testid="no-session-panel"] dl kbd' }], "folder-browser": [{ name: "folder-browser", selector: '[data-testid="dir-browser"]' }, { name: "folder-browser-mode-toggle", selector: '[data-testid="dir-browser-mode-toggle"]' }, { name: "folder-browser-up", selector: '[data-testid="dir-browser-up"]' }, { name: "folder-browser-crumbs", selector: '[data-testid="dir-browser"] span.min-w-0.flex-1' }, { name: "folder-browser-crumb", selector: '[data-testid="dir-browser"] span.min-w-0.flex-1 button' }, { name: "folder-browser-filter", selector: '[data-testid="dir-browser-filter"]' }, { name: "folder-browser-list", selector: '[data-testid="dir-browser"] div.overflow-y-auto' }, { name: "folder-browser-entry", selector: '[data-testid^="dir-browser-entry-"]', key: { self: !0, attr: "data-testid", strip: "dir-browser-entry-" } }, { name: "folder-browser-entry-name", selector: '[data-testid^="dir-browser-entry-"] > span:first-child', key: { closest: '[data-testid^="dir-browser-entry-"]', attr: "data-testid", strip: "dir-browser-entry-" } }, { name: "folder-browser-git", selector: '[data-testid^="dir-browser-entry-"] > span:last-child:not(:first-child)', key: { closest: '[data-testid^="dir-browser-entry-"]', attr: "data-testid", strip: "dir-browser-entry-" } }, { name: "folder-browser-note", selector: '[data-testid="dir-browser"] div.overflow-y-auto > div' }, { name: "folder-browser-use", selector: '[data-testid="dir-browser-use"]' }, { name: "folder-browser-path-input", selector: '[data-testid="project-path-input"]' }], instructions: [{ name: "instructions-scrim", selector: "body > div.fixed.inset-0" }, { name: "instructions-panel", selector: '[data-testid="instructions-dialog"]' }, { name: "instructions-title", selector: '[data-testid="instructions-dialog"] > h2' }, { name: "instructions-intro", selector: '[data-testid="instructions-dialog"] > p' }, { name: "instructions-label", selector: '[data-testid="instructions-dialog"] > label > span:first-child' }, { name: "instructions-count", selector: '[data-testid="instructions-count"]' }, { name: "instructions-text", selector: '[data-testid="instructions-text"]' }, { name: "instructions-folders", selector: '[data-testid="instructions-folders"]' }, { name: "instructions-error", selector: '[data-testid="instructions-error"]' }, { name: "instructions-cancel", selector: '[data-testid="instructions-dialog"] > div.flex.justify-end > button:first-child' }, { name: "instructions-save", selector: '[data-testid="instructions-save"]' }], memory: [{ name: "memory-scrim", selector: "body > div.fixed.inset-0", key: { self: !0, attr: "data-testid" } }, { name: "memory-panel", selector: '[data-testid="memory-dialog"]' }, { name: "memory-title", selector: '[data-testid="memory-dialog"] > h2' }, { name: "memory-intro", selector: '[data-testid="memory-dialog"] > p' }, { name: "memory-caps", selector: '[data-testid="memory-caps"]' }, { name: "memory-new", selector: '[data-testid="memory-new"]' }, { name: "memory-enabled", selector: '[data-testid="memory-enabled"]' }, { name: "memory-enabled-label", selector: '[data-testid="memory-dialog"] > label.flex > span' }, { name: "memory-note", selector: '[data-testid="memory-dialog"] > span.text-subtext-0' }, { name: "memory-row", selector: '[data-testid^="memory-row-"]', key: { self: !0, attr: "data-testid", strip: "memory-row-" } }, { name: "memory-open", selector: '[data-testid^="memory-open-"]', key: { self: !0, attr: "data-testid", strip: "memory-open-" } }, { name: "memory-file-title", selector: '[data-testid^="memory-row-"] button > span:first-child', key: { closest: '[data-testid^="memory-row-"]', attr: "data-testid", strip: "memory-row-" } }, { name: "memory-file-summary", selector: '[data-testid^="memory-row-"] button > span.truncate', key: { closest: '[data-testid^="memory-row-"]', attr: "data-testid", strip: "memory-row-" } }, { name: "memory-file-meta", selector: '[data-testid^="memory-row-"] button > span:last-child', key: { closest: '[data-testid^="memory-row-"]', attr: "data-testid", strip: "memory-row-" } }, { name: "memory-delete", selector: '[data-testid^="memory-delete-"]', key: { self: !0, attr: "data-testid", strip: "memory-delete-" } }, { name: "memory-error", selector: '[data-testid="memory-error"]' }, { name: "memory-close", selector: '[data-testid="memory-dialog"] > div.flex.justify-end > button' }, { name: "memory-file-name", selector: '[data-testid="memory-file-name"]' }, { name: "memory-name", selector: '[data-testid="memory-name"]' }, { name: "memory-count", selector: '[data-testid="memory-count"]' }, { name: "memory-text", selector: '[data-testid="memory-text"]' }, { name: "memory-conflict", selector: '[data-testid="memory-conflict"]' }, { name: "memory-reload", selector: '[data-testid="memory-reload"]' }, { name: "memory-back", selector: '[data-testid="memory-back"]' }, { name: "memory-save", selector: '[data-testid="memory-save"]' }, { name: "memory-confirm", selector: '[data-testid="confirm-dialog"]' }, { name: "memory-confirm-message", selector: ".confirm-dialog__message" }], worktree: [{ name: "worktree-plus", selector: '[data-testid^="worktree-menu-"]' }, { name: "worktree-popover", selector: '[role="dialog"][aria-label="Git worktrees"]' }, { name: "worktree-heading", selector: '[role="dialog"][aria-label="Git worktrees"] > div:first-child > span:first-child' }, { name: "worktree-project", selector: '[role="dialog"][aria-label="Git worktrees"] > div:first-child > span:last-child' }, { name: "worktree-list", selector: '[role="dialog"][aria-label="Git worktrees"] > div.overflow-y-auto' }, { name: "worktree-note", selector: '[role="dialog"][aria-label="Git worktrees"] > div.overflow-y-auto > div:not(.worktree-menu__entry)' }, { name: "worktree-entry", selector: '[data-testid^="worktree-entry-"]', key: { self: !0, attr: "data-testid", strip: "worktree-entry-" } }, { name: "worktree-entry-branch", selector: ".worktree-menu__entry-branch", key: { closest: '[data-testid^="worktree-entry-"]', attr: "data-testid", strip: "worktree-entry-" } }, { name: "worktree-badge", selector: '[data-testid^="worktree-entry-"] .worktree-menu__entry-branch > span', key: { closest: '[data-testid^="worktree-entry-"]', attr: "data-testid", strip: "worktree-entry-" } }, { name: "worktree-entry-path", selector: ".worktree-menu__entry-path", key: { closest: '[data-testid^="worktree-entry-"]', attr: "data-testid", strip: "worktree-entry-" } }, { name: "worktree-open", selector: '[data-testid^="worktree-open-"]', key: { self: !0, attr: "data-testid", strip: "worktree-open-" } }, { name: "worktree-remove", selector: '[data-testid^="worktree-remove-"]', key: { self: !0, attr: "data-testid", strip: "worktree-remove-" } }, { name: "worktree-error", selector: '[data-testid="worktree-error"]' }, { name: "worktree-new", selector: '[data-testid="worktree-new"]' }, { name: "worktree-name-input", selector: '[data-testid="worktree-name-input"]' }, { name: "worktree-start-input", selector: '[data-testid="worktree-start-input"]' }, { name: "worktree-branch-input", selector: '[data-testid="worktree-branch-input"]' }, { name: "worktree-parent-select", selector: '[data-testid="worktree-parent-select"]' }, { name: "worktree-new-branch", selector: '[data-testid="worktree-new-branch"]' }, { name: "worktree-path-input", selector: '[data-testid="worktree-path-input"]' }, { name: "worktree-agent-select", selector: '[data-testid="worktree-agent-select"]' }, { name: "worktree-create-cancel", selector: '[data-testid="worktree-create-cancel"]' }, { name: "worktree-create-submit", selector: '[data-testid="worktree-create-submit"]' }, { name: "worktree-confirm", selector: '[data-testid="confirm-dialog"]' }, { name: "worktree-confirm-message", selector: ".confirm-dialog__message" }, { name: "worktree-confirm-accept", selector: '[data-testid="confirm-accept"]' }, { name: "worktree-confirm-cancel", selector: '[data-testid="confirm-cancel"]' }], "terminal-search": [{ name: "terminal-frame", selector: '[data-testid="persistent-agent-terminal"]' }, { name: "term-search", selector: '[data-testid="term-search"]' }, { name: "term-search-input", selector: '[data-testid="term-search-input"]' }, { name: "term-search-button", selector: '[data-testid="term-search"] > button', key: { self: !0, attr: "title" } }], "agent-control": [{ name: "terminal-frame", selector: '[data-testid="persistent-agent-terminal"]' }, { name: "agent-control-chip", selector: '[data-testid="agent-control-chip"]' }, { name: "agent-control-label", selector: '[data-testid="agent-control-chip"] > span' }, { name: "agent-control-button", selector: '[data-testid="agent-control-chip"] > button' }, { name: "agent-control-error", selector: ".terminal__cli-error" }, { name: "agent-control-ended", selector: ".terminal__exited", key: { self: !0, attr: "data-testid" } }, { name: "agent-control-ended-text", selector: ".terminal__exited-text" }, { name: "agent-control-ended-button", selector: ".terminal__exited-actions > button", key: { self: !0, attr: "data-testid" } }], "phone-size": [{ name: "terminal-frame", selector: '[data-testid="persistent-agent-terminal"]' }, { name: "phone-size-notice", selector: '[data-testid="phone-size-notice"]' }, { name: "phone-size-chip", selector: '[data-testid="phone-size-chip"]' }, { name: "phone-size-heading", selector: '[data-testid="phone-size-notice"] span.font-semibold' }, { name: "phone-size-text", selector: '[data-testid="phone-size-notice"] span:not(.font-semibold)' }, { name: "phone-size-fold", selector: '[aria-label="Keep phone size and hide this"]' }, { name: "phone-size-button", selector: '[data-testid="phone-size-notice"] div.flex.flex-wrap > button, [data-testid="phone-size-chip"] > button' }], window: [{ name: "sidebar-card", selector: '[data-testid="sidebar-card"]' }, { name: "main-card", selector: '[data-testid="main-card"]' }, { name: "tools-card", selector: '[data-testid="tools-card"]' }, { name: "sidebar-toggle", selector: '[data-testid="sidebar-collapse-toggle"]' }, { name: "drawer-toggle", selector: '[data-testid="workspace-tools-toggle"]' }, { name: "resize-sidebar", selector: '[data-testid="resize-sidebar"]' }, { name: "resize-tools", selector: '[data-testid="resize-tools"]' }, { name: "tools-tab", selector: 'nav[aria-label="Files, Git and Browser"] > button' }, { name: "status-bar", selector: "footer.status-bar" }], settings: [{ name: "settings-modal", selector: '[data-testid="settings-modal"]' }, { name: "settings-nav-card", selector: '[data-testid="settings-modal"] > nav' }, { name: "settings-close", selector: '[data-testid="settings-close"]' }, { name: "settings-nav", selector: 'nav [data-testid^="settings-nav-"]', key: { self: !0, attr: "data-testid", strip: "settings-nav-" } }, { name: "settings-main-card", selector: '[data-testid="settings-modal"] > main' }, { name: "settings-search", selector: '[data-testid="settings-search"]' }, { name: "settings-title", selector: '[data-testid="settings-modal"] > main h1' }, { name: "settings-body", selector: '[data-testid="settings-modal"] .settings-modal__body' }, { name: "settings-group-title", selector: '[data-testid="settings-modal"] > main h3' }, { name: "settings-group-card", selector: '[data-testid="settings-modal"] > main section > div.rounded-ui' }, { name: "settings-row", selector: '[data-testid="settings-modal"] [data-setting-row]' }, { name: "settings-row-title", selector: '[data-testid="settings-modal"] [data-setting-row] > div:first-child > div:first-child' }, { name: "settings-row-description", selector: '[data-testid="settings-modal"] [data-setting-row] > div:first-child > div:nth-child(2)' }, { name: "settings-result-title", selector: '[data-testid^="settings-result-"] > h2' }], files: [{ name: "files-explorer", selector: '[data-testid="workspace-files-view"]' }, { name: "files-tree", selector: '[data-testid="workspace-file-tree-scroll"]' }, { name: "files-entry", selector: '[data-testid^="workspace-file-entry-"]', key: { self: !0, attr: "data-testid", strip: "workspace-file-entry-" } }, { name: "files-entry-icon", selector: '[data-testid^="workspace-file-entry-"] > svg[data-file-icon]', key: { closest: '[data-testid^="workspace-file-entry-"]', attr: "data-testid", strip: "workspace-file-entry-" } }, { name: "files-entry-name", selector: '[data-testid^="workspace-file-entry-"] > span.flex-1', key: { closest: '[data-testid^="workspace-file-entry-"]', attr: "data-testid", strip: "workspace-file-entry-" } }, { name: "files-pane", selector: '[data-testid="workspace-file-pane"]' }, { name: "files-file-title", selector: ".workspace-files__file-title > span:first-child" }, { name: "files-dirty", selector: '.workspace-files__file-title > span[title="Unsaved changes"]' }, { name: "files-save", selector: ".workspace-files__save" }, { name: "files-markdown-view", selector: '[aria-label="Markdown view"]' }, { name: "files-markdown-preview", selector: '[data-testid="workspace-markdown-preview"]' }, { name: "files-conflict", selector: '[data-testid="workspace-file-conflict"]' }, { name: "files-conflict-title", selector: '[data-testid="workspace-file-conflict"] > strong' }, { name: "files-conflict-action", selector: '[data-testid="workspace-file-conflict"] button' }, { name: "files-editor", selector: '[data-testid="workspace-file-editor-area"]' }, { name: "editor-text", selector: '[data-testid="workspace-file-editor-area"] .cm-scroller' }, { name: "files-asset", selector: '[data-testid="workspace-file-asset"]' }, { name: "files-asset-header", selector: '[data-testid="workspace-file-asset"] > header' }, { name: "files-asset-title", selector: '[data-testid="workspace-file-asset"] > header > strong' }, { name: "files-image-viewer", selector: '[data-testid="workspace-image-viewer"]' }, { name: "files-image-toolbar", selector: '[data-testid="workspace-image-viewer"] > [role="toolbar"]' }, { name: "files-image-status", selector: '[data-testid="workspace-image-info"]' }] };
 export {
-  z4 as NAMED_ELEMENTS,
+  N4 as NAMED_ELEMENTS,
   J0 as React,
   Mb as SCHEMA,
-  S4 as STYLE_KEYS,
-  E4 as describeToGpui,
-  x4 as jsxRuntime,
-  w4 as mount,
-  k4 as reactDom,
-  _4 as sdk
+  E4 as STYLE_KEYS,
+  z4 as describeToGpui,
+  w4 as jsxRuntime,
+  k4 as mount,
+  _4 as reactDom,
+  S4 as sdk
 };
