@@ -24,8 +24,9 @@
 //!
 //! `kit` is `{ div, image }` from `gpui-kit`; `files.icon(id, markup, color)` gives the element that draws an icon's
 //! markup (`currentColor` as `color`; the mod's `perch-react` `Icon`), as gpui-kit's `svg()` and `image()` read
-//! files through an asset source the host may not have. An icon does not follow a hover colour (it is drawn once
-//! per colour it is described with).
+//! files through an asset source the host may not have. An icon is drawn once per colour it is described with; one
+//! under a node whose own `hover:` changes the text colour is drawn twice, the hover copy shown by the engine while the
+//! pointer is over that node (a hover group), so a hover never calls back into the script.
 
 import { ASCENT, DESCENT } from "./describe.mjs";
 
@@ -97,7 +98,7 @@ function pressTarget(handle, id, event) {
  * `~`, the host element's id and its `data-testid` if any, which tests that read named elements leave out. */
 function engineId(node, events, overlay) {
   if (node.name) return node.name;
-  if (!(events.size || node.hover || node.focus || node.active || node.track_hover || overlay)) return null;
+  if (!(events.size || node.hover || node.focus || node.active || (node.track_hover && layoutGroups.has(node.group)) || overlay)) return null;
   const testId = node.meta?.attrs["data-testid"];
   return testId ? `~${node.id}:${testId}` : `~${node.id}`;
 }
@@ -112,18 +113,32 @@ const holdsWrappingText = (node, nested = false) =>
 /** A node the engine draws (display none is left out, so it is neither laid out nor recorded). */
 const drawn = (child) => child.style?.display !== "hidden";
 
+/** The hover groups some descendant shows or hides a box for (`group-hover:flex`): a change of layout, which GPUI
+ * cannot draw from a hover inside the frame that finds it (the box would be painted without being laid out), so the
+ * pointer over such a group is reported to the script, which describes the tree again. Every other group variant is
+ * drawn by the engine alone. Set by `describeToGpui` for the tree it builds. */
+let layoutGroups = new Set();
+function groupsChangingLayout(node, out = new Set()) {
+  for (const { group, style } of node.group_hover ?? []) if ("display" in style) out.add(group);
+  for (const child of node.children ?? []) if (child.kind !== "text") groupsChangingLayout(child, out);
+  return out;
+}
+
 /** One node and its subtree as builder chains. `unseen`: an ancestor is invisible or fully transparent, so its
  * named elements are not shown (the page counts them hidden) and carry no name. */
-export function toGpui(node, kit, handle, files, overlay = false, unseen = false, color = null, text = {}, rowItem = false, snapped = new Map()) {
+export function toGpui(node, kit, handle, files, overlay = false, unseen = false, color = null, text = {}, rowItem = false, snapped = new Map(), hoverIcon = null) {
   if (node.kind === "text") return snapped.get(node)?.text ?? node.text;
   const underPointer = UNDER_POINTER.has(node);
-  unseen ||= node.style.opacity === 0 || node.style.visibility === "invisible";
+  unseen ||= node.style.opacity === 0 || node.style.visibility === "invisible" || node.style.display === "hidden";
   if (unseen && (node.name || node.range_name)) node = { ...node, name: undefined, range_name: undefined, also: undefined };
+  // A colour of its own ends the hover colour of the node around it.
+  if (node.style.text_color !== undefined) hoverIcon = null;
   color = node.style.text_color ?? color;
-  // An icon takes the colour of its text, hover included: a node whose own `hover:` changes the text colour
-  // reports the pointer (`on_hover`), and while it is over the node its icons are drawn in the hover colour.
+  // An icon takes the colour of its text, hover included: under a node whose own `hover:` changes the text colour, it
+  // is also drawn in that colour, shown while the pointer is over the node (the node is a hover group for it).
   const hoverIcons = !!node.hover?.text_color && hasIcon(node);
-  if (hoverIcons && handle.hovered?.(node.id)) color = node.hover.text_color;
+  const group = node.group ?? (hoverIcons ? `~g${node.id}` : null);
+  if (hoverIcons) hoverIcon = { group, color: node.hover.text_color };
   text = { ...text };
   for (const key of ["text_size", "line_height", "whitespace", "text_ellipsis"]) if (node.style[key] !== undefined) text[key] = node.style[key];
   const events = new Set(node.events ?? []);
@@ -131,7 +146,14 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   if (node.kind === "image" && !node.markup) el = kit.image(node.src);
   else el = kit.div();
   // An icon is a box with the icon drawn in it (`svg`: in the colour its text would have, `image`: as drawn).
-  if (node.markup) el = el.child(files.icon(`~icon-${node.id}`, node.markup, node.kind === "svg" ? color : ""));
+  if (node.markup && node.kind === "svg" && hoverIcon && hoverIcon.color !== color) {
+    // Both copies are laid out on the icon's box; the hover only changes which one is painted.
+    const { group: over, color: hovered } = hoverIcon;
+    const layer = () => kit.div().absolute().top(0).left(0).size_full();
+    el = el
+      .child(layer().group_hover(over, (s) => s.invisible()).child(files.icon(`~icon-${node.id}`, node.markup, color)))
+      .child(layer().invisible().group_hover(over, (s) => s.visible()).child(files.icon(`~icon-${node.id}-hover`, node.markup, hovered)));
+  } else if (node.markup) el = el.child(files.icon(`~icon-${node.id}`, node.markup, node.kind === "svg" ? color : ""));
   const id = engineId(node, events, overlay);
   if (id) el = el.id(id);
   // Its laid-out box is kept for the source, which measured it (`HostDocument.measure`).
@@ -148,6 +170,12 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   const wraps = text.whitespace !== "nowrap" && !text.text_ellipsis;
   if (rowItem && wraps && node.style.flex_shrink !== 0 && node.style.min_w === undefined && holdsWrappingText(node)) el = el.min_w(0);
   for (const variant of ["hover", "focus", "active"]) if (node[variant]) el = el[variant]((s) => applyStyle(s, node[variant]));
+  // Hover groups, drawn by the engine from its hitboxes: no script runs when the pointer moves.
+  if (group) el = el.group(group);
+  for (const { group: over, style } of node.group_hover ?? []) {
+    const { display: _layout, ...drawnStyle } = style;
+    if (Object.keys(drawnStyle).length) el = el.group_hover(over, (s) => applyStyle(s, drawnStyle));
+  }
   // `scrollIntoView()`: the scroll area holding the element shows the child it is in. ponytail: the kit's one
   // `ScrollHandle` (`kit.scroll`) serves the first scroll area asked; a second one would need a handle per area.
   if (kit.scroll && (node.style.overflow_x === "scroll" || node.style.overflow_y === "scroll")) {
@@ -233,8 +261,10 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
       });
     }
   }
-  if (events.has("mouse_move")) el = el.on_mouse_move((event, cx) => { handle.dispatch(node.id, "pointermove", { ...point(event), pointerType: "mouse" }); cx.notify(); });
-  if (node.track_hover || hoverIcons) el = el.on_hover((on, cx) => { handle.hover(node.id, on); cx.notify(); });
+  // A move redraws only when the source changed something (a commit asks for its own frame): a listener that only
+  // reads the pointer (a long press measuring how far it moved) costs no new description.
+  if (events.has("mouse_move")) el = el.on_mouse_move((event) => { handle.dispatch(node.id, "pointermove", { ...point(event), pointerType: "mouse" }); });
+  if (node.track_hover && layoutGroups.has(node.group)) el = el.on_hover((on, cx) => { handle.hover(node.id, on); cx.notify(); });
   if (overlay) el = el.on_mouse_down_out((event, cx) => { handle.dispatch(handle.document.body.id, "pointerdown", { ...point(event), pointerType: "mouse" }); handle.dispatch(handle.document.body.id, "mousedown", point(event)); cx.notify(); });
   // A name for the element's own text (a bare text node in the page) goes on a box around that text. A line of
   // text that cannot wrap sits in a box of the CSS line height: GPUI rounds a line height to whole pixels when it
@@ -262,7 +292,7 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   for (const child of (node.children ?? []).filter(drawn)) {
     const basis = child.style?.flex_basis;
     if (indefinite && child.style.flex_grow > 0 && (basis === 0 || (typeof basis === "string" && basis.endsWith("%")))) snapped.set(child, { ...snapped.get(child), flex_basis: "auto" });
-    let built = toGpui(child, kit, handle, files, false, unseen, color, text, row && child.style?.position !== "absolute", snapped);
+    let built = toGpui(child, kit, handle, files, false, unseen, color, text, row && child.style?.position !== "absolute", snapped, hoverIcon);
     const own = !ranged && (child.kind === "text" || !child.meta);
     const lineBox = child.kind === "text" ? (snapped.get(child)?.h ?? line) : null;
     // A line laid on the row's device pixels (`snapRows`) has the width it was given and does not wrap in it.
@@ -329,6 +359,8 @@ export function lineHeightPx(text) {
  */
 export function describeToGpui(description, kit, handle, files, scale = 0, windowLayer = false) {
   const roots = [description.root, ...description.overlays];
+  layoutGroups = new Set();
+  for (const root of roots) groupsChangingLayout(root, layoutGroups);
   const snapped = scale > 0 ? snapColumns(roots, scale) : new Map();
   if (scale > 0 && files.measure) snapRows(roots, scale, files.measure, snapped);
   scrollGutters(roots, snapped);

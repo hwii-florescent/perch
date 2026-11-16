@@ -134,17 +134,23 @@ test("a session row click opens the session through the host", async () => {
   }
 });
 
-test("hovering a project header reveals its row actions (a group variant)", async () => {
+test("hovering a project header reveals its row actions through a hover group the engine draws", async () => {
   const { handle } = await mountSidebar("by-project", "dark");
   try {
     const header = find(handle, "project-header", "p-api");
-    assert.equal(header.node.track_hover, true, "the engine reports hover on the group");
+    const group = header.node.group;
+    assert.ok(group, "the header is a hover group");
+    assert.ok(!(header.node.events ?? []).includes("hover"), "the pointer is not reported to the script");
+    // The description as the engine draws it while the pointer is over the group: every `group_hover` of it applied.
+    const over = (node) => node.kind === "text" ? node : {
+      ...node,
+      style: { ...node.style, ...Object.assign({}, ...(node.group_hover ?? []).filter((g) => g.group === group).map((g) => g.style)) },
+      children: (node.children ?? []).map(over),
+    };
     const before = namedInstances(tree(handle.description)).hiddenCounts["project-menu-button"];
-    handle.hover(header.node.id, true);
-    const after = namedInstances(tree(handle.description)).hiddenCounts["project-menu-button"];
-    assert.equal(after, before - 1, "the hovered project's menu button shows");
-    handle.hover(header.node.id, false);
-    assert.equal(namedInstances(tree(handle.description)).hiddenCounts["project-menu-button"], before);
+    const hovered = namedInstances(tree({ ...handle.description, root: over(handle.description.root) }));
+    assert.equal(hovered.hiddenCounts["project-menu-button"] ?? 0, before - 1, "the hovered project's menu button shows");
+    assert.equal(namedInstances(tree(handle.description)).hiddenCounts["project-menu-button"], before, "at rest it stays hidden");
   } finally {
     handle.unmount();
   }

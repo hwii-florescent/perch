@@ -566,6 +566,11 @@ export class StyleSheet {
     return out;
   }
 
+  /** Whether a rule that may match `element` reads interaction `state` on one of its ancestors (`group-hover:`). */
+  readsAncestor(element, state) {
+    return this.candidates(element).some((rule) => rule.states.ancestor.has(state));
+  }
+
   /** Whether `element` carries a class whose interaction state some rule reads on an ancestor. */
   tracks(element, state) {
     for (const cls of element.classList) if (this.trackedStates.has(`${state}:${cls}`)) return true;

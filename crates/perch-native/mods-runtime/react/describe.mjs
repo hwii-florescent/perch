@@ -6,7 +6,9 @@
 //! the class that asked for it and the element; nothing is dropped silently.
 //!
 //! Node shapes (`id` is the host element's, the one `dispatch`/`hover`/`perch.bounds` take):
-//! - `{ kind: "div", id, style, hover?, focus?, active?, tokens, events, track_hover?, meta, children }`
+//! - `{ kind: "div", id, style, hover?, focus?, active?, group?, group_hover?, track_hover?, tokens, events, meta,
+//!   children }` (`group`: the hover group the element is, `track_hover` with it; `group_hover`:
+//!   `[{ group, style, tokens? }]`, its styles while that ancestor group is under the pointer)
 //! - `{ kind: "text", text, source? }` (`source`: the text before `text-transform`)
 //! - `{ kind: "svg", id, markup, style, ... }` (tinted with the text colour) and `{ kind: "image", markup }` (as drawn)
 //! - `{ kind: "input", id, value, placeholder, checked, input_type, style, ... }` (`value`: what the field holds,
@@ -505,7 +507,33 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
       if (Object.keys(changedTokens).length) extra[`${key}_tokens`] = changedTokens;
     }
   }
-  if (ctx.cascade.sheet.tracks(element, "hover")) extra.track_hover = true;
+  // Hover groups: an element whose hover a rule reads (`group/row`) names a group, and a descendant those rules style
+  // (`group-hover/row:opacity-100`) carries what it looks like while each such ancestor is under the pointer. The engine
+  // draws both from its hitboxes (`group`, `group_hover`), so moving the pointer runs no script and describes nothing.
+  // A variant that shows or hides a box (`group-hover:flex`) changes the layout, which the engine cannot do from a hover
+  // inside one frame: for such a group the translator still reports the pointer (`track_hover`), and the description
+  // follows the group's `:hover` state (`handle.hover`).
+  // ponytail: the variant is computed against the parent's resting style, so a value the hovered parent would pass
+  // down by inheritance alone (a `group-hover:text-*` on a box between the group and this text) is not followed.
+  if (ctx.cascade.sheet.tracks(element, "hover")) {
+    extra.group = groupName(element);
+    extra.track_hover = true;
+  }
+  if (ctx.cascade.sheet.readsAncestor(element, "hover")) {
+    for (let group = element.parentNode; group?.state; group = group.parentNode) {
+      if (!ctx.cascade.sheet.tracks(group, "hover")) continue;
+      const was = group.state.hover;
+      group.state.hover = true;
+      let variant;
+      try { variant = ctx.cascade.compute(element, parentComputed); } finally { group.state.hover = was; }
+      const vTokens = {};
+      const vStyle = encode({ ...boxStyle(variant, () => {}), ...textStyle(variant, textWanted(variant, ctx.measure), inheritedText) }, vTokens);
+      const changed = diff(style, vStyle);
+      if (!Object.keys(changed).length) continue;
+      const changedTokens = Object.fromEntries(Object.entries(vTokens).filter(([k]) => k in changed));
+      (extra.group_hover ??= []).push({ group: groupName(group), style: changed, ...(Object.keys(changedTokens).length ? { tokens: changedTokens } : {}) });
+    }
+  }
   // Digits drawn at one width (`tabular-nums`, which the engine cannot draw): the text's width is not the engine's.
   if (/tabular/.test(String(computed.values["font-variant-numeric"] ?? ""))) extra.tabular = true;
   // A word too long for its line is broken anywhere (`overflow-wrap: anywhere` / `break-word`).
@@ -525,6 +553,9 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
   if (events.length) extra.events = events;
   return { computed, style, tokens, extra, meta: meta(element), reports, childText: inheritText(inheritedText, ownText), where, shift };
 }
+
+/** The engine's name for the hover group `element` is (one per element, as CSS reads the hovered element itself). */
+const groupName = (element) => `~g${element.id}`;
 
 /** One described subtree. `chain` names the element's ancestors with their versions. */
 function describeElement(element, parentComputed, inheritedText, ctx, chain = "") {
