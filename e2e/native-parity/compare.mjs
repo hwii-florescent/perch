@@ -13,7 +13,11 @@
 //!     weight and line height are exact, and width is within 2 px or 3 % of the web width, whichever is larger. Every
 //!     width difference of such an element is listed, passing or not.
 //! Not gated, only reported: colours that come from no token, text differences, fonts of other elements, and the pixel
-//! difference between the two PNGs (plus a side-by-side image, written to --out). Exits 1 when any state fails.
+//! difference between the two PNGs (plus a side-by-side image, written to --out).
+//!
+//! Accepted failures: `accepted-failures.json` beside this file (or `--accepted <file>`) lists failing states by label
+//! (`screen/state/theme`) with a reason. Exits 1 when a state fails that is not listed, or when a listed state was
+//! compared and now passes (take it off the list). Listed states that were not compared in this run are ignored.
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -190,20 +194,23 @@ export function compareFiles({ webJson, nativeJson, webPng, nativePng, outDir })
 }
 
 /** The Markdown report for any number of states. */
-export function report(results) {
+export function report(results, verdict = judge(results, new Map())) {
   const out = [];
   const failed = results.filter((r) => !r.pass);
-  out.push(`# Native parity: ${failed.length ? `FAIL (${failed.length} of ${results.length} states)` : `PASS (${results.length} states)`}`, "");
+  const accepted = failed.length - verdict.unlisted.length;
+  out.push(`# Native parity: ${verdict.ok ? "PASS" : "FAIL"} (${results.length - failed.length} of ${results.length} states pass, ${accepted} failing accepted, ${verdict.unlisted.length} failing not accepted, ${verdict.nowPassing.length} accepted but now passing)`, "");
+  if (verdict.unlisted.length) out.push(`Failing and not accepted: ${verdict.unlisted.join(", ")}.`, "");
+  if (verdict.nowPassing.length) out.push(`Accepted but now passing (take them off the accepted list): ${verdict.nowPassing.join(", ")}.`, "");
   out.push(table(
     ["State", "Gate", "Elements web/native", "Missing", "Extra", "Failed checks", "Pixels differing", "Side by side"],
     results.map((r) => [
-      r.label, r.pass ? "PASS" : "FAIL", `${r.counts.web}/${r.counts.native}`, r.counts.missing, r.counts.extra, r.failures.length,
+      r.label, r.pass ? "PASS" : verdict.accepted.has(r.label) ? "FAIL (accepted)" : "FAIL", `${r.counts.web}/${r.counts.native}`, r.counts.missing, r.counts.extra, r.failures.length,
       r.pixels ? `${r.pixels.percent.toFixed(2)}% (${r.pixels.differing} of ${r.pixels.total}, mean ${r.pixels.meanAbs.toFixed(2)}/255${r.pixels.sizeMatch ? "" : `, SIZE web ${r.pixels.web} native ${r.pixels.native}`})` : r.pixelNote || "n/a",
       r.sideBySide ?? "-",
     ]),
   ), "");
   for (const r of results) {
-    out.push(`## ${r.label}: ${r.pass ? "PASS" : "FAIL"}`, "");
+    out.push(`## ${r.label}: ${r.pass ? "PASS" : verdict.accepted.has(r.label) ? `FAIL (accepted: ${verdict.accepted.get(r.label)})` : "FAIL"}`, "");
     if (r.failures.length) out.push(table(["Element", "Check", "Web", "Native", "Detail"], r.failures.map((f) => [f.id, f.check, f.web, f.native, f.detail])), "");
     if (r.widths.length) out.push("Width differences of text-sized elements (every one, gated or not):", "", table(
       ["Element", "Web width", "Native width", "Delta px", "Delta %", "Allowed px", "Result"],
@@ -219,6 +226,27 @@ export function report(results) {
   return out.join("\n");
 }
 
+const DEFAULT_ACCEPTED = path.join(path.dirname(fileURLToPath(import.meta.url)), "accepted-failures.json");
+
+/** Accepted failures by label, from `{ "accepted": [{ "state": "screen/state/theme", "reason": "..." }] }`. */
+export function loadAccepted(file) {
+  const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+  const out = new Map();
+  for (const entry of doc.accepted ?? []) {
+    if (typeof entry.state !== "string" || typeof entry.reason !== "string" || !entry.reason.trim()) throw new Error(`${file}: every entry needs a state and a reason`);
+    if (out.has(entry.state)) throw new Error(`${file}: ${entry.state} is listed twice`);
+    out.set(entry.state, entry.reason);
+  }
+  return out;
+}
+
+/** The exit verdict: failing states not on the list, and listed states compared in this run that now pass. */
+export function judge(results, accepted) {
+  const unlisted = results.filter((r) => !r.pass && !accepted.has(r.label)).map((r) => r.label);
+  const nowPassing = results.filter((r) => r.pass && accepted.has(r.label)).map((r) => r.label);
+  return { ok: unlisted.length === 0 && nowPassing.length === 0, unlisted, nowPassing, accepted };
+}
+
 function parseArgs(argv) {
   const args = {};
   for (let i = 0; i < argv.length; i += 2) {
@@ -229,11 +257,13 @@ function parseArgs(argv) {
   return args;
 }
 
-const USAGE = "usage: compare.mjs --web <web.json> --native <native.json> [--web-png p] [--native-png p] [--out dir]\n       compare.mjs --web-dir <dir> --native-dir <dir> [--out dir]";
+const USAGE = "usage: compare.mjs --web <web.json> --native <native.json> [--web-png p] [--native-png p] [--out dir] [--accepted file]\n       compare.mjs --web-dir <dir> --native-dir <dir> [--out dir] [--accepted file]";
 
 export function main(argv) {
   let args;
   try { args = parseArgs(argv); } catch (error) { console.error(`${error.message}\n${USAGE}`); return 2; }
+  let accepted;
+  try { accepted = args.accepted || fs.existsSync(DEFAULT_ACCEPTED) ? loadAccepted(args.accepted ?? DEFAULT_ACCEPTED) : new Map(); } catch (error) { console.error(error.message); return 2; }
   const out = args.out ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../artifacts-native-parity/compare");
   const jobs = [];
   if (args["web-dir"] && args["native-dir"]) {
@@ -249,11 +279,12 @@ export function main(argv) {
   const results = jobs.map((job) => {
     try { return compareFiles(job); } catch (error) {
       // A missing or unreadable native output is a failed state, not a crash.
-      return { label: job.label, pass: false, failures: [{ id: "document", check: "readable", web: job.webJson, native: job.nativeJson, detail: error.message }], widths: [], info: { textDiffs: [], colourDiffs: 0, fontDiffs: 0 }, counts: { web: 0, native: 0, missing: 0, extra: 0 }, pixels: null, pixelNote: "" };
+      return { label: job.label.replace(/^([^.]+)\.(.+)\.(dark|light)$/, "$1/$2/$3"), pass: false, failures: [{ id: "document", check: "readable", web: job.webJson, native: job.nativeJson, detail: error.message }], widths: [], info: { textDiffs: [], colourDiffs: 0, fontDiffs: 0 }, counts: { web: 0, native: 0, missing: 0, extra: 0 }, pixels: null, pixelNote: "" };
     }
   });
-  console.log(report(results));
-  return results.every((r) => r.pass) ? 0 : 1;
+  const verdict = judge(results, accepted);
+  console.log(report(results, verdict));
+  return verdict.ok ? 0 : 1;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = main(process.argv.slice(2));
