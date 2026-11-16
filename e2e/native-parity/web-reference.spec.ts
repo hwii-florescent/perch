@@ -17,7 +17,7 @@ const TOKENS = ["accent", "panel-bg", "surface-0", "surface-1", "surface-dim", "
 
 interface KeySpec { self?: boolean; closest?: string; find?: string; attr: string; strip?: string }
 interface ElementDef {
-  name: string; selector: string; description: string; textSized?: boolean; text?: boolean; textRange?: boolean; hoverOnly?: boolean; key?: KeySpec;
+  name: string; selector: string; description: string; textSized?: boolean; font?: boolean; text?: boolean; textRange?: boolean; hoverOnly?: boolean; key?: KeySpec;
 }
 /** `root`: the box boxes are measured against. `scope`: where elements are looked for when that is not inside the root
  * (a floating screen draws through a portal into `<body>`). `overflow`: boxes that must not scroll in the reference.
@@ -175,7 +175,7 @@ function measure({ rootSelector, scopeSelector, overflowSelectors, defs, tokens 
     const cs = getComputedStyle(el);
     const colors: Record<string, { value: string; token: string | null }> = {};
     for (const [prop, value] of Object.entries(real[at]!)) colors[prop] = { value, token: provenance[at]![prop] ?? null };
-    const withText = def.text || def.textSized;
+    const withText = def.text || def.textSized || def.font;
     const lineHeight = lineHeightOf(cs);
     return {
       name: def.name,
@@ -183,6 +183,7 @@ function measure({ rootSelector, scopeSelector, overflowSelectors, defs, tokens 
       index,
       box: { x: round(box.left - rootBox.left), y: round(box.top - rootBox.top), width: round(box.width), height: round(box.height) },
       textSized: !!def.textSized,
+      ...(def.font ? { fontGated: true } : {}),
       ...(opacityOf(el) < 1 ? { opacity: opacityOf(el) } : {}),
       ...(text !== undefined ? { text } : {}),
       ...((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && el.placeholder ? { placeholder: el.placeholder } : {}),

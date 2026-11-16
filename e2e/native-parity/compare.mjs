@@ -11,7 +11,9 @@
 //!   - every colour the web side took from a theme token is identical (`#rrggbbaa`), and the token table is identical;
 //!   - for a `textSized` element (its width comes from its own text) x, y and height are within 2 px, font family, size,
 //!     weight and line height are exact, and width is within 2 px or 3 % of the web width, whichever is larger. Every
-//!     width difference of such an element is listed, passing or not.
+//!     width difference of such an element is listed, passing or not;
+//!   - for a `fontGated` element (`font: true` in the names: text an engine draws, as the file editor's) font family,
+//!     size, weight and line height are exact.
 //! Not gated, only reported: colours that come from no token, text differences, fonts of other elements, and the pixel
 //! difference between the two PNGs (plus a side-by-side image, written to --out).
 //!
@@ -101,6 +103,8 @@ export function compareDocs(web, native) {
       const ok = Math.abs(delta) <= allowed + 1e-9;
       if (Math.abs(delta) >= NUMBER_EPSILON / 2) widths.push({ id, web: w.box.width, native: n.box.width, delta, percent: w.box.width ? (delta / w.box.width) * 100 : 0, allowed, ok });
       if (!ok) fail(id, "text width", fmt(w.box.width), fmt(n.box.width), `${signed(delta)} px, allowed ${fmt(allowed)}`);
+    }
+    if (w.textSized || w.fontGated) {
       if (!w.font) continue;
       if (!n.font) { fail(id, "font", JSON.stringify(w.font), "missing"); continue; }
       const bad = [];

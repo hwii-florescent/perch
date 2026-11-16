@@ -541,5 +541,10 @@ if (screen.after) {
   Object.assign((window as unknown as { __PARITY_SDK__: Json }).__PARITY_SDK__, JSON.parse(JSON.stringify(extra)));
 }
 await new Promise<void>((resolve) => setTimeout(resolve, 250));
+// The file editor (CodeMirror) is loaded with the first file opened: a state showing one waits for it (its text's
+// font is measured), at most a few seconds.
+for (let waited = 0; waited < 5000 && document.querySelector('[data-testid="workspace-file-editor-area"]') && !document.querySelector('[data-testid="workspace-file-editor-area"] .cm-scroller'); waited += 50) {
+  await new Promise<void>((resolve) => setTimeout(resolve, 50));
+}
 await frames();
 (window as unknown as { __PARITY_READY__: boolean }).__PARITY_READY__ = true;

@@ -1,6 +1,6 @@
 {
   "schema": "perch-native-parity-named-elements/1",
-  "note": "Selectors are evaluated with document.querySelectorAll on the web page (each resolves from the rendered stock source: test ids, classes and structure that already exist). A native renderer ignores them and emits the same names and keys. Fields: name, selector, description; textSized (width comes from the element's own text); text (record the element's text); textRange (box is the element's own text node, for a label that is a bare text node); hoverOnly (drawn only on hover: recorded only when visible); key (how an instance is told apart: the attribute of the element itself, its closest ancestor, or a descendant, with a prefix stripped), else the instance's index among its name.",
+  "note": "Selectors are evaluated with document.querySelectorAll on the web page (each resolves from the rendered stock source: test ids, classes and structure that already exist). A native renderer ignores them and emits the same names and keys. Fields: name, selector, description; textSized (width comes from the element's own text); font (its font is gated though its width is not its text's: text an engine draws); text (record the element's text); textRange (box is the element's own text node, for a label that is a bare text node); hoverOnly (drawn only on hover: recorded only when visible); key (how an instance is told apart: the attribute of the element itself, its closest ancestor, or a descendant, with a prefix stripped), else the instance's index among its name.",
   "screens": {
     "sidebar": {
       "root": "aside.sidebar",
@@ -3073,6 +3073,12 @@
           "name": "files-editor",
           "selector": "[data-testid=\"workspace-file-editor-area\"]",
           "description": "The editor's box (CodeMirror on the web, the editor engine natively): gated on its box only."
+        },
+        {
+          "name": "editor-text",
+          "selector": "[data-testid=\"workspace-file-editor-area\"] .cm-scroller",
+          "description": "The editor's text: CodeMirror's scroller on the web, the editor engine's text natively. Its font is gated: family, size and line height (12px on 1.5 lines on a Mac).",
+          "font": true
         },
         {
           "name": "files-asset",

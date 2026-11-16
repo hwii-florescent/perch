@@ -432,6 +432,8 @@ cargo test -p perch-native --test workspace_shell   # the window shell: backdrop
 cargo test -p perch-native --test mods_chrome_screens_window  # the stock screens in the real window, offscreen; Settings: Cmd+, opens the web's page, a Keyboard binding changed there changes what the window does for that key, Escape clears the search, then closes
 cargo test -p perch-native --test context_bridge_window  # Context Bridge in the real window against an isolated core: the terminal selection's Ask agent menu (not the pane menu), the dialog's preview by the core, one send on the target terminal's own connection (a plain shell, which the core refuses; no agent runs), a second send refused, the Files entry's Ask agent
 PERCH_PARITY_SCREENS=settings cargo test -p perch-native --test mods_chrome_capture  # draws the named screens (default: all) in both themes into e2e/artifacts-native-parity/native for `node e2e/native-parity/compare.mjs`
+cargo test -p perch-native --test files_drawer      # the drawer's Files tab in a window of 12 projects and 44 sessions: one explorer commit cut past its script budget, busy sessions, the drawer closed and opened; the rows must come back (PERCH_DRAWER_SHOTS=dir saves a frame that has none)
+cargo test -p perch-native --test files_drawer_core # the same drawer against a real core: a clone of this repository, plain shells printing in it
 cargo test -p perch-native --test terminal_session  # a real core as a child process
 cargo test -p perch-native --test workspace_session # two shells in a split against a real core, and the settings round trip
 ```
@@ -450,7 +452,8 @@ sets line heights in half pixels). Permissions and Mods are "Open in Perch" hand
 The gate (`node e2e/native-parity/compare.mjs --web-dir e2e/artifacts-native-parity/web --native-dir
 e2e/artifacts-native-parity/native`) exits 1 on any failing state that `e2e/native-parity/accepted-failures.json` does not
 list (by `screen/state/theme`, each with its reason), and on a listed state that now passes, so the list only shrinks.
-Add a state to the list only with the reason it is accepted; `npm run parity:selftest` in `e2e` tests these rules.
+A name marked `font` (the file editor's `editor-text`, drawn by the editor engine natively and by CodeMirror on the
+web) has its font family, size, weight and line height gated too. Add a state to the list only with the reason it is accepted; `npm run parity:selftest` in `e2e` tests these rules.
 It also fails every state of the state list (`e2e/native-parity/screens.json` and each screen's fixture states, both
 themes; `PARITY_SCREENS` for a part) that has no web reference, which cannot be accepted: make the references in the
 checkout under test with `npm run parity:web` rather than copying another worktree's set, which misses newer states.
