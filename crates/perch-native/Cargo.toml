@@ -21,7 +21,7 @@ anyhow = "1"
 # Reads the bundled symbols font's glyph outlines, the version GPUI's text system uses.
 ttf-parser = "0.25"
 # The version GPUI uses, for the frames it draws and the PNG images kitty graphics send.
-image = { version = "0.25", default-features = false, features = ["png", "tiff", "bmp"] }
+image = { version = "0.25", default-features = false, features = ["png", "tiff", "bmp", "jpeg", "gif", "webp", "ico"] }
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -35,6 +35,13 @@ gpui-shell = { path = "../../vendor/gpui-kit/crates/shell" }
 gpui-base = { path = "../../vendor/gpui-kit/crates/base" }
 # The version GPUI rasterises SVGs with: an icon's size is read before it is drawn.
 usvg = { version = "0.46", default-features = false }
+
+# Quick Look: the versions GPUI's macOS platform already builds.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSURL", "NSObject"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSResponder"] }
+raw-window-handle = "0.6"
 
 [dev-dependencies]
 libc = "0.2"
@@ -161,4 +168,9 @@ harness = false
 [[test]]
 name = "workspace_offline_window"
 path = "tests/workspace_offline_window.rs"
+harness = false
+
+[[test]]
+name = "files_media"
+path = "tests/files_media.rs"
 harness = false
