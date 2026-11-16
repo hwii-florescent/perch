@@ -39,6 +39,8 @@ syntect = { version = "5.3.0", default-features = false, features = ["parsing", 
 usvg = { version = "0.46", default-features = false }
 # WHATWG URL parsing for browser pages' addresses, the version GPUI already builds.
 url = "2"
+# Mod hot reload: the system's file events (FSEvents), the version herdr-app's gpui-kit names.
+notify = "8.2"
 
 # Browser pages: a WebKit child view (the version the Tauri app locks), with the AppKit calls wry does not make.
 # Quick Look: the Foundation and AppKit versions GPUI's macOS platform already builds.

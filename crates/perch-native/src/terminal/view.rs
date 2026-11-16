@@ -308,7 +308,8 @@ pub struct TerminalView {
     /// The blinking cursor is in its visible half.
     blink_on: bool,
     cursor_blinks: bool,
-    _blink: Task<()>,
+    /// Flips `blink_on`, only while the cursor blinks in a focused pane on screen.
+    blink: Option<Task<()>>,
     /// Lay the pane out afresh once, whatever holds the size: the font changed.
     refit: bool,
     /// The window's zoom: what the font and the padding are multiplied by.
@@ -392,12 +393,7 @@ impl TerminalView {
             epoch: Instant::now(),
             blink_on: true,
             cursor_blinks: false,
-            _blink: cx.spawn(async move |this, cx| loop {
-                cx.background_executor().timer(BLINK_HALF_PERIOD).await;
-                if this.update(cx, |this, cx| this.blink_tick(cx)).is_err() {
-                    return;
-                }
-            }),
+            blink: None,
             cursor_cell: None,
             buttons_down: Vec::new(),
             was_focused: false,
@@ -676,6 +672,29 @@ impl TerminalView {
             self.blink_on = true;
             cx.notify();
         }
+    }
+
+    /// Runs the blink timer while the cursor blinks in a focused pane on screen, and stops it
+    /// (the cursor stays on) otherwise, so an idle terminal wakes nothing.
+    fn sync_blink(&mut self, cx: &mut Context<Self>) {
+        if !(self.cursor_blinks && self.was_focused && !self.hidden) {
+            self.blink = None;
+            self.blink_on = true;
+            return;
+        }
+        if self.blink.is_none() {
+            self.blink = Some(cx.spawn(async move |this, cx| loop {
+                cx.background_executor().timer(BLINK_HALF_PERIOD).await;
+                if this.update(cx, |this, cx| this.blink_tick(cx)).is_err() {
+                    return;
+                }
+            }));
+        }
+    }
+
+    /// Whether the blink timer runs (for tests that check an idle pane wakes nothing).
+    pub fn blinking(&self) -> bool {
+        self.blink.is_some()
     }
 
     /// The grid the screen is at: the size the core last gave it.
@@ -1935,6 +1954,7 @@ impl TerminalView {
                 self.send(ToCore::Input(b"\x1b[O".to_vec()));
             }
         }
+        self.sync_blink(cx);
         cx.notify();
     }
 
@@ -2112,6 +2132,7 @@ impl TerminalView {
         let frame_cursor_cell = frame.cursor_cell;
         self.cursor_cell = frame.cursor_cell;
         self.cursor_blinks = frame.cursor.is_some_and(|c| c.blink);
+        self.sync_blink(cx);
         Painted {
             frame,
             metrics: fit.metrics,

@@ -345,6 +345,10 @@ fn main() {
     );
 
     run("colours_and_cursor", || colours_and_cursor(bg, fg));
+    run(
+        "blink_timer_only_while_blinking",
+        blink_timer_only_while_blinking,
+    );
     run("attributes", || attributes(bg, fg));
     run("wide_and_emoji", || wide_and_emoji(bg));
     run("resize_authority", resize_authority);
@@ -856,6 +860,36 @@ fn find_in_the_pane() {
     // The bar itself is the terminal-search stock screen over the pane, covered by the chrome
     // window test; the view draws nothing of its own for it.
     h.draw();
+}
+
+/// A blinking cursor wakes the view only while its pane is focused and on screen.
+fn blink_timer_only_while_blinking() {
+    let mut h = Harness::open(400.0, 120.0);
+    h.attach(20, 4, "\x1b[1 qHello");
+    h.draw();
+    assert!(
+        !h.view(|v, _| v.blinking()),
+        "an unfocused pane wakes nothing"
+    );
+    h.focus();
+    h.draw();
+    assert!(
+        h.view(|v, _| v.blinking()),
+        "a focused blinking cursor blinks"
+    );
+    h.view(|v, cx| v.set_visible(false, cx));
+    assert!(
+        !h.view(|v, _| v.blinking()),
+        "a pane off screen wakes nothing"
+    );
+    h.view(|v, cx| v.set_visible(true, cx));
+    h.focus();
+    h.output("\x1b[2 q");
+    h.draw();
+    assert!(
+        !h.view(|v, _| v.blinking()),
+        "a steady cursor wakes nothing"
+    );
 }
 
 /// Backgrounds, foregrounds, inverse and the cursor in each shape and focus.
