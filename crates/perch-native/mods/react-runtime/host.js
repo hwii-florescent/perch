@@ -36,6 +36,7 @@ import { Icon, bounds, forgetBounds, probing, textWidth } from "perch-react";
 import * as engines from "perch-engine";
 import * as editors from "perch-editor";
 import * as media from "perch-media";
+import * as markdown from "perch-markdown";
 import { ICONS, LETTERS, LETTER } from "./agent-icons.js";
 
 export const INERT = [
@@ -428,6 +429,8 @@ export function copyFor(cx, screen) {
     // `FileAsset`: a file's folder on this computer and its extraction, and `perch-media` (images, Quick Look).
     mediaFile: (workspaceId, path) => snapshot(`mediaFile:${workspaceId}\n${path}`, () => perch.mediaFile(workspaceId, path)),
     media,
+    // `MarkdownPreview`: the window's Markdown engine (`perch-markdown`).
+    markdown,
     statusLine: () => snapshot("statusLine", () => perch.statusLine()),
     zoom: () => snapshot("zoom", () => perch.zoom()),
     paneLook: () => snapshot("paneLook", () => perch.paneLook()),

@@ -432,7 +432,8 @@ cargo test -p perch-native --test workspace_shell   # the window shell: backdrop
 cargo test -p perch-native --test mods_chrome_screens_window  # the stock screens in the real window, offscreen; Settings: Cmd+, opens the web's page, a Keyboard binding changed there changes what the window does for that key, Escape clears the search, then closes
 cargo test -p perch-native --test context_bridge_window  # Context Bridge in the real window against an isolated core: the terminal selection's Ask agent menu (not the pane menu), the dialog's preview by the core, one send on the target terminal's own connection (a plain shell, which the core refuses; no agent runs), a second send refused, the Files entry's Ask agent
 PERCH_PARITY_SCREENS=settings cargo test -p perch-native --test mods_chrome_capture  # draws the named screens (default: all) in both themes into e2e/artifacts-native-parity/native for `node e2e/native-parity/compare.mjs`
-cargo test -p perch-native --test files_drawer      # the drawer's Files tab in a window of 12 projects and 44 sessions: one explorer commit cut past its script budget, busy sessions, the drawer closed and opened; the rows must come back (PERCH_DRAWER_SHOTS=dir saves a frame that has none)
+cargo test -p perch-native --test files_drawer      # the drawer's Files tab in a window of 12 projects and 44 sessions: one explorer commit cut past its script budget, busy sessions, the drawer closed and opened; the rows must come back; then a file's editor commit is cut and must start afresh without a change to its files (the mods are watched as the app's, no poll) (PERCH_DRAWER_SHOTS=dir saves a frame that has none)
+cargo test --release -p perch-native --test files_markdown_window  # the owner's steps with docs/ARCHITECTURE.md and the 106 KB docs/UI-UX-DIRECTION.md: open from the drawer, scroll, Preview, scroll, Source, clicks, Preview and Source again, close, drawer closed and opened; no copy of Files may be stopped or fail (PERCH_MD_FILES=a,b picks documents, PERCH_MD_SHOTS=dir saves every step)
 cargo test -p perch-native --test files_drawer_core # the same drawer against a real core: a clone of this repository, plain shells printing in it
 cargo test -p perch-native --test terminal_session  # a real core as a child process
 cargo test -p perch-native --test workspace_session # two shells in a split against a real core, and the settings round trip
@@ -442,6 +443,8 @@ The React runtime's own tests (`npm run test:mods-runtime`) compare its descript
 same screens, so they need the web references first: `(cd e2e && npm ci && npx playwright install webkit && npm run
 parity:web)` writes `e2e/artifacts-native-parity/web/` (headless WebKit, about a minute; ignored by git). Without
 them the comparing tests fail and say so.
+
+A Markdown file's Preview is drawn by the window's Markdown engine (`src/files/markdown.rs`, gpui-base's `TextView`), not by runtime elements: the runtime has no inline formatting, so a sentence with inline code could not wrap, and a long document was more script than a call may take. Its parity state is `files/markdown-preview`; the preview's box is gated, its text is compared by pixels only. Known difference: a table fills the column (the web's is as wide as its content).
 
 Settings (`mods/settings`) is the web's page on the React runtime, saving through the core. Its parity states are
 `e2e/native-parity/fixtures/settings.json` (web side: `PARITY_SCREENS=settings npm run parity:web` in `e2e`). Known

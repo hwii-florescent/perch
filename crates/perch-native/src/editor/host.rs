@@ -593,7 +593,8 @@ impl Editors {
         self.0.borrow_mut().zoom = Some(zoom);
     }
 
-    fn zoom(&self) -> f32 {
+    /// The window's zoom (1 is 100%).
+    pub fn zoom(&self) -> f32 {
         self.0.borrow().zoom.unwrap_or(1.)
     }
 

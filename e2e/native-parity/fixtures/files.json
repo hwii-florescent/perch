@@ -345,6 +345,138 @@
       }
     },
     {
+      "id": "markdown-preview",
+      "title": "docs/notes.md in its tab with Preview pressed: the rendered document (headings, inline code, a link, lists, a quote, a code block, a table, a rule) in place of the editor",
+      "size": {
+        "width": 760,
+        "height": 560
+      },
+      "props": {
+        "layout": "editor",
+        "initialPath": "docs/notes.md"
+      },
+      "view": {
+        "workspace": "w-perch-main",
+        "files": {
+          "trees": {
+            "": {
+              "workspaceId": "w-perch-main",
+              "path": "",
+              "entries": [
+                {
+                  "name": "docs",
+                  "path": "docs",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "src",
+                  "path": "src",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": ".gitignore",
+                  "path": ".gitignore",
+                  "kind": "file",
+                  "size": 24,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "Cargo.toml",
+                  "path": "Cargo.toml",
+                  "kind": "file",
+                  "size": 412,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "README.md",
+                  "path": "README.md",
+                  "kind": "file",
+                  "size": 1260,
+                  "readonly": false,
+                  "executable": false
+                }
+              ],
+              "truncated": false,
+              "state": "ready"
+            },
+            "src": {
+              "workspaceId": "w-perch-main",
+              "path": "src",
+              "entries": [
+                {
+                  "name": "ui",
+                  "path": "src/ui",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "lib.rs",
+                  "path": "src/lib.rs",
+                  "kind": "file",
+                  "size": 2048,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "main.rs",
+                  "path": "src/main.rs",
+                  "kind": "file",
+                  "size": 318,
+                  "readonly": false,
+                  "executable": false
+                }
+              ],
+              "truncated": false,
+              "state": "ready"
+            }
+          },
+          "documents": {
+            "docs/notes.md": {
+              "workspaceId": "w-perch-main",
+              "path": "docs/notes.md",
+              "metadata": {
+                "path": "docs/notes.md",
+                "name": "notes.md",
+                "size": 425,
+                "readonly": false,
+                "executable": false,
+                "kind": "file",
+                "mediaType": "text/markdown"
+              },
+              "content": "# Perch notes\n\nA paragraph with **bold**, *emphasis*, `inline code` and [a link](https://perch.dev) that runs long enough to wrap onto a second line in the pane, as the repository's docs do.\n\n## Lists\n\n- First item with `code`\n- Second item\n  - Nested item\n\n1. One\n2. Two\n\n> A quoted line.\n\n```rust\nfn main() {\n    println!(\"perch\");\n}\n```\n\n| Name | Kind |\n| :- | -: |\n| perch-core | crate |\n| web | package |\n\n---\n\nThe end.\n",
+              "savedContent": "# Perch notes\n\nA paragraph with **bold**, *emphasis*, `inline code` and [a link](https://perch.dev) that runs long enough to wrap onto a second line in the pane, as the repository's docs do.\n\n## Lists\n\n- First item with `code`\n- Second item\n  - Nested item\n\n1. One\n2. Two\n\n> A quoted line.\n\n```rust\nfn main() {\n    println!(\"perch\");\n}\n```\n\n| Name | Kind |\n| :- | -: |\n| perch-core | crate |\n| web | package |\n\n---\n\nThe end.\n",
+              "version": "v1",
+              "persistedContent": "# Perch notes\n\nA paragraph with **bold**, *emphasis*, `inline code` and [a link](https://perch.dev) that runs long enough to wrap onto a second line in the pane, as the repository's docs do.\n\n## Lists\n\n- First item with `code`\n- Second item\n  - Nested item\n\n1. One\n2. Two\n\n> A quoted line.\n\n```rust\nfn main() {\n    println!(\"perch\");\n}\n```\n\n| Name | Kind |\n| :- | -: |\n| perch-core | crate |\n| web | package |\n\n---\n\nThe end.\n",
+              "baseContent": "# Perch notes\n\nA paragraph with **bold**, *emphasis*, `inline code` and [a link](https://perch.dev) that runs long enough to wrap onto a second line in the pane, as the repository's docs do.\n\n## Lists\n\n- First item with `code`\n- Second item\n  - Nested item\n\n1. One\n2. Two\n\n> A quoted line.\n\n```rust\nfn main() {\n    println!(\"perch\");\n}\n```\n\n| Name | Kind |\n| :- | -: |\n| perch-core | crate |\n| web | package |\n\n---\n\nThe end.\n",
+              "baseVersion": "v1",
+              "bufferRevision": 1,
+              "reloadEpoch": 0,
+              "bufferState": "ready",
+              "state": "ready"
+            }
+          },
+          "previews": {},
+          "search": null,
+          "wrap": false
+        }
+      },
+      "steps": [
+        {
+          "click": "[aria-label=\"Markdown view\"] > button:last-child"
+        }
+      ]
+    },
+    {
       "id": "dirty",
       "title": "The same file with an unsaved edit",
       "size": {
