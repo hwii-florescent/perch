@@ -76,7 +76,6 @@ pub(super) fn handle_settings_update(
         reporter_pi_model: patch.reporter_pi_model,
         reporter_omp_model: patch.reporter_omp_model,
         max_live_sub_sessions: patch.max_live_sub_sessions,
-        max_sub_sessions: patch.max_sub_sessions,
         max_messages_per_run: patch.max_messages_per_run,
         max_lead_wakes_per_run: patch.max_lead_wakes_per_run,
         max_interrupts_per_sub_session: patch.max_interrupts_per_sub_session,
@@ -372,7 +371,7 @@ pub(super) fn settings_to_wire(s: &crate::settings::Settings) -> SettingsData {
         reporter_pi_model: s.reporter_pi_model.clone(),
         reporter_omp_model: s.reporter_omp_model.clone(),
         max_live_sub_sessions: Some(s.run_limits.live),
-        max_sub_sessions: Some(s.run_limits.total),
+        max_sub_sessions: None, // Legacy wire field; a run has no total limit.
         max_messages_per_run: Some(s.run_limits.messages),
         max_lead_wakes_per_run: None, // Legacy wire field; automatic deliveries are unlimited.
         max_interrupts_per_sub_session: Some(s.run_limits.interrupts),
