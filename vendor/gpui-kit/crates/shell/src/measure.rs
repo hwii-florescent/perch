@@ -13,7 +13,7 @@
 //! policy has gone (the copy closed), at the next frame that keeps a box.
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashMap,
     rc::{Rc, Weak},
 };
@@ -156,6 +156,75 @@ impl Element for Measure {
         cx: &mut App,
     ) {
         keep(&self.policy, &self.key, bounds);
+        self.element.prepaint(window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.element.paint(window, cx);
+    }
+}
+
+/// Wraps `element` so the box it is given is written to `seen` when GPUI prepaints it, for an
+/// element's pointer listeners. It lays out as the element it wraps, so unlike a canvas child
+/// it adds nothing to the element's scrollable content.
+pub(crate) fn observe(seen: Rc<Cell<Option<Bounds<Pixels>>>>, element: AnyElement) -> AnyElement {
+    Observe { seen, element }.into_any_element()
+}
+
+struct Observe {
+    seen: Rc<Cell<Option<Bounds<Pixels>>>>,
+    element: AnyElement,
+}
+
+impl IntoElement for Observe {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for Observe {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        (self.element.request_layout(window, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.seen.set(Some(bounds));
         self.element.prepaint(window, cx);
     }
 

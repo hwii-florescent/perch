@@ -1866,6 +1866,23 @@ fn with_input_handlers<E>(element: E, behavior: &Behavior, runtime: &Rc<ShellRun
 where
     E: StatefulInteractiveElement + ParentElement,
 {
+    input_handlers(element, behavior, runtime, None)
+}
+
+/// [`with_input_handlers`], with the box the pointer is reported against kept in `seen` by the
+/// caller (an [`measure::observe`] around the element) instead of by a canvas child. PERCH: that
+/// child is absolute and as big as the element, so inside a scroll area it counts as content
+/// and, with the padding GPUI adds to the content, makes a box whose content fits scroll by
+/// its padding.
+fn input_handlers<E>(
+    element: E,
+    behavior: &Behavior,
+    runtime: &Rc<ShellRuntime>,
+    seen: Option<&Rc<Cell<Option<Bounds<Pixels>>>>>,
+) -> E
+where
+    E: StatefulInteractiveElement + ParentElement,
+{
     let mut element = element;
     if let Some(callback) = behavior.on_drop {
         let runtime = Rc::downgrade(runtime);
@@ -1902,9 +1919,15 @@ where
     // The pointer half. It needs the element's box for `local_position`, and
     // captures it only when something asked.
     if behavior.wants_pointer_geometry() {
-        let bounds = Rc::new(Cell::new(None::<Bounds<Pixels>>));
-        let writer = Rc::clone(&bounds);
-        element = element.on_prepaint(move |value, _, _| writer.set(Some(value)));
+        let bounds = match seen {
+            Some(seen) => Rc::clone(seen),
+            None => {
+                let bounds = Rc::new(Cell::new(None::<Bounds<Pixels>>));
+                let writer = Rc::clone(&bounds);
+                element = element.on_prepaint(move |value, _, _| writer.set(Some(value)));
+                bounds
+            }
+        };
 
         // HERDR: controls need the same hover callbacks as plain layout elements.
         if let Some(callback) = behavior.on_hover {
@@ -2257,7 +2280,12 @@ fn flex_element(
     let identity = element_id(id, behavior.key.clone());
     let stateful = element.id(identity.clone());
     let stateful = with_gpui_focus(stateful, &behavior, focus.as_ref());
-    let stateful = with_input_handlers(stateful, &behavior, runtime);
+    // The element's box, for the pointer listeners, kept by a wrapper (`observe`) and not a child.
+    let seen = Rc::new(Cell::new(None::<Bounds<Pixels>>));
+    // (A scroll area drawn with the app's scrollbar keeps its pointer box as before: its element
+    // is the content inside the `Scrollable`, which cannot be wrapped.)
+    let observed = !behavior.scrollbar && (behavior.wants_pointer_geometry() || behavior.on_mouse_move.is_some());
+    let stateful = input_handlers(stateful, &behavior, runtime, (!behavior.scrollbar).then_some(&seen));
     let stateful = components::dock::with_commands(stateful, &behavior, runtime, cx);
     let stateful = with_aria(stateful, &behavior);
     let mut stateful = with_active_and_focus(stateful, &states);
@@ -2270,9 +2298,11 @@ fn flex_element(
         });
     }
     if let Some(callback) = behavior.on_mouse_move {
-        let bounds = Rc::new(Cell::new(None::<Bounds<Pixels>>));
-        let bounds_writer = Rc::clone(&bounds);
-        stateful = stateful.on_prepaint(move |value, _, _| bounds_writer.set(Some(value)));
+        let bounds = Rc::clone(&seen);
+        if behavior.scrollbar {
+            let writer = Rc::clone(&seen);
+            stateful = stateful.on_prepaint(move |value, _, _| writer.set(Some(value)));
+        }
         let runtime = Rc::downgrade(runtime);
         stateful = stateful.on_mouse_move(move |event, window, cx| {
             let Some(bounds) = bounds.get() else { return };
@@ -2328,7 +2358,12 @@ fn flex_element(
         }
         (false, false) => stateful,
     };
-    observe_size(finish(stateful, refinement, children), identity, behavior.on_size_change, runtime, window, cx)
+    let element = observe_size(finish(stateful, refinement, children), identity, behavior.on_size_change, runtime, window, cx);
+    if observed {
+        crate::measure::observe(seen, element)
+    } else {
+        element
+    }
 }
 
 fn observe_size(

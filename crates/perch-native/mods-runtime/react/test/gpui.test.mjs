@@ -338,3 +338,15 @@ test("only plain inline text elements join their line; a named one or one with a
     line.unmount();
   }
 });
+
+test("a box over the page takes the wheel: an overlay root and a pointer-taking card do, a pass-through overlay does not", () => {
+  const wheelOn = (node, overlay) => {
+    const { kit, handlers } = recordingKit();
+    toGpui({ kind: "div", children: [], style: {}, ...node }, kit, { document: null }, files, overlay);
+    return [...handlers.keys()].some((key) => key.endsWith(":on_scroll_wheel"));
+  };
+  assert.equal(wheelOn({ id: 1 }, true), true, "a dialog's backdrop");
+  assert.equal(wheelOn({ id: 2, pointer_none: true }, true), false, "a toast stack lets the wheel through");
+  assert.equal(wheelOn({ id: 3, blocks_pointer: true }, false), true, "a toast card");
+  assert.equal(wheelOn({ id: 4 }, false), false, "a plain box");
+});
