@@ -2125,6 +2125,10 @@ impl Workspace {
                 self.toggle_palette(window, cx)
             }
             "global.help" | "global.helpPlain" | "app.help" => self.open_keybind_help(cx),
+            "global.drawer" => {
+                self.chrome.toggle_drawer();
+                cx.notify();
+            }
             // As the web's Cmd+Shift+T and the sidebar's New session: the launcher, for the
             // sidebar's target.
             // As the web's: set a command's key (`keys` null: back to its default, "": none), kept
