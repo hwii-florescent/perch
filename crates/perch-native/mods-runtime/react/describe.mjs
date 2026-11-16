@@ -835,7 +835,19 @@ function describeNode(element, entry, ctx, anc, flags) {
     style.flex_direction = blockKids ? "col" : "row";
     if (!blockKids) style.items = "baseline";
     // An inline box among blocks is on a line of its own, as wide as its content, not the column's width.
-    else for (let i = 0; i < kids.length; i++) if (kids[i].kind !== "text" && /^inline-(block|flex)$/.test(kids[i][DISPLAY]) && !kids[i].style.self) adjustable(kids, i).style.self = "start";
+    else {
+      const inlineAt = (i) => kids[i] && (kids[i].kind === "text" || !/^(block|flex|grid|table|list-item)$/.test(kids[i][DISPLAY] ?? "block"));
+      for (let i = 0; i < kids.length; i++) {
+        if (kids[i].kind === "text" || !/^inline-(block|flex)$/.test(kids[i][DISPLAY])) continue;
+        const kid = adjustable(kids, i);
+        kid.style.self ??= "start";
+        // Alone on its line between blocks, it sits on the line's strut as the one-box case above does.
+        if (inlineAt(i - 1) || inlineAt(i + 1)) continue;
+        const child = ctx.cache.get(element.childNodes.find((n) => n.id === kid.id))?.part.computed;
+        const drop = child ? strutAscent(computed.values, ctx.measure) - ownBaseline(child.values, ctx.measure, kid) : 0;
+        if (drop > 0) kid.style.mt = Math.round(((kid.style.mt ?? 0) + drop) * 100) / 100;
+      }
+    }
     report("approximated", "display", `${computed.values.display} with inline content`, "(inline formatting)", blockKids ? "a column of its children" : "a row on the text baseline");
   }
   // Letter spacing: the engine has none. A spaced run keeps its glyphs together and gets the spacing WebKit adds
