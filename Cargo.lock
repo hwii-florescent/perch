@@ -6919,6 +6919,7 @@ dependencies = [
  "perchd",
  "serde",
  "serde_json",
+ "syntect",
  "tokio",
  "tokio-tungstenite",
  "ttf-parser",

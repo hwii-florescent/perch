@@ -295,6 +295,7 @@ pub fn resolve(name: &str) -> Theme {
 
 /// Puts `theme` into gpui-base's `Theme` global, which its controls and `cx.theme()` read.
 pub fn apply(theme: &Theme, cx: &mut App) {
+    crate::editor::theme::set_theme(theme);
     let t = |token: &str| theme.token(token).unwrap_or("#000000").to_string();
     let palette = serde_json::json!({
         "background": t("panel-bg"), "foreground": t("text"),

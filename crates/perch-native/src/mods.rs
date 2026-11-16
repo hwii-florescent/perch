@@ -28,6 +28,7 @@
 //! `gpui_base::Theme` global, which the host may set at any time. [`perch::Perch`] is that
 //! module; [`ModHost::refresh`] re-renders the mods whose data changed.
 
+pub mod engines;
 pub mod perch;
 pub mod react_host;
 pub mod screens;
@@ -259,6 +260,7 @@ pub const STOCK: &[(&str, &str)] = &[
         include_str!("../mods/parity-probe/main.js"),
     ),
     ("perch.d.ts", perch::DECLARATIONS),
+    ("perch-editor.d.ts", crate::editor::host::DECLARATIONS),
     (
         "react-runtime/@perch/sdk.js",
         include_str!("../mods/react-runtime/@perch/sdk.js"),
@@ -478,6 +480,10 @@ pub fn init(cx: &mut App) {
 pub struct WindowMods {
     pub host: ModHost,
     pub perch: perch::Perch,
+    /// The editors mods place (`perch-editor`), by document key.
+    pub editors: crate::editor::Editors,
+    /// The engine kinds screens place by key (`perch-engine`), `editor` among them.
+    pub engines: engines::Engines,
 }
 
 impl gpui::Global for WindowMods {}
@@ -510,7 +516,16 @@ pub fn start_in(
     let perch = perch::Perch::new();
     perch.register(&host);
     perch.attach(workspace, window, cx);
-    cx.set_global(WindowMods { host, perch });
+    let editors = crate::editor::Editors::default();
+    editors.register(&host);
+    let engines = host.engines().clone();
+    engines.register("editor", editors.clone());
+    cx.set_global(WindowMods {
+        host,
+        perch,
+        editors,
+        engines,
+    });
 }
 
 /// A mod found on disk.
@@ -531,6 +546,7 @@ struct Inner {
     runtime: Rc<ShellRuntime>,
     modules: RefCell<Vec<ModuleFactory>>,
     views: RefCell<Vec<WeakEntity<ModView>>>,
+    engines: engines::Engines,
 }
 
 /// The mods of one window: where they are, the JavaScript runtime they share and the host
@@ -548,9 +564,16 @@ impl ModHost {
             runtime,
             modules: RefCell::default(),
             views: RefCell::default(),
+            engines: engines::Engines::default(),
         }));
         react_host::register(&host);
+        host.0.engines.lend(&host);
         Ok(host)
+    }
+
+    /// The engine kinds this host's screens place by key (`perch-engine`).
+    pub fn engines(&self) -> &engines::Engines {
+        &self.0.engines
     }
 
     pub fn user_dir(&self) -> &Path {

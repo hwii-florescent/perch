@@ -2985,6 +2985,15 @@ impl<M: InputModeKind> InputBaseState<M> {
         recorded
     }
 
+    // PERCH: whether undo or redo would change anything, for an editor's menu.
+    pub fn can_undo(&self) -> bool {
+        self.undo_manager.can_undo()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.undo_manager.can_redo()
+    }
+
     pub(super) fn undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
         self.replay_history(true, window, cx);
     }
