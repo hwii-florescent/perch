@@ -98,6 +98,22 @@ pub fn probing() -> bool {
     #[cfg(not(feature = "render-test-support"))]
     false
 }
+
+/// PERCH: `element` named `name` for [`probe`] while probing, with `style`'s colours and font as
+/// its recorded look (a native element naming what it draws, as a script's `.id(...)` does);
+/// `element` unchanged otherwise, and always in a build without `render-test-support`.
+pub fn probed(
+    name: gpui::SharedString,
+    style: gpui::StyleRefinement,
+    element: gpui::AnyElement,
+) -> gpui::AnyElement {
+    #[cfg(feature = "render-test-support")]
+    if probe::named() {
+        return probe::wrap(name, style, element);
+    }
+    let _ = (name, style);
+    element
+}
 pub(crate) mod process;
 pub mod root;
 pub(crate) mod runtime;

@@ -550,7 +550,8 @@ fn interactions(cx: HeadlessAppContext) -> HeadlessAppContext {
     );
     cx = rig.close();
 
-    // A thread draws under its line; editing it gives a field whose text reaches the screen.
+    // A thread draws under its line, inside the line's row (the web's line box holds its thread);
+    // editing it gives a field whose text reaches the screen.
     let diff = synthetic(500);
     let comments = comments_for(&diff);
     let id = comments[0].id.clone();
@@ -561,7 +562,16 @@ fn interactions(cx: HeadlessAppContext) -> HeadlessAppContext {
         matches!(rows[thread - 1], Row::Line { .. }),
         "the thread follows its line"
     );
-    let plain = rig.row_bounds(thread).size.height;
+    let bare = (0..rows.len())
+        .find(|&i| {
+            matches!(rows[i], Row::Line { .. })
+                && !matches!(rows.get(i + 1), Some(Row::Thread { .. }))
+        })
+        .expect("a line with no thread");
+    let line_h = rig.row_bounds(bare).size.height;
+    let line = thread - 1;
+    let plain = rig.row_bounds(line).size.height;
+    assert!(plain > line_h, "the line's row holds its thread");
     rig.set_props(DiffProps {
         editing: Some(Editing {
             comment: id.clone(),
@@ -570,10 +580,12 @@ fn interactions(cx: HeadlessAppContext) -> HeadlessAppContext {
         ..DiffProps::default()
     });
     assert!(
-        rig.row_bounds(thread).size.height > plain,
+        rig.row_bounds(line).size.height > plain,
         "the edit field makes the thread taller"
     );
-    let field = rig.row_bounds(thread);
+    let mut field = rig.row_bounds(line);
+    field.origin.y += line_h;
+    field.size.height -= line_h;
     // The field is the card's body: a press in its middle focuses it.
     rig.click(field.center(), Modifiers::default());
     rig.events.borrow_mut().clear();

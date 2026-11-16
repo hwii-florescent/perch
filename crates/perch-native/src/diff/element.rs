@@ -188,6 +188,8 @@ pub struct DiffView {
     rows: Rc<Rows>,
     /// For each row, the index of its file's header row (for the pinned header).
     file_row: Rc<Vec<usize>>,
+    /// Each row's place among the rows of its kind, for the parity probe's names (`git-diff-line@3`).
+    ordinal: Rc<Vec<usize>>,
     props: DiffProps,
     colors: Colors,
     tints: Tints,
@@ -222,6 +224,7 @@ impl DiffView {
             comments: Rc::default(),
             rows: Rc::default(),
             file_row: Rc::default(),
+            ordinal: Rc::default(),
             props: DiffProps::default(),
             colors: Colors::of(theme),
             tints: Tints::of(theme),
@@ -310,12 +313,17 @@ impl DiffView {
             None => Rows::default(),
         };
         let mut file_row = Vec::with_capacity(rows.rows.len());
+        let mut ordinal = Vec::with_capacity(rows.rows.len());
+        let mut counts = [0usize; 5];
         let mut current = 0;
         for (i, row) in rows.rows.iter().enumerate() {
             if matches!(row, Row::File { .. }) {
                 current = i;
             }
             file_row.push(current);
+            let kind = probe_kind(row);
+            ordinal.push(counts[kind]);
+            counts[kind] += 1;
         }
         let top = self.list.logical_scroll_top();
         self.list.reset(rows.rows.len());
@@ -324,6 +332,7 @@ impl DiffView {
         }
         self.rows = Rc::new(rows);
         self.file_row = Rc::new(file_row);
+        self.ordinal = Rc::new(ordinal);
         if self.cursor.is_some_and(|c| c >= self.rows.rows.len()) {
             self.cursor = None;
         }
@@ -488,6 +497,7 @@ fn capitalized(word: &str) -> String {
 /// What one frame's rows need, cloned once per frame into the list's builder.
 #[derive(Clone)]
 struct Frame {
+    ordinal: Rc<Vec<usize>>,
     view: gpui::WeakEntity<DiffView>,
     diff: Option<Rc<DiffSnapshot>>,
     comments: Rc<Vec<ReviewComment>>,
@@ -503,7 +513,78 @@ struct Frame {
     edit: Option<(String, gpui::Entity<TextareaState>)>,
 }
 
+/// The row kinds the parity probe names, as an index: file header, hunk header, line, thread, other.
+fn probe_kind(row: &Row) -> usize {
+    match row {
+        Row::File { .. } => 0,
+        Row::Hunk { .. } => 1,
+        Row::Line { .. } => 2,
+        Row::Thread { .. } => 3,
+        Row::Binary { .. } => 4,
+    }
+}
+
+/// `element` named `name` for the parity probe (`gpui_shell::probe`), with the colours the row draws, as a
+/// script's `.id(...)` is; as it is when the probe is off.
+fn probed(name: String, background: Option<Hsla>, text: Hsla, element: AnyElement) -> AnyElement {
+    if !gpui_shell::probing() {
+        return element;
+    }
+    let mut style = gpui::StyleRefinement::default();
+    style.text.color = Some(text);
+    style.background = background.map(Into::into);
+    gpui_shell::probed(name.into(), style, element)
+}
+
 impl Frame {
+    /// Row `ix` as the list draws it. A line carries the comment thread under it (the web draws the thread inside
+    /// the line's grid, so the line's box holds both); the thread's own row is then empty. Each is named for the
+    /// parity probe by its place among its kind (`git-diff-line@2`).
+    fn named_row(&self, ix: usize) -> AnyElement {
+        let rows = &self.rows.rows;
+        let name = |base: &str, ix: usize| match self.ordinal.get(ix) {
+            Some(0) | None => base.to_string(),
+            Some(n) => format!("{base}@{n}"),
+        };
+        let c = self.colors;
+        match &rows[ix] {
+            Row::Thread { .. } => div().into_any_element(),
+            Row::File { .. } => probed(
+                name("git-file-header", ix),
+                Some(c.file_header),
+                c.text,
+                self.row(ix),
+            ),
+            Row::Hunk { .. } => probed(
+                name("git-hunk-header", ix),
+                Some(c.hunk_header),
+                c.accent,
+                self.row(ix),
+            ),
+            Row::Line { .. } => {
+                let line = self.row(ix);
+                let Some(Row::Thread { comments, .. }) = rows.get(ix + 1) else {
+                    return probed(name("git-diff-line", ix), None, c.text, line);
+                };
+                let thread = probed(
+                    name("git-line-comments", ix + 1),
+                    None,
+                    c.text,
+                    self.thread(ix + 1, comments),
+                );
+                let both = div()
+                    .flex()
+                    .flex_col()
+                    .w_full()
+                    .child(line)
+                    .child(thread)
+                    .into_any_element();
+                probed(name("git-diff-line", ix), None, c.text, both)
+            }
+            Row::Binary { .. } => self.row(ix),
+        }
+    }
+
     fn file_header(&self, file: usize) -> AnyElement {
         let Some(diff) = self.diff.as_deref() else {
             return div().into_any_element();
@@ -941,6 +1022,7 @@ impl Frame {
 impl Render for DiffView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let frame = Frame {
+            ordinal: self.ordinal.clone(),
             view: cx.entity().downgrade(),
             diff: self.diff.clone(),
             comments: self.comments.clone(),
@@ -1002,7 +1084,7 @@ impl Render for DiffView {
                 .absolute()
                 .size_full(),
             )
-            .child(list(self.list.clone(), move |ix, _, _| rows.row(ix)).size_full())
+            .child(list(self.list.clone(), move |ix, _, _| rows.named_row(ix)).size_full())
             .children(pinned.map(|(_, header, push)| {
                 div().absolute().top(push).left_0().right_0().child(header)
             }))
