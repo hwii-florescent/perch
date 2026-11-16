@@ -243,8 +243,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }) {
                     "aria-hidden": "true",
                     "data-testid": `session-elbow-${session.id}`,
                     children: [
-                        _jsx("span", { className: "flex-1 rounded-bl-[6px] border-b border-l border-overlay-0" }),
-                        _jsx("span", { className: cn("flex-1", !last && "border-l border-overlay-0") })
+                        _jsx("span", { className: "flex-1 rounded-bl-[6px] border-b border-l border-overlay-1" }),
+                        _jsx("span", { className: cn("flex-1", !last && "border-l border-overlay-1") })
                     ]
                 })),
                 button,
