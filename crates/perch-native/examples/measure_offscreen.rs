@@ -19,6 +19,9 @@ mod test_mode;
 const FRAME: Duration = Duration::from_millis(16);
 
 fn main() {
+    // The app is built without `render-test-support`, so its scripts never name their elements;
+    // this example gets the feature through dev-dependencies. Match the app unless asked.
+    gpui_shell::probe::set_named(std::env::var_os("PERCH_MEASURE_NAMES").is_some());
     let test = match test_mode::TestMode::from_env() {
         Ok(Some(test)) => test,
         Ok(None) => {
