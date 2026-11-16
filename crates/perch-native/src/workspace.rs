@@ -301,7 +301,10 @@ impl Workspace {
             cx.notify();
         });
         // The sidebar's own changes (hiding it, a count, a session's state) redraw the window.
-        let observed = cx.observe(&sidebar, |_, _, cx| cx.notify());
+        let observed = cx.observe(&sidebar, |this, _, cx| {
+            this.close_deleted(cx);
+            cx.notify()
+        });
         Self {
             sidebar,
             locate: None,
@@ -1714,6 +1717,27 @@ impl Workspace {
         if matches!(event, TerminalEvent::Status(_)) {
             cx.notify();
         }
+    }
+
+    /// Close the tabs of sessions the core deleted. A tab out of sight may have no terminal attached
+    /// to hear it, so the sidebar's word is what closes it.
+    fn close_deleted(&mut self, cx: &mut Context<Self>) {
+        let store = &self.sidebar.read(cx).model().store;
+        let gone: Vec<String> = self
+            .panes
+            .keys()
+            .filter(|id| store.deleted.contains(id))
+            .cloned()
+            .collect();
+        if gone.is_empty() {
+            return;
+        }
+        for id in &gone {
+            self.tabs.close(id);
+            self.panes.remove(id);
+        }
+        self.notice = None;
+        self.after_change(cx);
     }
 
     /// The connection of a terminal dropped. The shell is not known to have ended, so the screen

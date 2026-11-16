@@ -341,6 +341,8 @@ pub struct State {
     keys_file: Option<Value>,
     /// `programs.json` as the core checked it, while there is one.
     programs: Option<Value>,
+    /// Sessions the core said it deleted, see [`navigation::Store::deleted`].
+    deleted: Vec<String>,
     terminal: Option<Box<TerminalSettings>>,
     /// This computer as `server.info` names it: hostname, platform, reached over SSH.
     server: Option<(String, String, bool)>,
@@ -602,7 +604,10 @@ impl State {
             }
             ServerMessage::SessionUpdated { session } => self.session_updated(session),
             ServerMessage::SessionDeleted { session_id } => {
-                self.sessions.retain(|s| s.id != *session_id)
+                self.sessions.retain(|s| s.id != *session_id);
+                // ponytail: grows by one id per session ended while the window runs; trim if a
+                // window ever outlives many thousands.
+                self.deleted.push(session_id.clone());
             }
             ServerMessage::ProjectList {
                 host_id, projects, ..
@@ -927,6 +932,7 @@ impl State {
             provider_defaults: self.provider_defaults.clone(),
             agent_lists: self.agent_lists.clone(),
             programs: self.programs.clone(),
+            deleted: self.deleted.clone(),
         }
     }
 
