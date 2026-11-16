@@ -276,13 +276,57 @@ async fn open_file(
     missing("file")
 }
 
-/// `review <workspace id>`: the workspace's review is open with its diff drawn.
-async fn open_review(
-    _workspace: &str,
-    _window: WindowHandle<Workspace>,
-    _cx: &mut AsyncApp,
-) -> bool {
-    missing("review")
+/// `review <workspace id>`: the workspace's review is open with its diff drawn. The stock review asks
+/// for the status and the diff itself once the host offers Git; done when both are in, the screen
+/// runs, and a diff with files has its rows in the native diff view.
+async fn open_review(workspace: &str, window: WindowHandle<Workspace>, cx: &mut AsyncApp) -> bool {
+    use perch_native::git::store::LoadState;
+    let offered = until(cx, |cx| {
+        window
+            .read_with(cx, |ws, cx| {
+                let model = ws.sidebar().read(cx).model();
+                perch_native::git::can_take(model.connected, &model.store, workspace)
+            })
+            .unwrap_or(false)
+    })
+    .await;
+    let props = serde_json::json!({ "workspaceId": workspace });
+    let opened = offered
+        && window
+            .update(cx, |ws, _, cx| {
+                ws.open_screen("review", props, None, None, cx)
+            })
+            .unwrap_or(false);
+    if !opened {
+        return false;
+    }
+    let key = format!("diff:{workspace}");
+    until(cx, |cx| {
+        let failed = window
+            .update(cx, |ws, _, cx| ws.screen_error("review", cx))
+            .ok()
+            .flatten();
+        if let Some(error) = failed {
+            eprintln!("perch-native-test: the review screen failed: {error}");
+            return false;
+        }
+        cx.update(|cx| {
+            let Some(git) = perch_native::git::host(cx) else {
+                return false;
+            };
+            let review = git.review(workspace);
+            if review.status_state != LoadState::Ready || review.diff_state != LoadState::Ready {
+                return false;
+            }
+            let files = review.diff.as_ref().map_or(0, |d| d.files.len());
+            files == 0
+                || cx
+                    .try_global::<perch_native::mods::WindowMods>()
+                    .and_then(|mods| mods.diffs.view(&key))
+                    .is_some_and(|view| view.read(cx).rows().rows.len() > files)
+        })
+    })
+    .await
 }
 
 /// `browser <url>`: a browser pane shows the page.
