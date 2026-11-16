@@ -116,7 +116,7 @@ impl Toast {
 }
 
 /// A session finished or needs the person while they are not looking at it, or the core's usage
-/// alert: the app plays the sound and shows the toast. The follower only reports it; it never plays or shows anything.
+/// alert: the app plays the sound and posts the system notification. The follower only reports it; it never plays or shows anything.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Heard {
     pub alert: Alert,
@@ -132,19 +132,20 @@ pub struct Heard {
 }
 
 impl Heard {
-    /// What the toast says.
-    pub fn text(&self) -> String {
-        let what = match self.alert {
-            Alert::Done => "finished",
-            Alert::Blocked => "needs you",
-            Alert::Usage => {
-                return match &self.body {
-                    Some(body) => format!("{} · {body}", self.title),
-                    None => self.title.clone(),
-                }
+    /// What the system notification says, as the Tauri app's: its title and its body.
+    pub fn system_note(&self) -> (String, String) {
+        let session = || {
+            if self.title.is_empty() {
+                "(untitled session)".to_string()
+            } else {
+                self.title.clone()
             }
         };
-        format!("{} {what}", self.title)
+        match self.alert {
+            Alert::Done => ("Session finished".into(), session()),
+            Alert::Blocked => ("Session needs attention".into(), session()),
+            Alert::Usage => (self.title.clone(), self.body.clone().unwrap_or_default()),
+        }
     }
 }
 
@@ -2343,14 +2344,20 @@ mod tests {
         );
         assert_eq!(heard[0].session_id, USAGE_NOTIFICATION);
         assert_eq!(
-            heard[0].text(),
-            "Codex 5h limit at 93% · Resets in 42 minutes"
+            heard[0].system_note(),
+            (
+                "Codex 5h limit at 93%".into(),
+                "Resets in 42 minutes".into()
+            )
         );
         state.apply(&alert("reset", ""));
         let heard = state.take_alerts();
         assert!(!heard[0].sound, "a reset makes no sound");
         assert_eq!(heard[0].body, None, "an empty body is none");
-        assert_eq!(heard[0].text(), "Codex 5h limit at 93%");
+        assert_eq!(
+            heard[0].system_note(),
+            ("Codex 5h limit at 93%".into(), String::new())
+        );
         // With sound and toasts off, nothing is due.
         state.apply(&message(json!({"type": "settings.current", "settings":
             {"defaultCwd": null, "soundEnabled": false, "toastDelivery": "off"}})));
@@ -2430,7 +2437,10 @@ mod tests {
             [(false, Toast::App)],
             "sound is off: the toast alone is due"
         );
-        assert_eq!(heard[0].text(), "s1 finished");
+        assert_eq!(
+            heard[0].system_note(),
+            ("Session finished".into(), "s1".into())
+        );
         assert_eq!(heard[0].session_id, "s1");
         // Toasts off as well: nothing is due.
         state.apply(&message(json!({"type": "settings.current", "settings":
