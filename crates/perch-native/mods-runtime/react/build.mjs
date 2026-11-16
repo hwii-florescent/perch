@@ -62,6 +62,7 @@ export const SCREENS = [
   "terminal-search",
   "phone-size",
   "agent-control",
+  "browser",
   "browser-toolbar",
 ];
 /** Screens with no stock source of their own, drawn by hand from other stock screens (`ALSO`): the Settings page's frame

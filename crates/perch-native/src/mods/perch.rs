@@ -153,6 +153,8 @@ pub struct WindowState {
     pub add_project_at: Option<std::time::Instant>,
     /// The last request for a project's worktree menu, null when none is waiting.
     pub worktree_request: Value,
+    /// The drawer's browser pages by workspace (`useBrowserPages`).
+    pub browser_pages: Value,
 }
 
 /// Answers a screen's question for the core (`kind` and its `args`, as
@@ -279,6 +281,7 @@ impl Perch {
                 add_project_asks: ws.add_project_asks().0,
                 add_project_at: ws.add_project_asks().1,
                 worktree_request: ws.worktree_request().clone(),
+                browser_pages: ws.browser_drawer_state(cx),
                 terminals: ws.terminal_states(cx),
                 slide: ws.tab_slide(),
                 pointer: ws.pointer_follow().clone(),
@@ -833,6 +836,18 @@ impl Perch {
             .function(
                 "zoom",
                 reader(WINDOW, |perch, _| json!(perch.0.data.borrow().window.zoom)),
+            )
+            // A workspace's drawer pages, the one shown and how many browser tabs it has.
+            .function(
+                "browserPages",
+                reader(WINDOW, |perch, args| {
+                    let workspace = args.get(0).and_then(HostValue::as_str).unwrap_or("");
+                    let pages = &perch.0.data.borrow().window.browser_pages;
+                    pages
+                        .get(workspace)
+                        .cloned()
+                        .unwrap_or_else(|| json!({ "pages": [], "shownId": null, "tabCount": 0 }))
+                }),
             )
             // The window's requests to a screen, as counts that grow by one per request.
             .function(

@@ -265,25 +265,35 @@ impl Workspace {
             .into_iter()
             .filter(|id| is_browser_tab(id))
             .collect();
+        let mut wanted = Vec::new();
+        if self.chrome.tools() == Some(shell::Tools::Browser) && self.screens.has("browser", cx) {
+            if let Some(workspace) = self.shown_workspace(cx) {
+                wanted.push((
+                    "browser",
+                    "browser".to_string(),
+                    json!({ "workspaceId": workspace }),
+                ));
+            }
+        }
         if let Some(drawer) = self.drawer_page(&pages, cx) {
             keys.push(drawer);
         }
-        keys.into_iter()
-            .map(|key| {
-                let meta = pages.meta(&key);
-                let rows = pages.rows(&key);
-                let props = json!({
-                    "key": key,
-                    "native": true,
-                    "started": !meta.url.is_empty(),
-                    "icon": meta.icon,
-                    "value": pages.address(&key).map(|a| a.draft.clone()).unwrap_or_default(),
-                    "rows": rows,
-                    "picked": pages.picked(&key).map_or(-1, |i| i as i64),
-                });
-                ("browser-toolbar", format!("browser-toolbar#{key}"), props)
-            })
-            .collect()
+        let toolbars = keys.into_iter().map(|key| {
+            let meta = pages.meta(&key);
+            let rows = pages.rows(&key);
+            let props = json!({
+                "key": key,
+                "native": true,
+                "started": !meta.url.is_empty(),
+                "icon": meta.icon,
+                "value": pages.address(&key).map(|a| a.draft.clone()).unwrap_or_default(),
+                "rows": rows,
+                "picked": pages.picked(&key).map_or(-1, |i| i as i64),
+            });
+            ("browser-toolbar", format!("browser-toolbar#{key}"), props)
+        });
+        wanted.extend(toolbars);
+        wanted
     }
 
     /// The workspace shown: what the start page's picker or the active session says.
@@ -313,6 +323,9 @@ impl Workspace {
     /// The drawer's Browser: its page for this workspace (one is made the first time), the toolbar over it.
     pub(super) fn drawer_browser(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let pages = self.browsing.pages.clone()?;
+        if let Some(view) = self.screens.inflow("browser") {
+            return Some(div().size_full().flex().child(view).into_any_element());
+        }
         let workspace = self.shown_workspace(cx)?;
         let key = {
             let mut b = pages.borrow_mut();
@@ -324,23 +337,91 @@ impl Workspace {
         Some(self.page_with_toolbar(&pages, &key, cx))
     }
 
-    fn page_with_toolbar(&self, pages: &Shared, key: &str, cx: &App) -> AnyElement {
+    fn look(&self, cx: &App) -> Look {
         let tokens = self.tokens(cx);
-        let look = Look {
+        Look {
             fill: tokens.surface_0.into(),
             hint: tokens.subtext.into(),
-        };
-        let toolbar = self
-            .screens
+        }
+    }
+
+    fn toolbar(&self, key: &str) -> Option<gpui::AnyView> {
+        self.screens
             .inflow(&format!("browser-toolbar#{key}"))
-            .map(|view| div().flex_none().h(px(43.)).w_full().child(view));
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .children(toolbar)
-            .child(slot::page_slot(pages, key, self.page_cover(), look))
-            .into_any_element()
+            .map(Into::into)
+    }
+
+    fn page_with_toolbar(&self, pages: &Shared, key: &str, cx: &App) -> AnyElement {
+        slot::page_with_toolbar(
+            pages,
+            key,
+            self.page_cover(),
+            self.look(cx),
+            self.toolbar(key),
+        )
+    }
+
+    /// After the screens are placed: what the `browser` engine needs this frame.
+    pub(super) fn browser_engine_frame(
+        &self,
+        wanted: &[(&'static str, String, Value)],
+        window: &Window,
+        cx: &App,
+    ) {
+        if self.browsing.pages.is_none() {
+            return;
+        }
+        let toolbars = wanted
+            .iter()
+            .filter_map(|(_, key, _)| key.strip_prefix("browser-toolbar#"))
+            .filter_map(|page| Some((page.to_string(), self.toolbar(page)?)))
+            .collect();
+        slot::set_frame(
+            window.window_handle().window_id(),
+            slot::FrameLook {
+                cover: self.page_cover(),
+                look: self.look(cx),
+                toolbars,
+            },
+        );
+    }
+
+    /// `useBrowserPages`' data: each workspace's drawer pages, the one shown and its browser tab count.
+    pub fn browser_drawer_state(&self, _cx: &App) -> Value {
+        let Some(pages) = &self.browsing.pages else {
+            return json!({});
+        };
+        let pages = pages.borrow();
+        let mut state = serde_json::Map::new();
+        let mut workspaces: Vec<String> = pages.drawer_workspaces();
+        for tab in self.tabs.strip().iter().filter(|id| is_browser_tab(id)) {
+            if let Some((workspace, _)) = tab.split_once('\n') {
+                workspaces.push(workspace.to_string());
+            }
+        }
+        workspaces.sort();
+        workspaces.dedup();
+        for workspace in workspaces {
+            let list: Vec<Value> = pages
+                .drawer_pages(&workspace)
+                .iter()
+                .map(|p| {
+                    let meta = pages.meta(&drawer_key(&p.id));
+                    json!({ "id": p.id, "url": meta.url, "title": meta.title, "icon": meta.icon })
+                })
+                .collect();
+            let tabs = self
+                .tabs
+                .strip()
+                .iter()
+                .filter(|id| is_browser_tab(id) && id.starts_with(&format!("{workspace}\n")))
+                .count();
+            state.insert(
+                workspace.clone(),
+                json!({ "pages": list, "shownId": pages.drawer_shown(&workspace), "tabCount": tabs }),
+            );
+        }
+        Value::Object(state)
     }
 
     /// A browser tab's pane: its toolbar over its page.
@@ -477,7 +558,42 @@ impl Workspace {
         }
         let pages = self.browsing.pages.clone()?;
         let key = text("key").unwrap_or("").to_string();
+        let workspace = text("workspaceId").unwrap_or("").to_string();
+        let id = text("id").unwrap_or("").to_string();
         let result = match name {
+            // The drawer's (`useBrowserPages`): the screen names the page it opens.
+            "browser.drawer.open" if !workspace.is_empty() && !id.is_empty() => {
+                pages.borrow_mut().drawer_open_as(&workspace, &id);
+                Ok(())
+            }
+            "browser.drawer.select" => {
+                pages.borrow_mut().drawer_select(&workspace, &id);
+                Ok(())
+            }
+            "browser.drawer.close" => {
+                pages.borrow_mut().drawer_close(&id);
+                Ok(())
+            }
+            "browser.drawer.closeAll" => {
+                let tabs: Vec<String> = self
+                    .tabs
+                    .strip()
+                    .iter()
+                    .filter(|t| is_browser_tab(t) && t.starts_with(&format!("{workspace}\n")))
+                    .cloned()
+                    .collect();
+                pages.borrow_mut().drawer_close_all(&workspace, &tabs);
+                for tab in &tabs {
+                    self.tabs.close(tab);
+                }
+                self.after_change(cx);
+                Ok(())
+            }
+            // `BrowserPage active`: the page takes the keyboard once shown.
+            "browser.focus" => {
+                pages.borrow_mut().focus(&key);
+                Ok(())
+            }
             "browser.addressChange" => {
                 pages
                     .borrow_mut()

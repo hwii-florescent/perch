@@ -3955,7 +3955,8 @@ impl gpui::Render for Workspace {
         self.screens.realize(&self.screen_focus, window, cx);
         let wanted = self.inflow_wanted(cx);
         self.let_go_of_stale_hold(&wanted, cx);
-        self.screens.place(wanted, window, cx);
+        self.screens.place(wanted.clone(), window, cx);
+        self.browser_engine_frame(&wanted, window, cx);
         // A terminal that attaches takes the keyboard when it first draws; the tab that has it in
         // the layout keeps it. A modal screen has the keyboard while it is up.
         if self.screens.top_modal().is_none() && self.keyboard_held.is_none() {

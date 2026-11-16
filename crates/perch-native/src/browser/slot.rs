@@ -5,8 +5,10 @@
 //! [`reconcile`], painted after every slot, then has the views follow (`Browsers::end_frame`). The view calls
 //! wait for GPUI's paint to end (`App::defer`): AppKit's first-responder changes must not run inside it.
 //!
-//! The window's pages are found by window ([`attach`]), so the `browser` engine a screen places and the
-//! Rust-drawn browser tab reach the same pages.
+//! The window's pages are found by window ([`attach`]), so the `browser` engine a screen places ([`Engine`],
+//! `data-perch-engine="browser"`) and the Rust-drawn browser tab reach the same pages. The window says each frame
+//! whether pages are covered, their colours and each page's toolbar ([`set_frame`]); the engine draws the toolbar
+//! over the page as a browser tab's pane does.
 
 use super::{Browsers, Frame};
 use gpui::{
@@ -21,8 +23,17 @@ use std::sync::Arc;
 /// A window's pages, shared by the window and the slots it draws.
 pub type Shared = Rc<RefCell<Browsers>>;
 
+/// What the window says about this frame: covered, the colours, each page's toolbar.
+#[derive(Clone)]
+pub struct FrameLook {
+    pub cover: bool,
+    pub look: Look,
+    pub toolbars: HashMap<String, gpui::AnyView>,
+}
+
 thread_local! {
     static WINDOWS: RefCell<HashMap<WindowId, Shared>> = RefCell::default();
+    static LOOKS: RefCell<HashMap<WindowId, FrameLook>> = RefCell::default();
     /// Each page's decoded picture, by the PNG it came from.
     static PICTURES: RefCell<HashMap<String, (usize, Arc<RenderImage>)>> = RefCell::default();
 }
@@ -35,6 +46,46 @@ pub fn attach(window: WindowId, pages: Shared) {
 /// The window is going: its pages are no longer reachable from a slot.
 pub fn detach(window: WindowId) {
     WINDOWS.with(|w| w.borrow_mut().remove(&window));
+    LOOKS.with(|l| l.borrow_mut().remove(&window));
+}
+
+/// This frame's cover, colours and toolbars for `window`'s engines.
+pub fn set_frame(window: WindowId, look: FrameLook) {
+    LOOKS.with(|l| l.borrow_mut().insert(window, look));
+}
+
+/// A page with its toolbar (when a screen draws one) over it.
+pub fn page_with_toolbar(
+    pages: &Shared,
+    key: &str,
+    cover: bool,
+    look: Look,
+    toolbar: Option<gpui::AnyView>,
+) -> AnyElement {
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .children(toolbar.map(|view| div().flex_none().h(gpui::px(43.)).w_full().child(view)))
+        .child(page_slot(pages, key, cover, look))
+        .into_any_element()
+}
+
+/// The `browser` engine: a screen's `data-perch-engine="browser" data-perch-key="<page key>"` box shows that page
+/// (with its toolbar). The page is the window's: releasing the box keeps it (closing is the screen's command).
+pub struct Engine;
+
+impl crate::mods::engines::EngineKind for Engine {
+    fn draw(&self, key: &str, window: &mut Window, _: &mut App) -> AnyElement {
+        let id = window.window_handle().window_id();
+        let (Some(pages), Some(frame)) =
+            (pages(window), LOOKS.with(|l| l.borrow().get(&id).cloned()))
+        else {
+            return div().size_full().into_any_element();
+        };
+        let toolbar = frame.toolbars.get(key).cloned();
+        page_with_toolbar(&pages, key, frame.cover, frame.look, toolbar)
+    }
 }
 
 /// The pages of the window being drawn.

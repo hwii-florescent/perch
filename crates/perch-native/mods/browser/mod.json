@@ -1,0 +1,5 @@
+{
+  "name": "Browser",
+  "description": "The web app's stock drawer Browser section, unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

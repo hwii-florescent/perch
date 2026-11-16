@@ -438,3 +438,45 @@ export const TabMenu = () => null;
 /** A dragged tab's ghost is the host's; nothing is drawn in the strip. */
 export const TabDragLayer = () => null;
 export const NewFilePrompt = overlay("new-file");
+
+// ---- browser pages ----------------------------------------------------------------------------------------------
+
+const NO_BROWSER_PAGES = Object.freeze({ pages: [], shownId: null, tabCount: 0 });
+/** The drawer's browser pages of `workspaceId` (`perch.browserPages`), the one shown and how many browser tabs the
+ * workspace has, with the window's commands for them. `open()` names the new page and returns its id. */
+export function useBrowserPages(workspaceId) {
+  const data = useHostSnapshot((perch) => perch.browserPages?.(workspaceId) ?? NO_BROWSER_PAGES);
+  return useMemo(() => {
+    const run = (command, args) => host().command(command, { workspaceId, ...args });
+    return {
+      pages: data.pages ?? [],
+      shownId: data.shownId ?? null,
+      tabCount: data.tabCount ?? 0,
+      open: () => {
+        const id = `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+        run("browser.drawer.open", { id });
+        return id;
+      },
+      select: (id) => run("browser.drawer.select", { id }),
+      close: (id) => run("browser.drawer.close", { id }),
+      closeAll: () => run("browser.drawer.closeAll", {}),
+      // The window follows the page itself; nothing to keep here.
+      setUrl: () => {},
+    };
+  }, [data, workspaceId]);
+}
+
+/** A drawer page with its toolbar: a box the window fills with the native page (`data-perch-engine="browser"`).
+ * `active`: the page takes the keyboard once shown. */
+export function BrowserPage({ pageId, active }) {
+  const key = `drawer\n${pageId}`;
+  useEffect(() => {
+    if (active) host().command("browser.focus", { key });
+  }, [active, key]);
+  return createElement("div", {
+    "data-perch-engine": "browser",
+    "data-perch-key": key,
+    "data-testid": "browser-page",
+    style: { display: "flex", flex: "1 1 0%", minHeight: 0, minWidth: 0 },
+  });
+}

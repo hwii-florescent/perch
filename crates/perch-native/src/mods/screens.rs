@@ -200,6 +200,18 @@ pub const SCREENS: &[Screen] = &[
         height: 0.,
     },
     Screen {
+        id: "browser",
+        place: Place::InFlow,
+        width: 0.,
+        height: 0.,
+    },
+    Screen {
+        id: "browser-toolbar",
+        place: Place::InFlow,
+        width: 0.,
+        height: 43.,
+    },
+    Screen {
         id: "agent-control",
         place: Place::InFlow,
         width: 0.,

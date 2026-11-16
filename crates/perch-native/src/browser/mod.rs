@@ -323,6 +323,11 @@ impl Browsers {
             .collect()
     }
 
+    /// The workspaces with drawer pages.
+    pub fn drawer_workspaces(&self) -> Vec<String> {
+        self.drawer.iter().map(|p| p.workspace_id.clone()).collect()
+    }
+
     /// The page the drawer shows: the selected one, else the newest.
     pub fn drawer_shown(&self, workspace: &str) -> Option<String> {
         let pages = self.drawer_pages(workspace);
@@ -337,6 +342,17 @@ impl Browsers {
     /// A new empty drawer page, shown; its id.
     pub fn drawer_open(&mut self, workspace: &str) -> String {
         let id = (self.new_id)();
+        self.drawer_open_as(workspace, &id);
+        id
+    }
+
+    /// A new empty drawer page named `id` (a screen names the page it opens), shown. An id already open is shown.
+    pub fn drawer_open_as(&mut self, workspace: &str, id: &str) {
+        if self.drawer.iter().any(|p| p.id == id) {
+            self.active.insert(workspace.into(), id.into());
+            return;
+        }
+        let id = id.to_string();
         self.drawer.push(DrawerPage {
             id: id.clone(),
             workspace_id: workspace.into(),
@@ -345,7 +361,6 @@ impl Browsers {
         self.active.insert(workspace.into(), id.clone());
         self.ensure(&drawer_key(&id), "");
         self.save();
-        id
     }
 
     pub fn drawer_select(&mut self, workspace: &str, id: &str) {
