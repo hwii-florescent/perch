@@ -89,6 +89,15 @@ pub mod policy;
 // PERCH: element boxes, colours and fonts for tests.
 #[cfg(feature = "render-test-support")]
 pub mod probe;
+
+/// PERCH: whether a script should name its elements for [`probe`] (only with `render-test-support`,
+/// and only while [`probe::set_named`] leaves it on): names cost a selector pass per frame.
+pub fn probing() -> bool {
+    #[cfg(feature = "render-test-support")]
+    return probe::named();
+    #[cfg(not(feature = "render-test-support"))]
+    false
+}
 pub(crate) mod process;
 pub mod root;
 pub(crate) mod runtime;
