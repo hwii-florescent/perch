@@ -616,7 +616,7 @@ impl Editors {
                 focus.update(cx, |state, cx| state.focus(window, cx));
             })
             .child(Editor::new(&state));
-        if !gpui_shell::probe::named() {
+        if !gpui_shell::probing() {
             return editor.into_any_element();
         }
         // For the parity check: the editor's text style, compared with the web editor's (`editor-text`).
@@ -624,7 +624,7 @@ impl Editors {
         style.text.font_family = Some(family);
         style.text.font_size = Some(size.into());
         style.text.line_height = Some(line.into());
-        gpui_shell::probe::wrap("editor-text".into(), style, editor.into_any_element())
+        gpui_shell::probe_wrap("editor-text".into(), style, editor.into_any_element())
     }
 
     /// Perch's keys go first: a keystroke interceptor gives the focused editor's shortcuts and typing rules
