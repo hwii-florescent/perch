@@ -213,7 +213,8 @@ fn main() {
         gpui_platform::current_headless_renderer,
     );
     cx.update(mods::init);
-    let host = ModHost::new(user.clone()).expect("the mod host starts");
+    let host = ModHost::watched(user.clone()).expect("the mod host starts");
+    assert!(host.is_watched(), "the file system watches the mods folder");
     assert!(
         host.find("example").is_some_and(|m| !m.user),
         "the stock mod is there"

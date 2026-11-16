@@ -14,8 +14,9 @@
 //!
 //! A [`ModView`] is one mod as a GPUI view the workspace can place anywhere. It looks at the mod's
 //! files when the file system says something under the mods folder changed (one watcher per
-//! host, [`POLL`] after the event), and reloads it in place when they did; when the user adds or
-//! removes an override folder it switches source. Nothing runs while no file changes. A new
+//! [`ModHost::watched`] host, [`SETTLE`] after the event; a test's host looks every [`POLL`]),
+//! and reloads it in place when they did; when the user adds or removes an override folder it
+//! switches source. Nothing runs while no file changes. A new
 //! version that throws while loading never replaces the one on screen ([`ModView::load_error`]);
 //! one that throws in `render()` leaves the last good render drawn under the shell's error banner
 //! ([`ModView::render_error`]). A mod gets no more
@@ -51,9 +52,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 
-/// How long after a file event a shown mod looks at its files: a save is often several events,
-/// taken together. A save shows within this (and the file system's own delay).
-pub const POLL: Duration = Duration::from_millis(50);
+/// How often a test's mod host ([`ModHost::new`]) looks at a shown mod's files.
+pub const POLL: Duration = Duration::from_millis(250);
+
+/// How long after a file event a watched host's mod looks at its files: a save is often several
+/// events, taken together.
+const SETTLE: Duration = Duration::from_millis(50);
 
 /// The stock mods: path under `crates/perch-native/mods/`, and the file. Every file in that folder
 /// must be listed here (a unit test checks).
@@ -546,18 +550,28 @@ pub fn start(
     window: gpui::AnyWindowHandle,
     cx: &mut App,
 ) {
-    start_in(user_dir(), workspace, window, cx);
+    start_host(ModHost::watched(user_dir()), workspace, window, cx);
 }
 
-/// [`start`] with the mods of `dir` (a test's scratch folder).
+/// [`start`] with the mods of `dir` (a test's scratch folder), looked at every [`POLL`]: a test's
+/// executor takes no wakes from the file system's thread.
 pub fn start_in(
     dir: PathBuf,
     workspace: &Entity<crate::workspace::Workspace>,
     window: gpui::AnyWindowHandle,
     cx: &mut App,
 ) {
+    start_host(ModHost::new(dir), workspace, window, cx);
+}
+
+fn start_host(
+    host: Result<ModHost>,
+    workspace: &Entity<crate::workspace::Workspace>,
+    window: gpui::AnyWindowHandle,
+    cx: &mut App,
+) {
     init(cx);
-    let host = match ModHost::new(dir) {
+    let host = match host {
         Ok(host) => host,
         Err(error) => {
             eprintln!("perch-native: mods are off: {error:#}");
@@ -596,7 +610,8 @@ type ModuleFactory = Rc<dyn Fn(&str) -> HostModule>;
 struct Inner {
     user_dir: PathBuf,
     changes: Arc<Changes>,
-    /// `None` when the system would not watch the folder (said on stderr): mods then load once.
+    /// `None` for a test's host, or when the system would not watch the folder (said on
+    /// stderr): views then look every [`POLL`].
     watcher: RefCell<Option<notify::RecommendedWatcher>>,
     /// Folders outside `user_dir` watched for a linked mod folder (the watcher does not follow links).
     watched: RefCell<HashSet<PathBuf>>,
@@ -613,13 +628,30 @@ pub struct ModHost(Rc<Inner>);
 
 impl ModHost {
     /// Writes the stock mods out under `user_dir/.stock/` and starts a runtime for them.
+    /// Its views look at their files every [`POLL`]; the app's host is [`Self::watched`].
     pub fn new(user_dir: PathBuf) -> Result<Self> {
+        Self::with_watcher(user_dir, false)
+    }
+
+    /// A host whose views look at their files only when the file system says they changed. The
+    /// file system's thread wakes them, so this is the app's host, not a test executor's.
+    pub fn watched(user_dir: PathBuf) -> Result<Self> {
+        Self::with_watcher(user_dir, true)
+    }
+
+    fn with_watcher(user_dir: PathBuf, watched: bool) -> Result<Self> {
         write_stock(&user_dir.join(".stock"), STOCK)?;
         let runtime = ShellRuntime::new_isolated().context("could not start the mod runtime")?;
         let changes = Arc::new(Changes::default());
-        let watcher = watch(&user_dir, &changes)
-            .map_err(|error| eprintln!("perch-native: mod files are not watched: {error:#}"))
-            .ok();
+        let watcher = watched
+            .then(|| watch(&user_dir, &changes))
+            .and_then(|watcher| {
+                watcher
+                    .map_err(|error| {
+                        eprintln!("perch-native: mod files are not watched: {error:#}")
+                    })
+                    .ok()
+            });
         let host = Self(Rc::new(Inner {
             user_dir,
             changes,
@@ -648,6 +680,11 @@ impl ModHost {
     /// count.
     pub fn files_generation(&self) -> u64 {
         self.0.changes.generation.load(Ordering::SeqCst)
+    }
+
+    /// Whether the file system tells this host's views about changes ([`Self::watched`]).
+    pub fn is_watched(&self) -> bool {
+        self.0.watcher.borrow().is_some()
     }
 
     /// How many times this host's views looked at their mods' files, for tests that bound it.
@@ -736,7 +773,7 @@ impl ModHost {
         cx: &mut App,
     ) -> Entity<ModView> {
         let host = self.clone();
-        let mut changes = self.0.changes.subscribe();
+        let mut changes = self.is_watched().then(|| self.0.changes.subscribe());
         let key = key.to_string();
         let id = id.to_string();
         let entity = cx.new(|cx| {
@@ -750,16 +787,22 @@ impl ModHost {
                 _poll: Task::ready(()),
             };
             view.check(window, cx);
-            view._poll = cx.spawn_in(window, async move |this, cx| {
-                while changes.next().await.is_some() {
-                    cx.background_executor().timer(POLL).await;
-                    while changes.try_recv().is_ok() {}
-                    if this
-                        .update_in(cx, |view, window, cx| view.check(window, cx))
-                        .is_err()
-                    {
-                        break;
+            view._poll = cx.spawn_in(window, async move |this, cx| loop {
+                match changes.as_mut() {
+                    Some(changes) => {
+                        if changes.next().await.is_none() {
+                            break;
+                        }
+                        cx.background_executor().timer(SETTLE).await;
+                        while changes.try_recv().is_ok() {}
                     }
+                    None => cx.background_executor().timer(POLL).await,
+                }
+                if this
+                    .update_in(cx, |view, window, cx| view.check(window, cx))
+                    .is_err()
+                {
+                    break;
                 }
             });
             view

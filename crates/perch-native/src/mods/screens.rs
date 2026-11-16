@@ -41,7 +41,7 @@
 //! releases it (`ShellRuntime::close`, as gpui-kit's own hosts do).
 
 use super::perch::Perch;
-use super::{ModHost, ModView, WindowMods};
+use super::{ModHost, ModView, WindowMods, POLL};
 use crate::workspace::Workspace;
 use gpui::{App, Context, Entity, FocusHandle, Pixels, Point, Window};
 use serde_json::Value;
@@ -315,8 +315,8 @@ impl Floating {
 /// The window's screens: which mods exist, the in-flow copies on screen and the floating ones open.
 #[derive(Default)]
 pub struct Screens {
-    /// Whether each screen's mod was found, and at which [`ModHost::files_generation`].
-    present: RefCell<HashMap<&'static str, (bool, u64)>>,
+    /// Whether each screen's mod was found, at which [`ModHost::files_generation`] and when.
+    present: RefCell<HashMap<&'static str, (bool, u64, Instant)>>,
     inflow: HashMap<String, Entity<ModView>>,
     pub floating: Vec<Floating>,
     /// Copies that left the window since the last draw, closed at the next (closing needs the window).
@@ -360,13 +360,19 @@ impl Screens {
         };
         let mut present = self.present.borrow_mut();
         let generation = host.files_generation();
-        if let Some((found, at)) = present.get(screen.id) {
-            if *at == generation {
+        if let Some((found, seen, at)) = present.get(screen.id) {
+            // A watched host says when files change; a test's host is looked at every POLL.
+            let fresh = if host.is_watched() {
+                *seen == generation
+            } else {
+                at.elapsed() < POLL
+            };
+            if fresh {
                 return *found;
             }
         }
         let found = host.find(screen.id).is_some();
-        present.insert(screen.id, (found, generation));
+        present.insert(screen.id, (found, generation, Instant::now()));
         found
     }
 
