@@ -35,6 +35,7 @@ import * as perch from "perch";
 import { Icon, bounds, forgetBounds, textWidth } from "perch-react";
 import * as engines from "perch-engine";
 import * as editors from "perch-editor";
+import * as media from "perch-media";
 import { ICONS, LETTERS, LETTER } from "./agent-icons.js";
 
 export const INERT = [
@@ -350,6 +351,9 @@ export function copyFor(cx, screen) {
     // `useWorkspaceFiles`: one workspace's files from the window's store, and its actions run there.
     workspaceFiles: (id) => snapshot(`workspaceFiles:${id}`, () => perch.workspaceFiles(id)),
     filesDo: (action, workspaceId, ...args) => perch.filesDo(action, workspaceId, ...args),
+    // `FileAsset`: a file's folder on this computer and its extraction, and `perch-media` (images, Quick Look).
+    mediaFile: (workspaceId, path) => snapshot(`mediaFile:${workspaceId}\n${path}`, () => perch.mediaFile(workspaceId, path)),
+    media,
     statusLine: () => snapshot("statusLine", () => perch.statusLine()),
     zoom: () => snapshot("zoom", () => perch.zoom()),
     paneLook: () => snapshot("paneLook", () => perch.paneLook()),

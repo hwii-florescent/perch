@@ -374,7 +374,8 @@ impl FileStore {
             .any(|(_, d)| d.needs_buffer_sync())
     }
 
-    /// `trees`, `documents`, `previews`, `search` and `wrap` of one workspace, by the web's names.
+    /// `trees`, `documents`, `previews`, `search`, `extractions` and `wrap` of one workspace, by
+    /// the web's names.
     pub fn snapshot(&self, workspace_id: &str) -> Value {
         fn value(v: &impl Serialize) -> Value {
             serde_json::to_value(v).unwrap_or(Value::Null)
@@ -389,6 +390,7 @@ impl FileStore {
             "documents": docs,
             "previews": self.previews.get(workspace_id).map_or(json!({}), value),
             "search": value(&self.searches.get(workspace_id)),
+            "extractions": self.extractions.get(workspace_id).map_or(json!({}), value),
             "wrap": self.wrap,
         })
     }

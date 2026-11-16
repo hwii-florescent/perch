@@ -1054,6 +1054,7 @@ export default screen("tabs", Hidden, { container: { position: "relative", width
     let host = ModHost::new(dir.clone()).expect("the mod host starts");
     // Every React screen's host imports `perch-editor`, as the window lends it.
     perch_native::editor::Editors::default().register(&host);
+    perch_native::files::media::register(&host, std::rc::Rc::new(|_: &gpui::App| None));
     let perch = Perch::new();
     publish(&perch, fixture, state);
     let pressed: std::rc::Rc<std::cell::RefCell<Option<Value>>> = Default::default();

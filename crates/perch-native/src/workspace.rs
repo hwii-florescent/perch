@@ -363,6 +363,11 @@ impl Workspace {
         }
     }
 
+    /// The core `locate` finds now, if it can.
+    pub fn core(&self) -> Option<Core> {
+        self.locate.as_ref()?().ok()
+    }
+
     /// Attach the terminals of opened sessions to the core `locate` finds. Without it the main
     /// area never touches the network.
     pub fn with_core(mut self, locate: impl Fn() -> anyhow::Result<Core> + 'static) -> Self {

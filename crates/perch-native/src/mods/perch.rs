@@ -253,6 +253,16 @@ impl Perch {
         let perch = self.clone();
         host.register_module(move |id| perch.module(id));
         self.0.hosts.borrow_mut().push(host.clone());
+        // `perch-media` (and the `image` engine), reading bytes from the attached window's core.
+        let perch = self.clone();
+        crate::files::media::register(
+            host,
+            Rc::new(move |cx: &App| {
+                let workspace = perch.0.attached.borrow().as_ref()?.workspace.upgrade()?;
+                let core = workspace.read(cx).core()?;
+                Some(std::sync::Arc::new(core) as std::sync::Arc<dyn crate::files::media::Fetch>)
+            }),
+        );
     }
 
     /// Follows `workspace` (in the window `handle`): publishes its model and tabs whenever it
@@ -414,13 +424,38 @@ impl Perch {
         files
     }
 
+    /// `FileAsset`'s view of one file: the workspace's folder on this computer (`root`, null for
+    /// a workspace on another computer or one that is gone) and the file's archive extraction.
+    fn media_file(&self, workspace_id: &str, path: &str) -> Value {
+        let store = self.store();
+        let data = self.0.data.borrow();
+        let root = store
+            .workspaces
+            .iter()
+            .find(|w| w.id == workspace_id && w.host_id == crate::sidebar::LOCAL)
+            .map(|w| w.path.clone());
+        let extraction = data
+            .files
+            .get(workspace_id)
+            .and_then(|files| files["extractions"].get(path))
+            .cloned();
+        json!({ "root": root, "extraction": extraction })
+    }
+
     /// The `perch` functions of the files screen: `workspaceFiles(workspaceId)` and
     /// `filesDo(action, workspaceId, ...args)`, which runs one of `useWorkspaceFiles`' actions
     /// on the window's store.
     fn files_functions(&self, id: &Rc<str>, module: HostModule) -> HostModule {
         let (reader, id) = (self.clone(), id.clone());
+        let (media, media_id) = (self.clone(), id.clone());
         let runner = self.clone();
         module
+            .function("mediaFile", move |args| {
+                let (workspace_id, path) = (args.string(0)?, args.string(1)?);
+                media.read(&media_id, STORE);
+                media.read(&media_id, &format!("files:{workspace_id}"));
+                Ok(to_host(&media.media_file(workspace_id, path)))
+            })
             .function("workspaceFiles", move |args| {
                 let workspace_id = args.string(0)?.to_string();
                 reader.read(&id, STORE);
@@ -2446,6 +2481,44 @@ mod tests {
         ] {
             assert!(notice_from(&bad).is_err(), "{bad} is refused");
         }
+    }
+
+    #[test]
+    fn media_file_gives_a_local_workspace_its_folder_and_the_extraction() {
+        let perch = Perch::new();
+        let workspace = |id: &str, host: &str| {
+            serde_json::from_value(json!({
+                "id": id, "projectId": "p", "hostId": host, "path": format!("/w/{id}"), "name": id, "dirty": false, "state": "active",
+                "createdAt": 0, "updatedAt": 0,
+            }))
+            .unwrap()
+        };
+        let store = crate::sidebar::navigation::Store {
+            workspaces: vec![workspace("here", "local"), workspace("there", "box")],
+            ..Default::default()
+        };
+        perch.set_model(crate::sidebar::Model {
+            store: Arc::new(store),
+            ..Default::default()
+        });
+        perch.set_files(
+            "here",
+            json!({"extractions": {"a.zip": {"state": "ready", "destination": "a"}}}),
+        );
+        assert_eq!(
+            perch.media_file("here", "a.zip"),
+            json!({"root": "/w/here", "extraction": {"state": "ready", "destination": "a"}})
+        );
+        assert_eq!(
+            perch.media_file("here", "b.png"),
+            json!({"root": "/w/here", "extraction": null})
+        );
+        assert_eq!(
+            perch.media_file("there", "a.zip"),
+            json!({"root": null, "extraction": null}),
+            "another computer's folder is not on this one"
+        );
+        assert_eq!(perch.media_file("gone", "a.zip")["root"], Value::Null);
     }
 
     #[test]

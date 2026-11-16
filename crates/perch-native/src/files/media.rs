@@ -420,16 +420,34 @@ pub fn element(key: &str) -> AnyElement {
         .into_any_element()
 }
 
-/// Lends `perch-media` to every mod `host` loads; images are read through `fetch`.
-pub fn register(host: &ModHost, fetch: Arc<dyn Fetch>) {
-    host.register_module(move |_| module(fetch.clone()));
+/// Where `open` reads bytes from: the window's core, asked when an image opens (none: not connected).
+pub type FetchSource = Rc<dyn Fn(&App) -> Option<Arc<dyn Fetch>>>;
+
+/// The `image` engine kind: `data-perch-engine="image"` draws [`element`] for its key.
+pub struct ImageEngine;
+
+impl crate::mods::engines::EngineKind for ImageEngine {
+    fn draw(&self, key: &str, _: &mut Window, _: &mut App) -> AnyElement {
+        element(key)
+    }
+
+    fn release(&self, key: &str, cx: &mut App) {
+        release(key, None, cx);
+    }
+}
+
+/// Lends `perch-media` to every mod `host` loads, and places its images as the `image` engine; bytes
+/// are read through `source`.
+pub fn register(host: &ModHost, source: FetchSource) {
+    host.engines().register("image", ImageEngine);
+    host.register_module(move |_| module(source.clone()));
 }
 
 fn field<'a>(value: Option<&'a HostValue>, key: &str) -> Option<&'a HostValue> {
     value?.get(key)
 }
 
-fn module(fetch: Arc<dyn Fetch>) -> HostModule {
+fn module(source: FetchSource) -> HostModule {
     HostModule::new("perch-media")
         .declarations(DECLARATIONS)
         .component("Image", |args, _, _| element(args.id()))
@@ -450,9 +468,11 @@ fn module(fetch: Arc<dyn Fetch>) -> HostModule {
                     .and_then(HostValue::as_number)
                     .unwrap_or(0.) as u64,
             };
-            let svg = gpui_shell::with_current_app(|cx| cx.svg_renderer())
+            let (svg, fetch) = gpui_shell::with_current_app(|cx| (cx.svg_renderer(), source(cx)))
                 .ok_or_else(|| HostError::new("open: no app"))?;
-            let work = open(&key, file, fetch.clone(), svg);
+            let fetch =
+                fetch.ok_or_else(|| HostError::new("Perch is not connected to its core"))?;
+            let work = open(&key, file, fetch, svg);
             Ok(async move {
                 match work() {
                     Ok(Some((w, h))) => Ok(HostValue::Object(vec![
