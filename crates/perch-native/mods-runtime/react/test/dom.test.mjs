@@ -346,3 +346,37 @@ test("rows styled alike compute their style once, and a row that differs gets it
     handle.unmount();
   }
 });
+
+test("a re-sorted list keeps the descriptions of rows that did not change, and equals a fresh description", async () => {
+  const { runtime } = await loadSidebar();
+  const { createElement: h } = await import("react");
+  const perch = { isMac: true, render() {}, error: (e) => { throw e; } };
+  const row = (item) => h("div", { key: item.id, "data-testid": item.id, className: "group/row flex items-center px-2 text-sm hover:bg-black/5" },
+    h("span", { className: "truncate" }, item.title),
+    h("button", { type: "button", className: "opacity-0 group-hover/row:opacity-100 px-1", onClick: () => {} }, "…"));
+  const first = ["a", "b", "c", "d", "e"].map((id) => ({ id, title: `Row ${id}` }));
+  const List = ({ items }) => h("div", { className: "flex flex-col space-y-0.5" }, items.map(row));
+  // Host ids differ between mounts: name each by its first appearance, so two trees alike compare equal.
+  const canonical = (description) => {
+    const names = new Map();
+    return JSON.stringify(description.root).replace(/n\d+/g, (id) => (names.has(id) ? names.get(id) : (names.set(id, `#${names.size}`), names.get(id))));
+  };
+  const fresh = (items) => {
+    const other = runtime.mount(perch, List, { container: { width: 240, height: 200 }, props: { items } });
+    try { return canonical(other.description); } finally { other.unmount(); }
+  };
+  const handle = runtime.mount(perch, List, { container: { width: 240, height: 200 }, props: { items: first } });
+  try {
+    const rows = () => Object.fromEntries(handle.description.root.children[0].children.map((n) => [n.meta.attrs["data-testid"], n]));
+    const before = rows();
+    // "e" moves to the top; "c" gets a new title.
+    const next = [first[4], first[0], first[1], { id: "c", title: "Row c, renamed" }, first[3]];
+    handle.update({ items: next });
+    const after = rows();
+    assert.equal(after.b, before.b, "a row that neither changed nor moved keeps its description");
+    assert.notEqual(after.c, before.c, "a row whose text changed is described again");
+    assert.equal(canonical(handle.description), fresh(next), "the kept description is the one a fresh mount describes");
+  } finally {
+    handle.unmount();
+  }
+});
