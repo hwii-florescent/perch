@@ -212,11 +212,13 @@ export function screen(id, Component, options = {}) {
         // `mode`: how the elements are wrapped for the keyboard, part of what the kept frame was built with.
         const draw = (mode, wrap) => {
           if (same && mode === this.mode) return unchanged();
-          this.look = look;
-          this.mode = mode;
           // Vertical lengths are laid on the window's device pixels (`snapColumns` in the runtime).
           // A screen in a region of the window (a sidebar, a status bar) portals into the window's layer.
-          return wrap(describeToGpui(this.handle.description, this.kit, this.handle, files, scale(), inRegion));
+          const built = wrap(describeToGpui(this.handle.description, this.kit, this.handle, files, scale(), inRegion));
+          // Only a build that finished is one to keep: one the engine cut off (its time budget) drew nothing.
+          this.look = look;
+          this.mode = mode;
+          return built;
         };
         // Effects that measured a box older than the tree run again once this frame has laid it out.
         if (this.handle.drawing?.()) {
