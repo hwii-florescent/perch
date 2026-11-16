@@ -85,6 +85,25 @@ export default class extends View {
 }
 "##;
 
+/// A modal with three boxes side by side: one padded and capped whose content fits (so nothing to
+/// scroll), one clipped with more content than its height, and one scroller with more content.
+const BOXES: &str = r##"
+import { View, div } from "gpui-kit";
+import { h_flex, v_flex } from "gpui-base";
+export default class extends View {
+  render() {
+    return h_flex().id("boxes-root").size_full().gap(20).p(20)
+      .child(v_flex().id("fit").w(200).max_h(400).p(16).gap(8).overflow_y_scroll()
+        .child(div().id("fit-a").h(50).bg("#ff0000"))
+        .child(div().id("fit-b").h(50).bg("#00ff00")))
+      .child(v_flex().id("clip").w(200).h(100).overflow_y_hidden()
+        .child(div().id("clip-a").h(300).flex_none().bg("#0000ff")))
+      .child(v_flex().id("long").w(200).h(100).overflow_y_scroll()
+        .child(div().id("long-a").h(300).flex_none().bg("#ffff00")));
+  }
+}
+"##;
+
 /// A status line that names each terminal with its state (`term:<session>:<state>`).
 const TERMINALS: &str = r##"
 import { View, div } from "gpui-kit";
@@ -269,12 +288,17 @@ impl Rig {
     }
 
     fn scroll(&mut self, x: f32, y: f32) {
+        self.wheel(x, y, -3.);
+    }
+
+    /// One wheel step of `lines` (negative is down) at `(x, y)`.
+    fn wheel(&mut self, x: f32, y: f32, lines: f32) {
         self.cx
             .update_window(self.window.into(), |_, window: &mut Window, cx| {
                 window.dispatch_event(
                     PlatformInput::ScrollWheel(ScrollWheelEvent {
                         position: point(px(x), px(y)),
-                        delta: ScrollDelta::Lines(point(0., -3.)),
+                        delta: ScrollDelta::Lines(point(0., lines)),
                         modifiers: Modifiers::default(),
                         touch_phase: TouchPhase::Moved,
                     }),
@@ -525,6 +549,52 @@ fn main() {
     );
     rig.draw();
     assert!(rig.terminal_focused());
+
+    // Wheel over boxes: one whose content fits does not move, nor does a clipped one; a scroller
+    // with more content does; and none of it reaches the terminal under the modal.
+    let history: String = (0..120).map(|n| format!("history {n}\r\n")).collect();
+    let row0 = |rig: &mut Rig| {
+        rig.ws(|ws, _, cx| {
+            ws.terminal()
+                .expect("a terminal")
+                .update(cx, |view, _| view.frame().row_text(0))
+        })
+    };
+    rig.ws(|ws, _, cx| {
+        ws.terminal()
+            .expect("a terminal")
+            .update(cx, |view, cx| view.output(&history, cx))
+    });
+    rig.draw();
+    rig.wheel(900., 300., 3.);
+    rig.draw();
+    let scrolled_back = row0(&mut rig);
+    rig.write("confirm", BOXES);
+    rig.open_confirm("boxes");
+    let top = |rig: &mut Rig, name: &str| rig.record(name).unwrap().bounds.origin.y;
+    let (fit, clip, long) = (
+        top(&mut rig, "fit-a"),
+        top(&mut rig, "clip-a"),
+        top(&mut rig, "long-a"),
+    );
+    for name in ["fit", "clip", "long"] {
+        let at = rig.record(name).unwrap().bounds.center();
+        rig.wheel(f32::from(at.x), f32::from(at.y), -3.);
+    }
+    rig.draw();
+    assert_eq!(top(&mut rig, "fit-a"), fit, "a box whose content fits does not move");
+    assert_eq!(top(&mut rig, "clip-a"), clip, "a clipped box does not move");
+    assert!(top(&mut rig, "long-a") < long, "a box with more content scrolls");
+    rig.wheel(900., 300., 3.);
+    rig.wheel(30., 600., 3.);
+    rig.draw();
+    assert_eq!(row0(&mut rig), scrolled_back, "a wheel on a modal does not reach the terminal");
+    rig.press("escape");
+    rig.draw();
+    rig.wheel(900., 300., -3.);
+    rig.draw();
+    assert_ne!(row0(&mut rig), scrolled_back, "with the modal gone the terminal takes the wheel");
+    rig.write("confirm", CONFIRM);
 
     // The close guard asks through the confirmation, for a terminal attached to an agent's
     // session; dismissed, the tab stays.
