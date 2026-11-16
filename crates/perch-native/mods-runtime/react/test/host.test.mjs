@@ -10,7 +10,7 @@ import { repo } from "./support.mjs";
 // The host modules `host.js` imports exist only inside the window's engine; nothing here calls them.
 registerHooks({
   resolve(specifier, context, next) {
-    if (specifier === "perch" || specifier === "perch-react" || specifier === "perch-engine" || specifier === "perch-editor") return { url: "data:text/javascript,export const Icon=0,bounds=0,forgetBounds=0,probing=0,textWidth=0,Engine=0,events=0", shortCircuit: true, format: "module" };
+    if (specifier === "perch" || specifier === "perch-react" || specifier === "perch-engine" || specifier === "perch-editor" || specifier === "perch-diff") return { url: "data:text/javascript,export const Icon=0,bounds=0,forgetBounds=0,probing=0,textWidth=0,Engine=0,events=0", shortCircuit: true, format: "module" };
     return next(specifier, context);
   },
 });

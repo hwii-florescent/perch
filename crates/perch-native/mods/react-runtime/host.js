@@ -228,6 +228,9 @@ export function copyFor(cx, screen) {
   const openOverlays = new Set();
   // Editors this copy placed (`perch.editor.watch`): their queued events, read on `refresh()`.
   const watched = new Map();
+  // Diff views this copy reads (`perch.diff.seq`): the event count its subscribers were last told of. A diff view's
+  // events move no published revision, so `refresh()` looks at these itself.
+  const diffSeqs = new Map();
   function snapshot(key, read) {
     let entry = snapshots.get(key);
     if (!entry) {
@@ -356,14 +359,25 @@ export function copyFor(cx, screen) {
     filesDo: (action, workspaceId, ...args) => perch.filesDo(action, workspaceId, ...args),
     // `useGitReview`: one workspace's review from the window's Git store, read again only when it moved (a diff
     // can be 20,000 lines), and its actions run there. `diff` drives the review's diff engine by key.
-    gitReview: (id) => {
+    gitReview: (id) => snapshot(`gitReview:${id}`, () => {
       const revision = perch.gitReviewRevision(id);
       let entry = reviews.get(id);
       if (!entry || entry.revision !== revision) reviews.set(id, (entry = { revision, value: perch.gitReview(id) }));
       return entry.value;
-    },
+    }),
     gitDo: (action, workspaceId, ...args) => perch.gitDo(action, workspaceId, ...args),
-    diff: diffs,
+    diff: {
+      ...diffs,
+      seq: (key) => {
+        const n = diffs.seq(key);
+        if (!diffSeqs.has(key)) diffSeqs.set(key, n);
+        return n;
+      },
+      release: (key) => {
+        diffSeqs.delete(key);
+        return diffs.release(key);
+      },
+    },
     statusLine: () => snapshot("statusLine", () => perch.statusLine()),
     zoom: () => snapshot("zoom", () => perch.zoom()),
     paneLook: () => snapshot("paneLook", () => perch.paneLook()),
@@ -639,6 +653,12 @@ export function copyFor(cx, screen) {
         lookedAt = tell ? null : revision;
         if (!moved || tell) seenRevision = revision;
         changed ||= moved;
+      }
+      for (const [key, told] of diffSeqs) {
+        const n = diffs.seq(key);
+        if (n === told) continue;
+        changed = true;
+        if (tell) diffSeqs.set(key, n);
       }
       if (changed && tell) for (const listener of [...listeners]) listener();
       return changed;
