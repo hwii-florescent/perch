@@ -569,14 +569,13 @@ export class StyleSheet {
   /** Rules that may match `element` (by its classes, its tag, and the universal ones), or its `pseudo` box
    * (`before`, `after`). */
   candidates(element, pseudo = null) {
-    const id = element.getAttribute?.("id") ?? null;
-    const key = `${element.tagName} ${element.className}|${pseudo ?? ""}|${id ?? ""}`;
+    const key = `${element.tagName} ${element.className}|${pseudo ?? ""}`;
     const known = this.candidateCache.get(key);
     if (known) return known;
     const out = [];
     const seen = new Set();
     const classes = new Set(element.classList);
-    const push = (list) => { if (list) for (const rule of list) if (!seen.has(rule) && rule.pseudo === pseudo) { seen.add(rule); if (subjectMayMatch(rule.steps[rule.steps.length - 1].compound, element.tagName, classes, id)) out.push(rule); } };
+    const push = (list) => { if (list) for (const rule of list) if (!seen.has(rule) && rule.pseudo === pseudo) { seen.add(rule); if (subjectMayMatch(rule.steps[rule.steps.length - 1].compound, element.tagName, classes)) out.push(rule); } };
     for (const cls of element.classList) push(this.index.get(`.${cls}`));
     push(this.index.get(element.tagName));
     push(this.index.get("*"));
@@ -620,17 +619,16 @@ export class StyleSheet {
   }
 }
 
-/** Whether a subject compound may match an element with this tag, classes and id: false only when its tag, id or
- * classes rule it out, or `:root` (the document's `html`), or a `:where()`/`:is()` of compounds that all do. Checks
+/** Whether a subject compound may match an element with this tag and classes: false only when its tag or classes
+ * rule it out (not its id: the candidates are kept per tag and class list, and ids are often unique), or `:root` (the document's `html`), or a `:where()`/`:is()` of compounds that all do. Checks
  * nothing `compoundMatches` would reach after a pseudo-class with an effect (`:has()` marks the element). */
-function subjectMayMatch(compound, tag, classes, id) {
+function subjectMayMatch(compound, tag, classes) {
   if (compound.tag && compound.tag !== "*" && compound.tag !== tag) return false;
-  if (compound.id && compound.id !== id) return false;
   for (const name of compound.classes) if (!classes.has(name)) return false;
   for (const p of compound.pseudos) {
     if (p.name === "has") return true;
     if (p.name === "root" && tag !== "html") return false;
-    if ((p.name === "where" || p.name === "is") && p.list.every((steps) => steps.length === 1 && !subjectMayMatch(steps[0].compound, tag, classes, id))) return false;
+    if ((p.name === "where" || p.name === "is") && p.list.every((steps) => steps.length === 1 && !subjectMayMatch(steps[0].compound, tag, classes))) return false;
   }
   return true;
 }
