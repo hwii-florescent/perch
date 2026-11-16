@@ -309,26 +309,70 @@ async fn open_review(
 }
 
 /// `browser <url>`: a browser pane shows the page.
-async fn open_browser(_url: &str, _window: WindowHandle<Workspace>, _cx: &mut AsyncApp) -> bool {
-    missing("browser")
+async fn open_browser(url: &str, window: WindowHandle<Workspace>, cx: &mut AsyncApp) -> bool {
+    // A workspace must be known (the core's lists) before a tab can be opened in it.
+    let args = serde_json::json!({ "url": url });
+    let opened = until(cx, |cx| {
+        window
+            .update(cx, |workspace, window, cx| {
+                workspace
+                    .run_command("browser.open", Some(&args), window, cx)
+                    .is_ok()
+            })
+            .unwrap_or(false)
+    })
+    .await;
+    // The page is made where its pane is drawn. A window that gets no display frames (hidden, or the display
+    // asleep) never draws on its own, so draw one each time it is looked at, until the page lives.
+    opened
+        && until(cx, |cx| {
+            let _ = gpui::AppContext::update_window(cx, window.into(), |_, window, cx| {
+                let _ = window.draw(cx);
+            });
+            window
+                .read_with(cx, |workspace, _| {
+                    let tab = workspace
+                        .tabs()
+                        .shown()
+                        .iter()
+                        .any(|id| perch_native::workspace::is_browser_tab(id));
+                    let live = workspace
+                        .browser_pages()
+                        .is_some_and(|pages| pages.borrow().live_views() > 0);
+                    tab && live
+                })
+                .unwrap_or(false)
+        })
+        .await
 }
 
 /// `close [<tab id>]`: that tab, or the focused one, is closed and gone from the strip.
 async fn close_tab(tab: Option<&str>, window: WindowHandle<Workspace>, cx: &mut AsyncApp) -> bool {
-    let id = match tab {
-        Some(id) => Some(id.to_string()),
-        None => window
-            .read_with(cx, |ws, _| ws.tabs().active().map(str::to_string))
+    let Some(id) = tab.map(str::to_string).or_else(|| {
+        window
+            .read_with(cx, |workspace, _| {
+                workspace.tabs().active().map(str::to_string)
+            })
             .ok()
-            .flatten(),
+            .flatten()
+    }) else {
+        return false;
     };
-    let Some(id) = id else { return false };
-    let closed = window.update(cx, |ws, window, cx| {
-        let args = serde_json::json!({ "id": id });
-        ws.run_command("tabs.close", Some(&args), window, cx)
-            .is_ok()
-    });
-    closed.unwrap_or(false) && until(cx, |cx| !shown(window, cx).contains(&id)).await
+    let args = serde_json::json!({ "id": id });
+    let closed = window
+        .update(cx, |workspace, window, cx| {
+            workspace
+                .run_command("tabs.close", Some(&args), window, cx)
+                .is_ok()
+        })
+        .unwrap_or(false);
+    closed
+        && until(cx, |cx| {
+            window
+                .read_with(cx, |workspace, _| !workspace.tabs().contains(&id))
+                .unwrap_or(false)
+        })
+        .await
 }
 
 #[cfg(test)]

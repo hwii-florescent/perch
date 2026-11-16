@@ -562,9 +562,20 @@ impl Workspace {
         if name == "browser.open" {
             let workspace = match text("workspaceId") {
                 Some(id) => self.known_workspace(Some(id), cx),
+                // The workspace shown, else (nothing shown yet) this computer's first.
                 None => self
                     .shown_workspace(cx)
-                    .ok_or_else(|| "Open a workspace first.".to_string()),
+                    .or_else(|| {
+                        let model = self.sidebar.read(cx).model();
+                        let store = &model.store;
+                        store
+                            .workspaces
+                            .iter()
+                            .find(|w| w.host_id == LOCAL)
+                            .or(store.workspaces.first())
+                            .map(|w| w.id.clone())
+                    })
+                    .ok_or_else(|| "There is no workspace to open a browser tab in.".to_string()),
             };
             let engine = self.read_prefs(cx).engine;
             let result = workspace.and_then(|workspace| {
