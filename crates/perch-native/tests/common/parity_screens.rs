@@ -286,10 +286,35 @@ pub fn window_from(data: &Value, model: &Model) -> WindowState {
         .filter(|s| workspace.is_some() && s["workspaceId"].as_str() == workspace.as_deref())
         .collect();
     mine.sort_by_key(|s| s["createdAt"].as_i64().unwrap_or(0));
-    let strip: Vec<String> = mine
+    let mut strip: Vec<String> = mine
         .iter()
         .filter_map(|s| s["id"].as_str().map(str::to_string))
         .collect();
+    // The web's file tabs follow its sessions (a review or a browser tab is not a file's).
+    let files: Vec<&Value> = data["fileTabs"]["tabs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|t| t["kind"].as_str().unwrap_or("file") == "file")
+        .collect();
+    let file_id = |t: &Value| {
+        format!(
+            "{}\n{}",
+            t["workspaceId"].as_str().unwrap_or(""),
+            t["path"].as_str().unwrap_or("")
+        )
+    };
+    strip.extend(files.iter().map(|t| file_id(t)));
+    let previews: Vec<String> = files
+        .iter()
+        .filter(|t| t["preview"] == true)
+        .map(|t| file_id(t))
+        .collect();
+    // A focused file tab has the keyboard and the pane, as on the web.
+    let file_focus = data["fileTabs"]["active"]
+        .as_str()
+        .filter(|id| strip.iter().any(|s| s == id))
+        .map(str::to_string);
     let zoomed_id = data["splitSets"]["zoomedId"].as_str();
     let set = data["splitSets"]["sets"]
         .as_array()
@@ -351,9 +376,14 @@ pub fn window_from(data: &Value, model: &Model) -> WindowState {
             Some(notification_json(&note, model))
         })
         .collect();
+    let (shown, active) = match file_focus {
+        Some(id) => (vec![id.clone()], Some(id)),
+        None => (shown, active),
+    };
     WindowState {
         zoomed: zoomed_id.is_some(),
         strip,
+        previews,
         shown,
         active,
         zoom: 1.,

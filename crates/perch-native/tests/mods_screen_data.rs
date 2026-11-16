@@ -34,13 +34,11 @@ const SCREENS: [&str; 16] = [
     "worktree",
 ];
 
-/// The states whose web strip also holds file, review and browser tabs. The native strip holds
-/// sessions only, so only the web's session tabs are compared there; the rest of
-/// `workspaceTabs` is compared as everywhere else.
-const SESSIONS_ONLY: &[(&str, &str)] = &[("tabs", "files-and-pages"), ("pane-header", "corner")];
-
-const FILE_FOCUSED: &str = "a file tab has the focus on the web; the native strip holds sessions \
-     only, so its focus stays on the window's session";
+/// The states whose web strip also holds review and browser tabs, which the native strip does not
+/// hold yet: there only the web's session and file tabs are compared; the rest of `workspaceTabs`
+/// is compared as everywhere else.
+const SESSIONS_AND_FILES: &[(&str, &str)] =
+    &[("tabs", "files-and-pages"), ("pane-header", "corner")];
 
 /// Every difference the native client cannot remove, and why.
 const EXCEPTIONS: &[Exception] = &[
@@ -50,30 +48,6 @@ const EXCEPTIONS: &[Exception] = &[
         path: "agentChoices.lastChoice",
         reason: "the last agent picked is the screen's own storage (`perch.lastAgentChoice`), not \
                  the window's data, and the worktree menu does not read it",
-    },
-    Exception {
-        screen: "tabs",
-        states: &["files-and-pages"],
-        path: "workspaceTabs.activeId",
-        reason: FILE_FOCUSED,
-    },
-    Exception {
-        screen: "tabs",
-        states: &["files-and-pages"],
-        path: "workspaceTabs.tabs[2].state",
-        reason: FILE_FOCUSED,
-    },
-    Exception {
-        screen: "pane-header",
-        states: &["corner"],
-        path: "workspaceTabs.activeId",
-        reason: FILE_FOCUSED,
-    },
-    Exception {
-        screen: "pane-header",
-        states: &["corner"],
-        path: "workspaceTabs.tabs[2].state",
-        reason: FILE_FOCUSED,
     },
     Exception {
         screen: "tabs",
@@ -216,9 +190,9 @@ fn compare(
 ) -> Vec<Difference> {
     let mut web = expected.clone();
     parity_screens::fill_wire_defaults(&mut web);
-    if SESSIONS_ONLY.contains(&(fixture.screen.as_str(), state)) {
+    if SESSIONS_AND_FILES.contains(&(fixture.screen.as_str(), state)) {
         let tabs = web["workspaceTabs"]["tabs"].as_array_mut().unwrap();
-        tabs.retain(|t| t["kind"] == "session");
+        tabs.retain(|t| t["kind"] == "session" || t["kind"] == "file");
     }
     let props = fixture.props(state);
     let native = parity_screens::native_sdk(perch, &web, props.as_ref());

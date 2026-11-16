@@ -513,15 +513,17 @@ fn launcher(rig: &mut Rig) {
     rig.click(&format!("launcher-row:{first}"));
     assert_eq!(launched(rig), [("local".into(), None, first)]);
 
+    // New file asks for the file's name in the dialog's prompt.
+    rig.press(LAUNCHER_KEY);
+    rig.press("enter");
+    rig.click("launcher-row:file");
+    assert_eq!(rig.open_screens(), ["dialog"], "the name prompt");
+    rig.press("escape");
+    assert!(rig.open_screens().is_empty(), "cancelled");
+
     // What this window cannot open is listed and refused with the reason (a browser tab needs WebKit, which a
     // headless window has none of).
-    for (row, reason) in [
-        ("browser", "Browser pages need the desktop's WebKit."),
-        (
-            "file",
-            "A new file needs the files view, which the native window does not have yet.",
-        ),
-    ] {
+    for (row, reason) in [("browser", "Browser pages need the desktop's WebKit.")] {
         rig.press(LAUNCHER_KEY);
         rig.press("enter");
         rig.click(&format!("launcher-row:{row}"));
