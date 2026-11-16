@@ -70,6 +70,16 @@ path = "tests/files_window.rs"
 harness = false
 
 [[test]]
+name = "files_drawer"
+path = "tests/files_drawer.rs"
+harness = false
+
+[[test]]
+name = "files_drawer_core"
+path = "tests/files_drawer_core.rs"
+harness = false
+
+[[test]]
 name = "files_restart"
 path = "tests/files_restart.rs"
 harness = false

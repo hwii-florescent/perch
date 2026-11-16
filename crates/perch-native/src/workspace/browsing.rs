@@ -308,9 +308,15 @@ impl Workspace {
         if let Some((workspace, _)) = active.split_once('\n') {
             return Some(workspace.to_string());
         }
+        // The core's list, not the sidebar's rows: a session the sidebar does not list (a plain shell) is still in
+        // its workspace.
         self.sidebar
             .read(cx)
-            .find_session(active)
+            .model()
+            .store
+            .sessions
+            .iter()
+            .find(|s| s.id == active)
             .and_then(|s| s.workspace_id.clone())
     }
 
