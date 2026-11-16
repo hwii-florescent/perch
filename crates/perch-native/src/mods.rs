@@ -695,6 +695,8 @@ impl ModHost {
                 shown: None,
                 tried: None,
                 load_error: None,
+                restarted: None,
+                stopped: None,
                 _poll: Task::ready(()),
             };
             view.check(window, cx);
@@ -783,8 +785,15 @@ pub struct ModView {
     /// The source and file stamp last acted on, so a broken version is tried once per change.
     tried: Option<(PathBuf, Stamp)>,
     load_error: Option<String>,
+    /// When the copy last started afresh after a call into it was stopped half-way.
+    restarted: Option<Instant>,
+    /// Why that call was stopped: still reported (`error`) by the fresh copy, until the mod's files change.
+    stopped: Option<String>,
     _poll: Task<()>,
 }
+
+/// How often a copy stopped half-way may start afresh.
+const RESTART_EVERY: Duration = Duration::from_secs(5);
 
 impl ModView {
     pub fn id(&self) -> &str {
@@ -813,9 +822,12 @@ impl ModView {
         error
     }
 
-    /// The load error, else the render error.
+    /// The load error, else the render error, else why a call was stopped before the copy started afresh.
     pub fn error(&self, cx: &App) -> Option<String> {
-        self.load_error.clone().or_else(|| self.render_error(cx))
+        self.load_error
+            .clone()
+            .or_else(|| self.render_error(cx))
+            .or_else(|| self.stopped.clone())
     }
 
     /// The shell's view of the mod, for tests and tools that read its description.
@@ -823,6 +835,30 @@ impl ModView {
         let root = &self.shown.as_ref()?.root;
         let content: AnyView = root.read(cx).content().clone();
         content.downcast::<ScriptView>().ok()
+    }
+
+    /// Whether a call into the copy (an event, a timer, a task) was stopped past its time budget, so it is to start
+    /// afresh. What the call was doing is half done: a React commit cut short leaves the screen's tree stuck (the
+    /// Files drawer stayed blank), and a cut cannot be caught in the script. A copy starts afresh at most once per
+    /// [`RESTART_EVERY`]; one stopped again sooner keeps its notice until then.
+    fn stopped_half_way(&mut self, cx: &App) -> bool {
+        let stopped = self
+            .script_view(cx)
+            .is_some_and(|view| view.read(cx).was_stopped());
+        if !stopped
+            || self
+                .restarted
+                .is_some_and(|at| at.elapsed() < RESTART_EVERY)
+        {
+            return false;
+        }
+        eprintln!(
+            "perch-native: mod {} was stopped half-way and starts afresh",
+            self.key
+        );
+        self.stopped = self.render_error(cx);
+        self.restarted = Some(Instant::now());
+        true
     }
 
     /// Looks at the mod's files and loads, reloads or switches source when they changed.
@@ -837,8 +873,12 @@ impl ModView {
         // handful. A large one would want an OS file watcher (herdr-app uses `notify`).
         let stamp = stamp(&info.dir);
         let current = Some((info.dir.clone(), stamp));
-        if self.tried == current {
+        let restart = self.stopped_half_way(cx);
+        if self.tried == current && !restart {
             return;
+        }
+        if self.tried != current {
+            self.stopped = None;
         }
         self.tried = current;
         let outcome = match &self.shown {
@@ -848,7 +888,7 @@ impl ModView {
                 "{} in a mod folder is not allowed: a Perch mod imports only its own files",
                 gpui_shell::plugin::MANIFEST_FILE
             )),
-            Some(shown) if shown.dir == info.dir => {
+            Some(shown) if shown.dir == info.dir && !restart => {
                 let root = shown.root.clone();
                 self.host.0.runtime.reload_now(&root, window, cx)
             }

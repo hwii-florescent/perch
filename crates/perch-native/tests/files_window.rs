@@ -429,6 +429,80 @@ fn main() {
         vec!["w1\nsrc/lib.rs".to_string(), "w1\ndocs/new.md".to_string()]
     );
 
+    // A Markdown file's Preview draws its draft, rendered, in place of the editor. A long one (as the repository's
+    // docs are): lexed at once it ran past the 500 ms a click may take, and Preview never showed.
+    let item = "- **Item** with `code`, a [link](https://perch.dev) and enough words to be a real line of a doc.\n";
+    let long = format!(
+        "# Notes title\n\nSome *words*.\n\n{}\n## More\n\nEnd.\n",
+        item.repeat(800)
+    );
+    assert!(long.len() > 70_000);
+    rig.ws(|ws, _, cx| ws.open_file("w1", "notes.md", false, cx));
+    rig.settle();
+    let sent = rig.sent();
+    let read = sent
+        .iter()
+        .find(|f| f["type"] == "fs.read" && f["path"] == "notes.md")
+        .unwrap_or_else(|| panic!("the file is read: {sent:?}"));
+    rig.answer(
+        json!({"type": "fs.read.result", "requestId": read["requestId"],
+        "workspaceId": "w1", "content": long.clone(), "version": "v1",
+        "metadata": {"path": "notes.md", "name": "notes.md", "size": 30, "readonly": false,
+                     "executable": false, "kind": "file", "mediaType": "text/markdown"}}),
+    );
+    let records = rig.settle();
+    let loaded = rig.ws(|ws, _, _| {
+        ws.files()
+            .document("w1", "notes.md")
+            .map(|d| d.content.clone())
+    });
+    assert_eq!(loaded.as_ref(), Some(&long));
+    assert!(named(&records, "files-markdown-preview").is_none());
+    assert!(
+        named(&records, "files-editor").is_some(),
+        "the editor first"
+    );
+    let toggle = named(&records, "files-markdown-view")
+        .unwrap_or_else(|| {
+            let mut names: Vec<_> = records.iter().map(|r| r.name.to_string()).collect();
+            names.sort();
+            panic!("a Markdown file has the Source/Preview toggle: {names:?}")
+        })
+        .bounds;
+    // Preview is the toggle's second half.
+    let preview = gpui::point(
+        toggle.origin.x + toggle.size.width * 0.75,
+        toggle.origin.y + toggle.size.height * 0.5,
+    );
+    rig.click(preview);
+    let records = rig.settle();
+    if let Some(dir) = std::env::var_os("PERCH_FILES_SHOTS") {
+        let image = rig
+            .cx
+            .update_window(rig.window.into(), |_, window: &mut Window, cx| {
+                let _ = window.draw(cx);
+                window.render_to_image().expect("offscreen render")
+            })
+            .unwrap();
+        image
+            .save(PathBuf::from(dir).join("markdown-preview.png"))
+            .unwrap();
+    }
+    let shown = named(&records, "files-markdown-preview").unwrap_or_else(|| {
+        let mut names: Vec<_> = records.iter().map(|r| r.name.to_string()).collect();
+        names.sort();
+        panic!("Preview draws the rendered draft: {names:?}")
+    });
+    assert!(
+        shown.bounds.size.height > px(100.),
+        "the preview fills the pane: {:?}",
+        shown.bounds
+    );
+    assert!(
+        named(&records, "files-editor").is_none(),
+        "the editor is hidden under Preview"
+    );
+
     let _ = std::fs::remove_dir_all(&scratch);
     println!("files window: ok");
 }

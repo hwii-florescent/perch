@@ -45,3 +45,26 @@ test("a long document is cut where the web cuts it", () => {
   assert.ok(source.length <= FILE_PREVIEW_MAX_CHARS && source.endsWith("x"));
   assert.deepEqual(previewSource("short"), { source: "short", truncated: false });
 });
+
+test("a long document lexed section by section draws what lexing it whole draws", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const { repo } = await import("./support.mjs");
+  const { markdownSections, markdownLexer } = await import("../markdown.mjs");
+  // The tree as drawn: tags, props and text, without React's keys or the link handlers.
+  const shape = (node) => {
+    if (Array.isArray(node)) return node.map(shape).filter((n) => n != null && n !== "");
+    if (node == null || typeof node !== "object") return node;
+    const { children, onClick, ...props } = node.props ?? {};
+    return [node.type === Symbol.for("react.fragment") ? "#" : node.type, props, shape(children)];
+  };
+  for (const name of ["docs/ARCHITECTURE.md", "docs/DECISIONS.md", "docs/TESTING.md", "docs/UI-UX-DIRECTION.md"]) {
+    const text = fs.readFileSync(path.join(repo, name), "utf8");
+    const sections = markdownSections(text);
+    assert.equal(sections.join(""), text, name);
+    assert.ok(sections.length > 3 && sections.every((s) => s.length < 12_000), `${name}: ${sections.map((s) => s.length)}`);
+    const lexer = markdownLexer(() => {});
+    for (const section of sections) lexer.add(section);
+    assert.deepEqual(shape(lexer.elements()), shape(markdownElements(text, () => {})), name);
+  }
+});

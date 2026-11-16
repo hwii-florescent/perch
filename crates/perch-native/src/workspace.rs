@@ -4257,11 +4257,14 @@ impl Workspace {
         )
     }
 
-    /// Zoom every terminal, shown or kept, and say the level.
+    /// Zoom every terminal, shown or kept, and the file editors, and say the level.
     fn zoom_to(&mut self, zoom: Zoom, cx: &mut Context<Self>) {
         self.zoom = zoom;
         for view in self.panes.values().filter_map(|pane| pane.view.as_ref()) {
             view.update(cx, |view, cx| view.set_zoom(zoom.factor(), cx));
+        }
+        if let Some(mods) = cx.try_global::<crate::mods::WindowMods>() {
+            mods.editors.set_zoom(zoom.factor());
         }
         self.notice = Some(format!("Zoom {}%", (zoom.factor() * 100.0).round()));
         cx.notify();

@@ -127,7 +127,21 @@ const hostConfig = {
   bindToConsole: (method, args) => Function.prototype.bind.call(console[method], console, ...args),
 };
 
-export const reconciler = Reconciler(hostConfig);
+export let reconciler = Reconciler(hostConfig);
+/** How many times React was replaced (`fresh`): a tree mounted on an earlier one is dead. */
+let generation = 0;
+
+/** A call into React that the engine cut past its time budget never unwinds (the cut cannot be caught and `finally`
+ * does not run), so React stays mid-render: from then on it renders nothing and says nothing, and every screen drawn
+ * by it stays as the cut left it (the Files drawer stayed blank, opened again or not). Before each call from outside
+ * React, a React left so is replaced by a fresh one; the trees mounted on it are dead (`handle.dead()`) and their
+ * screens mount them again. */
+function fresh() {
+  if (!reconciler.isAlreadyRendering()) return;
+  reconciler = Reconciler(hostConfig);
+  generation += 1;
+  currentPriority = NoEventPriority;
+}
 export const createPortal = (children, container, key = null) => reconciler.createPortal(children, container, null, key);
 
 /** React's prop for a DOM event type (`click` is `onClick`, `dblclick` `onDoubleClick`). */
@@ -216,7 +230,12 @@ export function mount(perch, Component, options = {}) {
   };
   /** Runs pending effects; describes again when they changed what the source listens for on document/window
    * (a menu's outside-press listener), which the description tells the engine. */
+  fresh();
+  const born = generation;
+  /** Whether this tree's React is the current one (`fresh`); a dead tree takes no more calls. */
+  const alive = () => { fresh(); return born === generation; };
   const settle = () => {
+    if (!alive()) return;
     reconciler.flushPassiveEffects();
     reconciler.flushSyncWork();
     if (listening() !== described) render();
@@ -237,6 +256,7 @@ export function mount(perch, Component, options = {}) {
     return walk(document.documentElement);
   };
   const discrete = (fn) => {
+    if (!alive()) return undefined;
     const previous = currentPriority;
     currentPriority = DiscreteEventPriority;
     try { return fn(); } finally {
@@ -397,15 +417,20 @@ export function mount(perch, Component, options = {}) {
     },
     /** Runs effects React has scheduled (the engine calls it after a frame). */
     flush: settle,
+    /** React was replaced since this tree was mounted (`fresh`): the tree is to be mounted again. */
+    dead: () => !alive(),
     update(props) {
+      if (!alive()) return;
       reconciler.updateContainerSync(createElement(Component, props ?? {}), root, null, null);
       reconciler.flushSyncWork();
       settle();
     },
     unmount() {
-      reconciler.updateContainerSync(null, root, null, null);
-      reconciler.flushSyncWork();
-      reconciler.flushPassiveEffects();
+      if (alive()) {
+        reconciler.updateContainerSync(null, root, null, null);
+        reconciler.flushSyncWork();
+        reconciler.flushPassiveEffects();
+      }
       document.afterCommit = null;
       document.retries.length = 0;
       perch.forgetBounds?.(prefix);

@@ -129,6 +129,22 @@ test("a text-sized element's font must be exact", () => {
   assert.match(checks(compareDocs(web, missing)).join(), /title:a font/);
 });
 
+test("a font-gated element's font must be exact; another element's font is only counted", () => {
+  const web = synthetic();
+  const MONO = { family: "ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace", size: 12, weight: 400, lineHeight: 18, lineHeightNormal: false };
+  web.elements.push(el("editor", null, { x: 0, y: 200, width: 240, height: 300 }, { fontGated: true, font: MONO }));
+  const larger = clone(web);
+  Object.assign(find(larger, "editor").font, { size: 13, lineHeight: 20 });
+  assert.match(checks(compareDocs(web, larger)).join(), /editor\S* font/);
+  const plain = clone(web);
+  delete find(plain, "editor").fontGated;
+  const other = clone(plain);
+  Object.assign(find(other, "editor").font, { size: 13 });
+  const result = compareDocs(plain, other);
+  assert.deepEqual(checks(result), []);
+  assert.equal(result.info.fontDiffs, 1);
+});
+
 test("documents of different schema, screen, state or theme are not compared", () => {
   const web = synthetic();
   for (const [field, value] of [["schema", "other/1"], ["screen", "tabs"], ["state", "two"], ["theme", "light"]]) {
