@@ -380,10 +380,12 @@ pub const STOCK: &[(&str, &str)] = &[
 ];
 
 /// Stock files that are not text, written out beside a stock mod's scripts as [`STOCK`]'s are: the
-/// start page's logo is the app's own (`packages/web/src/assets`).
+/// start page's logo is the app's own (`packages/web/src/assets/perch-logo-texture-medium.webp`)
+/// made 320 pixels square: it is drawn 80 points wide, and the 1600-pixel original held 10 MB of
+/// decoded pixels for that.
 pub const STOCK_BYTES: &[(&str, &[u8])] = &[(
     "start/perch-logo.webp",
-    include_bytes!("../../../packages/web/src/assets/perch-logo-texture-medium.webp"),
+    include_bytes!("../assets/perch-logo-320.webp"),
 )];
 
 /// Where user mods live: `native-mods/` in the folder that holds the core's database
