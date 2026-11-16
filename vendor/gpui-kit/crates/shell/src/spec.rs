@@ -1232,6 +1232,79 @@ impl SpecArena {
         template.root + base
     }
 
+    /// PERCH: copies the subtree at `root` of `source` (the description a view published last) into
+    /// this arena and answers where its root landed, unattached. Every handler in it is handed to
+    /// `handler`, which registers it again for the build in progress and answers its new id (or
+    /// `None` when it is gone), so the copy pins nothing of the snapshot it came from. `None`, with
+    /// nothing copied, when the subtree holds a node that cannot be in two descriptions (a child
+    /// view, a dock area, a bound input or list) or a handler that is gone.
+    pub(crate) fn copy_subtree(
+        &mut self,
+        source: &SpecArena,
+        root: SpecId,
+        mut handler: impl FnMut(CallbackId) -> Option<CallbackId>,
+        mut exists: impl FnMut(CallbackId) -> bool,
+    ) -> Option<SpecId> {
+        // The nodes reachable from `root` (children, state styles and slots), in a stack.
+        let mut order = Vec::new();
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            let node = source.nodes.get(id as usize)?;
+            match node.component.as_ref()? {
+                Component::Div
+                | Component::HFlex
+                | Component::VFlex
+                | Component::Text(_)
+                | Component::Svg(_)
+                | Component::Image(_)
+                | Component::Module(_)
+                | Component::Registered(_) => {}
+                _ => return None,
+            }
+            for op in &node.ops {
+                match op {
+                    SpecOp::StateStyle(_, id) | SpecOp::Slot(_, id) => stack.push(*id),
+                    SpecOp::Callback(_, callback) | SpecOp::ActionCallback(_, callback) => {
+                        if !exists(*callback) {
+                            return None;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            stack.extend(node.children.iter().copied());
+            order.push(id);
+        }
+        let base = self.nodes.len() as SpecId;
+        let at: std::collections::HashMap<SpecId, SpecId> = order
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (*id, base + i as SpecId))
+            .collect();
+        self.nodes.reserve(order.len());
+        for id in &order {
+            let mut node = source.nodes[*id as usize].clone();
+            for child in &mut node.children {
+                *child = at[child];
+            }
+            for op in &mut node.ops {
+                match op {
+                    SpecOp::StateStyle(_, id) | SpecOp::Slot(_, id) => *id = at[id],
+                    SpecOp::Callback(_, callback) | SpecOp::ActionCallback(_, callback) => {
+                        *callback = handler(*callback).unwrap_or(CallbackId::MAX);
+                    }
+                    _ => {}
+                }
+            }
+            self.nodes.push(node);
+            self.parented
+                .push(source.parented[*id as usize] && *id != root);
+            self.claimed.push(source.claimed[*id as usize]);
+        }
+        self.structure = mix(self.structure, mix(10, source.structure));
+        Some(base)
+    }
+
     /// Writes one call's value into a grafted slot.
     ///
     /// `base` is what [`Self::graft`] returned less the template's own root, so
