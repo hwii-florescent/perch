@@ -536,6 +536,25 @@ impl State {
         }
     }
 
+    /// The order this window just asked the core to keep, taken at once as the web's store does
+    /// (`setWorkspaceOrder`), so the strip and the sidebar follow the move before the core's
+    /// broadcast confirms it. Absent lists keep what is stored.
+    pub fn set_order(
+        &mut self,
+        host_id: &str,
+        projects: Option<Vec<String>>,
+        sessions: Option<Vec<String>>,
+    ) {
+        let (stored_projects, stored_sessions) =
+            self.order.get(host_id).cloned().unwrap_or_default();
+        self.apply(&ServerMessage::WorkspaceOrder {
+            request_id: None,
+            host_id: host_id.to_string(),
+            projects: projects.unwrap_or(stored_projects),
+            sessions: sessions.unwrap_or(stored_sessions),
+        });
+    }
+
     /// Fold one message from the core in. Returns what to ask for next.
     pub fn apply(&mut self, message: &ServerMessage) -> Vec<Request> {
         let mut asks = Vec::new();

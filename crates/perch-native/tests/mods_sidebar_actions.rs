@@ -347,10 +347,20 @@ fn row_drag(rig: &mut Rig, elsewhere: AnyWindowHandle) {
         "the order goes to the core once, on the release"
     );
     assert_eq!(rig.forwarded()["phase"], "up");
+    // The order is shown at once, as the web's store does, before the core's broadcast.
     assert!(
-        in_place(rig),
-        "the slide is undone (the core keeps the order)"
+        near(y(rig, "alpha"), alpha_y)
+            && near(y(rig, "charlie"), bravo.1)
+            && near(y(rig, "bravo"), charlie.1),
+        "the rows show the new order at once"
     );
+    // The core's own word replaces it (here, a list from a core that never kept the move).
+    let fresh = state().model();
+    rig.ws(|ws, _, cx| {
+        ws.sidebar()
+            .update(cx, |s, cx| s.apply(Update::Model(fresh), cx))
+    });
+    assert!(in_place(rig), "the core's order is what stays");
     assert_eq!(rig.tabs().0, strings(&["alpha"]), "the release is no click");
     let ended = rig.forwarded();
     rig.moved(charlie, true);
@@ -494,10 +504,11 @@ fn session_menu(rig: &mut Rig) {
     rig.right_click("session-button:charlie");
     rig.click("tab-menu-show-beside");
     rig.click("tab-menu-beside-item:tab-split-with-bravo");
+    // The strip lists them in the sidebar's order, whatever order they opened in.
     assert_eq!(
         rig.tabs(),
         (
-            strings(&["alpha", "charlie", "bravo"]),
+            strings(&["alpha", "bravo", "charlie"]),
             strings(&["charlie", "bravo"]),
             Some("charlie".into())
         )
