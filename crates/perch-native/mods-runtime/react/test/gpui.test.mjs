@@ -2,8 +2,8 @@
 //! handlers the chains carry run the source's own handlers.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fixture, mountSidebar, THEMES } from "./support.mjs";
-import { breakLines, scrollGutters, shrinkWrapBases, snapColumns, snapRows, toGpui } from "../gpui.mjs";
+import { fixture, mountSidebar, namedInstances, THEMES, tree } from "./support.mjs";
+import { breakLines, describeToGpui, scrollGutters, shrinkWrapBases, snapColumns, snapRows, toGpui } from "../gpui.mjs";
 
 /** A gpui-kit stand-in that records each call, and keeps the handlers. */
 function recordingKit() {
@@ -349,4 +349,99 @@ test("a box over the page takes the wheel: an overlay root and a pointer-taking 
   assert.equal(wheelOn({ id: 2, pointer_none: true }, true), false, "a toast stack lets the wheel through");
   assert.equal(wheelOn({ id: 3, blocks_pointer: true }, false), true, "a toast card");
   assert.equal(wheelOn({ id: 4 }, false), false, "a plain box");
+});
+
+/** A gpui-kit stand-in with `reuse`: each element has an id, and the elements of the published description can be
+ * taken into the next one (`commit` publishes, as the engine's view does). */
+function retainingKit() {
+  let next = 0;
+  let generation = 0;
+  let committed = new Map();
+  let open = new Map();
+  const state = { reused: 0 };
+  const wrap = (record) => {
+    open.set(record.uid, record);
+    const proxy = new Proxy(record, {
+      get(target, name) {
+        if (name === "record") return target;
+        if (name === "__id") return target.uid;
+        return (...args) => {
+          if (name === "id") target.id = args[0];
+          else if (name === "child") target.children.push(args[0]);
+          else if (["hover", "focus", "active"].includes(name)) { const style = make("style"); args[0](style); target.styles.push([name, style.record.styles]); }
+          else if (name === "group_hover") { const style = make("style"); args[1](style); target.styles.push([name, args[0], style.record.styles]); }
+          else if (!name.startsWith("on_")) target.styles.push([name, ...args]);
+          return proxy;
+        };
+      },
+    });
+    return proxy;
+  };
+  const make = (kind, arg) => wrap({ uid: ++next, kind, arg, id: null, children: [], styles: [] });
+  const kit = {
+    div: () => make("div"),
+    image: (path) => make("image", path),
+    renderGeneration: () => generation,
+    reuse: (uid, from) => {
+      const record = from === generation - 1 ? committed.get(uid) : null;
+      if (!record) return null;
+      state.reused++;
+      // Its subtree comes along, as the engine copies it.
+      const keep = (r) => { if (r?.uid) { open.set(r.uid, r); r.children.forEach((c) => keep(c?.record)); } };
+      keep(record);
+      return wrap(record);
+    },
+  };
+  const commit = () => { committed = open; open = new Map(); generation++; };
+  return { kit, commit, state };
+}
+
+/** Elements as plain data. */
+const plain = (el) => {
+  if (typeof el === "string") return el;
+  const r = el.record;
+  return { kind: r.kind, arg: r.arg, id: r.id, markup: r.markup, color: r.color, styles: (r.styles ?? []).map((s) => JSON.stringify(s)), children: (r.children ?? []).map(plain) };
+};
+
+test("a kept node in new surroundings is drawn again: an inherited colour, a margin its column moved", () => {
+  const box = (style, children = []) => ({ kind: "div", id: Math.random(), style, children });
+  const icon = { kind: "svg", id: 7, markup: "<svg/>", style: { w: 10, h: 10 } };
+  const kept = box({ h: 10.25 }, [icon]);
+  const page = (color, above) => ({ root: box({ display: "flex", flex_direction: "col", text_color: color }, [box({ h: above }), kept]), overlays: [] });
+  const iconFiles = { icon: (id, markup, color) => ({ record: { id, markup, color, children: [] } }) };
+  const { kit, commit, state } = retainingKit();
+  const handle = {};
+  const draw = (description) => { const out = plain(describeToGpui(description, kit, handle, iconFiles, 2)); commit(); return out; };
+  const scratch = (description) => plain(describeToGpui(structuredClone(description), retainingKit().kit, {}, iconFiles, 2));
+  draw(page("#111111ff", 10.1));
+  const same = page("#111111ff", 10.1);
+  assert.deepEqual(draw(same), scratch(same));
+  assert.ok(state.reused > 0, "the same surroundings keep it");
+  // Its height lands on another device pixel below a sibling of another fraction; then another colour.
+  for (const next of [page("#111111ff", 10.4), page("#222222ff", 10.4)]) {
+    state.reused = 0;
+    assert.deepEqual(draw(next), scratch(next));
+  }
+});
+
+test("drawing again keeps unchanged subtrees and draws what drawing from scratch draws", async () => {
+  const { handle, runtime } = await mountSidebar("by-project", "dark");
+  try {
+    const measure = (text, font) => text.length * font.size * 0.55;
+    const withMeasure = { ...files, measure };
+    const { kit, commit, state } = retainingKit();
+    runtime.describeToGpui(handle.description, kit, handle, withMeasure, 2);
+    commit();
+    // Folding a project: its rows go, the others stay as they were.
+    const header = namedInstances(tree(handle.description)).instances.find((i) => i.def.name === "project-header");
+    handle.click(header.el.node.id);
+    const kept = runtime.describeToGpui(handle.description, kit, handle, withMeasure, 2);
+    commit();
+    assert.ok(state.reused > 0, "unchanged subtrees are taken from the last description");
+    // The same description with no node in common with any drawn so far: nothing kept, nothing remembered.
+    const scratch = runtime.describeToGpui(structuredClone(handle.description), retainingKit().kit, { ...handle, retained: undefined }, withMeasure, 2);
+    assert.deepEqual(plain(kept), plain(scratch));
+  } finally {
+    handle.unmount();
+  }
 });

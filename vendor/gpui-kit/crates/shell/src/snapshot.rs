@@ -111,6 +111,11 @@ impl RenderSnapshot {
         self.inner.root
     }
 
+    /// PERCH: the callback generation this snapshot's handlers belong to.
+    pub(crate) fn generation(&self) -> u64 {
+        self.inner.generation
+    }
+
     pub(crate) fn arena(&self) -> &SpecArena {
         &self.inner.arena
     }

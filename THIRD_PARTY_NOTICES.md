@@ -325,6 +325,12 @@ it from its upstreams. Each copy keeps its upstream licence file and herdr's
     `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
     `vendor/gpui-kit/crates/shell/src/view.rs`: an event, timer or task that the time budget
     stops says so over its view, as a failed render does, instead of only being logged.
+  - `vendor/gpui-kit/crates/shell/src/spec.rs`, `vendor/gpui-kit/crates/shell/src/snapshot.rs`,
+    `vendor/gpui-kit/crates/shell/src/runtime.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
+    `vendor/gpui-kit/crates/shell/src/view.rs`: `reuse(id, generation)`, a subtree of the view's
+    live description copied into the one being built, its handlers registered again, so an
+    unchanged part is not described again.
   - `vendor/gpui-kit/crates/base/src/input/base/state.rs` and
     `vendor/gpui-kit/crates/base/src/input/base/undo_manager.rs`: `can_undo` and `can_redo`,
     whether undo or redo has anything to replay, for an editor's menu; `apply_external` and
