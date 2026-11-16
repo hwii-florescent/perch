@@ -46,6 +46,11 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = 
 gpui-shell = { path = "../../vendor/gpui-kit/crates/shell", features = ["render-test-support"] }
 
 [[test]]
+name = "files_timing"
+path = "tests/files_timing.rs"
+harness = false
+
+[[test]]
 name = "files_window"
 path = "tests/files_window.rs"
 harness = false

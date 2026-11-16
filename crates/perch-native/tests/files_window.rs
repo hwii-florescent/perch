@@ -203,24 +203,27 @@ fn main() {
             .map(|d| d.content.clone())
     });
     assert_eq!(loaded.as_deref(), Some("# Work"));
-    // The durable buffer holds what is on disk: nothing to restore.
-    let get = sent.iter().find(|f| f["type"] == "fs.buffer.get").unwrap();
-    rig.answer(json!({"type": "fs.buffer.result", "requestId": get["requestId"], "workspaceId": "w1",
-        "buffer": {"workspaceId": "w1", "path": "README.md", "content": "# Work", "baseContent": "# Work",
-            "baseVersion": "v1", "externalVersion": "v1", "revision": 0, "dirty": false, "conflict": false,
-            "updatedAt": 0}}));
-    rig.settle();
-
     // The native editor holds the file, by the web's document key.
     let editors = rig
         .cx
         .update(|cx| cx.global::<WindowMods>().editors.clone());
-    let doc = "w1\0README.md\00";
-    let state = editors
-        .state(doc)
-        .unwrap_or_else(|| panic!("the editor is open: {:?}", editors.keys()));
-    let text = rig.cx.update(|cx| state.read(cx).value().to_string());
-    assert_eq!(text, "# Work");
+    let doc = "w1\0README.md\x000";
+    let text = |rig: &mut Rig| {
+        let state = editors
+            .state(doc)
+            .unwrap_or_else(|| panic!("the editor is open: {:?}", editors.keys()));
+        rig.cx.update(|cx| state.read(cx).value().to_string())
+    };
+    assert_eq!(text(&mut rig), "# Work");
+
+    // A draft the core kept arrives after the editor opened: the editor takes it.
+    let get = sent.iter().find(|f| f["type"] == "fs.buffer.get").unwrap();
+    rig.answer(json!({"type": "fs.buffer.result", "requestId": get["requestId"], "workspaceId": "w1",
+        "buffer": {"workspaceId": "w1", "path": "README.md", "content": "# Kept", "baseContent": "# Work",
+            "baseVersion": "v1", "externalVersion": "v1", "revision": 1, "dirty": true, "conflict": false,
+            "updatedAt": 0}}));
+    rig.settle();
+    assert_eq!(text(&mut rig), "# Kept");
 
     // An edit reaches the store as the draft, and an edited preview is kept.
     rig.cx
@@ -228,6 +231,15 @@ fn main() {
             editors.set_value(doc, "# Work!", false, window, cx)
         })
         .unwrap();
+    // The store has it at once; the screen and the strip are told shortly after.
+    rig.cx.run_until_parked();
+    let draft = rig.ws(|ws, _, _| {
+        ws.files()
+            .document("w1", "README.md")
+            .map(|d| d.content.clone())
+    });
+    assert_eq!(draft.as_deref(), Some("# Work!"));
+    rig.cx.advance_clock(std::time::Duration::from_millis(200));
     rig.settle();
     let draft = rig.ws(|ws, _, _| {
         ws.files()

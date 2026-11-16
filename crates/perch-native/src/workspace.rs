@@ -32,6 +32,7 @@ use crate::handoff::{open_in_perch, perch_url, Place};
 use crate::keymap::{Context as KeyContext, Hit, Keymap};
 use crate::mods::screens::{self, OnResult, Screens, PANE_HEADER_HEIGHT};
 use crate::mods::theme;
+use crate::mods::WindowMods;
 use crate::settings::Change;
 use crate::shell::{self, Chrome, Tokens, GUTTER, TOGGLE_AFTER, TOGGLE_INSET, TOGGLE_INSET_MAC};
 use crate::sidebar::{navigation, Alert, Heard, Provider, LOCAL};
@@ -62,6 +63,10 @@ use std::time::{Duration, Instant};
 const LEADER_TIMEOUT: Duration = Duration::from_millis(1500);
 /// Pixels one resize key grows or shrinks the focused pane by, as the web's.
 const RESIZE_STEP: f32 = 60.;
+/// The pause in typing after which the files screen is shown what was typed in a file's editor
+/// (its caret, its text for a preview): the editor shows the keys at once and the store has them
+/// at once, and redrawing the screen on every key would cost each key a frame.
+const TYPING_SHOWN: Duration = Duration::from_millis(300);
 /// How many tabs out of sight keep their terminal attached. A tab beyond them is parked: its
 /// terminal lets go of the shell (which keeps running) and attaches again, with the core's
 /// repaint, when the tab is shown.
@@ -731,6 +736,13 @@ impl Workspace {
     /// Sends the store's frames, wakes for its next draft deadline, and redraws when a
     /// workspace's files moved.
     fn pump_files(&mut self, cx: &mut Context<Self>) {
+        self.pump(false, cx);
+    }
+
+    /// Sends the store's frames and arms its timers; with `quiet` (typing in an editor, which
+    /// already shows it) the screen is shown the change once typing pauses ([`TYPING_SHOWN`]).
+    fn pump(&mut self, quiet: bool, cx: &mut Context<Self>) {
+        self.bind_editors(cx);
         let (sent, changed, arm) = self.files.drain();
         for frame in sent {
             self.send_to_core(frame, cx);
@@ -747,15 +759,128 @@ impl Workspace {
             })
             .detach();
         }
+        self.files.held.extend(changed);
+        if quiet {
+            if !self.files.held.is_empty() {
+                self.files.typed += 1;
+                let typed = self.files.typed;
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(TYPING_SHOWN).await;
+                    let _ = this.update(cx, |this, cx| {
+                        if this.files.typed == typed {
+                            this.pump_files(cx);
+                        }
+                    });
+                })
+                .detach();
+            }
+            return;
+        }
+        let changed = std::mem::take(&mut self.files.held);
         if !changed.is_empty() {
             self.keep_edited_previews();
+            self.files.resync = true;
             if let Some((_, perch)) = screens::mods(cx) {
                 for workspace_id in &changed {
-                    perch.set_files(workspace_id, self.files.store.snapshot(workspace_id));
+                    perch.set_files(workspace_id, self.files.snapshot(workspace_id));
                 }
                 perch.flush(cx);
             }
             cx.notify();
+        }
+    }
+
+    /// Has the window's editors hand this store the edits and caret moves of file documents.
+    fn bind_editors(&mut self, cx: &mut Context<Self>) {
+        if self.files.bound {
+            return;
+        }
+        let Some(editors) = cx.try_global::<WindowMods>().map(|m| m.editors.clone()) else {
+            return;
+        };
+        self.files.bound = true;
+        let this = cx.weak_entity();
+        editors.bind(move |key, kind, cx| {
+            if crate::files::doc_key(key).is_none() {
+                return false;
+            }
+            let (this, key, kind) = (this.clone(), key.to_string(), kind.to_string());
+            cx.defer(move |cx| {
+                let _ = this.update(cx, |this, cx| this.editor_heard(&key, &kind, cx));
+            });
+            true
+        });
+    }
+
+    /// A file editor's text or caret moved: the draft goes to the store at once (the core's
+    /// buffer after the store's pause), the screen hears of it shortly.
+    fn editor_heard(&mut self, key: &str, kind: &str, cx: &mut Context<Self>) {
+        let Some((workspace_id, path, epoch)) = crate::files::doc_key(key) else {
+            return;
+        };
+        let Some(editors) = cx.try_global::<WindowMods>().map(|m| m.editors.clone()) else {
+            return;
+        };
+        match kind {
+            "change" => {
+                let current = self
+                    .files
+                    .store
+                    .document(workspace_id, path)
+                    .is_some_and(|d| d.reload_epoch.unwrap_or(0) == epoch);
+                let Some(state) = editors.state(key).filter(|_| current) else {
+                    return;
+                };
+                let text = state.read(cx).value().to_string();
+                let store = &mut self.files.store;
+                let was_dirty = store
+                    .document(workspace_id, path)
+                    .is_some_and(|d| d.dirty());
+                store.update_draft(workspace_id, path, text, Instant::now());
+                // The first edit shows at once: the tab's dirty mark, the preview kept.
+                if !was_dirty {
+                    return self.pump(false, cx);
+                }
+            }
+            _ => {
+                let Some(caret) = editors.caret(key) else {
+                    return;
+                };
+                self.files.carets.insert(key.to_string(), caret);
+                self.files.held.insert(workspace_id.to_string());
+            }
+        }
+        self.pump(true, cx);
+    }
+
+    /// Gives each open file editor the store's text where it differs (a load, a reload, a draft
+    /// restored or overwritten): as an external change, with no undo entry.
+    fn sync_editors(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !std::mem::take(&mut self.files.resync) {
+            return;
+        }
+        let Some(editors) = cx.try_global::<WindowMods>().map(|m| m.editors.clone()) else {
+            return;
+        };
+        for key in editors.keys() {
+            let Some((workspace_id, path, epoch)) = crate::files::doc_key(&key) else {
+                continue;
+            };
+            let Some(document) = self
+                .files
+                .store
+                .document(workspace_id, path)
+                .filter(|d| d.reload_epoch.unwrap_or(0) == epoch)
+            else {
+                continue;
+            };
+            let differs = editors
+                .state(&key)
+                .is_some_and(|state| state.read(cx).value() != document.content.as_str());
+            if differs {
+                let text = document.content.clone();
+                editors.set_value(&key, &text, true, window, cx);
+            }
         }
     }
 
@@ -4204,6 +4329,7 @@ impl Workspace {
 
 impl gpui::Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_editors(window, cx);
         self.viewport_height = f32::from(window.viewport_size().height);
         if window.focused(cx).is_none() {
             self.root_focus.focus(window, cx);

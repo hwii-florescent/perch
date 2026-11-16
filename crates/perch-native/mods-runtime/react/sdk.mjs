@@ -402,27 +402,27 @@ export { FileIcon, GitMarker, assetKind };
 // offered yet.
 
 /** The web's `CodeEditor` on the native editor (`perch-editor`), drawn in an `editor` engine slot by `docKey`: opened
- * (or restored, with its undo history) when the key mounts and parked when it goes; the draft is applied as an
- * external change (no undo entry, no change event) whenever it differs from the editor's text; a user edit comes
- * back as `onChange(text)`, the caret as `onCaret`, Save as `onSave`. */
-export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, label, path, docKey, ref }) {
+ * (or restored, with its undo history) when the key mounts and parked when it goes. The window keeps the editor and
+ * its document's draft in step itself (a key goes to the store at once and costs this screen nothing; the store's
+ * text from the core reaches the editor as an external change), so `value` is only the text it opens with and
+ * `onChange` is not called. The caret comes from the window's snapshot (`onCaret`), Save from the editor. */
+export function CodeEditor({ value, onSave, onCaret, readOnly, wrap, label, path, docKey, ref }) {
   const editor = host().editor;
+  const workspaceId = String(docKey).split("\0")[0];
+  const caret = useHostSnapshot((perch) => perch.workspaceFiles(workspaceId)?.carets?.[docKey] ?? null);
   const latest = useRef(null);
-  latest.current = { onChange, onSave, onCaret };
+  latest.current = { onSave, onCaret };
   useLayoutEffect(() => {
     editor.open(docKey, { path, value, readonly: !!readOnly, wrap: !!wrap, label });
     const stop = editor.listen(docKey, (events) => {
-      const on = latest.current;
       for (const event of events) {
-        if (event.type === "change") on.onChange?.(editor.value(docKey));
-        else if (event.type === "caret") on.onCaret?.({ line: event.line, col: event.col });
-        else if (event.type === "save") on.onSave?.();
+        if (event.type === "save") latest.current.onSave?.();
         else if (event.type === "goto") editor.openGoto(docKey);
       }
     });
     return () => { stop(); editor.park(docKey); };
   }, [docKey]);
-  useLayoutEffect(() => { if (editor.value(docKey) !== value) editor.setValue(docKey, value); }, [docKey, value]);
+  useEffect(() => { if (caret) latest.current.onCaret?.({ line: caret.line, col: caret.col }); }, [caret?.line, caret?.col]);
   useLayoutEffect(() => { editor.setReadonly(docKey, !!readOnly); }, [docKey, readOnly]);
   useLayoutEffect(() => { editor.setWrap(docKey, !!wrap); }, [docKey, wrap]);
   useImperativeHandle(ref, () => ({ openGoto: () => editor.openGoto(docKey), focus: () => editor.focus(docKey), askAgent() {} }), [docKey]);

@@ -355,8 +355,6 @@ export function copyFor(cx, screen) {
     editor: {
       open: (key, options) => editors.open(key, options),
       park: (key) => editors.park(key),
-      value: (key) => editors.value(key),
-      setValue: (key, text) => editors.setValue(key, text, { external: true }),
       setReadonly: (key, on) => editors.setReadonly(key, on),
       setWrap: (key, on) => editors.setWrap(key, on),
       focus: (key) => editors.focus(key),
