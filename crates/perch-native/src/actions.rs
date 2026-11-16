@@ -621,8 +621,10 @@ mod tests {
         let mut b = project("b", &["claude2"]);
         b.sessions[0].provider_id = Some("claude".into());
         let model = model(vec![a, b], &[]);
-        let mut nav = Nav::default();
-        nav.selected = Some((LOCAL.into(), "claude1".into()));
+        let mut nav = Nav {
+            selected: Some((LOCAL.into(), "claude1".into())),
+            ..Nav::default()
+        };
         let mut step = |id: &str| {
             let outcome = nav.run(id, &model);
             if let Some(Outcome::Open { session_id, .. }) = &outcome {
