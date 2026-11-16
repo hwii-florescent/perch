@@ -2040,7 +2040,12 @@ const OWN: [(&str, &str, &str); 10] = [
 
 /// Window commands beyond the keymap's: the web's ids the window can perform (some under the
 /// name its keys use), and the native ones screens need.
-const WINDOW_COMMANDS: [(&str, &str, &str); 40] = [
+const WINDOW_COMMANDS: [(&str, &str, &str); 41] = [
+    (
+        "browser.open",
+        "Open a browser tab in a workspace (the one shown when none is named), at an address or empty",
+        "{workspaceId?, url?}",
+    ),
     (
         "files.extract",
         "Extract a workspace's archive beside it",
