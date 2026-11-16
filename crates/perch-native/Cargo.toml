@@ -33,6 +33,8 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = 
 # The JavaScript mod engine, vendored from herdr-app (see THIRD_PARTY_NOTICES.md).
 gpui-shell = { path = "../../vendor/gpui-kit/crates/shell" }
 gpui-base = { path = "../../vendor/gpui-kit/crates/base" }
+# The grammars the editor highlights with: the vendored editor's own version and features.
+syntect = { version = "5.3.0", default-features = false, features = ["parsing", "default-syntaxes", "regex-fancy"] }
 # The version GPUI rasterises SVGs with: an icon's size is read before it is drawn.
 usvg = { version = "0.46", default-features = false }
 
@@ -42,6 +44,11 @@ libc = "0.2"
 gpui = { package = "gpui-pre", version = "=0.3.8", features = ["test-support"] }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit", "runtime_shaders", "test-support"] }
 gpui-shell = { path = "../../vendor/gpui-kit/crates/shell", features = ["render-test-support"] }
+
+[[test]]
+name = "editor_engine"
+path = "tests/editor_engine.rs"
+harness = false
 
 [[test]]
 name = "terminal_session"

@@ -478,6 +478,8 @@ pub fn init(cx: &mut App) {
 pub struct WindowMods {
     pub host: ModHost,
     pub perch: perch::Perch,
+    /// The editors mods place (`perch-editor`), by document key.
+    pub editors: crate::editor::Editors,
 }
 
 impl gpui::Global for WindowMods {}
@@ -510,7 +512,13 @@ pub fn start_in(
     let perch = perch::Perch::new();
     perch.register(&host);
     perch.attach(workspace, window, cx);
-    cx.set_global(WindowMods { host, perch });
+    let editors = crate::editor::Editors::default();
+    editors.register(&host);
+    cx.set_global(WindowMods {
+        host,
+        perch,
+        editors,
+    });
 }
 
 /// A mod found on disk.
