@@ -80,7 +80,7 @@ impl SidebarSettings {
     }
 
     /// Applies the fields `patch` names; a wrong type is refused and nothing changes.
-    fn patch(&mut self, patch: &Value) -> Result<(), String> {
+    pub fn patch(&mut self, patch: &Value) -> Result<(), String> {
         let object = patch
             .as_object()
             .ok_or("setSidebarSettings takes an object")?;
