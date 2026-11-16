@@ -464,10 +464,10 @@ fn family_names_are_exact() {
     );
     assert_eq!(parity::web_family(".AppleSystemUIFont"), "system-ui");
     assert_eq!(
-        parity::web_family("Menlo"),
+        parity::web_family(".AppleSystemUIFontMonospaced"),
         "ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace"
     );
-    for other in ["Helvetica", "system-ui", "IBM Plex Sans", ""] {
+    for other in ["Menlo", "Helvetica", "system-ui", "IBM Plex Sans", ""] {
         assert_eq!(parity::web_family(other), other, "{other:?} is not renamed");
     }
 }

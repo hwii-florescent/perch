@@ -56,11 +56,16 @@ const OUTLINE = ["outline-style", "outline-width", "outline-color"];
 /** Engine families for the CSS stacks the app uses. */
 const SYSTEM = /(-apple-system|blinkmacsystemfont|system-ui|segoe ui|sans-serif|times)/i;
 const MONO = /(ui-monospace|sfmono|sf mono|menlo|monospace)/i;
+/** The app's monospace stack leads with `ui-monospace`, which WebKit draws in CoreText's monospaced system face (SF
+ * Mono): the engine asks for it by that name, as the file editor does. A list whose first face is `Menlo`, or the
+ * bare `monospace` generic, is WebKit's own default fixed face, Menlo. */
+const SYSTEM_MONO = /^\s*["']?(ui-monospace|sfmono-regular|sf mono)["']?\s*(,|$)/i;
 /** A bare `system-ui` (a form control's own face, WebKit's `-webkit-small-control`) is CoreText's
  * `.AppleSystemUIFont`: the face `.SystemUIFont` resolves to, kept under its own name so a capture tells the two
  * requests apart. CoreText has no family named `system-ui`. */
 const ENGINE_FAMILY = (family) =>
-  MONO.test(family) ? "Menlo"
+  SYSTEM_MONO.test(family ?? "") ? ".AppleSystemUIFontMonospaced"
+    : MONO.test(family) ? "Menlo"
     : /^\s*system-ui\s*$/i.test(family ?? "") ? ".AppleSystemUIFont"
     : SYSTEM.test(family) ? ".SystemUIFont" : familyOut(family).split(",")[0].trim();
 

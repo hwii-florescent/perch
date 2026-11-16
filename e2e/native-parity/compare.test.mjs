@@ -138,11 +138,22 @@ test("a font-gated element's font must be exact; another element's font is only 
   assert.match(checks(compareDocs(web, larger)).join(), /editor\S* font/);
   const plain = clone(web);
   delete find(plain, "editor").fontGated;
+  find(plain, "editor").font.family = "-apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif";
   const other = clone(plain);
   Object.assign(find(other, "editor").font, { size: 13 });
   const result = compareDocs(plain, other);
   assert.deepEqual(checks(result), []);
   assert.equal(result.info.fontDiffs, 1);
+});
+
+test("an element the web draws in the monospace stack is font-gated, named for its font or not", () => {
+  const web = synthetic();
+  const MONO = { family: "ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace", size: 12, weight: 400, lineHeight: 18, lineHeightNormal: false };
+  web.elements.push(el("path", null, { x: 0, y: 200, width: 100, height: 18 }, { font: MONO }));
+  assert.deepEqual(checks(compareDocs(web, clone(web))), []);
+  const menlo = clone(web);
+  find(menlo, "path").font.family = "Menlo";
+  assert.match(checks(compareDocs(web, menlo)).join(), /path\S* font/);
 });
 
 test("documents of different schema, screen, state or theme are not compared", () => {

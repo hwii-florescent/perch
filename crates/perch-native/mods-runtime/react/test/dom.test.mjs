@@ -189,7 +189,8 @@ test("a form control's bare system-ui and the app's system stack are asked for u
       h("button", { type: "button", "data-testid": "control" }, "Delete"),
       h("span", { "data-testid": "stack", style: { fontFamily: APP } }, "Title"),
       h("span", { "data-testid": "bare", style: { fontFamily: "system-ui" } }, "Bare"),
-      h("span", { "data-testid": "mono", style: { fontFamily: "ui-monospace, Menlo, monospace" } }, "x"));
+      h("span", { "data-testid": "mono", style: { fontFamily: "ui-monospace, Menlo, monospace" } }, "x"),
+      h("span", { "data-testid": "menlo", style: { fontFamily: "Menlo, monospace" } }, "x"));
   }
   const handle = runtime.mount(perch, Probe, { container: { width: 200, height: 100 } });
   try {
@@ -201,7 +202,8 @@ test("a form control's bare system-ui and the app's system stack are asked for u
     assert.equal(family("control"), ".AppleSystemUIFont", "a button's own face, WebKit's -webkit-small-control");
     assert.equal(family("bare"), ".AppleSystemUIFont");
     assert.equal(family("stack"), ".SystemUIFont");
-    assert.equal(family("mono"), "Menlo");
+    assert.equal(family("mono"), ".AppleSystemUIFontMonospaced", "the app's stack is the monospaced system face (SF Mono)");
+    assert.equal(family("menlo"), "Menlo", "a stack that leads with Menlo is Menlo");
   } finally {
     handle.unmount();
   }
