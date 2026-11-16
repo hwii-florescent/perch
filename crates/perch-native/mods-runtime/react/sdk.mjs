@@ -428,6 +428,14 @@ export function useWorkspaceFiles(workspaceId, options = {}) {
     host().filesDo(action, workspaceId, ...args);
     return null;
   }])), [workspaceId]);
+  // Ask agent where the Context Bridge is (the window's): an editor selection says whether its file has unsaved
+  // changes as the store has it when asked.
+  const canAsk = useHostSnapshot((perch) => !!perch.contextBridgeAvailable?.(workspaceId));
+  const askAgent = useMemo(() => (canAsk ? (source) => {
+    if (source.kind !== "editor") return host().askAgent(workspaceId, source);
+    const doc = host().workspaceFiles(workspaceId)?.documents?.[source.path];
+    return host().askAgent(workspaceId, { ...source, dirty: doc?.content !== doc?.savedContent });
+  } : undefined), [canAsk, workspaceId]);
   return useMemo(() => ({
     workspace: data.workspace,
     connected: data.connected,
@@ -438,7 +446,8 @@ export function useWorkspaceFiles(workspaceId, options = {}) {
     wrap: data.wrap,
     git: { ...data.git, decorations },
     actions,
-  }), [data, decorations, actions]);
+    askAgent,
+  }), [data, decorations, actions, askAgent]);
 }
 export const useStatusLine = () => useHostSnapshot((perch) => perch.statusLine());
 export const useZoom = () => useHostSnapshot((perch) => perch.zoom());

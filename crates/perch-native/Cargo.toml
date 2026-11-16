@@ -47,7 +47,9 @@ wry = { version = "0.55", default-features = false, features = ["os-webview"] }
 objc2 = "0.6"
 block2 = "0.6"
 raw-window-handle = "0.6"
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSURL", "NSObject"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSURL", "NSObject", "NSBundle", "NSError"] }
+# Notifications under the app's own identity, the version and features the Tauri app uses.
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNUserNotificationCenter", "UNNotification", "UNNotificationRequest", "UNNotificationContent", "UNNotificationTrigger"] }
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSResponder"] }
 
 [dev-dependencies]
@@ -165,6 +167,11 @@ harness = false
 [[test]]
 name = "workspace_phone_hold"
 path = "tests/workspace_phone_hold.rs"
+harness = false
+
+[[test]]
+name = "context_bridge_window"
+path = "tests/context_bridge_window.rs"
 harness = false
 
 [[test]]
