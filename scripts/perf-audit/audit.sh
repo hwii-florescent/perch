@@ -6,7 +6,7 @@
 #   audit.sh stream <n> on|off
 #   audit.sh teardown
 set -u -o pipefail
-WT=/Users/hwiii/Github/perch-wt/perf-audit
+WT=${WT:-$(cd "$(dirname "$0")/../.." && pwd)}
 BIN=$WT/target/release
 CORE=$BIN/perch-core; NATIVE=${NATIVE_BIN:-$BIN/perch-native}; SETUP=$BIN/examples/measure_setup
 SCR=${SCR:-${TMPDIR:-/tmp/}perf-audit-run}
