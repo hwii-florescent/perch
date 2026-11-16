@@ -3048,6 +3048,43 @@ impl Workspace {
                 self.root_focus.focus(window, cx);
                 self.after_change(cx);
             }
+            // The project's start page (its home): the project is shown and no tab stays on
+            // screen, as `workspace.open` does for a workspace without a session.
+            "project.home" => {
+                let project = text("projectId").ok_or("This command needs {projectId, name}.")?;
+                let focused = screens::mods(cx)
+                    .and_then(|(_, perch)| {
+                        let result = perch.run_own("project.focus", &json!({ "id": project }))?;
+                        perch.flush(cx);
+                        Some(result)
+                    })
+                    .ok_or("No mod shows the navigation.")?;
+                focused?;
+                self.tabs.hide();
+                self.root_focus.focus(window, cx);
+                self.after_change(cx);
+            }
+            // As the web's: a previewed file's tab is kept (a tab that is not a preview stays as
+            // it is), whichever tab is named.
+            "tab.pin" => {
+                let id = text("id").ok_or("This command needs {id}.")?;
+                if !self.tabs.contains(id) {
+                    return Err(format!("No tab {id}."));
+                }
+                if self.tabs.pin(id) {
+                    cx.notify();
+                }
+            }
+            "workspace.files" => {
+                let id = self.known_workspace(text("id"), cx)?;
+                self.show_files(&id, cx);
+            }
+            // The drawer's Git tab (this client hands the Git view to the Perch app).
+            "workspace.git" => {
+                self.known_workspace(text("id"), cx)?;
+                self.chrome.set_tools(Some(shell::Tools::Git));
+                cx.notify();
+            }
             // What this client cannot do is the desktop app's, or the browser's, on a click.
             "handoff.open" => {
                 let place = match text("place") {
