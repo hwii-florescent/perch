@@ -441,6 +441,11 @@ differences the gate reports: Keyboard draws one group of bindings at a time (th
 per-frame budget, and 113 rows do), and the long Notifications page drifts up to 3 px below the window's edge (the engine
 sets line heights in half pixels). Permissions and Mods are "Open in Perch" hand-offs.
 
+The gate (`node e2e/native-parity/compare.mjs --web-dir e2e/artifacts-native-parity/web --native-dir
+e2e/artifacts-native-parity/native`) exits 1 on any failing state that `e2e/native-parity/accepted-failures.json` does not
+list (by `screen/state/theme`, each with its reason), and on a listed state that now passes, so the list only shrinks.
+Add a state to the list only with the reason it is accepted; `npm run parity:selftest` in `e2e` tests these rules.
+
 Run `cargo test` for this package on its own: building `perch-core` together with GPUI changes how
 `serde_json` orders keys and fails three unrelated core tests. `cargo test --workspace` hits the same
 three failures for the same reason.
