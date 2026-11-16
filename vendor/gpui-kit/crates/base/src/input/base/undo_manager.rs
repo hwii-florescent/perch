@@ -364,6 +364,76 @@ impl UndoManager {
         Some(replay)
     }
 
+    // PERCH: an edit made outside the history (a store value replacing `range`, in bytes, with `new_len` bytes), as
+    // CodeMirror's history maps through an unrecorded change. The history is rebased under it, newest first: a
+    // transaction whose changes all lie clear of the edit is kept, with its ranges and cursors after the edit shifted;
+    // the first one that overlaps it, and every older one, is dropped (undo cannot replay across text it never saw).
+    // Redo is cleared, and the next edit starts a new transaction.
+    pub(super) fn map_external(&mut self, range: std::ops::Range<usize>, new_len: usize) {
+        self.commit_all_transactions();
+        self.redo_transactions.clear();
+        self.coalescing_boundary = true;
+        let delta = new_len as isize - range.len() as isize;
+        let shift = |at: usize, edit: &std::ops::Range<usize>| -> usize {
+            if at >= edit.end {
+                at.saturating_add_signed(delta)
+            } else if at > edit.start {
+                edit.start + new_len
+            } else {
+                at
+            }
+        };
+        // The edit, in the coordinates after the transaction looked at.
+        let mut edit = range;
+        let mut keep_from = 0;
+        for index in (0..self.undo_transactions.len()).rev() {
+            let transaction = &mut self.undo_transactions[index];
+            let mut before = edit.clone();
+            let mut clear = true;
+            for change in transaction.changes.iter().rev() {
+                let new = change.new_range.start..change.new_range.end;
+                if overlaps(&before, &new) {
+                    clear = false;
+                    break;
+                }
+                if before.start >= new.end {
+                    let d = change.new_range.len() as isize - change.old_range.len() as isize;
+                    before = before.start.saturating_add_signed(-d)..before.end.saturating_add_signed(-d);
+                }
+            }
+            if !clear {
+                keep_from = index + 1;
+                break;
+            }
+            let mut at = edit.clone();
+            for change in transaction.changes.iter_mut().rev() {
+                if at.end <= change.new_range.start {
+                    for r in [&mut change.new_range, &mut change.old_range] {
+                        r.start = r.start.saturating_add_signed(delta);
+                        r.end = r.end.saturating_add_signed(delta);
+                    }
+                } else {
+                    let d = change.new_range.len() as isize - change.old_range.len() as isize;
+                    at = at.start.saturating_add_signed(-d)..at.end.saturating_add_signed(-d);
+                }
+            }
+            for (selections, edit) in [
+                (&mut transaction.selections_after, &edit),
+                (&mut transaction.selections_before, &at),
+            ] {
+                for selection in selections.iter_mut().flatten() {
+                    selection.start = shift(selection.start, edit);
+                    selection.end = shift(selection.end, edit);
+                }
+            }
+            // Pairs the engine inserted are not followed through an outside edit.
+            transaction.auto_closed_pairs_before = None;
+            transaction.auto_closed_pairs_after = None;
+            edit = at;
+        }
+        self.undo_transactions.drain(..keep_from);
+    }
+
     // PERCH: whether undo or redo has anything to replay, for an editor's menu.
     pub(super) fn can_undo(&self) -> bool {
         !self.undo_transactions.is_empty() || self.pending.is_some()
@@ -382,6 +452,15 @@ impl UndoManager {
     pub(super) fn undo_count(&self) -> usize {
         self.undo_transactions.len()
     }
+}
+
+// PERCH: whether an outside edit and a recorded change share text (an insertion strictly inside the other counts).
+fn overlaps(a: &std::ops::Range<usize>, b: &std::ops::Range<usize>) -> bool {
+    if a.is_empty() || b.is_empty() {
+        let (point, span) = if a.is_empty() { (a.start, b) } else { (b.start, a) };
+        return span.start < point && point < span.end;
+    }
+    a.start < b.end && b.start < a.end
 }
 
 impl UndoTransaction {

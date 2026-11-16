@@ -477,6 +477,8 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &Capture) -> Shot {
         );
     }
     let host = ModHost::new(scratch.join("native-mods")).expect("the mod host starts");
+    // Every React screen's host imports `perch-editor`, as the window lends it.
+    perch_native::editor::Editors::default().register(&host);
     let perch = Perch::new();
     perch.register(&host);
     publish(&perch, capture.fixture, capture.state);
