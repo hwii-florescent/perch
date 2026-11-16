@@ -370,11 +370,8 @@ fn timings(mut cx: HeadlessAppContext, slack: f32, report: bool) -> HeadlessAppC
                     "{lines} lines, threads {threads}: open {open_ms:.1} ms, wheel {mean:.2} ms"
                 ));
             }
-            if threads {
-                thread_means.push((open_ms, mean));
-            } else {
-                thread_means.push((open_ms, mean));
-            }
+            // Without threads first, then with: entry `i` and `i + 3` are the same size.
+            thread_means.push((open_ms, mean));
             cx = rig.close();
         }
     }

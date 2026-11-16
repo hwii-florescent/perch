@@ -177,7 +177,7 @@ impl GitHost {
                 Either::Left((Ok(answer), _)) => Some(answer),
                 Either::Left((Err(_), _)) => None,
                 Either::Right(_) => {
-                    let _ = cx.update(|cx| {
+                    cx.update(|cx| {
                         let mut out = Vec::new();
                         git.0.borrow_mut().store.expire(ticket, &mut out);
                         git.pump(out, cx);
@@ -185,7 +185,7 @@ impl GitHost {
                     return;
                 }
             };
-            let _ = cx.update(|cx| {
+            cx.update(|cx| {
                 let ready = git.ready(&id, cx);
                 let mut out = Vec::new();
                 match outcome {
