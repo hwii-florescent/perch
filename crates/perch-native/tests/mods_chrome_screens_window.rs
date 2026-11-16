@@ -256,12 +256,17 @@ impl Rig {
 
     /// One wheel step down (three lines) at `(x, y)`.
     fn scroll(&mut self, x: f32, y: f32) {
+        self.wheel(x, y, -3.);
+    }
+
+    /// One wheel step of `lines` (negative is down, towards newer output) at `(x, y)`.
+    fn wheel(&mut self, x: f32, y: f32, lines: f32) {
         self.cx
             .update_window(self.window.into(), |_, window: &mut Window, cx| {
                 window.dispatch_event(
                     PlatformInput::ScrollWheel(gpui::ScrollWheelEvent {
                         position: point(px(x), px(y)),
-                        delta: gpui::ScrollDelta::Lines(point(0., -3.)),
+                        delta: gpui::ScrollDelta::Lines(point(0., lines)),
                         modifiers: Modifiers::default(),
                         touch_phase: gpui::TouchPhase::Moved,
                     }),
@@ -874,6 +879,30 @@ fn many_listing(path: Option<&str>) -> Value {
 /// nothing else, so the title, the name field and the path stay where they are.
 fn add_project_scroll(rig: &mut Rig) {
     rig.asked();
+    // History in the terminal behind the dialog, to see whether a wheel reaches it.
+    let history: String = (0..120).map(|n| format!("history {n}\r\n")).collect();
+    rig.ws(|ws, _, cx| {
+        ws.terminal()
+            .expect("a terminal")
+            .update(cx, |view, cx| view.output(&history, cx))
+    });
+    rig.draw();
+    let behind = |rig: &mut Rig| {
+        rig.ws(|ws, _, cx| {
+            ws.terminal()
+                .expect("a terminal")
+                .update(cx, |view, _| view.frame().row_text(0))
+        })
+    };
+    // Control: the same wheel over the terminal alone scrolls its history.
+    let live = behind(rig);
+    rig.wheel(620., 300., 3.);
+    rig.wheel(620., 300., 3.);
+    let terminal_top = behind(rig);
+    assert_ne!(
+        terminal_top, live,
+        "the wheel scrolls the terminal when nothing covers it"
+    );
     rig.click("add-project-button");
     answer_listings(rig, many_listing);
     let top = |rig: &mut Rig, name: &str| {
@@ -896,6 +925,35 @@ fn add_project_scroll(rig: &mut Rig) {
         "the list is cut at 260 px: {list:?}"
     );
     rig.shot("add-project-before");
+    // A wheel on the dialog beside the list (its path row, then Use this folder's row) moves
+    // nothing: the dialog's content fits its box, and the terminal behind it keeps its place.
+    for name in ["folder-browser-crumbs", "folder-browser-use"] {
+        let at = rig.record(name).unwrap().bounds.center();
+        for _ in 0..3 {
+            rig.scroll(f32::from(at.x), f32::from(at.y));
+        }
+        assert_eq!(
+            behind(rig),
+            terminal_top,
+            "wheel on {name} reached the terminal"
+        );
+        assert_eq!(top(rig, "folder-browser-crumbs"), crumbs, "wheel on {name}");
+        assert_eq!(top(rig, "folder-browser-use"), use_it, "wheel on {name}");
+    }
+    // Nor does one on the backdrop, beside the panel.
+    for _ in 0..3 {
+        rig.scroll(30., 30.);
+    }
+    assert_eq!(
+        top(rig, "folder-browser-crumbs"),
+        crumbs,
+        "wheel on the backdrop"
+    );
+    assert_eq!(
+        behind(rig),
+        terminal_top,
+        "wheel on the backdrop reached the terminal"
+    );
     for _ in 0..2 {
         rig.scroll(500., 380.);
     }
@@ -909,6 +967,11 @@ fn add_project_scroll(rig: &mut Rig) {
         top(rig, "folder-browser-use"),
         use_it,
         "Use this folder stayed"
+    );
+    assert_eq!(
+        behind(rig),
+        terminal_top,
+        "wheel on the list reached the terminal"
     );
     rig.press("escape");
     assert!(rig.record("folder-browser").is_none(), "Escape closed it");

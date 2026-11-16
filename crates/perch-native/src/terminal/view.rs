@@ -789,6 +789,9 @@ impl TerminalView {
                 self.input_lease = input;
                 self.resize_lease = resize;
                 self.agent = agent;
+                // A take asked on the connection before this one has no answer coming: the window
+                // asks again on this one.
+                self.claiming = false;
                 // The size is told once after attaching, as the web terminal does, whatever
                 // the fit looks like.
                 self.requested = None;
@@ -852,6 +855,7 @@ impl TerminalView {
                 // The screen stays; the shell is not known to have ended.
                 self.input_lease = false;
                 self.resize_lease = false;
+                self.claiming = false;
                 self.agent = None;
                 self.set_status(Status::Disconnected(reason), cx);
             }
@@ -2341,6 +2345,11 @@ impl TerminalView {
                 "phone": false,
             },
         })
+    }
+
+    /// Whether this view holds the lease that sizes the shell.
+    pub fn holds_size(&self) -> bool {
+        self.resize_lease
     }
 
     /// Whether a paired device (a phone) holds this terminal's size, and this view is attached to

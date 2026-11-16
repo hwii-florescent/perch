@@ -138,6 +138,16 @@ impl Rig {
         self.cx.run_until_parked();
     }
 
+    /// A key through the window's own dispatch.
+    fn key(&mut self, spec: &str) {
+        self.cx
+            .update_window(self.window.into(), |_, window: &mut Window, cx| {
+                window.dispatch_keystroke(gpui::Keystroke::parse(spec).unwrap(), cx);
+            })
+            .unwrap();
+        self.cx.run_until_parked();
+    }
+
     fn press(&mut self, x: f32, y: f32) {
         self.send(PlatformInput::MouseDown(MouseDownEvent {
             button: MouseButton::Left,
@@ -382,6 +392,24 @@ fn main() {
         rig.ws(|ws, _| ws.drawer()),
         Some(Tools::Git),
         "it reopens on the tab it had"
+    );
+    // The web's key toggles it too (Cmd+Shift+B; Alt+Shift+B elsewhere).
+    let drawer_key = if cfg!(target_os = "macos") {
+        "cmd-shift-b"
+    } else {
+        "alt-shift-b"
+    };
+    rig.key(drawer_key);
+    assert_eq!(
+        rig.ws(|ws, _| ws.drawer()),
+        None,
+        "the key closes the drawer"
+    );
+    rig.key(drawer_key);
+    assert_eq!(
+        rig.ws(|ws, _| ws.drawer()),
+        Some(Tools::Git),
+        "and opens it again"
     );
 
     // Handles: the gutter beside a column resizes it, within the web's bounds.
