@@ -1387,7 +1387,9 @@ struct FixtureMedia;
 
 impl perch_native::files::media::Fetch for FixtureMedia {
     fn fetch(&self, _: &str, path: &str, max: u64) -> anyhow::Result<Vec<u8>> {
-        let name = Path::new(path).file_name().ok_or_else(|| anyhow::anyhow!("no name"))?;
+        let name = Path::new(path)
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("no name"))?;
         let file = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../e2e/native-parity/fixtures/media")
             .join(name);
