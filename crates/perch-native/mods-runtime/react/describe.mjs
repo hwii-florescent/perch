@@ -16,7 +16,8 @@
 //! - `{ kind: "input", id, value, placeholder, checked, input_type, style, ... }` (`value`: what the field holds,
 //!   typed text included; `field_w`: a line field's content width when its content sizes it)
 //! - `break_anywhere` on a node whose text breaks a word too long for its line anywhere (`overflow-wrap`)
-//! - `blocks_pointer` on a node that takes pointer events under an ancestor that lets them through; `tabular` on one
+//! - `blocks_pointer` on a node that takes pointer events under an ancestor that lets them through; `pointer_none` on
+//!   one that lets them through (the wheel too); `tabular` on one
 //!   whose digits are tabular; `scrollbar` (its width) on a vertical scroller
 //! - a node `mount` was given a parity table for (`options.names`) carries `name` (`name` or `name:key`, the engine
 //!   id tests find it by) and, for a name that is the element's own text, `range_name`.
@@ -561,6 +562,8 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
   // An element that takes pointer events again under one that lets them through (`pointer-events-auto` in a
   // `pointer-events-none` stack): a press on it stops there and does not reach what is beneath the screen.
   if (computed.values["pointer-events"] !== "none" && parentComputed?.values["pointer-events"] === "none") extra.blocks_pointer = true;
+  // A box that lets pointer events through (`pointer-events-none`: a toast stack): the wheel goes through it as well.
+  if (computed.values["pointer-events"] === "none") extra.pointer_none = true;
   const events = Object.entries(EVENTS).filter(([, props]) => props.some((p) => typeof element.props[p] === "function")).map(([name]) => name);
   // A form's submit button submits it on a click, with or without a handler of its own.
   if (!events.includes("click") && submits(element)) events.push("click");
@@ -593,6 +596,15 @@ function pseudoBoxes(element, computed, inheritedText, ctx) {
 const groupName = (element) => `~g${element.id}`;
 
 /** One described subtree. `chain` names the element's ancestors with their versions. */
+/** An inline element that may join its line's text: it holds only text and draws nothing of its own (no margin, padding,
+ * border or background, which would be lost), has no handlers, and no test id (tests and the parity gate name it, so it
+ * stays a box: a count in a label, the number in a state badge). */
+const BOX_KEYS = ["pt", "pr", "pb", "pl", "mt", "mr", "mb", "ml", "border_t", "border_r", "border_b", "border_l", "bg"];
+function joinsLine(k) {
+  return k.kind === "div" && k[DISPLAY] === "inline" && !k.events?.length && !k.meta?.attrs?.["data-testid"] &&
+    !BOX_KEYS.some((key) => k.style?.[key]) && k.children?.every((c) => c.kind === "text");
+}
+
 function describeElement(element, parentComputed, inheritedText, ctx, chain = "") {
   const key = `${chain}/${element.id}.${element.version}`;
   let entry = ctx.cache.get(element);
@@ -696,9 +708,9 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
   // A block holding inline content and elements: the engine has no inline formatting, so its inline children are
   // laid out as a row on the text baseline (one line; wrapping inline runs would need text runs in the engine).
   // Inline elements holding only text (a `<code>` in a sentence) cannot be a box in a row that wraps, and the engine has no
-  // text runs: their text joins the sentence, in the sentence's own font.
+  // text runs: their text joins the sentence, in the sentence's own font (`joinsLine`).
   // ponytail: the inline element's own face (a monospace path) and colour are lost; wrapping needs engine text runs.
-  if (!style.display && inline && kids.some((k) => k.kind !== "text") && kids.every((k) => k.kind === "text" || (k.kind === "div" && k[DISPLAY] === "inline" && !k.events?.length && k.children?.every((c) => c.kind === "text")))) {
+  if (!style.display && inline && kids.some((k) => k.kind !== "text") && kids.every((k) => k.kind === "text" || joinsLine(k))) {
     const text = kids.map((k) => (k.kind === "text" ? k.text : k.children.map((c) => c.text).join(""))).join("");
     report("approximated", "display", "inline text elements in a line of text", "(inline formatting)", "their text joined to the line, in its font");
     kids.splice(0, kids.length, { kind: "text", text });

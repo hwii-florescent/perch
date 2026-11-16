@@ -114,6 +114,11 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     s("global.settings", "Open Settings", &["mod+,"]),
     s("global.help", "Open this keybind help", &["mod+/"]),
+    s(
+        "global.drawer",
+        "Toggle the right drawer (files and Git)",
+        &["cmd+shift+b", "alt+shift+b"],
+    ),
     scoped(
         "global.helpPlain",
         "Open keybind help (outside inputs)",
@@ -1537,6 +1542,32 @@ mod tests {
     }
 
     #[test]
+    fn the_drawer_toggles_on_the_webs_key_and_on_one_chosen_in_settings() {
+        let m = keymap(&[], None);
+        assert_eq!(
+            run(m.resolve(&press("cmd-shift-b"), IN_TERMINAL)),
+            "global.drawer"
+        );
+        assert_eq!(
+            run(m.resolve(&press("cmd-b"), IN_TERMINAL)),
+            "global.sidebar"
+        );
+        let other = keymap(&[], None).with_platform(false);
+        assert_eq!(
+            run(other.resolve(&press("alt-shift-b"), IN_TERMINAL)),
+            "global.drawer"
+        );
+        let chosen = keymap(&[("global.drawer", "cmd+alt+d")], None);
+        assert_eq!(chosen.resolve(&press("cmd-shift-b"), IN_TERMINAL), None);
+        assert_eq!(
+            run(chosen.resolve(&press("cmd-alt-d"), IN_TERMINAL)),
+            "global.drawer"
+        );
+        let off = keymap(&[("global.drawer", "")], None);
+        assert_eq!(off.resolve(&press("cmd-shift-b"), IN_TERMINAL), None);
+    }
+
+    #[test]
     fn a_choice_the_web_would_refuse_binds_nothing() {
         for bad in [
             "cmd+nonsense",
@@ -1918,9 +1949,9 @@ mod tests {
             for entry in fixture[section].as_array().unwrap() {
                 let id = entry[0].as_str().unwrap();
                 let Some(shortcut) = all_shortcuts().find(|s| s.id == id) else {
-                    // The window has no drawer and no preview tabs to keep.
+                    // The window has no preview tabs to keep.
                     assert!(
-                        ["global.drawer", "tabs.keepOpen"].contains(&id),
+                        id == "tabs.keepOpen",
                         "{id}: the web ships it and this window has no such shortcut"
                     );
                     continue;

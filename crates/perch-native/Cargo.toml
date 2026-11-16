@@ -116,6 +116,11 @@ path = "tests/workspace_phone_hold.rs"
 harness = false
 
 [[test]]
+name = "workspace_window_size"
+path = "tests/workspace_window_size.rs"
+harness = false
+
+[[test]]
 name = "workspace_lifecycle"
 path = "tests/workspace_lifecycle.rs"
 harness = false
