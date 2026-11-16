@@ -158,6 +158,11 @@ fn a_tab_opens_its_page_where_its_pane_is_drawn() {
         .is_err(),
         "only addresses a page may load"
     );
+    // Test mode's `browser <url>` names no workspace: with none shown, the computer's first.
+    rig.run("tabs.close", json!({"id": PAGE})).unwrap();
+    rig.run("browser.open", json!({"url": "example.com"}))
+        .unwrap();
+    assert_eq!(rig.shown(), [PAGE]);
 }
 
 fn another_tab_hides_the_page_and_closing_ends_it() {
