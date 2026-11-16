@@ -164,7 +164,9 @@ impl Workspace {
     /// Before the window draws: the pages exist once a browser tab or the drawer's page is wanted, the frame
     /// starts, the key monitor follows whether any page is alive.
     pub(super) fn browser_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let wanted = self.tabs.strip().iter().any(|id| is_browser_tab(id))
+        let wanted = self
+            .every_tabs()
+            .any(|tabs| tabs.strip().iter().any(|id| is_browser_tab(id)))
             || self.chrome.tools() == Some(shell::Tools::Browser);
         if !wanted && self.browsing.pages.is_none() {
             return;
@@ -403,7 +405,11 @@ impl Workspace {
         let pages = pages.borrow();
         let mut state = serde_json::Map::new();
         let mut workspaces: Vec<String> = pages.drawer_workspaces();
-        for tab in self.tabs.strip().iter().filter(|id| is_browser_tab(id)) {
+        for tab in self
+            .every_tabs()
+            .flat_map(|tabs| tabs.strip())
+            .filter(|id| is_browser_tab(id))
+        {
             if let Some((workspace, _)) = tab.split_once('\n') {
                 workspaces.push(workspace.to_string());
             }
@@ -536,6 +542,7 @@ impl Workspace {
             }
         };
         let id = format!("{workspace}\n{BROWSER}{path}");
+        self.enter_workspace(workspace);
         let started = !path.starts_with("blank:");
         if let Some(pages) = &self.browsing.pages {
             let mut pages = pages.borrow_mut();

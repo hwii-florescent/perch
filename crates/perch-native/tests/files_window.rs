@@ -417,7 +417,17 @@ fn main() {
             next.read(cx).tabs().active().map(str::to_string),
         )
     });
-    assert_eq!(strip, (vec!["w1\nsrc/lib.rs".to_string()], None));
+    // The kept tab belongs to w1's strip: no workspace is on screen yet, so none is drawn, and it
+    // is there again once w1 is.
+    assert_eq!(strip, (vec![], None));
+    next.update(&mut rig.cx, |ws, cx| {
+        ws.open_file("w1", "docs/new.md", false, cx)
+    });
+    let strip = rig.cx.update(|cx| next.read(cx).tabs().strip().to_vec());
+    assert_eq!(
+        strip,
+        vec!["w1\nsrc/lib.rs".to_string(), "w1\ndocs/new.md".to_string()]
+    );
 
     // A Markdown file's Preview draws its draft, rendered, in place of the editor. A long one (as the repository's
     // docs are): lexed at once it ran past the 500 ms a click may take, and Preview never showed.

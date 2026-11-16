@@ -123,16 +123,80 @@ let layoutGroups = new Set();
 /** The overlay being built: its own box and every shown absolute box inside it, which may lie past its edge (a
  * submenu beside a menu). A press is outside the overlay only when it is outside all of them. */
 let outside = null;
+const LAYOUT_GROUPS = new WeakMap();
 function groupsChangingLayout(node, out = new Set()) {
-  for (const { group, style } of node.group_hover ?? []) if ("display" in style) out.add(group);
-  for (const child of node.children ?? []) if (child.kind !== "text") groupsChangingLayout(child, out);
+  let own = LAYOUT_GROUPS.get(node);
+  if (!own) {
+    own = new Set();
+    for (const { group, style } of node.group_hover ?? []) if ("display" in style) own.add(group);
+    for (const child of node.children ?? []) if (child.kind !== "text") for (const group of groupsChangingLayout(child)) own.add(group);
+    LAYOUT_GROUPS.set(node, own);
+  }
+  for (const group of own) out.add(group);
   return out;
 }
 
+/** Retained subtrees, while the screen's tree is built (`describeToGpui`): `from`, what each node of the last build
+ * became (its element's id in the view's live description and what it was built in, `key`); `clean`, the nodes whose
+ * device-pixel overrides, theirs and their subtree's, are the last build's; `next`, the same for this build. */
+let retain = null;
+
+/** Everything around a node its elements are built from, besides the node (and its subtree) itself. */
+const retainKey = (node, unseen, color, text, rowItem, hoverIcon, snapped) =>
+  `${+unseen}|${color}|${text.text_size}|${text.line_height}|${text.whitespace}|${text.text_ellipsis}|${+rowItem}|${hoverIcon ? `${hoverIcon.group}|${hoverIcon.color}` : ""}|${+UNDER_POINTER.has(node)}|${+IN_SCROLL.has(node)}|${snapped.get(node)?.flex_basis ?? ""}`;
+
+/** Whether `node` or a node under it is a scroll area, which keeps per-build state on the handle (`scrollIntoView`). */
+const SCROLLERS = new WeakMap();
+function holdsScroller(node) {
+  let holds = SCROLLERS.get(node);
+  if (holds === undefined) {
+    holds = node.style.overflow_x === "scroll" || node.style.overflow_y === "scroll" || (node.children ?? []).some((c) => c.kind !== "text" && holdsScroller(c));
+    SCROLLERS.set(node, holds);
+  }
+  return holds;
+}
+
+/** Adds to `clean` every node under `node` whose overrides in `now`, and its subtree's, are those in `before`; says
+ * whether `node`'s are. */
+function cleanSubtrees(node, now, before, clean) {
+  let ok = sameValues(now.get(node), before.get(node));
+  if (node.kind === "text") return ok;
+  for (const child of node.children ?? []) if (!cleanSubtrees(child, now, before, clean)) ok = false;
+  if (ok) clean.add(node);
+  return ok;
+}
+function sameValues(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const key of keys) if (a[key] !== b[key]) return false;
+  return true;
+}
+
 /** One node and its subtree as builder chains. `unseen`: an ancestor is invisible or fully transparent, so its
- * named elements are not shown (the page counts them hidden) and carry no name. */
+ * named elements are not shown (the page counts them hidden) and carry no name.
+ *
+ * A node of the screen's tree that is the last build's own node, in the same surroundings and with the same overrides
+ * under it, is the last build's element (`kit.reuse`): the engine copies it, handlers included, from the view's live
+ * description, and nothing under it is built again. The handlers it keeps read only that node, which is unchanged. */
 export function toGpui(node, kit, handle, files, overlay = false, unseen = false, color = null, text = {}, rowItem = false, snapped = new Map(), hoverIcon = null) {
   if (node.kind === "text") return snapped.get(node)?.text ?? node.text;
+  const key = retain && !overlay && !holdsScroller(node) ? retainKey(node, unseen, color, text, rowItem, hoverIcon, snapped) : null;
+  if (key !== null && retain.clean.has(node)) {
+    const was = retain.from.get(node);
+    const kept = was?.key === key ? kit.reuse(was.id, retain.generation) : null;
+    if (kept) {
+      retain.next.set(node, { id: kept.__id, key });
+      return kept;
+    }
+  }
+  const built = buildGpui(node, kit, handle, files, overlay, unseen, color, text, rowItem, snapped, hoverIcon);
+  if (key !== null) retain.next.set(node, { id: built.__id, key });
+  return built;
+}
+
+function buildGpui(node, kit, handle, files, overlay, unseen, color, text, rowItem, snapped, hoverIcon) {
   const underPointer = UNDER_POINTER.has(node);
   unseen ||= node.style.opacity === 0 || node.style.visibility === "invisible" || node.style.display === "hidden";
   if (unseen && (node.name || node.range_name)) node = { ...node, name: undefined, range_name: undefined, also: undefined };
@@ -397,7 +461,21 @@ export function describeToGpui(description, kit, handle, files, scale = 0, windo
   scrollGutters(roots, snapped);
   shrinkWrapBases(roots, snapped);
   if (files.measure) breakLines(roots, files.measure, snapped);
-  let layer = kit.div().relative().size_full().child(toGpui(description.root, kit, handle, files, false, false, null, {}, false, snapped));
+  // The ids of the last build are those of the view's live description while its generation is the one they were
+  // built in (a build that failed published nothing, and `reuse` refuses them).
+  const keep = kit.reuse && kit.renderGeneration ? (handle.retained ??= { built: new Map(), overrides: new Map(), generation: -1 }) : null;
+  const before = new Map(snapped);
+  if (keep && description.root) {
+    retain = { from: keep.built, generation: keep.generation, clean: new Set(), next: new Map() };
+    cleanSubtrees(description.root, snapped, keep.overrides, retain.clean);
+  }
+  let layer;
+  try {
+    layer = kit.div().relative().size_full().child(toGpui(description.root, kit, handle, files, false, false, null, {}, false, snapped));
+    if (keep) Object.assign(keep, { built: retain?.next ?? new Map(), overrides: before, generation: kit.renderGeneration() ?? -1 });
+  } finally {
+    retain = null;
+  }
   let over = windowLayer && description.overlays.length ? kit.div().relative().size_full().window_layer() : layer;
   for (const overlay of description.overlays) over = over.child(toGpui(overlay, kit, handle, files, true, false, null, {}, false, snapped));
   return over === layer ? layer : layer.child(over);
@@ -418,9 +496,16 @@ export function describeToGpui(description, kit, handle, files, scale = 0, windo
  * line's `w`).
  */
 export function snapRows(roots, scale, measure, overrides) {
-  const set = (node, values) => overrides.set(node, { ...overrides.get(node), ...values });
-  const widths = new Map();
-  const fonts = new Map();
+  // As in `snapColumns`: a subtree's widths and overrides depend only on it and the font around it, kept across
+  // builds while the scale and the text measure are the same.
+  if (rowMemo.scale !== scale || rowMemo.measure !== measure) rowMemo = { scale, measure, widths: new WeakMap(), fonts: new WeakMap(), keys: new WeakMap(), visits: new WeakMap() };
+  const { widths, fonts, keys, visits } = rowMemo;
+  const journal = [];
+  const merge = (node, values) => overrides.set(node, { ...overrides.get(node), ...values });
+  const set = (node, values) => {
+    journal.push(node, values);
+    merge(node, values);
+  };
   const FONT_KEYS = ["text_size", "font_weight", "font_family", "italic", "whitespace", "text_ellipsis"];
 
   /** The exact CSS width of `node` when its content sizes it (NaN when not known), in font `font` around it. */
@@ -432,8 +517,11 @@ export function snapRows(roots, scale, measure, overrides) {
       return Number.isFinite(w) ? w : NaN;
     }
     if (!drawn(node) || node.kind === "input" || node.kind === "engine" || node.markup) return explicitWidth(node);
+    const key = `${font.text_size}|${font.font_weight}|${font.font_family}|${font.italic}|${font.whitespace}|${font.text_ellipsis}|${+tabular}`;
+    if (keys.get(node) === key && widths.has(node)) return widths.get(node);
+    keys.set(node, key);
     const own = { ...font };
-    for (const key of FONT_KEYS) if (node.style[key] !== undefined) own[key] = node.style[key];
+    for (const k of FONT_KEYS) if (node.style[k] !== undefined) own[k] = node.style[k];
     // `text-overflow` is not inherited: an ellipsis cuts the text of the box that asks for it, not the text of the
     // boxes inside it (a path's crumbs, each a button, in a line that ends in an ellipsis).
     own.text_ellipsis = !!node.style.text_ellipsis;
@@ -474,6 +562,16 @@ export function snapRows(roots, scale, measure, overrides) {
   /** Lays `node`'s row out on device pixels, then every row under it. */
   function visit(node) {
     if (!node || node.kind === "text" || !drawn(node)) return;
+    const key = keys.get(node);
+    const kept = visits.get(node);
+    if (kept && key !== undefined && kept.key === key) {
+      for (let i = 0; i < kept.log.length; i += 2) {
+        journal.push(kept.log[i], kept.log[i + 1]);
+        merge(kept.log[i], kept.log[i + 1]);
+      }
+      return;
+    }
+    const start = journal.length;
     const kids = (node.children ?? []).filter(inFlow);
     if (isPackedRow(node) && kids.length > 1) {
       const gap = px(node.style.gap_x);
@@ -514,6 +612,7 @@ export function snapRows(roots, scale, measure, overrides) {
       });
     }
     for (const kid of node.children ?? []) if (kid.kind !== "text") visit(kid);
+    if (key !== undefined) visits.set(node, { key, log: journal.slice(start) });
   }
 
   for (const root of roots) {
@@ -522,6 +621,8 @@ export function snapRows(roots, scale, measure, overrides) {
     visit(root);
   }
 }
+/** `snapRows`' results by node, kept while the scale and the measure are the same. */
+let rowMemo = { scale: 0, measure: null };
 
 // ---- line breaks ----------------------------------------------------------------------------------------------
 
@@ -541,8 +642,26 @@ export function breakLines(roots, measure, overrides) {
   const n = (v) => (typeof v === "number" ? v : 0);
   const stretched = (node, parent) =>
     parent && isColumn(parent) && !isRow(parent) && node.style.position !== "absolute" && !["start", "center", "end"].includes(node.style.self) && !["start", "center", "end"].includes(parent.style.items);
+  if (breakMemo.measure !== measure) breakMemo = { measure, walks: new WeakMap() };
+  const journal = [];
+  const put = (node, values) => {
+    journal.push(node, values);
+    overrides.set(node, { ...overrides.get(node), ...values });
+  };
+  // A subtree's lines depend only on it, the room it has and the font around it (kept while the measure is the same).
   const walk = (node, parent, room, font) => {
     if (!node || node.kind === "text" || !drawn(node)) return;
+    const key = `${room}|${+stretched(node, parent)}|${font.text_size}|${font.font_weight}|${font.font_family}|${font.italic}|${font.line_height}`;
+    const kept = breakMemo.walks.get(node);
+    if (kept?.key === key) {
+      for (let i = 0; i < kept.log.length; i += 2) put(kept.log[i], kept.log[i + 1]);
+      return;
+    }
+    const start = journal.length;
+    walkOnce(node, parent, room, font);
+    breakMemo.walks.set(node, { key, log: journal.slice(start) });
+  };
+  const walkOnce = (node, parent, room, font) => {
     const s = node.style;
     let own = typeof s.w === "number" ? s.w : s.w === "100%" ? room : stretched(node, parent) ? room - n(s.ml) - n(s.mr) : NaN;
     if (typeof s.max_w === "number") own = Math.min(own, s.max_w);
@@ -572,19 +691,22 @@ export function breakLines(roots, measure, overrides) {
         const text = lines.join("\n");
         // A measure that fails (NaN) fits nothing: the text is left to GPUI.
         if (!lines.every((line) => !line || fits(line))) count = NaN;
-        else if (text !== kid.text) overrides.set(kid, { ...overrides.get(kid), text });
+        else if (text !== kid.text) put(kid, { text });
         count += lines.length;
       }
       // GPUI rounds the line height it lays text out with; the box keeps the CSS height of its lines.
       const line = lineHeightPx(mine);
       if (Number.isFinite(count) && line && s.h === undefined && kids.length === 1) {
-        overrides.set(node, { ...overrides.get(node), h: count * line + n(s.pt) + n(s.pb) + n(s.border_t) + n(s.border_b) });
+        put(node, { h: count * line + n(s.pt) + n(s.pb) + n(s.border_t) + n(s.border_b) });
       }
     }
     for (const kid of kids) walk(kid, node, isRow(node) ? NaN : content, mine);
   };
   for (const root of roots) walk(root, null, NaN, {});
 }
+
+/** `breakLines`' results by node, kept while the measure is the same. */
+let breakMemo = { measure: null };
 
 // ---- shrink-to-fit ----------------------------------------------------------------------------------------------
 
@@ -700,18 +822,44 @@ const inFlow = (child) => child.kind === "text" || (drawn(child) && child.style.
  * and the total restarts after it. A row's children sit side by side and keep GPUI's own rounding.
  */
 export function snapColumns(roots, scale) {
+  // What a subtree yields depends only on the subtree (description nodes are never changed) and what is around it:
+  // its inherited text for its height, and for its placing the running total's distance from its last device pixel.
+  // Both are kept across builds at one scale, so a build visits only the subtrees that are new or moved.
+  if (columnMemo.scale !== scale) columnMemo = freshColumnMemo(scale);
+  const { heights, texts, textKeys, visits, places } = columnMemo;
   const out = new Map();
+  /** Every override of this pass in order, so a memoised visit can record its share and replay it. */
+  const journal = [];
+  const merge = (node, values) => {
+    const was = out.get(node);
+    out.set(node, was ? { ...was, ...values } : values);
+  };
   // A length that is not a plain one (NaN) keeps its own value and restarts the total.
-  const set = (node, values) => out.set(node, { ...out.get(node), ...Object.fromEntries(Object.entries(values).filter(([, v]) => Number.isFinite(v))) });
-  const heights = new Map();
-  const texts = new Map();
+  const set = (node, values) => {
+    let kept = null;
+    for (const key in values) {
+      if (Number.isFinite(values[key])) (kept ??= {})[key] = values[key];
+    }
+    if (!kept) return;
+    journal.push(node, kept);
+    merge(node, kept);
+  };
+  const replay = (log) => {
+    for (let i = 0; i < log.length; i += 2) {
+      journal.push(log[i], log[i + 1]);
+      merge(log[i], log[i + 1]);
+    }
+  };
 
   /** The exact CSS height of `node` (NaN when not known), for text styled `text` around it. */
   function height(node, text) {
     // A line that cannot wrap: `nowrap`, or text with no place to break.
     if (node.kind === "text") return text.whitespace === "nowrap" || UNBREAKABLE.test(node.text) ? (lineHeightPx(text) ?? NaN) : NaN;
-    const own = { ...text };
-    for (const key of TEXT_KEYS) if (node.style[key] !== undefined) own[key] = node.style[key];
+    const key = `${text.text_size}|${text.line_height}|${text.whitespace}|${text.text_ellipsis}`;
+    if (textKeys.get(node) === key && heights.has(node)) return heights.get(node);
+    let own = text;
+    for (const k of TEXT_KEYS) if (node.style[k] !== undefined && node.style[k] !== own[k]) { if (own === text) own = { ...text }; own[k] = node.style[k]; }
+    textKeys.set(node, key);
     texts.set(node, own);
     const s = node.style;
     const kids = (node.children ?? []).filter(inFlow);
@@ -777,12 +925,17 @@ export function snapColumns(roots, scale) {
   /** `node`'s own content, not placed in a column: its children on a fresh total (a column) or each on its own. */
   function visit(node) {
     if (node.kind === "text" || !drawn(node)) return;
+    const key = textKeys.get(node);
+    const kept = visits.get(node);
+    if (kept && key !== undefined && kept.key === key) return replay(kept.log);
+    const start = journal.length;
     for (const child of (node.children ?? []).filter((c) => c.kind !== "text" && drawn(c) && c.style.position === "absolute")) visit(child);
     if (isColumn(node) && !isRow(node)) {
       const flow = fresh();
       set(node, { border_t: stack(flow, px(node.style.border_t)), pt: stack(flow, px(node.style.pt)) });
       column(node, flow);
     } else for (const child of (node.children ?? []).filter(inFlow)) if (child.kind !== "text") visit(child);
+    if (key !== undefined) visits.set(node, { key, log: journal.slice(start) });
   }
 
   /** `node`'s in-flow children, stacked on `flow` from its content top; false when they could not be (each child
@@ -798,7 +951,7 @@ export function snapColumns(roots, scale) {
     if (gap) set(node, { gap_y: 0 });
     kids.forEach((kid, i) => {
       if (kid.kind === "text") {
-        const h = heights.get(kid) ?? height(kid, texts.get(node) ?? {});
+        const h = height(kid, texts.get(node) ?? {});
         if (Number.isFinite(h)) set(kid, { h: stack(flow, h) });
         else Object.assign(flow, fresh());
         return;
@@ -827,8 +980,23 @@ export function snapColumns(roots, scale) {
     return node.kind === "div" && !isRow(node) && kids.length > 0 && kids.every((kid) => kid.kind === "text") && Number.isInteger(line) && [s.h, s.min_h, s.max_h].every((v) => v === undefined || v === "auto");
   }
 
-  /** A node whose height is known, at `flow`'s running total: its lengths on the total, its height their sum. */
+  /** A node whose height is known, at `flow`'s running total: its lengths on the total, its height their sum. What it
+   * yields depends on the total only through its distance past the last device pixel (`flow.laid` is on one). */
   function place(node, flow) {
+    const key = `${textKeys.get(node)}|${Math.round((flow.exact - flow.laid) * 1e6)}`;
+    const kept = places.get(node);
+    if (kept && kept.key === key) {
+      replay(kept.log);
+      flow.exact += kept.exact;
+      flow.laid += kept.laid;
+      return;
+    }
+    const start = journal.length;
+    const [exact0, laid0] = [flow.exact, flow.laid];
+    placeOnce(node, flow);
+    places.set(node, { key, log: journal.slice(start), exact: flow.exact - exact0, laid: flow.laid - laid0 });
+  }
+  function placeOnce(node, flow) {
     const s = node.style;
     for (const child of (node.children ?? []).filter((c) => c.kind !== "text" && drawn(c) && c.style.position === "absolute")) visit(child);
     const start = flow.laid;
@@ -862,3 +1030,8 @@ export function snapColumns(roots, scale) {
   Object.defineProperty(out, "heights", { value: heights });
   return out;
 }
+
+/** `snapColumns`' results by node, kept while the scale is the same (`heights`, `texts` and the inherited text they
+ * were worked out for, `textKeys`; a content's overrides, `visits`; a placing's, by its total's residual, `places`). */
+const freshColumnMemo = (scale) => ({ scale, heights: new WeakMap(), texts: new WeakMap(), textKeys: new WeakMap(), visits: new WeakMap(), places: new WeakMap() });
+let columnMemo = freshColumnMemo(0);

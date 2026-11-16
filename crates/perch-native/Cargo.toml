@@ -140,6 +140,11 @@ path = "tests/mods_responsive.rs"
 harness = false
 
 [[test]]
+name = "workspace_tabs_window"
+path = "tests/workspace_tabs_window.rs"
+harness = false
+
+[[test]]
 name = "mods_sidebar_actions"
 path = "tests/mods_sidebar_actions.rs"
 harness = false
@@ -152,6 +157,11 @@ harness = false
 [[test]]
 name = "mods_chrome_window"
 path = "tests/mods_chrome_window.rs"
+harness = false
+
+[[test]]
+name = "mods_window_commands"
+path = "tests/mods_window_commands.rs"
 harness = false
 
 [[test]]

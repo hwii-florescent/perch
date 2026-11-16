@@ -313,6 +313,11 @@ impl<T: Clone> CallbackArena<T> {
         self.building.is_some()
     }
 
+    /// PERCH: the generation being recorded, if a build is open.
+    pub(crate) fn building_generation(&self) -> Option<u64> {
+        self.building.as_ref().map(|(generation, _)| *generation)
+    }
+
     pub(crate) fn checkpoint(&self) -> usize {
         self.building
             .as_ref()

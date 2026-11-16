@@ -255,7 +255,8 @@ impl ScriptView {
         let policy = self.policy.clone();
         let entity = cx.entity();
 
-        match runtime.build_or_keep_snapshot(&object, Some(entity), policy, window, cx) {
+        let previous = self.current.clone();
+        match runtime.build_reusing(&object, Some(entity), policy, previous, window, cx) {
             // PERCH: the script said nothing changed (`unchanged()`): the live snapshot stands.
             Ok(None) if self.current.is_some() => self.error = None,
             Ok(None) => {

@@ -333,6 +333,13 @@ impl Perch {
         if let Some(model) = model {
             self.set_model(model);
         }
+        // A file, review or browser tab on screen names its workspace in its id: the one the
+        // strip's + (New browser, New file) and the start page work in.
+        let tab_workspace = window
+            .active
+            .as_deref()
+            .and_then(|id| id.split_once('\n'))
+            .map(|(workspace, _)| workspace.to_string());
         self.set_window(window);
         let changed = {
             let data = self.0.data.borrow();
@@ -348,6 +355,14 @@ impl Perch {
             data.session_id = open.map(|o| o.1);
             drop(data);
             self.bump(VIEW);
+        }
+        if let Some(workspace) = tab_workspace {
+            let mut data = self.0.data.borrow_mut();
+            if data.workspace_id.as_ref() != Some(&workspace) {
+                data.workspace_id = Some(workspace);
+                drop(data);
+                self.bump(VIEW);
+            }
         }
         self.flush(cx);
     }
@@ -2040,7 +2055,12 @@ const OWN: [(&str, &str, &str); 10] = [
 
 /// Window commands beyond the keymap's: the web's ids the window can perform (some under the
 /// name its keys use), and the native ones screens need.
-const WINDOW_COMMANDS: [(&str, &str, &str); 40] = [
+const WINDOW_COMMANDS: [(&str, &str, &str); 45] = [
+    (
+        "browser.open",
+        "Open a browser tab in a workspace (the one shown when none is named), at an address or empty",
+        "{workspaceId?, url?}",
+    ),
     (
         "files.extract",
         "Extract a workspace's archive beside it",
@@ -2168,6 +2188,26 @@ const WINDOW_COMMANDS: [(&str, &str, &str); 40] = [
     ),
     ("workspace.restore", "Wake a sleeping workspace", "{id}"),
     ("workspace.rename", "Rename a workspace", "{id, name}"),
+    (
+        "workspace.files",
+        "Open a workspace's files in the drawer",
+        "{id}",
+    ),
+    (
+        "workspace.git",
+        "Open a workspace's Git in the drawer",
+        "{id}",
+    ),
+    (
+        "project.home",
+        "Show a project's start page",
+        "{projectId, name?}",
+    ),
+    (
+        "tab.pin",
+        "Keep a previewed file's tab (single-click previews are replaced by the next one)",
+        "{id}",
+    ),
     (
         "host.refresh",
         "Ask a host for its projects and workspaces again",
@@ -2709,6 +2749,97 @@ mod tests {
             .is_err());
         assert!(settings.patch(&json!({"nope": 1})).is_err());
         assert_eq!(settings, before, "nothing changes when any field is wrong");
+    }
+
+    /// The command ids the stock mods run: each `runCommand("id"` and `run("id"` of the native
+    /// mods and of the web mods of the same name.
+    fn stock_mod_commands() -> std::collections::BTreeSet<String> {
+        fn scan(dir: &std::path::Path, found: &mut std::collections::BTreeSet<String>) {
+            for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    scan(&path, found);
+                } else if path
+                    .extension()
+                    .is_some_and(|e| matches!(e.to_str(), Some("js" | "jsx" | "ts" | "tsx")))
+                {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    for call in ["runCommand(", "run("] {
+                        for part in text.split(call).skip(1) {
+                            let Some(rest) = part.strip_prefix('"') else {
+                                continue;
+                            };
+                            let id = rest.split('"').next().unwrap_or("");
+                            let dotted = id
+                                .split_once('.')
+                                .is_some_and(|(a, b)| !a.is_empty() && !b.is_empty());
+                            if dotted && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '.') {
+                                found.insert(id.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let web = root.join("../../packages/web/src/stock-ui");
+        let mut found = std::collections::BTreeSet::new();
+        for entry in std::fs::read_dir(root.join("mods")).unwrap().flatten() {
+            if entry.path().is_dir() {
+                scan(&entry.path(), &mut found);
+                scan(&web.join(entry.file_name()), &mut found);
+            }
+        }
+        found
+    }
+
+    /// Whether some match arm of the window's sources names command `id`.
+    fn has_handler(id: &str) -> bool {
+        fn arms(dir: &std::path::Path, id: &str) -> bool {
+            std::fs::read_dir(dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .any(|entry| {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        return arms(&path, id);
+                    }
+                    let quoted = format!("\"{id}\"");
+                    path.extension().is_some_and(|e| e == "rs")
+                        && std::fs::read_to_string(&path).unwrap().lines().any(|line| {
+                            line.match_indices(quoted.as_str()).any(|(at, _)| {
+                                let rest = line[at + quoted.len()..].trim_start();
+                                rest.starts_with("=>")
+                                    || rest.starts_with('|')
+                                    || rest.starts_with("if ")
+                            })
+                        })
+                })
+        }
+        arms(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            id,
+        )
+    }
+
+    #[test]
+    fn every_command_a_stock_mod_runs_is_listed_and_handled() {
+        let perch = Perch::new();
+        let ids = stock_mod_commands();
+        assert!(ids.contains("tab.select") && ids.contains("workspace.git"));
+        // The browser toolbar's `browser.*` go through the window's own `host.command`, not `run`,
+        // so they are handled but not listed; `terminal.*` is taken by prefix.
+        let missing: Vec<&String> = ids
+            .iter()
+            .filter(|id| {
+                let window_only = id.starts_with("browser.");
+                !(window_only || perch.known(id))
+                    || !(window_only || id.starts_with("terminal.") || has_handler(id))
+                    || (window_only && !has_handler(id))
+            })
+            .collect();
+        assert!(missing.is_empty(), "no native handler: {missing:?}");
     }
 
     #[test]
