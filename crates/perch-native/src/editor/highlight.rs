@@ -240,7 +240,7 @@ impl Job {
         let text = self.text.slice(start..).to_string();
         let mut kinds = Kinds::default();
         let mut state = self.state;
-        let mut previous: Option<Arc<State>> = None;
+        let mut recent = Vec::new();
         let mut batch = Vec::new();
         let mut from = self.from;
         let mut clock = Instant::now();
@@ -255,7 +255,7 @@ impl Job {
                 std::thread::sleep(Duration::from_nanos(slow));
             }
             let line = lines.next().unwrap_or("");
-            let start = shared(&mut previous, &state);
+            let start = shared(&mut recent, &state);
             let spans = parse_line(&mut state, line, &mut kinds);
             batch.push(Line { start, spans });
             if batch.len() >= CHUNK_LINES || clock.elapsed() >= CHUNK_TIME {
@@ -282,15 +282,22 @@ impl Job {
 }
 
 /// `state` as an `Arc`, the previous line's when they are equal.
-fn shared(previous: &mut Option<Arc<State>>, state: &State) -> Arc<State> {
-    match previous {
-        Some(p) if **p == *state => p.clone(),
-        _ => {
-            let fresh = Arc::new(state.clone());
-            *previous = Some(fresh.clone());
-            fresh
-        }
+/// How many distinct line-start states [`shared`] remembers.
+const RECENT_STATES: usize = 8;
+
+/// `state` as a shared value: one of the `recent` (most recent first) when equal, so lines that alternate between a
+/// few states (a file's top level, a body's statements) hold a handful of states, not one per line.
+// ponytail: a linear scan of a few states per line; a hash of the parse stack would let a whole file share.
+fn shared(recent: &mut Vec<Arc<State>>, state: &State) -> Arc<State> {
+    if let Some(i) = recent.iter().position(|p| **p == *state) {
+        let found = recent.remove(i);
+        recent.insert(0, found.clone());
+        return found;
     }
+    let fresh = Arc::new(state.clone());
+    recent.insert(0, fresh.clone());
+    recent.truncate(RECENT_STATES);
+    fresh
 }
 
 /// The highlighter's data, shared with the task that installs background results.
@@ -447,10 +454,10 @@ impl Core {
         }
         let clock = Instant::now();
         let mut kinds = Kinds::default();
-        let mut previous = None;
+        let mut recent = Vec::new();
         loop {
             let mut state = self.frontier_state.clone();
-            let start = shared(&mut previous, &state);
+            let start = shared(&mut recent, &state);
             let spans = parse_line(&mut state, &self.line_text(self.frontier), &mut kinds);
             if self.accept(Line { start, spans }, state) {
                 return true;
@@ -795,6 +802,41 @@ mod tests {
     }
 
     const SNIPPETS: [&str; 10] = ["a", "\n", "\"", "/*", "*/", "{", "}", "'", "`", "// x\n"];
+
+    #[test]
+    fn lines_share_their_start_states() {
+        // Statements alternating between a few parse states, as Perch's editor timing files are.
+        let text: String = (0..10_000)
+            .map(|i| match i % 5 {
+                0 => format!("fn f{i}() -> u8 {{ 1 }}\n"),
+                1 => format!("let s = \"v{i}\"; // n\n"),
+                2 => format!("/* b */ x += {};\n", i % 97),
+                3 => "struct S { a: u32 }\n".to_string(),
+                _ => format!("const C: f64 = {i}.5;\n"),
+            })
+            .collect();
+        let syntax = syntax_for("main.rs").unwrap();
+        let job = Job {
+            generation: 0,
+            current: Arc::new(AtomicU64::new(0)),
+            text: Rope::from(text.as_str()),
+            from: 0,
+            state: Core::initial(syntax),
+        };
+        let mut lines = Vec::new();
+        job.run(|chunk| {
+            lines.extend(chunk.lines);
+            true
+        });
+        assert_eq!(lines.len(), 10_001);
+        let distinct: std::collections::HashSet<_> =
+            lines.iter().map(|l| Arc::as_ptr(&l.start)).collect();
+        assert!(
+            distinct.len() <= RECENT_STATES,
+            "{} distinct start states",
+            distinct.len()
+        );
+    }
 
     #[test]
     fn random_edits_match_a_full_parse() {
