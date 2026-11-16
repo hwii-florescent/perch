@@ -96,6 +96,22 @@
     {
       "state": "tabs/files-and-pages/light",
       "reason": "Needs the review and browser tabs in the strip."
+    },
+    {
+      "state": "files/image/dark",
+      "reason": "The header's path title is flex-1: natively it shares the row with two buttons (Quick Look, Open with Default App, the approved native media design) where the web has one Download link, so it is 146 px narrower; every other named element matches."
+    },
+    {
+      "state": "files/image/light",
+      "reason": "The header's path title is flex-1: natively it shares the row with two buttons (Quick Look, Open with Default App, the approved native media design) where the web has one Download link, so it is 146 px narrower; every other named element matches."
+    },
+    {
+      "state": "files/pdf-card/dark",
+      "reason": "The header's path title is flex-1: natively it shares the row with two buttons (Quick Look, Open with Default App, the approved native media design) where the web has one Download link, so it is 146 px narrower; every other named element matches."
+    },
+    {
+      "state": "files/pdf-card/light",
+      "reason": "The header's path title is flex-1: natively it shares the row with two buttons (Quick Look, Open with Default App, the approved native media design) where the web has one Download link, so it is 146 px narrower; every other named element matches."
     }
   ]
 }

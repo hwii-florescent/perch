@@ -18,7 +18,7 @@
 # page; h the same pane closed again. The files, repository and page are made in the scratch
 # directory and the page is served on the loopback only.
 #
-# Budgets (native client, window hidden): a at most 120 MB; t +60, e +35, f +80, g +100 (client
+# Budgets (native client, window hidden): a at most 120 MB; t +60, e +35 plus +15 for its tab's mod view JS, f +80, g +100 (client
 # plus the WebKit helpers the pane started) over a of the same run; h: the page's WebContent gone
 # within 5 s of the close, and at most +40 MB left over a (client plus the GPU and Networking
 # helpers, which WebKit keeps for the app's life). A state over its

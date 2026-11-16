@@ -1,7 +1,7 @@
 {
   "schema": "perch-native-parity-fixture/1",
   "screen": "files",
-  "note": "The Files screen (stock-ui/files) in its two layouts: `explorer`, the tree in the drawer's Files tab (a 300x560 card, the drawer's body), and `editor`, one file's editor in a file tab's pane (760x560). A state's `view.files` is, for workspace `view.workspace`, the workspace's files as the store keeps them (`useWorkspaceFiles`: trees, documents, previews, search, wrap; the web's `useWorkspaceFilesStore` and the native window's store give the same fields); the store's actions do nothing, so nothing is asked of a core. The editor's text is the editor engine's own drawing (CodeMirror on the web): its box is gated, not what it draws.",
+  "note": "The Files screen (stock-ui/files) in its two layouts: `explorer`, the tree in the drawer's Files tab (a 300x560 card, the drawer's body), and `editor`, one file's editor in a file tab's pane (760x560). A state's `view.files` is, for workspace `view.workspace`, the workspace's files as the store keeps them (`useWorkspaceFiles`: trees, documents, previews, search, wrap; the web's `useWorkspaceFilesStore` and the native window's store give the same fields); the store's actions do nothing, so nothing is asked of a core. The editor's text is the editor engine's own drawing (CodeMirror on the web): its box is gated, not what it draws. Media states (`image`, `pdf-card`) read the file's bytes from `fixtures/media/` (the web's `workspace-file` URL, served by the reference build; natively the capture's fetch).",
   "dataFrom": "sidebar",
   "size": {
     "width": 300,
@@ -595,6 +595,276 @@
                 "expectedVersion": "v1",
                 "actualVersion": "v2"
               }
+            }
+          },
+          "previews": {},
+          "search": null,
+          "wrap": false
+        }
+      }
+    },
+    {
+      "id": "image",
+      "title": "photo.png in its tab: the image fitted under its toolbar, 64 × 48 · Fit",
+      "size": {
+        "width": 760,
+        "height": 560
+      },
+      "props": {
+        "layout": "editor",
+        "initialPath": "photo.png"
+      },
+      "view": {
+        "workspace": "w-perch-main",
+        "files": {
+          "trees": {
+            "": {
+              "workspaceId": "w-perch-main",
+              "path": "",
+              "entries": [
+                {
+                  "name": "docs",
+                  "path": "docs",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "src",
+                  "path": "src",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": ".gitignore",
+                  "path": ".gitignore",
+                  "kind": "file",
+                  "size": 24,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "Cargo.toml",
+                  "path": "Cargo.toml",
+                  "kind": "file",
+                  "size": 412,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "README.md",
+                  "path": "README.md",
+                  "kind": "file",
+                  "size": 1260,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "photo.png",
+                  "path": "photo.png",
+                  "kind": "file",
+                  "size": 136,
+                  "readonly": false,
+                  "executable": false
+                }
+              ],
+              "truncated": false,
+              "state": "ready"
+            },
+            "src": {
+              "workspaceId": "w-perch-main",
+              "path": "src",
+              "entries": [
+                {
+                  "name": "ui",
+                  "path": "src/ui",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "lib.rs",
+                  "path": "src/lib.rs",
+                  "kind": "file",
+                  "size": 2048,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "main.rs",
+                  "path": "src/main.rs",
+                  "kind": "file",
+                  "size": 318,
+                  "readonly": false,
+                  "executable": false
+                }
+              ],
+              "truncated": false,
+              "state": "ready"
+            }
+          },
+          "documents": {
+            "photo.png": {
+              "workspaceId": "w-perch-main",
+              "path": "photo.png",
+              "metadata": {
+                "path": "photo.png",
+                "name": "photo.png",
+                "size": 136,
+                "readonly": false,
+                "executable": false,
+                "kind": "file",
+                "mediaType": "image/png"
+              },
+              "content": "",
+              "savedContent": "",
+              "version": "v1",
+              "persistedContent": "",
+              "baseContent": "",
+              "baseVersion": "v1",
+              "bufferRevision": 1,
+              "reloadEpoch": 0,
+              "bufferState": "ready",
+              "state": "ready"
+            }
+          },
+          "previews": {},
+          "search": null,
+          "wrap": false
+        }
+      }
+    },
+    {
+      "id": "pdf-card",
+      "title": "doc.pdf in its tab: the header with its buttons; the body is the web's PDF viewer and the native card, not compared by element",
+      "size": {
+        "width": 760,
+        "height": 560
+      },
+      "props": {
+        "layout": "editor",
+        "initialPath": "doc.pdf"
+      },
+      "view": {
+        "workspace": "w-perch-main",
+        "files": {
+          "trees": {
+            "": {
+              "workspaceId": "w-perch-main",
+              "path": "",
+              "entries": [
+                {
+                  "name": "docs",
+                  "path": "docs",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "src",
+                  "path": "src",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": ".gitignore",
+                  "path": ".gitignore",
+                  "kind": "file",
+                  "size": 24,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "Cargo.toml",
+                  "path": "Cargo.toml",
+                  "kind": "file",
+                  "size": 412,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "README.md",
+                  "path": "README.md",
+                  "kind": "file",
+                  "size": 1260,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "doc.pdf",
+                  "path": "doc.pdf",
+                  "kind": "file",
+                  "size": 586,
+                  "readonly": false,
+                  "executable": false
+                }
+              ],
+              "truncated": false,
+              "state": "ready"
+            },
+            "src": {
+              "workspaceId": "w-perch-main",
+              "path": "src",
+              "entries": [
+                {
+                  "name": "ui",
+                  "path": "src/ui",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "lib.rs",
+                  "path": "src/lib.rs",
+                  "kind": "file",
+                  "size": 2048,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "main.rs",
+                  "path": "src/main.rs",
+                  "kind": "file",
+                  "size": 318,
+                  "readonly": false,
+                  "executable": false
+                }
+              ],
+              "truncated": false,
+              "state": "ready"
+            }
+          },
+          "documents": {
+            "doc.pdf": {
+              "workspaceId": "w-perch-main",
+              "path": "doc.pdf",
+              "metadata": {
+                "path": "doc.pdf",
+                "name": "doc.pdf",
+                "size": 586,
+                "readonly": false,
+                "executable": false,
+                "kind": "file",
+                "mediaType": "application/pdf"
+              },
+              "content": "",
+              "savedContent": "",
+              "version": "v1",
+              "persistedContent": "",
+              "baseContent": "",
+              "baseVersion": "v1",
+              "bufferRevision": 1,
+              "reloadEpoch": 0,
+              "bufferState": "ready",
+              "state": "ready"
             }
           },
           "previews": {},
