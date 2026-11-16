@@ -69,10 +69,16 @@ function fileMenuResult(p, r) {
     case "refresh": return p.onRefresh?.();
     case "hold": heldEntry = { workspaceId: ws, path: args[0], cut: !!args[1] }; return;
     case "mutate": return mutate(args[0], args[1], args[2]);
+    case "openInDefaultApp":
+    case "reveal": {
+      const inside = relative(p, String(args[0] ?? ""));
+      if (inside === null) return console.error(`react-runtime: ${args[0]} is outside the workspace`);
+      const id = r.action === "reveal" ? "files.reveal" : "files.openDefault";
+      return void perch.run(id, { workspaceId: ws, path: inside }).catch((error) => console.error(`perch.run ${id}: ${error?.message ?? error}`));
+    }
     case "createFileAt": {
-      const root = String(p.workspacePath ?? "").replace(/\/+$/, "");
       const [dir, name] = args;
-      const inside = dir === root ? "" : dir.startsWith(`${root}/`) ? dir.slice(root.length + 1) : null;
+      const inside = relative(p, dir);
       if (inside === null) return console.error("react-runtime: a new file outside the workspace is not made by the native window yet");
       return mutate("createFile", inside ? `${inside}/${name}` : name);
     }
@@ -80,8 +86,16 @@ function fileMenuResult(p, r) {
   }
 }
 
+/** `absolute` as a path in the menu's workspace (`""` for its root), or null outside it. */
+function relative(p, absolute) {
+  const root = String(p.workspacePath ?? (p.workspaceId ? perch.workspaceFiles(p.workspaceId)?.workspace?.path : "") ?? "").replace(/\/+$/, "");
+  const path = absolute.replace(/\/+$/, "");
+  return path === root ? "" : path.startsWith(`${root}/`) ? path.slice(root.length + 1) : null;
+}
+
 /** The props of the `dialog` screen for a file menu or a new-file prompt: the folders' names give a copy its free
- * name. Open in Default App, Reveal and Ask agent are not offered. */
+ * name. Open in Default App and Reveal are offered for a workspace on this computer; Ask agent waits for the
+ * native Context Bridge. */
 function fileMenuProps(p) {
   const files = p.workspaceId ? perch.workspaceFiles(p.workspaceId) : null;
   const names = Object.fromEntries(Object.entries(files?.trees ?? {}).map(([dir, tree]) => [dir, (tree?.entries ?? []).map((e) => e.name)]));
@@ -89,7 +103,7 @@ function fileMenuProps(p) {
   return {
     workspaceId: p.workspaceId, workspacePath: p.workspacePath ?? files?.workspace?.path ?? "", target: p.target ?? null,
     x: p.x ?? 0, y: p.y ?? 0, ...(p.initialStage ? { initialStage: p.initialStage } : {}),
-    held, nativeAvailable: false, canAsk: false, names,
+    held, nativeAvailable: files?.workspace?.hostId === "local", canAsk: false, names,
   };
 }
 

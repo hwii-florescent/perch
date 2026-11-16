@@ -338,6 +338,23 @@ fn main() {
         .center();
     rig.sent();
     rig.right_click(row);
+    // A workspace on this computer offers Open in Default App and Reveal; Ask agent waits for the
+    // native Context Bridge. Neither is clicked here: it would open another app.
+    let menu = rig.settle();
+    assert!(named(&menu, ":file-menu-open-default").is_some());
+    assert!(named(&menu, ":file-menu-reveal").is_some());
+    assert!(named(&menu, ":file-menu-ask-agent").is_none());
+    for bad in ["../outside", "/etc", "a/../../b"] {
+        let refused = rig.ws(|ws, window, cx| {
+            ws.run_command(
+                "files.reveal",
+                Some(&json!({ "workspaceId": "w1", "path": bad })),
+                window,
+                cx,
+            )
+        });
+        assert!(refused.is_err(), "{bad} is refused");
+    }
     rig.click_named(":file-menu-delete");
     rig.click_named("confirm-accept");
     rig.settle();
