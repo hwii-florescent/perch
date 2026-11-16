@@ -1,0 +1,6 @@
+{
+  "name": "Browser toolbar",
+  "description": "The web app's stock browser toolbar, unchanged, drawn natively through the React runtime over each browser page.",
+  "runtime": "react",
+  "screen": { "height": 43 }
+}

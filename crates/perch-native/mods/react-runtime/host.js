@@ -219,12 +219,11 @@ export function copyFor(cx, screen) {
   let escapeHeld = false;
   // Snapshots by key, read again on `refresh()`.
   const snapshots = new Map();
-  // The editors this copy placed (`CodeEditor`): what each one heard, by document key, kept until it is delivered.
-  const editorListeners = new Map();
-  const editorHeard = new Map();
   const listeners = new Set();
   const focusListeners = new Set();
   const openOverlays = new Set();
+  // Editors this copy placed (`perch.editor.watch`): their queued events, read on `refresh()`.
+  const watched = new Map();
   function snapshot(key, read) {
     let entry = snapshots.get(key);
     if (!entry) {
@@ -351,22 +350,6 @@ export function copyFor(cx, screen) {
     // `useWorkspaceFiles`: one workspace's files from the window's store, and its actions run there.
     workspaceFiles: (id) => snapshot(`workspaceFiles:${id}`, () => perch.workspaceFiles(id)),
     filesDo: (action, workspaceId, ...args) => perch.filesDo(action, workspaceId, ...args),
-    // The native editor (`perch-editor`) by document key, for `CodeEditor`; `listen` hears its events.
-    editor: {
-      open: (key, options) => editors.open(key, options),
-      park: (key) => editors.park(key),
-      setReadonly: (key, on) => editors.setReadonly(key, on),
-      setWrap: (key, on) => editors.setWrap(key, on),
-      focus: (key) => editors.focus(key),
-      openGoto: (key) => editors.openGoto(key),
-      listen(key, listener) {
-        editorListeners.set(key, listener);
-        return () => {
-          if (editorListeners.get(key) === listener) editorListeners.delete(key);
-          editorHeard.delete(key);
-        };
-      },
-    },
     statusLine: () => snapshot("statusLine", () => perch.statusLine()),
     zoom: () => snapshot("zoom", () => perch.zoom()),
     paneLook: () => snapshot("paneLook", () => perch.paneLook()),
@@ -545,6 +528,17 @@ export function copyFor(cx, screen) {
     closeOverlay(id) {
       if (openOverlays.delete(id)) perch.run("overlay.close").catch(() => {});
     },
+    // The native editor (`perch-editor`, functions by document key) for `@perch/sdk`'s `CodeEditor`, and
+    // `watch(docKey, handler)`: the editor's events (change, caret, save, goto, contextmenu) reach `handler` in
+    // batches from `refresh()`, which the module's re-render of this copy runs. Returns the unwatch function.
+    editor: {
+      ...editors,
+      watch(key, handler) {
+        const entry = { handler, pending: [] };
+        watched.set(key, entry);
+        return () => { if (watched.get(key) === entry) watched.delete(key); };
+      },
+    },
     // Engine slots (`perch-engine`): `focus(engine, key)` gives an engine the keyboard, `focused()` says which has it
     // (`{ engine, key }` or null), `release(engine, key)` lets a key go (the slot unmounted or was re-keyed).
     engines: {
@@ -609,18 +603,11 @@ export function copyFor(cx, screen) {
      * subscribers; without, only looks. */
     refresh(tell) {
       let changed = false;
-      // An editor's events are taken as they come (reading them empties the queue) and delivered with `tell`.
-      for (const key of editorListeners.keys()) {
-        const events = editors.events(key);
-        if (events.length) editorHeard.set(key, [...(editorHeard.get(key) ?? []), ...events]);
-      }
-      if (editorHeard.size) {
+      for (const [key, entry] of watched) {
+        entry.pending.push(...editors.events(key));
+        if (!entry.pending.length) continue;
         changed = true;
-        if (tell) {
-          const heard = [...editorHeard];
-          editorHeard.clear();
-          for (const [key, events] of heard) editorListeners.get(key)?.(events);
-        }
+        if (tell) entry.handler(entry.pending.splice(0));
       }
       for (const entry of snapshots.values()) {
         const value = entry.read();
@@ -653,6 +640,7 @@ export function copyFor(cx, screen) {
       COPIES.delete(copy);
       listeners.clear();
       focusListeners.clear();
+      watched.clear();
       openOverlays.clear();
       snapshots.clear();
       for (const [id, timer] of TIMERS.all) if (timer.copy === copy) clearTimeout(id);

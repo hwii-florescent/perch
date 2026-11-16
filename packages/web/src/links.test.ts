@@ -120,3 +120,11 @@ describe("terminal links", () => {
     expect(open).not.toHaveBeenCalled();
   });
 });
+
+// The shared table the native client's address port (crates/perch-native/src/browser/address.rs) also reads.
+import addressCases from "./addressCases.json";
+describe("shared address cases", () => {
+  it.each(addressCases.addresses.map((c) => [c.input, (c as { engine?: string }).engine, c.expected] as const))("%j (%s) gives %s", (input, engine, expected) => {
+    expect(browserAddress(input, engine)).toBe(expected);
+  });
+});

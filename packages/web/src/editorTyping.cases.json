@@ -1,0 +1,162 @@
+{
+  "about": "Typing rules of the file editor, read by editorTyping.test.ts (CodeMirror) and crates/perch-native/tests/editor_typing.rs (the native editor). `doc`: the text with the caret at `|`, or a selection between `[` and `]`. `keys`: typed in order; a one-character string is typed, `enter`, `backspace` and `undo` are those keys. `expect`: the text afterwards, the caret or selection marked the same way. `web`: false for a case CodeMirror's commands in the web test cannot drive (the web editor gets it from its keymap).",
+  "cases": [
+    {
+      "name": "closes an opener at the end of a line",
+      "file": "A.java",
+      "doc": "if (x) |",
+      "keys": [
+        "{"
+      ],
+      "expect": "if (x) {|}"
+    },
+    {
+      "name": "a typed closer goes over the one it inserted",
+      "file": "A.java",
+      "doc": "if (x) |",
+      "keys": [
+        "{",
+        "}"
+      ],
+      "expect": "if (x) {}|"
+    },
+    {
+      "name": "types over only a closer it inserted",
+      "file": "A.java",
+      "doc": "f(|)",
+      "keys": [
+        ")"
+      ],
+      "expect": "f()|)"
+    },
+    {
+      "name": "does not close before a word",
+      "file": "A.java",
+      "doc": "|x",
+      "keys": [
+        "("
+      ],
+      "expect": "(|x"
+    },
+    {
+      "name": "closes before a dot (VS Code's before set)",
+      "file": "A.java",
+      "doc": "|.x",
+      "keys": [
+        "("
+      ],
+      "expect": "(|).x"
+    },
+    {
+      "name": "closes before a quote (VS Code's before set)",
+      "file": "A.java",
+      "doc": "|\"x\"",
+      "keys": [
+        "("
+      ],
+      "expect": "(|)\"x\""
+    },
+    {
+      "name": "closes before a dot in a language with its own pairs",
+      "file": "a.ts",
+      "doc": "|.x",
+      "keys": [
+        "("
+      ],
+      "expect": "(|).x"
+    },
+    {
+      "name": "closes before a quote in a language with its own pairs",
+      "file": "a.ts",
+      "doc": "|\"x\"",
+      "keys": [
+        "("
+      ],
+      "expect": "(|)\"x\""
+    },
+    {
+      "name": "closes a quote",
+      "file": "a.ts",
+      "doc": "const s = |",
+      "keys": [
+        "\""
+      ],
+      "expect": "const s = \"|\""
+    },
+    {
+      "name": "does not close a quote after a word character",
+      "file": "a.ts",
+      "doc": "don|",
+      "keys": [
+        "'"
+      ],
+      "expect": "don'|"
+    },
+    {
+      "name": "surrounds a selection with the pair",
+      "file": "A.java",
+      "doc": "[x]",
+      "keys": [
+        "("
+      ],
+      "expect": "([x])"
+    },
+    {
+      "name": "Enter after an opener indents",
+      "file": "A.java",
+      "doc": "class A {|",
+      "keys": [
+        "enter"
+      ],
+      "expect": "class A {\n  |"
+    },
+    {
+      "name": "Enter between a pair opens an indented middle line",
+      "file": "A.java",
+      "doc": "class A {\n  void f() {|}\n}",
+      "keys": [
+        "enter"
+      ],
+      "expect": "class A {\n  void f() {\n    |\n  }\n}"
+    },
+    {
+      "name": "a typed } re-indents its line to the opener's",
+      "file": "A.java",
+      "doc": "class A {\n  void f() {\n    x();\n    |\n}",
+      "keys": [
+        "}"
+      ],
+      "expect": "class A {\n  void f() {\n    x();\n  }|\n}"
+    },
+    {
+      "name": "Backspace removes an empty pair it inserted",
+      "file": "A.java",
+      "doc": "f|",
+      "keys": [
+        "(",
+        "backspace"
+      ],
+      "expect": "f|"
+    },
+    {
+      "name": "backtick pairs in TypeScript",
+      "file": "a.ts",
+      "doc": "const s = |",
+      "keys": [
+        "`"
+      ],
+      "expect": "const s = `|`"
+    },
+    {
+      "name": "undo after a closed pair removes the pair in one step",
+      "file": "A.java",
+      "doc": "f|",
+      "keys": [
+        "(",
+        "undo"
+      ],
+      "expect": "f|",
+      "web": false
+    }
+  ]
+}

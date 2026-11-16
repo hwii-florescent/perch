@@ -271,7 +271,7 @@ pub(super) async fn start(
         Reserved::Refused(refusal) => {
             use sub_sessions::Refusal;
             let status = match refusal {
-                Refusal::Concurrent(_) | Refusal::Descendants(_) => StatusCode::CONFLICT,
+                Refusal::Concurrent(_) => StatusCode::CONFLICT,
                 Refusal::Depth => StatusCode::FORBIDDEN,
             };
             return Err(fail(status, refusal.message()));
@@ -1040,7 +1040,6 @@ pub(super) mod tests {
         // would launch a real agent, which a test must not do.)
         db.set_limits(crate::sub_sessions::RunLimits {
             live: 1,
-            total: 1,
             ..Default::default()
         });
         let (status, answer) = call("spawn", lead.token.clone(), spawn_body("k9", "lead")).await;

@@ -59,6 +59,9 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+mod browsing;
+pub use browsing::is_browser_tab;
+
 /// How long a follow-up key after the leader chord is awaited.
 const LEADER_TIMEOUT: Duration = Duration::from_millis(1500);
 /// Pixels one resize key grows or shrinks the focused pane by, as the web's.
@@ -266,6 +269,8 @@ pub struct Workspace {
     column_drag: Option<ColumnDrag>,
     /// The window's width as last drawn.
     viewport_width: f32,
+    /// Browser pages: browser tabs and the drawer's (`browsing`).
+    browsing: browsing::Browsing,
     /// The workspace files this window has open: listings, documents and their drafts.
     files: crate::files::Files,
     /// The workspace the drawer's Files tab was opened on, for when no tab on screen names one.
@@ -359,6 +364,7 @@ impl Workspace {
             chrome: Chrome::default(),
             column_drag: None,
             viewport_width: 0.0,
+            browsing: Default::default(),
             files: crate::files::Files::new(files_live),
             explorer_workspace: None,
             _subscriptions: vec![opened, failed, observed],
@@ -626,31 +632,12 @@ impl Workspace {
         cx.notify();
     }
 
-    /// The workspace on screen: the active file tab's, or the active session's, else the one
-    /// the Files tab was last opened on.
-    fn shown_workspace(&self, cx: &App) -> Option<String> {
-        self.active_workspace(cx)
-            .or_else(|| self.explorer_workspace.clone())
-    }
-
-    fn active_workspace(&self, cx: &App) -> Option<String> {
-        let active = self.tabs.active()?;
-        if let Some((workspace_id, _)) = file_tab(active) {
-            return Some(workspace_id.to_string());
-        }
-        let store = &self.sidebar.read(cx).model().store;
-        store
-            .sessions
-            .iter()
-            .find(|s| s.id == active)
-            .and_then(|s| s.workspace_id.clone())
-    }
-
     /// The files screens the window places: the explorer in the drawer's Files tab, a file's
     /// editor in each file tab on screen.
     fn files_wanted(&self, want: &mut impl FnMut(&'static str, String, Value), cx: &App) {
         if self.chrome.tools() == Some(shell::Tools::Files) {
-            if let Some(workspace_id) = self.shown_workspace(cx) {
+            let shown = self.shown_workspace(cx);
+            if let Some(workspace_id) = shown.or_else(|| self.explorer_workspace.clone()) {
                 want(
                     "files",
                     "files#drawer".into(),
@@ -1750,8 +1737,8 @@ impl Workspace {
             "launcher",
             json!({ "hostId": host_id, "projects": projects, "activeProjectId": active }),
             None,
-            Some(Box::new(move |this, result, _, cx| {
-                let outcome = this.launcher_result(&host_id, &result, cx);
+            Some(Box::new(move |this, result, window, cx| {
+                let outcome = this.launcher_result(&host_id, &result, window, cx);
                 this.finish(outcome, cx);
             })),
             cx,
@@ -1763,6 +1750,7 @@ impl Workspace {
         &mut self,
         host_id: &str,
         result: &Value,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
         let (action, args) = action_of(result);
@@ -1772,7 +1760,10 @@ impl Workspace {
                 let agent = word(&args, 1).ok_or("start needs an agent.")?;
                 self.start_session(host_id, word(&args, 0), &agent, cx)
             }
-            Some("openBrowser") => Err(NO_BROWSER.into()),
+            Some("openBrowser") => {
+                let args = word(&args, 0).map(|id| json!({ "workspaceId": id }));
+                self.run_command("browser.open", args.as_ref(), window, cx)
+            }
             Some("focusWorkspace") => Err(NO_FILES.into()),
             Some("addProject") => self.ask_add_project(cx),
             Some(other) => Err(format!("The native window cannot {other} yet.")),
@@ -1817,6 +1808,9 @@ impl Workspace {
                 wanted.push((id, key, props));
             }
         };
+        for (id, key, props) in self.browser_wanted(cx) {
+            want(id, key, props);
+        }
         if self.sidebar.read(cx).visible() {
             want("sidebar", "sidebar".into(), json!({}));
         }
@@ -2471,6 +2465,9 @@ impl Workspace {
     /// A tab's name: the session's title now (a plain terminal is not listed), else the title its
     /// program set, else what it was opened as.
     fn title_of(&self, id: &str, cx: &App) -> String {
+        if let Some(title) = self.browser_title(id) {
+            return title;
+        }
         if let Some((_, path)) = file_tab(id) {
             return path.rsplit('/').next().unwrap_or(path).to_string();
         }
@@ -2514,6 +2511,9 @@ impl Workspace {
             })
         };
         self.sidebar.read(cx).take_refused();
+        if let Some(result) = self.browser_command(name, args, window, cx) {
+            return result;
+        }
         match name {
             "global.navigator" | "global.navigatorAlt" | "app.palette" => {
                 self.toggle_palette(window, cx)
@@ -2928,9 +2928,7 @@ impl Workspace {
                 };
                 self.hand_off(place)?;
             }
-            // The strip's "+" lists New browser and New file, as the web's; this window has no
-            // browser view, so New browser is refused with the reason (as the launcher's are).
-            "browser.open" => return Err(NO_BROWSER.into()),
+            // New browser is `browsing`'s.
             "file.open" => {
                 let workspace =
                     text("workspaceId").ok_or("This command needs {workspaceId, path}.")?;
@@ -3426,6 +3424,9 @@ impl Workspace {
     /// deleting the session later still closes the tab, whatever the wait said. A tab with no
     /// attached terminal has no connection to ask over: it closes, and the session keeps running.
     fn close(&mut self, id: &str, cx: &mut Context<Self>) {
+        if is_browser_tab(id) {
+            return self.close_browser_tab(id, cx);
+        }
         // A file's tab just goes: its draft stays in the core's buffer, as the web's does.
         if file_tab(id).is_some() {
             self.tabs.close(id);
@@ -4165,6 +4166,9 @@ impl Workspace {
     }
 
     fn pane_body(&self, id: &str, focused: bool, cx: &mut Context<Self>) -> AnyElement {
+        if let Some(page) = self.browser_body(id, focused, cx) {
+            return page;
+        }
         let target = id.to_string();
         let frame = div()
             .id(format!("pane-{id}"))
@@ -4246,11 +4250,9 @@ fn program_in(argv: &Value, task: Option<&str>) -> Result<String, String> {
 /// A file tab's workspace and path: its id is the web's `fileTabKey`, `<workspace id>\n<path>`
 /// (a session id never holds a line break).
 pub fn file_tab(id: &str) -> Option<(&str, &str)> {
-    id.split_once('\n')
+    id.split_once('\n').filter(|_| !is_browser_tab(id))
 }
 
-/// Why New browser is refused here.
-const NO_BROWSER: &str = "A browser tab does not open in the native window yet.";
 /// Why New file is refused here: it names the file in the files view's prompt.
 const NO_FILES: &str =
     "A new file needs the files view, which the native window does not have yet.";
@@ -4360,6 +4362,7 @@ impl gpui::Render for Workspace {
                 },
             ));
         }
+        self.browser_frame(window, cx);
         // Screens mods draw: the notifications screen is up while there are notifications, the
         // floating ones opened since the last draw get their views, the in-flow ones are placed.
         let toast_up = self.screens.is_open("toast");
@@ -4371,7 +4374,8 @@ impl gpui::Render for Workspace {
         self.screens.realize(&self.screen_focus, window, cx);
         let wanted = self.inflow_wanted(cx);
         self.let_go_of_stale_hold(&wanted, cx);
-        self.screens.place(wanted, window, cx);
+        self.screens.place(wanted.clone(), window, cx);
+        self.browser_engine_frame(&wanted, window, cx);
         // A terminal that attaches takes the keyboard when it first draws; the tab that has it in
         // the layout keeps it. A modal screen has the keyboard while it is up.
         if self.screens.top_modal().is_none() && self.keyboard_held.is_none() {
@@ -4514,6 +4518,10 @@ impl gpui::Render for Workspace {
             )
         });
         let tools = self.chrome.tools();
+        let mut drawer_browser = (tools == Some(shell::Tools::Browser))
+            .then(|| self.drawer_browser(cx))
+            .flatten();
+        let drawer_has_page = drawer_browser.is_some();
         let drawer_card = tools.map(|tab| {
             let width = self
                 .chrome
@@ -4562,15 +4570,22 @@ impl gpui::Render for Workspace {
                         .child(div().flex().items_center().gap(px(2.)).children(tabs))
                         .child(shell::drawer_toggle(tokens, toggle_drawer.clone())),
                 )
-                .child(match (tab, self.screens.inflow("files#drawer")) {
-                    (shell::Tools::Files, Some(explorer)) => div()
-                        .flex_1()
-                        .min_h_0()
-                        .flex()
-                        .flex_col()
-                        .child(explorer)
-                        .into_any_element(),
-                    _ => self.handoff_body(tab, open, tokens),
+                .children(
+                    drawer_browser
+                        .take()
+                        .map(|page| div().flex_1().min_h_0().child(page).into_any_element()),
+                )
+                .when(!drawer_has_page, |card| {
+                    card.child(match (tab, self.screens.inflow("files#drawer")) {
+                        (shell::Tools::Files, Some(explorer)) => div()
+                            .flex_1()
+                            .min_h_0()
+                            .flex()
+                            .flex_col()
+                            .child(explorer)
+                            .into_any_element(),
+                        _ => self.handoff_body(tab, open, tokens),
+                    })
                 })
                 .child(shell::round_corners(tokens.backdrop))
         });
@@ -4749,6 +4764,8 @@ impl gpui::Render for Workspace {
         // While a tab is pressed the window follows the pointer wherever it is, before anything
         // under it: what is under a drag does not react to it. While a press a mod follows lasts,
         // the pointer is forwarded to that mod, and only then.
+        // Painted after every page's slot: the pages follow what was drawn.
+        let pages_follow = self.browser_reconcile();
         let follow = (self.drag.is_some() || self.follow.is_some()).then(|| {
             let this = cx.entity().downgrade();
             canvas(
@@ -4871,6 +4888,7 @@ impl gpui::Render for Workspace {
             .children(floating)
             .children(follow)
             .children(columns)
+            .children(pages_follow)
     }
 }
 

@@ -327,7 +327,9 @@ it from its upstreams. Each copy keeps its upstream licence file and herdr's
     stops says so over its view, as a failed render does, instead of only being logged.
   - `vendor/gpui-kit/crates/base/src/input/base/state.rs` and
     `vendor/gpui-kit/crates/base/src/input/base/undo_manager.rs`: `can_undo` and `can_redo`,
-    whether undo or redo has anything to replay, for an editor's menu.
+    whether undo or redo has anything to replay, for an editor's menu; `apply_external` and
+    `map_external`, an edit from outside the editor (a store value) applied without an undo entry
+    or a change event, the undo history mapped through it (what it overlaps is dropped).
 - `vendor/quickjs-jit-runtime/`: the `jit` crate of
   [longbridge/quickjs-jit](https://github.com/longbridge/quickjs-jit) at `96593cd` with
   herdr's fix for longbridge/quickjs-jit#38, MIT (Copyright (c) 2020 Mees Delzenne,
