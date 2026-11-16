@@ -179,5 +179,49 @@ fn main() {
     let frame = draw(&mut cx, window);
     assert_eq!(red_width(&frame, H / 2.), 0., "nothing drawn after release");
 
+    // Timing: a 4,000 x 3,000 PNG decodes and draws within 500 ms, a zoom step within 8 ms a frame
+    // (release builds; `PERCH_BUDGET_STRICT=1` holds the budgets exactly, otherwise with a 2x
+    // margin for a busy machine). Debug builds only report.
+    let photo = png(4000, 3000);
+    let svg = cx.update(|cx| cx.svg_renderer());
+    let file = MediaFile {
+        workspace_id: "w".into(),
+        path: "photo.png".into(),
+        media_type: "image/png".into(),
+        size: photo.len() as u64,
+    };
+    let started = std::time::Instant::now();
+    media::open(KEY, file, Arc::new(Bytes(photo)), svg)().unwrap();
+    draw(&mut cx, window);
+    let opened = started.elapsed();
+    let started = std::time::Instant::now();
+    for zoom in [0.5, 0.625, 0.78, 1.0, 1.25] {
+        media::set_zoom(KEY, Some(zoom));
+        draw(&mut cx, window);
+    }
+    let step = started.elapsed() / 5;
+    let margin = if std::env::var("PERCH_BUDGET_STRICT").as_deref() == Ok("1") {
+        1
+    } else {
+        2
+    };
+    if std::env::var("PERCH_MEDIA_REPORT").is_ok() || cfg!(debug_assertions) {
+        println!("files_media: 4000x3000 png opened in {opened:?}, zoom step {step:?} a frame");
+    }
+    if !cfg!(debug_assertions) {
+        assert!(
+            opened <= std::time::Duration::from_millis(500 * margin),
+            "opened in {opened:?}"
+        );
+        assert!(
+            step <= std::time::Duration::from_millis(8 * margin),
+            "zoom step {step:?}"
+        );
+    }
+    cx.update_window(window.into(), |_, window: &mut Window, cx| {
+        media::release(KEY, Some(window), cx)
+    })
+    .unwrap();
+
     println!("files_media: ok");
 }
