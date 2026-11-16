@@ -197,14 +197,14 @@ The command fails when any copy of the current revision failed.
 - The core keeps the last 256 reports and 16 open questions. Past that it drops
   the oldest. A screen's reports go when it disconnects.
 
-## API reference (1.10)
+## API reference (1.11)
 
 The full signatures and field docs are in `perch-sdk.d.ts`; this lists what each
 export is for.
 
 ### `version: string`
 
-This page's SDK version, as semver (`"1.10.2"`). 1.1 added `assetUrl`,
+This page's SDK version, as semver (`"1.11.0"`). 1.1 added `assetUrl`,
 `useInstance` and `useInstanceState`; 1.2 the status bar, tab strip and pane
 header surface; 1.3 navigation (the sidebar); 1.4 resources (the Git review,
 `useResourceState`, and the terminal, layout and focus queries); 1.5 files, the
@@ -220,7 +220,8 @@ browser toolbar and the phone's own screens (their props types), `glassClass`,
 `tapButtonClass`, `GearIcon`, `PlusIcon` and `EllipsisIcon`; 1.10.1 makes `useTerminals` draw again when a
 pin or this device's order changes (`terminal.pin`, `terminal.order`), so a copy can group and order by them; 1.10.2 reshapes the phone's
 screens' props, with no export added: the header gets `onOpenTools`, the switcher `chatMode`, `onChatMode` and `onOpenSettings`, the
-panes `session` (`content` is now the drawer's tool), and the files screen is always given its `explorer`.
+panes `session` (`content` is now the drawer's tool), and the files screen is always given its `explorer`; 1.11
+adds `Submenu`, a menu row that opens a list of choices beside the menu (hover, click or keyboard).
 
 ### `useKeybindings(): KeybindEntry[]`
 

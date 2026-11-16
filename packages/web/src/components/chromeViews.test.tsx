@@ -65,11 +65,11 @@ it("a lead folds its sub-sessions behind a chevron, keeps what needs you on show
   act(() => usePerchStore.setState({ sessions: family, sessionId: "lead" }));
   act(() => root.render(<WorkspaceOverview />));
   const row = (id: string) => get(`workspace-session-${id}`) as HTMLElement | null;
-  // Unfolded: the sub-sessions are filled cards with an elbow each, the lead is filled and carries the chevron.
+  // Unfolded: the sub-sessions hang off an elbow each; only the active row (the lead) is filled, none at rest.
   expect(row("kid-a")!.parentElement!.hasAttribute("data-sub-session")).toBe(true);
   expect(host.querySelectorAll('[data-testid^="session-elbow-"]')).toHaveLength(2);
   expect(row("lead")!.parentElement!.className).toContain("bg-surface-1");
-  expect(row("kid-a")!.parentElement!.className).toContain("bg-surface-0");
+  expect(row("kid-a")!.parentElement!.className).not.toMatch(/(^|\s)bg-surface-[01](\s|$)/);
   const fold = get("session-fold-lead")!;
   expect(fold.getAttribute("aria-expanded")).toBe("true");
   expect(get("session-fold-kid-a")).toBeNull();
