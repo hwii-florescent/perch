@@ -2,70 +2,6 @@
   "note": "Failing gate states that are accepted for now, each with its reason. compare.mjs fails on any failing state not listed here and on a listed state that passes again; remove entries as they are fixed.",
   "accepted": [
     {
-      "state": "instructions/empty/dark",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "instructions/empty/light",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "instructions/filled/dark",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "instructions/filled/light",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "instructions/loading/dark",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "instructions/loading/light",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "instructions/save-no-answer/dark",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "instructions/save-no-answer/light",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "instructions/save-refused/dark",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "instructions/save-refused/light",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "instructions/too-long/dark",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "instructions/too-long/light",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "instructions/unavailable/dark",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "instructions/unavailable/light",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "instructions/workspace/dark",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "instructions/workspace/light",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
       "state": "keybind-help/all/dark",
       "reason": "Rows for the drawer, preview tab and file editor wait for those screens."
     },
@@ -82,36 +18,12 @@
       "reason": "Rows for the drawer, preview tab and file editor wait for those screens."
     },
     {
-      "state": "memory/conflict/dark",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "memory/conflict/light",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
       "state": "memory/memory-off/dark",
       "reason": "The check box shrinks to 9.5 px in its row."
     },
     {
       "state": "memory/memory-off/light",
       "reason": "The check box shrinks to 9.5 px in its row."
-    },
-    {
-      "state": "memory/new-file/dark",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "memory/new-file/light",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "memory/open-file/dark",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
-    },
-    {
-      "state": "memory/open-file/light",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); the count span is missing."
     },
     {
       "state": "pane-header/corner/dark",
@@ -160,38 +72,6 @@
     {
       "state": "settings/notifications/light",
       "reason": "Known (docs/TESTING.md): the long Notifications page drifts up to 3 px down, as the engine sets line heights in half pixels."
-    },
-    {
-      "state": "sidebar/family-folded/dark",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); project names are 5 px off."
-    },
-    {
-      "state": "sidebar/family-folded/light",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); project names are 5 px off."
-    },
-    {
-      "state": "sidebar/family-open-child/dark",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); project names are 5 px off."
-    },
-    {
-      "state": "sidebar/family-open-child/light",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); project names are 5 px off."
-    },
-    {
-      "state": "sidebar/family-unfolded/dark",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); project names are 5 px off."
-    },
-    {
-      "state": "sidebar/family-unfolded/light",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); project names are 5 px off."
-    },
-    {
-      "state": "sidebar/folded-rollup/dark",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); project names are 5 px off."
-    },
-    {
-      "state": "sidebar/folded-rollup/light",
-      "reason": "regression, to fix: Settings commit 71c95e75 (inline text elements joined to their line); project names are 5 px off."
     },
     {
       "state": "start/workspace-long-name/dark",

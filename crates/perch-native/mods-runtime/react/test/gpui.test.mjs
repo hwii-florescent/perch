@@ -315,3 +315,26 @@ test("a named text run in a flex column is as wide as its glyphs, where its alig
   const row = toGpui({ ...column("left"), style: { display: "flex" } }, kit, {}, files).record;
   assert.deepEqual(row.children.map((c) => c.record).find((c) => c?.id === "name").styles, [], "a row lays it out as it is");
 });
+
+test("only plain inline text elements join their line; a named one or one with a margin stays a box", async () => {
+  const { handle, runtime } = await mountSidebar("folded-rollup", "dark");
+  handle.unmount();
+  const { jsx } = await import("../../../mods/react-runtime/react/jsx-runtime.js");
+  const Line = () => jsx("div", { children: [
+    jsx("p", { children: ["Run ", jsx("code", { children: "perch" }), " here"] }),
+    jsx("p", { children: ["Instructions ", jsx("span", { "data-testid": "count", children: "3 / 10" })] }),
+    jsx("p", { children: ["Working", jsx("span", { style: { marginLeft: "4px" }, children: "2" })] }),
+  ] });
+  const line = runtime.mount(globalThis.perch, Line, {});
+  try {
+    const paragraphs = [];
+    const walk = (n) => { if (n.meta?.tag === "p") paragraphs.push(n); (n.children ?? []).forEach(walk); };
+    walk(line.description.root);
+    const [code, named, badge] = paragraphs;
+    assert.deepEqual(code.children.map((c) => c.kind === "text" ? c.text : c.meta.tag), ["Run perch here"]);
+    assert.equal(named.children.find((c) => c.meta)?.meta.attrs["data-testid"], "count");
+    assert.equal(badge.children.find((c) => c.meta)?.style.ml, 4);
+  } finally {
+    line.unmount();
+  }
+});
