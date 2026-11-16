@@ -351,6 +351,11 @@ it from its upstreams. Each copy keeps its upstream licence file and herdr's
   `vendor/gpui-pre-macos/src/platform.rs`). `vendor/gpui-pre/Cargo.toml` and
   `vendor/gpui-pre-macos/Cargo.toml` say so in a header, and the latter quiets lints. Herdr's
   other GPUI patches (idle wake, frame capture, terminal metrics, image cache) are not taken.
+  Perch's own changes, also marked `PERCH:`: the macOS display link pauses after a few vsyncs
+  with nothing to draw and the window's `frame_waker` restarts it
+  (`vendor/gpui-pre-macos/src/display_link.rs` `FrameDemand`, and `step`, `draw` and
+  `frame_waker` in `vendor/gpui-pre-macos/src/window.rs`); `PERCH_NATIVE_PERF=1` logs each
+  frame request on stderr (`perf_log` in `vendor/gpui-pre/src/window.rs`).
 
 The shell also pulls `quickjs-jit` (MIT, with QuickJS-ng's MIT C sources) and
 [LLRT](https://github.com/awslabs/llrt) modules (Apache-2.0) from git at the revisions

@@ -315,8 +315,8 @@ impl Floating {
 /// The window's screens: which mods exist, the in-flow copies on screen and the floating ones open.
 #[derive(Default)]
 pub struct Screens {
-    /// Whether a mod exists for an id, and when that was looked at.
-    present: RefCell<HashMap<&'static str, (bool, Instant)>>,
+    /// Whether each screen's mod was found, at which [`ModHost::files_generation`] and when.
+    present: RefCell<HashMap<&'static str, (bool, u64, Instant)>>,
     inflow: HashMap<String, Entity<ModView>>,
     pub floating: Vec<Floating>,
     /// Copies that left the window since the last draw, closed at the next (closing needs the window).
@@ -359,14 +359,20 @@ impl Screens {
             return false;
         };
         let mut present = self.present.borrow_mut();
-        if let Some((found, at)) = present.get(screen.id) {
-            if at.elapsed() < POLL {
+        let generation = host.files_generation();
+        if let Some((found, seen, at)) = present.get(screen.id) {
+            // A watched host says when files change; a test's host is looked at every POLL.
+            let fresh = if host.is_watched() {
+                *seen == generation
+            } else {
+                at.elapsed() < POLL
+            };
+            if fresh {
                 return *found;
             }
         }
-        // ponytail: one stat per screen per POLL while drawing; a folder watcher would push it.
         let found = host.find(screen.id).is_some();
-        present.insert(screen.id, (found, Instant::now()));
+        present.insert(screen.id, (found, generation, Instant::now()));
         found
     }
 

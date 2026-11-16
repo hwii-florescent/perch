@@ -213,7 +213,8 @@ fn main() {
         gpui_platform::current_headless_renderer,
     );
     cx.update(mods::init);
-    let host = ModHost::new(user.clone()).expect("the mod host starts");
+    let host = ModHost::watched(user.clone()).expect("the mod host starts");
+    assert!(host.is_watched(), "the file system watches the mods folder");
     assert!(
         host.find("example").is_some_and(|m| !m.user),
         "the stock mod is there"
@@ -268,6 +269,22 @@ fn main() {
     assert!(
         text > 20,
         "the text is drawn in the box ({text} white pixels)"
+    );
+
+    // With nothing changing on disk, the view does not look at its files again (it used to,
+    // four times a second). The watcher's events from writing the stock mods pass first.
+    std::thread::sleep(Duration::from_millis(500));
+    cx.advance_clock(POLL);
+    cx.run_until_parked();
+    let checks = host.file_checks();
+    for _ in 0..20 {
+        cx.advance_clock(Duration::from_millis(250));
+        cx.run_until_parked();
+    }
+    assert_eq!(
+        host.file_checks(),
+        checks,
+        "an idle mod does not look at its files"
     );
 
     // An edit on disk is drawn by the same view, without a restart.

@@ -19,6 +19,9 @@ mod test_mode;
 const FRAME: Duration = Duration::from_millis(16);
 
 fn main() {
+    // The app is built without `render-test-support`, so its scripts never name their elements;
+    // this example gets the feature through dev-dependencies. Match the app unless asked.
+    gpui_shell::probe::set_named(std::env::var_os("PERCH_MEASURE_NAMES").is_some());
     let test = match test_mode::TestMode::from_env() {
         Ok(Some(test)) => test,
         Ok(None) => {
@@ -72,31 +75,35 @@ fn main() {
 
     // The executor's clock is this loop's: it follows the real one, one frame at a time.
     loop {
-        // As `perch-native` hands the follower's updates over, without sounds or system notifications. Read here,
-        // not by a spawned task: the test executor that drives this window is not woken from the follower's thread.
-        while let Ok(update) = update_rx.try_recv() {
-            cx.update(|cx| match update {
-                Update::Alert(heard) => {
-                    if matches!(heard.toast, Toast::App) {
-                        workspace.update(cx, |workspace, cx| workspace.toast(heard, cx));
+        // A run loop drains its autorelease pool every turn; this loop has none of its own.
+        objc2::rc::autoreleasepool(|_| {
+            // As `perch-native` hands the follower's updates over, without sounds or system notifications. Read here,
+            // not by a spawned task: the test executor that drives this window is not woken from the follower's thread.
+            while let Ok(update) = update_rx.try_recv() {
+                cx.update(|cx| match update {
+                    Update::Alert(heard) => {
+                        if matches!(heard.toast, Toast::App) {
+                            workspace.update(cx, |workspace, cx| workspace.toast(heard, cx));
+                        }
                     }
-                }
-                Update::Files(message) => {
-                    workspace.update(cx, |workspace, cx| workspace.on_files_message(&message, cx));
-                }
-                update => {
-                    let sidebar = workspace.read(cx).sidebar().clone();
-                    sidebar.update(cx, |sidebar, cx| sidebar.apply(update, cx));
-                }
-            });
-        }
-        cx.run_until_parked();
-        // Draws what changed and renders it on the GPU into one reused target, as a display's frame would.
-        if let Err(error) = cx.present(window.into()) {
-            eprintln!("measure_offscreen: {error}");
-            std::process::exit(1);
-        }
-        cx.advance_clock(FRAME);
-        std::thread::sleep(FRAME);
+                    Update::Files(message) => {
+                        workspace
+                            .update(cx, |workspace, cx| workspace.on_files_message(&message, cx));
+                    }
+                    update => {
+                        let sidebar = workspace.read(cx).sidebar().clone();
+                        sidebar.update(cx, |sidebar, cx| sidebar.apply(update, cx));
+                    }
+                });
+            }
+            cx.run_until_parked();
+            // Draws what changed and renders it on the GPU into one reused target, as a display's frame would.
+            if let Err(error) = cx.present(window.into()) {
+                eprintln!("measure_offscreen: {error}");
+                std::process::exit(1);
+            }
+            cx.advance_clock(FRAME);
+            std::thread::sleep(FRAME);
+        });
     }
 }
