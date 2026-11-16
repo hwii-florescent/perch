@@ -26,7 +26,9 @@ export const THEMES = ["light", "dark"];
 /** The web reference for one state and theme (`npm run parity:web` in `e2e/` writes it). */
 export function reference(state, theme) {
   const file = path.join(referenceDir, `sidebar.${state}.${theme}.json`);
-  if (!fs.existsSync(file)) throw new Error(`no web reference ${path.relative(repo, file)}: run \`npm run parity:web\` in e2e/ first`);
+  if (!fs.existsSync(file)) {
+    throw new Error(`no web reference ${path.relative(repo, file)}. These tests compare the runtime with the web's own drawing, which the parity capture writes (headless WebKit, about a minute): from the repository root run \`(cd e2e && npm ci && npx playwright install webkit && npm run parity:web)\`, then run these tests again. See docs/TESTING.md, "Native client".`);
+  }
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
