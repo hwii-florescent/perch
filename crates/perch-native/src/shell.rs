@@ -90,7 +90,9 @@ pub struct Chrome {
     last: Option<Tools>,
     sidebar_width: Option<f32>,
     tools_width: Option<f32>,
-    /// The file the three are kept in; without it they last as long as the window.
+    /// The regular file tabs of the strip (`workspace\npath`), opened again after a restart.
+    files: Vec<String>,
+    /// The file these are kept in; without it they last as long as the window.
     file: Option<PathBuf>,
 }
 
@@ -113,6 +115,12 @@ impl Chrome {
             last: tools,
             sidebar_width: width("sidebarWidth"),
             tools_width: width("toolsWidth"),
+            files: kept["files"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|id| id.as_str().map(str::to_string))
+                .collect(),
             file: Some(file),
         }
     }
@@ -172,6 +180,19 @@ impl Chrome {
         self.tools_width = px.map(f32::round);
     }
 
+    /// The regular file tabs kept from the last run.
+    pub fn files(&self) -> &[String] {
+        &self.files
+    }
+
+    /// Keeps the strip's regular file tabs (written only when they changed).
+    pub fn set_files(&mut self, files: Vec<String>) {
+        if self.files != files {
+            self.files = files;
+            self.keep();
+        }
+    }
+
     /// Writes what is kept. A failure is not the person's concern: the widths are a convenience,
     /// as the web's `localStorage` ones are.
     pub fn keep(&self) {
@@ -185,6 +206,9 @@ impl Chrome {
         }
         if let Some(width) = self.tools_width {
             kept["toolsWidth"] = json!(width);
+        }
+        if !self.files.is_empty() {
+            kept["files"] = json!(self.files);
         }
         if let Some(dir) = file.parent() {
             let _ = std::fs::create_dir_all(dir);

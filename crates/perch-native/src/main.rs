@@ -76,6 +76,22 @@ fn main() {
             )
             .expect("could not open the window");
         let workspace = window.update(cx, |_, _, cx| cx.entity()).expect("window");
+        // Drafts not yet in the core's buffers go before the window or the app does.
+        window
+            .update(cx, |_, window, cx| {
+                let flushing = workspace.clone();
+                window.on_window_should_close(cx, move |_, cx| {
+                    flushing.update(cx, |workspace, cx| workspace.flush_drafts(cx));
+                    true
+                });
+                cx.on_app_quit(|workspace, cx| {
+                    workspace.flush_drafts(cx);
+                    // The client's task sends the frames: give it a moment before the app goes.
+                    cx.background_executor().timer(Duration::from_millis(100))
+                })
+                .detach();
+            })
+            .expect("window");
         perch_native::mods::start(&workspace, window.into(), cx);
         // A scripted run is watched, not listened to: it makes no sound and posts no notification.
         let silent = test.is_some();
