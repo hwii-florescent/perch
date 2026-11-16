@@ -128,7 +128,7 @@ fn main() {
                     continue;
                 }
                 if let Update::Review(message) = update {
-                    let _ = cx.update(|cx| {
+                    cx.update(|cx| {
                         if let Some(git) = perch_native::git::host(cx) {
                             git.on_delivery(&message, cx);
                         }
