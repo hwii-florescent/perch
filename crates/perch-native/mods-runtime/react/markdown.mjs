@@ -79,3 +79,57 @@ function one(token, key, open) {
 export function markdownElements(text, open) {
   return render(Lexer.lex(text, { gfm: true }), open);
 }
+
+/** `text` in sections of at least `size` characters, each after the first starting where every block before it has
+ * ended (outside a fenced block): at a heading, at a top-level bullet item, or after a blank line at a line that is
+ * not indented (an ordered item there too). Lexing a long document at once runs past a script's time budget (72 KB
+ * took half a second), so the preview lexes one section per turn (`markdownLexer`, which joins a list split so).
+ * ponytail: an HTML block holding a blank line could be split; a raw-HTML-heavy document is not what this previews. */
+export function markdownSections(text, size = 4000) {
+  const sections = [];
+  let start = 0, pos = 0, fence = null, blank = false;
+  while (pos < text.length) {
+    const end = text.indexOf("\n", pos);
+    const line = text.slice(pos, end < 0 ? text.length : end);
+    const mark = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    const boundary = !fence && !mark && pos - start >= size && (/^(#{1,6}|[-*+])(\s|$)/.test(line) || (blank && /^[^\s>|]/.test(line)));
+    if (boundary) {
+      sections.push(text.slice(start, pos));
+      start = pos;
+    }
+    if (mark && !fence) fence = mark;
+    else if (mark && mark[0] === fence[0] && mark.length >= fence.length && !line.trim().slice(mark.length)) fence = null;
+    blank = !line.trim();
+    pos = end < 0 ? text.length : end + 1;
+  }
+  sections.push(text.slice(start));
+  return sections;
+}
+
+/** A document lexed section by section (`markdownSections`, in order): `add(section)` lexes the next one, `elements()`
+ * draws all lexed so far. One lexer for all, so a reference link resolves to a definition in an earlier section; a
+ * list a section boundary split goes on as one list, as the whole document's lexing has it.
+ * ponytail: a definition in a later section than its use is not seen, and a list split where one half is loose and
+ * the other tight keeps each half's spacing; one pass over the definitions first, and re-lexing the joined list,
+ * would match the web exactly. */
+export function markdownLexer(open) {
+  const lexer = new Lexer({ gfm: true });
+  const tokens = [];
+  const last = () => tokens.findLast((t) => t.type !== "space");
+  return {
+    add(section) {
+      const from = lexer.tokens.length;
+      lexer.lex(section);
+      const added = lexer.tokens.slice(from);
+      const first = added.findIndex((t) => t.type !== "space");
+      const before = last();
+      if (first >= 0 && added[first].type === "list" && before?.type === "list" && before.ordered === added[first].ordered && (before.ordered || before.raw.trimStart()[0] === added[first].raw.trimStart()[0])) {
+        before.items.push(...added[first].items);
+        before.raw += added[first].raw;
+        added.splice(0, first + 1);
+      }
+      tokens.push(...added);
+    },
+    elements: () => render(tokens, open),
+  };
+}

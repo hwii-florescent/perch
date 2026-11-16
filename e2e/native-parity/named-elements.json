@@ -3043,6 +3043,16 @@
           "text": true
         },
         {
+          "name": "files-markdown-view",
+          "selector": "[aria-label=\"Markdown view\"]",
+          "description": "A Markdown file's Source and Preview toggle, in its header."
+        },
+        {
+          "name": "files-markdown-preview",
+          "selector": "[data-testid=\"workspace-markdown-preview\"]",
+          "description": "A Markdown file's rendered preview of its draft, in place of the editor."
+        },
+        {
           "name": "files-conflict",
           "selector": "[data-testid=\"workspace-file-conflict\"]",
           "description": "The conflict bar: tinted red, its title, what to do, the two versions and the three choices."
