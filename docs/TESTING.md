@@ -450,6 +450,9 @@ The gate (`node e2e/native-parity/compare.mjs --web-dir e2e/artifacts-native-par
 e2e/artifacts-native-parity/native`) exits 1 on any failing state that `e2e/native-parity/accepted-failures.json` does not
 list (by `screen/state/theme`, each with its reason), and on a listed state that now passes, so the list only shrinks.
 Add a state to the list only with the reason it is accepted; `npm run parity:selftest` in `e2e` tests these rules.
+It also fails every state of the state list (`e2e/native-parity/screens.json` and each screen's fixture states, both
+themes; `PARITY_SCREENS` for a part) that has no web reference, which cannot be accepted: make the references in the
+checkout under test with `npm run parity:web` rather than copying another worktree's set, which misses newer states.
 
 Run `cargo test` for this package on its own: building `perch-core` together with GPUI changes how
 `serde_json` orders keys and fails three unrelated core tests. `cargo test --workspace` hits the same
