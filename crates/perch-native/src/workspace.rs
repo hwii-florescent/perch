@@ -1446,10 +1446,8 @@ impl Workspace {
                 let agent = word(&args, 1).ok_or("start needs an agent.")?;
                 self.start_session(host_id, word(&args, 0), &agent, cx)
             }
-            // The window has no browser or files view: New browser and New file are the desktop
-            // app's, as the window's other hand-offs.
-            Some("openBrowser") => self.hand_off(Place::Browser),
-            Some("focusWorkspace") => self.hand_off(Place::Files),
+            Some("openBrowser") => Err(NO_BROWSER.into()),
+            Some("focusWorkspace") => Err(NO_FILES.into()),
             Some("addProject") => self.ask_add_project(cx),
             Some(other) => Err(format!("The native window cannot {other} yet.")),
         }
@@ -2474,8 +2472,10 @@ impl Workspace {
                 };
                 self.hand_off(place)?;
             }
-            "browser.open" => self.hand_off(Place::Browser)?,
-            "file.open" => self.hand_off(Place::Files)?,
+            // The strip's "+" lists New browser and New file, as the web's; this window has
+            // neither view, so they are refused with the reason (as the launcher's are).
+            "browser.open" => return Err(NO_BROWSER.into()),
+            "file.open" => return Err(NO_FILES.into()),
             "link.open" => {
                 let url = text("url").ok_or("This command needs {url}.")?;
                 crate::handoff::open_link(url).map_err(|e| e.to_string())?;
@@ -3756,6 +3756,12 @@ fn program_in(argv: &Value, task: Option<&str>) -> Result<String, String> {
         .collect::<Vec<_>>()
         .join(" "))
 }
+
+/// Why New browser is refused here.
+const NO_BROWSER: &str = "A browser tab does not open in the native window yet.";
+/// Why New file is refused here: it names the file in the files view's prompt.
+const NO_FILES: &str =
+    "A new file needs the files view, which the native window does not have yet.";
 
 fn word(args: &[Value], at: usize) -> Option<String> {
     args.get(at).and_then(Value::as_str).map(str::to_string)

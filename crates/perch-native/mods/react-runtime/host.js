@@ -488,9 +488,9 @@ export function copyFor(cx, screen) {
     openOverlay(kind, props = {}) {
       const id = nextOverlay++;
       const known = OVERLAY_SCREENS[kind];
-      // The window has no files view: New file is the desktop app's, as the window's other hand-offs.
+      // The window has no files view: New file is refused with the reason, as the launcher's is.
       if (kind === "new-file") {
-        perch.run("handoff.open", { place: "files" }).catch((error) => console.error(`react-runtime: ${error?.message ?? error}`));
+        perch.run("file.open", {}).catch((error) => console.error(`react-runtime: ${error?.message ?? error}`));
         props.onClose?.();
         return id;
       }
