@@ -8,7 +8,15 @@
 # examples/measure_setup); --build makes them (needs ZIG, see docs/TESTING.md).
 #
 # States: a idle, nothing shown; b one terminal; c four split terminals; d one busy full-screen
-# colour TUI. Physical footprint (`footprint`), summed over the app's own processes: the one
+# colour TUI. Native client only: t a workspace of 5,000 files shown in Files; e one 10,000-line
+# Rust file open (highlighted); f the review of 5,000 added lines; g one browser pane on a local
+# page; h the same pane closed again. The files, repository and page are made in the scratch
+# directory and the page is served on the loopback only.
+#
+# Budgets (native client, window hidden): a at most 120 MB; t +60, e +35, f +80, g +100 (client
+# plus the WebKit helpers the pane started) over a of the same run; h: every helper the pane
+# started gone within 5 s of the close, and the client back within 10 MB of a. A state over its
+# budget makes the script exit 1, after the tables. Physical footprint (`footprint`), summed over the app's own processes: the one
 # process of the native client; the Tauri host plus the WebKit helpers that appeared after it was
 # launched. Each state runs in a fresh process, settles SETTLE seconds, then takes SAMPLES samples
 # (median reported). The desktop app embeds its own core and its test window is hidden, so the
@@ -68,9 +76,10 @@ CORE=$BIN/perch-core
 DESKTOP=$BIN/perch-desktop
 NATIVE=$BIN/perch-native
 SETUP=$BIN/examples/measure_setup
-for f in "$CORE" "$DESKTOP" "$NATIVE" "$SETUP"; do
+for f in "$CORE" "$NATIVE" "$SETUP"; do
   [ -x "$f" ] || die "$f is missing; run with --build"
 done
+if has tauri "$APPS"; then [ -x "$DESKTOP" ] || die "$DESKTOP is missing; run with --build"; fi
 
 SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/perch-measure.XXXXXX") || die "no scratch directory"
 SCRATCH=$(cd "$SCRATCH" && pwd -P)
@@ -129,7 +138,7 @@ cleanup() {
     case "$name" in native-? | tauri-?) stop_pid "$pid" ;; esac
   done < <(sort -r "$PIDFILE")
   while read -r name pid; do
-    case "$name" in core*) stop_pid "$pid" ;; esac
+    case "$name" in core* | page-server) stop_pid "$pid" ;; esac
   done < <(sort -r "$PIDFILE")
   local dir
   for dir in $APP_DIRS; do stop_daemon "$dir"; done
@@ -320,6 +329,46 @@ make_sessions() { # dir count -> session ids in creation order, one second apart
 
 session_id() { sed -n "${2}p" "$1/sessions"; }
 
+# ---- files, review and browser states (native only) ----------------------------------------
+
+needs_work() { local s; for s in t e f g h; do has "$s" "$STATES" && return 0; done; return 1; }
+
+make_work() { # dir -> the fixtures, their workspaces (WS_TREE, WS_CODE) and the page (PAGE_URL)
+  local dir=$1 w=$1/work port
+  mkdir -p "$w/tree" "$w/code" "$w/page"
+  python3 -I - "$w" <<'PY' || return 1
+import sys, pathlib
+w = pathlib.Path(sys.argv[1])
+for i in range(5000):
+    (w / "tree" / f"file-{i:04d}.txt").write_text(f"entry {i}\n")
+line = 'fn item_{0}(x: u64) -> u64 {{ let s = "text {0}"; x.wrapping_mul({0}) + s.len() as u64 }} // {0}\n'
+(w / "code" / "big.rs").write_text("".join(line.format(i) for i in range(10000)))
+(w / "code" / "review.ts").write_text("export const head = 1;\n")
+(w / "page" / "page.html").write_text("<!doctype html><title>measure</title>" + "".join(f"<p>paragraph {i}</p>" for i in range(200)))
+PY
+  (cd "$w/code" && git init -q && git add -A && git -c user.name=measure -c user.email=measure@localhost commit -qm fixture) || return 1
+  python3 -I -c "
+import sys
+with open(sys.argv[1], 'a') as f:
+    f.writelines(f'export const added{i} = {i} * 2; // a changed line {i}\n' for i in range(5000))" "$w/code/review.ts" || return 1
+  WS_TREE=$(env -i HOME="$dir/home" PERCHD_DIR="$dir/daemon" PATH="$PATH" "$SETUP" workspace "$w/tree") || return 1
+  WS_CODE=$(env -i HOME="$dir/home" PERCHD_DIR="$dir/daemon" PATH="$PATH" "$SETUP" workspace "$w/code") || return 1
+  port=$(free_port)
+  python3 -I -m http.server --bind 127.0.0.1 --directory "$w/page" "$port" > "$dir/logs/page.log" 2>&1 &
+  track page-server $!
+  PAGE_URL=http://127.0.0.1:$port/page.html
+  wait_for "the page server" 10 curl -sf -o /dev/null "$PAGE_URL" || return 1
+  log "  workspaces: tree $WS_TREE, code $WS_CODE; page $PAGE_URL"
+}
+
+# ponytail: a helper is the pane's when it appeared after the client started; another program
+# starting WebKit at the same time is counted too. Run on a quiet machine, or attribute helpers by
+# their responsible process if that ever matters.
+new_helpers() { # known pids -> WebKit helpers that are not among them
+  local h
+  for h in $(webkit_pids); do case " $1 " in *" $h "*) ;; *) printf '%s ' "$h" ;; esac; done
+}
+
 record() { # app state mb... -> a results line
   echo "$*" | tr ' ' '\t' >> "$RESULTS"
 }
@@ -350,13 +399,19 @@ native_script() { # state dir -> the script for the native client
     b) echo "open $(session_id "$dir" 1)" ;;
     c) echo "open $(session_id "$dir" 1); split right; split down; split right" ;;
     d) echo "open $(session_id "$dir" 2)" ;;
+    t) echo "files $WS_TREE" ;;
+    e) echo "file $WS_CODE big.rs" ;;
+    f) echo "review $WS_CODE" ;;
+    g) echo "browser $PAGE_URL" ;;
+    h) echo "browser $PAGE_URL; pause 3000; close" ;;
   esac
 }
 
 run_native() { # state dir hidden(0|1) -> median MB
   local state=$1 dir=$2 hidden=$3
-  local envs script log_file pid before after
+  local envs script log_file pid before after known helpers=""
   envs=$(run_env "$dir"); script=$(native_script "$state" "$dir")
+  known=$(webkit_pids | tr '\n' ' ')
   log_file=$dir/logs/native-$state-hidden$hidden.log
   before=$(front_name)
   # shellcheck disable=SC2086
@@ -364,13 +419,28 @@ run_native() { # state dir hidden(0|1) -> median MB
     PERCH_NATIVE_SCRIPT="$script" "$NATIVE" > "$log_file" 2>&1 &
   pid=$!
   track "native-$state" "$pid"
-  wait_for "the script to finish" 120 grep -q "script done" "$log_file" || { cat "$log_file" >&2; return 1; }
+  if [ "$state" = h ]; then # the pane's helpers, while it is open
+    wait_for "the browser pane" 120 sh -c "grep -q 'step 1 done' '$log_file' || ! kill -0 $pid 2> /dev/null"
+    grep -q "step 1 done" "$log_file" || { cat "$log_file" >&2; return 1; }
+    helpers=$(new_helpers "$known")
+  fi
+  wait_for "the script to finish" 120 sh -c "grep -q 'script done' '$log_file' || ! kill -0 $pid 2> /dev/null"
+  grep -q "script done" "$log_file" || { cat "$log_file" >&2; return 1; }
+  if [ "$state" = h ]; then
+    local gone_in=no
+    wait_for "the pane's WebKit helpers to go" 5 sh -c "! ps -p '$(echo $helpers | tr ' ' ',')' > /dev/null 2>&1" && gone_in=yes
+    [ -n "$helpers" ] || gone_in="none seen"
+    log "  browser pane helpers [$helpers] gone within 5 s: $gone_in"
+    record "native-hidden$hidden-helpers-gone" h "$([ "$gone_in" = yes ] && echo 1 || echo 0)"
+    helpers=""
+  fi
+  [ "$state" = g ] && helpers=$(new_helpers "$known")
   after=$(front_name)
   echo "$(date +%T) native $state hidden=$hidden launch: before=[$before] after=[$after]" >> "$FRONT_LOG"
   [ -e "$SCRATCH/front-stolen" ] && die "the native client took the frontmost app"
   [ "$state" = d ] && busy_on "$dir" 2
   local mb
-  mb=$(sample_state "native $state hidden=$hidden" "$pid") || return 1
+  mb=$(sample_state "native $state hidden=$hidden" "$pid $helpers") || return 1
   [ "$hidden" = 0 ] && { echo "native $state windows:" >&2; window_report "$pid" >&2; }
   stop_pid "$pid" || die "native client $pid would not stop"
   echo "$mb"
@@ -490,10 +560,10 @@ log "display: $(system_profiler SPDisplaysDataType 2> /dev/null | sed -n 's/^ *R
 log "console locked: $(ioreg -n Root -d1 | sed -n 's/.*IOConsoleLocked" = //p' | head -1)"
 log "frontmost at start: $(front_name)"
 log "scratch: $SCRATCH"
-log "binary sizes (bytes): $(stat -f '%z %N' "$NATIVE" "$DESKTOP" "$CORE" | sed "s|$BIN/||" | tr '\n' ';')"
+log "binary sizes (bytes): $(stat -f '%z %N' "$NATIVE" "$CORE" $(has tauri "$APPS" && echo "$DESKTOP") | sed "s|$BIN/||" | tr '\n' ';')"
 
 state_name() { case "$1" in a) echo "idle" ;; b) echo "one terminal" ;; c) echo "four splits" ;; d) echo "busy TUI" ;; esac; }
-order_states() { local s; for s in a b d c; do has "$s" "$STATES" && printf '%s ' "$s"; done; } # c last: it makes sessions
+order_states() { local s; for s in a b d t e f g h c; do has "$s" "$STATES" && printf '%s ' "$s"; done; } # c last: it makes sessions
 
 if has native "$APPS"; then
   log "== native client (headless core + daemon)"
@@ -501,6 +571,7 @@ if has native "$APPS"; then
   start_core "$D" || die "native core did not start"
   CORE_NATIVE=$CORE_PID
   make_sessions "$D" 2 || die "could not make sessions"
+  if needs_work; then make_work "$D" || die "could not make the files, repository and page"; fi
   for s in $(order_states); do
     for hidden in 1 0; do
       log "- native state $s hidden=$hidden"
@@ -528,6 +599,7 @@ if has tauri "$APPS"; then
   start_core "$D" || die "webkit core did not start"
   CORE_WEBKIT=$CORE_PID
   for s in $(order_states); do
+    case "$s" in [abcd]) ;; *) continue ;; esac # the page has no files, review or browser states here
     log "- webkit state $s"
     mb=$(run_webkit "$s" "$D") || die "webkit state $s failed"
     record webkit "$s" "$mb"
@@ -578,3 +650,7 @@ PY
 echo
 echo "frontmost app log:"; sed 's/^/  /' "$FRONT_LOG"
 if [ -e "$SCRATCH/front-stolen" ]; then die "a tracked app took the frontmost app"; fi
+
+# ---- budgets (native client, hidden window) --------------------------------------------------
+
+python3 -I "$ROOT/scripts/native-memory-budgets.py" "$RESULTS" || die "a memory budget is exceeded"
