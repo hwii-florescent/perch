@@ -7,6 +7,13 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-16 — "Show beside" is one row with a submenu (owner)
+
+The tab menu (both apps) no longer lists a "Show beside <tab>" row per open tab. One "Show beside" row with a chevron
+opens the open tabs beside the menu, as a native menu's submenu: on hover, a click, Right arrow, Enter or Space; Up
+and Down move, Left arrow or Escape close it back to the row. The submenu is a reusable `components/ui/submenu.tsx`
+(exported in the SDK). The per-tab rows keep their `tab-split-with-<id>` test ids.
+
 ## 2026-11-16 — Session rows have no fill at rest (owner)
 
 Supersedes the "filled cards" part of the 2026-11-15 sub-session decision below. In the stock sidebar (both apps) no

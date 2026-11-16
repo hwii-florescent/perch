@@ -20,6 +20,7 @@ import StockDialog from "../../../../packages/web/src/stock-ui/dialog/main.tsx";
 import StockSelect from "../../../../packages/web/src/stock-ui/select/main.tsx";
 import { SELECT } from "../../../../packages/web/src/components/ui/settings.ts";
 import { Chevron } from "../../../../packages/web/src/components/ui/chevron.tsx";
+import { Submenu } from "../../../../packages/web/src/components/ui/submenu.tsx";
 import { DOT_GLYPH, sessionDotState } from "../../../../packages/web/src/statusDot.ts";
 import { isNestedIn, nestUnderLeads } from "../../../../packages/web/src/sidebarOrder.ts";
 import { computeAnchoredPopoverStyle, useDismissOnOutsideClick } from "../../../../packages/web/src/components/popoverPosition.ts";
@@ -44,7 +45,7 @@ function host() {
 }
 const subscribe = (listener) => host().subscribe?.(listener) ?? (() => {});
 
-export { Chevron, cn, menuPanel, CloseIcon, EllipsisIcon, GearIcon, PlusIcon, HostStateDot, PageIcon, useDismissOnOutsideClick };
+export { Chevron, cn, menuPanel, Submenu, CloseIcon, EllipsisIcon, GearIcon, PlusIcon, HostStateDot, PageIcon, useDismissOnOutsideClick };
 export const anchoredPopoverStyle = computeAnchoredPopoverStyle;
 // Settings' pages (1.8): the host's own parts and class strings, so the pages draw as the web's (`sdkSettings.ts`), and
 // `SettingsQuery`, the search text the Settings shell provides. The QR is the web's own component.

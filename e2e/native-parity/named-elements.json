@@ -1548,7 +1548,30 @@
         {
           "name": "tab-menu-item",
           "selector": "[data-testid=\"tab-split-menu\"] > button",
-          "description": "One row: Rename tab, Split right / below with new terminal, a 'Show beside' row, Show this tab full size, Separate all tabs, an opener's row, Stop agent (red), Close tab (red); disabled rows are 40% opacity.",
+          "description": "One row: Rename tab, Split right / below with new terminal, Show this tab full size, Separate all tabs, an opener's row, Stop agent (red), Close tab (red); disabled rows are 40% opacity.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-menu-show-beside",
+          "selector": "[data-testid=\"tab-menu-show-beside\"]",
+          "description": "The 'Show beside' row with its chevron; it opens the list of open tabs beside the menu (hover, click, Right arrow or Enter).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-menu-beside-list",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"]",
+          "description": "The list of open tabs, beside the menu's right edge (left when there is no room), on the menu's surface with its shadow; it scrolls past the window's height."
+        },
+        {
+          "name": "tab-menu-beside-item",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button",
+          "description": "One open tab to show beside this one.",
           "key": {
             "self": true,
             "attr": "data-testid"
@@ -1558,23 +1581,17 @@
         },
         {
           "name": "tab-menu-item-label",
-          "selector": "[data-testid=\"tab-split-menu\"] > button > span.block",
-          "description": "The name inside a Show beside row, cut with an ellipsis.",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button > span.block",
+          "description": "The name inside an open tab's row, cut with an ellipsis.",
           "key": {
-            "closest": "[data-testid=\"tab-split-menu\"] > button",
+            "closest": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button",
             "attr": "data-testid"
           },
           "text": true
         },
         {
-          "name": "tab-menu-heading",
-          "selector": "[data-testid=\"tab-split-menu\"] > p",
-          "description": "The small line over the Show beside rows.",
-          "text": true
-        },
-        {
           "name": "tab-menu-empty",
-          "selector": "[data-testid=\"tab-split-menu\"] > div:not(.h-px)",
+          "selector": "[data-testid=\"tab-menu-empty\"]",
           "description": "No other open tab available.",
           "text": true
         },
@@ -1862,7 +1879,30 @@
         {
           "name": "tab-menu-item",
           "selector": "[data-testid=\"tab-split-menu\"] > button",
-          "description": "One row: Rename tab, Split right / below with new terminal, a 'Show beside' row, Show this tab full size, Separate all tabs, a sidebar row (Move up, Move down), an inbound choice, Close tab (red); disabled rows are 40% opacity.",
+          "description": "One row: Rename tab, Split right / below with new terminal, Show this tab full size, Separate all tabs, a sidebar row (Move up, Move down), an inbound choice, Close tab (red); disabled rows are 40% opacity.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-menu-show-beside",
+          "selector": "[data-testid=\"tab-menu-show-beside\"]",
+          "description": "The 'Show beside' row with its chevron; it opens the list of open tabs beside the menu (hover, click, Right arrow or Enter).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-menu-beside-list",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"]",
+          "description": "The list of open tabs, beside the menu's right edge (left when there is no room), on the menu's surface with its shadow; it scrolls past the window's height."
+        },
+        {
+          "name": "tab-menu-beside-item",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button",
+          "description": "One open tab to show beside this one.",
           "key": {
             "self": true,
             "attr": "data-testid"
@@ -1872,23 +1912,17 @@
         },
         {
           "name": "tab-menu-item-label",
-          "selector": "[data-testid=\"tab-split-menu\"] > button > span.block",
-          "description": "The name inside a Show beside row, cut with an ellipsis.",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button > span.block",
+          "description": "The name inside an open tab's row, cut with an ellipsis.",
           "key": {
-            "closest": "[data-testid=\"tab-split-menu\"] > button",
+            "closest": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button",
             "attr": "data-testid"
           },
           "text": true
         },
         {
-          "name": "tab-menu-heading",
-          "selector": "[data-testid=\"tab-split-menu\"] > p",
-          "description": "The small line over the Show beside rows.",
-          "text": true
-        },
-        {
           "name": "tab-menu-empty",
-          "selector": "[data-testid=\"tab-split-menu\"] > div:not(.h-px)",
+          "selector": "[data-testid=\"tab-menu-empty\"]",
           "description": "No other open tab available.",
           "text": true
         },
@@ -2006,7 +2040,7 @@
         {
           "name": "start-link",
           "selector": "[data-testid$=\"-panel\"] button.text-subtext-0",
-          "description": "A small muted link under the buttons: 'Open one automatically: Settings \u2192 Empty workspace opens' (and Manage agents in the CLI page); underlined on hover.",
+          "description": "A small muted link under the buttons: 'Open one automatically: Settings → Empty workspace opens' (and Manage agents in the CLI page); underlined on hover.",
           "text": true,
           "textSized": true
         },
