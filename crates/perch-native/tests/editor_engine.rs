@@ -35,7 +35,8 @@ export default class extends View {
   init() {
     const p = perch.props();
     this.key = p.key;
-    this.restored = editor.open(p.key, { path: p.path, value: p.value }).restored;
+    // A document the test opened from Rust is only drawn (its text does not cross the script boundary).
+    this.restored = p.preopened ? true : editor.open(p.key, { path: p.path, value: p.value }).restored;
     this.changes = 0;
     this.caret = "1-1";
   }
@@ -124,6 +125,45 @@ impl Rig {
             }
             let error = self.ws(|ws, _, cx| ws.screen_error("instructions", cx));
             assert!(error.is_none(), "{key}: {error:?}");
+        }
+        panic!("{key}: the editor is never drawn");
+    }
+
+    /// Opens `key` from Rust, then the mod that draws it; returns the box and the times to the editor's creation
+    /// and to its first drawn frame.
+    fn open_from_rust(
+        &mut self,
+        key: &str,
+        path: &str,
+        value: &str,
+    ) -> (gpui::Bounds<gpui::Pixels>, Duration, Duration) {
+        let editors = self.editors();
+        let options = gpui_shell::HostValue::Object(vec![
+            ("path".into(), path.into()),
+            ("value".into(), value.into()),
+        ]);
+        let started = Instant::now();
+        self.win(|window, cx| {
+            editors
+                .open("instructions", key, &options, window, cx)
+                .unwrap()
+        });
+        let created = started.elapsed();
+        let opened = self.ws(|ws, _, cx| {
+            ws.open_screen(
+                "instructions",
+                json!({ "key": key, "preopened": true }),
+                None,
+                None,
+                cx,
+            )
+        });
+        assert!(opened);
+        for _ in 0..200 {
+            let records = self.step(true);
+            if let Some(area) = records.iter().find(|r| r.name.as_ref() == "editor-box") {
+                return (area.bounds, created, started.elapsed());
+            }
         }
         panic!("{key}: the editor is never drawn");
     }
@@ -366,15 +406,20 @@ fn typing_stays_quick_during_a_slow_parse(rig: &mut Rig) {
     highlight::slow_background_parse_for_tests(Duration::from_micros(500));
     let area = rig.open("doc-slow", "src/s.rs", &short_rust(2_000));
     rig.click(point(area.origin.x + px(200.), area.origin.y + px(100.)));
+    assert!(
+        highlight::background_parses_running() > 0,
+        "the parse is still running while keys arrive"
+    );
     let mut worst = Duration::ZERO;
     for i in 0..10 {
         worst = worst.max(rig.key(if i == 4 { "enter" } else { "/" }));
     }
+    let still = highlight::background_parses_running() > 0;
     highlight::slow_background_parse_for_tests(Duration::ZERO);
     rig.until_coloured();
     assert!(rig.value("doc-slow").matches('/').count() >= 9);
     report(&format!(
-        "typing during a slow background parse: worst key and frame {worst:?}"
+        "typing during a slow background parse: worst key and frame {worst:?}; parse still running after the keys: {still}"
     ));
     // A 2,000-line parse at 0.5 ms a line takes a second: typing never waited for it.
     assert!(
@@ -406,9 +451,7 @@ fn timings(rig: &mut Rig) {
         };
         let highlighted = uncapped || text.chars().count() <= highlight::MAX_HIGHLIGHT_CHARS;
         let key = format!("timed-{lines}");
-        let started = Instant::now();
-        let area = rig.open(&key, "src/big.rs", &text);
-        let first = started.elapsed();
+        let (area, created, first) = rig.open_from_rust(&key, "src/big.rs", &text);
         let coloured = rig.until_coloured() + first;
         rig.click(point(area.origin.x + px(200.), area.origin.y + px(100.)));
         let mut each: Vec<Duration> = (0..steps)
@@ -417,7 +460,7 @@ fn timings(rig: &mut Rig) {
         each.sort();
         let mean = each.iter().sum::<Duration>() / steps as u32;
         report(&format!(
-            "editor {lines} lines ({} chars, {}): first frame {first:?}, every line coloured {coloured:?}; typed {steps} keys, mean {mean:?}, median {:?}, worst {:?} per key and frame",
+            "editor {lines} lines ({} chars, {}): open {created:?}, first frame {first:?}, every line coloured {coloured:?}; typed {steps} keys, mean {mean:?}, median {:?}, worst {:?} per key and frame",
             text.len(),
             if highlighted { "highlighted" } else { "plain, over the cap" },
             each[steps / 2],

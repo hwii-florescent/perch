@@ -28,37 +28,8 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 
-/// The module's TypeScript face; `mods/perch.d.ts` declares the same.
-pub const DECLARATIONS: &str = r#"export interface EditorOpen { path: string; value: string; readonly?: boolean; wrap?: boolean; label?: string; autoClose?: boolean }
-export type EditorEvent =
-  | { type: "change" } | { type: "caret"; line: number; col: number } | { type: "focus" } | { type: "blur" }
-  | { type: "contextmenu"; x: number; y: number } | { type: "save" } | { type: "goto" };
-export const Editor: { new(docKey: string, props?: {}): any };
-export function open(docKey: string, options: EditorOpen): { restored: boolean };
-export function park(docKey: string): void;
-export function release(docKey: string): void;
-export function events(docKey: string): EditorEvent[];
-export function value(docKey: string): string;
-export function setValue(docKey: string, text: string, options?: { external?: boolean }): void;
-export function setReadonly(docKey: string, on: boolean): void;
-export function setWrap(docKey: string, on: boolean): void;
-export function setAutoClose(docKey: string, on: boolean): void;
-export function focus(docKey: string): void;
-export function openSearch(docKey: string, replace?: boolean): void;
-export function closeSearch(docKey: string): void;
-export function isSearchOpen(docKey: string): boolean;
-export function openGoto(docKey: string): void;
-export function goTo(docKey: string, line: number, col?: number): void;
-export function caret(docKey: string): { line: number; col: number };
-export function selection(docKey: string): { text: string; startLine: number; endLine: number } | null;
-export function undo(docKey: string): void;
-export function redo(docKey: string): void;
-export function canUndo(docKey: string): boolean;
-export function canRedo(docKey: string): boolean;
-export function cut(docKey: string): void;
-export function copy(docKey: string): void;
-export function paste(docKey: string): void;
-export function selectAll(docKey: string): void;"#;
+/// The module's TypeScript face, shipped beside the stock mods.
+pub const DECLARATIONS: &str = include_str!("../../mods/perch-editor.d.ts");
 
 /// Parked editors kept, as the web's `CodeEditor` keeps 32.
 pub const MAX_PARKED: usize = 32;
@@ -590,6 +561,7 @@ fn create(path: &str, value: &str, window: &mut Window, cx: &mut App) -> Entity<
         let mut state = EditorState::new(window, cx)
             .language(name)
             .line_number(true)
+            .soft_wrap(false)
             .folding(false);
         state.set_tab_size(
             TabSize {

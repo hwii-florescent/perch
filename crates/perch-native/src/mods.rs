@@ -259,6 +259,7 @@ pub const STOCK: &[(&str, &str)] = &[
         include_str!("../mods/parity-probe/main.js"),
     ),
     ("perch.d.ts", perch::DECLARATIONS),
+    ("perch-editor.d.ts", crate::editor::host::DECLARATIONS),
     (
         "react-runtime/@perch/sdk.js",
         include_str!("../mods/react-runtime/@perch/sdk.js"),

@@ -5,7 +5,7 @@
 //! the *frontier* (the first line not known to be right) back to the edit; parsing resumes there and stops as soon
 //! as a line starts in the state its cached entry started in (convergence: everything after it is unchanged). So a
 //! keystroke reparses about one line. Up to [`SYNC_BUDGET`] of parsing runs on the UI thread in `update`; the rest
-//! (opening a file, `set_value`, opening a block comment) runs on the background executor over a snapshot of the
+//! (opening a file, `set_value`, opening a block comment) runs on a background thread over a snapshot of the
 //! text, published in chunks tagged with a generation. Any edit or convergence bumps the generation, so a chunk
 //! parsed for an older text is dropped and never coloured. Lines not yet parsed draw plain or keep their previous
 //! colours (their text is unchanged; only their context may be), as CodeMirror does.
@@ -570,14 +570,22 @@ impl IncrementalHighlighter {
 
     fn spawn(&mut self, job: Job, cx: &mut Context<EditorState>) {
         let (sender, mut receiver) = futures::channel::mpsc::unbounded();
-        let worker = cx.background_executor().spawn(async move {
-            RUNNING.fetch_add(1, Ordering::AcqRel);
-            job.run(|chunk| sender.unbounded_send(chunk).is_ok());
+        // Its own thread rather than GPUI's background executor: a headless test's executor runs "background"
+        // tasks inline on the main thread, which would hide exactly what this is for. It stops at its next line
+        // once its generation is stale (an edit, a convergence, the highlighter dropped).
+        RUNNING.fetch_add(1, Ordering::AcqRel);
+        let spawned = std::thread::Builder::new()
+            .name("perch-editor-highlight".into())
+            .spawn(move || {
+                job.run(|chunk| sender.unbounded_send(chunk).is_ok());
+                RUNNING.fetch_sub(1, Ordering::AcqRel);
+            });
+        if spawned.is_err() {
+            // No thread: the frontier stays put and the next edit tries again; the text still draws.
             RUNNING.fetch_sub(1, Ordering::AcqRel);
-        });
+        }
         let core: Weak<RefCell<Core>> = Rc::downgrade(&self.core);
         self.task = Some(cx.spawn(async move |this, cx| {
-            let _worker = worker;
             while let Some(chunk) = receiver.next().await {
                 let Some(core) = core.upgrade() else { break };
                 let more = core.borrow_mut().install(chunk);
