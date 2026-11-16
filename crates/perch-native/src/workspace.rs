@@ -188,7 +188,13 @@ pub struct Notice {
 pub struct Workspace {
     sidebar: Entity<Sidebar>,
     locate: Option<Locate>,
+    /// The strip of the workspace on screen (`tabs_of`): the tabs, splits and active tab of that
+    /// workspace only, as the web's strip lists a workspace's own sessions and files.
     tabs: Tabs,
+    /// The workspace `tabs` and `history` belong to; empty before any is shown.
+    tabs_of: String,
+    /// The strips and histories of the other workspaces, each as it was left.
+    parked: HashMap<String, (Tabs, History)>,
     panes: HashMap<String, Pane>,
     /// A split that was asked for and waits for its new terminal to be opened.
     pending_split: Option<(Side, Instant)>,
@@ -332,6 +338,8 @@ impl Workspace {
             sidebar,
             locate: None,
             tabs: Tabs::default(),
+            tabs_of: String::new(),
+            parked: HashMap::new(),
             panes: HashMap::new(),
             pending_split: None,
             put_away: HashSet::new(),
@@ -393,9 +401,73 @@ impl Workspace {
     pub fn with_window_state(mut self, file: std::path::PathBuf) -> Self {
         self.chrome = Chrome::kept_in(file);
         for id in self.chrome.files().to_vec() {
-            self.tabs.append(&id);
+            let workspace = id.split_once('\n').map_or("", |(w, _)| w).to_string();
+            self.parked.entry(workspace).or_default().0.append(&id);
         }
         self
+    }
+
+    /// Show workspace `key`'s strip and history: the one on screen is put aside as it is (its
+    /// active tab too) and the workspace's own comes back, empty when it never had one.
+    fn enter_workspace(&mut self, key: &str) {
+        if self.tabs_of == key {
+            return;
+        }
+        let left = (
+            std::mem::take(&mut self.tabs),
+            std::mem::take(&mut self.history),
+        );
+        let away = std::mem::replace(&mut self.tabs_of, key.to_string());
+        if left.0 != Tabs::default() {
+            self.parked.insert(away, left);
+        }
+        (self.tabs, self.history) = self.parked.remove(key).unwrap_or_default();
+    }
+
+    /// The workspace tab `id` belongs to: a file, review or browser tab names it in its id, a
+    /// session is in the one the core records (an older record, the one at its folder). Empty when
+    /// the session is unknown.
+    fn tab_workspace(&self, id: &str, cx: &App) -> String {
+        if let Some((workspace, _)) = id.split_once('\n') {
+            return workspace.to_string();
+        }
+        let store = &self.sidebar.read(cx).model().store;
+        let Some(session) = store.sessions.iter().find(|s| s.id == id) else {
+            return String::new();
+        };
+        match &session.workspace_id {
+            Some(w) => w.clone(),
+            None => store
+                .workspaces
+                .iter()
+                .find(|w| navigation::in_workspace(session, w))
+                .map_or_else(
+                    || format!("{}:{}", session.host_id, session.cwd),
+                    |w| w.id.clone(),
+                ),
+        }
+    }
+
+    /// Put the strip of tab `id`'s workspace on screen before the tab is opened or shown.
+    fn enter_for(&mut self, id: &str, cx: &App) {
+        let workspace = self.tab_workspace(id, cx);
+        if !workspace.is_empty() {
+            self.enter_workspace(&workspace);
+        }
+    }
+
+    /// Every workspace's strip, the one on screen first.
+    fn every_tabs(&self) -> impl Iterator<Item = &Tabs> {
+        std::iter::once(&self.tabs).chain(self.parked.values().map(|(tabs, _)| tabs))
+    }
+
+    /// Take tab `id` out of every workspace's strip: a session the core deleted goes from
+    /// wherever it was open.
+    fn close_everywhere(&mut self, id: &str) {
+        self.tabs.close(id);
+        for (tabs, _) in self.parked.values_mut() {
+            tabs.close(id);
+        }
     }
 
     /// Copy and paste through `clipboard` instead of the system's.
@@ -627,6 +699,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let id = format!("{workspace_id}\n{path}");
+        self.enter_workspace(workspace_id);
         if preview {
             self.tabs.open_preview(&id, |other| {
                 file_tab(other).is_some_and(|(w, _)| w == workspace_id)
@@ -1353,6 +1426,7 @@ impl Workspace {
             .session_to_open(id)
             .ok_or("That session is gone.")?;
         self.ensure_pane(&open, cx);
+        self.enter_for(id, cx);
         self.tabs.open(id);
         Ok(())
     }
@@ -1987,6 +2061,7 @@ impl Workspace {
     fn on_open(&mut self, event: &OpenSession, cx: &mut Context<Self>) {
         let id = event.session_id.clone();
         self.put_away.remove(&id);
+        self.enter_for(&id, cx);
         let side = self
             .pending_split
             .take()
@@ -2116,7 +2191,7 @@ impl Workspace {
             // asked too long ago to be waiting still.
             TerminalEvent::Ended => {
                 if self.panes.contains_key(id) {
-                    self.tabs.close(id);
+                    self.close_everywhere(id);
                     self.panes.remove(id);
                     self.notice = None;
                     self.after_change(cx);
@@ -2147,7 +2222,7 @@ impl Workspace {
             return;
         }
         for id in &gone {
-            self.tabs.close(id);
+            self.close_everywhere(id);
             self.panes.remove(id);
         }
         self.notice = None;
@@ -2868,16 +2943,38 @@ impl Workspace {
             }
             "workspace.open" => {
                 let id = self.known_workspace(text("id"), cx)?;
-                // Its session last shown here, else the workspace's start page.
+                // Its strip comes back as it was left. What it showed last is shown again, else
+                // its newest session, else the workspace's start page.
+                let on_screen = self.tabs_of == id;
+                self.enter_workspace(&id);
                 let store = self.sidebar.read(cx).model().store.clone();
-                let last = self.tabs.strip().iter().rev().find(|tab| {
-                    store
-                        .sessions
+                let is_session = |tab: &String| store.sessions.iter().any(|s| s.id == *tab);
+                let newest = || {
+                    self.tabs
+                        .strip()
                         .iter()
-                        .any(|s| s.id == **tab && s.workspace_id.as_deref() == Some(id.as_str()))
-                });
-                match last.cloned() {
-                    Some(tab) => self.show_session(&tab, cx)?,
+                        .rev()
+                        .find(|tab| is_session(tab))
+                        .cloned()
+                };
+                // A workspace already on screen shows its newest session; one switched to shows
+                // what it showed when it was left.
+                let last = if on_screen {
+                    newest()
+                } else {
+                    // (A session the core no longer lists is not a place to go back to.)
+                    self.tabs
+                        .active()
+                        .filter(|tab| tab.contains('\n') || is_session(&tab.to_string()))
+                        .map(str::to_string)
+                        .or_else(newest)
+                };
+                match last {
+                    Some(tab) if is_session(&tab) => self.show_session(&tab, cx)?,
+                    Some(tab) => {
+                        self.tabs.show(&tab);
+                        self.after_change(cx);
+                    }
                     None => {
                         self.run_command(
                             "workspace.focus",
@@ -3028,6 +3125,7 @@ impl Workspace {
                         perch.unfocus_workspace();
                         perch.flush(cx);
                     }
+                    self.enter_workspace("");
                     self.tabs.hide();
                     self.root_focus.focus(window, cx);
                     self.after_change(cx);
@@ -3042,6 +3140,11 @@ impl Workspace {
                     })
                     .ok_or("No mod shows the navigation.")?;
                 focused?;
+                if let Some(workspace) =
+                    screens::mods(cx).and_then(|(_, perch)| perch.shown_place().1)
+                {
+                    self.enter_workspace(&workspace);
+                }
                 self.tabs.hide();
                 // The terminal that had the keyboard is off screen: the window takes it, so keys
                 // (Cmd+T) still reach the commands.
@@ -4397,12 +4500,13 @@ impl Workspace {
     /// review or a page does not.
     fn keep_file_tabs(&mut self) {
         let files = self
-            .tabs
-            .strip()
-            .iter()
-            .filter(|id| {
-                file_tab(id).is_some_and(|(_, path)| !path.is_empty() && !path.starts_with('\0'))
-                    && !self.tabs.is_preview(id)
+            .every_tabs()
+            .flat_map(|tabs| {
+                tabs.strip().iter().filter(|id| {
+                    file_tab(id)
+                        .is_some_and(|(_, path)| !path.is_empty() && !path.starts_with('\0'))
+                        && !tabs.is_preview(id)
+                })
             })
             .cloned()
             .collect();
