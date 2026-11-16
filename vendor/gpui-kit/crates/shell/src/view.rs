@@ -192,6 +192,11 @@ impl ScriptView {
         self.error.as_deref().or(self.stopped.as_deref())
     }
 
+    /// PERCH: whether a call into this view's script (an event, a timer, a task) was stopped before it finished.
+    pub fn was_stopped(&self) -> bool {
+        self.stopped.is_some()
+    }
+
     /// PERCH: a call into this view's script was stopped before it finished; the view says so over what it shows.
     pub(crate) fn stopped(&mut self, why: String, cx: &mut Context<Self>) {
         self.stopped = Some(why);

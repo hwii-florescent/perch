@@ -425,6 +425,9 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
   // stays mounted behind the rendered view, so a draft, caret and conflict state are never touched.
   const isMarkdown = selectedPath != null && /\.(?:md|markdown)$/i.test(selectedPath);
   const markdownPreview = isMarkdown && markdownPreviewPath === selectedPath;
+  // Preview is for formatted documents only (owner decision 2026-11-16, docs/DECISIONS.md): Markdown has its own
+  // Source/Preview toggle, HTML the core's sandboxed preview; a code or plain-text file has no Preview button.
+  const isHtml = selectedPath != null && /\.(?:html?|xhtml)$/i.test(selectedPath);
   const canEdit = document != null && !document.metadata?.readonly && document.state !== "loading" && document.state !== "error";
   const canSave = document != null && !document.metadata?.readonly && dirty && document.state !== "saving" && document.state !== "loading" && document.state !== "error";
 
@@ -652,7 +655,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
                     </div>
                   )}
                   <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", wrap && "text-fg")} onClick={() => setWrap(!wrap)} title="Toggle word wrap">Wrap</button>
-                  {!isMarkdown && <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", previewOpen && "text-fg")} onClick={() => { setPreviewOpen((value) => !value); if (!preview || preview.state === "error") requestPreview(selectedPath); }}>Preview</button>}
+                  {isHtml && <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", previewOpen && "text-fg")} onClick={() => { setPreviewOpen((value) => !value); if (!preview || preview.state === "error") requestPreview(selectedPath); }}>Preview</button>}
                   <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]")} onClick={handleReload} disabled={document.state === "saving" || document.bufferState === "saving"} title="Reload from disk">Reload</button>
                   <button type="button" className={cn(GHOST_BUTTON, "workspace-files__save px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", canSave && "text-fg")} onClick={() => saveFile(selectedPath)} disabled={!canSave} title={shortcutLabel("editor.save") ? `Save (${shortcutLabel("editor.save")})` : "Save"}>
                     {document.state === "saving" ? "Saving…" : "Save"}

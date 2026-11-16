@@ -75,8 +75,9 @@ pub fn record(name: &str) -> Option<ProbeRecord> {
     RECORDS.with(|records| records.borrow().get(name).cloned())
 }
 
-/// Wraps a named node so its layout is recorded.
-pub(crate) fn wrap(name: SharedString, style: StyleRefinement, element: AnyElement) -> AnyElement {
+/// Wraps a named node so its layout is recorded. PERCH: public, so a host's native element (an editor drawn in a
+/// script's slot) is recorded under a name too, with the text style it sets on itself.
+pub fn wrap(name: SharedString, style: StyleRefinement, element: AnyElement) -> AnyElement {
     Probe { name, style: Box::new(style), element }.into_any_element()
 }
 

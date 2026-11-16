@@ -423,6 +423,8 @@ pub fn web_family(family: &str) -> String {
         // The runtime's name for a bare `system-ui` (a form control's own face): the same face.
         ".AppleSystemUIFont" => "system-ui".into(),
         "Menlo" => WEB_MONO_FONT.into(),
+        // The file editor's face: CoreText's monospaced system face, SF Mono, which is `ui-monospace` in WebKit.
+        ".AppleSystemUIFontMonospaced" => WEB_MONO_FONT.into(),
         _ => family.into(),
     }
 }

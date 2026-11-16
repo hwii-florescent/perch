@@ -7,6 +7,12 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-16 — Preview is only for formatted documents (owner)
+
+A file's Preview shows only for a format that renders, in both apps from the same stock Files screen: Markdown keeps
+its Source/Preview toggle, HTML keeps the core's sandboxed preview. A code or plain-text file has no Preview button.
+LaTeX and other formats get Preview when the app renders them; it renders none of them yet.
+
 ## 2026-11-16 — The Files explorer draws only the rows around the view (lead)
 
 The stock Files screen's tree (both apps) is one flat list of rows indented by depth, as the nested folders were,

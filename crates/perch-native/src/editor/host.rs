@@ -58,6 +58,24 @@ struct Shared {
     refresh_queued: HashSet<String>,
     /// Hands keys to [`Editors::key_down`] before GPUI resolves bindings (installed with the first editor).
     keys: Option<Subscription>,
+    /// The window's zoom ([`Editors::set_zoom`]); none is 100%.
+    zoom: Option<f32>,
+}
+
+/// The web editor's text (`CodeEditor.tsx`, VS Code's defaults) at `zoom`: family, size and line height. On a Mac
+/// 12 px on 1.5 lines in `ui-monospace`, which is CoreText's monospaced system face (SF Mono); elsewhere 14 px on
+/// 1.35 lines in the theme's monospace face.
+fn font(zoom: f32, cx: &App) -> (SharedString, gpui::Pixels, gpui::Pixels) {
+    let (family, size, line) = if cfg!(target_os = "macos") {
+        (SharedString::from(".AppleSystemUIFontMonospaced"), 12., 1.5)
+    } else {
+        (
+            gpui_base::Theme::global(cx).tokens.typography.mono.clone(),
+            14.,
+            1.35,
+        )
+    };
+    (family, gpui::px(size * zoom), gpui::px(size * zoom * line))
 }
 
 /// Every editor of one app, by document key. Cheap to clone.
@@ -570,26 +588,43 @@ impl Editors {
             })
     }
 
+    /// Sizes the editors' text by the window's zoom (1 is 100%), as the web's `--zoom` does.
+    pub fn set_zoom(&self, zoom: f32) {
+        self.0.borrow_mut().zoom = Some(zoom);
+    }
+
+    fn zoom(&self) -> f32 {
+        self.0.borrow().zoom.unwrap_or(1.)
+    }
+
     /// The editor for `key`, drawn to fill its box; an empty box when there is none.
     pub fn draw(&self, key: &str, _window: &mut Window, cx: &mut App) -> AnyElement {
         let Some(state) = self.state(key) else {
             return gpui::div().size_full().into_any_element();
         };
-        let typography = &gpui_base::Theme::global(cx).tokens.typography;
-        let (family, size) = (typography.mono.clone(), typography.mono_md.size);
+        let (family, size, line) = font(self.zoom(), cx);
         let focus = state.clone();
         let editor = InputBase::new(SharedString::from(format!("perch-editor-{key}")))
             .flex()
             .items_start()
             .size_full()
             .min_h_0()
-            .font_family(family)
+            .font_family(family.clone())
             .text_size(size)
+            .line_height(line)
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                 focus.update(cx, |state, cx| state.focus(window, cx));
             })
             .child(Editor::new(&state));
-        editor.into_any_element()
+        if !gpui_shell::probing() {
+            return editor.into_any_element();
+        }
+        // For the parity check: the editor's text style, compared with the web editor's (`editor-text`).
+        let mut style = gpui::StyleRefinement::default();
+        style.text.font_family = Some(family);
+        style.text.font_size = Some(size.into());
+        style.text.line_height = Some(line.into());
+        gpui_shell::probe_wrap("editor-text".into(), style, editor.into_any_element())
     }
 
     /// Perch's keys go first: a keystroke interceptor gives the focused editor's shortcuts and typing rules

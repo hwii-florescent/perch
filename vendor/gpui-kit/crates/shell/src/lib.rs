@@ -98,6 +98,20 @@ pub fn probing() -> bool {
     #[cfg(not(feature = "render-test-support"))]
     false
 }
+
+/// PERCH: [`probe::wrap`] while [`probing`], else `element` unchanged (release builds have no probe).
+pub fn probe_wrap(
+    name: gpui::SharedString,
+    style: gpui::StyleRefinement,
+    element: gpui::AnyElement,
+) -> gpui::AnyElement {
+    #[cfg(feature = "render-test-support")]
+    if probe::named() {
+        return probe::wrap(name, style, element);
+    }
+    let _ = (name, style);
+    element
+}
 pub(crate) mod process;
 pub mod root;
 pub(crate) mod runtime;
