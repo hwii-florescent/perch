@@ -12,7 +12,8 @@
 //!   the computer's projects then No project; a project or No project starts the picked agent there
 //!   (a Quickchat for No project); Escape and a press outside close it without anything beneath
 //!   taking the press. Cmd+T opens the tab strip's launcher below its "+". The agent dropdown
-//!   lists the agents below it, and the one picked is the one started.
+//!   lists the agents below it, and the one picked is the one started. New browser opens a browser
+//!   tab, and the menu still opens after it and over a page (which is hidden under it).
 //! - Dialog: a script opens it with the file menu's New file prompt; a path typed (or typed over
 //!   all of the field after Cmd+A) and Enter close it with the create action; Escape and a press on
 //!   the dim backdrop close it with nothing.
@@ -33,6 +34,7 @@ use gpui::{
 };
 use gpui_shell::probe::{self, ProbeRecord};
 use perch_core::protocol::ServerMessage;
+use perch_native::browser::fake::{browsers, Calls};
 use perch_native::client::Command;
 use perch_native::mods::{self, POLL};
 use perch_native::sidebar::{Alert, Heard, State, Toast};
@@ -90,6 +92,7 @@ struct Rig {
     window: WindowHandle<Workspace>,
     opened: Rc<RefCell<Vec<OpenSession>>>,
     asked: UnboundedReceiver<Command>,
+    pages: Rc<RefCell<Calls>>,
 }
 
 impl Rig {
@@ -1114,6 +1117,100 @@ fn new_session(rig: &mut Rig) {
     println!("new-session: ok");
 }
 
+/// New browser from the strip's menu opens a browser tab, and the menu opens again after it. With a
+/// page showing (a native view over the window), the "+" and Cmd+T still open the menu, and the page
+/// is hidden under it (its still picture drawn instead) until it closes.
+fn new_tab_over_a_page(rig: &mut Rig) {
+    let cmd_t = if cfg!(target_os = "macos") {
+        "cmd-t"
+    } else {
+        "ctrl-t"
+    };
+    // New browser from the menu (from the Quickchat start page, where the strip offers it): the menu
+    // closes, an empty browser tab opens, and Cmd+T and the "+" open the menu again after.
+    rig.ws(|ws, window, cx| ws.run_command("nests.scratchpad", None, window, cx))
+        .unwrap();
+    rig.draw();
+    rig.press(cmd_t);
+    assert_eq!(rig.open_screens(), ["new-session"]);
+    rig.click("launcher-option:new-tab-browser");
+    assert!(
+        rig.open_screens().is_empty(),
+        "picking New browser closed the menu"
+    );
+    let blank = rig
+        .ws(|ws, _, _| ws.tabs().active().map(str::to_string))
+        .expect("New browser opened a tab");
+    assert!(blank.starts_with("wc\n\0browser\nblank:"), "{blank:?}");
+    for how in ["Cmd+T", "the +"] {
+        if how == "Cmd+T" {
+            rig.press(cmd_t);
+        } else {
+            rig.click("tab-new");
+        }
+        assert_eq!(
+            rig.open_screens(),
+            ["new-session"],
+            "after New browser, {how} opens the menu"
+        );
+        rig.press("escape");
+        assert!(rig.open_screens().is_empty());
+    }
+    rig.ws(|ws, window, cx| ws.run_command("tabs.close", Some(&json!({"id": blank})), window, cx))
+        .unwrap();
+    rig.draw();
+
+    rig.ws(|ws, window, cx| {
+        ws.run_command(
+            "browser.open",
+            Some(&json!({"url": "example.com", "workspaceId": "wc"})),
+            window,
+            cx,
+        )
+    })
+    .unwrap();
+    rig.draw();
+    let page = rig
+        .ws(|ws, _, _| ws.tabs().active().map(str::to_string))
+        .unwrap();
+    let log = std::mem::take(&mut rig.pages.borrow_mut().log);
+    assert!(
+        log.contains(&format!("{page} show")),
+        "the page shows: {log:?}"
+    );
+
+    for how in ["Cmd+T", "the +", "Cmd+T again"] {
+        if how == "the +" {
+            rig.click("tab-new");
+        } else {
+            rig.press(cmd_t);
+        }
+        assert_eq!(rig.open_screens(), ["new-session"], "{how} opens the menu");
+        assert!(rig.record("launcher").is_some(), "{how}: the menu is drawn");
+        let log = std::mem::take(&mut rig.pages.borrow_mut().log);
+        assert!(
+            log.contains(&format!("{page} hide")),
+            "{how}: the page is hidden under the menu: {log:?}"
+        );
+        rig.press("escape");
+        assert!(rig.open_screens().is_empty(), "{how}: Escape closed it");
+        let log = std::mem::take(&mut rig.pages.borrow_mut().log);
+        assert!(
+            log.contains(&format!("{page} show")),
+            "{how}: the page shows again: {log:?}"
+        );
+    }
+    rig.ws(|ws, window, cx| ws.run_command("tabs.close", Some(&json!({"id": page})), window, cx))
+        .unwrap();
+    rig.ws(|ws, _, cx| {
+        ws.sidebar().update(cx, |s, cx| {
+            s.open("local".into(), "alpha".into(), Some("claude".into()), cx)
+        })
+    });
+    rig.draw();
+    println!("new-tab over a page: ok");
+}
+
 /// Opens the dialog as a script does, with the New file prompt for `/work`; what it closes with
 /// goes to `results`.
 fn open_dialog(rig: &mut Rig, results: &Rc<RefCell<Vec<Value>>>) {
@@ -1326,11 +1423,13 @@ fn main() {
     );
     let (tx, asked) = unbounded();
     let model = state().model();
+    let (browser_pages, pages) = browsers();
     let window = cx
         .open_window(size(px(WIDTH), px(HEIGHT)), |_, cx| {
             cx.new(|cx| {
                 Workspace::new(model, Some(tx), cx)
                     .with_core(|| Err(anyhow::anyhow!("no core in this test")))
+                    .with_browser_pages(browser_pages)
             })
         })
         .unwrap();
@@ -1349,6 +1448,7 @@ fn main() {
         window,
         opened,
         asked,
+        pages,
     };
     rig.ws(|ws, _, cx| {
         ws.sidebar().update(cx, |s, cx| {
@@ -1367,6 +1467,7 @@ fn main() {
     tab_menu(&mut rig);
     tab_drag(&mut rig);
     new_session(&mut rig);
+    new_tab_over_a_page(&mut rig);
     dialog(&mut rig);
     toast(&mut rig);
     confirm(&mut rig);
