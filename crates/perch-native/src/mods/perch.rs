@@ -214,6 +214,8 @@ struct Shared {
     asker: RefCell<Option<Asker>>,
     /// Takes screens' changes in place of the window's core (`Self::set_sender`).
     sender: RefCell<Option<Sender>>,
+    /// Reads media files in place of the window's core (`Self::set_fetch`).
+    fetch: RefCell<Option<Arc<dyn crate::files::media::Fetch>>>,
     /// The instant screens read as now, in ms since the epoch, when held (`Self::hold_clock`).
     held_clock: std::cell::Cell<Option<f64>>,
     attached: RefCell<Option<Attached>>,
@@ -243,6 +245,7 @@ impl Perch {
             hosts: RefCell::default(),
             asker: RefCell::default(),
             sender: RefCell::default(),
+            fetch: RefCell::default(),
             held_clock: std::cell::Cell::default(),
             attached: RefCell::default(),
             flush_queued: Cell::new(false),
@@ -261,11 +264,19 @@ impl Perch {
         crate::files::media::register(
             host,
             Rc::new(move |cx: &App| {
+                if let Some(fetch) = perch.0.fetch.borrow().clone() {
+                    return Some(fetch);
+                }
                 let workspace = perch.0.attached.borrow().as_ref()?.workspace.upgrade()?;
                 let core = workspace.read(cx).core()?;
-                Some(std::sync::Arc::new(core) as std::sync::Arc<dyn crate::files::media::Fetch>)
+                Some(Arc::new(core) as Arc<dyn crate::files::media::Fetch>)
             }),
         );
+    }
+
+    /// Media files are read through `fetch` instead of the window's core (fixtures, tests).
+    pub fn set_fetch(&self, fetch: Arc<dyn crate::files::media::Fetch>) {
+        *self.0.fetch.borrow_mut() = Some(fetch);
     }
 
     /// Follows `workspace` (in the window `handle`): publishes its model and tabs whenever it

@@ -17,7 +17,12 @@ export const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const STEP = 1.25;
 const MIN_SCALE = 0.05;
 const MAX_SIDE = 16_384;
-const BTN = cn(GHOST_BUTTON, "min-h-8 min-w-8 px-2 text-[0.75rem] max-[700px]:min-h-11 max-[700px]:min-w-11");
+// ponytail: `inline-flex items-center justify-center` stands in for WebKit's centring of a button's content, which the
+// runtime does not do; the web's classes are otherwise the same.
+const CENTRED = "inline-flex items-center justify-center";
+const BTN = cn(GHOST_BUTTON, CENTRED, "min-h-8 min-w-8 px-2 text-[0.75rem] max-[700px]:min-h-11 max-[700px]:min-w-11");
+/** The header's buttons: the web's Download link's classes. */
+const HEADER_BTN = cn(GHOST_BUTTON, "inline-flex min-h-8 items-center px-2");
 const KIND_LABEL = { pdf: "PDF document", audio: "Audio", video: "Video" };
 
 let keys = 0;
@@ -111,10 +116,10 @@ export function FileAsset({ workspaceId, metadata, perch }) {
   return h("section", { className: "flex min-h-0 min-w-0 flex-1 flex-col", "aria-label": `Previewing ${metadata.path}`, "data-testid": "workspace-file-asset" },
     h("header", { className: "flex shrink-0 flex-wrap items-center gap-2 px-3 py-2 text-[0.75rem]" },
       h("strong", { className: "min-w-0 flex-1 truncate", title: metadata.path }, metadata.path),
-      archive && h("button", { type: "button", className: cn(GHOST_BUTTON, "min-h-8 px-2"), disabled: extraction?.state === "loading", onClick: () => perch.command("files.extract", { workspaceId, path: metadata.path }) },
+      archive && h("button", { type: "button", className: HEADER_BTN, disabled: extraction?.state === "loading", onClick: () => perch.command("files.extract", { workspaceId, path: metadata.path }) },
         extraction?.state === "loading" ? "Extracting…" : "Extract"),
-      !remote && h("button", { type: "button", className: cn(GHOST_BUTTON, "min-h-8 px-2"), onClick: () => open("quickLook") }, "Quick Look"),
-      !remote && h("button", { type: "button", className: cn(GHOST_BUTTON, "min-h-8 px-2"), onClick: () => open("openDefault") }, "Open with Default App")),
+      !remote && h("button", { type: "button", className: HEADER_BTN, onClick: () => open("quickLook") }, "Quick Look"),
+      !remote && h("button", { type: "button", className: HEADER_BTN, onClick: () => open("openDefault") }, "Open with Default App")),
     extraction?.state === "ready" && h("p", { role: "status", className: "m-0 px-3 py-2 text-[0.75rem] text-subtext-0" }, `Extracted to ${extraction.destination}. Find it in the file tree.`),
     extraction?.state === "error" && h("p", { role: "alert", className: "m-0 px-3 py-2 text-[0.75rem] text-red" }, extraction.error),
     !hasPreview || failed
