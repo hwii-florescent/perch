@@ -1233,6 +1233,14 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
         "folder-browser" => perch.set_asker(fixture_browser(fixture, capture.state)),
         "instructions" => perch.set_asker(fixture_answers(fixture, capture.state)),
         "worktree" => perch.set_asker(fixture_worktree(fixture, capture.state)),
+        // The workspace's files as the window's store would give them (`view.files`).
+        "files" => {
+            let view = &fixture.state(capture.state)["view"];
+            let workspace = view["workspace"]
+                .as_str()
+                .expect("a files state names its workspace");
+            perch.set_files(workspace, view["files"].clone());
+        }
         "memory" => {
             perch.set_asker(fixture_answers(fixture, capture.state));
             // The memory page's clock is held at this instant (a file's "5m ago").

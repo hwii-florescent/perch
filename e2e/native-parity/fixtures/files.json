@@ -1,0 +1,607 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "files",
+  "note": "The Files screen (stock-ui/files) in its two layouts: `explorer`, the tree in the drawer's Files tab (a 300x560 card, the drawer's body), and `editor`, one file's editor in a file tab's pane (760x560). A state's `view.files` is, for workspace `view.workspace`, the workspace's files as the store keeps them (`useWorkspaceFiles`: trees, documents, previews, search, wrap; the web's `useWorkspaceFilesStore` and the native window's store give the same fields); the store's actions do nothing, so nothing is asked of a core. The editor's text is the editor engine's own drawing (CodeMirror on the web): its box is gated, not what it draws.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 300,
+    "height": 560
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "props": {
+    "workspaceId": "w-perch-main",
+    "layout": "explorer"
+  },
+  "states": [
+    {
+      "id": "tree",
+      "title": "The explorer with src open: folders first, then files, each with its icon",
+      "view": {
+        "workspace": "w-perch-main",
+        "files": {
+          "trees": {
+            "": {
+              "workspaceId": "w-perch-main",
+              "path": "",
+              "entries": [
+                {
+                  "name": "docs",
+                  "path": "docs",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "src",
+                  "path": "src",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": ".gitignore",
+                  "path": ".gitignore",
+                  "kind": "file",
+                  "size": 24,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "Cargo.toml",
+                  "path": "Cargo.toml",
+                  "kind": "file",
+                  "size": 412,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "README.md",
+                  "path": "README.md",
+                  "kind": "file",
+                  "size": 1260,
+                  "readonly": false,
+                  "executable": false
+                }
+              ],
+              "truncated": false,
+              "state": "ready"
+            },
+            "src": {
+              "workspaceId": "w-perch-main",
+              "path": "src",
+              "entries": [
+                {
+                  "name": "ui",
+                  "path": "src/ui",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "lib.rs",
+                  "path": "src/lib.rs",
+                  "kind": "file",
+                  "size": 2048,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "main.rs",
+                  "path": "src/main.rs",
+                  "kind": "file",
+                  "size": 318,
+                  "readonly": false,
+                  "executable": false
+                }
+              ],
+              "truncated": false,
+              "state": "ready"
+            }
+          },
+          "documents": {},
+          "previews": {},
+          "search": null,
+          "wrap": false
+        }
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"workspace-file-entry-src\"]"
+        }
+      ]
+    },
+    {
+      "id": "preview-tab",
+      "title": "A click on README.md opens it as the preview tab: its row is selected",
+      "view": {
+        "workspace": "w-perch-main",
+        "files": {
+          "trees": {
+            "": {
+              "workspaceId": "w-perch-main",
+              "path": "",
+              "entries": [
+                {
+                  "name": "docs",
+                  "path": "docs",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "src",
+                  "path": "src",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": ".gitignore",
+                  "path": ".gitignore",
+                  "kind": "file",
+                  "size": 24,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "Cargo.toml",
+                  "path": "Cargo.toml",
+                  "kind": "file",
+                  "size": 412,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "README.md",
+                  "path": "README.md",
+                  "kind": "file",
+                  "size": 1260,
+                  "readonly": false,
+                  "executable": false
+                }
+              ],
+              "truncated": false,
+              "state": "ready"
+            },
+            "src": {
+              "workspaceId": "w-perch-main",
+              "path": "src",
+              "entries": [
+                {
+                  "name": "ui",
+                  "path": "src/ui",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "lib.rs",
+                  "path": "src/lib.rs",
+                  "kind": "file",
+                  "size": 2048,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "main.rs",
+                  "path": "src/main.rs",
+                  "kind": "file",
+                  "size": 318,
+                  "readonly": false,
+                  "executable": false
+                }
+              ],
+              "truncated": false,
+              "state": "ready"
+            }
+          },
+          "documents": {},
+          "previews": {},
+          "search": null,
+          "wrap": false
+        }
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"workspace-file-entry-README.md\"]"
+        }
+      ]
+    },
+    {
+      "id": "editor",
+      "title": "src/main.rs in its tab: the header and the editor, saved",
+      "size": {
+        "width": 760,
+        "height": 560
+      },
+      "props": {
+        "layout": "editor",
+        "initialPath": "src/main.rs"
+      },
+      "view": {
+        "workspace": "w-perch-main",
+        "files": {
+          "trees": {
+            "": {
+              "workspaceId": "w-perch-main",
+              "path": "",
+              "entries": [
+                {
+                  "name": "docs",
+                  "path": "docs",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "src",
+                  "path": "src",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": ".gitignore",
+                  "path": ".gitignore",
+                  "kind": "file",
+                  "size": 24,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "Cargo.toml",
+                  "path": "Cargo.toml",
+                  "kind": "file",
+                  "size": 412,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "README.md",
+                  "path": "README.md",
+                  "kind": "file",
+                  "size": 1260,
+                  "readonly": false,
+                  "executable": false
+                }
+              ],
+              "truncated": false,
+              "state": "ready"
+            },
+            "src": {
+              "workspaceId": "w-perch-main",
+              "path": "src",
+              "entries": [
+                {
+                  "name": "ui",
+                  "path": "src/ui",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "lib.rs",
+                  "path": "src/lib.rs",
+                  "kind": "file",
+                  "size": 2048,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "main.rs",
+                  "path": "src/main.rs",
+                  "kind": "file",
+                  "size": 318,
+                  "readonly": false,
+                  "executable": false
+                }
+              ],
+              "truncated": false,
+              "state": "ready"
+            }
+          },
+          "documents": {
+            "src/main.rs": {
+              "workspaceId": "w-perch-main",
+              "path": "src/main.rs",
+              "metadata": {
+                "path": "src/main.rs",
+                "name": "main.rs",
+                "size": 123,
+                "readonly": false,
+                "executable": false,
+                "kind": "file",
+                "mediaType": "text/x-rust"
+              },
+              "content": "use perch::App;\n\nfn main() {\n    // Open the workspace beside its files.\n    let app = App::new(\"perch\");\n    app.run();\n}\n",
+              "savedContent": "use perch::App;\n\nfn main() {\n    // Open the workspace beside its files.\n    let app = App::new(\"perch\");\n    app.run();\n}\n",
+              "version": "v1",
+              "persistedContent": "use perch::App;\n\nfn main() {\n    // Open the workspace beside its files.\n    let app = App::new(\"perch\");\n    app.run();\n}\n",
+              "baseContent": "use perch::App;\n\nfn main() {\n    // Open the workspace beside its files.\n    let app = App::new(\"perch\");\n    app.run();\n}\n",
+              "baseVersion": "v1",
+              "bufferRevision": 1,
+              "reloadEpoch": 0,
+              "bufferState": "ready",
+              "state": "ready"
+            }
+          },
+          "previews": {},
+          "search": null,
+          "wrap": false
+        }
+      }
+    },
+    {
+      "id": "dirty",
+      "title": "The same file with an unsaved edit",
+      "size": {
+        "width": 760,
+        "height": 560
+      },
+      "props": {
+        "layout": "editor",
+        "initialPath": "src/main.rs"
+      },
+      "view": {
+        "workspace": "w-perch-main",
+        "files": {
+          "trees": {
+            "": {
+              "workspaceId": "w-perch-main",
+              "path": "",
+              "entries": [
+                {
+                  "name": "docs",
+                  "path": "docs",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "src",
+                  "path": "src",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": ".gitignore",
+                  "path": ".gitignore",
+                  "kind": "file",
+                  "size": 24,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "Cargo.toml",
+                  "path": "Cargo.toml",
+                  "kind": "file",
+                  "size": 412,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "README.md",
+                  "path": "README.md",
+                  "kind": "file",
+                  "size": 1260,
+                  "readonly": false,
+                  "executable": false
+                }
+              ],
+              "truncated": false,
+              "state": "ready"
+            },
+            "src": {
+              "workspaceId": "w-perch-main",
+              "path": "src",
+              "entries": [
+                {
+                  "name": "ui",
+                  "path": "src/ui",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "lib.rs",
+                  "path": "src/lib.rs",
+                  "kind": "file",
+                  "size": 2048,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "main.rs",
+                  "path": "src/main.rs",
+                  "kind": "file",
+                  "size": 318,
+                  "readonly": false,
+                  "executable": false
+                }
+              ],
+              "truncated": false,
+              "state": "ready"
+            }
+          },
+          "documents": {
+            "src/main.rs": {
+              "workspaceId": "w-perch-main",
+              "path": "src/main.rs",
+              "metadata": {
+                "path": "src/main.rs",
+                "name": "main.rs",
+                "size": 123,
+                "readonly": false,
+                "executable": false,
+                "kind": "file",
+                "mediaType": "text/x-rust"
+              },
+              "content": "use perch::App;\n\nfn main() {\n    // Open the workspace beside its files.\n    let app = App::new(\"perch\");\n    app.open_files();\n    app.run();\n}\n",
+              "savedContent": "use perch::App;\n\nfn main() {\n    // Open the workspace beside its files.\n    let app = App::new(\"perch\");\n    app.run();\n}\n",
+              "version": "v1",
+              "persistedContent": "use perch::App;\n\nfn main() {\n    // Open the workspace beside its files.\n    let app = App::new(\"perch\");\n    app.open_files();\n    app.run();\n}\n",
+              "baseContent": "use perch::App;\n\nfn main() {\n    // Open the workspace beside its files.\n    let app = App::new(\"perch\");\n    app.run();\n}\n",
+              "baseVersion": "v1",
+              "bufferRevision": 1,
+              "reloadEpoch": 0,
+              "bufferState": "ready",
+              "state": "ready"
+            }
+          },
+          "previews": {},
+          "search": null,
+          "wrap": false
+        }
+      }
+    },
+    {
+      "id": "conflict",
+      "title": "The file changed on disk under an unsaved edit: the conflict bar with its choices",
+      "size": {
+        "width": 760,
+        "height": 560
+      },
+      "props": {
+        "layout": "editor",
+        "initialPath": "src/main.rs"
+      },
+      "view": {
+        "workspace": "w-perch-main",
+        "files": {
+          "trees": {
+            "": {
+              "workspaceId": "w-perch-main",
+              "path": "",
+              "entries": [
+                {
+                  "name": "docs",
+                  "path": "docs",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "src",
+                  "path": "src",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": ".gitignore",
+                  "path": ".gitignore",
+                  "kind": "file",
+                  "size": 24,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "Cargo.toml",
+                  "path": "Cargo.toml",
+                  "kind": "file",
+                  "size": 412,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "README.md",
+                  "path": "README.md",
+                  "kind": "file",
+                  "size": 1260,
+                  "readonly": false,
+                  "executable": false
+                }
+              ],
+              "truncated": false,
+              "state": "ready"
+            },
+            "src": {
+              "workspaceId": "w-perch-main",
+              "path": "src",
+              "entries": [
+                {
+                  "name": "ui",
+                  "path": "src/ui",
+                  "kind": "directory",
+                  "size": 0,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "lib.rs",
+                  "path": "src/lib.rs",
+                  "kind": "file",
+                  "size": 2048,
+                  "readonly": false,
+                  "executable": false
+                },
+                {
+                  "name": "main.rs",
+                  "path": "src/main.rs",
+                  "kind": "file",
+                  "size": 318,
+                  "readonly": false,
+                  "executable": false
+                }
+              ],
+              "truncated": false,
+              "state": "ready"
+            }
+          },
+          "documents": {
+            "src/main.rs": {
+              "workspaceId": "w-perch-main",
+              "path": "src/main.rs",
+              "metadata": {
+                "path": "src/main.rs",
+                "name": "main.rs",
+                "size": 123,
+                "readonly": false,
+                "executable": false,
+                "kind": "file",
+                "mediaType": "text/x-rust"
+              },
+              "content": "use perch::App;\n\nfn main() {\n    // Open the workspace beside its files.\n    let app = App::new(\"perch\");\n    app.open_files();\n    app.run();\n}\n",
+              "savedContent": "use perch::App;\n\nfn main() {\n    // Open the workspace beside its files.\n    let app = App::new(\"perch\");\n    app.run();\n}\n",
+              "version": "v1",
+              "persistedContent": "use perch::App;\n\nfn main() {\n    // Open the workspace beside its files.\n    let app = App::new(\"perch\");\n    app.open_files();\n    app.run();\n}\n",
+              "baseContent": "use perch::App;\n\nfn main() {\n    // Open the workspace beside its files.\n    let app = App::new(\"perch\");\n    app.run();\n}\n",
+              "baseVersion": "v1",
+              "bufferRevision": 1,
+              "reloadEpoch": 0,
+              "bufferState": "conflict",
+              "state": "conflict",
+              "conflict": {
+                "message": "The file changed on disk since it was opened.",
+                "expectedVersion": "v1",
+                "actualVersion": "v2"
+              }
+            }
+          },
+          "previews": {},
+          "search": null,
+          "wrap": false
+        }
+      }
+    }
+  ]
+}

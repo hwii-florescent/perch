@@ -237,6 +237,25 @@ const SCREENS: Record<string, Screen> = {
     }),
     Probe: PropsProbe,
   },
+  files: {
+    load: () => import("../../../packages/web/src/stock-ui/files/main"),
+    mount: "card",
+    // The workspace's files as the store keeps them, and store actions that ask no core for anything.
+    ready: async (view) => {
+      const { useWorkspaceFilesStore } = await import("../../../packages/web/src/filesystemStore");
+      const id = String(view.workspace);
+      const files = view.files as { trees: Json; documents: Json; previews: Json; search: Json | null; wrap: boolean };
+      const none = () => null;
+      useWorkspaceFilesStore.setState({
+        trees: { [id]: files.trees }, documents: { [id]: files.documents }, previews: { [id]: files.previews },
+        searches: files.search ? { [id]: files.search } : {}, wrap: files.wrap,
+        requestTree: none, searchFiles: none, openFile: none, reloadFile: none, requestPreview: none,
+        updateDraft: () => {}, saveFile: none, overwriteFile: none,
+      } as never);
+    },
+    props: (fixed) => ({ ...fixed, onOpenFile: noop, onPathChange: noop }),
+    Probe: PropsProbe,
+  },
   "tab-menu": {
     load: () => import("../../../packages/web/src/stock-ui/tab-menu/main"),
     mount: "stage",

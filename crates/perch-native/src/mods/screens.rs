@@ -11,7 +11,9 @@
 //!   window places nowhere yet, and over each terminal on screen `agent-control` (keyed
 //!   `agent-control#<tab id>`, while the agent has a chip, an error or an ended banner),
 //!   `terminal-search` (`terminal-search#<tab id>`, while its find is open) and `phone-size`
-//!   (`phone-size#<tab id>`, while a phone holds its size and this window may take it back);
+//!   (`phone-size#<tab id>`, while a phone holds its size and this window may take it back), and
+//!   `files`: the explorer in the drawer's Files tab (`files#drawer`) and a file's editor in each
+//!   file tab's pane (`files#<tab id>`);
 //! - floating, opened by the window over the whole of it, as the web's take the whole page:
 //!   `navigator`, `pane-menu`, `tab-menu`, `confirm`, `dialog`, `new-session`, `session-split`,
 //!   `keybind-help`, `launcher`, `instructions`, `memory` (modal), `toast` and `tab-drag`
@@ -213,6 +215,14 @@ pub const SCREENS: &[Screen] = &[
     },
     Screen {
         id: "agent-control",
+        place: Place::InFlow,
+        width: 0.,
+        height: 0.,
+    },
+    // Files (`stock:files`): the explorer in the drawer's Files tab (`files#drawer`) and a file's
+    // editor in each file tab's pane (`files#<tab id>`).
+    Screen {
+        id: "files",
         place: Place::InFlow,
         width: 0.,
         height: 0.,

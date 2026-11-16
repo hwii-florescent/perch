@@ -438,6 +438,10 @@ impl Perch {
                 let rest: Vec<Value> = (2..args.len())
                     .filter_map(|i| args.get(i).map(from_host))
                     .collect();
+                // A screen drawn with no window (the parity capture) has no store to act on.
+                if runner.0.attached.borrow().is_none() {
+                    return Ok(HostValue::Null);
+                }
                 runner.in_workspace(move |ws, cx| {
                     let text = |i: usize| {
                         rest.get(i)
@@ -2038,11 +2042,16 @@ const OWN: [(&str, &str, &str); 10] = [
 
 /// Window commands beyond the keymap's: the web's ids the window can perform (some under the
 /// name its keys use), and the native ones screens need.
-const WINDOW_COMMANDS: [(&str, &str, &str); 37] = [
+const WINDOW_COMMANDS: [(&str, &str, &str); 38] = [
     (
         "files.extract",
         "Extract a workspace's archive beside it",
         "{workspaceId, path}",
+    ),
+    (
+        "file.open",
+        "Open a workspace's file in a tab (its preview tab with preview: true)",
+        "{workspaceId, path, preview?}",
     ),
     (
         "handoff.open",

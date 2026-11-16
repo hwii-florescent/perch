@@ -18,6 +18,14 @@ Owner, for the review on both the web and the native client:
 - The native client draws `DiffView` natively from the window's Git store; the screen source is the
   same on both.
 
+## 2026-11-16 — The Files explorer draws only the rows around the view (lead)
+
+The stock Files screen's tree (both apps) is one flat list of rows indented by depth, as the nested folders were,
+and a long tree draws only the rows in view plus a chunk of 16 on each side; the rest keep their height. Nothing
+visible changes: same rows, indents, states and test ids. A file row keeps its chevron's room as an empty box rather
+than a hidden chevron. Forced by the native client, where a 1,000-file root could not be drawn whole within the
+screen's time budget.
+
 ## 2026-11-16 — "Show beside" is one row with a submenu (owner)
 
 The tab menu (both apps) no longer lists a "Show beside <tab>" row per open tab. One "Show beside" row with a chevron
