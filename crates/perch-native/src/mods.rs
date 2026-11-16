@@ -133,6 +133,16 @@ pub const STOCK: &[(&str, &str)] = &[
         "instructions/instructions/main.js",
         include_str!("../mods/instructions/instructions/main.js"),
     ),
+    ("review/main.js", include_str!("../mods/review/main.js")),
+    ("review/mod.json", include_str!("../mods/review/mod.json")),
+    (
+        "review/review/main.js",
+        include_str!("../mods/review/review/main.js"),
+    ),
+    (
+        "review/review/review.js",
+        include_str!("../mods/review/review/review.js"),
+    ),
     ("memory/main.js", include_str!("../mods/memory/main.js")),
     ("memory/mod.json", include_str!("../mods/memory/mod.json")),
     (

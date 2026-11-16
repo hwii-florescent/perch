@@ -232,6 +232,31 @@ fn scenario(rig: &mut Rig) {
     );
     println!("ok: a preview's promise settles with the core's receipt");
 
+    // The stock review on that workspace: it runs, places the native diff by key, and the diff view draws the
+    // core's diff from the window's store.
+    let props = serde_json::json!({ "workspaceId": id });
+    let opened = h
+        .window
+        .update(&mut h.cx, |ws, _, cx| {
+            ws.open_screen("review", props, None, None, cx)
+        })
+        .unwrap();
+    assert!(opened, "the review screen opens");
+    let diffs =
+        h.cx.update(|cx| cx.global::<perch_native::mods::WindowMods>().diffs.clone());
+    let key = format!("diff:{id}");
+    h.wait("the review's diff drawn natively", |h| {
+        let error = h
+            .window
+            .update(&mut h.cx, |ws, _, cx| ws.screen_error("review", cx))
+            .unwrap();
+        assert!(error.is_none(), "the review screen runs: {error:?}");
+        diffs
+            .view(&key)
+            .is_some_and(|view| h.cx.update(|cx| view.read(cx).rows().rows.len()) > 2)
+    });
+    println!("ok: the stock review runs natively and its diff is the native view");
+
     h.close();
     follower.abort();
 }

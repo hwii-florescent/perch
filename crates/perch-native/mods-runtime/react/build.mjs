@@ -64,6 +64,7 @@ export const SCREENS = [
   "agent-control",
   "browser",
   "browser-toolbar",
+  "review",
 ];
 /** Screens with no stock source of their own, drawn by hand from other stock screens (`ALSO`): the Settings page's frame
  * is Perch's own component in the web (`SettingsPage.tsx`), not a stock screen, so its folder holds only what is written

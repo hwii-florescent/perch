@@ -223,6 +223,14 @@ pub const SCREENS: &[Screen] = &[
         width: 0.,
         height: 0.,
     },
+    // The review (`stock:review`): a workspace's Git status, diff and comments, by `workspaceId`. Over the window
+    // until review tabs place it in a tab.
+    Screen {
+        id: "review",
+        place: Place::Floating { modal: false },
+        width: 0.,
+        height: 0.,
+    },
     Screen {
         id: "memory",
         place: MODAL,

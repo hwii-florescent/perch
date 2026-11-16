@@ -53,6 +53,8 @@ export { ModeSwitch, QrCode, SettingRow, SettingsGroup, Switch, settingsClass, u
 export { SettingsQuery } from "../../../../packages/web/src/components/ui/setting-row.tsx";
 // State the host keeps for a resource (the pages' unsent text), as the web's `useResourceState`.
 export { useResourceState } from "../../../../packages/web/src/resourceState.ts";
+// Perch's file icon and Git state mark (the review lists changed files with them).
+export { FileIcon, GitMarker } from "../../../../packages/web/src/components/fileDecorations.tsx";
 /** A new random id, as the web's `newId`: a v4 UUID where the engine has one, else a random one of that shape. */
 export function newId() {
   if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
