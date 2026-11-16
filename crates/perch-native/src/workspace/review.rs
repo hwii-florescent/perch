@@ -2,8 +2,8 @@
 //! web's source) on the window's Git store.
 //!
 //! A review tab's id is the web's file tab key of kind `review` (`fileTabKey`): `<workspace id>\n\0review`. Its
-//! screen is `review#<tab id>`; the drawer's is `review#drawer`, on the workspace shown (as the web's
-//! `WorkspaceTools`). The review asks for its status and diff itself once its host offers Git.
+//! screen is `review#<tab id>`; the drawer's is `review#drawer`, on the workspace shown, else the one `workspace.git`
+//! named (as the web's `WorkspaceTools`). The review asks for its status and diff itself once its host offers Git.
 
 use super::*;
 
@@ -39,7 +39,8 @@ impl Workspace {
         cx: &App,
     ) {
         if self.chrome.tools() == Some(shell::Tools::Git) {
-            if let Some(workspace_id) = self.shown_workspace(cx) {
+            let shown = self.shown_workspace(cx);
+            if let Some(workspace_id) = shown.or_else(|| self.explorer_workspace.clone()) {
                 want(
                     "review",
                     "review#drawer".into(),

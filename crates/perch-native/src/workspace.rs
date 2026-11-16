@@ -283,7 +283,7 @@ pub struct Workspace {
     browsing: browsing::Browsing,
     /// The workspace files this window has open: listings, documents and their drafts.
     files: crate::files::Files,
-    /// The workspace the drawer's Files tab was opened on, for when no tab on screen names one.
+    /// The workspace the drawer's Files or Git tab was opened on, for when no tab on screen names one.
     explorer_workspace: Option<String>,
     /// Context Bridge: the terminal's Ask agent menu, the capture being asked about and its send.
     bridge: context_bridge::Bridge,
@@ -3256,9 +3256,10 @@ impl Workspace {
                 let id = self.known_workspace(text("id"), cx)?;
                 self.show_files(&id, cx);
             }
-            // The drawer's Git tab (this client hands the Git view to the Perch app).
+            // The drawer's Git tab on that workspace (while no tab on screen names one).
             "workspace.git" => {
-                self.known_workspace(text("id"), cx)?;
+                let id = self.known_workspace(text("id"), cx)?;
+                self.explorer_workspace = Some(id);
                 self.chrome.set_tools(Some(shell::Tools::Git));
                 cx.notify();
             }

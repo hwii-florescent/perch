@@ -260,6 +260,33 @@ fn scenario(rig: &mut Rig) {
     });
     println!("ok: the review opens as a tab, runs natively and its diff is the native view");
 
+    // `workspace.git` opens the drawer's Git tab with the review of that workspace.
+    h.window
+        .update(&mut h.cx, |ws, window, cx| {
+            ws.run_command(
+                "workspace.git",
+                Some(&serde_json::json!({ "id": id })),
+                window,
+                cx,
+            )
+        })
+        .unwrap()
+        .expect("workspace.git runs");
+    h.wait("the drawer's review", |h| {
+        let (placed, error) = h
+            .window
+            .update(&mut h.cx, |ws, _, cx| {
+                (
+                    ws.screen_view("review#drawer").is_some(),
+                    ws.screen_error("review#drawer", cx),
+                )
+            })
+            .unwrap();
+        assert!(error.is_none(), "the drawer's review runs: {error:?}");
+        placed
+    });
+    println!("ok: workspace.git shows the review in the drawer's Git tab");
+
     h.close();
     follower.abort();
 }
