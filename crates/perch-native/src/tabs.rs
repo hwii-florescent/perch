@@ -284,6 +284,25 @@ impl Tabs {
         self.show(id);
     }
 
+    /// Add a tab after `after`'s family (the tabs right after it whose id `family` accepts),
+    /// leaving the keyboard where it is. One already open stays where it is.
+    pub fn add_after(&mut self, id: &str, after: &str, family: impl Fn(&str) -> bool) {
+        if self.contains(id) {
+            return;
+        }
+        let at = match self.strip.iter().position(|tab| tab == after) {
+            Some(lead) => {
+                lead + 1
+                    + self.strip[lead + 1..]
+                        .iter()
+                        .take_while(|tab| family(tab))
+                        .count()
+            }
+            None => self.strip.len(),
+        };
+        self.strip.insert(at, id.into());
+    }
+
     /// Give a tab the keyboard. Leaving a zoomed pane for another tab un-zooms.
     pub fn show(&mut self, id: &str) -> bool {
         if !self.contains(id) {
