@@ -45,3 +45,9 @@ it("remembers a page, drops its title on a new address, and rejects unsafe icons
   expect(useBrowserPages.getState().pages.k?.icon).toBe("");
   expect(JSON.parse([...storage.store].find(([k]) => k.startsWith("perch.browserPages"))![1]).k.title).toBe("B");
 });
+
+// The shared table the native client's address port (crates/perch-native/src/browser/address.rs) also reads.
+import addressCases from "./addressCases.json";
+it.each(addressCases.rows.map((c) => [c.typed, c] as const))("rows for %j match the shared table", (_typed, c) => {
+  expect(addressRows(c.typed, c.history, c.suggestions, (c as { engine?: string }).engine)).toEqual(c.expected);
+});

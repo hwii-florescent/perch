@@ -6907,6 +6907,7 @@ name = "perch-native"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "block2 0.6.2",
  "futures",
  "ghostty-sys",
  "gpui-base",
@@ -6915,15 +6916,19 @@ dependencies = [
  "gpui-shell",
  "image",
  "libc",
+ "objc2 0.6.4",
  "perch-core",
  "perchd",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "syntect",
  "tokio",
  "tokio-tungstenite",
  "ttf-parser",
+ "url",
  "usvg",
+ "wry",
 ]
 
 [[package]]

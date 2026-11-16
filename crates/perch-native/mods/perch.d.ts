@@ -527,6 +527,12 @@ declare module "perch" {
   export function inRegion(id: string): boolean;
   /** `useZoom`: the terminals' zoom factor (1 is 100%). */
   export function zoom(): number;
+  /** `useBrowserPages`: the drawer's browser pages of a workspace, the one shown and its browser tab count. */
+  export function browserPages(workspaceId: string): {
+    pages: { id: string; url: string; title?: string; icon?: string }[];
+    shownId: string | null;
+    tabCount: number;
+  };
   /** A tab drag in flight, for the tab strip to slide its tabs as the web's does (`slideDrag.ts`): the dragged
    * tab, whether the pointer is over the strip, and each tab's offset along it (`slideOffsets`); null when no tab
    * is dragged. */

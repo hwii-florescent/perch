@@ -934,6 +934,9 @@ const ASKS: &[(&str, &[(&str, Field)])] = &[
         ],
     ),
     ("memory.list", &[("projectId", Field::Text)]),
+    // A browser page's address bar: remembered pages and the engine's suggestions for what is typed.
+    ("browser.history.search", &[("query", Field::Text)]),
+    ("browser.suggest", &[("query", Field::Text)]),
     // Settings' pages: the paired devices and the pairing code, who can reach this computer, the
     // ssh look at a computer, the models of each harness and each computer's agent list. All
     // answered under the request id.
@@ -1109,6 +1112,21 @@ pub fn send_frame(kind: &str, args: &Value) -> Result<Value, String> {
             Ok(json!({"type": kind, "host": host}))
         }
         "browser.history.clear" => Ok(json!({"type": kind})),
+        // A page a browser page showed, and an entry the address bar's list removes.
+        "browser.history.record" => {
+            let url = args["url"]
+                .as_str()
+                .ok_or_else(|| "browser.history.record needs url as text.".to_string())?;
+            let title = args["title"].as_str().unwrap_or("");
+            let visit = args["visit"].as_bool().unwrap_or(false);
+            Ok(json!({"type": kind, "url": url, "title": title, "visit": visit}))
+        }
+        "browser.history.remove" => {
+            let url = args["url"]
+                .as_str()
+                .ok_or_else(|| "browser.history.remove needs url as text.".to_string())?;
+            Ok(json!({"type": kind, "url": url}))
+        }
         "hosts.delete" => {
             let id = args["id"]
                 .as_str()
@@ -1153,7 +1171,9 @@ fn answer_of(message: &ServerMessage) -> Option<(&str, Result<Value, String>)> {
         | ServerMessage::MachineHosts { request_id, .. }
         | ServerMessage::MachineResult { request_id, .. }
         | ServerMessage::AgentModelsList { request_id, .. }
-        | ServerMessage::AgentManifestList { request_id, .. } => {
+        | ServerMessage::AgentManifestList { request_id, .. }
+        | ServerMessage::BrowserHistoryResult { request_id, .. }
+        | ServerMessage::BrowserSuggestResult { request_id, .. } => {
             let mut state = serde_json::to_value(message).unwrap_or(Value::Null);
             if let Some(state) = state.as_object_mut() {
                 state.remove("type");
