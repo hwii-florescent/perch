@@ -1492,6 +1492,31 @@ fn sub_sessions_open_beside_their_lead() {
     println!("workspace_render: sub-session tabs ok");
 }
 
+/// The sub-sessions of a lead open in the order the workspace's strip (and the sidebar's family)
+/// lists them, whatever order the core's list comes in, and a sub-session of another workspace (a
+/// Quickchat chat) never joins the lead's tabs.
+fn sub_session_tabs_follow_the_strip_order() {
+    let terminal = |parent: Option<&str>, created: u64, cwd: &str| match parent {
+        Some(p) => json!({"cliProviderId": "terminal", "parentSessionId": p,
+                          "createdAt": created, "cwd": cwd}),
+        None => json!({"cliProviderId": "terminal", "createdAt": created, "cwd": cwd}),
+    };
+    let mut h = Harness::new(model(&[
+        ("k3", terminal(Some("lead"), 4, "/work")),
+        ("chat", terminal(Some("lead"), 5, "/scratch")),
+        ("lead", terminal(None, 1, "/work")),
+        ("k1", terminal(Some("lead"), 2, "/work")),
+        ("k2", terminal(Some("lead"), 3, "/work")),
+    ]));
+    h.open("lead");
+    assert_eq!(
+        h.ws(|ws| ws.tabs().strip().to_vec()),
+        ["lead", "k1", "k2", "k3"],
+        "oldest first as the strip lists them, and no tab for the other workspace's chat"
+    );
+    println!("workspace_render: sub-session tab order ok");
+}
+
 /// A session with no recorded launch provider is not attached under a guessed one.
 fn a_session_with_no_launch_provider_is_not_attached() {
     let mut cx = HeadlessAppContext::with_platform(
@@ -1696,6 +1721,7 @@ fn main() {
     a_session_with_no_launch_provider_is_not_attached();
     a_deleted_session_closes_its_tab_whenever_the_core_says_so();
     sub_sessions_open_beside_their_lead();
+    sub_session_tabs_follow_the_strip_order();
     the_pane_menu_opens_on_right_click();
     a_peek_is_a_terminal_over_the_window();
     tabs_out_of_sight_are_parked_beyond_twelve();
