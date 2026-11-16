@@ -1052,6 +1052,8 @@ export default screen("tabs", Hidden, { container: { position: "relative", width
     .unwrap();
 
     let host = ModHost::new(dir.clone()).expect("the mod host starts");
+    // Every React screen's host imports `perch-editor`, as the window lends it.
+    perch_native::editor::Editors::default().register(&host);
     let perch = Perch::new();
     publish(&perch, fixture, state);
     let pressed: std::rc::Rc<std::cell::RefCell<Option<Value>>> = Default::default();
@@ -1190,6 +1192,8 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
     let user = capture.mods.map_or(empty, Path::to_path_buf);
     seed_storage(&user, drawn, fixture, capture.state);
     let host = ModHost::new(user).expect("the mod host starts");
+    // Every React screen's host imports `perch-editor`, as the window lends it.
+    perch_native::editor::Editors::default().register(&host);
     assert!(host.find(drawn).is_some(), "a mod draws screen {drawn}");
     let perch = Perch::new();
     perch.register(&host);

@@ -226,7 +226,10 @@ fn main() {
     }
     let records = rig.settle();
     // s3 and s7 are sub-sessions of s2 and s6: they open with their leads.
-    assert_eq!(rig.keys(&records, "tab"), ["s1", "s2", "s3", "s5", "s6", "s7", "s20"]);
+    assert_eq!(
+        rig.keys(&records, "tab"),
+        ["s1", "s2", "s3", "s5", "s6", "s7", "s20"]
+    );
 
     // Hover: sweep the pointer down and up the rows, a frame per move.
     let centers: Vec<_> = rows

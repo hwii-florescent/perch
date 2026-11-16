@@ -513,12 +513,10 @@ fn launcher(rig: &mut Rig) {
     rig.click(&format!("launcher-row:{first}"));
     assert_eq!(launched(rig), [("local".into(), None, first)]);
 
-    // What this window cannot open is listed and refused with the reason.
+    // What this window cannot open is listed and refused with the reason (a browser tab needs WebKit, which a
+    // headless window has none of).
     for (row, reason) in [
-        (
-            "browser",
-            "A browser tab does not open in the native window yet.",
-        ),
+        ("browser", "Browser pages need the desktop's WebKit."),
         (
             "file",
             "A new file needs the files view, which the native window does not have yet.",

@@ -2985,6 +2985,38 @@ impl<M: InputModeKind> InputBaseState<M> {
         recorded
     }
 
+    // PERCH: replaces `range` (bytes) with `text` from outside the editor, as a store value: no undo entry and no
+    // change event; the undo history is mapped through the edit (`UndoManager::map_external`), and the selection
+    // keeps its place, shifted by the edit (inside it, to its end).
+    pub fn apply_external(
+        &mut self,
+        range: Range<usize>,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let selected = self.selected_range();
+        self.undo_manager.map_external(range.clone(), text.len());
+        let utf16 = self.range_to_utf16(&range);
+        self.undo_manager.set_ignoring(true);
+        self.emit_events = false;
+        self.with_edits_allowed(|this| this.replace_text_in_range_silent(Some(utf16), text, window, cx));
+        self.undo_manager.set_ignoring(false);
+        self.emit_events = true;
+        let delta = text.len() as isize - range.len() as isize;
+        let shift = |at: usize| {
+            if at >= range.end {
+                at.saturating_add_signed(delta)
+            } else if at > range.start {
+                range.start + text.len()
+            } else {
+                at
+            }
+        };
+        self.set_selected_range(shift(selected.start)..shift(selected.end), cx);
+        cx.notify();
+    }
+
     // PERCH: whether undo or redo would change anything, for an editor's menu.
     pub fn can_undo(&self) -> bool {
         self.undo_manager.can_undo()

@@ -3,6 +3,7 @@
 //! GPUI, `sound` plays an alert, and `handoff` opens the rest in Perch.
 
 pub mod actions;
+pub mod browser;
 pub mod client;
 pub mod diff;
 pub mod editor;

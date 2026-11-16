@@ -184,6 +184,24 @@ pub const STOCK: &[(&str, &str)] = &[
         "phone-size/phone-size/main.js",
         include_str!("../mods/phone-size/phone-size/main.js"),
     ),
+    ("browser/main.js", include_str!("../mods/browser/main.js")),
+    ("browser/mod.json", include_str!("../mods/browser/mod.json")),
+    (
+        "browser/browser/main.js",
+        include_str!("../mods/browser/browser/main.js"),
+    ),
+    (
+        "browser-toolbar/main.js",
+        include_str!("../mods/browser-toolbar/main.js"),
+    ),
+    (
+        "browser-toolbar/mod.json",
+        include_str!("../mods/browser-toolbar/mod.json"),
+    ),
+    (
+        "browser-toolbar/browser-toolbar/main.js",
+        include_str!("../mods/browser-toolbar/browser-toolbar/main.js"),
+    ),
     (
         "agent-control/main.js",
         include_str!("../mods/agent-control/main.js"),
@@ -526,6 +544,7 @@ pub fn start_in(
     let diffs = crate::diff::host::Diffs::default();
     diffs.register(&host);
     engines.register("diff", diffs.clone());
+    engines.register("browser", crate::browser::slot::Engine);
     cx.set_global(WindowMods {
         host,
         perch,

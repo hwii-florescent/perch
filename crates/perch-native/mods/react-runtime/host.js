@@ -35,6 +35,7 @@ import * as perch from "perch";
 import { Icon, bounds, forgetBounds, textWidth } from "perch-react";
 import * as engines from "perch-engine";
 import * as diffs from "perch-diff";
+import * as editors from "perch-editor";
 import { ICONS, LETTERS, LETTER } from "./agent-icons.js";
 
 export const INERT = [
@@ -223,6 +224,8 @@ export function copyFor(cx, screen) {
   const listeners = new Set();
   const focusListeners = new Set();
   const openOverlays = new Set();
+  // Editors this copy placed (`perch.editor.watch`): their queued events, read on `refresh()`.
+  const watched = new Map();
   function snapshot(key, read) {
     let entry = snapshots.get(key);
     if (!entry) {
@@ -537,6 +540,17 @@ export function copyFor(cx, screen) {
     closeOverlay(id) {
       if (openOverlays.delete(id)) perch.run("overlay.close").catch(() => {});
     },
+    // The native editor (`perch-editor`, functions by document key) for `@perch/sdk`'s `CodeEditor`, and
+    // `watch(docKey, handler)`: the editor's events (change, caret, save, goto, contextmenu) reach `handler` in
+    // batches from `refresh()`, which the module's re-render of this copy runs. Returns the unwatch function.
+    editor: {
+      ...editors,
+      watch(key, handler) {
+        const entry = { handler, pending: [] };
+        watched.set(key, entry);
+        return () => { if (watched.get(key) === entry) watched.delete(key); };
+      },
+    },
     // Engine slots (`perch-engine`): `focus(engine, key)` gives an engine the keyboard, `focused()` says which has it
     // (`{ engine, key }` or null), `release(engine, key)` lets a key go (the slot unmounted or was re-keyed).
     engines: {
@@ -601,6 +615,12 @@ export function copyFor(cx, screen) {
      * subscribers; without, only looks. */
     refresh(tell) {
       let changed = false;
+      for (const [key, entry] of watched) {
+        entry.pending.push(...editors.events(key));
+        if (!entry.pending.length) continue;
+        changed = true;
+        if (tell) entry.handler(entry.pending.splice(0));
+      }
       for (const entry of snapshots.values()) {
         const value = entry.read();
         const text = JSON.stringify(value);
@@ -632,6 +652,7 @@ export function copyFor(cx, screen) {
       COPIES.delete(copy);
       listeners.clear();
       focusListeners.clear();
+      watched.clear();
       openOverlays.clear();
       snapshots.clear();
       for (const [id, timer] of TIMERS.all) if (timer.copy === copy) clearTimeout(id);

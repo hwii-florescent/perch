@@ -435,6 +435,11 @@ cargo test -p perch-native --test terminal_session  # a real core as a child pro
 cargo test -p perch-native --test workspace_session # two shells in a split against a real core, and the settings round trip
 ```
 
+The React runtime's own tests (`npm run test:mods-runtime`) compare its descriptions with the web's drawing of the
+same screens, so they need the web references first: `(cd e2e && npm ci && npx playwright install webkit && npm run
+parity:web)` writes `e2e/artifacts-native-parity/web/` (headless WebKit, about a minute; ignored by git). Without
+them the comparing tests fail and say so.
+
 Settings (`mods/settings`) is the web's page on the React runtime, saving through the core. Its parity states are
 `e2e/native-parity/fixtures/settings.json` (web side: `PARITY_SCREENS=settings npm run parity:web` in `e2e`). Known
 differences the gate reports: Keyboard draws one group of bindings at a time (the engine cuts a script that runs over its

@@ -70,6 +70,7 @@ fn main() {
                         Workspace::new(Model::default(), Some(command_tx), cx)
                             .with_core(|| Core::discover(&perchd::server::default_dir()))
                             .with_window_state(perch_native::mods::user_dir().join(".window.json"))
+                            .with_browser_file(perch_native::mods::user_dir().join(".browser.json"))
                     })
                 },
             )

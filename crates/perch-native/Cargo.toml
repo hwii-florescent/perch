@@ -37,6 +37,15 @@ gpui-base = { path = "../../vendor/gpui-kit/crates/base" }
 syntect = { version = "5.3.0", default-features = false, features = ["parsing", "default-syntaxes", "regex-fancy"] }
 # The version GPUI rasterises SVGs with: an icon's size is read before it is drawn.
 usvg = { version = "0.46", default-features = false }
+# WHATWG URL parsing for browser pages' addresses, the version GPUI already builds.
+url = "2"
+
+# Browser pages: a WebKit child view (the version the Tauri app locks), with the AppKit calls wry does not make.
+[target.'cfg(target_os = "macos")'.dependencies]
+wry = { version = "0.55", default-features = false, features = ["os-webview"] }
+objc2 = "0.6"
+block2 = "0.6"
+raw-window-handle = "0.6"
 
 [dev-dependencies]
 libc = "0.2"
@@ -46,8 +55,28 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = 
 gpui-shell = { path = "../../vendor/gpui-kit/crates/shell", features = ["render-test-support"] }
 
 [[test]]
+name = "browser_pane"
+path = "tests/browser_pane.rs"
+harness = false
+
+[[test]]
+name = "browser_tabs_window"
+path = "tests/browser_tabs_window.rs"
+harness = false
+
+[[test]]
+name = "browser_webkit"
+path = "tests/browser_webkit.rs"
+harness = false
+
+[[test]]
 name = "editor_engine"
 path = "tests/editor_engine.rs"
+harness = false
+
+[[test]]
+name = "editor_typing"
+path = "tests/editor_typing.rs"
 harness = false
 
 [[test]]

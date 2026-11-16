@@ -18,6 +18,15 @@ Owner, for the review on both the web and the native client:
 - The native client draws `DiffView` natively from the window's Git store; the screen source is the
   same on both.
 
+## 2026-11-16 — No per-run total of sub-sessions; the live limit stays (owner)
+
+Owner: with "Live sub-sessions per run" bounding how many run at once, the total per run
+(`runLimits.total`, stopped ones included) served no purpose and blocked long runs whose lead stops
+finished children. It is removed: a run may start any number of children while fewer than the live
+limit are live. The core ignores `runLimits.total` in an old settings file and `maxSubSessions` on the wire
+(the field stays optional in `protocol.rs` / `protocol.ts`, never emitted). Messages, interrupts and waiting
+cards keep their limits. This supersedes the "total per run 8" default in 2026-11-08.
+
 ## 2026-11-15 — A stopped sub-session closes like a person's Close (owner)
 
 Owner, after `perch stop` left stopped children's tabs and rows behind ("Agent unavailable", and
