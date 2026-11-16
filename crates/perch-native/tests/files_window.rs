@@ -98,6 +98,46 @@ impl Rig {
         self.ws(|ws, _, cx| ws.on_files_message(&message, cx));
     }
 
+    fn right_click(&mut self, at: gpui::Point<gpui::Pixels>) {
+        self.cx
+            .update_window(self.window.into(), |_, window: &mut Window, cx| {
+                window.dispatch_event(
+                    PlatformInput::MouseDown(MouseDownEvent {
+                        button: MouseButton::Right,
+                        position: at,
+                        modifiers: Modifiers::default(),
+                        click_count: 1,
+                        first_mouse: false,
+                    }),
+                    cx,
+                );
+                window.dispatch_event(
+                    PlatformInput::MouseUp(MouseUpEvent {
+                        button: MouseButton::Right,
+                        position: at,
+                        modifiers: Modifiers::default(),
+                        click_count: 1,
+                    }),
+                    cx,
+                );
+            })
+            .unwrap();
+    }
+
+    /// Clicks the element named `suffix`, failing with every name drawn when there is none.
+    fn click_named(&mut self, suffix: &str) {
+        let records = self.settle();
+        let at = named(&records, suffix)
+            .unwrap_or_else(|| {
+                let mut names: Vec<_> = records.iter().map(|r| r.name.to_string()).collect();
+                names.sort();
+                panic!("no {suffix}: {names:?}")
+            })
+            .bounds
+            .center();
+        self.click(at);
+    }
+
     fn click(&mut self, at: gpui::Point<gpui::Pixels>) {
         self.cx
             .update_window(self.window.into(), |_, window: &mut Window, cx| {
@@ -286,6 +326,39 @@ fn main() {
     rig.settle();
     assert!(rig.ws(|ws, _, _| ws.tabs().shown().is_empty()));
     assert!(rig.ws(|ws, _, _| ws.files().document("w1", "README.md").is_some()));
+
+    // The entry menu: Delete, confirmed, asks the core to delete the entry; once it has, the
+    // entry's open tab closes.
+    rig.ws(|ws, _, cx| ws.open_file("w1", "README.md", false, cx));
+    rig.ws(|ws, _, cx| ws.show_files("w1", cx));
+    let records = rig.settle();
+    let row = named(&records, "files-entry:README.md")
+        .expect("README.md's row")
+        .bounds
+        .center();
+    rig.sent();
+    rig.right_click(row);
+    rig.click_named(":file-menu-delete");
+    rig.click_named("confirm-accept");
+    rig.settle();
+    let sent = rig.sent();
+    let delete = sent
+        .iter()
+        .find(|f| f["type"] == "fs.mutate")
+        .unwrap_or_else(|| panic!("the entry is deleted: {sent:?}"));
+    assert_eq!(
+        (delete["op"].as_str(), delete["path"].as_str()),
+        (Some("delete"), Some("README.md"))
+    );
+    rig.answer(
+        json!({"type": "fs.mutate.result", "requestId": delete["requestId"], "workspaceId": "w1",
+        "op": "delete", "path": "README.md"}),
+    );
+    rig.settle();
+    assert!(
+        !rig.ws(|ws, _, _| ws.tabs().contains("w1\nREADME.md")),
+        "its tab closed"
+    );
 
     // `files.extract` asks the core to extract the archive.
     rig.sent();

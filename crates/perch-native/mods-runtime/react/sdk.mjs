@@ -400,8 +400,7 @@ export const useWorkspaceTabs = () => useHostSnapshot((perch) => perch.workspace
 
 export { FileIcon, GitMarker, assetKind };
 // ponytail: stand-ins until the native engines land: a media file shows its name and size (Quick Look replaces
-// `FileAsset`), Markdown shows its source (the token renderer replaces `MarkdownPreview`) and the entry menu is not
-// offered yet.
+// `FileAsset`) and Markdown shows its source (the token renderer replaces `MarkdownPreview`).
 
 export function FileAsset({ metadata }) {
   return createElement("div", { className: "grid content-center justify-items-center gap-1 p-5 text-[0.72rem] text-subtext-0" },
@@ -411,7 +410,8 @@ export function FileAsset({ metadata }) {
 export function MarkdownPreview({ content }) {
   return createElement("pre", { className: "m-0 min-h-0 flex-1 overflow-auto p-3 whitespace-pre-wrap text-fg" }, content);
 }
-export const FileEntryMenu = () => null;
+/** The explorer's right-click menu and its prompts: the window's `dialog` screen (`file-menu` in it). */
+export const FileEntryMenu = overlay("file-menu");
 
 const NO_MARKS = new Map();
 const FILE_ACTIONS = ["requestTree", "searchFiles", "openFile", "reloadFile", "requestPreview", "updateDraft", "saveFile", "overwriteFile", "setWrap"];

@@ -46,7 +46,59 @@ export const INERT = [
 
 /** Overlays that open as one of the window's screens: the screen, its props from the overlay's, and what the
  * screen's result does with the overlay's callbacks. */
+/** The entry the explorer's Cut or Copy holds (`{workspaceId, path, cut}`), for Paste. */
+let heldEntry = null;
+const parentOf = (path) => path.split("/").slice(0, -1).join("/");
+const within = (path, root) => path === root || path.startsWith(`${root}/`);
+
+/** What the file menu's result asks (`dialog/main.js`): a change goes to the window's file store (`fs.mutate`), which
+ * opens a new file and moves or closes the tabs it touched; the rest is the explorer's own (`onOpenFile`, `onExpand`,
+ * `onRefresh`) or the held entry. */
+function fileMenuResult(p, r) {
+  const args = Array.isArray(r?.args) ? r.args : [];
+  const ws = p.workspaceId;
+  const mutate = (op, path, to) => {
+    perch.filesDo("mutate", ws, op, path, ...(to ? [to] : []));
+    if ((op === "rename" || op === "delete") && heldEntry?.workspaceId === ws && within(heldEntry.path, path)) heldEntry = null;
+    const dir = parentOf(to ?? path);
+    if (op !== "delete" && dir) p.onExpand?.(dir);
+  };
+  switch (r?.action) {
+    case "openFile": return p.onOpenFile?.(args[0]);
+    case "expand": return p.onExpand?.(args[0]);
+    case "refresh": return p.onRefresh?.();
+    case "hold": heldEntry = { workspaceId: ws, path: args[0], cut: !!args[1] }; return;
+    case "mutate": return mutate(args[0], args[1], args[2]);
+    case "createFileAt": {
+      const root = String(p.workspacePath ?? "").replace(/\/+$/, "");
+      const [dir, name] = args;
+      const inside = dir === root ? "" : dir.startsWith(`${root}/`) ? dir.slice(root.length + 1) : null;
+      if (inside === null) return console.error("react-runtime: a new file outside the workspace is not made by the native window yet");
+      return mutate("createFile", inside ? `${inside}/${name}` : name);
+    }
+    default: if (r?.action) console.error(`react-runtime: the file menu's ${r.action} is not done by the native window`);
+  }
+}
+
+/** The props of the `dialog` screen for a file menu or a new-file prompt: the folders' names give a copy its free
+ * name. Open in Default App, Reveal and Ask agent are not offered. */
+function fileMenuProps(p) {
+  const files = p.workspaceId ? perch.workspaceFiles(p.workspaceId) : null;
+  const names = Object.fromEntries(Object.entries(files?.trees ?? {}).map(([dir, tree]) => [dir, (tree?.entries ?? []).map((e) => e.name)]));
+  const held = heldEntry?.workspaceId === p.workspaceId ? { path: heldEntry.path, cut: heldEntry.cut } : null;
+  return {
+    workspaceId: p.workspaceId, workspacePath: p.workspacePath ?? files?.workspace?.path ?? "", target: p.target ?? null,
+    x: p.x ?? 0, y: p.y ?? 0, ...(p.initialStage ? { initialStage: p.initialStage } : {}),
+    held, nativeAvailable: false, canAsk: false, names,
+  };
+}
+
 const OVERLAY_SCREENS = {
+  "file-menu": {
+    screen: "dialog",
+    props: fileMenuProps,
+    result: (p, r) => { fileMenuResult(p, r); p.onClose?.(); },
+  },
   "new-session-menu": {
     screen: "new-session",
     // The strip's extras (New browser, New file) cross as their ids and labels; the one picked runs its own onSelect.
@@ -497,7 +549,14 @@ export function copyFor(cx, screen) {
     openOverlay(kind, props = {}) {
       const id = nextOverlay++;
       const known = OVERLAY_SCREENS[kind];
-      // The window has no files view: New file is refused with the reason, as the launcher's is.
+      // New file is the file menu's name prompt for the workspace it names; with none, it is refused with the reason,
+      // as the launcher's is.
+      // It outlives what opened it (the launcher closes as it opens the prompt): it closes with its answer.
+      if (kind === "new-file" && props.workspaceId) {
+        const prompt = this.openOverlay("file-menu", { ...props, initialStage: "newFile" });
+        openOverlays.delete(prompt);
+        return prompt;
+      }
       if (kind === "new-file") {
         perch.run("file.open", {}).catch((error) => console.error(`react-runtime: ${error?.message ?? error}`));
         props.onClose?.();
