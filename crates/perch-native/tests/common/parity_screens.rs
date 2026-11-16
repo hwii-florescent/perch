@@ -1084,6 +1084,7 @@ export default screen("tabs", Hidden, { container: { position: "relative", width
     let host = ModHost::new(dir.clone()).expect("the mod host starts");
     // Every React screen's host imports `perch-editor`, as the window lends it.
     perch_native::editor::Editors::default().register(&host);
+    perch_native::files::media::register(&host, std::rc::Rc::new(|_: &gpui::App| None));
     let perch = Perch::new();
     publish(&perch, fixture, state);
     let pressed: std::rc::Rc<std::cell::RefCell<Option<Value>>> = Default::default();
@@ -1239,6 +1240,7 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
                 .as_str()
                 .expect("a files state names its workspace");
             perch.set_files(workspace, view["files"].clone());
+            perch.set_fetch(std::sync::Arc::new(FixtureMedia));
         }
         "memory" => {
             perch.set_asker(fixture_answers(fixture, capture.state));
@@ -1407,5 +1409,22 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
         png,
         json: json_path,
         report,
+    }
+}
+
+/// The media states' bytes: `e2e/native-parity/fixtures/media/<name>`, as the reference build serves them.
+struct FixtureMedia;
+
+impl perch_native::files::media::Fetch for FixtureMedia {
+    fn fetch(&self, _: &str, path: &str, max: u64) -> anyhow::Result<Vec<u8>> {
+        let name = Path::new(path)
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("no name"))?;
+        let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../e2e/native-parity/fixtures/media")
+            .join(name);
+        let bytes = std::fs::read(file)?;
+        anyhow::ensure!(bytes.len() as u64 <= max, "too large");
+        Ok(bytes)
     }
 }

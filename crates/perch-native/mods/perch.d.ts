@@ -422,6 +422,12 @@ declare module "perch" {
    * `requestTree(path)`, `searchFiles(query)`, `openFile(path, force?)`, `reloadFile(path)`, `requestPreview(path)`,
    * `updateDraft(path, content)`, `saveFile(path)`, `overwriteFile(path)`, `extractArchive(path)`, `setWrap(on)`. */
   export function filesDo(action: string, workspaceId: string, ...args: unknown[]): void;
+  /** `FileAsset`'s view of a file: the workspace's folder on this computer (`root`, null when the workspace is on
+   * another computer or gone) and the file's archive extraction (null before one). */
+  export function mediaFile(workspaceId: string, path: string): {
+    root: string | null;
+    extraction: { state: "idle" | "loading" | "ready" | "error"; destination?: string; error?: string } | null;
+  };
   /** What has the keyboard, and the panes on screen. */
   export function focus(): Focus;
   /** Every session on every computer, as a terminal record. */
