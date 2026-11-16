@@ -133,6 +133,31 @@ impl Rig {
             .update(|cx| cx.global::<WindowMods>().host.metrics())
     }
 
+    fn click(&mut self, at: gpui::Point<gpui::Pixels>) {
+        self.cx
+            .update_window(self.window.into(), |_, window: &mut Window, cx| {
+                for input in [
+                    PlatformInput::MouseDown(gpui::MouseDownEvent {
+                        button: gpui::MouseButton::Left,
+                        position: at,
+                        modifiers: Modifiers::default(),
+                        click_count: 1,
+                        first_mouse: false,
+                    }),
+                    PlatformInput::MouseUp(gpui::MouseUpEvent {
+                        button: gpui::MouseButton::Left,
+                        position: at,
+                        modifiers: Modifiers::default(),
+                        click_count: 1,
+                    }),
+                ] {
+                    window.dispatch_event(input, cx);
+                }
+            })
+            .unwrap();
+        self.cx.run_until_parked();
+    }
+
     fn move_to(&mut self, at: gpui::Point<gpui::Pixels>) {
         self.cx
             .update_window(self.window.into(), |_, window: &mut Window, cx| {
@@ -294,6 +319,71 @@ fn main() {
         rig.keys(&records, "tab"),
         ["s20"],
         "the strip closes the tabs of the stopped sessions and keeps the other"
+    );
+    // Settings' Keyboard page opens and draws within the script's budgets.
+    rig.ws(|ws, window, cx| ws.run_command("global.settings", None, window, cx))
+        .unwrap();
+    let records = rig.settle();
+    let nav = records
+        .iter()
+        .find(|r| r.name.as_ref() == "settings-nav:keyboard")
+        .expect("the Keyboard section is listed")
+        .bounds
+        .center();
+    let before = rig.metrics();
+    let started = Instant::now();
+    rig.click(nav);
+    let records = rig.settle();
+    let opened = started.elapsed();
+    let spent = rig.metrics().since(&before);
+    let error = rig.ws(|ws, _, cx| ws.screen_error("settings", cx));
+    let rows = records
+        .iter()
+        .filter(|r| r.name.contains("keybinding-"))
+        .count();
+    if report() {
+        println!(
+            "keyboard page: {opened:?} to open, {rows} binding records, script renders {}, script time {:?}, \
+             materializations {}, materialize time {:?}; error {error:?}",
+            spent.script_renders(),
+            spent.script_render_time(),
+            spent.materializations(),
+            spent.materialize_time(),
+        );
+    }
+    assert_eq!(error, None, "the Keyboard page draws");
+    assert!(rows > 0, "the Keyboard page draws its bindings");
+
+    // A script stopped in the middle of an event (past its time budget) says so where it is drawn.
+    rig.ws(|ws, window, cx| ws.screen_closed("settings", serde_json::Value::Null, window, cx));
+    let status = user.join("status");
+    std::fs::create_dir_all(&status).unwrap();
+    std::fs::write(status.join("mod.json"), r#"{ "name": "Spin" }"#).unwrap();
+    std::fs::write(
+        status.join("main.js"),
+        r#"import { View, div } from "gpui-kit";
+export default class Spin extends View {
+  render(_cx) {
+    return div().id("spin").size_full().on_click(() => { for (;;) {} }).child("spin");
+  }
+}
+"#,
+    )
+    .unwrap();
+    let records = rig.settle();
+    let spin = records
+        .iter()
+        .find(|r| r.name.as_ref() == "spin")
+        .expect("the person's status mod is drawn")
+        .bounds
+        .center();
+    rig.click(spin);
+    rig.settle();
+    let view = rig.ws(|ws, _, _| ws.screen_view("status")).unwrap();
+    let error = rig.cx.update(|cx| view.read(cx).error(cx));
+    assert!(
+        error.as_deref().is_some_and(|e| e.contains("was stopped")),
+        "a stopped click handler is reported, not dropped: {error:?}"
     );
     println!("mods_responsive: ok");
     let _ = std::fs::remove_dir_all(&scratch);
