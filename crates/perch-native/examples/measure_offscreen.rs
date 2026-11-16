@@ -19,6 +19,13 @@ mod test_mode;
 const FRAME: Duration = Duration::from_millis(16);
 
 fn main() {
+    // A profiler attaching by pid gets this long before anything is drawn.
+    if let Some(ms) = std::env::var("PERCH_MEASURE_DELAY_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+    }
     // The app is built without `render-test-support`, so its scripts never name their elements;
     // this example gets the feature through dev-dependencies. Match the app unless asked.
     gpui_shell::probe::set_named(std::env::var_os("PERCH_MEASURE_NAMES").is_some());
