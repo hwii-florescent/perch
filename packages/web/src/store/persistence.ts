@@ -5,9 +5,9 @@
  *
  * Every function here is exported (even ones with no consumer outside
  * index.ts) because index.ts's own store body calls them extensively;
- * `navSeedPending` is an exported `let` — index.ts reads its live value
- * after `writeActiveHostStored` (defined here) sets it, which is a correct
- * ES-module live binding, not a snapshot copy.
+ * `navSeedPending` is read when first asked, not when this module loads: the
+ * window's viewer id (`viewer.ts`) is settled after the first imports run, and a
+ * read under an earlier id would see another viewer's storage.
  */
 import type { AgentKind } from "@perch/shared";
 import type { ActiveProject } from "./index";
@@ -42,19 +42,21 @@ export function readActiveHostStored(): string {
  * (usually a local one) would yank the sidebar back to "local" moments after
  * the user switched to a remote host.
  */
-export let navSeedPending = (() => {
-  try {
-    return (
-      readViewerStored(ACTIVE_HOST_STORAGE_KEY) == null &&
-      readViewerStored(ACTIVE_PROJECT_STORAGE_KEY) == null
-    );
-  } catch {
-    return false;
-  }
-})();
+let seedPending: boolean | undefined;
+export const navSeedPending = (): boolean =>
+  (seedPending ??= (() => {
+    try {
+      return (
+        readViewerStored(ACTIVE_HOST_STORAGE_KEY) == null &&
+        readViewerStored(ACTIVE_PROJECT_STORAGE_KEY) == null
+      );
+    } catch {
+      return false;
+    }
+  })());
 
 export function writeActiveHostStored(hostId: string): void {
-  navSeedPending = false;
+  seedPending = false;
   try {
     localStorage.setItem(viewerKey(ACTIVE_HOST_STORAGE_KEY), hostId);
   } catch {

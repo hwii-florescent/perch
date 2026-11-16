@@ -61,6 +61,13 @@ describe("leaving a session for a workspace's start screen", () => {
     expect(useFileTabs.getState().tabs).toEqual([scoped]);
     expect(useFileTabs.getState().active).toBe(fileTabKey(scoped));
   });
+
+  it("deleting the last session shows its newest file though the server still lists the session", () => {
+    usePerchStore.setState({ activeWorkspaceId: "chats", sessionId: "b", sessions: [{ id: "b", workspaceId: "chats" } as never] });
+    usePerchStore.getState().deleteSession("b"); // the list keeps "b" until the server answers
+    expect(usePerchStore.getState().sessionId).toBeNull();
+    expect(useFileTabs.getState().active).toBe(fileTabKey(scoped));
+  });
 });
 
 describe("tabDirectory (the status bar's folder)", () => {
