@@ -2159,11 +2159,30 @@ impl Workspace {
                 .and_then(|s| s.parent_session_id.clone())
         };
         let mut opened = Vec::new();
-        // In the core's order, so a lead opened just now brings its own sub-sessions in.
+        // Each lead's sub-sessions in its workspace strip's order (the sidebar lists them in it),
+        // and only those of the lead's own workspace: a Quickchat or another project's session
+        // never joins the family.
+        let mut strips: HashMap<&str, Vec<String>> = HashMap::new();
+        let mut kids = Vec::new();
         for session in &store.sessions {
-            let Some(lead) = session.parent_session_id.as_deref() else {
+            let Some(lead_id) = session.parent_session_id.as_deref() else {
                 continue;
             };
+            let Some(lead) = store.sessions.iter().find(|s| s.id == lead_id) else {
+                continue;
+            };
+            if !navigation::same_workspace(lead, session) {
+                continue;
+            }
+            let strip = strips
+                .entry(lead_id)
+                .or_insert_with(|| navigation::strip_of_workspace(store, lead));
+            let at = strip.iter().position(|id| *id == session.id);
+            kids.push((at, session));
+        }
+        kids.sort_by_key(|(at, _)| *at);
+        for (_, session) in kids {
+            let lead = session.parent_session_id.as_deref().unwrap_or_default();
             let here = |id: &str| self.tabs.contains(id) || opened.iter().any(|(o, _)| o == id);
             if !here(lead)
                 || here(&session.id)
