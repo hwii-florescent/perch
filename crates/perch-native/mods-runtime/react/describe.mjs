@@ -11,6 +11,8 @@
 //!   `[{ group, style, tokens? }]`, its styles while that ancestor group is under the pointer)
 //! - `{ kind: "text", text, source? }` (`source`: the text before `text-transform`)
 //! - `{ kind: "svg", id, markup, style, ... }` (tinted with the text colour) and `{ kind: "image", markup }` (as drawn)
+//! - `{ kind: "engine", id, engine, key, style }`: a box the host fills with a native element (`data-perch-engine`,
+//!   `data-perch-key`; `gpui.mjs` draws `files.engine(engine, key)` in it)
 //! - `{ kind: "input", id, value, placeholder, checked, input_type, style, ... }` (`value`: what the field holds,
 //!   typed text included; `field_w`: a line field's content width when its content sizes it)
 //! - `break_anywhere` on a node whose text breaks a word too long for its line anywhere (`overflow-wrap`)
@@ -606,6 +608,14 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
   if (element.measured && element.ownerDocument?.measureKey) node.measure = element.ownerDocument.measureKey(element);
 
   const tag = element.tagName;
+  // An engine slot: a native element the host draws in this box by key (`perch-engine`); the source's children,
+  // if any, are not drawn.
+  if (element.props["data-perch-engine"] != null) {
+    node.kind = "engine";
+    node.engine = String(element.props["data-perch-engine"]);
+    node.key = String(element.props["data-perch-key"] ?? "");
+    return node;
+  }
   if (tag === "svg") {
     node.kind = element.props["data-perch-image"] ? "image" : "svg";
     node.markup = svgMarkup(element);
