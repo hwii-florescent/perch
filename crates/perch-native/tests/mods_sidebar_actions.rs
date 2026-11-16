@@ -414,14 +414,18 @@ fn session_menu(rig: &mut Rig) {
     // then charlie, which has none.
     let rows = rig.keys("tab-menu-item");
     assert_eq!(
-        &rows[..5],
+        &rows[..3],
         strings(&[
             "tab-menu-rename",
             "tab-menu-split-right",
-            "tab-menu-split-below",
-            "tab-split-with-alpha",
-            "tab-split-with-charlie"
+            "tab-menu-split-below"
         ])
+    );
+    assert!(rig.record("tab-menu-show-beside").is_some(), "one Show beside row");
+    rig.click("tab-menu-show-beside");
+    assert_eq!(
+        rig.keys("tab-menu-beside-item"),
+        strings(&["tab-split-with-alpha", "tab-split-with-charlie"])
     );
     assert!(
         rows.iter()
@@ -461,7 +465,8 @@ fn session_menu(rig: &mut Rig) {
     // Show beside alpha: bravo's tab opens with alpha beside it (the web's `joinSplit` puts the
     // other tab after the menu's), and bravo has the keyboard.
     rig.right_click("session-button:bravo");
-    rig.click("tab-menu-item:tab-split-with-alpha");
+    rig.click("tab-menu-show-beside");
+    rig.click("tab-menu-beside-item:tab-split-with-alpha");
     assert!(rig.open_screens().is_empty());
     assert_eq!(
         rig.tabs(),
@@ -484,7 +489,8 @@ fn session_menu(rig: &mut Rig) {
     rig.draw();
     assert_eq!(rig.tabs().0, strings(&["alpha"]), "bravo's tab is put away");
     rig.right_click("session-button:charlie");
-    rig.click("tab-menu-item:tab-split-with-bravo");
+    rig.click("tab-menu-show-beside");
+    rig.click("tab-menu-beside-item:tab-split-with-bravo");
     assert_eq!(
         rig.tabs(),
         (

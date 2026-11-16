@@ -518,14 +518,14 @@ fn split_with_session(rig: &mut Rig) {
             "tab-menu-rename",
             "tab-menu-split-right",
             "tab-menu-split-below",
-            "tab-split-with-bravo",
             "session-inbound-accept-alpha",
             "session-inbound-hold-alpha",
             "session-inbound-refuse-alpha",
             "tab-menu-close"
         ]
     );
-    rig.click("tab-menu-item:tab-split-with-bravo");
+    rig.click("tab-menu-show-beside");
+    rig.click("tab-menu-beside-item:tab-split-with-bravo");
     assert!(rig.open_screens().is_empty());
     assert_eq!(
         panes(rig),
@@ -579,7 +579,6 @@ fn tab_menu(rig: &mut Rig) {
             "tab-menu-rename",
             "tab-menu-split-right",
             "tab-menu-split-below",
-            "tab-split-with-alpha",
             "session-inbound-accept-bravo",
             "session-inbound-hold-bravo",
             "session-inbound-refuse-bravo",

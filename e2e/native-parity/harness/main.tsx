@@ -497,9 +497,15 @@ const listed = screen.listed?.(props);
 if (listed && state.steps?.length) await found(listed, "listing");
 for (const step of state.steps ?? []) {
   if (step.type) {
-    const input = (await found<HTMLInputElement>(step.type.selector, "type")) as HTMLInputElement;
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, step.type.text);
-    input.dispatchEvent(new Event("input", { bubbles: true }));
+    // A screen clears its search as it opens (an effect); on a busy machine that can land after the text went in, so
+    // the text goes in again until it stays.
+    for (let tries = 0; tries < 20; tries++) {
+      const input = (await found<HTMLInputElement>(step.type.selector, "type")) as HTMLInputElement;
+      if (input.value === step.type.text) break;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, step.type.text);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      await frames();
+    }
   } else if (step.key) {
     const target = await found(step.key.selector, "key");
     target.dispatchEvent(new KeyboardEvent("keydown", { key: step.key.key, bubbles: true, cancelable: true }));

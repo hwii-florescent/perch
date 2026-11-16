@@ -68,7 +68,8 @@ it.each(["project", "status", "list"])("%s sidebar and horizontal tabs share dir
   expect(sidebar).toContain("Rename tab");
   expect(sidebar).toContain("Close tab");
   expect(sidebar).toContain("Split right with new terminal");
-  expect(sidebar).toContain("Show beside Other chat");
+  expect(sidebar).toContain("Show beside");
+  expect(get("tab-split-with-other").textContent).toBe("Other chat");
   expect(sidebar.join()).not.toContain("Session pane actions");
   expect(switchSession).not.toHaveBeenCalled();
   act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
