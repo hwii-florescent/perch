@@ -27,6 +27,7 @@ import { DOT_GLYPH, sessionDotState } from "../../../../packages/web/src/statusD
 import { isNestedIn, nestUnderLeads } from "../../../../packages/web/src/sidebarOrder.ts";
 import { computeAnchoredPopoverStyle, useDismissOnOutsideClick } from "../../../../packages/web/src/components/popoverPosition.ts";
 import { PageIcon } from "../../../../packages/web/src/components/PageIcon.tsx";
+import { FileAsset as NativeFileAsset } from "./fileAsset.mjs";
 import { FileIcon, GitMarker } from "../../../../packages/web/src/components/fileDecorations.tsx";
 import { assetKind } from "../../../../packages/web/src/components/workspaceFileKind.ts";
 
@@ -400,14 +401,6 @@ export const useWorkspaceTabs = () => useHostSnapshot((perch) => perch.workspace
 // ---- files ----------------------------------------------------------------------------------------------------
 
 export { FileIcon, GitMarker, assetKind };
-// ponytail: a stand-in until the native media viewer lands: a media file shows its name and size (Quick Look replaces
-// `FileAsset`).
-
-export function FileAsset({ metadata }) {
-  return createElement("div", { className: "grid content-center justify-items-center gap-1 p-5 text-[0.72rem] text-subtext-0" },
-    createElement("strong", { className: "text-[0.9rem] text-fg" }, metadata?.name ?? ""),
-    createElement("span", null, `${metadata?.mediaType ?? "file"} · ${metadata?.size ?? 0} bytes`));
-}
 /** The rendered preview of the live draft (`markdown.mjs`), in the web's box. A relative image is a placeholder too:
  * the native window has no confined file route for it yet. */
 export function MarkdownPreview({ path, content }) {
@@ -569,6 +562,8 @@ export function DiffView(props) {
   }, [seq, key]);
   return createElement("div", { "data-perch-engine": "diff", "data-perch-key": key, "data-testid": "git-diff", className: props.className ?? "min-h-0 flex-1" });
 }
+/** The file pane's media viewer (`fileAsset.mjs`), drawn through this copy's host. */
+export function FileAsset(props) { return createElement(NativeFileAsset, { ...props, perch: host() }); }
 
 // ---- the file editor ------------------------------------------------------------------------------------------
 

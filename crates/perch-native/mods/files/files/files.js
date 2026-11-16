@@ -121,26 +121,30 @@ function FileTree({ expanded, selectedPath, cursor, trees, decorations, scroller
     if (!trees[""])
         return null;
     const height = rowHeight();
-    // One box per chunk, always there: those in view hold their rows, the rest only their height. A move fills one box
-    // and empties another, so the rows that stay are not drawn again (in Perch's own runtime a list that gains or loses
-    // a child is described again whole).
-    const chunks = Array.from({ length: Math.ceil(items.length / TREE_CHUNK) }, (_, at) => at * TREE_CHUNK);
-    return (_jsx("div", {
+    // The chunks in view, each a box keyed by its first row, between two spacers that hold the rest's height. A move
+    // adds one chunk and drops another; the chunks that stay keep their boxes, so their rows are not drawn again, and
+    // the list stays a handful of boxes however long the tree is.
+    const chunks = [];
+    for (let first = start; first < end; first += TREE_CHUNK)
+        chunks.push(first);
+    return (_jsxs("div", {
         ref: listRef,
         className: "min-w-0",
         "data-testid": "workspace-file-tree-root",
-        children: chunks.map((first) => {
-            const last = Math.min(items.length, first + TREE_CHUNK);
-            if (first >= end || last <= start)
-                return _jsx("div", {
-                    "aria-hidden": true,
-                    style: { height: (last - first) * height }
-                }, first);
-            return _jsx("div", {
+        children: [
+            _jsx("div", {
+                "aria-hidden": true,
+                style: { height: start * height }
+            }, "before"),
+            chunks.map((first) => _jsx("div", {
                 className: "min-w-0",
-                children: items.slice(first, last).map(row)
-            }, first);
-        })
+                children: items.slice(first, Math.min(end, first + TREE_CHUNK)).map(row)
+            }, first)),
+            _jsx("div", {
+                "aria-hidden": true,
+                style: { height: (items.length - end) * height }
+            }, "after")
+        ]
     }));
     function row(item) {
         const indent = item.level ? { marginLeft: `${item.level * 0.5}rem` } : undefined;

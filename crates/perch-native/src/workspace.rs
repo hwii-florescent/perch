@@ -373,6 +373,11 @@ impl Workspace {
         }
     }
 
+    /// The core `locate` finds now, if it can.
+    pub fn core(&self) -> Option<Core> {
+        self.locate.as_ref()?().ok()
+    }
+
     /// Attach the terminals of opened sessions to the core `locate` finds. Without it the main
     /// area never touches the network.
     pub fn with_core(mut self, locate: impl Fn() -> anyhow::Result<Core> + 'static) -> Self {
@@ -2440,14 +2445,49 @@ impl Workspace {
         }
     }
 
-    /// Back (`-1`) or Forward (`1`) to a tab shown before, passing over sessions gone since.
+    /// The absolute path of `path` (relative, `""` for the root) in a workspace on this computer;
+    /// refused for a remote workspace or a path that leaves the workspace.
+    fn local_entry(
+        &self,
+        workspace: &str,
+        path: &str,
+        cx: &App,
+    ) -> Result<std::path::PathBuf, String> {
+        use std::path::Component;
+        let store = &self.sidebar.read(cx).model().store;
+        let ws = store
+            .workspaces
+            .iter()
+            .find(|w| w.id == workspace)
+            .ok_or_else(|| format!("No workspace {workspace}."))?;
+        if ws.host_id != "local" {
+            return Err("Only a workspace on this computer can be opened here.".into());
+        }
+        let relative = std::path::Path::new(path);
+        if !relative
+            .components()
+            .all(|c| matches!(c, Component::Normal(_)))
+        {
+            return Err("The path must stay inside the workspace.".into());
+        }
+        Ok(std::path::Path::new(&ws.path).join(relative))
+    }
+
+    /// Back (`-1`) or Forward (`1`) to a tab shown before: a session, or a tab still in the strip
+    /// (a file, review, page or browser); tabs closed and sessions gone since are passed over.
     fn step_history(&mut self, by: isize, cx: &mut Context<Self>) -> Result<(), String> {
         let sidebar = self.sidebar.read(cx);
-        let panes = &self.panes;
+        let (panes, tabs) = (&self.panes, &self.tabs);
         let place = self.history.step(by, |id| {
-            panes.contains_key(id) || sidebar.session_to_open(id).is_some()
+            panes.contains_key(id) || tabs.contains(id) || sidebar.session_to_open(id).is_some()
         });
         match place {
+            Some(id) if !self.panes.contains_key(&id) && self.tabs.contains(&id) => {
+                if self.tabs.show(&id) {
+                    self.after_change(cx);
+                }
+                Ok(())
+            }
             Some(id) => self.show_session(&id, cx),
             None => Ok(()),
         }
@@ -3020,6 +3060,14 @@ impl Workspace {
                 };
                 let (workspace, path) = (workspace.to_string(), path.to_string());
                 self.with_files(|store, _| store.extract_archive(&workspace, &path), cx);
+            }
+            "files.openDefault" | "files.reveal" => {
+                let (Some(workspace), Some(path)) = (text("workspaceId"), text("path")) else {
+                    return Err("This command needs {workspaceId, path}.".into());
+                };
+                let full = self.local_entry(workspace, path, cx)?;
+                crate::handoff::open_path(&full, name == "files.reveal")
+                    .map_err(|e| e.to_string())?;
             }
             "tabs.keepOpen" => {
                 if let Some(id) = self.tabs.active().map(str::to_string) {

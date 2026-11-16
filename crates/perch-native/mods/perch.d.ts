@@ -432,6 +432,12 @@ declare module "perch" {
    * `createComment`, `previewBatch`, `sendBatch`, ...) on the window's Git store; settles with its preview,
    * packet or delivery, null for the rest. */
   export function gitDo(action: string, workspaceId: string, ...args: unknown[]): Promise<unknown>;
+  /** `FileAsset`'s view of a file: the workspace's folder on this computer (`root`, null when the workspace is on
+   * another computer or gone) and the file's archive extraction (null before one). */
+  export function mediaFile(workspaceId: string, path: string): {
+    root: string | null;
+    extraction: { state: "idle" | "loading" | "ready" | "error"; destination?: string; error?: string } | null;
+  };
   /** What has the keyboard, and the panes on screen. */
   export function focus(): Focus;
   /** Every session on every computer, as a terminal record. */

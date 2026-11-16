@@ -21,7 +21,7 @@ anyhow = "1"
 # Reads the bundled symbols font's glyph outlines, the version GPUI's text system uses.
 ttf-parser = "0.25"
 # The version GPUI uses, for the frames it draws and the PNG images kitty graphics send.
-image = { version = "0.25", default-features = false, features = ["png", "tiff", "bmp"] }
+image = { version = "0.25", default-features = false, features = ["png", "tiff", "bmp", "jpeg", "gif", "webp", "ico"] }
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -41,11 +41,14 @@ usvg = { version = "0.46", default-features = false }
 url = "2"
 
 # Browser pages: a WebKit child view (the version the Tauri app locks), with the AppKit calls wry does not make.
+# Quick Look: the Foundation and AppKit versions GPUI's macOS platform already builds.
 [target.'cfg(target_os = "macos")'.dependencies]
 wry = { version = "0.55", default-features = false, features = ["os-webview"] }
 objc2 = "0.6"
 block2 = "0.6"
 raw-window-handle = "0.6"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSURL", "NSObject"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSResponder"] }
 
 [dev-dependencies]
 libc = "0.2"
@@ -242,4 +245,9 @@ harness = false
 [[test]]
 name = "git_store_window"
 path = "tests/git_store_window.rs"
+harness = false
+
+[[test]]
+name = "files_media"
+path = "tests/files_media.rs"
 harness = false
