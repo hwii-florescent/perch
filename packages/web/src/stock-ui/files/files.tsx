@@ -680,7 +680,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
                 </div>
               )}
               {markdownPreview && <MarkdownPreview workspaceId={workspaceId} path={selectedPath} content={document.content} local={workspace.hostId === "local"} />}
-              <div className={cn("relative flex min-h-[12rem] min-w-0 flex-1 flex-col overflow-hidden", markdownPreview && "hidden")}>
+              <div className={cn("relative flex min-h-[12rem] min-w-0 flex-1 flex-col overflow-hidden", markdownPreview && "hidden")} data-testid="workspace-file-editor-area">
                 <Suspense fallback={<div className={PREVIEW_STATE} role="status">Loading editor…</div>}>
                   <CodeEditor
                     key={`${selectedPath}\0${document.reloadEpoch ?? 0}`}

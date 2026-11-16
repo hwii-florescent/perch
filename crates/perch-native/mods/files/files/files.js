@@ -927,6 +927,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
                                         local: workspace.hostId === "local"
                                     }), _jsx("div", {
                                         className: cn("relative flex min-h-[12rem] min-w-0 flex-1 flex-col overflow-hidden", markdownPreview && "hidden"),
+                                        "data-testid": "workspace-file-editor-area",
                                         children: _jsx(Suspense, {
                                             fallback: _jsx("div", {
                                                 className: PREVIEW_STATE,

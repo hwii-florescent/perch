@@ -446,6 +446,10 @@ impl Perch {
                 let rest: Vec<Value> = (2..args.len())
                     .filter_map(|i| args.get(i).map(from_host))
                     .collect();
+                // A screen drawn with no window (the parity capture) has no store to act on.
+                if runner.0.attached.borrow().is_none() {
+                    return Ok(HostValue::Null);
+                }
                 runner.in_workspace(move |ws, cx| {
                     let text = |i: usize| {
                         rest.get(i)
