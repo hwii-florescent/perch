@@ -6,10 +6,10 @@ import { sdkSurface } from "./sdk";
 describe("@perch/sdk", () => {
   // The public surface is versioned: adding or removing an export means changing this list and SDK_VERSION together
   // (a removal or an incompatible change is a new major), and docs/MOD-SDK.md with them.
-  it("exports exactly the 1.10 surface", async () => {
-    expect(SDK_VERSION).toBe("1.10.2");
+  it("exports exactly the 1.11 surface", async () => {
+    expect(SDK_VERSION).toBe("1.11.0");
     expect(Object.keys(sdkSurface()).sort()).toEqual([
-      "AgentIcon", "BrowserPage", "Chevron", "CloseIcon", "CodeEditor", "ConfirmDialog", "CopyButton", "Dialog",
+      "AgentIcon", "BrowserPage", "Chevron", "CloseIcon", "CodeEditor", "ConfirmDialog", "CopyButton", "Dialog", "DiffView",
       "EllipsisIcon", "FileAsset", "FileEntryMenu", "FileIcon", "FolderBrowser", "GearIcon", "GitMarker", "HostStateDot", "InstructionsDialog",
       "Layout", "Markdown", "MarkdownPreview", "MemoryDialog", "ModeSwitch", "NewFilePrompt", "NewSessionMenu",
       "PageIcon", "PlusIcon", "QrCode", "Select", "SessionDot", "SessionMenu", "SettingRow", "SettingsGroup", "SlashPopover", "Slot", "Switch",

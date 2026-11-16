@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceGitReview, type WorkspaceGitReviewProps } from "../stock-ui/review/review";
 import { chooseDropdown } from "./ui/selectTesting";
 import { resetResourceStateForTest } from "../resourceState";
+import { EMPTY_GIT_REVIEW_STATE, useWorkspaceGitReviewStore } from "../gitReviewStore";
 import type {
   GitDiffSnapshot,
   GitStatusSnapshot,
@@ -152,6 +153,13 @@ async function render(nextProps: WorkspaceGitReviewProps): Promise<void> {
     document.body.appendChild(host);
   }
   if (!root) root = createRoot(host);
+  // The screen's props and its `DiffView` read one store in the app (`useGitReview`); here the props are the truth.
+  useWorkspaceGitReviewStore.setState((state) => ({
+    workspaces: {
+      ...state.workspaces,
+      [nextProps.workspaceId]: { ...EMPTY_GIT_REVIEW_STATE, diff: nextProps.diff ?? null, diffState: nextProps.diffState, comments: nextProps.comments },
+    },
+  }));
   await act(async () => {
     root?.render(<WorkspaceGitReview {...nextProps} />);
   });

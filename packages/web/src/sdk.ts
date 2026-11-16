@@ -17,6 +17,7 @@ import { TabSplitMenu } from "./components/TabSplitMenu";
 import { segment } from "./components/ui/segment";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { DirectoryBrowser } from "./components/DirectoryBrowser";
+import { DiffView } from "./components/GitDiffView";
 import { HostStateDot } from "./components/HostStateDot";
 import { InstructionsDialog } from "./components/InstructionsDialog";
 import { MemoryDialog } from "./components/MemoryDialog";
@@ -381,6 +382,7 @@ export function useGitReview(workspaceId: string): Sdk.GitReview {
 }
 
 export { FileIcon, GitMarker, newId, useResourceState };
+export { DiffView };
 
 // ---------------------------------------------------------------------------------------------------------------
 // 1.5: files (`stock:files`). Listings, drafts, versions, saves and conflicts are `filesystemStore`'s; CodeMirror,
@@ -614,7 +616,7 @@ export function sdkSurface(): typeof Sdk {
   useHosts, useNavigation, nestSessions, useSessionFolders, useAddProject, useAddProjectRequest, pickFolder,
   SessionDot, HostStateDot, SessionMenu, WorktreeMenu, InstructionsDialog, MemoryDialog, FolderBrowser: DirectoryBrowser, Dialog, ConfirmDialog, Select,
   menuItemClass, rowActionClass, buttonClass: button, beginReorderDrag,
-  useResourceState, newId, FileIcon, GitMarker, useGitReview,
+  useResourceState, newId, FileIcon, GitMarker, useGitReview, DiffView,
   terminals: terminalRecords, useTerminals, readTerminal, fetchTerminal, sendToTerminal, layoutTree, focus: focusInfo, useModData,
   useNotifications, iconButton: ICON_BUTTON, useAgentChoices, shortcutFor, menuDividerClass: menuDivider,
   useWorkspaceFiles, CodeEditor, FileAsset: WorkspaceFileAsset, MarkdownPreview: WorkspaceMarkdownPreview, FileEntryMenu, Chevron, assetKind, shortcutLabel,
