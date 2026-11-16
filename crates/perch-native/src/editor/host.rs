@@ -13,7 +13,7 @@
 //!
 //! No keys are bound here: save, find and go-to-line belong to the window's keymap.
 
-use super::{highlight, theme};
+use super::{highlight, keys, theme};
 use crate::mods::ModHost;
 use gpui::{
     prelude::*, AnyElement, App, Entity, Focusable as _, MouseButton, SharedString, Subscription,
@@ -40,6 +40,8 @@ struct Doc {
     owner: String,
     events: Vec<HostValue>,
     caret: (usize, usize),
+    /// Pairing and inserted closers ([`keys`]).
+    typing: Rc<RefCell<keys::Typing>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -178,6 +180,10 @@ impl Editors {
                     owner: owner.to_string(),
                     events: Vec::new(),
                     caret: (1, 1),
+                    typing: Rc::new(RefCell::new(keys::Typing::new(keys::pairs_for(
+                        path,
+                        value.len(),
+                    )))),
                     _subscriptions: subscriptions,
                 },
             );
@@ -539,7 +545,8 @@ impl Editors {
         let typography = &gpui_base::Theme::global(cx).tokens.typography;
         let (family, size) = (typography.mono.clone(), typography.mono_md.size);
         let focus = state.clone();
-        InputBase::new(SharedString::from(format!("perch-editor-{key}")))
+        let (editors, typed_key) = (self.clone(), key.to_string());
+        let editor = InputBase::new(SharedString::from(format!("perch-editor-{key}")))
             .flex()
             .items_start()
             .size_full()
@@ -549,8 +556,75 @@ impl Editors {
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                 focus.update(cx, |state, cx| state.focus(window, cx));
             })
-            .child(Editor::new(&state))
+            .child(Editor::new(&state));
+        // Perch's keys go first: the editor's shortcuts and typing rules ([`keys`]).
+        gpui::div()
+            .size_full()
+            .min_h_0()
+            .capture_key_down(move |event, window, cx| {
+                if editors.key_down(&typed_key, &event.keystroke, window, cx) {
+                    cx.stop_propagation();
+                }
+            })
+            .child(editor)
             .into_any_element()
+    }
+
+    /// A key on `key`'s editor before the engine has it: an editor shortcut (resolved from the person's bindings on
+    /// every key), else a typing rule. True when it was handled here.
+    pub fn key_down(
+        &self,
+        key: &str,
+        keystroke: &gpui::Keystroke,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> bool {
+        let Some((state, typing)) = self
+            .0
+            .borrow()
+            .docs
+            .get(key)
+            .map(|d| (d.state.clone(), d.typing.clone()))
+        else {
+            return false;
+        };
+        let composing = state.update(cx, |s, cx| {
+            gpui::EntityInputHandler::marked_text_range(s, window, cx).is_some()
+        });
+        let shortcut = (!composing)
+            .then(|| cx.try_global::<crate::mods::WindowMods>())
+            .flatten()
+            .and_then(|mods| mods.perch.keymap().editor_shortcut(keystroke));
+        if let Some(id) = shortcut {
+            self.run_shortcut(key, &state, id, cx);
+            return true;
+        }
+        let handled = keys::type_key(&state, &mut typing.borrow_mut(), keystroke, window, cx);
+        handled
+    }
+
+    /// Runs editor command `id` on `key`'s editor, as the web's `runEditorShortcut`: a find step with Find closed
+    /// does nothing but is still the editor's.
+    fn run_shortcut(&self, key: &str, state: &Entity<EditorState>, id: &str, cx: &mut App) {
+        match id {
+            "editor.save" => self.emit(key, "save", cx),
+            "editor.gotoLine" => self.emit(key, "goto", cx),
+            "editor.find" => state.update(cx, |s, cx| s.open_search(false, cx)),
+            "editor.replace" | "editor.replaceAlt" => {
+                state.update(cx, |s, cx| s.open_search(true, cx))
+            }
+            "editor.findNext" | "editor.findNextAlt" => state.update(cx, |s, cx| {
+                if s.search_session().open {
+                    s.next_search_match(cx);
+                }
+            }),
+            "editor.findPrevious" | "editor.findPreviousAlt" => state.update(cx, |s, cx| {
+                if s.search_session().open {
+                    s.previous_search_match(cx);
+                }
+            }),
+            _ => {}
+        }
     }
 }
 
@@ -576,7 +650,8 @@ fn create(path: &str, value: &str, window: &mut Window, cx: &mut App) -> Entity<
             .language(name)
             .line_number(true)
             .soft_wrap(false)
-            .folding(false);
+            .folding(false)
+            .auto_close(false);
         state.set_tab_size(
             TabSize {
                 tab_size: 2,
@@ -597,11 +672,13 @@ fn create(path: &str, value: &str, window: &mut Window, cx: &mut App) -> Entity<
     state
 }
 
-/// Replaces the text. `external` (a store value): no undo entry and no change event, the caret and scroll kept
-/// where they were (clamped). Otherwise one undoable edit, heard as a change.
+/// Replaces the text. `external` (a store value): the smallest single change from the editor's text to `text`, applied
+/// without an undo entry or a change event, the undo history mapped through it and the caret kept in place
+/// (`apply_external`, as the web's `editorDiff.ts` applies a store echo). Otherwise one undoable edit, heard as a
+/// change.
 ///
-/// ponytail: an external value clears the undo history, because the engine cannot map history through a change it
-/// did not record (the web maps it, `editorDiff.ts`). External values are rare (reload, conflict, recovery).
+/// ponytail: one change spanning every difference, where the web splits it by lines (`externalChanges`), so an outside
+/// edit at both ends of the file drops the history between them. Upgrade path: a line diff, applied from the end.
 fn set_value(
     state: &Entity<EditorState>,
     text: &str,
@@ -610,28 +687,38 @@ fn set_value(
     cx: &mut App,
 ) {
     state.update(cx, |state, cx| {
-        if state.value() == text {
+        let old = state.value();
+        if old.as_ref() == text {
             return;
         }
         if !external {
             state.replace_all(text.to_string(), window, cx);
             return;
         }
-        let selected = state.selected_range();
-        let scroll = state.scroll_offset();
-        state.set_value(text.to_string(), window, cx);
-        let len = state.text().len();
-        let clamp = |at: usize| {
-            let mut at = at.min(len);
-            while !state.text().is_char_boundary(at) {
-                at -= 1;
-            }
-            at
-        };
-        let range = clamp(selected.start)..clamp(selected.end);
-        state.set_selected_range(range, cx);
-        state.set_scroll_offset(scroll, cx);
+        let (range, insert) = minimal_change(&old, text);
+        state.apply_external(range, insert, window, cx);
     });
+}
+
+/// The smallest single change turning `old` into `next`: the byte range of `old` to replace and what replaces it,
+/// on character boundaries (common prefix and suffix kept).
+fn minimal_change<'a>(old: &str, next: &'a str) -> (std::ops::Range<usize>, &'a str) {
+    let prefix = old
+        .char_indices()
+        .zip(next.chars())
+        .find(|((_, a), b)| a != b)
+        .map_or(old.len().min(next.len()), |((at, _), _)| at);
+    let suffix = old[prefix..]
+        .chars()
+        .rev()
+        .zip(next[prefix..].chars().rev())
+        .take_while(|(a, b)| a == b)
+        .map(|(a, _)| a.len_utf8())
+        .sum::<usize>();
+    (
+        prefix..old.len() - suffix,
+        &next[prefix..next.len() - suffix],
+    )
 }
 
 /// The caret as 1-based line and column.
@@ -669,6 +756,15 @@ fn object<const N: usize>(fields: [(&str, HostValue); N]) -> HostValue {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn minimal_change_keeps_the_common_ends() {
+        assert_eq!(super::minimal_change("abcdef", "abXdef"), (2..3, "X"));
+        assert_eq!(super::minimal_change("abc", "abc!"), (3..3, "!"));
+        assert_eq!(super::minimal_change("aaa", "aa"), (2..3, ""));
+        assert_eq!(super::minimal_change("é1", "é2"), (2..3, "2"));
+        assert_eq!(super::minimal_change("", "x"), (0..0, "x"));
+    }
+
     #[test]
     fn declarations_and_exports_agree() {
         super::Editors::default()
