@@ -333,6 +333,13 @@ impl Perch {
         if let Some(model) = model {
             self.set_model(model);
         }
+        // A file, review or browser tab on screen names its workspace in its id: the one the
+        // strip's + (New browser, New file) and the start page work in.
+        let tab_workspace = window
+            .active
+            .as_deref()
+            .and_then(|id| id.split_once('\n'))
+            .map(|(workspace, _)| workspace.to_string());
         self.set_window(window);
         let changed = {
             let data = self.0.data.borrow();
@@ -348,6 +355,14 @@ impl Perch {
             data.session_id = open.map(|o| o.1);
             drop(data);
             self.bump(VIEW);
+        }
+        if let Some(workspace) = tab_workspace {
+            let mut data = self.0.data.borrow_mut();
+            if data.workspace_id.as_ref() != Some(&workspace) {
+                data.workspace_id = Some(workspace);
+                drop(data);
+                self.bump(VIEW);
+            }
         }
         self.flush(cx);
     }
