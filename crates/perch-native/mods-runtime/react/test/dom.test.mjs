@@ -259,3 +259,27 @@ test("a content-sized box moved by a percentage of itself is moved by its laid-o
     handle.unmount();
   }
 });
+
+test("letter spacing widens a run by room after it; a negative one never becomes negative padding", async () => {
+  const { runtime } = await loadSidebar();
+  const { createElement: h } = await import("react");
+  const perch = { isMac: true, render() {}, error: (e) => { throw e; } };
+  function Probe() {
+    return h("div", null,
+      h("span", { "data-testid": "wide", style: { letterSpacing: "1px" } }, "Quickchat"),
+      h("span", { "data-testid": "tight", style: { letterSpacing: "-0.5px" } }, "Quickchat"));
+  }
+  const handle = runtime.mount(perch, Probe, { container: { width: 300, height: 100 } });
+  try {
+    await settle();
+    const node = (id) => {
+      const walk = (n) => (n.meta?.attrs?.["data-testid"] === id ? n : (n.children ?? []).map(walk).find(Boolean));
+      return walk(handle.description.root);
+    };
+    const pads = (n) => [n.style?.pr, ...(n.children ?? []).flatMap(pads)].filter((v) => v !== undefined);
+    assert.deepEqual(pads(node("wide")), [9], "1px after each of 9 letters");
+    assert.ok(pads(node("tight")).every((pr) => pr >= 0), `no negative padding: ${pads(node("tight"))}`);
+  } finally {
+    handle.unmount();
+  }
+});

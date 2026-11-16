@@ -9455,7 +9455,7 @@ function Yd(a, l) {
     const d = s[o];
     switch (o) {
       case "letter-spacing":
-        d !== "normal" && d?.px !== 0 && l("approximated", o, d?.px !== void 0 ? `${Math.round(d.px * 1e3) / 1e3}px` : d, i, "the run is as wide as with the spacing (room after it), the letters are not spread");
+        d !== "normal" && d?.px !== 0 && l("approximated", o, d?.px !== void 0 ? `${Math.round(d.px * 1e3) / 1e3}px` : d, i, d?.px < 0 ? "the run keeps its untracked width, the letters are not drawn closer" : "the run is as wide as with the spacing (room after it), the letters are not spread");
         break;
       case "font-variant-numeric":
         d !== "normal" && Tf(d) === null && l("unsupported", o, d, i);
@@ -9618,7 +9618,7 @@ function Mf(a, l, s, o, i = "") {
     w("approximated", "display", `${f.values.display} with inline content`, "(inline formatting)", X ? "a column of its children" : "a row on the text baseline");
   }
   const p = f.values["letter-spacing"]?.px;
-  if (p)
+  if (p > 0)
     for (let h = 0; h < O.length; h++) {
       const v = O[h];
       if (v.kind !== "text") continue;

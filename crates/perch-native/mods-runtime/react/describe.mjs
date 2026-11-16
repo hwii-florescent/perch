@@ -447,7 +447,7 @@ function reportDeclarations(computed, report) {
     const value = v[prop];
     switch (prop) {
       case "letter-spacing":
-        if (value !== "normal" && !(value?.px === 0)) report("approximated", prop, value?.px !== undefined ? `${Math.round(value.px * 1000) / 1000}px` : value, source, "the run is as wide as with the spacing (room after it), the letters are not spread");
+        if (value !== "normal" && !(value?.px === 0)) report("approximated", prop, value?.px !== undefined ? `${Math.round(value.px * 1000) / 1000}px` : value, source, value?.px < 0 ? "the run keeps its untracked width, the letters are not drawn closer" : "the run is as wide as with the spacing (room after it), the letters are not spread");
         break;
       case "font-variant-numeric":
         if (value !== "normal" && numericFeatures(value) === null) report("unsupported", prop, value, source);
@@ -676,8 +676,10 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
   // after each character as room after the run, so the run's box is as wide as the page's (the letters are not
   // spread). A row of single characters with gaps spreads them, but every character's box snaps to the device pixel
   // grid and the run comes out 2.7 to 5.8 px wider than the page's.
+  // Negative spacing (`tracking-[-0.02em]`) has no room to give back: the run keeps its untracked width, a few pixels
+  // wider than the page's, rather than a negative padding that leaves its last glyph outside a clipping box.
   const spacing = computed.values["letter-spacing"]?.px;
-  if (spacing) {
+  if (spacing > 0) {
     for (let i = 0; i < kids.length; i++) {
       const run = kids[i];
       if (run.kind !== "text") continue;
