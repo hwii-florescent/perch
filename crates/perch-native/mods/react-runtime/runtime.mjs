@@ -15279,11 +15279,12 @@ function ey({ onGo: n, onClose: l }) {
     Number.isFinite(m) ? n(m, Number.isFinite(f) ? f : 1) : l();
   };
   return lt.createElement(
-    "form",
-    { className: "flex shrink-0 items-center gap-2 border-b border-border px-3 py-1 text-[0.75rem] text-subtext-0", onSubmit: o, "data-testid": "editor-goto" },
+    "div",
+    { className: "flex shrink-0 items-center gap-2 border-b border-border px-3 py-1 text-[0.75rem] text-subtext-0", "data-testid": "editor-goto" },
     lt.createElement("label", { htmlFor: "perch-editor-goto" }, "Go to line"),
     lt.createElement("input", {
       id: "perch-editor-goto",
+      "data-testid": "editor-goto-line",
       autoFocus: !0,
       value: s,
       className: "min-w-0 flex-1 rounded border border-border bg-transparent px-1 text-text",
@@ -15292,7 +15293,7 @@ function ey({ onGo: n, onClose: l }) {
         d.key === "Escape" ? (d.preventDefault(), l()) : d.key === "Enter" && o(d);
       }
     }),
-    lt.createElement("button", { type: "submit", className: ks }, "OK")
+    lt.createElement("button", { type: "button", className: ks, onClick: o }, "OK")
   );
 }
 function ny({ value: n, onChange: l, onSave: s, onCaret: i, readOnly: o, wrap: d, label: m, path: f, docKey: p, onAskAgent: y, ref: E }) {

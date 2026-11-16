@@ -460,14 +460,14 @@ function GotoLine({ onGo, onClose }) {
     if (Number.isFinite(line)) onGo(line, Number.isFinite(col) ? col : 1);
     else onClose();
   };
-  return createElement("form", { className: "flex shrink-0 items-center gap-2 border-b border-border px-3 py-1 text-[0.75rem] text-subtext-0", onSubmit: go, "data-testid": "editor-goto" },
+  return createElement("div", { className: "flex shrink-0 items-center gap-2 border-b border-border px-3 py-1 text-[0.75rem] text-subtext-0", "data-testid": "editor-goto" },
     createElement("label", { htmlFor: "perch-editor-goto" }, "Go to line"),
     createElement("input", {
-      id: "perch-editor-goto", autoFocus: true, value: text, className: "min-w-0 flex-1 rounded border border-border bg-transparent px-1 text-text",
+      id: "perch-editor-goto", "data-testid": "editor-goto-line", autoFocus: true, value: text, className: "min-w-0 flex-1 rounded border border-border bg-transparent px-1 text-text",
       onChange: (event) => setText(event.target.value),
       onKeyDown: (event) => { if (event.key === "Escape") { event.preventDefault(); onClose(); } else if (event.key === "Enter") go(event); },
     }),
-    createElement("button", { type: "submit", className: GHOST_BUTTON }, "OK"));
+    createElement("button", { type: "button", className: GHOST_BUTTON, onClick: go }, "OK"));
 }
 
 /**

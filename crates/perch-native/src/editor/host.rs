@@ -52,6 +52,8 @@ struct Shared {
     parked: VecDeque<String>,
     hosts: Vec<ModHost>,
     refresh_queued: HashSet<String>,
+    /// Hands keys to [`Editors::key_down`] before GPUI resolves bindings (installed with the first editor).
+    keys: Option<Subscription>,
 }
 
 /// Every editor of one app, by document key. Cheap to clone.
@@ -102,6 +104,13 @@ impl Editors {
     ) {
         if let Some(state) = self.state(key) {
             set_value(&state, text, external, window, cx);
+        }
+    }
+
+    /// Turns bracket and quote pairing on or off for `key` (Perch's rules; the engine's own pairing stays off).
+    pub fn set_auto_close(&self, key: &str, on: bool) {
+        if let Some(doc) = self.0.borrow().docs.get(key) {
+            doc.typing.borrow_mut().off = !on;
         }
     }
 
@@ -188,6 +197,7 @@ impl Editors {
                 },
             );
         }
+        self.intercept_keys(cx);
         let state = self.state(key).expect("just opened");
         state.update(cx, |state, cx| {
             if let Some(on) = flag("readonly") {
@@ -196,10 +206,10 @@ impl Editors {
             if let Some(on) = flag("wrap") {
                 state.set_soft_wrap(on, window, cx);
             }
-            if let Some(on) = flag("autoClose") {
-                state.set_auto_close(on, window, cx);
-            }
         });
+        if let Some(on) = flag("autoClose") {
+            self.set_auto_close(key, on);
+        }
         Ok(object([("restored", restored.into())]))
     }
 
@@ -418,12 +428,8 @@ impl Editors {
             .function("setAutoClose", {
                 let editors = e();
                 move |args| {
-                    let on = args.boolean(1)?;
-                    editors
-                        .with(&key(args)?, |s, w, cx| {
-                            s.update(cx, |s, cx| s.set_auto_close(on, w, cx))
-                        })
-                        .map(null)
+                    editors.set_auto_close(&key(args)?, args.boolean(1)?);
+                    Ok(HostValue::Null)
                 }
             })
             .function("focus", {
@@ -545,7 +551,6 @@ impl Editors {
         let typography = &gpui_base::Theme::global(cx).tokens.typography;
         let (family, size) = (typography.mono.clone(), typography.mono_md.size);
         let focus = state.clone();
-        let (editors, typed_key) = (self.clone(), key.to_string());
         let editor = InputBase::new(SharedString::from(format!("perch-editor-{key}")))
             .flex()
             .items_start()
@@ -557,17 +562,35 @@ impl Editors {
                 focus.update(cx, |state, cx| state.focus(window, cx));
             })
             .child(Editor::new(&state));
-        // Perch's keys go first: the editor's shortcuts and typing rules ([`keys`]).
-        gpui::div()
-            .size_full()
-            .min_h_0()
-            .capture_key_down(move |event, window, cx| {
-                if editors.key_down(&typed_key, &event.keystroke, window, cx) {
+        editor.into_any_element()
+    }
+
+    /// Perch's keys go first: a keystroke interceptor gives the focused editor's shortcuts and typing rules
+    /// ([`keys`]) every key before GPUI resolves bindings, since the engine binds Backspace, Enter and its own Find
+    /// and a key-down listener would hear those only after them.
+    fn intercept_keys(&self, cx: &mut App) {
+        if self.0.borrow().keys.is_some() {
+            return;
+        }
+        // Weak: the subscription lives in what it points at.
+        let weak = Rc::downgrade(&self.0);
+        let keys = cx.intercept_keystrokes(move |event, window, cx| {
+            let Some(shared) = weak.upgrade() else { return };
+            let editors = Editors(shared);
+            let focused = editors
+                .0
+                .borrow()
+                .docs
+                .iter()
+                .find(|(_, d)| d.state.focus_handle(cx).is_focused(window))
+                .map(|(k, _)| k.clone());
+            if let Some(key) = focused {
+                if editors.key_down(&key, &event.keystroke, window, cx) {
                     cx.stop_propagation();
                 }
-            })
-            .child(editor)
-            .into_any_element()
+            }
+        });
+        self.0.borrow_mut().keys = Some(keys);
     }
 
     /// A key on `key`'s editor before the engine has it: an editor shortcut (resolved from the person's bindings on
@@ -597,6 +620,12 @@ impl Editors {
             .and_then(|mods| mods.perch.keymap().editor_shortcut(keystroke));
         if let Some(id) = shortcut {
             self.run_shortcut(key, &state, id, cx);
+            return true;
+        }
+        // Escape closes Find, as CodeMirror's panel does; otherwise it is the engine's (and then the screen's).
+        let plain = !keystroke.modifiers.modified();
+        if plain && keystroke.key == "escape" && state.read(cx).search_session().open {
+            state.update(cx, |s, cx| s.close_search(cx));
             return true;
         }
         let handled = keys::type_key(&state, &mut typing.borrow_mut(), keystroke, window, cx);

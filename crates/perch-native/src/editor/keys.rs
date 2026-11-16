@@ -47,6 +47,8 @@ pub fn pairs_for(path: &str, len: usize) -> &'static [(char, char)] {
 pub struct Typing {
     pairs: &'static [(char, char)],
     closers: Vec<usize>,
+    /// Whether pairing is off (`setAutoClose(false)`): no bracket or quote rule runs.
+    pub off: bool,
     /// The text's length and the caret when the last key was seen, to follow the edit that key made.
     seen: Option<(usize, usize)>,
 }
@@ -116,6 +118,9 @@ fn rule(
     selected: Range<usize>,
     key: &str,
 ) -> Option<(Edit, Option<usize>)> {
+    if typing.off && key != "}" {
+        return None;
+    }
     let caret = selected.end;
     let next = text[caret..].chars().next();
     let prev = text[..selected.start].chars().next_back();
