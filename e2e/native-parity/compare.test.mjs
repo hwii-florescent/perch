@@ -176,3 +176,34 @@ test("pixelDiff counts what differs and the cli writes the side-by-side image an
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("accepted failures: an unlisted failure fails, a listed one is accepted, a listed state that passes fails", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "parity-accepted-"));
+  try {
+    const web = synthetic();
+    const moved = clone(web);
+    find(moved, "row", "a").box.y += 3;
+    for (const [name, doc] of [["web", web], ["same", web], ["moved", moved]]) fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(doc));
+    const list = (states) => { const file = path.join(dir, `accepted-${states.length}.json`); fs.writeFileSync(file, JSON.stringify({ accepted: states.map((state) => ({ state, reason: "known" })) })); return file; };
+    const run = (native, accepted) => spawnSync(process.execPath, [path.join(here, "compare.mjs"), "--web", path.join(dir, "web.json"), "--native", path.join(dir, `${native}.json`), "--out", path.join(dir, "out"), "--accepted", accepted], { encoding: "utf8" });
+
+    const unlisted = run("moved", list([]));
+    assert.equal(unlisted.status, 1, unlisted.stdout);
+    assert.match(unlisted.stdout, /Failing and not accepted: demo\/one\/dark/);
+
+    const listed = run("moved", list(["demo/one/dark"]));
+    assert.equal(listed.status, 0, listed.stdout);
+    assert.match(listed.stdout, /FAIL \(accepted: known\)/);
+
+    const nowPassing = run("same", list(["demo/one/dark"]));
+    assert.equal(nowPassing.status, 1, nowPassing.stdout);
+    assert.match(nowPassing.stdout, /now passing \(take them off the accepted list\): demo\/one\/dark/);
+
+    // A listed state this run did not compare is no reason to fail.
+    assert.equal(run("same", list(["demo/other/dark"])).status, 0);
+    fs.writeFileSync(path.join(dir, "bad.json"), JSON.stringify({ accepted: [{ state: "demo/one/dark" }] }));
+    assert.equal(run("same", path.join(dir, "bad.json")).status, 2);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
