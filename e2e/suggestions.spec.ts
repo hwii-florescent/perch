@@ -96,7 +96,7 @@ test("a suggested task is started by the person's click, the child's message is 
       "Use the shell and no other tools. Run exactly this one command, quoted as written, and nothing else: " +
       `perch suggest --agent claude --model ${CHEAP_CLAUDE_MODEL} --task 'Run the shell command perch send ${lead} ${marker} and then stop. Use no other tools.' ` +
       "The text inside the quotes is a task for the person to start later: you only suggest it, never carry it out yourself (a haiku that ran it would fail with 'you cannot message yourself'). " +
-      "Then reply with the one word suggested and nothing else. Later, if a message headed Perch message or Perch status arrives, reply with the one word noted and run no tools.",
+      "Then reply with the one word suggested and nothing else. Later, if a message headed Perch message or Sub-session reports arrives, reply with the one word noted and run no tools.",
     );
     const card = ui.getByTestId("native-cli-suggestion-card");
     await expect(card).toBeVisible({ timeout: 120_000 });

@@ -84,8 +84,52 @@ pub(super) fn reconcile(app: &AppState, row: &SubSessionRow) -> SubState {
         .db
         .move_sub_session(&row.child_session_id, &[row.state], settled)
     {
-        Ok(_) => settled,
+        Ok(moved) => {
+            // A stop that was unknown is now confirmed: the child closes like any confirmed stop.
+            if moved && settled == SubState::Stopped {
+                close_stopped(app, &key);
+            }
+            settled
+        }
         Err(_) => row.state,
+    }
+}
+
+/// A confirmed-stopped child closes in every window (`session::close_stopped_child`). If that
+/// cannot finish, the stop still stands: its runtime record is kept for the next start to close.
+fn close_stopped(app: &AppState, key: &AgentKey) {
+    if let Err(error) = super::session::close_stopped_child(app, &key.session_id) {
+        tracing::warn!(%error, "a stopped sub-session could not be closed yet");
+        if let Err(error) = persist_agent_runtime(app, key) {
+            tracing::warn!(%error, "could not checkpoint a stopped sub-session");
+        }
+        notify_session_updated(app, &key.session_id);
+    }
+}
+
+/// On start: close every confirmed-stopped child that still has a runtime record or a shell, as
+/// [`close_stopped`] would have when it stopped. Nothing else is touched.
+pub(super) fn close_stopped_children(app: &AppState) {
+    let children = match app.db.stopped_children() {
+        Ok(children) => children,
+        Err(error) => {
+            tracing::warn!(%error, "could not read stopped sub-sessions");
+            return;
+        }
+    };
+    let records = app.agent_runtime.lifecycle().list();
+    for child in children {
+        let has_record = records.iter().any(|record| record.key.session_id == child);
+        let has_shell = app
+            .workspace_terminals
+            .list(&child)
+            .is_ok_and(|shells| !shells.is_empty());
+        if !(has_record || has_shell) {
+            continue;
+        }
+        if let Err(error) = super::session::close_stopped_child(app, &child) {
+            tracing::warn!(%error, "a stopped sub-session could not be closed yet");
+        }
     }
 }
 
@@ -93,6 +137,8 @@ pub(super) struct SpawnRequest {
     pub agent: String,
     pub model: Option<String>,
     pub task: String,
+    /// `--name`; without one the child is named from its task (`sub_sessions::session_name`).
+    pub name: Option<String>,
     pub key: String,
     pub worktree: bool,
     /// Minutes of silence before `perch list` marks the child quiet; `None` = the default.
@@ -129,10 +175,19 @@ impl SpawnRequest {
             agent: agent.to_string(),
             model,
             task,
+            name: body["name"].as_str().map(str::to_string),
             key,
             worktree: body["worktree"].as_bool().unwrap_or(false),
             quiet_after,
         })
+    }
+}
+
+/// Name a new child after its work (`sub_sessions::session_name`) through the auto-title path, so the
+/// sidebar, its tab and `perch list` show it and a later rename still wins.
+fn name_child(db: &HistoryDb, child: &str, name: Option<&str>, task: &str) {
+    if let Err(error) = db.set_cli_title(child, &sub_sessions::session_name(name, task)) {
+        tracing::warn!(%error, "could not name a sub-session");
     }
 }
 
@@ -227,6 +282,12 @@ pub(super) async fn start(
         }
         Reserved::New(row) => row,
     };
+    name_child(
+        &app.db,
+        &row.child_session_id,
+        request.name.as_deref(),
+        &request.task,
+    );
     if let Some(minutes) = request.quiet_after {
         if let Err(error) = app.db.set_quiet_after(&row.child_session_id, minutes) {
             tracing::warn!(%error, "could not keep a sub-session's quiet threshold");
@@ -499,10 +560,9 @@ fn member_json(
 ) -> Value {
     let title = app
         .db
-        .list_sessions()
+        .session_title(session_id)
         .ok()
-        .and_then(|rows| rows.into_iter().find(|row| row.id == session_id))
-        .map(|row| row.title)
+        .flatten()
         .unwrap_or_default();
     let key = key_of(app, session_id, provider).ok();
     let snapshot = key
@@ -530,7 +590,12 @@ fn member_json(
         "model": child.and_then(|(row, _)| row.model.clone()),
         "title": title,
         "dispatch": child.map(|(_, state)| state.as_str()),
-        "state": lifecycle.map_or(Value::String("unknown".into()), |state| json!(state)),
+        // A confirmed stop is an exit, whatever a record restored after a restart still says.
+        "state": match (child.map(|(_, state)| state), lifecycle) {
+            (Some(SubState::Stopped), _) => json!(AgentState::Exited),
+            (_, Some(state)) => json!(state),
+            (_, None) => Value::String("unknown".into()),
+        },
         "needsYou": lifecycle == Some(AgentState::Blocked),
         "quietMinutes": quiet,
         "task": child.map(|(row, _)| row.task.clone()),
@@ -737,10 +802,7 @@ pub(super) fn stop_child(app: &AppState, row: &SubSessionRow) -> Result<SubState
                 &[SubState::Stopping],
                 SubState::Stopped,
             );
-            if let Err(error) = persist_agent_runtime(app, &key) {
-                tracing::warn!(%error, "could not checkpoint a stopped sub-session");
-            }
-            notify_session_updated(app, &row.child_session_id);
+            close_stopped(app, &key);
             Ok(SubState::Stopped)
         }
         Err(error) => {
@@ -861,6 +923,32 @@ pub(super) mod tests {
 
     /// The spawn, list and stop routes over real HTTP against a booted core, up to the point of
     /// starting an agent: what is refused, what is recorded, what a retry returns.
+    #[test]
+    fn a_new_child_is_named_after_its_work_and_a_rename_still_wins() {
+        let root = std::env::temp_dir().join(format!("perch-sub-name-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let db = HistoryDb::open(root.join("history.sqlite")).unwrap();
+        let title = |id: &str| db.get_session_row(id).unwrap().unwrap().title;
+        let (workspace, _) = lead_with_child(&db, &root, SubState::Starting);
+        // A launched agent's session is listed once its terminal is active.
+        db.mark_cli_activity("child").unwrap();
+        name_child(&db, "child", None, "Fix the parser. Then run the tests.");
+        assert_eq!(title("child"), "Fix the parser");
+        db.set_title_override("child", "Parser work").unwrap();
+        assert_eq!(title("child"), "Parser work");
+
+        db.create_session_in_workspace("named", &workspace, &root.to_string_lossy())
+            .unwrap();
+        db.mark_cli_activity("named").unwrap();
+        name_child(
+            &db,
+            "named",
+            Some("Editor research"),
+            "Research only. Change nothing.",
+        );
+        assert_eq!(title("named"), "Editor research");
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn spawn_list_and_stop_enforce_their_rules_over_http() {
         let root = std::env::temp_dir().join(format!("perch-sub-http-{}", Uuid::new_v4()));
@@ -1233,9 +1321,167 @@ pub(super) mod tests {
         assert_eq!(db.parent_of("child").unwrap(), None);
         assert!(db.get_session("lead").unwrap().is_none());
         assert!(
-            db.get_session("child").unwrap().is_some(),
-            "a child becomes an ordinary session"
+            db.get_session("child").unwrap().is_none(),
+            "the child it stopped closed, and goes with its lead"
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A confirmed stop ends the child like a person's Close: every window hears it is gone, no
+    /// list shows it, nothing restores it, and its lead still lists it as exited with its record.
+    #[tokio::test]
+    async fn a_confirmed_stop_closes_the_child_in_every_window_and_keeps_its_record() {
+        let root = std::env::temp_dir().join(format!("perch-sub-close-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let (address, db) = boot(&root).await;
+        let app = crate::server::booted_state(address);
+        let (workspace, _) = lead_with_child(&db, &nest, SubState::Running);
+        let row = db.sub_session("child").unwrap().unwrap();
+        db.mark_cli_activity("lead").unwrap();
+        db.mark_cli_activity("child").unwrap();
+        let key = AgentKey::new(&workspace.id, "child", "codex").unwrap();
+        let terminal = crate::agent_runtime::terminal_key(&key);
+        crate::daemon::client()
+            .unwrap()
+            .create(
+                &terminal,
+                vec!["/bin/sh".into(), "-c".into(), "sleep 60".into()],
+                None,
+                vec![],
+                80,
+                24,
+            )
+            .unwrap();
+        let mut events = app.hub.hub_events_tx.subscribe();
+
+        let state = tokio::task::spawn_blocking({
+            let app = app.clone();
+            move || stop_child(&app, &row)
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(state, SubState::Stopped);
+        assert_eq!(
+            crate::daemon::session_state(&terminal),
+            crate::daemon::RuntimeState::Exited
+        );
+        let closed = loop {
+            match events.try_recv().unwrap().as_ref() {
+                ServerMessage::SessionDeleted { session_id } => break session_id.clone(),
+                _ => continue,
+            }
+        };
+        assert_eq!(closed, "child");
+        let listed: Vec<String> = db
+            .list_sessions()
+            .unwrap()
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(listed, vec!["lead".to_string()]);
+        assert!(db.get_session_row("child").unwrap().is_none());
+        assert!(app.agent_runtime.snapshot(&key).is_err());
+        assert!(app
+            .agent_persistence
+            .load_snapshots(now_millis())
+            .unwrap()
+            .iter()
+            .all(|saved| saved.snapshot.key.session_id != "child"));
+        // What the lead keeps: the record, the title, and an exit, never "reconnecting".
+        assert_eq!(
+            db.sub_session("child").unwrap().unwrap().state,
+            SubState::Stopped
+        );
+        let lead = AgentIdentity {
+            workspace_id: workspace.id.clone(),
+            session_id: "lead".into(),
+            provider_id: "claude".into(),
+            incarnation: String::new(),
+        };
+        let stopped = db.sub_session("child").unwrap().unwrap();
+        let member = member_json(
+            &app,
+            &lead,
+            "child",
+            "codex",
+            Some((&stopped, stopped.state)),
+        );
+        assert_eq!(member["state"], "exited", "{member}");
+        assert_eq!(member["dispatch"], "stopped", "{member}");
+        assert_eq!(member["title"], db.session_title("child").unwrap().unwrap());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A child stopped before this start, still remembered by a saved runtime record (it shows as
+    /// reconnecting), closes on start; the lead's own record is left alone.
+    #[tokio::test]
+    async fn a_child_stopped_before_a_restart_is_closed_on_start_and_nothing_else_is() {
+        let root = std::env::temp_dir().join(format!("perch-sub-stale-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let workspace = {
+            let db = Arc::new(HistoryDb::open(root.join("history.sqlite")).unwrap());
+            let (workspace, _) = lead_with_child(&db, &nest, SubState::Stopped);
+            db.mark_cli_activity("lead").unwrap();
+            db.mark_cli_activity("child").unwrap();
+            let persistence = crate::agent_persistence::AgentPersistence::new(db.clone());
+            persistence.ensure_schema().unwrap();
+            let registry = crate::agent_fleet::AgentLifecycleRegistry::new();
+            for (session, provider) in [("lead", "claude"), ("child", "codex")] {
+                let key = AgentKey::new(&workspace.id, session, provider).unwrap();
+                registry
+                    .register(AgentRegistration {
+                        key: key.clone(),
+                        provider_id: provider.into(),
+                        provider_session_id: None,
+                        resumable: false,
+                        now_ms: 1,
+                    })
+                    .unwrap();
+                persistence
+                    .save_snapshot(&crate::agent_persistence::PersistedAgentSnapshot::new(
+                        registry.get(&key).unwrap(),
+                        crate::agent_fleet::AgentMode::Cli,
+                    ))
+                    .unwrap();
+            }
+            workspace
+        };
+        let (address, db) = boot(&root).await;
+        let app = crate::server::booted_state(address);
+        let sessions_with_records = || {
+            app.agent_runtime
+                .lifecycle()
+                .list()
+                .into_iter()
+                .map(|record| record.key.session_id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(sessions_with_records(), vec!["lead".to_string()]);
+        assert!(app
+            .agent_persistence
+            .load_snapshots(now_millis())
+            .unwrap()
+            .iter()
+            .all(|saved| saved.snapshot.key.session_id != "child"));
+        let listed: Vec<String> = db
+            .list_sessions()
+            .unwrap()
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(listed, vec!["lead".to_string()]);
+        assert!(
+            db.get_session("child").unwrap().is_some(),
+            "its records stay"
+        );
+        assert_eq!(
+            db.sub_session("child").unwrap().unwrap().state,
+            SubState::Stopped
+        );
+        let _ = workspace;
         let _ = std::fs::remove_dir_all(root);
     }
 

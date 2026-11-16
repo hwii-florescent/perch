@@ -57,6 +57,8 @@ impl SuggestionState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Suggested {
     pub task: String,
+    /// The name the started sub-session gets (`perch suggest --name`); none: from its task.
+    pub name: Option<String>,
     pub agent: String,
     pub model: Option<String>,
     pub worktree: bool,

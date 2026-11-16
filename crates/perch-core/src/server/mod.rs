@@ -734,6 +734,8 @@ pub async fn run(
     if let Err(error) = purge {
         tracing::warn!("could not delete archived sessions and projects: {error}");
     }
+    // A sub-session stopped before this start closes now, as it would have when it stopped.
+    sub_sessions::close_stopped_children(&state);
     // A claimed prompt or review packet may have crossed the dispatch barrier
     // immediately before a prior process exited. Preserve it as explicitly
     // unconfirmed so reconnect/reload paths cannot launch a duplicate.

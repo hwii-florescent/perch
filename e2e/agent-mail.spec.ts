@@ -100,7 +100,7 @@ test("a child's message and status reach an idle lead, and the lead's message re
     await send(
       "Use the shell and no other tools. Run exactly: " +
       `perch spawn --agent ${CHILD_AGENT} --model ${CHILD_MODEL} --task Run the shell command perch send ${lead} ${upMarker} and then stop. Use no other tools. ` +
-      "Then reply with the one word spawned and nothing else. Later, if a message headed Perch message or Perch status arrives, reply with the one word noted and run no tools.",
+      "Then reply with the one word spawned and nothing else. Later, if a message headed Perch message or Sub-session reports arrives, reply with the one word noted and run no tools.",
     );
     await expect(ui.locator('[data-native-role="user"]')).toHaveCount(1, { timeout: 60_000 });
     // The status reads Ready for a moment after the prompt is sent: wait for what the turn does, then for the end of it.

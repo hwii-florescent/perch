@@ -230,6 +230,15 @@ impl HistoryDb {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Every child that was confirmed stopped, on any lead: what closes on start.
+    pub fn stopped_children(&self) -> anyhow::Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut statement =
+            conn.prepare("SELECT child_session_id FROM sub_sessions WHERE state = 'stopped'")?;
+        let rows = statement.query_map([], |row| row.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Every sub-session whose own session belongs to `project_id`, oldest first. A child moved
     /// into a worktree of the Project is the Project's too (the join reads the session's project).
     pub fn sub_sessions_in_project(&self, project_id: &str) -> anyhow::Result<Vec<SubSessionRow>> {

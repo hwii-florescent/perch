@@ -824,8 +824,45 @@ pub(super) fn delete_session(app: &AppState, session_id: &str) -> anyhow::Result
     super::sub_sessions::stop_children_of(app, session_id)
         .map_err(|error| anyhow::anyhow!("{error}; session retained"))?;
     let _agent_operation = app.agent_operation_lock.lock().unwrap();
-    // Read before the rows go: each run the lead began has a notes folder of its own.
+    // Read before the rows go: each run the lead began has a notes folder of its own, and its
+    // stopped children are already closed, so they go with it rather than coming back as rows.
     let runs = app.db.runs_of_session(session_id).unwrap_or_default();
+    let closed_children: Vec<String> = app
+        .db
+        .sub_sessions_of(session_id)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|row| row.state == crate::sub_sessions::SubState::Stopped)
+        .map(|row| row.child_session_id)
+        .collect();
+    end_session(app, session_id, true)?;
+    for child in &closed_children {
+        if let Err(error) = end_session(app, child, true) {
+            tracing::warn!(%error, "could not delete a closed sub-session");
+        }
+        crate::native_ui::remove_notes_dir(child);
+    }
+    // A lead's run ends with it: its notes folder is scratch for the run, so it goes too.
+    crate::native_ui::remove_notes_dir(session_id);
+    for run in &runs {
+        crate::native_ui::remove_notes_dir(run);
+    }
+    // Fan out to every connection: the row a session.updated would look up
+    // is gone.
+    let _ = app
+        .hub
+        .hub_events_tx
+        .send(Arc::new(ServerMessage::SessionDeleted {
+            session_id: session_id.to_string(),
+        }));
+    Ok(())
+}
+
+/// End a local session for every viewer: its agents and shells stop, and every in-memory and
+/// persisted runtime record of it is forgotten, so nothing restores it after a restart. With
+/// `delete_row` its database row goes too; without, the row and its records (title, report,
+/// sub-session record) stay. The caller holds `agent_operation_lock`.
+fn end_session(app: &AppState, session_id: &str, delete_row: bool) -> anyhow::Result<()> {
     let agent_keys = app
         .agent_runtime
         .lifecycle()
@@ -843,7 +880,11 @@ pub(super) fn delete_session(app: &AppState, session_id: &str) -> anyhow::Result
         anyhow::bail!("could not confirm legacy terminal stopped; session retained");
     }
     // Close shells before forgetting any session bookkeeping.
-    app.workspace_terminals.delete_session(session_id)?;
+    if delete_row {
+        app.workspace_terminals.delete_session(session_id)?;
+    } else {
+        app.workspace_terminals.close_session(session_id)?;
+    }
     super::agent_history::forget_session(session_id);
     super::attention::forget_session(app, session_id);
     for set in [
@@ -858,13 +899,18 @@ pub(super) fn delete_session(app: &AppState, session_id: &str) -> anyhow::Result
         let _ = app.agent_persistence.delete_snapshot(key);
     }
     app.cli_active_sessions.lock().unwrap().remove(session_id);
-    // A lead's run ends with it: its notes folder is scratch for the run, so it goes too.
-    crate::native_ui::remove_notes_dir(session_id);
-    for run in &runs {
-        crate::native_ui::remove_notes_dir(run);
+    Ok(())
+}
+
+/// Close a sub-session its lead (or a person) stopped, as a person's Close would: its tabs and
+/// sidebar row go in every window. Its records stay for the lead's `perch list`; the sub-session
+/// record's `stopped` state is what keeps it out of every session list. Call only once the stop
+/// is confirmed.
+pub(super) fn close_stopped_child(app: &AppState, session_id: &str) -> anyhow::Result<()> {
+    {
+        let _agent_operation = app.agent_operation_lock.lock().unwrap();
+        end_session(app, session_id, false)?;
     }
-    // Fan out to every connection: the row a session.updated would look up
-    // is gone.
     let _ = app
         .hub
         .hub_events_tx

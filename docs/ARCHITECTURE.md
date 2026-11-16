@@ -480,11 +480,19 @@ the core, not the agent, decides:
   leaves nothing behind.
 - *Stop* is by the lead for its own children only. The record goes `stopping`, the core terminates the
   process and confirms it is gone (`stop_confirmed`, like session delete), and only then records
-  `stopped` and lets the exit be observed. A person stopping a lead (terminal kill) stops its live
-  children the same way. Deleting a lead (also what archiving its Workspace does, which deletes the Workspace's
-  sessions) first stops its live children, each confirmed; if one cannot be shown stopped (a stop not
-  confirmed, a launch still in flight) the delete is refused and the lead and its records are kept. The
-  stopped children then remain as ordinary sessions without a parent; deleting a child drops its record.
+  `stopped`. A person stopping a lead (terminal kill) stops its live children the same way.
+- *A confirmed stop closes the child* like a person's Close (`session::close_stopped_child`): its
+  agents and shells end, its runtime records and saved snapshot go (so no restart restores it as
+  `reconnecting`), and `session.deleted` reaches every window, which drops its tabs and sidebar row.
+  Its session row, report, title and sub-session record stay; the record's `stopped` state keeps it
+  out of every session list (`SESSION_VISIBILITY_FILTER`), and `perch list` shows it `exited`. The
+  same applies when `stop_unknown` later settles to `stopped`. An unconfirmed stop changes nothing. On
+  start, a `stopped` child that still has a runtime record or a shell (stopped by an older build) is
+  closed by the same rule; nothing else is touched. Deleting a lead (also what archiving its Workspace
+  does, which deletes the Workspace's sessions) first stops its live children, each confirmed; if one
+  cannot be shown stopped (a stop not confirmed, a launch still in flight) the delete is refused and the
+  lead and its records are kept. Its closed children are deleted with it; children that exited on their
+  own remain as ordinary sessions without a parent. Deleting a child drops its record.
   **Esc in the chat is not a stop:** it interrupts the lead's own turn (a keystroke into its prompt), and
   its children keep running; only a terminal kill, a delete and `perch stop` stop them.
 - *`--worktree`*: after the child is recorded, the core makes a new checkout of the lead's repository,
@@ -529,12 +537,13 @@ contract the tests hold it to.
   the explicit action. `agent_mail::route(facts)` decides, over: the recorded incarnation
   is still its live one; its runtime is alive and its native bridge has reported; nothing is blocked and
   no question or approval is open (that always waits, with the reason); and then
-  1. **idle** (lifecycle Idle or Done, the bridge says no turn runs) → the message **starts a turn**; for
-     a lead, no child may be working (an idle lead is woken by the last of them, not each);
+  1. **idle** (lifecycle Idle or Done, the bridge says no turn runs) → the message **starts a turn**, for
+     a lead too: an idle lead gets each report at once, whatever its other children are doing (owner,
+     2026-11-15; an earlier rule held it until no child worked, so one long child silenced the rest);
   2. **a turn is running** and the CLI has a follow-up queue (`has_followup_queue`: Pi, OMP) → it goes into
-     that queue (`QueuedInAgent`), with no working-children wait;
+     that queue (`QueuedInAgent`);
   3. **a turn is running** and the CLI has none but Perch can steer it (Codex, Claude: `can_steer`) → the
-     message **steers** the running turn (`Steered`, receipt "steered"), with no working-children wait;
+     message **steers** the running turn (`Steered`, receipt "steered");
   4. **a turn is running** and the CLI is neither (anything else) → it waits for idle and the receipt's
      reason says so ("... Perch cannot put a message into a running opencode turn, so it gets this when its
      turn ends");
@@ -592,22 +601,28 @@ contract the tests hold it to.
   "cancelled by sender". Once `delivering` it cannot be taken back. Receivers that end (identity revoked on
   a confirmed exit, session deleted) turn their queued mail `undelivered`; deleting a lead deletes the
   run's mail with it (its children become ordinary sessions, like their records).
-- *Envelope and neutralising.* The prompt always begins with Perch's own header naming the sender (title,
-  provider, session, kind) and saying the text is from another agent, not a person, and approves nothing;
-  the body follows as a quoted block, every line prefixed, so a leading `/`, `!` or `#` can never be a
-  command or a mode switch (the prompt starts with a `────` rule line, never a character from the
-  sender). Peer text is data; the guide tells agents the
+- *Envelope and neutralising.* The prompt always begins with Perch's own header naming the sender (name,
+  provider, session, kind); the body follows as a quoted block, every line prefixed, so a leading `/`, `!`
+  or `#` can never be a command or a mode switch (the prompt starts with a `────` rule line, never a
+  character from the sender). The standing disclaimer sentence under the header was dropped (owner,
+  2026-11-15); `parse_envelope` still reads banners written with it. Peer text is data; the guide tells agents the
   same. A message never answers a dialog and never approves anything: delivery refuses while one is open.
 - *Notes from children.* When a child's turn ends, it becomes blocked, or its exit is confirmed, Perch
   queues a `note` for its lead: status words, whether it is waiting on a person (Perch's own state), and
-  the first 400 characters of its own `perch report`, else the cheap model's summary (`Summary by <model>`),
-  else of its last message, each labelled a claim (a finished turn is noted even when the child said and
-  reported nothing: "It has reported nothing"). The summary is kept before the note is queued, so a slow or
+  the first 400 characters of its own `perch report`, else the cheap model's summary (`summary by <model>`),
+  else of its last message (a finished turn is noted even when the child said and reported nothing:
+  "nothing reported"). Each is one line: the child's session name and short id, its status, then what it
+  said (`Editor research (0407a72d) · reported: ...`). The summary is kept before the note is queued, so a slow or
   absent model only delays a note, never changes what it can say. A
   newer note from the same child replaces one still queued. Queued notes of a lead go in **one** delivery
-  (a roster, one line per child, headed as status rather than instruction); messages go one per delivery.
+  (a roster headed `──── Sub-session reports (HH:MM UTC) ────`, one line per child, with no disclaimer:
+  owner, 2026-11-15); messages go one per delivery.
+- *Sub-session names.* A spawned or suggested child gets a name: `perch spawn|suggest --name`, else the
+  task's first sentence cut to about 40 characters (`sub_sessions::session_name`). It is written as the
+  session's auto-title (`cli_title`), so the sidebar, tabs, `perch list` and the notes show it and a
+  person's rename (`title_override`) still wins. A suggestion keeps its name until Start.
 - *No wake cap* (owner decision 2026-11-09). Reports and quiet-child notes keep reaching the lead
-  throughout a run, subject to the existing process, input and working-children checks. The legacy
+  throughout a run, subject to the existing process and input checks. The legacy
   `runLimits.wakes` / `maxLeadWakesPerRun` setting and historical delivery counts no longer gate
   delivery. The wire field is retained for compatibility but no longer emitted, and Settings shows no
   wake-limit control. Notifications already marked `undelivered` remain so; an update never replays them.
