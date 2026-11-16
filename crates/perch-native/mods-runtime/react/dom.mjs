@@ -70,6 +70,11 @@ export class HostElement extends Target {
     this.version = 0;
   }
   touch() { this.version++; }
+  /** The element and every ancestor whose style asked what lies below it (`:has()`, `selector.mjs`). */
+  touchWatchers() {
+    this.touch();
+    for (let n = this.parentElement; n; n = n.parentElement) if (n.watchesDescendants) n.touch();
+  }
   get nodeName() { return this.tagName.toUpperCase(); }
   get parentElement() { return this.parentNode instanceof HostElement ? this.parentNode : null; }
   get children() { return this.childNodes.filter((n) => n instanceof HostElement); }
@@ -115,7 +120,7 @@ export class HostElement extends Target {
     if (child.parentNode) child.parentNode.removeChild(child);
     child.parentNode = this;
     this.childNodes.push(child);
-    this.touch();
+    this.touchWatchers();
     return child;
   }
   insertBefore(child, before) {
@@ -124,14 +129,14 @@ export class HostElement extends Target {
     child.parentNode = this;
     if (at < 0) this.childNodes.push(child);
     else this.childNodes.splice(at, 0, child);
-    this.touch();
+    this.touchWatchers();
     return child;
   }
   removeChild(child) {
     const at = this.childNodes.indexOf(child);
     if (at >= 0) this.childNodes.splice(at, 1);
     child.parentNode = null;
-    this.touch();
+    this.touchWatchers();
     return child;
   }
   contains(node) {

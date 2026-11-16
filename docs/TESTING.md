@@ -427,11 +427,19 @@ assertions match with `contains`, not equality.
 cargo test -p perch-native            # everything below
 cargo test -p perch-native --lib      # state reduction, actions, frames, launch correlation and reconnect against a stand-in core, hand-off URL; tab and split model, key resolution, command palette filtering, terminal settings
 cargo test -p perch-native --test sidebar_render    # headless GPUI render of the sidebar (project and By status views, nested rows); no window opens
-cargo test -p perch-native --test workspace_render  # the window drawn offscreen: tabs, a split with different content in each pane, the palette, the terminal settings, attention on a tab, keys.json and chosen keys
+cargo test -p perch-native --test workspace_render  # the window drawn offscreen: tabs, a split with different content in each pane, the palette, attention on a tab, keys.json and chosen keys
 cargo test -p perch-native --test workspace_shell   # the window shell: backdrop, rounded cards, 44 px heads, toggles, the drawer and its tabs, column handles; PERCH_NATIVE_SHOT_DIR=dir saves the four states as PNGs (compare with `PARITY_SCREENS=window npm run parity:web` in e2e, which is not in the default list)
+cargo test -p perch-native --test mods_chrome_screens_window  # the stock screens in the real window, offscreen; Settings: Cmd+, opens the web's page, a Keyboard binding changed there changes what the window does for that key, Escape clears the search, then closes
+PERCH_PARITY_SCREENS=settings cargo test -p perch-native --test mods_chrome_capture  # draws the named screens (default: all) in both themes into e2e/artifacts-native-parity/native for `node e2e/native-parity/compare.mjs`
 cargo test -p perch-native --test terminal_session  # a real core as a child process
 cargo test -p perch-native --test workspace_session # two shells in a split against a real core, and the settings round trip
 ```
+
+Settings (`mods/settings`) is the web's page on the React runtime, saving through the core. Its parity states are
+`e2e/native-parity/fixtures/settings.json` (web side: `PARITY_SCREENS=settings npm run parity:web` in `e2e`). Known
+differences the gate reports: Keyboard draws one group of bindings at a time (the engine cuts a script that runs over its
+per-frame budget, and 113 rows do), and the long Notifications page drifts up to 3 px below the window's edge (the engine
+sets line heights in half pixels). Permissions and Mods are "Open in Perch" hand-offs.
 
 Run `cargo test` for this package on its own: building `perch-core` together with GPUI changes how
 `serde_json` orders keys and fails three unrelated core tests. `cargo test --workspace` hits the same

@@ -505,8 +505,9 @@ fn main() {
 
     // The gear opens Settings.
     rig.click("settings-gear");
-    assert!(
-        rig.ws(|ws, _, _| ws.settings_open()),
+    assert_eq!(
+        rig.ws(|ws, _, _| ws.screens_open()),
+        ["settings"],
         "app.settings reached the window"
     );
     rig.ws(|ws, window, cx| ws.run_command("overlay.close", None, window, cx))

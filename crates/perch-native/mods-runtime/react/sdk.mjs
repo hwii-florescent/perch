@@ -46,6 +46,20 @@ const subscribe = (listener) => host().subscribe?.(listener) ?? (() => {});
 
 export { Chevron, cn, menuPanel, CloseIcon, EllipsisIcon, GearIcon, PlusIcon, HostStateDot, PageIcon, useDismissOnOutsideClick };
 export const anchoredPopoverStyle = computeAnchoredPopoverStyle;
+// Settings' pages (1.8): the host's own parts and class strings, so the pages draw as the web's (`sdkSettings.ts`), and
+// `SettingsQuery`, the search text the Settings shell provides. The QR is the web's own component.
+export { ModeSwitch, QrCode, SettingRow, SettingsGroup, Switch, settingsClass, useSettingsQuery } from "../../../../packages/web/src/sdkSettings.ts";
+export { SettingsQuery } from "../../../../packages/web/src/components/ui/setting-row.tsx";
+// State the host keeps for a resource (the pages' unsent text), as the web's `useResourceState`.
+export { useResourceState } from "../../../../packages/web/src/resourceState.ts";
+/** A new random id, as the web's `newId`: a v4 UUID where the engine has one, else a random one of that shape. */
+export function newId() {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = Math.floor(Math.random() * 16);
+    return (c === "x" ? r : (r & 3) | 8).toString(16);
+  });
+}
 /** Read once: the host (`globalThis.perch`) is set before the runtime is evaluated. */
 export const isMac = globalThis.perch?.isMac !== false;
 export const keyLabel = (combo) => formatCombo(combo, host().isMac !== false);
@@ -75,7 +89,8 @@ export const pickFolder = globalThis.perch?.pickFolder ? (title) => host().pickF
 
 // ---- data -----------------------------------------------------------------------------------------------------
 
-function useHostSnapshot(read) {
+/** The host's data, read as `read(perch)` and read again whenever it changes. */
+export function useHostSnapshot(read) {
   const readRef = useRef(read);
   readRef.current = read;
   return useSyncExternalStore(subscribe, () => readRef.current(host()));

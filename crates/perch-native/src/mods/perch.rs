@@ -160,6 +160,10 @@ pub struct WindowState {
 pub type Asker =
     Rc<dyn Fn(&str, &Value) -> futures::channel::oneshot::Receiver<Result<Value, String>>>;
 
+/// Takes a change a screen sends the core (`kind` and its `args`, as [`crate::client::send_frame`]
+/// checks them) instead of the window's core (a test's fixture).
+pub type Sender = Rc<dyn Fn(&str, &Value)>;
+
 /// How long after the window asked for the Add project form a sidebar that mounts takes the
 /// request (the sidebar shown by that same request): `ADD_PROJECT_LATE_MS` in the web.
 const ADD_PROJECT_LATE_MS: u128 = 3000;
@@ -198,6 +202,8 @@ struct Shared {
     hosts: RefCell<Vec<ModHost>>,
     /// Answers screens' questions in place of the window's core (`Self::set_asker`).
     asker: RefCell<Option<Asker>>,
+    /// Takes screens' changes in place of the window's core (`Self::set_sender`).
+    sender: RefCell<Option<Sender>>,
     /// The instant screens read as now, in ms since the epoch, when held (`Self::hold_clock`).
     held_clock: std::cell::Cell<Option<f64>>,
     attached: RefCell<Option<Attached>>,
@@ -225,6 +231,7 @@ impl Perch {
             reads: RefCell::default(),
             hosts: RefCell::default(),
             asker: RefCell::default(),
+            sender: RefCell::default(),
             held_clock: std::cell::Cell::default(),
             attached: RefCell::default(),
             flush_queued: Cell::new(false),
@@ -988,6 +995,16 @@ impl Perch {
                     }
                 }),
             )
+            // A modal screen keeps Escape for itself (true) or gives it back to the window (false).
+            .function("holdEscape", {
+                let (perch, id) = (self.clone(), id.clone());
+                move |args| {
+                    let held = matches!(args.get(0), Some(HostValue::Bool(true)));
+                    let id = id.to_string();
+                    perch.in_workspace(move |ws, _| ws.hold_escape(&id, held))?;
+                    Ok(HostValue::Null)
+                }
+            })
             // An in-flow screen's own field has the keyboard (true) or let it go (false).
             .function("holdKeyboard", {
                 let (perch, id) = (self.clone(), id.clone());
@@ -1084,6 +1101,64 @@ impl Perch {
             .function("commands", reader(KEYS, |perch, _| json!(perch.commands())))
             .function("keys", reader(KEYS, |perch, _| perch.keys()))
             .function("keybindings", reader(KEYS, |perch, _| perch.keybindings()))
+            // Settings' pages. The core's settings as it last sent them (the web's `settings`), null
+            // until it has.
+            .function(
+                "settings",
+                reader(STORE, |perch, _| {
+                    perch.store().settings.clone().unwrap_or(Value::Null)
+                }),
+            )
+            // A change to the core's settings or computers: `send("settings.update", {patch})`,
+            // `send("hosts.upsert", {host})`, `send("hosts.delete", {id})`. The core answers with
+            // `settings.current` / `hosts.updated`, which the readers above and below follow.
+            .function("send", {
+                let perch = self.clone();
+                move |args| {
+                    let kind = args.string(0)?.to_string();
+                    perch.send(&kind, args.get(1).map(from_host).unwrap_or(Value::Null))?;
+                    Ok(HostValue::Null)
+                }
+            })
+            // The computers Settings > SSH hosts lists and each one's connection.
+            .function(
+                "hostEntries",
+                reader(STORE, |perch, _| {
+                    let store = perch.store();
+                    let states: serde_json::Map<String, Value> = store
+                        .host_states
+                        .iter()
+                        .map(|(id, f)| {
+                            let mut state = json!({ "state": f.state });
+                            if let Some(error) = &f.error {
+                                state["error"] = json!(error);
+                            }
+                            (id.clone(), state)
+                        })
+                        .collect();
+                    json!({ "hosts": store.host_entries, "hostStates": states })
+                }),
+            )
+            // Settings > Keyboard: the commands' groups with their keys, and what recording a key
+            // gives a command (`Keymap::record`).
+            .function(
+                "keyboard",
+                reader(KEYS, |perch, _| {
+                    let data = perch.0.data.borrow();
+                    json!({
+                        "groups": perch.keymap().settings_groups(),
+                        "hasOverrides": !data.model.keybindings.is_empty(),
+                    })
+                }),
+            )
+            .function(
+                "recordKey",
+                reader(KEYS, |perch, args| {
+                    let id = args.get(0).and_then(HostValue::as_str).unwrap_or("");
+                    let event = args.get(1).map(from_host).unwrap_or(Value::Null);
+                    perch.keymap().record(id, &event).unwrap_or(Value::Null)
+                }),
+            )
             .function(
                 "shortcutLabel",
                 reader(KEYS, |perch, args| {
@@ -1133,6 +1208,22 @@ impl Perch {
     /// Answers screens' questions with `asker` instead of the window's core (a test's fixture).
     pub fn set_asker(&self, asker: Asker) {
         *self.0.asker.borrow_mut() = Some(asker);
+    }
+
+    /// Takes screens' changes with `sender` instead of the window's core (a test's fixture).
+    pub fn set_sender(&self, sender: Sender) {
+        *self.0.sender.borrow_mut() = Some(sender);
+    }
+
+    /// Sends the core change `kind` with `args` (`settings.update`, `hosts.upsert`,
+    /// `hosts.delete`); refused when they are not what the core takes.
+    fn send(&self, kind: &str, args: Value) -> Result<(), HostError> {
+        let frame = crate::client::send_frame(kind, &args).map_err(HostError::new)?;
+        if let Some(sender) = self.0.sender.borrow().clone() {
+            sender(kind, &args);
+            return Ok(());
+        }
+        self.in_workspace(move |ws, cx| ws.send_to_core(frame, cx))
     }
 
     /// Puts question `kind` to the set asker, else the attached window's core; refused when
@@ -1625,7 +1716,17 @@ const OWN: [(&str, &str, &str); 10] = [
 
 /// Window commands beyond the keymap's: the web's ids the window can perform (some under the
 /// name its keys use), and the native ones screens need.
-const WINDOW_COMMANDS: [(&str, &str, &str); 34] = [
+const WINDOW_COMMANDS: [(&str, &str, &str); 36] = [
+    (
+        "handoff.open",
+        "Open a place in the Perch desktop app (a click's choice)",
+        "{place: files | changes | browser | chat | settings}",
+    ),
+    (
+        "link.open",
+        "Open an https link in the browser (a click's choice)",
+        "{url}",
+    ),
     (
         "session.start",
         "Start an agent in a folder on a host",

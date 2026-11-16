@@ -29,6 +29,10 @@
 //! - Terminal find: the terminal's find key opens the find bar over its pane with the keyboard in
 //!   it; what is typed is the terminal's query (and never reaches the shell); Escape and × close
 //!   it, the keyboard back in the terminal.
+//! - Settings: Cmd+, opens the web's page with its sections in the web's order; the Keyboard page
+//!   records a key through the keymap, saves it through the core (`settings.update`), and once the
+//!   core sends the settings back the window answers the new key and no longer the old one;
+//!   Escape closes it, except while a key is being recorded.
 //! - Start: the main area with nothing open; New session, `?`, a workspace's agent buttons and the
 //!   connecting page.
 //!
@@ -515,6 +519,113 @@ fn rig_with_nothing_open(user: PathBuf) -> Rig {
     let mut rig = rig(user);
     rig.draw();
     rig
+}
+
+/// The sections of Settings, top to bottom, as the web lists them.
+const SECTIONS: [&str; 10] = [
+    "general",
+    "appearance",
+    "agents",
+    "mods",
+    "keyboard",
+    "terminal",
+    "notifications",
+    "hosts",
+    "devices",
+    "permissions",
+];
+
+/// The core's `settings.current` after it saved `keybindings`, as every follower receives it.
+fn core_keeps(rig: &mut Rig, keybindings: Value) {
+    let mut state = state();
+    state.apply(&message(json!({"type": "settings.current", "settings":
+        {"defaultCwd": null, "keybindings": keybindings}})));
+    let model = state.model();
+    rig.ws(|ws, _, cx| {
+        ws.sidebar()
+            .update(cx, |sidebar, cx| sidebar.apply(Update::Model(model), cx))
+    });
+    rig.draw();
+}
+
+fn settings(rig: &mut Rig) {
+    rig.asked();
+    rig.press("cmd-,");
+    assert_eq!(rig.open_screens(), ["settings"], "Cmd+, opens Settings");
+    assert!(!rig.terminal_focused(), "Settings has the keyboard");
+    rig.draw();
+    let error = rig.ws(|ws, _, cx| ws.screen_error("settings", cx));
+    assert_eq!(error, None, "Settings loads and renders");
+    // Every section, in the web's order.
+    let mut at: Vec<(f32, &str)> = Vec::new();
+    for id in SECTIONS {
+        // The parity table names the section list's rows by section.
+        let name = format!("settings-nav:{id}");
+        let y = f32::from(rig.record(&name).expect("drawn").bounds.origin.y);
+        at.push((y, id));
+    }
+    assert!(at.windows(2).all(|w| w[0].0 < w[1].0), "in order: {at:?}");
+    rig.shot("settings-general");
+    // The core answers what the pages ask of it; none of it is needed to draw them.
+    rig.asked();
+
+    // Keyboard: record a key for the help, and the core is told to keep it.
+    let nav = "settings-nav:keyboard".to_string();
+    rig.click(&nav);
+    let broken: Vec<String> = rig
+        .draw()
+        .iter()
+        .map(|r| r.name.to_string())
+        .filter(|n| n.contains("settings-page-error"))
+        .collect();
+    assert!(broken.is_empty(), "the Keyboard page draws: {broken:?}");
+    let row = by_test_id(rig, "keybinding-global.help");
+    rig.click(&row);
+    assert!(
+        rig.ws(|ws, _, _| ws.screens_open()) == ["settings"],
+        "still open while recording"
+    );
+    // Escape is the recorder's while it records: it stops, and Settings stays.
+    rig.press("escape");
+    assert_eq!(
+        rig.open_screens(),
+        ["settings"],
+        "Escape stopped the recording only"
+    );
+    rig.click(&row);
+    rig.press("cmd-alt-j");
+    let frames: Vec<Value> = rig
+        .asked()
+        .into_iter()
+        .filter_map(|c| match c {
+            Command::Send(frame) => Some(frame),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(frames.len(), 1, "one save: {frames:?}");
+    assert_eq!(frames[0]["type"], "settings.update");
+    let saved = frames[0]["patch"]["keybindings"].clone();
+    assert_eq!(saved["global.help"], "cmd+alt+j", "{saved}");
+
+    // Until the core says so the window keeps its old key; then it answers the new one only.
+    core_keeps(rig, saved);
+    rig.press("escape");
+    assert!(rig.open_screens().is_empty(), "Escape closed Settings");
+    assert!(rig.terminal_focused());
+    rig.press(HELP_KEY);
+    assert!(
+        rig.open_screens().is_empty(),
+        "the old key no longer opens the help"
+    );
+    rig.press("cmd-alt-j");
+    assert_eq!(
+        rig.open_screens(),
+        ["keybind-help"],
+        "the recorded key does"
+    );
+    rig.press("escape");
+    core_keeps(rig, json!({}));
+    println!("settings: ok");
 }
 
 fn start(rig: &mut Rig) {
@@ -1311,6 +1422,7 @@ fn main() {
     worktree(&mut rig);
     worktree_jobs(&mut rig);
     terminal_find(&mut rig);
+    settings(&mut rig);
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())
         .unwrap();

@@ -3,9 +3,9 @@
 //! compiled stylesheet, `css.mjs`) and the tests (the web reference's named-element selectors).
 //!
 //! Supported: type, `*`, `.class`, `#id`, `[attr]`, `[attr=v]`, `[attr^=v]`, `[attr$=v]`, `[attr*=v]`, `[attr~=v]`,
-//! `:first-child`, `:last-child`, `:only-child`, `:nth-child(n)`, `:not()`, `:is()`, `:where()`, `:root`, the state pseudo-classes
+//! `:first-child`, `:last-child`, `:only-child`, `:nth-child(n)`, `:not()`, `:is()`, `:where()`, `:has()` (of a compound: a descendant that matches), `:root`, the state pseudo-classes
 //! (`:hover`, `:focus`, `:focus-visible`, `:focus-within`, `:active`, `:disabled`, `:enabled`, `:checked`), and the
-//! descendant and child combinators. Anything else (`+`, `~`, `:has()`, pseudo-elements, ...) throws a
+//! descendant and child combinators. Anything else (`+`, `~`, `:has()` of a longer selector, pseudo-elements, ...) throws a
 //! `SelectorError`, so a caller can skip a rule it cannot evaluate instead of guessing.
 //!
 //! An element is anything with `tagName` (lower case), `getAttribute(name)`, `parentElement` and `children`
@@ -14,7 +14,7 @@
 export class SelectorError extends Error {}
 
 const STATES = new Set(["hover", "focus", "focus-visible", "focus-within", "active", "disabled", "enabled", "checked"]);
-const FUNCTIONAL = new Set(["not", "is", "where", "nth-child"]);
+const FUNCTIONAL = new Set(["not", "is", "where", "has", "nth-child"]);
 const SIMPLE = new Set(["first-child", "last-child", "only-child", "root", ...STATES]);
 
 /** `text` without CSS escapes (`\:` is `:`, `\31 ` is `1`). */
@@ -95,7 +95,9 @@ function parseCompound(text, at) {
           if (!/^\d+$/.test(arg)) throw new SelectorError(`:nth-child(${arg}) is not supported (only a number)`);
           compound.pseudos.push({ name: lower, n: Number(arg) });
         } else {
-          compound.pseudos.push({ name: lower, list: splitList(arg).map(parseComplex) });
+          const list = splitList(arg).map(parseComplex);
+          if (lower === "has" && list.some((steps) => steps.length !== 1)) throw new SelectorError(`:has(${arg}) is not supported (only a compound selector)`);
+          compound.pseudos.push({ name: lower, list });
         }
       } else {
         if (!SIMPLE.has(lower)) throw new SelectorError(`:${lower} is not supported`);
@@ -182,6 +184,12 @@ function siblingsOf(element) {
   return element.parentElement ? element.parentElement.children : [element];
 }
 
+/** Whether any element below `element` (its children, theirs, ...) satisfies `test`. */
+function hasDescendant(element, test) {
+  for (const child of element.children) if (test(child) || hasDescendant(child, test)) return true;
+  return false;
+}
+
 function compoundMatches(element, compound, options, isSubject) {
   if (compound.tag && compound.tag !== "*" && element.tagName !== compound.tag) return false;
   if (compound.id && element.getAttribute("id") !== compound.id) return false;
@@ -198,6 +206,11 @@ function compoundMatches(element, compound, options, isSubject) {
       case "nth-child": if (siblingsOf(element).indexOf(element) !== pseudo.n - 1) return false; break;
       case "root": if (!element.isDocumentRoot) return false; break;
       case "not": if (pseudo.list.some((steps) => complexMatches(element, steps, options, isSubject))) return false; break;
+      case "has":
+        // Its answer depends on the descendants: the element is marked so that adding or removing one below it bumps its
+        // version (`dom.mjs`), and the style computed from it is computed again.
+        element.watchesDescendants = true;
+        if (!pseudo.list.some(([{ compound: inner }]) => hasDescendant(element, (d) => compoundMatches(d, inner, options, false)))) return false; break;
       case "is": case "where": if (!pseudo.list.some((steps) => complexMatches(element, steps, options, isSubject))) return false; break;
       default:
         if (!options.state || !options.state(element, pseudo.name, isSubject)) return false;

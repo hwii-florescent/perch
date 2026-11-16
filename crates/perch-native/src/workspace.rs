@@ -32,10 +32,7 @@ use crate::handoff::{open_in_perch, perch_url, Place};
 use crate::keymap::{Context as KeyContext, Hit, Keymap};
 use crate::mods::screens::{self, OnResult, Screens, PANE_HEADER_HEIGHT};
 use crate::mods::theme;
-use crate::settings::{
-    self, next_choice, scrollback_from_text, stepped, Change, CONTRAST, MAX_SCROLLBACK,
-    MIN_SCROLLBACK, OPACITY, OPTION_AS_ALT, PADDING, TOAST_DELIVERY,
-};
+use crate::settings::Change;
 use crate::shell::{self, Chrome, Tokens, GUTTER, TOGGLE_AFTER, TOGGLE_INSET, TOGGLE_INSET_MAC};
 use crate::sidebar::{navigation, Alert, Heard, Provider, LOCAL};
 use crate::tab_drag::{self, Drop, TabDrag};
@@ -46,8 +43,7 @@ use crate::terminal::clipboard::{Clipboard, SystemClipboard};
 use crate::terminal::links::{open_in_system, Target};
 use crate::terminal::{Status, TerminalEvent, TerminalView};
 use crate::ui::{
-    hint, LaunchFailed, OpenSession, Sidebar, DIM_COLOR, MAIN_BG, SELECTED_BG, SIDEBAR_BG,
-    TITLE_COLOR,
+    hint, LaunchFailed, OpenSession, Sidebar, DIM_COLOR, MAIN_BG, SIDEBAR_BG, TITLE_COLOR,
 };
 use crate::zoom::Zoom;
 use futures::channel::mpsc::UnboundedSender;
@@ -153,12 +149,6 @@ impl<T: Clone + PartialEq> Settle<T> {
     }
 }
 
-#[derive(Default)]
-struct SettingsPanel {
-    /// The scrollback being typed.
-    editing: Option<String>,
-}
-
 /// The most notifications kept for a screen to show; the oldest go first.
 const MAX_NOTIFICATIONS: usize = 20;
 
@@ -192,7 +182,6 @@ pub struct Workspace {
     panes: HashMap<String, Pane>,
     /// A split that was asked for and waits for its new terminal to be opened.
     pending_split: Option<(Side, Instant)>,
-    settings: Option<SettingsPanel>,
     /// The zoom every terminal in the window is at.
     zoom: Zoom,
     /// Counts the changes of what is on screen, for [`Pane::seen`].
@@ -308,7 +297,6 @@ impl Workspace {
             tabs: Tabs::default(),
             panes: HashMap::new(),
             pending_split: None,
-            settings: None,
             zoom: Zoom::default(),
             tick: 0,
             viewport_height: 0.0,
@@ -430,10 +418,6 @@ impl Workspace {
     /// The session peeked at, when there is one.
     pub fn peeked(&self) -> Option<&str> {
         self.peek.as_deref()
-    }
-
-    pub fn settings_open(&self) -> bool {
-        self.settings.is_some()
     }
 
     pub fn leader_armed(&self) -> bool {
@@ -559,6 +543,12 @@ impl Workspace {
         answer
     }
 
+    /// Sends the core a change a screen made (`client::send_frame`'s kinds): a setting or a
+    /// computer. The sidebar follows the core's broadcast, not this request.
+    pub fn send_to_core(&self, frame: Value, cx: &App) {
+        self.sidebar.read(cx).send(Command::Send(frame));
+    }
+
     /// Registers `path` on `host_id` as a project, as the sidebar's Add project form does
     /// (`useAddProject().add`): pending until the core answers, then success or its error. Ignored
     /// while one is pending.
@@ -677,6 +667,16 @@ impl Workspace {
             cx.notify();
         }
         opened
+    }
+
+    /// Why open screen `id` is not drawn as its mod means (it would not load, or its render threw).
+    pub fn screen_error(&self, id: &str, cx: &App) -> Option<String> {
+        self.screens.error(id, cx)
+    }
+
+    /// Screen `id` keeps Escape for itself while `held`, or gives it back to the window.
+    pub fn hold_escape(&mut self, id: &str, held: bool) {
+        self.screens.set_takes_escape(id, held);
     }
 
     /// Gives an open floating screen new props; it re-renders. False when it is not open.
@@ -1818,6 +1818,10 @@ impl Workspace {
                     Some(Hit::Run { name, .. })
                         if matches!(name.as_str(), "global.navigator" | "global.navigatorAlt")
                 );
+            // A screen that keeps Escape for itself gets it as a key (the settings search clears first).
+            if keystroke.key == "escape" && self.screens.takes_escape(top) {
+                return false;
+            }
             let busy = keystroke.key == "escape" && !self.screens.dismissable(top);
             if (keystroke.key == "escape" && !busy) || toggles {
                 self.screen_closed(top, Value::Null, window, cx);
@@ -1839,26 +1843,6 @@ impl Workspace {
             if !typing {
                 self.park_peek(cx);
                 return true;
-            }
-        }
-        if let Some(text) = self.settings.as_mut().and_then(|p| p.editing.as_mut()) {
-            match settings::edit(text, keystroke) {
-                settings::Edit::Ignored => {}
-                settings::Edit::Changed => {
-                    cx.notify();
-                    return true;
-                }
-                settings::Edit::Escape => {
-                    if let Some(panel) = self.settings.as_mut() {
-                        panel.editing = None;
-                    }
-                    cx.notify();
-                    return true;
-                }
-                settings::Edit::Enter => {
-                    self.commit_scrollback(cx);
-                    return true;
-                }
             }
         }
         let context = KeyContext {
@@ -2441,11 +2425,28 @@ impl Workspace {
                 self.root_focus.focus(window, cx);
                 self.after_change(cx);
             }
+            // What this client cannot do is the desktop app's, or the browser's, on a click.
+            "handoff.open" => {
+                let place = match text("place") {
+                    Some("files") => Place::Files,
+                    Some("changes") => Place::Changes,
+                    Some("browser") => Place::Browser,
+                    Some("chat") => Place::Chat,
+                    Some("settings") => Place::Settings,
+                    _ => return Err(
+                        "This command needs {place: files, changes, browser, chat or settings}."
+                            .into(),
+                    ),
+                };
+                self.hand_off(place)?;
+            }
+            "link.open" => {
+                let url = text("url").ok_or("This command needs {url}.")?;
+                crate::handoff::open_link(url).map_err(|e| e.to_string())?;
+            }
             "overlay.close" => {
                 if let Some(top) = self.screens.top_modal() {
                     self.screen_closed(top, Value::Null, window, cx);
-                } else if self.settings.take().is_some() {
-                    cx.notify();
                 } else {
                     return Err("Nothing is open to close.".into());
                 }
@@ -2572,12 +2573,14 @@ impl Workspace {
                     }
                 }
             }
+            // The web's Settings page (`page` lands on a section); the same key closes it.
             "global.settings" | "app.settings" => {
-                self.settings = match self.settings {
-                    Some(_) => None,
-                    None => Some(SettingsPanel::default()),
-                };
-                cx.notify();
+                if self.screens.is_open("settings") {
+                    self.screen_closed("settings", Value::Null, window, cx);
+                } else {
+                    let page = text("page").map(str::to_string);
+                    self.open_screen("settings", json!({ "page": page }), None, None, cx);
+                }
             }
             "workspace.pin" => {
                 // Bare, it flips the current workspace; with arguments it is the web's, which
@@ -3553,17 +3556,6 @@ impl Workspace {
         }
     }
 
-    fn commit_scrollback(&mut self, cx: &mut Context<Self>) {
-        let typed = self.settings.as_ref().and_then(|p| p.editing.clone());
-        if let Some(n) = typed.as_deref().and_then(scrollback_from_text) {
-            self.change(Change::Scrollback(n), cx);
-            if let Some(panel) = self.settings.as_mut() {
-                panel.editing = None;
-            }
-        }
-        cx.notify();
-    }
-
     fn change(&mut self, change: Change, cx: &mut Context<Self>) {
         self.sidebar.update(cx, |sidebar, _| {
             sidebar.send(Command::UpdateSettings(change.patch()))
@@ -3672,390 +3664,6 @@ impl Workspace {
                 .into_any_element(),
         }
     }
-
-    fn settings_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let panel = self.settings.as_ref()?;
-        let terminal = self.sidebar.read(cx).model().terminal.clone();
-        let row = |title: &str, note: &str| {
-            div()
-                .flex()
-                .flex_col()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(rgb(TITLE_COLOR))
-                        .child(title.to_string()),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(rgb(DIM_COLOR))
-                        .child(note.to_string()),
-                )
-        };
-        let mut body = div().flex().flex_col().gap_3().p_3().child(
-            div()
-                .flex()
-                .justify_between()
-                .child(
-                    div()
-                        .text_color(rgb(TITLE_COLOR))
-                        .child("Settings · Terminal"),
-                )
-                .child(
-                    div()
-                        .id("settings-close")
-                        .cursor_pointer()
-                        .text_xs()
-                        .text_color(rgb(DIM_COLOR))
-                        .child("Close")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.settings = None;
-                            cx.notify();
-                        })),
-                ),
-        );
-        let Some(terminal) = terminal else {
-            body = body.child(hint("Waiting for the core"));
-            return Some(self.overlay(
-                "settings",
-                520.,
-                body,
-                |this, cx| {
-                    this.settings = None;
-                    cx.notify();
-                },
-                cx,
-            ));
-        };
-        let typed = panel.editing.clone();
-        let valid = typed
-            .as_deref()
-            .is_none_or(|t| scrollback_from_text(t).is_some());
-        let scrollback_box = div()
-            .id("scrollback")
-            .cursor_pointer()
-            .px_2()
-            .py_1()
-            .rounded_sm()
-            .bg(rgb(SELECTED_BG))
-            .text_sm()
-            .text_color(rgb(if valid { TITLE_COLOR } else { 0xe5484d }))
-            .child(match &typed {
-                Some(text) => format!("{text}▏"),
-                None => terminal.scrollback.to_string(),
-            })
-            .on_click({
-                let current = terminal.scrollback.to_string();
-                cx.listener(move |this, _, _, cx| {
-                    if let Some(panel) = this.settings.as_mut() {
-                        panel.editing = Some(current.clone());
-                    }
-                    cx.notify();
-                })
-            });
-        let sound_file = |file: &str| {
-            if file.is_empty() {
-                "the system alert".to_string()
-            } else {
-                file.to_string()
-            }
-        };
-        let [across, down] = terminal.padding;
-        body = body
-            .child(setting_row(
-                "Scrollback (lines)",
-                &format!("{MIN_SCROLLBACK}\u{2013}{MAX_SCROLLBACK} lines, Enter to save. Open terminals follow at once."),
-                scrollback_box.into_any_element(),
-            ))
-            .child(self.switch(
-                "login-shell",
-                "Login shell",
-                "Spawn plain terminal panes as a login shell. Only for terminals created afterwards.",
-                terminal.login_shell,
-                Change::LoginShell(!terminal.login_shell),
-                cx,
-            ))
-            .child(self.switch(
-                "double-quotes",
-                "Wrap dropped paths in double quotes",
-                "Applies to file drops. Off uses single quotes.",
-                terminal.dropped_path_double_quotes,
-                Change::DroppedPathDoubleQuotes(!terminal.dropped_path_double_quotes),
-                cx,
-            ))
-            .child(self.stepper(
-                "contrast",
-                "Minimum contrast",
-                "Text below this ratio (1 to 21) is pushed toward black or white. 1 leaves colours alone.",
-                format!("{:.1}", terminal.minimum_contrast),
-                Change::MinimumContrast(stepped(terminal.minimum_contrast, -0.5, CONTRAST)),
-                Change::MinimumContrast(stepped(terminal.minimum_contrast, 0.5, CONTRAST)),
-                cx,
-            ))
-            .child(self.switch(
-                "clipboard-write",
-                "Programs may write the clipboard",
-                "A program in a terminal can copy text with OSC 52.",
-                terminal.clipboard_write,
-                Change::ClipboardWrite(!terminal.clipboard_write),
-                cx,
-            ))
-            .child(self.switch(
-                "copy-on-select",
-                "Copy on select",
-                "Releasing a mouse selection in a terminal copies it.",
-                terminal.copy_on_select,
-                Change::CopyOnSelect(!terminal.copy_on_select),
-                cx,
-            ))
-            .child(self.switch(
-                "scrollbars",
-                "Scrollbars",
-                "A strip over the text edge while there is history to scroll.",
-                terminal.pane_scrollbars,
-                Change::PaneScrollbars(!terminal.pane_scrollbars),
-                cx,
-            ))
-            .child(self.stepper(
-                "padding-across",
-                "Padding across (px)",
-                "Space left and right of the text, 0 to 64.",
-                format!("{across}"),
-                Change::Padding([stepped(across, -2.0, PADDING), down]),
-                Change::Padding([stepped(across, 2.0, PADDING), down]),
-                cx,
-            ))
-            .child(self.stepper(
-                "padding-down",
-                "Padding down (px)",
-                "Space above and below the text, 0 to 64.",
-                format!("{down}"),
-                Change::Padding([across, stepped(down, -2.0, PADDING)]),
-                Change::Padding([across, stepped(down, 2.0, PADDING)]),
-                cx,
-            ))
-            .child(self.stepper(
-                "opacity",
-                "Opacity",
-                "0.1 to 1. Below 1, what is behind a terminal shows through.",
-                format!("{:.1}", terminal.opacity),
-                Change::Opacity(stepped(terminal.opacity, -0.1, OPACITY)),
-                Change::Opacity(stepped(terminal.opacity, 0.1, OPACITY)),
-                cx,
-            ))
-            .child(self.choice(
-                "option-as-alt",
-                "Option as Alt",
-                "auto, on, off, left or right. This window treats on, left and right as auto.",
-                &terminal.option_as_alt,
-                Change::OptionAsAlt(next_choice(&OPTION_AS_ALT, &terminal.option_as_alt)),
-                cx,
-            ))
-            .child(
-                div()
-                    .pt_2()
-                    .text_xs()
-                    .text_color(rgb(DIM_COLOR))
-                    .child("Alerts"),
-            )
-            .child(self.switch(
-                "sounds",
-                "Alert sounds",
-                "A sound when a session finishes or needs you and you are not looking at it.",
-                terminal.sound_enabled,
-                Change::SoundEnabled(!terminal.sound_enabled),
-                cx,
-            ))
-            .child(row(
-                "Sound files",
-                &format!(
-                    "Done: {}. Needs you: {}. Chosen in Perch.",
-                    sound_file(&terminal.sound_done),
-                    sound_file(&terminal.sound_blocked)
-                ),
-            ))
-            .child(self.choice(
-                "toasts",
-                "Toasts",
-                "app: a message in the window; system: a system notification; off.",
-                &terminal.toast_delivery,
-                Change::ToastDelivery(next_choice(&TOAST_DELIVERY, &terminal.toast_delivery)),
-                cx,
-            ))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(rgb(DIM_COLOR))
-                    .child("Line height, ligatures and scroll speed have no setting in the core yet."),
-            )
-            .child(
-                div().id("settings-handoff").cursor_pointer().text_xs().text_color(rgb(DIM_COLOR))
-                    .child("Every other setting is in Perch: Open Settings in Perch")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        let result = this.hand_off(Place::Settings);
-                        this.finish(result, cx);
-                    })),
-            );
-        Some(self.overlay(
-            "settings",
-            520.,
-            body,
-            |this, cx| {
-                this.settings = None;
-                cx.notify();
-            },
-            cx,
-        ))
-    }
-
-    fn switch(
-        &self,
-        id: &'static str,
-        title: &str,
-        note: &str,
-        on: bool,
-        flip: Change,
-        cx: &mut Context<Self>,
-    ) -> gpui::Div {
-        let button = div()
-            .id(id)
-            .cursor_pointer()
-            .px_2()
-            .py_1()
-            .rounded_sm()
-            .text_sm()
-            .bg(rgb(SELECTED_BG))
-            .text_color(rgb(if on { 0x4caf6a } else { DIM_COLOR }))
-            .child(if on { "On" } else { "Off" })
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.change(flip, cx);
-                cx.notify();
-            }));
-        setting_row(title, note, button.into_any_element())
-    }
-
-    /// A value with a button either side that move it by one step. Each button saves the value it
-    /// would give, so a click is one `settings.update`.
-    #[allow(clippy::too_many_arguments)]
-    fn stepper(
-        &self,
-        id: &'static str,
-        title: &str,
-        note: &str,
-        shown: String,
-        lower: Change,
-        higher: Change,
-        cx: &mut Context<Self>,
-    ) -> gpui::Div {
-        let button = |label: &'static str, id: String, change: Change, cx: &mut Context<Self>| {
-            div()
-                .id(SharedString::from(id))
-                .cursor_pointer()
-                .px_2()
-                .py_1()
-                .rounded_sm()
-                .text_sm()
-                .bg(rgb(SELECTED_BG))
-                .text_color(rgb(TITLE_COLOR))
-                .child(label)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.change(change, cx);
-                    cx.notify();
-                }))
-        };
-        let control = div()
-            .flex()
-            .items_center()
-            .gap_1()
-            .child(button("\u{2212}", format!("{id}-less"), lower, cx))
-            .child(
-                div()
-                    .min_w(px(44.))
-                    .flex()
-                    .justify_center()
-                    .text_sm()
-                    .text_color(rgb(TITLE_COLOR))
-                    .child(shown),
-            )
-            .child(button("+", format!("{id}-more"), higher, cx));
-        setting_row(title, note, control.into_any_element())
-    }
-
-    /// A value that moves to the next of a few when clicked.
-    fn choice(
-        &self,
-        id: &'static str,
-        title: &str,
-        note: &str,
-        shown: &str,
-        next: Change,
-        cx: &mut Context<Self>,
-    ) -> gpui::Div {
-        let button = div()
-            .id(id)
-            .cursor_pointer()
-            .px_2()
-            .py_1()
-            .rounded_sm()
-            .text_sm()
-            .bg(rgb(SELECTED_BG))
-            .text_color(rgb(TITLE_COLOR))
-            .child(shown.to_string())
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.change(next, cx);
-                cx.notify();
-            }));
-        setting_row(title, note, button.into_any_element())
-    }
-
-    /// A box over the main area; a click outside it closes it.
-    fn overlay(
-        &self,
-        id: &'static str,
-        width: f32,
-        body: gpui::Div,
-        close: impl Fn(&mut Self, &mut Context<Self>) + 'static + Clone,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        // Room above (48) and below (24) it, up to what a box of lists needs.
-        let room = if self.viewport_height > 0.0 {
-            (self.viewport_height - 72.).clamp(120., 560.)
-        } else {
-            560.
-        };
-        div()
-            .id(id)
-            .absolute()
-            .inset_0()
-            .flex()
-            .justify_center()
-            .pt(px(48.))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, _, cx| close(this, cx)),
-            )
-            .child(
-                div()
-                    .w(px(width))
-                    .h_auto()
-                    .max_h(px(room))
-                    .overflow_hidden()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(rgb(OVERLAY_BORDER))
-                    .bg(rgb(SIDEBAR_BG))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("{id}-body")))
-                            .max_h(px(room - 2.))
-                            .overflow_y_scroll()
-                            .child(body),
-                    ),
-            )
-            .into_any_element()
-    }
 }
 
 /// A screen result's web action: `{action, args}`.
@@ -4096,36 +3704,6 @@ fn program_in(argv: &Value, task: Option<&str>) -> Result<String, String> {
 
 fn word(args: &[Value], at: usize) -> Option<String> {
     args.get(at).and_then(Value::as_str).map(str::to_string)
-}
-
-/// A setting: its name and what it does on the left, its control on the right.
-fn setting_row(title: &str, note: &str, control: AnyElement) -> gpui::Div {
-    div()
-        .flex()
-        .justify_between()
-        .items_center()
-        .gap_3()
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                // The words give way to the control, which keeps its size.
-                .flex_1()
-                .min_w_0()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(rgb(TITLE_COLOR))
-                        .child(title.to_string()),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(rgb(DIM_COLOR))
-                        .child(note.to_string()),
-                ),
-        )
-        .child(div().flex_none().child(control))
 }
 
 impl Workspace {
@@ -4234,10 +3812,7 @@ impl gpui::Render for Workspace {
         self.screens.place(wanted, window, cx);
         // A terminal that attaches takes the keyboard when it first draws; the tab that has it in
         // the layout keeps it. A modal screen has the keyboard while it is up.
-        if self.settings.is_none()
-            && self.screens.top_modal().is_none()
-            && self.keyboard_held.is_none()
-        {
+        if self.screens.top_modal().is_none() && self.keyboard_held.is_none() {
             let peeked = self
                 .peek
                 .as_ref()
@@ -4610,7 +4185,7 @@ impl gpui::Render for Workspace {
             .iter()
             .filter_map(|open| self.floating_view(open))
             .collect();
-        let overlays = self.settings_view(cx).into_iter().chain(self.peek_view(cx));
+        let overlays = self.peek_view(cx).into_iter();
         // While a tab is pressed the window follows the pointer wherever it is, before anything
         // under it: what is under a drag does not react to it. While a press a mod follows lasts,
         // the pointer is forwarded to that mod, and only then.

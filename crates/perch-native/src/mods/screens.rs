@@ -72,6 +72,13 @@ const MODAL: Place = Place::Floating { modal: true };
 
 /// Every screen a mod can take, in the order the web's are ported.
 pub const SCREENS: &[Screen] = &[
+    // Settings: the web's page over the whole window (`SettingsPage`), its pages drawn inside it.
+    Screen {
+        id: "settings",
+        place: MODAL,
+        width: 0.,
+        height: 0.,
+    },
     Screen {
         id: "sidebar",
         place: Place::InFlow,
@@ -255,6 +262,9 @@ pub struct Floating {
     pub on_result: Option<OnResult>,
     /// What had the keyboard when a modal one opened, given it back on close.
     pub focus_back: Option<FocusHandle>,
+    /// The screen wants Escape for itself (a search text to clear, a key being recorded): the window
+    /// leaves it to the screen instead of dismissing it.
+    pub takes_escape: bool,
     props: Value,
 }
 
@@ -407,6 +417,7 @@ impl Screens {
             view: None,
             on_result,
             focus_back,
+            takes_escape: false,
             props,
         });
         true
@@ -489,5 +500,23 @@ impl Screens {
     /// The modal screen on top, which the keyboard belongs to.
     pub fn top_modal(&self) -> Option<&'static str> {
         self.floating.iter().rev().find(|f| f.modal()).map(|f| f.id)
+    }
+
+    /// Why open screen `id` is not drawn as its mod means: the mod would not load, or its last render threw.
+    pub fn error(&self, id: &str, cx: &App) -> Option<String> {
+        let view = self.floating.iter().find(|f| f.id == id)?.view.as_ref()?;
+        view.read(cx).error(cx)
+    }
+
+    /// Whether open screen `id` keeps Escape for itself.
+    pub fn takes_escape(&self, id: &str) -> bool {
+        self.floating.iter().any(|f| f.id == id && f.takes_escape)
+    }
+
+    /// Screen `id` keeps Escape for itself (`held`), or gives it back to the window.
+    pub fn set_takes_escape(&mut self, id: &str, held: bool) {
+        if let Some(open) = self.floating.iter_mut().find(|f| f.id == id) {
+            open.takes_escape = held;
+        }
     }
 }

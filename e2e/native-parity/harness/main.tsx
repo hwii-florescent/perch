@@ -312,6 +312,22 @@ const SCREENS: Record<string, Screen> = {
     }),
     Probe: PropsProbe,
   },
+  settings: {
+    // The app's own Settings page (`components/SettingsPage.tsx`: the frame, the section list, the search and the sections as
+    // `settingsRoutes.tsx` binds them) on the harness's store: nothing asks a core, so the sections show what the store holds.
+    // The state's `patch` opens it (`settingsOpen`); a section is chosen by `steps`.
+    load: async () => {
+      const { SettingsPage } = await import("../../../packages/web/src/components/SettingsPage");
+      // The Permissions section reads the Mac app's bridge once, as the page loads (`links.ts`); the notification section reads
+      // it each time it draws. This client has no notification centre, so the page is drawn as a browser draws it, the bridge gone.
+      delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+      // Nor has it the browser's Notification API: the page reads "not supported", as the client's page does.
+      Object.defineProperty(window, "Notification", { value: undefined, configurable: true });
+      return { default: SettingsPage as unknown as ComponentType<never> };
+    },
+    mount: "stage",
+    Probe: PropsProbe,
+  },
   memory: {
     clock: 1_800_000_000_000,
     listed: (props) => (props.loading ? null : '[data-testid="memory-new"]:not(:disabled)'),
@@ -436,7 +452,7 @@ data.sessions = sessions;
 if (hostPatch) data.hostStates = { ...(data.hostStates as object), ...hostPatch };
 usePerchStore.setState(data);
 // Nothing here has a core to ask for the host's agents: the fixture's list stands.
-usePerchStore.setState({ fetchAgentManifests: () => null });
+usePerchStore.setState({ fetchAgentManifests: () => null, fetchSettings: () => null, fetchHosts: () => null });
 useFileTabs.setState({ tabs: fileTabs?.tabs ?? [], active: fileTabs?.active ?? null });
 useSplitSets.setState({ sets: splitSets?.sets ?? [], zoomedId: splitSets?.zoomedId ?? null });
 useBrowserPages.setState({ pages: browserPages ?? {} });
@@ -451,7 +467,8 @@ const { width, height } = state.size ?? fixture.size;
 const Shown = Component as ComponentType<Json>;
 const shown: ReactNode = <Shown {...(screen.props ? screen.props(props) : props)} />;
 createRoot(document.getElementById("root")!).render(
-  <div className="app app--cards">
+  // The Mac app's window: the section list leaves room for the traffic lights (`.app--mac-desktop`).
+  <div className={"app app--cards" + (screenName === "settings" ? " app--mac-desktop" : "")}>
     {screen.mount === "card"
       // The box the app lays the screen in (`CARD` in StockWindow.tsx), square-cornered, at the size the fixture names.
       ? <div style={{ display: "flex", flexDirection: "column", width, height, overflow: "hidden", background: "var(--card-bg)", position: "relative" }} data-parity-card="">{shown}</div>
