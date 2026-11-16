@@ -7,6 +7,12 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-16 — Session rows have no fill at rest (owner)
+
+Supersedes the "filled cards" part of the 2026-11-15 sub-session decision below. In the stock sidebar (both apps) no
+session row, lead or sub-session, is filled at rest: only the active row and a hovered or focused one are. The elbow
+connector, the fold chevron and the "…" menu stay.
+
 ## 2026-11-15 — A stopped sub-session closes like a person's Close (owner)
 
 Owner, after `perch stop` left stopped children's tabs and rows behind ("Agent unavailable", and
