@@ -72,6 +72,11 @@ path = "tests/files_window.rs"
 harness = false
 
 [[test]]
+name = "files_markdown_window"
+path = "tests/files_markdown_window.rs"
+harness = false
+
+[[test]]
 name = "files_drawer"
 path = "tests/files_drawer.rs"
 harness = false

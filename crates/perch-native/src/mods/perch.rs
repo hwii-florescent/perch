@@ -259,6 +259,8 @@ impl Perch {
         let perch = self.clone();
         host.register_module(move |id| perch.module(id));
         self.0.hosts.borrow_mut().push(host.clone());
+        // `perch-markdown` (the `markdown` engine): a Markdown file's rendered preview.
+        crate::files::markdown::register(host);
         // `perch-media` (and the `image` engine), reading bytes from the attached window's core.
         let perch = self.clone();
         crate::files::media::register(

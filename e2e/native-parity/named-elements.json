@@ -3048,6 +3048,12 @@
           "description": "A Markdown file's Source and Preview toggle, in its header."
         },
         {
+          "name": "files-markdown-preview-button",
+          "selector": "[aria-label=\"Markdown view\"] > button:last-child",
+          "description": "The toggle's Preview button.",
+          "text": true
+        },
+        {
           "name": "files-markdown-preview",
           "selector": "[data-testid=\"workspace-markdown-preview\"]",
           "description": "A Markdown file's rendered preview of its draft, in place of the editor."

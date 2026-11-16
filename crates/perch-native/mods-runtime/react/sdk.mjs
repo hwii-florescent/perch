@@ -17,7 +17,7 @@ import { GHOST_BUTTON, ICON_BUTTON } from "../../../../packages/web/src/componen
 import { CloseIcon, EllipsisIcon, GearIcon, PlusIcon } from "../../../../packages/web/src/components/ui/icons.tsx";
 import { HostStateDot } from "../../../../packages/web/src/components/HostStateDot.tsx";
 import StockDialog from "../../../../packages/web/src/stock-ui/dialog/main.tsx";
-import { FILE_PREVIEW_MAX_CHARS, markdownLexer, markdownSections, previewSource } from "./markdown.mjs";
+import { FILE_PREVIEW_MAX_CHARS, previewSource } from "./markdown.mjs";
 import StockSelect from "../../../../packages/web/src/stock-ui/select/main.tsx";
 import StockEditorMenu from "../../../../packages/web/src/stock-ui/editor-menu/main.tsx";
 import { SELECT } from "../../../../packages/web/src/components/ui/settings.ts";
@@ -401,28 +401,23 @@ export const useWorkspaceTabs = () => useHostSnapshot((perch) => perch.workspace
 // ---- files ----------------------------------------------------------------------------------------------------
 
 export { FileIcon, GitMarker, assetKind };
-/** The rendered preview of the live draft (`markdown.mjs`), in the web's box. A relative image is a placeholder too:
- * the native window has no confined file route for it yet. */
+let markdownKeys = 0;
+/** The rendered preview of the live draft, in the web's box: the window's Markdown engine (`perch-markdown`, the
+ * `markdown` engine slot) draws the document, as `CodeEditor` places the editor. It parses off the script and wraps
+ * inline code, links and emphasis, which elements described here cannot (the runtime has no inline formatting), and
+ * a long document is not thousands of elements to render and describe. Nothing is fetched; an image is the web's text
+ * placeholder, a link opens only for an absolute http(s) address on a click. */
 export function MarkdownPreview({ path, content }) {
   const { source, truncated } = previewSource(content ?? "");
-  // Section by section, one per turn (`markdownSections`): long documents lex past a script's time budget at once.
-  const sections = useMemo(() => markdownSections(source), [source]);
-  const lexer = useMemo(() => markdownLexer((url) => runCommand("link.open", { url })), [source]);
-  const [lexed, setLexed] = useState({ lexer: null, count: 0 });
-  const count = lexed.lexer === lexer ? lexed.count : 0;
-  useEffect(() => {
-    if (count >= sections.length) return undefined;
-    const next = () => { lexer.add(sections[count]); setLexed({ lexer, count: count + 1 }); };
-    // The first section at once, the rest a turn apart.
-    if (count === 0) { next(); return undefined; }
-    const timer = setTimeout(next, 0);
-    return () => clearTimeout(timer);
-  }, [lexer, sections, count]);
-  const elements = useMemo(() => lexer.elements(), [lexer, count]);
-  return createElement("div", { className: "min-h-0 min-w-0 flex-1 overflow-auto px-4 py-3 text-[0.8rem]", tabIndex: 0, role: "region", "aria-label": `Rendered preview of ${path}`, "data-testid": "workspace-markdown-preview" },
+  const markdown = host().markdown;
+  const key = useMemo(() => `markdown-${++markdownKeys}`, []);
+  useLayoutEffect(() => { markdown?.show(key, source); }, [key, source]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => markdown?.release(key), [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  return createElement("div", { className: "min-h-0 min-w-0 flex-1 overflow-auto px-4 py-3 text-[0.8rem]", style: { display: "flex", flexDirection: "column" }, tabIndex: 0, role: "region", "aria-label": `Rendered preview of ${path}`, "data-testid": "workspace-markdown-preview" },
     truncated && createElement("p", { role: "status", className: "mt-0 text-[0.7rem] text-yellow", "data-testid": "workspace-markdown-truncated" },
       `This document is large: only the first ${FILE_PREVIEW_MAX_CHARS.toLocaleString()} characters are rendered. Switch to Source to see all of it.`),
-    createElement("div", { className: "message__markdown file-markdown" }, elements));
+    createElement("div", { className: "message__markdown file-markdown", style: { display: "flex", flexDirection: "column", flex: "1 1 0%", minHeight: 0 } },
+      createElement("div", { "data-perch-engine": "markdown", "data-perch-key": key, className: "min-h-0 min-w-0 flex-1" })));
 }
 /** The explorer's right-click menu and its prompts: the window's `dialog` screen (`file-menu` in it). */
 export const FileEntryMenu = overlay("file-menu");
