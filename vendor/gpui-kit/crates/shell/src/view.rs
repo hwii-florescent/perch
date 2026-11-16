@@ -250,8 +250,14 @@ impl ScriptView {
         let policy = self.policy.clone();
         let entity = cx.entity();
 
-        match runtime.build_snapshot(&object, Some(entity), policy, window, cx) {
-            Ok(snapshot) => {
+        match runtime.build_or_keep_snapshot(&object, Some(entity), policy, window, cx) {
+            // PERCH: the script said nothing changed (`unchanged()`): the live snapshot stands.
+            Ok(None) if self.current.is_some() => self.error = None,
+            Ok(None) => {
+                self.error =
+                    Some("render(cx) returned unchanged() before its first description".into())
+            }
+            Ok(Some(snapshot)) => {
                 // Measured here rather than anywhere else because this is the
                 // only place two consecutive descriptions of one view exist at
                 // the same time. Nothing acts on the answer: it counts how often

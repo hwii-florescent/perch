@@ -207,6 +207,8 @@ struct Attached {
 struct Shared {
     data: RefCell<Data>,
     revisions: RefCell<HashMap<String, u64>>,
+    /// Bumped with every part: a screen that saw this value has nothing new to read (`revision`).
+    revision: Cell<u64>,
     /// Per mod id, the revision of each part it read when it last rendered.
     reads: RefCell<HashMap<String, HashMap<String, u64>>>,
     hosts: RefCell<Vec<ModHost>>,
@@ -238,6 +240,7 @@ impl Perch {
         Self(Rc::new(Shared {
             data: RefCell::default(),
             revisions: RefCell::default(),
+            revision: Cell::default(),
             reads: RefCell::default(),
             hosts: RefCell::default(),
             asker: RefCell::default(),
@@ -749,6 +752,7 @@ impl Perch {
     }
 
     fn bump(&self, part: &str) {
+        self.0.revision.set(self.0.revision.get() + 1);
         *self
             .0
             .revisions
@@ -1375,6 +1379,10 @@ impl Perch {
                 Ok(to_host(&json))
             })
             .function("theme", reader(THEME, |perch, _| perch.theme_tokens()))
+            .function("revision", {
+                let perch = self.clone();
+                move |_| Ok(HostValue::Number(perch.0.revision.get() as f64))
+            })
             .function(
                 "themeName",
                 reader(THEME, |perch, _| json!(perch.theme().name)),

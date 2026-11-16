@@ -27,7 +27,7 @@
 //! hover colour does not reach it, as in CSS) or when the inherited value would differ (`line-height: normal`, a
 //! multiplier under a new size). `tokens` names the theme token each colour came from.
 import { Cascade, colorOut, evalLength, familyOut, lineHeightPx, splitTop, THEME_TOKENS } from "./css.mjs";
-import { HostElement, HostText, MEASURE_TRIES, submits } from "./dom.mjs";
+import { HostElement, HostText, MEASURE_TRIES, submits, tick } from "./dom.mjs";
 import { closest as closestBy, matchesComplex, parseSelector, querySelectorAll as queryBy } from "./selector.mjs";
 
 export const SCHEMA = "perch-native-description/1";
@@ -581,7 +581,7 @@ function pseudoBoxes(element, computed, inheritedText, ctx) {
     const content = String(own.values.content ?? "none").trim();
     if (content === "none" || content === "normal") continue;
     const text = /^(["'])(.*)\1$/.exec(content)?.[2] ?? "";
-    const report = (kind, property, value, source, note) => ctx.findings.add(kind, property, value, source ?? "(user agent)", `${label(element)}::${pseudo}`, note);
+    const report = (kind, property, value, source, note) => ctx.add(kind, property, value, source ?? "(user agent)", `${label(element)}::${pseudo}`, note);
     const tokens = {};
     const base = boxStyle(own, report, ctx.viewport);
     const style = encode({ ...base, ...textStyle(own, textWanted(own, ctx.measure), inheritedText) }, tokens);
@@ -595,7 +595,6 @@ function pseudoBoxes(element, computed, inheritedText, ctx) {
 /** The engine's name for the hover group `element` is (one per element, as CSS reads the hovered element itself). */
 const groupName = (element) => `~g${element.id}`;
 
-/** One described subtree. `chain` names the element's ancestors with their versions. */
 /** An inline element that may join its line's text: it holds only text and draws nothing of its own (no margin, padding,
  * border or background, which would be lost), has no handlers, and no test id (tests and the parity gate name it, so it
  * stays a box: a count in a label, the number in a state badge). */
@@ -605,13 +604,62 @@ function joinsLine(k) {
     !BOX_KEYS.some((key) => k.style?.[key]) && k.children?.every((c) => c.kind === "text");
 }
 
-function describeElement(element, parentComputed, inheritedText, ctx, chain = "") {
-  const key = `${chain}/${element.id}.${element.version}`;
+/** A described child its parent adjusts, copied first: a description kept from an earlier pass is never changed. */
+function adjustable(kids, i) {
+  const kid = kids[i];
+  const copy = { ...kid, style: { ...kid.style } };
+  Object.defineProperty(copy, DISPLAY, { value: kid[DISPLAY] });
+  kids[i] = copy;
+  return copy;
+}
+
+/** The first/last positions of `element`'s ancestors, for the rare rule that reads them (a table's last row). */
+function ancestorPositions(element) {
+  const out = [];
+  for (let n = element.parentElement; n?.parentElement; n = n.parentElement) {
+    const siblings = n.parentElement.children;
+    out.push(`${+(siblings[0] === n)}${+(siblings[siblings.length - 1] === n)}`);
+  }
+  return out.join("");
+}
+
+/**
+ * One described subtree. Its own part (style, variants, events) is kept while what its rules read is unchanged
+ * (`StyleSheet.depends`): its props and state (`version`), its parent's computed values and inherited text, an
+ * ancestor's attributes or state (`anc`, the latest such tick above it) when a rule reads one, and whether it is the
+ * first or last child when a rule reads that. A subtree in which nothing changed (`stamp`) is the same description
+ * as before, findings replayed; one whose layout is read back (a percentage translate) is described every time.
+ */
+function describeElement(element, parentComputed, inheritedText, ctx, anc = 0, first = true, last = true, index = 0) {
+  const deps = ctx.cascade.sheet.depends(element);
+  const pos = deps.pos ? `${+first}${+last}${deps.nth ? `:${index}` : ""}` : "";
+  const ancPos = deps.ancPos ? ancestorPositions(element) : "";
   let entry = ctx.cache.get(element);
-  if (!entry || entry.key !== key) ctx.cache.set(element, (entry = { key, part: ownPart(element, parentComputed, inheritedText, ctx) }));
+  const fresh = entry && entry.version === element.version && entry.parentValues === parentComputed?.values && entry.inheritedText === inheritedText &&
+    entry.pos === pos && entry.ancPos === ancPos && (!deps.anc || anc <= entry.at);
+  if (fresh && entry.node && entry.stamp === element.stamp && !entry.volatile && (!entry.subAnc || anc <= entry.subAt)) {
+    for (const args of entry.log) ctx.add(...args);
+    return entry.node;
+  }
+  if (!fresh) {
+    const part = ownPart(element, parentComputed, inheritedText, ctx);
+    // Its children's inherited text keeps its identity when its value did not change, as their keys compare it.
+    if (entry && same(entry.part.childText, part.childText)) part.childText = entry.part.childText;
+    entry = { version: element.version, parentValues: parentComputed?.values, inheritedText, pos, ancPos, at: ctx.now, part };
+    ctx.cache.set(element, entry);
+  }
+  const start = ctx.log.length;
+  const flags = { volatile: !!entry.part.shift || deps.ancPos, subAnc: deps.anc };
+  const node = describeNode(element, entry, ctx, Math.max(anc, element.attrStamp), flags);
+  Object.assign(entry, { node, stamp: element.stamp, subAt: ctx.now, log: ctx.log.slice(start), volatile: flags.volatile, subAnc: flags.subAnc });
+  return node;
+}
+
+/** The node for `element` from its own part (`entry.part`) and its children's descriptions. */
+function describeNode(element, entry, ctx, anc, flags) {
   const { computed, tokens, extra, reports, childText, where } = entry.part;
-  for (const args of reports) ctx.findings.add(...args);
-  const report = (kind, property, value, source, note) => ctx.findings.add(kind, property, value, source ?? "(user agent)", where, note);
+  for (const args of reports) ctx.add(...args);
+  const report = (kind, property, value, source, note) => ctx.add(kind, property, value, source ?? "(user agent)", where, note);
   const style = { ...entry.part.style };
   if (entry.part.shift) laidOutShift(element, style, entry.part.shift);
   const node = { kind: "div", id: element.id, style, tokens, meta: entry.part.meta, ...extra };
@@ -668,6 +716,8 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
   const transform = computed.values["text-transform"];
   const kids = [];
   let inline = false, blockKids = false;
+  const elements = element.childNodes.reduce((n, child) => n + (child instanceof HostElement ? 1 : 0), 0);
+  let at = 0;
   for (const child of element.childNodes) {
     if (child instanceof HostText) {
       if (child.hidden || child.data === "") continue;
@@ -684,7 +734,11 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
       continue;
     }
     if (!(child instanceof HostElement)) continue;
-    const described = describeElement(child, computed, childText, ctx, key);
+    const described = describeElement(child, computed, childText, ctx, anc, at === 0, at === elements - 1, at);
+    at++;
+    const kept = ctx.cache.get(child);
+    flags.volatile ||= kept.volatile;
+    flags.subAnc ||= kept.subAnc;
     const childDisplay = described[DISPLAY];
     if (childDisplay === "inline" || childDisplay === "inline-block" || childDisplay === "inline-flex") inline = true;
     else if (childDisplay !== "none") blockKids = true;
@@ -695,8 +749,9 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
   // draws the text in a box of no width, so such an item keeps its content width and does not clip: the same width, and
   // ponytail: a box squeezed narrower than its text overflows instead of ending in an ellipsis.
   if (/(^|\s)inline-flex(\s|$)/.test(String(element.props?.className ?? "")) && style.w === undefined) {
-    for (const kid of kids) {
-      if (kid.style?.flex_grow && kid.style.min_w === 0 && kid.style.overflow_x === "hidden") {
+    for (let i = 0; i < kids.length; i++) {
+      if (kids[i].style?.flex_grow && kids[i].style.min_w === 0 && kids[i].style.overflow_x === "hidden") {
+        const kid = adjustable(kids, i);
         delete kid.style.min_w;
         delete kid.style.flex_grow;
         delete kid.style.flex_basis;
@@ -716,8 +771,9 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
     kids.splice(0, kids.length, { kind: "text", text });
   }
   const hasElements = kids.some((k) => k.kind !== "text");
-  const only = kids.length === 1 && kids[0].kind !== "text" && /^inline-(block|flex)$/.test(kids[0][DISPLAY]) ? kids[0] : null;
+  let only = kids.length === 1 && kids[0].kind !== "text" && /^inline-(block|flex)$/.test(kids[0][DISPLAY]) ? kids[0] : null;
   if (!style.display && only) {
+    only = adjustable(kids, 0);
     // One inline box alone on its line (a button in a plain div): CSS puts its baseline on the line's strut, the
     // block's own font and line height, which lowers it under a larger font. The engine has no line boxes: the box
     // is moved down by the strut's ascent less its own baseline.
@@ -731,7 +787,7 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
   } else if (!style.display && kids.length === 1 && (kids[0].kind === "svg" || kids[0].kind === "image") && kids[0][DISPLAY] === "inline" && typeof kids[0].style.h === "number") {
     // One inline image alone on its line (an icon in a plain span): it sits on the baseline of the line's strut, so
     // the line is as high as the strut's ascent or the image, whichever is taller, plus the strut's descent.
-    const icon = kids[0];
+    const icon = adjustable(kids, 0);
     const ascent = strutAscent(computed.values, ctx.measure);
     const descent = lineHeightPx(computed.values, ctx.measure) - ascent;
     const round = (n) => Math.round(n * 100) / 100;
@@ -746,7 +802,7 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
     style.flex_direction = blockKids ? "col" : "row";
     if (!blockKids) style.items = "baseline";
     // An inline box among blocks is on a line of its own, as wide as its content, not the column's width.
-    else for (const kid of kids) if (kid.kind !== "text" && /^inline-(block|flex)$/.test(kid[DISPLAY]) && !kid.style.self) kid.style.self = "start";
+    else for (let i = 0; i < kids.length; i++) if (kids[i].kind !== "text" && /^inline-(block|flex)$/.test(kids[i][DISPLAY]) && !kids[i].style.self) adjustable(kids, i).style.self = "start";
     report("approximated", "display", `${computed.values.display} with inline content`, "(inline formatting)", blockKids ? "a column of its children" : "a row on the text baseline");
   }
   // Letter spacing: the engine has none. A spaced run keeps its glyphs together and gets the spacing WebKit adds
@@ -897,13 +953,21 @@ export function describe(document, perch, sheet, kept = {}, names = null) {
   const look = JSON.stringify([theme, viewport]);
   if (kept.look !== look || kept.sheet !== sheet) Object.assign(kept, { look, sheet, cache: new WeakMap(), cascade: new Cascade(sheet, { theme, viewport }), top: null });
   const { cascade, cache } = kept;
-  const ctx = { cascade, cache, viewport, findings: new Findings(), measure: perch.lineHeight ? (size) => perch.lineHeight(size) : null };
+  const findings = new Findings();
+  const log = [];
+  const add = (...args) => { log.push(args); findings.add(...args); };
+  const ctx = { cascade, cache, viewport, findings, log, add, now: tick(), measure: perch.lineHeight ? (size) => perch.lineHeight(size) : null };
   // <html> and <body> carry no state of their own here: computed once per look.
   kept.top ??= cascade.compute(document.body, cascade.compute(document.documentElement, null));
-  const trees = document.body.children.map((child) => describeElement(child, kept.top, ENGINE_ROOT_TEXT, ctx));
+  const tops = document.body.children;
+  const trees = tops.map((child, i) => describeElement(child, kept.top, ENGINE_ROOT_TEXT, ctx, 0, i === 0, i === tops.length - 1, i));
   if (names?.length) {
     const nodes = new Map();
-    const walk = (node) => { if (node.id) nodes.set(node.id, node); for (const child of node.children ?? []) walk(child); };
+    // Names are given afresh each pass (a kept node may hold the last pass's).
+    const walk = (node) => {
+      if (node.id) { nodes.set(node.id, node); delete node.name; delete node.range_name; delete node.also; }
+      for (const child of node.children ?? []) walk(child);
+    };
     trees.forEach(walk);
     nameElements(document, names, nodes);
   }

@@ -312,6 +312,7 @@ async function tabsWork(page: Page, owner: string, a: string, b: string, name: s
 /** Two sessions shown side by side: each tiled pane has a header from `owner`'s copy, and its expand leaves the split. */
 async function paneHeadersWork(page: Page, owner: string, a: string, b: string) {
   await page.getByTestId(`tab-${b}`).click({ button: "right" });
+  await page.getByTestId("tab-menu-show-beside").click();
   await page.getByTestId(`tab-split-with-${a}`).click();
   await expect(page.getByTestId("split-canvas")).toHaveAttribute("data-split", "2", { timeout: 15000 });
   for (const id of [a, b]) await expect(page.locator(`[data-testid="mod-view-${owner}"] [data-testid="pane-header-${id}"]`)).toBeVisible({ timeout: 15000 });
@@ -375,6 +376,7 @@ test("the status bar, tabs and pane headers run from stock packages; a clone cho
     .toEqual([...stockOrder].reverse());
   await expect(page.locator('[data-testid="mod-view-e2e-my-status"]').getByTestId("status-connection")).toHaveAttribute("aria-label", "Linked", { timeout: 15000 });
   await page.getByTestId(`tab-${b}`).click({ button: "right" });
+  await page.getByTestId("tab-menu-show-beside").click();
   await page.getByTestId(`tab-split-with-${a}`).click();
   await page.getByTestId(`e2e-pane-menu-${a}`).click();
   await expect(page.getByTestId("tab-split-menu")).toBeVisible();

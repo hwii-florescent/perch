@@ -32,7 +32,7 @@
 // the pointer, draws the `tab-drag` screen and moves or splits the tab once it is let go. Commands the module and the
 // window lack are refused by it and logged.
 import * as perch from "perch";
-import { Icon, bounds, forgetBounds, textWidth } from "perch-react";
+import { Icon, bounds, forgetBounds, probing, textWidth } from "perch-react";
 import * as engines from "perch-engine";
 import * as diffs from "perch-diff";
 import * as editors from "perch-editor";
@@ -221,6 +221,8 @@ export function copyFor(cx, screen) {
   // Snapshots by key, read again on `refresh()`.
   const snapshots = new Map();
   const reviews = new Map();
+  let seenRevision = null;
+  let lookedAt = null;
   const listeners = new Set();
   const focusListeners = new Set();
   const openOverlays = new Set();
@@ -230,7 +232,7 @@ export function copyFor(cx, screen) {
     let entry = snapshots.get(key);
     if (!entry) {
       const value = read();
-      snapshots.set(key, (entry = { read, value, text: JSON.stringify(value) }));
+      snapshots.set(key, (entry = { read, value }));
     }
     return entry.value;
   }
@@ -621,12 +623,22 @@ export function copyFor(cx, screen) {
         changed = true;
         if (tell) entry.handler(entry.pending.splice(0));
       }
-      for (const entry of snapshots.values()) {
-        const value = entry.read();
-        const text = JSON.stringify(value);
-        if (text === entry.text) continue;
-        changed = true;
-        if (tell) Object.assign(entry, { value, text });
+      // Nothing published since the snapshots were last found current: none is read again.
+      const revision = perch.revision?.() ?? null;
+      if (revision === null || revision !== seenRevision) {
+        let moved = false;
+        // A look keeps what it read for the catch-up that follows at the same revision, which reads nothing again.
+        const looked = revision !== null && lookedAt === revision;
+        for (const entry of snapshots.values()) {
+          const value = looked && entry.next !== undefined ? entry.next : share(entry.value, entry.read());
+          entry.next = tell || revision === null ? undefined : value;
+          if (value === entry.value) continue;
+          moved = true;
+          if (tell) entry.value = value;
+        }
+        lookedAt = tell ? null : revision;
+        if (!moved || tell) seenRevision = revision;
+        changed ||= moved;
       }
       if (changed && tell) for (const listener of [...listeners]) listener();
       return changed;
@@ -667,6 +679,30 @@ export function copyFor(cx, screen) {
 
 /** Icons: `perch-react` draws an icon's markup (gpui-kit's `svg()` reads files this window does not serve), and
  * measures text. */
+/** `next`, with every part equal to `old`'s being `old`'s own object (list items matched by `id`): a memoised row
+ * of the source sees a session that did not change as the same object. `old` itself when nothing changed. */
+export function share(old, next) {
+  if (old === next || typeof old !== "object" || typeof next !== "object" || old === null || next === null) return old === next ? old : next;
+  if (Array.isArray(old) !== Array.isArray(next)) return next;
+  if (Array.isArray(next)) {
+    const byId = new Map();
+    for (const item of old) if (item && typeof item === "object" && "id" in item) byId.set(item.id, item);
+    const out = next.map((item, i) => share(item && typeof item === "object" && "id" in item ? byId.get(item.id) : old[i], item));
+    return out.length === old.length && out.every((item, i) => item === old[i]) ? old : out;
+  }
+  const out = {};
+  let same = Object.keys(old).length === Object.keys(next).length;
+  for (const key of Object.keys(next)) {
+    out[key] = share(old[key], next[key]);
+    if (out[key] !== old[key] || !(key in old)) same = false;
+  }
+  return same ? old : out;
+}
+
+/** Whether tests read the elements' parity names (`perch-react`'s `probing`): working them out takes a selector pass
+ * over the tree on every description, which a release build skips. */
+export const naming = probing;
+
 export const files = {
   icon: (id, markup, color) => Icon.new(id, { markup, color: color ?? "" }),
   // An engine slot's native element, by kind and key (`perch-engine`).

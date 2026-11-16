@@ -23,8 +23,8 @@ declare module "@perch/sdk" {
    * the start screen, the editor menu, the terminal's find bar, the slash popover (`SlashPopover`), Split with
    * session and the phone-size notice (their props types); 1.10 the phone's own screens (`stock:mobile-*`), the shell
    * toolbar, the agent terminal's controls, the dock's tab and group actions and the browser toolbar (their props
-   * types), and `glassClass`, `tapButtonClass`, `GearIcon`, `PlusIcon`, `EllipsisIcon`; 1.11 the review's diff
-   * (`DiffView`).
+   * types), and `glassClass`, `tapButtonClass`, `GearIcon`, `PlusIcon`, `EllipsisIcon`; 1.11 `Submenu`; 1.12 the
+   * review's diff (`DiffView`).
    */
   export const version: string;
 
@@ -733,6 +733,17 @@ declare module "@perch/sdk" {
   export function beginReorderDrag(event: import("react").PointerEvent, options: ReorderDragOptions): void;
   /** A menu row's classes (`danger` red). */
   export function menuItemClass(options?: { danger?: boolean }): string;
+  /** A menu row that opens a list of choices beside the menu, as a native menu's submenu: on hover, a click, Right
+   * arrow, Enter or Space; Up and Down move in it, Left arrow or Escape close it. `side` is where it opens (the
+   * caller knows where its menu sits), `up` opens it upward from the row, `maxHeight` makes it scroll. */
+  export function Submenu(props: {
+    label: string;
+    items: { key: string; label: string; testId?: string; onSelect: () => void }[];
+    testId?: string;
+    side?: "right" | "left";
+    up?: boolean;
+    maxHeight?: number;
+  }): import("react").ReactElement;
   /** A glyph button at the end of a list row (⋯, +, ×), shown on hover of its `group/ph` (`project`) or `group/row`
    * (`session`) row, on focus and on touch; `always` always. */
   export function rowActionClass(options?: { reveal?: "always" | "project" | "session"; tone?: "default" | "danger"; className?: string }): string;
@@ -885,7 +896,7 @@ declare module "@perch/sdk" {
   }
   /** A React hook: workspace `workspaceId`'s review. */
   export function useGitReview(workspaceId: string): GitReview;
-  /** 1.11: `DiffView`'s props. The diff and its comments are the review's (`useGitReview`), read by `workspaceId`;
+  /** 1.12: `DiffView`'s props. The diff and its comments are the review's (`useGitReview`), read by `workspaceId`;
    * the props are view state, and what the person does comes back through the callbacks. */
   export interface DiffViewProps {
     workspaceId: string;
@@ -911,7 +922,7 @@ declare module "@perch/sdk" {
     onDelete(comment: ReviewComment): void;
     className?: string;
   }
-  /** 1.11: the review's diff, its own scroll surface (`git-diff`): a header per file and hunk, a row per line with
+  /** 1.12: the review's diff, its own scroll surface (`git-diff`): a header per file and hunk, a row per line with
    * the `＋` and the selection, the comment threads under their lines. The native client draws it natively. */
   export function DiffView(props: DiffViewProps): ReactElement;
 

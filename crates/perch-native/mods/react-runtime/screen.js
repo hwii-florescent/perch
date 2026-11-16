@@ -41,8 +41,8 @@
 //
 // This file is written by hand and shared by every React screen (`mods/react-runtime/`, which the mod host writes into
 // each screen's folder); `build.mjs` leaves it alone.
-import { copyFor, files, runningHost } from "./host.js";
-import { View, div, image } from "gpui-kit";
+import { copyFor, files, naming, runningHost } from "./host.js";
+import { View, div, image, unchanged } from "gpui-kit";
 import { ScrollHandle } from "gpui-base";
 import { close, inRegion as inRegionOf, props as screenProps, scale } from "perch";
 import { describeToGpui, mount, NAMED_ELEMENTS, sdk } from "./runtime.mjs";
@@ -156,7 +156,7 @@ export function screen(id, Component, options = {}) {
       this.raw = JSON.stringify(screenProps());
       this.mounts = 0;
       const props = { ...toProps(JSON.parse(this.raw)), key: this.mounts };
-      const handle = mount(copy.host, Component, { container: options.container, names: namesOf(id, options), props });
+      const handle = mount(copy.host, Component, { container: options.container, names: naming() ? namesOf(id, options) : null, props });
       copy.attach(handle);
       this.handle = entered(copy, handle);
       // Where `scrollIntoView()` leaves its request (a handle can only be made here, not while drawing).
@@ -203,9 +203,20 @@ export function screen(id, Component, options = {}) {
             task.notify();
           });
         }
-        // Vertical lengths are laid on the window's device pixels (`snapColumns` in the runtime).
-        // A screen in a region of the window (a sidebar, a status bar) portals into the window's layer.
-        const drawn = describeToGpui(this.handle.description, this.kit, this.handle, files, scale(), inRegion);
+        // What the elements are built from: when it is what the last frame was built from (this frame only waits for
+        // the catch-up, or something the screen read moved and changed nothing), the engine keeps that frame's
+        // elements and no element is built again.
+        const look = [this.handle.description, scale(), this.handle.document?.scrollTarget ?? null];
+        const same = !!this.look && look.every((part, i) => part === this.look[i]);
+        // `mode`: how the elements are wrapped for the keyboard, part of what the kept frame was built with.
+        const draw = (mode, wrap) => {
+          if (same && mode === this.mode) return unchanged();
+          this.look = look;
+          this.mode = mode;
+          // Vertical lengths are laid on the window's device pixels (`snapColumns` in the runtime).
+          // A screen in a region of the window (a sidebar, a status bar) portals into the window's layer.
+          return wrap(describeToGpui(this.handle.description, this.kit, this.handle, files, scale(), inRegion));
+        };
         // Effects that measured a box older than the tree run again once this frame has laid it out.
         if (this.handle.drawing?.()) {
           cx.timer.after(0, () => {
@@ -227,7 +238,7 @@ export function screen(id, Component, options = {}) {
             });
           }
         }
-        if (!this.keys) return drawn;
+        if (!this.keys) return draw(0, (drawn) => drawn);
         // An engine slot that took the keyboard (a press on it) is the document's focused element, as on the web.
         const engine = focusedEngine(copy.host, this.handle.document);
         if (engine && this.handle.document.activeElement !== engine && !this.focusingEngine) {
@@ -244,13 +255,13 @@ export function screen(id, Component, options = {}) {
         // Nothing of its own is focused any more (its form closed), or the keyboard went elsewhere: it lets go.
         if (this.held && (!focusedHere(this.handle.document) || (this.armed && !ownFocus))) this.hold(false);
         // Not holding it, an in-flow screen takes no keyboard: a press on it leaves the keyboard where it was.
-        if (options.keyboard === "in-flow" && !this.held) return drawn;
-        return drawn.track_focus(this.keys).on_key_down((event, cx) => {
+        if (options.keyboard === "in-flow" && !this.held) return draw(1, (drawn) => drawn);
+        return draw(2, (drawn) => drawn.track_focus(this.keys).on_key_down((event, cx) => {
           // A key from an engine inside the screen (its focus is not the screen's own) is the engine's alone.
           if (!this.keys.is_focused()) return;
           if (this.handle.key(domKey(event))) cx.stop_propagation();
           cx.notify();
-        });
+        }));
       });
     }
   };

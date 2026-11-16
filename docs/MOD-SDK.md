@@ -197,14 +197,14 @@ The command fails when any copy of the current revision failed.
 - The core keeps the last 256 reports and 16 open questions. Past that it drops
   the oldest. A screen's reports go when it disconnects.
 
-## API reference (1.11)
+## API reference (1.12)
 
 The full signatures and field docs are in `perch-sdk.d.ts`; this lists what each
 export is for.
 
 ### `version: string`
 
-This page's SDK version, as semver (`"1.11.0"`). 1.1 added `assetUrl`,
+This page's SDK version, as semver (`"1.12.0"`). 1.1 added `assetUrl`,
 `useInstance` and `useInstanceState`; 1.2 the status bar, tab strip and pane
 header surface; 1.3 navigation (the sidebar); 1.4 resources (the Git review,
 `useResourceState`, and the terminal, layout and focus queries); 1.5 files, the
@@ -221,6 +221,7 @@ browser toolbar and the phone's own screens (their props types), `glassClass`,
 pin or this device's order changes (`terminal.pin`, `terminal.order`), so a copy can group and order by them; 1.10.2 reshapes the phone's
 screens' props, with no export added: the header gets `onOpenTools`, the switcher `chatMode`, `onChatMode` and `onOpenSettings`, the
 panes `session` (`content` is now the drawer's tool), and the files screen is always given its `explorer`; 1.11
+adds `Submenu`, a menu row that opens a list of choices beside the menu (hover, click or keyboard). 1.12 adds
 the review's diff (`DiffView`).
 
 ### `useKeybindings(): KeybindEntry[]`
@@ -382,7 +383,7 @@ unsent work.
   `previewId`. `askAgent(source)` opens Context Bridge's own preview and
   explicit send; it is absent where the host offers none. The screen never
   derives paths, line numbers, revisions or anchors itself.
-- `DiffView` (1.11): the review's diff for `workspaceId`, its own scroll surface
+- `DiffView` (1.12): the review's diff for `workspaceId`, its own scroll surface
   (`git-diff`), drawn from the review Perch keeps (the diff and its comments
   are never props). The screen gives view state (`path`, `wrap`, `selection`,
   the comment being edited) and hears line selection, the `＋`, Ask agent and
