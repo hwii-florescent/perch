@@ -233,11 +233,11 @@ pub const SCREENS: &[Screen] = &[
         width: 0.,
         height: 0.,
     },
-    // The review (`stock:review`): a workspace's Git status, diff and comments, by `workspaceId`. Over the window
-    // until review tabs place it in a tab.
+    // The review (`stock:review`): a workspace's Git status, diff and comments, by `workspaceId`: in the drawer's
+    // Git tab (`review#drawer`) and in each review tab's pane (`review#<tab id>`).
     Screen {
         id: "review",
-        place: Place::Floating { modal: false },
+        place: Place::InFlow,
         width: 0.,
         height: 0.,
     },
@@ -534,6 +534,10 @@ impl Screens {
 
     /// Why open screen `id` is not drawn as its mod means: the mod would not load, or its last render threw.
     pub fn error(&self, id: &str, cx: &App) -> Option<String> {
+        // An in-flow copy by its key (`review#<tab id>`).
+        if let Some(view) = self.inflow.get(id) {
+            return view.read(cx).error(cx);
+        }
         let view = self.floating.iter().find(|f| f.id == id)?.view.as_ref()?;
         view.read(cx).error(cx)
     }

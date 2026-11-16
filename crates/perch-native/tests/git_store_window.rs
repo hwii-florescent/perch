@@ -232,30 +232,33 @@ fn scenario(rig: &mut Rig) {
     );
     println!("ok: a preview's promise settles with the core's receipt");
 
-    // The stock review on that workspace: it runs, places the native diff by key, and the diff view draws the
-    // core's diff from the window's store.
-    let props = serde_json::json!({ "workspaceId": id });
-    let opened = h
-        .window
-        .update(&mut h.cx, |ws, _, cx| {
-            ws.open_screen("review", props, None, None, cx)
-        })
+    // The workspace's review as a tab: the stock review runs in the tab's pane, places the native
+    // diff by key, and the diff view draws the core's diff from the window's store.
+    let tab = perch_native::workspace::review_tab_id(&id);
+    h.window
+        .update(&mut h.cx, |ws, _, cx| ws.open_review(&id, cx))
         .unwrap();
-    assert!(opened, "the review screen opens");
     let diffs =
         h.cx.update(|cx| cx.global::<perch_native::mods::WindowMods>().diffs.clone());
     let key = format!("diff:{id}");
-    h.wait("the review's diff drawn natively", |h| {
-        let error = h
+    let screen = format!("review#{tab}");
+    h.wait("the review tab's diff drawn natively", |h| {
+        let (shown, error) = h
             .window
-            .update(&mut h.cx, |ws, _, cx| ws.screen_error("review", cx))
+            .update(&mut h.cx, |ws, _, cx| {
+                (
+                    ws.tabs().shown().contains(&tab),
+                    ws.screen_error(&screen, cx),
+                )
+            })
             .unwrap();
         assert!(error.is_none(), "the review screen runs: {error:?}");
-        diffs
-            .view(&key)
-            .is_some_and(|view| h.cx.update(|cx| view.read(cx).rows().rows.len()) > 2)
+        shown
+            && diffs
+                .view(&key)
+                .is_some_and(|view| h.cx.update(|cx| view.read(cx).rows().rows.len()) > 2)
     });
-    println!("ok: the stock review runs natively and its diff is the native view");
+    println!("ok: the review opens as a tab, runs natively and its diff is the native view");
 
     h.close();
     follower.abort();

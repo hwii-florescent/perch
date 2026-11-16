@@ -246,14 +246,7 @@ async fn split(direction: Direction, window: WindowHandle<Workspace>, cx: &mut A
     started && until(cx, |cx| shown(window, cx).len() > before).await
 }
 
-// The openers for files, review and browser steps. Each feature fills in its own function; until
-// then the step is reported as missing and the run fails, so a measurement never passes by
-// silently skipping the state it was asked for.
-
-fn missing(step: &str) -> bool {
-    eprintln!("perch-native-test: the {step} step is not in this build");
-    false
-}
+// The openers for files, review and browser steps, each its feature's.
 
 /// `files <workspace id>`: that workspace's files are shown.
 async fn show_files(workspace: &str, window: WindowHandle<Workspace>, cx: &mut AsyncApp) -> bool {
@@ -299,7 +292,7 @@ async fn open_file(
         .await
 }
 
-/// `review <workspace id>`: the workspace's review is open with its status and diff loaded. Done
+/// `review <workspace id>`: the workspace's review is open in a tab with its status and diff loaded. Done
 /// when both are in the window's Git store and the screen has not failed; once the screen has
 /// rendered (the window drew), also when a diff with files has its rows in the native diff view.
 async fn open_review(workspace: &str, window: WindowHandle<Workspace>, cx: &mut AsyncApp) -> bool {
@@ -313,13 +306,10 @@ async fn open_review(workspace: &str, window: WindowHandle<Workspace>, cx: &mut 
             .unwrap_or(false)
     })
     .await;
-    let props = serde_json::json!({ "workspaceId": workspace });
     let opened = offered
         && window
-            .update(cx, |ws, _, cx| {
-                ws.open_screen("review", props, None, None, cx)
-            })
-            .unwrap_or(false);
+            .update(cx, |ws, _, cx| ws.open_review(workspace, cx))
+            .is_ok();
     if !opened {
         return false;
     }
@@ -347,7 +337,15 @@ async fn open_review(workspace: &str, window: WindowHandle<Workspace>, cx: &mut 
     let key = format!("diff:{workspace}");
     let drawn = until(cx, |cx| {
         let failed = window
-            .update(cx, |ws, _, cx| ws.screen_error("review", cx))
+            .update(cx, |ws, _, cx| {
+                ws.screen_error(
+                    &format!(
+                        "review#{}",
+                        perch_native::workspace::review_tab_id(workspace)
+                    ),
+                    cx,
+                )
+            })
             .ok()
             .flatten();
         if let Some(error) = failed {

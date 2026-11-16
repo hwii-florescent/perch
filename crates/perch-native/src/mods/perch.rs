@@ -1830,6 +1830,21 @@ impl Perch {
                 if let Some(tab) = self.file_tab(&data, id) {
                     return tab;
                 }
+                if let Some(workspace_id) = crate::workspace::review_tab(id) {
+                    // The web's review tab (`tabInfo`): "Changes", no path of its own.
+                    return json!({
+                        "id": id,
+                        "kind": "review",
+                        "label": "Changes",
+                        "title": "",
+                        "state": self.tab_state(id),
+                        "dirty": false,
+                        "preview": false,
+                        "path": "",
+                        "workspaceId": workspace_id,
+                        "blank": false,
+                    });
+                }
                 let session = store.sessions.iter().find(|s| s.id == *id);
                 let title = session.map(|s| s.title.clone()).unwrap_or_default();
                 let mut tab = json!({

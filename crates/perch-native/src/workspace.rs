@@ -60,7 +60,9 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 mod browsing;
+mod review;
 pub use browsing::is_browser_tab;
+pub use review::{review_tab, review_tab_id};
 
 /// How long a follow-up key after the leader chord is awaited.
 const LEADER_TIMEOUT: Duration = Duration::from_millis(1500);
@@ -1821,6 +1823,7 @@ impl Workspace {
             want("start", "start".into(), self.start_props(cx));
         }
         self.files_wanted(&mut want, cx);
+        self.review_wanted(&mut want, cx);
         let shown = self.tabs.shown();
         if shown.len() > 1 {
             for id in &shown {
@@ -2471,6 +2474,9 @@ impl Workspace {
         if let Some((_, path)) = file_tab(id) {
             return path.rsplit('/').next().unwrap_or(path).to_string();
         }
+        if review_tab(id).is_some() {
+            return "Changes".into();
+        }
         let named = |title: String| Some(title).filter(|t| !t.trim().is_empty());
         let listed = self
             .sidebar
@@ -2935,6 +2941,11 @@ impl Workspace {
                 let path = text("path").ok_or("This command needs {workspaceId, path}.")?;
                 let preview = args.and_then(|a| a["preview"].as_bool()).unwrap_or(false);
                 self.open_file(workspace, path, preview, cx);
+            }
+            "review.open" => {
+                let workspace = text("workspaceId").ok_or("This command needs {workspaceId}.")?;
+                let workspace = workspace.to_string();
+                self.open_review(&workspace, cx);
             }
             "files.extract" => {
                 let (Some(workspace), Some(path)) = (text("workspaceId"), text("path")) else {
@@ -3427,8 +3438,9 @@ impl Workspace {
         if is_browser_tab(id) {
             return self.close_browser_tab(id, cx);
         }
-        // A file's tab just goes: its draft stays in the core's buffer, as the web's does.
-        if file_tab(id).is_some() {
+        // A file's tab just goes: its draft stays in the core's buffer, as the web's does. A review
+        // tab keeps nothing of its own: its comments are the core's.
+        if file_tab(id).is_some() || review_tab(id).is_some() {
             self.tabs.close(id);
             self.after_change(cx);
             return;
@@ -4183,6 +4195,12 @@ impl Workspace {
             );
         // What a mod draws over the terminal, in the pane's box: the agent's controls, the find
         // bar, the phone-size notice.
+        if review_tab(id).is_some() {
+            return match self.screens.inflow(&format!("review#{id}")) {
+                Some(view) => frame.relative().child(view).into_any_element(),
+                None => frame.child(self.title_of(id, cx)).into_any_element(),
+            };
+        }
         if file_tab(id).is_some() {
             return match self.screens.inflow(&format!("files#{id}")) {
                 Some(view) => frame.relative().child(view).into_any_element(),
@@ -4250,7 +4268,8 @@ fn program_in(argv: &Value, task: Option<&str>) -> Result<String, String> {
 /// A file tab's workspace and path: its id is the web's `fileTabKey`, `<workspace id>\n<path>`
 /// (a session id never holds a line break).
 pub fn file_tab(id: &str) -> Option<(&str, &str)> {
-    id.split_once('\n').filter(|_| !is_browser_tab(id))
+    id.split_once('\n')
+        .filter(|_| !is_browser_tab(id) && review_tab(id).is_none())
 }
 
 /// Why New file is refused here: it names the file in the files view's prompt.
@@ -4584,6 +4603,10 @@ impl gpui::Render for Workspace {
                             .flex_col()
                             .child(explorer)
                             .into_any_element(),
+                        (shell::Tools::Git, _) => match self.drawer_review() {
+                            Some(review) => review,
+                            None => self.handoff_body(tab, open, tokens),
+                        },
                         _ => self.handoff_body(tab, open, tokens),
                     })
                 })
