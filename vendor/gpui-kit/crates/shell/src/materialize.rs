@@ -295,6 +295,10 @@ fn takes_typed_children(component: &Component) -> bool {
 #[derive(Default)]
 struct StateStyles {
     hover: Option<StyleRefinement>,
+    /// PERCH: the hover group this element names (`group(name)`), and the styles it takes while the
+    /// pointer is over an ancestor group (`group_hover(name, ...)`).
+    group: Option<SharedString>,
+    group_hover: SmallVec<[(SharedString, StyleRefinement); 1]>,
     active: Option<StyleRefinement>,
     focus: Option<StyleRefinement>,
 }
@@ -1714,13 +1718,24 @@ where
 /// differ. Components that are not interactive silently ignore state styles
 /// rather than failing the render — the script gets a `tracing` warning.
 fn with_hover<E: InteractiveElement>(element: E, states: &StateStyles) -> E {
-    match states.hover.clone() {
+    let mut element = match states.hover.clone() {
         Some(hover) => element.hover(move |mut style| {
             style.refine(&hover);
             style
         }),
         None => element,
+    };
+    // PERCH: hover groups, drawn by GPUI from the hitboxes alone.
+    if let Some(group) = states.group.clone() {
+        element = element.group(group);
     }
+    for (group, style) in states.group_hover.iter().cloned() {
+        element = element.group_hover(group, move |mut base| {
+            base.refine(&style);
+            base
+        });
+    }
+    element
 }
 
 fn with_active_and_focus<E: StatefulInteractiveElement>(element: E, states: &StateStyles) -> E {
@@ -2733,6 +2748,13 @@ pub(in crate::materialize) fn resolve_ops(
                     });
                 }
             }
+            // PERCH: a hover group (`group(name)`).
+            SpecOp::Method("group", args) => {
+                states.group = args
+                    .first()
+                    .and_then(|value| value.as_str().ok())
+                    .map(SharedString::from);
+            }
             SpecOp::Method(name, args) => {
                 if !matches!(
                     *name,
@@ -2751,6 +2773,11 @@ pub(in crate::materialize) fn resolve_ops(
                 let resolved = resolve_state(arena, *node);
                 match *name {
                     "hover" => states.hover = Some(resolved),
+                    "group_hover" => {
+                        if let Some(group) = state_group(arena, *node) {
+                            states.group_hover.push((group, resolved));
+                        }
+                    }
                     "active" => states.active = Some(resolved),
                     "focus" => states.focus = Some(resolved),
                     // Not a runtime state at all: the one style from which
@@ -2920,7 +2947,8 @@ struct Fade(f32);
 impl Fade {
     fn enter(refinement: &StyleRefinement, states: &StateStyles) -> Self {
         let changes = |s: &Option<StyleRefinement>| s.as_ref().is_some_and(|s| s.opacity.is_some() || s.visibility.is_some());
-        if changes(&states.hover) || changes(&states.active) || changes(&states.focus) {
+        let grouped = states.group_hover.iter().any(|(_, s)| s.opacity.is_some() || s.visibility.is_some());
+        if grouped || changes(&states.hover) || changes(&states.active) || changes(&states.focus) {
             KEEP_INLINE.with(|o| o.set(true));
         }
         let hidden = refinement.visibility == Some(gpui::Visibility::Hidden);
@@ -3225,6 +3253,17 @@ fn sample_pixels(
 /// Resolves a detached state node into a refinement. Only style ops are
 /// meaningful there; anything else is a script mistake already reported at the
 /// call site.
+/// PERCH: the group a `group_hover` state node follows (its `group(name)`).
+fn state_group(arena: &SpecArena, node: SpecId) -> Option<SharedString> {
+    arena.node(node)?.ops().iter().find_map(|op| match op {
+        SpecOp::Method("group", args) => args
+            .first()
+            .and_then(|value| value.as_str().ok())
+            .map(SharedString::from),
+        _ => None,
+    })
+}
+
 fn resolve_state(arena: &SpecArena, node: SpecId) -> StyleRefinement {
     let Some(node) = arena.node(node) else {
         return StyleRefinement::default();

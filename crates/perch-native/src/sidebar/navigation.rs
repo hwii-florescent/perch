@@ -72,6 +72,9 @@ pub struct Store {
     pub agent_lists: HashMap<String, AgentList>,
     /// `programs.json` as the core checked it (`mods.state`), while there is one.
     pub programs: Option<serde_json::Value>,
+    /// Sessions the core said it deleted (`session.deleted`) while the window followed it: their
+    /// tabs close even when no terminal is attached to hear it.
+    pub deleted: Vec<String>,
 }
 
 /// A computer's agent list while it is not simply answered.

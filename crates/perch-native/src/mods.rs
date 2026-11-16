@@ -445,10 +445,12 @@ pub const STOCK: &[(&str, &str)] = &[
 ];
 
 /// Stock files that are not text, written out beside a stock mod's scripts as [`STOCK`]'s are: the
-/// start page's logo is the app's own (`packages/web/src/assets`).
+/// start page's logo is the app's own (`packages/web/src/assets/perch-logo-texture-medium.webp`)
+/// made 320 pixels square: it is drawn 80 points wide, and the 1600-pixel original held 10 MB of
+/// decoded pixels for that.
 pub const STOCK_BYTES: &[(&str, &[u8])] = &[(
     "start/perch-logo.webp",
-    include_bytes!("../../../packages/web/src/assets/perch-logo-texture-medium.webp"),
+    include_bytes!("../assets/perch-logo-320.webp"),
 )];
 
 /// Where user mods live: `native-mods/` in the folder that holds the core's database
@@ -553,6 +555,12 @@ impl ModHost {
 
     pub fn user_dir(&self) -> &Path {
         &self.0.user_dir
+    }
+
+    /// What the mods' runtime has spent so far (script renders, materializations), for tests
+    /// that bound what an interaction costs.
+    pub fn metrics(&self) -> gpui_shell::metrics::RuntimeMetrics {
+        self.0.runtime.read_metrics()
     }
 
     /// Adds a host module mods may import, built for each mod (by id) as it loads. Modules

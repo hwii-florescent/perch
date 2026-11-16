@@ -68,6 +68,9 @@ pub struct ScriptView {
     /// every frame: a broken render is exactly as frame-coupled as a working one
     /// if the failure re-triggers the build.
     error: Option<String>,
+    /// PERCH: why an event, timer or task of this view's script was stopped before it finished (it ran past its
+    /// time budget). What it was doing is half done, so this stays shown until the view is replaced.
+    stopped: Option<String>,
     /// Whose authority this view's script runs under.
     ///
     /// Captured when the view is constructed rather than read when it is used:
@@ -126,6 +129,7 @@ impl ScriptView {
             policy,
             theme: None,
             error: None,
+            stopped: None,
             ownership,
             runtime,
         }
@@ -185,7 +189,13 @@ impl ScriptView {
     /// finds `snapshot()` empty should report this rather than the absence,
     /// because the absence is the symptom and this is the cause.
     pub fn build_error(&self) -> Option<&str> {
-        self.error.as_deref()
+        self.error.as_deref().or(self.stopped.as_deref())
+    }
+
+    /// PERCH: a call into this view's script was stopped before it finished; the view says so over what it shows.
+    pub(crate) fn stopped(&mut self, why: String, cx: &mut Context<Self>) {
+        self.stopped = Some(why);
+        cx.notify();
     }
 
     pub fn snapshot(&self) -> Option<&RenderSnapshot> {
@@ -299,7 +309,7 @@ impl Render for ScriptView {
         }
         // HERDR: the view a ShellRoot shows leaves its spinners to it; not over an
         // error banner, which must cover them.
-        let may_host = matches!(self.ownership, ViewOwnership::Root) && self.error.is_none();
+        let may_host = matches!(self.ownership, ViewOwnership::Root) && self.build_error().is_none();
         let (built, again) = crate::materialize::build_view(cx.entity_id(), may_host, || self.draw(window, cx));
         if again {
             crate::materialize::wake_view_now(window, cx);
@@ -316,7 +326,10 @@ impl ScriptView {
     }
 
     fn draw_snapshot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        match (self.error.as_deref(), self.current.as_ref()) {
+        match (
+            self.error.as_deref().or(self.stopped.as_deref()),
+            self.current.as_ref(),
+        ) {
             (None, Some(snapshot)) => materialize(&self.runtime, snapshot, window, cx),
             // A build that failed left the last good snapshot in place, so the
             // interface is still there to show. Reporting over it beats

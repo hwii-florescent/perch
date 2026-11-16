@@ -5127,6 +5127,20 @@ impl ShellRuntime {
                 self.pending_nested
                     .borrow_mut()
                     .truncate(pending_checkpoint);
+                // PERCH: a call the deadline stopped outside a render (an event, a timer, a task) would otherwise
+                // only be logged: its view says so. A stopped render is the build's own error already.
+                if let Some(why) = sandbox::take_cut() {
+                    if !matches!(
+                        scope::current_phase(),
+                        Some(ScopePhase::Render | ScopePhase::Layout)
+                    ) {
+                        if let Some(view) = scope::current_view() {
+                            scope::with_current_app(|cx| {
+                                view.update(cx, |view, cx| view.stopped(why, cx))
+                            });
+                        }
+                    }
+                }
                 Err(error)
             }
         }
@@ -5160,6 +5174,8 @@ impl ShellRuntime {
     fn begin_state(&self, ctx: &Ctx<'_>, id: SpecId, name: &str) -> JsResult<SpecId> {
         let interned = match name {
             "hover" => "hover",
+            // PERCH: styles while the pointer is over an ancestor named by `group(name)`.
+            "group_hover" => "group_hover",
             "active" => "active",
             "focus" => "focus",
             // Not a runtime state, but the same mechanism: a detached node
@@ -5780,6 +5796,17 @@ globalThis.__gpui = (() => {
     };
 
   methods.hover = state("hover");
+  // PERCH: styles while the pointer is over the ancestor `group(name)` named. The detached element carries the
+  // name, so the engine knows which group the styles follow; nothing runs in the script when the pointer moves.
+  methods.group_hover = function (group, declare) {
+    if (typeof group !== "string" || typeof declare !== "function") {
+      throw new TypeError("group_hover(group, declare) expects a group name and a function");
+    }
+    const target = element(__state(this.__id, "group_hover"));
+    target.group(group);
+    declare(target);
+    return this;
+  };
   methods.active = state("active");
   methods.focus = state("focus");
   // Not a state: the filled part of a slider, declared the same way because
@@ -7274,6 +7301,7 @@ impl ShellRuntime {
                 "keep_mounted",
                 "window_layer", // PERCH: a window layer (`materialize::window_layer_of`).
                 "measure",      // PERCH: an element's box for the host (`measure`).
+                "group",        // PERCH: names the element for a descendant's `group_hover`.
                 "also_named",   // PERCH: one more name a test reads the box by (`probe`).
                 "on_item_click",
                 "on_item_secondary_click",
@@ -8341,6 +8369,7 @@ impl ShellRuntime {
             | "keep_mounted"
             | "window_layer" // PERCH: a window layer.
             | "measure" // PERCH: an element's box for the host.
+            | "group" // PERCH: a hover group.
             | "also_named" // PERCH: one more test name.
             | "tab_index"
             | "tab_stop"
@@ -8400,6 +8429,7 @@ impl ShellRuntime {
                     "keep_mounted" => "keep_mounted",
                     "window_layer" => "window_layer", // PERCH: a window layer.
                     "measure" => "measure", // PERCH: an element's box for the host.
+                    "group" => "group", // PERCH: a hover group.
                     "also_named" => "also_named", // PERCH: one more test name.
                     "tab_index" => "tab_index",
                     "tab_stop" => "tab_stop",

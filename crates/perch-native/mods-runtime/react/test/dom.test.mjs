@@ -325,3 +325,24 @@ test("a switch's knob (its ::before) is drawn inside its track, moved across whe
     handle.unmount();
   }
 });
+
+test("rows styled alike compute their style once, and a row that differs gets its own", async () => {
+  const { runtime } = await loadSidebar();
+  const { createElement: h } = await import("react");
+  const perch = { isMac: true, render() {}, error: (e) => { throw e; } };
+  const row = (id, extra = {}) => h("div", { key: id, "data-testid": id, className: "flex px-2 text-sm", ...extra }, id);
+  const Probe = () => h("div", null, row("a"), row("b"), row("red", { style: { color: "rgb(255, 0, 0)" } }), row("bold", { className: "flex px-2 text-sm font-bold" }));
+  const handle = runtime.mount(perch, Probe, { container: { width: 200, height: 100 } });
+  try {
+    const document = handle.globals.document;
+    const style = (id) => document.computed(document.querySelector(`[data-testid="${id}"]`));
+    assert.equal(style("a"), style("b"), "one computed style for two rows alike");
+    assert.notEqual(style("red"), style("a"));
+    assert.deepEqual(style("red").color.rgba, [255, 0, 0, 1]);
+    assert.notDeepEqual(style("a").color.rgba, [255, 0, 0, 1]);
+    assert.equal(style("bold")["font-weight"], 700);
+    assert.notEqual(style("a")["font-weight"], 700);
+  } finally {
+    handle.unmount();
+  }
+});

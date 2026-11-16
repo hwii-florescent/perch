@@ -569,6 +569,11 @@ export class StyleSheet {
     return out;
   }
 
+  /** Whether a rule that may match `element` reads interaction `state` on one of its ancestors (`group-hover:`). */
+  readsAncestor(element, state) {
+    return this.candidates(element).some((rule) => rule.states.ancestor.has(state));
+  }
+
   /** Whether `element` carries a class whose interaction state some rule reads on an ancestor. */
   tracks(element, state) {
     for (const cls of element.classList) if (this.trackedStates.has(`${state}:${cls}`)) return true;
@@ -619,6 +624,10 @@ export class Cascade {
     this.theme = theme;
     this.viewport = viewport;
     this.parsed = new Map();
+    // Computed styles by the parent's (its `values`, shared by every element that computed it) and then by what else
+    // decides one: the rules, svg size attributes and inline style. Rows of a list compute their cascade once.
+    this.computed = new WeakMap();
+    this.rootComputed = new Map();
   }
 
   themeHex(name) { return this.theme?.[name] ?? null; }
@@ -647,12 +656,27 @@ export class Cascade {
    * is the element (pass the element's own computed style as `parent`). */
   compute(element, parent, assume = new Set(), pseudo = null) {
     const rules = this.matching(element, assume, pseudo);
+    const attrs = pseudo ? [] : presentational(element);
+    const inline = pseudo ? [] : inlineDeclarations(element.inlineStyle ?? element.props?.style);
+    let known = this.rootComputed;
+    if (parent) {
+      known = this.computed.get(parent.values);
+      if (!known) this.computed.set(parent.values, (known = new Map()));
+    }
+    const key = `${rules.map((rule) => rule.order).join(",")}|${attrs.length ? JSON.stringify(attrs) : ""}|${inline.length ? JSON.stringify(inline) : ""}`;
+    let style = known.get(key);
+    if (!style) known.set(key, (style = this.cascade(rules, attrs, inline, parent)));
+    return { ...style, rules, element };
+  }
+
+  /** The computed style from the matched `rules`, presentational `attrs`, `inline` declarations and the parent's. */
+  cascade(rules, attrs, inline, parent) {
     const declared = [];
     for (const rule of rules) {
       for (const [prop, value, important] of rule.decls) declared.push({ prop, value, important: important ? 1 : 0, origin: rule.origin === 0 ? 0 : 2, layer: rule.layer, specificity: rule.specificity, order: rule.order, source: rule.source });
     }
-    if (!pseudo) for (const [prop, value] of presentational(element)) declared.push({ prop, value, important: 0, origin: 1, layer: 0, specificity: [0, 0, 0], order: 0, source: `attr:${prop}` });
-    if (!pseudo) for (const [prop, value] of inlineDeclarations(element.inlineStyle ?? element.props?.style)) declared.push({ prop, value, important: 0, origin: 3, layer: 0, specificity: [1, 0, 0], order: 0, source: "style" });
+    for (const [prop, value] of attrs) declared.push({ prop, value, important: 0, origin: 1, layer: 0, specificity: [0, 0, 0], order: 0, source: `attr:${prop}` });
+    for (const [prop, value] of inline) declared.push({ prop, value, important: 0, origin: 3, layer: 0, specificity: [1, 0, 0], order: 0, source: "style" });
     declared.sort(compareRank);
 
     // Custom properties. Inheriting ones chain to the parent's (a prototype chain, so nothing is copied); a
@@ -740,7 +764,7 @@ export class Cascade {
       values.display = blockify(values.display);
     }
     if (values.position === "absolute" || values.position === "fixed") values.display = blockify(values.display);
-    return { values, sources, own, inherited, customs, rules, element };
+    return { values, sources, own, inherited, customs };
   }
 
   parseValue(prop, text, ctx, values, parentValues) {

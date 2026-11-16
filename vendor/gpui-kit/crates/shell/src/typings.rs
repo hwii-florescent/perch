@@ -1512,6 +1512,11 @@ const ELEMENT_METHODS: &str = r#"    /**
      */
     measure<Self extends Element>(this: Self, key: string): Self;
     /**
+     * PERCH: names this element as a hover group: a descendant's
+     * `group_hover(name, ...)` styles apply while the pointer is over it.
+     */
+    group<Self extends Element>(this: Self, name: string): Self;
+    /**
      * PERCH: one more name a test reads the element's box by, beside its `id`
      * (two parity names for one element). Recorded only in test builds.
      */
@@ -1958,6 +1963,11 @@ const ELEMENT_METHODS: &str = r#"    /**
      * ignored, so a chain and a block body both work.
      */
     hover<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
+    /**
+     * PERCH: styles applied while the pointer is over the ancestor named
+     * `group` (`group(name)`), drawn by the engine with no script call.
+     */
+    group_hover<Self extends Element>(this: Self, group: string, declare: (el: NativeElement) => NativeElement | void): Self;
     /** Styles applied while the element is pressed. */
     active<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
     /** Styles applied while the element has focus. */
@@ -4031,6 +4041,7 @@ mod tests {
         "keep_mounted",
         "window_layer", // PERCH: a window layer (`materialize::window_layer_of`).
         "measure",      // PERCH: an element's box for the host (`measure`).
+        "group",        // PERCH: a hover group (`group_hover`).
         "also_named",   // PERCH: one more name a test reads the box by (`probe`).
         "on_item_click",
         "on_item_secondary_click",
@@ -4102,6 +4113,7 @@ mod tests {
         "loop",
         "spin",
         "hover",
+        "group_hover",
         "active",
         "focus",
     ];

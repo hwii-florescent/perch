@@ -20,6 +20,7 @@ function recordingKit() {
           else if (name === "child") target.children.push(args[0]);
           else if (typeof args[args.length - 1] === "function" && name.startsWith("on_")) handlers.set(`${target.id}:${name}${args.length > 1 ? `:${args[0]}` : ""}`, args[args.length - 1]);
           else if (["hover", "focus", "active"].includes(name)) args[0](make("style"));
+          else if (name === "group_hover") { const style = make("style"); args[1](style); target.styles.push([name, args[0], style.record.styles]); }
           else target.styles.push([name, ...args]);
           return proxy;
         };
@@ -111,19 +112,22 @@ test("an icon takes its button's hover colour while the pointer is over it", asy
     const find = (n) => (n.name === "organize-button" ? n : (n.children ?? []).map(find).find(Boolean));
     const button = find(handle.description.root);
     assert.ok(button?.hover?.text_color, "the organize button changes its text colour on hover");
-    const iconColor = () => {
-      const { kit, handlers } = recordingKit();
-      const record = byId(runtime.describeToGpui(handle.description, kit, handle, files)).get("organize-button");
-      const icons = [];
-      const walk = (r) => { if (r.markup) icons.push(r.color); r.children.forEach((c) => typeof c !== "string" && walk(c.record)); };
-      walk(record);
-      return { color: icons[0], hover: handlers.get("organize-button:on_hover") };
+    const { kit, handlers } = recordingKit();
+    const record = byId(runtime.describeToGpui(handle.description, kit, handle, files)).get("organize-button");
+    const group = record.styles.find(([name]) => name === "group")?.[1];
+    assert.ok(group, "the button is a hover group");
+    assert.ok(!handlers.has("organize-button:on_hover"), "the pointer is not reported to the script");
+    // Each icon is drawn twice: in its colour at rest, and in the hover colour shown while the group is hovered.
+    const icons = [];
+    const walk = (r, shownOnHover) => {
+      if (r.markup) icons.push({ color: r.color, shownOnHover });
+      const toggles = r.styles?.find(([name, over]) => name === "group_hover" && over === group);
+      const shown = toggles ? toggles[2].some(([name]) => name === "visible") : shownOnHover;
+      r.children.forEach((c) => typeof c !== "string" && walk(c.record, shown));
     };
-    const rest = iconColor();
-    assert.ok(rest.hover, "the button reports the pointer");
-    assert.notEqual(rest.color, button.hover.text_color);
-    rest.hover(true, cx());
-    assert.equal(iconColor().color, button.hover.text_color);
+    walk(record, false);
+    assert.ok(icons.some((i) => !i.shownOnHover && i.color !== button.hover.text_color), "at rest, its own colour");
+    assert.ok(icons.some((i) => i.shownOnHover && i.color === button.hover.text_color), "over it, the hover colour");
   } finally {
     handle.unmount();
   }
