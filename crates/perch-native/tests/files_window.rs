@@ -15,7 +15,7 @@ use gpui::{
 use gpui_shell::probe::{self, ProbeRecord};
 use perch_core::protocol::ServerMessage;
 use perch_native::client::Command;
-use perch_native::mods::{self, POLL};
+use perch_native::mods::{self, WindowMods, POLL};
 use perch_native::sidebar::State;
 use perch_native::ui::Workspace;
 use serde_json::{json, Value};
@@ -79,7 +79,7 @@ impl Rig {
     /// The `fs.*` frames the window sent the core since the last call.
     fn sent(&mut self) -> Vec<Value> {
         let mut frames = Vec::new();
-        while let Ok(Some(command)) = self.asked.try_next() {
+        while let Ok(command) = self.asked.try_recv() {
             if let Command::Send(frame) = command {
                 if frame["type"].as_str().is_some_and(|t| t.starts_with("fs.")) {
                     frames.push(frame);
@@ -203,6 +203,42 @@ fn main() {
             .map(|d| d.content.clone())
     });
     assert_eq!(loaded.as_deref(), Some("# Work"));
+    // The durable buffer holds what is on disk: nothing to restore.
+    let get = sent.iter().find(|f| f["type"] == "fs.buffer.get").unwrap();
+    rig.answer(json!({"type": "fs.buffer.result", "requestId": get["requestId"], "workspaceId": "w1",
+        "buffer": {"workspaceId": "w1", "path": "README.md", "content": "# Work", "baseContent": "# Work",
+            "baseVersion": "v1", "externalVersion": "v1", "revision": 0, "dirty": false, "conflict": false,
+            "updatedAt": 0}}));
+    rig.settle();
+
+    // The native editor holds the file, by the web's document key.
+    let editors = rig
+        .cx
+        .update(|cx| cx.global::<WindowMods>().editors.clone());
+    let doc = "w1\0README.md\00";
+    let state = editors
+        .state(doc)
+        .unwrap_or_else(|| panic!("the editor is open: {:?}", editors.keys()));
+    let text = rig.cx.update(|cx| state.read(cx).value().to_string());
+    assert_eq!(text, "# Work");
+
+    // An edit reaches the store as the draft, and an edited preview is kept.
+    rig.cx
+        .update_window(rig.window.into(), |_, window: &mut Window, cx| {
+            editors.set_value(doc, "# Work!", false, window, cx)
+        })
+        .unwrap();
+    rig.settle();
+    let draft = rig.ws(|ws, _, _| {
+        ws.files()
+            .document("w1", "README.md")
+            .map(|d| (d.content.clone(), d.dirty()))
+    });
+    assert_eq!(draft, Some(("# Work!".to_string(), true)));
+    assert!(
+        !rig.ws(|ws, _, _| ws.tabs().is_preview(id)),
+        "an edited preview is kept"
+    );
 
     // Closing asks nothing: the tab goes, the document stays in the store.
     let closed = rig

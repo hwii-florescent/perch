@@ -5,7 +5,7 @@
 //! (`perch.navigation(options)`, `perch.hosts()`, ...), which must return the same object until the data changes.
 //! Menus and dialogs Perch draws itself (session menu, new session menu, confirm, select, folder browser,
 //! instructions, memory) open through `perch.openOverlay(kind, props)`; their callbacks are plain functions.
-import { createElement, Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createElement, Fragment, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { cn } from "../../../../packages/web/src/lib/cn.ts";
 import { beginSlideDrag } from "../../../../packages/web/src/slideDrag.ts";
 import { formatCombo } from "../../../../packages/web/src/keyCombo.ts";
@@ -397,11 +397,36 @@ export const useWorkspaceTabs = () => useHostSnapshot((perch) => perch.workspace
 // ---- files ----------------------------------------------------------------------------------------------------
 
 export { FileIcon, GitMarker, assetKind };
-// ponytail: stand-ins until the native engines land: the editor shows the draft as plain text (phase 2's engine node
-// replaces `CodeEditor`), a media file shows its name and size (Quick Look replaces `FileAsset`), Markdown shows its
-// source (the token renderer replaces `MarkdownPreview`) and the entry menu is not offered yet.
-export function CodeEditor({ value, label }) {
-  return createElement("pre", { "aria-label": label, className: "m-0 min-h-0 flex-1 overflow-auto p-3 text-[0.78rem] leading-[1.45] whitespace-pre text-fg [font-family:var(--font-mono)]" }, value);
+// ponytail: stand-ins until the native engines land: a media file shows its name and size (Quick Look replaces
+// `FileAsset`), Markdown shows its source (the token renderer replaces `MarkdownPreview`) and the entry menu is not
+// offered yet.
+
+/** The web's `CodeEditor` on the native editor (`perch-editor`), drawn in an `editor` engine slot by `docKey`: opened
+ * (or restored, with its undo history) when the key mounts and parked when it goes; the draft is applied as an
+ * external change (no undo entry, no change event) whenever it differs from the editor's text; a user edit comes
+ * back as `onChange(text)`, the caret as `onCaret`, Save as `onSave`. */
+export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, label, path, docKey, ref }) {
+  const editor = host().editor;
+  const latest = useRef(null);
+  latest.current = { onChange, onSave, onCaret };
+  useLayoutEffect(() => {
+    editor.open(docKey, { path, value, readonly: !!readOnly, wrap: !!wrap, label });
+    const stop = editor.listen(docKey, (events) => {
+      const on = latest.current;
+      for (const event of events) {
+        if (event.type === "change") on.onChange?.(editor.value(docKey));
+        else if (event.type === "caret") on.onCaret?.({ line: event.line, col: event.col });
+        else if (event.type === "save") on.onSave?.();
+        else if (event.type === "goto") editor.openGoto(docKey);
+      }
+    });
+    return () => { stop(); editor.park(docKey); };
+  }, [docKey]);
+  useLayoutEffect(() => { if (editor.value(docKey) !== value) editor.setValue(docKey, value); }, [docKey, value]);
+  useLayoutEffect(() => { editor.setReadonly(docKey, !!readOnly); }, [docKey, readOnly]);
+  useLayoutEffect(() => { editor.setWrap(docKey, !!wrap); }, [docKey, wrap]);
+  useImperativeHandle(ref, () => ({ openGoto: () => editor.openGoto(docKey), focus: () => editor.focus(docKey), askAgent() {} }), [docKey]);
+  return createElement("div", { "data-perch-engine": "editor", "data-perch-key": docKey, "aria-label": label, className: "min-h-0 flex-1" });
 }
 export function FileAsset({ metadata }) {
   return createElement("div", { className: "grid content-center justify-items-center gap-1 p-5 text-[0.72rem] text-subtext-0" },

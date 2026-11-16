@@ -2803,15 +2803,15 @@ impl Workspace {
                 };
                 self.hand_off(place)?;
             }
-            // The strip's "+" lists New browser and New file, as the web's; this window has
-            // neither view, so they are refused with the reason (as the launcher's are).
+            // The strip's "+" lists New browser and New file, as the web's; this window has no
+            // browser view, so New browser is refused with the reason (as the launcher's are).
             "browser.open" => return Err(NO_BROWSER.into()),
             "file.open" => {
                 let workspace =
                     text("workspaceId").ok_or("This command needs {workspaceId, path}.")?;
                 let path = text("path").ok_or("This command needs {workspaceId, path}.")?;
                 let preview = args.and_then(|a| a["preview"].as_bool()).unwrap_or(false);
-                self.open_file(&workspace.to_string(), &path.to_string(), preview, cx);
+                self.open_file(workspace, path, preview, cx);
             }
             "files.extract" => {
                 let (Some(workspace), Some(path)) = (text("workspaceId"), text("path")) else {

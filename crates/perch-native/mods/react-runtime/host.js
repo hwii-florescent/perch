@@ -34,6 +34,7 @@
 import * as perch from "perch";
 import { Icon, bounds, forgetBounds, textWidth } from "perch-react";
 import * as engines from "perch-engine";
+import * as editors from "perch-editor";
 import { ICONS, LETTERS, LETTER } from "./agent-icons.js";
 
 export const INERT = [
@@ -218,6 +219,9 @@ export function copyFor(cx, screen) {
   let escapeHeld = false;
   // Snapshots by key, read again on `refresh()`.
   const snapshots = new Map();
+  // The editors this copy placed (`CodeEditor`): what each one heard, by document key, kept until it is delivered.
+  const editorListeners = new Map();
+  const editorHeard = new Map();
   const listeners = new Set();
   const focusListeners = new Set();
   const openOverlays = new Set();
@@ -347,6 +351,24 @@ export function copyFor(cx, screen) {
     // `useWorkspaceFiles`: one workspace's files from the window's store, and its actions run there.
     workspaceFiles: (id) => snapshot(`workspaceFiles:${id}`, () => perch.workspaceFiles(id)),
     filesDo: (action, workspaceId, ...args) => perch.filesDo(action, workspaceId, ...args),
+    // The native editor (`perch-editor`) by document key, for `CodeEditor`; `listen` hears its events.
+    editor: {
+      open: (key, options) => editors.open(key, options),
+      park: (key) => editors.park(key),
+      value: (key) => editors.value(key),
+      setValue: (key, text) => editors.setValue(key, text, { external: true }),
+      setReadonly: (key, on) => editors.setReadonly(key, on),
+      setWrap: (key, on) => editors.setWrap(key, on),
+      focus: (key) => editors.focus(key),
+      openGoto: (key) => editors.openGoto(key),
+      listen(key, listener) {
+        editorListeners.set(key, listener);
+        return () => {
+          if (editorListeners.get(key) === listener) editorListeners.delete(key);
+          editorHeard.delete(key);
+        };
+      },
+    },
     statusLine: () => snapshot("statusLine", () => perch.statusLine()),
     zoom: () => snapshot("zoom", () => perch.zoom()),
     paneLook: () => snapshot("paneLook", () => perch.paneLook()),
@@ -589,6 +611,19 @@ export function copyFor(cx, screen) {
      * subscribers; without, only looks. */
     refresh(tell) {
       let changed = false;
+      // An editor's events are taken as they come (reading them empties the queue) and delivered with `tell`.
+      for (const key of editorListeners.keys()) {
+        const events = editors.events(key);
+        if (events.length) editorHeard.set(key, [...(editorHeard.get(key) ?? []), ...events]);
+      }
+      if (editorHeard.size) {
+        changed = true;
+        if (tell) {
+          const heard = [...editorHeard];
+          editorHeard.clear();
+          for (const [key, events] of heard) editorListeners.get(key)?.(events);
+        }
+      }
       for (const entry of snapshots.values()) {
         const value = entry.read();
         const text = JSON.stringify(value);
