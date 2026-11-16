@@ -170,10 +170,9 @@ impl HeadlessAppContext {
             .borrow_mut()
             .update_window(window, |_, window, _| window.platform_window.as_test().cloned())?
             .ok_or_else(|| anyhow::anyhow!("not a headless window"))?;
-        test_window.simulate_frame_request(crate::RequestFrameOptions {
-            require_presentation: true,
-            ..Default::default()
-        });
+        // PERCH: a display's tick, which presents only after a draw. Forcing a present every frame
+        // keeps the GPU busy, and its driver then holds about 116 MB a real window frees at rest.
+        test_window.simulate_frame_request(crate::RequestFrameOptions::default());
         Ok(())
     }
 
