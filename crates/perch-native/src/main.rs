@@ -91,6 +91,10 @@ fn main() {
                     });
                     continue;
                 }
+                if let Update::Files(message) = update {
+                    workspace.update(cx, |workspace, cx| workspace.on_files_message(&message, cx));
+                    continue;
+                }
                 let sidebar = workspace.read_with(cx, |workspace, _| workspace.sidebar().clone());
                 sidebar.update(cx, |sidebar, cx| sidebar.apply(update, cx));
             }

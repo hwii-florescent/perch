@@ -247,6 +247,9 @@ pub struct Tabs {
     active: Option<String>,
     /// The focused pane fills the area (`panes.zoom`).
     zoomed: bool,
+    /// Preview tabs (a file opened by a single click, drawn in italics): the next previewed
+    /// file of the same workspace takes its place until it is kept.
+    previews: Vec<String>,
 }
 
 impl Tabs {
@@ -279,6 +282,25 @@ impl Tabs {
             self.strip.push(id.into());
         }
         self.show(id);
+    }
+
+    /// Add a tab after `after`'s family (the tabs right after it whose id `family` accepts),
+    /// leaving the keyboard where it is. One already open stays where it is.
+    pub fn add_after(&mut self, id: &str, after: &str, family: impl Fn(&str) -> bool) {
+        if self.contains(id) {
+            return;
+        }
+        let at = match self.strip.iter().position(|tab| tab == after) {
+            Some(lead) => {
+                lead + 1
+                    + self.strip[lead + 1..]
+                        .iter()
+                        .take_while(|tab| family(tab))
+                        .count()
+            }
+            None => self.strip.len(),
+        };
+        self.strip.insert(at, id.into());
     }
 
     /// Give a tab the keyboard. Leaving a zoomed pane for another tab un-zooms.
@@ -327,6 +349,50 @@ impl Tabs {
         self.show(&id);
     }
 
+    /// The preview tabs.
+    pub fn previews(&self) -> &[String] {
+        &self.previews
+    }
+
+    /// Whether tab `id` is a preview.
+    pub fn is_preview(&self, id: &str) -> bool {
+        self.previews.iter().any(|p| p == id)
+    }
+
+    /// Show `id` as a preview tab, as the web's `openFilePreview`: an open tab is just shown,
+    /// preview or not; else it takes the slot of the preview `same_place` accepts (its
+    /// workspace's) that is in no split, else it goes last. Returns the preview it replaced,
+    /// whose tab is gone.
+    pub fn open_preview(&mut self, id: &str, same_place: impl Fn(&str) -> bool) -> Option<String> {
+        if self.contains(id) {
+            self.show(id);
+            return None;
+        }
+        let old = self
+            .previews
+            .iter()
+            .find(|p| same_place(p) && !self.in_split(p))
+            .cloned();
+        self.previews.push(id.into());
+        let Some(old) = old else {
+            self.open(id);
+            return None;
+        };
+        let at = self.strip.iter().position(|t| *t == old)?;
+        self.strip[at] = id.into();
+        self.previews.retain(|p| *p != old);
+        self.show(id);
+        Some(old)
+    }
+
+    /// A preview tab becomes a regular one (double-click, Enter, an edit, Keep open). Returns
+    /// whether it was a preview.
+    pub fn pin(&mut self, id: &str) -> bool {
+        let was = self.is_preview(id);
+        self.previews.retain(|p| p != id);
+        was
+    }
+
     /// Close a tab. If it had the keyboard, the next tab takes it, else the one before. Returns
     /// whether it was open.
     pub fn close(&mut self, id: &str) -> bool {
@@ -335,6 +401,7 @@ impl Tabs {
         };
         self.strip.remove(at);
         self.leave(id);
+        self.previews.retain(|p| p != id);
         if self.active.as_deref() == Some(id) {
             self.zoomed = false;
             self.active = self.strip.get(at).or_else(|| self.strip.last()).cloned();
@@ -786,6 +853,75 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// File tabs as the window names them: `<workspace>\n<path>`.
+    fn in_workspace(workspace: &'static str) -> impl Fn(&str) -> bool {
+        move |id| id.split_once('\n').is_some_and(|(w, _)| w == workspace)
+    }
+
+    #[test]
+    fn a_click_replaces_the_preview_in_its_slot() {
+        let mut t = tabs(&["s1"]);
+        assert_eq!(t.open_preview("w\na.rs", in_workspace("w")), None);
+        t.open("s2");
+        assert_eq!(
+            t.open_preview("w\nb.rs", in_workspace("w")),
+            Some("w\na.rs".into())
+        );
+        assert_eq!(t.strip(), ["s1", "w\nb.rs", "s2"]);
+        assert_eq!(t.active(), Some("w\nb.rs"));
+        assert!(t.is_preview("w\nb.rs") && !t.is_preview("w\na.rs"));
+        // Another workspace has its own preview.
+        assert_eq!(t.open_preview("v\nc.rs", in_workspace("v")), None);
+        assert_eq!(t.strip().len(), 4);
+    }
+
+    #[test]
+    fn an_open_file_is_just_shown_preview_or_not() {
+        let mut t = tabs(&["w\na.rs", "s1"]);
+        t.show("s1");
+        assert_eq!(t.open_preview("w\na.rs", in_workspace("w")), None);
+        assert_eq!(t.active(), Some("w\na.rs"));
+        assert!(!t.is_preview("w\na.rs"));
+    }
+
+    #[test]
+    fn keep_open_promotes_and_a_kept_tab_is_never_replaced() {
+        let mut t = Tabs::default();
+        t.open_preview("w\na.rs", in_workspace("w"));
+        assert!(t.pin("w\na.rs"));
+        assert!(!t.pin("w\na.rs"));
+        assert_eq!(t.open_preview("w\nb.rs", in_workspace("w")), None);
+        assert_eq!(t.strip(), ["w\na.rs", "w\nb.rs"]);
+    }
+
+    #[test]
+    fn a_preview_in_a_split_or_a_terminal_is_never_replaced() {
+        let mut t = tabs(&["s1"]);
+        t.open_preview("w\na.rs", in_workspace("w"));
+        assert!(t.join("w\na.rs", "s1"));
+        assert_eq!(t.open_preview("w\nb.rs", in_workspace("w")), None);
+        assert_eq!(t.strip(), ["s1", "w\na.rs", "w\nb.rs"]);
+        // Only previews are replaced: a session tab never is.
+        let mut t = tabs(&["w\nterminal-like"]);
+        assert_eq!(t.open_preview("w\nc.rs", in_workspace("w")), None);
+        assert_eq!(t.strip().len(), 2);
+    }
+
+    #[test]
+    fn a_closed_preview_is_forgotten_and_back_and_forward_include_file_tabs() {
+        let mut t = Tabs::default();
+        let mut h = History::default();
+        t.open("s1");
+        h.record("s1");
+        t.open_preview("w\na.rs", in_workspace("w"));
+        h.record("w\na.rs");
+        let open = |id: &str| t.contains(id);
+        assert_eq!(h.step(-1, open), Some("s1".into()));
+        assert_eq!(h.step(1, open), Some("w\na.rs".into()));
+        assert!(t.close("w\na.rs"));
+        assert!(!t.is_preview("w\na.rs"));
+    }
 
     #[test]
     fn resizing_moves_the_focused_pane_s_edge_and_keeps_a_minimum() {

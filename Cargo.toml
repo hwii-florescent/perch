@@ -34,6 +34,14 @@ strip = "none"
 [profile.dev.package.quickjs-jit-sys]
 opt-level = 2
 
+# The editor's syntax highlighter: at -O0 its regexes parse a few hundred lines a second, too slow for its tests.
+[profile.dev.package.syntect]
+opt-level = 2
+[profile.dev.package.fancy-regex]
+opt-level = 2
+[profile.dev.package.regex-automata]
+opt-level = 2
+
 # perch-native's mod engine (vendored gpui-shell): LLRT modules name `rquickjs`,
 # and must share the shell's quickjs-jit VM, as gpui-kit's own workspace does.
 [patch.crates-io]
