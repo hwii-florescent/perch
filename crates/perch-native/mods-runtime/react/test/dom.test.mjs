@@ -260,14 +260,16 @@ test("a content-sized box moved by a percentage of itself is moved by its laid-o
   }
 });
 
-test("letter spacing widens a run by room after it; a negative one never becomes negative padding", async () => {
+test("letter spacing: room after a run; a negative one takes it back, or where the element clips, draws the run smaller", async () => {
   const { runtime } = await loadSidebar();
   const { createElement: h } = await import("react");
   const perch = { isMac: true, render() {}, error: (e) => { throw e; } };
   function Probe() {
     return h("div", null,
       h("span", { "data-testid": "wide", style: { letterSpacing: "1px" } }, "Quickchat"),
-      h("span", { "data-testid": "tight", style: { letterSpacing: "-0.5px" } }, "Quickchat"));
+      h("span", { "data-testid": "tight", style: { letterSpacing: "-0.5px" } }, "Quickchat"),
+      // The start card's heading: tracked tighter inside a box that clips.
+      h("h1", { "data-testid": "clipped", style: { letterSpacing: "-0.5px", fontSize: 25, overflow: "hidden", whiteSpace: "nowrap" } }, "Quickchat"));
   }
   const handle = runtime.mount(perch, Probe, { container: { width: 300, height: 100 } });
   try {
@@ -278,7 +280,12 @@ test("letter spacing widens a run by room after it; a negative one never becomes
     };
     const pads = (n) => [n.style?.pr, ...(n.children ?? []).flatMap(pads)].filter((v) => v !== undefined);
     assert.deepEqual(pads(node("wide")), [9], "1px after each of 9 letters");
-    assert.ok(pads(node("tight")).every((pr) => pr >= 0), `no negative padding: ${pads(node("tight"))}`);
+    assert.deepEqual(pads(node("tight")), [-4.5], "the box is the tracked width");
+    const clipped = node("clipped");
+    assert.deepEqual(pads(clipped), [], "no glyph is pushed past the clip");
+    const run = clipped.children[0];
+    assert.ok(run.style.text_size < 25 && run.style.text_size > 24, `drawn a little smaller: ${run.style.text_size}`);
+    assert.match(run.style.line_height, /^[\d.]+px$/, "on the heading's line height");
   } finally {
     handle.unmount();
   }

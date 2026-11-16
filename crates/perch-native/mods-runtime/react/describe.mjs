@@ -447,7 +447,7 @@ function reportDeclarations(computed, report) {
     const value = v[prop];
     switch (prop) {
       case "letter-spacing":
-        if (value !== "normal" && !(value?.px === 0)) report("approximated", prop, value?.px !== undefined ? `${Math.round(value.px * 1000) / 1000}px` : value, source, value?.px < 0 ? "the run keeps its untracked width, the letters are not drawn closer" : "the run is as wide as with the spacing (room after it), the letters are not spread");
+        if (value !== "normal" && !(value?.px === 0)) report("approximated", prop, value?.px !== undefined ? `${Math.round(value.px * 1000) / 1000}px` : value, source, value?.px < 0 ? "the run's box is as wide as with the spacing (the glyphs reach past it; where the element clips, the run is drawn smaller to fit)" : "the run is as wide as with the spacing (room after it), the letters are not spread");
         break;
       case "font-variant-numeric":
         if (value !== "normal" && numericFeatures(value) === null) report("unsupported", prop, value, source);
@@ -700,15 +700,26 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
   // after each character as room after the run, so the run's box is as wide as the page's (the letters are not
   // spread). A row of single characters with gaps spreads them, but every character's box snaps to the device pixel
   // grid and the run comes out 2.7 to 5.8 px wider than the page's.
-  // Negative spacing (`tracking-[-0.02em]`) has no room to give back: the run keeps its untracked width, a few pixels
-  // wider than the page's, rather than a negative padding that leaves its last glyph outside a clipping box.
+  // Negative spacing (`tracking-[-0.02em]`) takes the room back the same way (a negative padding), so the box is the
+  // page's width and the glyphs reach past it. Where the element clips (`overflow-hidden` on the start card's
+  // heading) that would cut the last glyph, so there the run is drawn a little smaller instead, as wide as tracked.
   const spacing = computed.values["letter-spacing"]?.px;
-  if (spacing > 0) {
+  const clips = computed.values["overflow-x"] !== "visible";
+  if (spacing) {
     for (let i = 0; i < kids.length; i++) {
       const run = kids[i];
       if (run.kind !== "text") continue;
       const room = Math.round(spacing * [...run.text].length * 1000) / 1000;
-      kids[i] = { kind: "div", style: { pr: room }, tokens: {}, children: [run] };
+      if (spacing > 0 || !clips) {
+        kids[i] = { kind: "div", style: { pr: room }, tokens: {}, children: [run] };
+        continue;
+      }
+      // ponytail: the run's width is judged from an average advance of 0.55em, not measured, so the drawn width is
+      // within a pixel or two of the page's; measuring the run in the engine would make it exact.
+      const size = computed.values["font-size"];
+      const scale = Math.max(0.8, 1 + spacing / (0.55 * size));
+      const lineHeight = Math.round(lineHeightPx(computed.values, ctx.measure) * 1000) / 1000;
+      kids[i] = { kind: "div", style: { text_size: Math.round(size * scale * 1000) / 1000, line_height: `${lineHeight}px` }, tokens: {}, children: [run] };
     }
   }
   node.children = kids;
