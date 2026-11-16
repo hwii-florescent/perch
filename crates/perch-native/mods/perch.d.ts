@@ -418,9 +418,6 @@ declare module "perch" {
     wrap: boolean;
     git: { isGit: boolean; ready: boolean; statusState: string; decorations: [string, unknown][] };
   };
-  /** A number that moves whenever `workspaceFiles(workspaceId)` may read differently: check it before reading a
-   * large tree again. */
-  export function workspaceFilesRevision(workspaceId: string): number;
   /** Runs one of `useWorkspaceFiles`' actions on the window's file store, once the current call has unwound:
    * `requestTree(path)`, `searchFiles(query)`, `openFile(path, force?)`, `reloadFile(path)`, `requestPreview(path)`,
    * `updateDraft(path, content)`, `saveFile(path)`, `overwriteFile(path)`, `extractArchive(path)`, `setWrap(on)`. */
@@ -437,6 +434,8 @@ declare module "perch" {
   export function setSidebarSettings(patch: Partial<SidebarSettings>): SidebarSettings;
   /** The scale factor of the window this mod is drawn in: device pixels per logical pixel. */
   export function scale(): number;
+  /** A number that moves whenever anything this module answers may have changed (not a read: it re-renders nothing). */
+  export function revision(): number;
   /** The theme on screen, as its 18 tokens. */
   export function theme(): ThemeTokens;
   export function themeName(): string;

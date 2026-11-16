@@ -8,7 +8,8 @@
 //! `bounds(key)` is where an element the runtime marked `.measure(key)` was last laid out (`{x, y, width, height}`,
 //! logical pixels from the window's top left, or null before its first layout), for `getBoundingClientRect` and the
 //! DOM's measurement properties; `forgetBounds(prefix)` lets a tree's keys go when it unmounts. Both see only the
-//! calling mod copy's boxes (`gpui_shell::measure`).
+//! calling mod copy's boxes (`gpui_shell::measure`). `probing()` says whether tests read element names
+//! (`gpui_shell::probing`): the parity names are worked out only then.
 //! Everything else the runtime needs (timers, jobs, storage) the engine already gives.
 
 use super::ModHost;
@@ -25,7 +26,8 @@ use std::sync::Arc;
 const DECLARATIONS: &str = "export const Icon: { new(id: string, props: { markup: string; color?: string }): any };
 export function textWidth(text: string, font: { size: number; weight?: number; family?: string; italic?: boolean }): number;
 export function bounds(key: string): { x: number; y: number; width: number; height: number } | null;
-export function forgetBounds(prefix: string): void;";
+export function forgetBounds(prefix: string): void;
+export function probing(): boolean;";
 
 /// The largest icon markup drawn.
 const MAX_MARKUP: usize = 256 * 1024;
@@ -84,6 +86,7 @@ fn module() -> HostModule {
             gpui_shell::measure::forget(args.string(0)?);
             Ok(HostValue::Null)
         })
+        .function("probing", |_| Ok(HostValue::Bool(gpui_shell::probing())))
 }
 
 /// The icon `props` names, or an empty box when the markup is not one. Rasterised here, at the window's scale, so

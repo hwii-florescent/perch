@@ -215,8 +215,8 @@ function compoundMatches(element, compound, options, isSubject) {
   if (compound.tag && compound.tag !== "*" && element.tagName !== compound.tag) return false;
   if (compound.id && element.getAttribute("id") !== compound.id) return false;
   if (compound.classes.length) {
-    const classes = element.classList ?? [];
-    for (const name of compound.classes) if (!classes.includes(name)) return false;
+    const classes = element.classSet ?? new Set(element.classList ?? []);
+    for (const name of compound.classes) if (!classes.has(name)) return false;
   }
   for (const attr of compound.attrs) if (!attrMatches(element, attr)) return false;
   for (const pseudo of compound.pseudos) {

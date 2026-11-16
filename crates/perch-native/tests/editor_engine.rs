@@ -4,7 +4,8 @@
 //! undo entry or a change event, undo, parked state restored by key, at most 32 parked), that a theme switch recolours
 //! an open editor, that typing stays quick while a slow background parse runs, and the timing budgets: typing in a
 //! highlighted 1,000-line file at most 4 ms per key and frame, 10,000 lines at most 8 ms, colours everywhere within
-//! 300 ms of opening (failing above twice those in a release build; debug builds only report).
+//! 300 ms of opening (failing above twice those in a release build, above the budgets themselves with
+//! `PERCH_BUDGET_STRICT=1`; debug builds only report).
 //!
 //! `PERCH_EDITOR_REPORT=1` prints the numbers. `PERCH_EDITOR_LINES=1000,10000,50000` picks the timed sizes;
 //! `PERCH_EDITOR_UNCAPPED=1` lifts the 300,000-character highlight cap, to time the highlighter on the measurement
@@ -436,6 +437,15 @@ fn report(line: &str) {
     }
 }
 
+/// How far over a budget a release run may go: twice it for noisy machines, none when strict.
+fn margin() -> u32 {
+    if std::env::var("PERCH_BUDGET_STRICT").as_deref() == Ok("1") {
+        1
+    } else {
+        2
+    }
+}
+
 fn timings(rig: &mut Rig) {
     let uncapped = std::env::var_os("PERCH_EDITOR_UNCAPPED").is_some();
     if uncapped {
@@ -472,12 +482,12 @@ fn timings(rig: &mut Rig) {
                 _ => Duration::from_millis(8),
             };
             assert!(
-                mean <= budget * 2,
+                mean <= budget * margin(),
                 "{lines} lines: {mean:?} per key, budget {budget:?}"
             );
             if lines <= 10_000 {
                 assert!(
-                    coloured <= Duration::from_millis(600),
+                    coloured <= Duration::from_millis(300) * margin(),
                     "{lines} lines coloured in {coloured:?}"
                 );
             }

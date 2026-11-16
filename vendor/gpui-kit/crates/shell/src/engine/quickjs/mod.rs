@@ -1129,6 +1129,8 @@ pub(crate) mod exports {
         "uniform_list",
         "PathBuilder",
         "Background",
+        // PERCH: what `render()` returns when its description has not changed.
+        "unchanged",
     ];
 
     /// Components, layout helpers and the theme, all owned by `gpui-base`.
@@ -3148,6 +3150,20 @@ impl ShellRuntime {
         window: &mut Window,
         cx: &mut App,
     ) -> Result<RenderSnapshot> {
+        self.build_or_keep_snapshot(object, view, policy, window, cx)?
+            .ok_or_else(|| anyhow!("render(cx) returned unchanged() with no snapshot to keep"))
+    }
+
+    /// PERCH: [`Self::build_snapshot`], or `None` when the script returned `unchanged()`: nothing is
+    /// published, the open callback generation is dropped, and the caller keeps its snapshot.
+    pub(crate) fn build_or_keep_snapshot(
+        self: &Rc<Self>,
+        object: &ViewObject,
+        view: Option<Entity<ScriptView>>,
+        policy: Rc<crate::policy::Policy>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<Option<RenderSnapshot>> {
         // One theme sync per description makes cx.theme() a JS-only cache read.
         // The native snapshot crosses the boundary only when this revision
         // changes, rather than once per component asking for the theme.
@@ -3177,9 +3193,17 @@ impl ShellRuntime {
         };
 
         let root = match root {
-            Ok(root) => {
+            Ok(Some(root)) => {
                 object.jit_warm.set(true);
                 root
+            }
+            Ok(None) => {
+                self.callbacks.borrow_mut().abort();
+                self.arena.borrow_mut().reset();
+                if let Some(view) = view {
+                    scheduler::drain_after_render(self, view, policy, window, cx);
+                }
+                return Ok(None);
             }
             Err(error) => {
                 self.callbacks.borrow_mut().abort();
@@ -3214,7 +3238,7 @@ impl ShellRuntime {
             scheduler::drain_after_render(self, view, policy, window, cx);
         }
 
-        Ok(snapshot)
+        Ok(Some(snapshot))
     }
 
     /// Runs the script and returns the element description as text.
@@ -5061,7 +5085,8 @@ impl ShellRuntime {
     /// Renders once, and on a "not a function" failure renders again with the
     /// diagnostic prototype installed so the error can name the method and
     /// suggest a correction. See the prelude for why this is two passes.
-    fn call_render(&self, object: &ViewObject, generation: u64) -> Result<SpecId> {
+    /// `None`: the script returned `unchanged()`, and the current snapshot stands.
+    fn call_render(&self, object: &ViewObject, generation: u64) -> Result<Option<SpecId>> {
         match self.call_render_once(object, generation) {
             Ok(id) => Ok(id),
             Err(error) if error.to_string().contains("not a function") => {
@@ -5086,7 +5111,7 @@ impl ShellRuntime {
         let _ = self.with_js(|ctx| ctx.globals().set("__diagnostics", enabled));
     }
 
-    fn call_render_once(&self, object: &ViewObject, generation: u64) -> Result<SpecId> {
+    fn call_render_once(&self, object: &ViewObject, generation: u64) -> Result<Option<SpecId>> {
         self.with_js(|ctx| {
             let prepare_theme: Function = ctx.globals().get("__prepare_theme")?;
             prepare_theme.call::<_, ()>(())?;
@@ -5098,7 +5123,13 @@ impl ShellRuntime {
                 This(instance),
                 context_object(ctx, ContextBinding::Call(generation))?,
             ))?;
-            element_id(ctx, &produced)
+            let unchanged = produced
+                .as_object()
+                .is_some_and(|object| object.get::<_, bool>("__unchanged").unwrap_or(false));
+            if unchanged {
+                return Ok(None);
+            }
+            element_id(ctx, &produced).map(Some)
         })
     }
 
@@ -6957,10 +6988,13 @@ globalThis.__gpui = (() => {
   };
 
   globalThis.__template = template;
+  // PERCH: `render()` returning this keeps the view's current snapshot, handlers included, and publishes nothing.
+  const UNCHANGED = Object.freeze({ __unchanged: true });
 
   return {
     __element: element,
     View,
+    unchanged: () => UNCHANGED,
     div: () => element(__div()),
     h_flex: () => element(__h_flex()),
     v_flex: () => element(__v_flex()),

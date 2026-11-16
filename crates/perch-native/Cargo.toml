@@ -110,6 +110,11 @@ path = "tests/mods_sidebar_window.rs"
 harness = false
 
 [[test]]
+name = "screen_engine_measure"
+path = "tests/screen_engine_measure.rs"
+harness = false
+
+[[test]]
 name = "mods_responsive"
 path = "tests/mods_responsive.rs"
 harness = false

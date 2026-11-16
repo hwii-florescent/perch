@@ -217,7 +217,7 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   if ((scroller && IN_SCROLL.has(node)) || covers) el = el.on_scroll_wheel((_event, cx) => cx.stop_propagation?.());
   // `onScroll`: a wheel step over a scroll area that listens is its `scroll` event. The boxes the listener reads
   // (`getBoundingClientRect`) are the last frame's, so they show the area one step behind.
-  if (scroller && events.has("scroll")) el = el.on_scroll_wheel(() => { handle.dispatch(node.id, "scroll", {}); });
+  if (scroller && events.has("scroll")) el = el.on_scroll_wheel((_event, cx) => { handle.dispatch(node.id, "scroll", {}); cx.notify(); });
   if (scroller || IN_SCROLL.has(node)) for (const child of node.children ?? []) if (child.kind !== "text") IN_SCROLL.add(child);
 
   // A press on a text field puts the keyboard in it, as a browser does, and keeps its box (a list anchored to it).

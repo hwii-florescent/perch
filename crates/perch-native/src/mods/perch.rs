@@ -205,6 +205,8 @@ struct Attached {
 struct Shared {
     data: RefCell<Data>,
     revisions: RefCell<HashMap<String, u64>>,
+    /// Bumped with every part: a screen that saw this value has nothing new to read (`revision`).
+    revision: Cell<u64>,
     /// Per mod id, the revision of each part it read when it last rendered.
     reads: RefCell<HashMap<String, HashMap<String, u64>>>,
     hosts: RefCell<Vec<ModHost>>,
@@ -236,6 +238,7 @@ impl Perch {
         Self(Rc::new(Shared {
             data: RefCell::default(),
             revisions: RefCell::default(),
+            revision: Cell::default(),
             reads: RefCell::default(),
             hosts: RefCell::default(),
             asker: RefCell::default(),
@@ -427,19 +430,6 @@ impl Perch {
                 reader.read(&id, &format!("files:{workspace_id}"));
                 Ok(to_host(&reader.workspace_files(&workspace_id)))
             })
-            // What `workspaceFiles` would read has moved when this number has: a screen's host checks it
-            // before reading a whole tree again.
-            .function("workspaceFilesRevision", {
-                let reader = self.clone();
-                move |args| {
-                    let workspace_id = args.string(0)?;
-                    let revisions = reader.0.revisions.borrow();
-                    let at = |part: &str| revisions.get(part).copied().unwrap_or(0);
-                    Ok(to_host(&json!(
-                        at(STORE) + at(&format!("files:{workspace_id}"))
-                    )))
-                }
-            })
             .function("filesDo", move |args| {
                 let action = args.string(0)?.to_string();
                 let workspace_id = args.string(1)?.to_string();
@@ -616,6 +606,7 @@ impl Perch {
     }
 
     fn bump(&self, part: &str) {
+        self.0.revision.set(self.0.revision.get() + 1);
         *self
             .0
             .revisions
@@ -1242,6 +1233,10 @@ impl Perch {
                 Ok(to_host(&json))
             })
             .function("theme", reader(THEME, |perch, _| perch.theme_tokens()))
+            .function("revision", {
+                let perch = self.clone();
+                move |_| Ok(HostValue::Number(perch.0.revision.get() as f64))
+            })
             .function(
                 "themeName",
                 reader(THEME, |perch, _| json!(perch.theme().name)),
