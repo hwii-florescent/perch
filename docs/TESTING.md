@@ -468,6 +468,11 @@ three failures for the same reason.
   in the scratch directory) and exits 1 when a state is over its budget; the budgets are in
   `scripts/native-memory-budgets.py` (`python3 -I scripts/native-memory-budgets.py --self-test` checks them).
   A test-mode step whose feature is not built fails the run rather than skipping the state.
+  A window gets no frames while the display sleeps or the console is locked, so its screens never draw; then
+  add `--offscreen`, which measures `examples/measure_offscreen` (the same workspace, mods, core connection and
+  script, presented every 16 ms by GPUI's headless Metal renderer). Its idle footprint holds GPU targets a
+  hidden window does not, so only its growth over idle is judged; browser panes (`g`, `h`), the shown window
+  and the Tauri app still need the display awake.
 - Timing budgets run strict in release: `PERCH_BUDGET_STRICT=1 cargo test --release -p perch-native --test
   editor_engine` (and every other timing test that names the variable in its header) fails at the budgets
   themselves rather than at twice them, the default for noisy machines; each test prints its numbers under its

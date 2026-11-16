@@ -156,17 +156,16 @@ function FileTree({
   }, [cursor]);
   if (!trees[""]) return null;
   const height = rowHeight();
-  // One box per chunk, always there: those in view hold their rows, the rest only their height. A move fills one box
-  // and empties another, so the rows that stay are not drawn again (in Perch's own runtime a list that gains or loses
-  // a child is described again whole).
-  const chunks = Array.from({ length: Math.ceil(items.length / TREE_CHUNK) }, (_, at) => at * TREE_CHUNK);
+  // The chunks in view, each a box keyed by its first row, between two spacers that hold the rest's height. A move
+  // adds one chunk and drops another; the chunks that stay keep their boxes, so their rows are not drawn again, and
+  // the list stays a handful of boxes however long the tree is.
+  const chunks: number[] = [];
+  for (let first = start; first < end; first += TREE_CHUNK) chunks.push(first);
   return (
     <div ref={listRef} className="min-w-0" data-testid="workspace-file-tree-root">
-      {chunks.map((first) => {
-        const last = Math.min(items.length, first + TREE_CHUNK);
-        if (first >= end || last <= start) return <div key={first} aria-hidden style={{ height: (last - first) * height }} />;
-        return <div key={first} className="min-w-0">{items.slice(first, last).map(row)}</div>;
-      })}
+      <div key="before" aria-hidden style={{ height: start * height }} />
+      {chunks.map((first) => <div key={first} className="min-w-0">{items.slice(first, Math.min(end, first + TREE_CHUNK)).map(row)}</div>)}
+      <div key="after" aria-hidden style={{ height: (items.length - end) * height }} />
     </div>
   );
 

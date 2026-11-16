@@ -97,6 +97,39 @@ pub fn open_link(url: &str) -> io::Result<()> {
         .ok_or_else(|| io::Error::other(format!("{opener} failed: {status}")))
 }
 
+/// Open a local file or folder with its default app, or show it in the file manager (`reveal`), as
+/// the desktop app's file menu does. `path` must be absolute, so it can never read as an option.
+pub fn open_path(path: &std::path::Path, reveal: bool) -> io::Result<()> {
+    if !path.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "only an absolute path can be opened",
+        ));
+    }
+    let mut command = if cfg!(target_os = "macos") {
+        let mut open = Command::new("open");
+        if reveal {
+            open.arg("-R");
+        }
+        open.arg(path);
+        open
+    } else {
+        // ponytail: xdg-open has no reveal; the folder that holds the entry opens instead.
+        let mut open = Command::new("xdg-open");
+        open.arg(if reveal {
+            path.parent().unwrap_or(path)
+        } else {
+            path
+        });
+        open
+    };
+    let status = command.status()?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| io::Error::other(format!("opening {} failed: {status}", path.display())))
+}
+
 fn is_web_link(url: &str) -> bool {
     url.len() <= 2048
         && url.starts_with("https://")

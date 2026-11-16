@@ -1994,10 +1994,20 @@ const OWN: [(&str, &str, &str); 10] = [
 
 /// Window commands beyond the keymap's: the web's ids the window can perform (some under the
 /// name its keys use), and the native ones screens need.
-const WINDOW_COMMANDS: [(&str, &str, &str); 38] = [
+const WINDOW_COMMANDS: [(&str, &str, &str); 40] = [
     (
         "files.extract",
         "Extract a workspace's archive beside it",
+        "{workspaceId, path}",
+    ),
+    (
+        "files.openDefault",
+        "Open a local workspace's entry with its default app (a click's choice)",
+        "{workspaceId, path}",
+    ),
+    (
+        "files.reveal",
+        "Show a local workspace's entry in the file manager (a click's choice)",
         "{workspaceId, path}",
     ),
     (
