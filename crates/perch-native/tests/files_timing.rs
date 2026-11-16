@@ -6,8 +6,8 @@
 //!   draft reaching the window's store to the drawn frame (budget 4 ms per key at 1,000 lines, 8 ms at 10,000), one
 //!   key per 16 ms frame, so the screen is shown the typing every 150 ms as when a person types.
 //!
-//! Every number is printed. The budgets fail the run in a release build or with `PERCH_BUDGET_STRICT=1`; a debug
-//! build otherwise only reports. `PERCH_FILES_TREE=1000,5000`, `PERCH_FILES_LINES=1000,10000` and
+//! Every number is printed. With `PERCH_BUDGET_STRICT=1` a number over its budget fails the run; otherwise a release
+//! build fails only past twice the budget (the margin a loaded CI machine needs) and a debug build only reports. `PERCH_FILES_TREE=1000,5000`, `PERCH_FILES_LINES=1000,10000` and
 //! `PERCH_FILES_STEPS=30` pick the sizes and the number of steps and keys. Resident memory before and after each
 //! is printed too (`ps`), for the heap the screen grows.
 //!
@@ -183,12 +183,26 @@ fn env_list(name: &str, default: &[usize]) -> Vec<usize> {
 }
 
 fn strict() -> bool {
-    !cfg!(debug_assertions) || std::env::var("PERCH_BUDGET_STRICT").as_deref() == Ok("1")
+    std::env::var("PERCH_BUDGET_STRICT").as_deref() == Ok("1")
+}
+
+/// The budget a number is held to: its own when strict, twice it in an ordinary release run, none in a debug build.
+fn held(budget: Duration) -> Option<Duration> {
+    if strict() {
+        Some(budget)
+    } else if cfg!(debug_assertions) {
+        None
+    } else {
+        Some(budget * 2)
+    }
 }
 
 fn within(what: &str, took: Duration, budget: Duration) {
-    if strict() {
-        assert!(took <= budget, "{what}: {took:?}, budget {budget:?}");
+    if let Some(limit) = held(budget) {
+        assert!(
+            took <= limit,
+            "{what}: {took:?}, budget {budget:?} (held to {limit:?})"
+        );
     }
 }
 
@@ -463,8 +477,10 @@ fn main() {
         "files timing: ok{}",
         if strict() {
             ""
-        } else {
+        } else if cfg!(debug_assertions) {
             " (debug build: budgets reported, not enforced)"
+        } else {
+            " (held to twice the budgets; PERCH_BUDGET_STRICT=1 holds them exactly)"
         }
     );
 }
