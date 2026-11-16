@@ -695,6 +695,72 @@ fn quickchat_before_first(rig: &mut Rig) {
     println!("quickchat before first: ok");
 }
 
+/// Commands the web has that the window now runs as it does: `key.bind` keeps a key in the core's
+/// settings (and refuses one the web refuses), leader 9 is the 9th tab or the last, leader c
+/// starts a terminal in the project on screen with no picker, and `agent.next` skips terminals.
+fn web_commands(rig: &mut Rig) {
+    let run = |rig: &mut Rig, name: &str, args: Value| {
+        rig.ws(|ws, window, cx| ws.run_command(name, Some(&args), window, cx))
+    };
+    rig.asked();
+    run(
+        rig,
+        "key.bind",
+        json!({"command": "global.sidebar", "keys": "cmd+shift+y"}),
+    )
+    .unwrap();
+    let saved: Vec<Value> = rig
+        .asked()
+        .into_iter()
+        .filter_map(|c| match c {
+            Command::UpdateSettings(patch) => Some(patch),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        saved,
+        [json!({"keybindings": {"global.sidebar": "cmd+shift+y"}})]
+    );
+    let refused = run(
+        rig,
+        "key.bind",
+        json!({"command": "global.sidebar", "keys": "y"}),
+    );
+    assert!(refused.unwrap_err().contains("cannot be bound"));
+    assert!(
+        run(rig, "key.bind", json!({"keys": "cmd+y"})).is_err(),
+        "needs a command"
+    );
+    assert!(rig.asked().is_empty(), "nothing saved for a refused key");
+
+    rig.open("alpha");
+    rig.open("bravo");
+    run(rig, "tabs.jump1", json!({})).unwrap();
+    assert_eq!(rig.active().as_deref(), Some("alpha"));
+    run(rig, "leader.jump9", json!({})).unwrap();
+    assert_eq!(
+        rig.active().as_deref(),
+        Some("bravo"),
+        "fewer than 9: the last"
+    );
+
+    rig.asked();
+    run(rig, "leader.newSession", json!({})).unwrap();
+    let launched: Vec<_> = rig
+        .asked()
+        .into_iter()
+        .filter_map(|c| match c {
+            Command::Launch { cwd, provider, .. } => Some((cwd, provider)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        launched,
+        [(Some("/work".to_string()), "terminal".to_string())]
+    );
+    println!("web-commands: ok");
+}
+
 fn main() {
     let scratch: PathBuf =
         std::env::temp_dir().join(format!("perch-keys-window-{}", std::process::id()));
@@ -714,6 +780,7 @@ fn main() {
     new_project_running(&mut rig);
     empty_workspace(&mut rig);
     close_last_tab(&mut rig);
+    web_commands(&mut rig);
 
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())

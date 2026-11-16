@@ -2100,9 +2100,43 @@ impl Workspace {
             "global.navigator" | "global.navigatorAlt" | "app.palette" => {
                 self.toggle_palette(window, cx)
             }
-            "global.help" | "global.helpPlain" => self.open_keybind_help(cx),
+            "global.help" | "global.helpPlain" | "app.help" => self.open_keybind_help(cx),
             // As the web's Cmd+Shift+T and the sidebar's New session: the launcher, for the
             // sidebar's target.
+            // As the web's: set a command's key (`keys` null: back to its default, "": none), kept
+            // in the core's settings, which every window follows.
+            "key.bind" => {
+                let command = text("command").filter(|c| !c.is_empty());
+                let keys = args.and_then(|a| a.get("keys")).unwrap_or(&Value::Null);
+                let (Some(command), true) = (command, keys.is_null() || keys.is_string()) else {
+                    return Err(
+                        "key.bind needs {command: <id>, keys: \"cmd+shift+y\" | \"\" | null}."
+                            .into(),
+                    );
+                };
+                let keys = keys.as_str();
+                if let Some(combo) = keys.filter(|k| !k.is_empty()) {
+                    if !crate::keymap::bindable(combo, cfg!(target_os = "macos")) {
+                        return Err(format!(
+                            "\"{combo}\" cannot be bound: it is reserved or has no modifier."
+                        ));
+                    }
+                }
+                let sidebar = self.sidebar.read(cx);
+                let mut next = sidebar.model().keybindings.clone();
+                match keys {
+                    None => next.remove(command),
+                    Some(combo) => next.insert(command.to_string(), combo.to_string()),
+                };
+                sidebar.send(Command::UpdateSettings(json!({ "keybindings": next })));
+            }
+            // The 9th tab, or the last when there are fewer, as the web's leader 9 (Cmd+9 is
+            // always the last).
+            "leader.jump9" => self.select(Some(9), cx)?,
+            // As the web's leader c: a terminal in the project on screen, with no picker.
+            "leader.newSession" => self.sidebar.update(cx, |sidebar, cx| {
+                sidebar.launch(perch_core::agent_fleet::TERMINAL_PROVIDER, cx)
+            })?,
             "sessions.new" => {
                 if !self.screens.has("launcher", cx) {
                     return Err("No mod draws the launcher.".into());
@@ -2902,10 +2936,7 @@ impl Workspace {
     /// The tab at `index` (1 is first), or the last one.
     fn select(&mut self, index: Option<usize>, cx: &mut Context<Self>) -> Result<(), String> {
         if !self.tabs.jump(index) {
-            return Err(match index {
-                Some(n) => format!("No tab {n}: there are {}.", self.tabs.strip().len()),
-                None => "There are no tabs.".into(),
-            });
+            return Err("There are no tabs.".into());
         }
         self.after_change(cx);
         Ok(())

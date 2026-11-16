@@ -243,6 +243,8 @@ impl Nav {
                 self.new_session = Some(self.new_session_target(model, true));
                 Outcome::Nothing
             }
+            "agent.next" => self.step_agent(model, 1),
+            "agent.prev" => self.step_agent(model, -1),
             "nests.prev" => self.step_workspace(model, -1),
             "nests.next" => self.step_workspace(model, 1),
             jump => {
@@ -266,6 +268,43 @@ impl Nav {
                 session_id: next,
             },
             None => Outcome::Nothing,
+        }
+    }
+
+    /// `agent.next` / `agent.prev`: the next session of the shown computer, in the sidebar's
+    /// order, that is an agent (not a plain terminal), wrapping round, as the web's.
+    fn step_agent(&mut self, model: &Model, step: isize) -> Outcome {
+        let agents: Vec<(String, String)> = self
+            .stops(model)
+            .into_iter()
+            .flat_map(|stop| stop.sessions)
+            .filter(|(_, id)| {
+                let row = model.hosts.iter().flat_map(|h| &h.projects).find_map(|p| {
+                    p.sessions
+                        .iter()
+                        .chain(p.workspaces.iter().flat_map(|w| &w.sessions))
+                        .find(|s| &s.id == id)
+                });
+                row.is_some_and(|s| {
+                    s.provider_id.as_deref() != Some(perch_core::agent_fleet::TERMINAL_PROVIDER)
+                })
+            })
+            .collect();
+        if agents.is_empty() {
+            return Outcome::Nothing;
+        }
+        let current = self.selected.as_ref().map(|(_, id)| id.as_str());
+        let at = agents
+            .iter()
+            .position(|(_, id)| Some(id.as_str()) == current);
+        let len = agents.len() as isize;
+        let next = at.map_or(if step > 0 { 0 } else { len - 1 }, |at| {
+            (at as isize + step).rem_euclid(len)
+        });
+        let (host_id, session_id) = agents[next as usize].clone();
+        Outcome::Open {
+            host_id,
+            session_id,
         }
     }
 
@@ -571,6 +610,41 @@ mod tests {
         }
         assert_eq!(Nav::default().run("tabs.new", &model), None);
         assert_eq!(Nav::default().run("nests.jumpx", &model), None);
+    }
+
+    #[test]
+    fn agent_next_and_prev_step_through_agents_only_wrapping() {
+        let mut a = project("a", &["claude1", "shell", "codex"]);
+        a.sessions[0].provider_id = Some("claude".into());
+        a.sessions[1].provider_id = Some("terminal".into());
+        a.sessions[2].provider_id = Some("codex".into());
+        let mut b = project("b", &["claude2"]);
+        b.sessions[0].provider_id = Some("claude".into());
+        let model = model(vec![a, b], &[]);
+        let mut nav = Nav::default();
+        nav.selected = Some((LOCAL.into(), "claude1".into()));
+        let mut step = |id: &str| {
+            let outcome = nav.run(id, &model);
+            if let Some(Outcome::Open { session_id, .. }) = &outcome {
+                nav.selected = Some((LOCAL.into(), session_id.clone()));
+            }
+            outcome
+        };
+        assert_eq!(step("agent.next"), open("codex"), "the terminal is skipped");
+        assert_eq!(step("agent.next"), open("claude2"));
+        assert_eq!(step("agent.next"), open("claude1"), "wraps round");
+        assert_eq!(step("agent.prev"), open("claude2"), "and back");
+        let terminals = model_with_terminal_only();
+        assert_eq!(
+            Nav::default().run("agent.next", &terminals),
+            Some(Outcome::Nothing)
+        );
+    }
+
+    fn model_with_terminal_only() -> Model {
+        let mut a = project("a", &["shell"]);
+        a.sessions[0].provider_id = Some("terminal".into());
+        model(vec![a], &[])
     }
 
     #[test]

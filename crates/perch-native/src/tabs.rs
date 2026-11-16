@@ -299,10 +299,12 @@ impl Tabs {
         self.zoomed = false;
     }
 
-    /// The tab at `index` (1 is first); `None` counts from the end (`tabs.last`).
+    /// The tab at `index` (1 is first), or the last when there are fewer, as the web jumps;
+    /// `None` is the last (`tabs.last`).
     pub fn jump(&mut self, index: Option<usize>) -> bool {
         let id = match index {
-            Some(n) => n.checked_sub(1).and_then(|i| self.strip.get(i)),
+            Some(0) => None,
+            Some(n) => self.strip.get(n.min(self.strip.len()).wrapping_sub(1)),
             None => self.strip.last(),
         };
         let id = id.cloned();
@@ -957,7 +959,10 @@ mod tests {
         assert!(t.jump(Some(1)));
         assert_eq!(t.active(), Some("a"));
         assert!(!t.jump(Some(0)));
-        assert!(!t.jump(Some(4)));
+        assert_eq!(t.active(), Some("a"));
+        assert!(t.jump(Some(4)), "past the end is the last");
+        assert_eq!(t.active(), Some("c"));
+        assert!(t.jump(Some(1)));
         assert!(t.jump(None));
         assert_eq!(t.active(), Some("c"));
         t.step(1);

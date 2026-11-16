@@ -497,7 +497,7 @@ pub fn leader_target(id: &str) -> Option<&'static str> {
         "focus.down" => "panes.focus.down",
         "focus.up" => "panes.focus.up",
         "focus.right" => "panes.focus.right",
-        "newSession" => "sessions.new",
+        "newSession" => "leader.newSession",
         // The window runs these itself: the shown project's worktree menu, the next folder's
         // newest session, the focused pane's size and resize mode.
         "worktree" => "leader.worktree",
@@ -513,7 +513,7 @@ pub fn leader_target(id: &str) -> Option<&'static str> {
         "jump6" => "tabs.jump6",
         "jump7" => "tabs.jump7",
         "jump8" => "tabs.jump8",
-        "jump9" => "tabs.last",
+        "jump9" => "leader.jump9",
         "swapNext" => "pane.swapNext",
         "swap.left" => "pane.swap:left",
         "swap.down" => "pane.swap:down",
@@ -543,6 +543,10 @@ pub const TYPED: &[(&str, Option<&str>)] = &[
     ("pane.focus", Some("pane")),
     ("app.settings", None),
     ("app.palette", None),
+    ("app.help", None),
+    ("key.bind", None),
+    ("agent.next", None),
+    ("agent.prev", None),
     ("app.zoom_in", None),
     ("app.zoom_out", None),
     ("app.zoom_reset", None),
@@ -732,6 +736,14 @@ fn reserved(chord: &Chord, mac: bool) -> bool {
     mac && MAC_RESERVED
         .iter()
         .any(|spec| parse_combo(spec, true).is_some_and(|reserved| reserved == *chord))
+}
+
+/// Whether `combo` (the settings' notation) may be bound to a command, as the web's
+/// `bindableCombo`: a key, not reserved by the macOS menu, with Command, Control, Alt or a
+/// function key.
+pub fn bindable(combo: &str, mac: bool) -> bool {
+    parse_combo(combo, mac)
+        .is_some_and(|c| !reserved(&c, mac) && (c.cmd || c.ctrl || c.alt || function_key(&c)))
 }
 
 fn function_key(chord: &Chord) -> bool {
@@ -1834,6 +1846,11 @@ mod tests {
             for entry in fixture[section].as_array().unwrap() {
                 let id = entry[0].as_str().unwrap();
                 let Some(shortcut) = all_shortcuts().find(|s| s.id == id) else {
+                    // The window has no drawer and no preview tabs to keep.
+                    assert!(
+                        ["global.drawer", "tabs.keepOpen"].contains(&id),
+                        "{id}: the web ships it and this window has no such shortcut"
+                    );
                     continue;
                 };
                 let chord = effective_spec(&shortcut, &BTreeMap::new(), true)
@@ -1848,6 +1865,19 @@ mod tests {
             }
         }
         assert!(checked > 60, "only {checked} defaults were compared");
+    }
+
+    #[test]
+    fn a_key_is_bindable_as_the_web_allows() {
+        assert!(bindable("cmd+shift+y", true));
+        assert!(bindable("f5", true));
+        assert!(bindable("ctrl+alt+left", false));
+        assert!(!bindable("y", true), "no modifier");
+        assert!(!bindable("shift+y", true), "Shift alone is typing");
+        assert!(!bindable("cmd+q", true), "the macOS menu's");
+        assert!(bindable("cmd+q", false));
+        assert!(!bindable("cmd+nope", true), "not a key");
+        assert!(!bindable("", true));
     }
 
     #[test]
