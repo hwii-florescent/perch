@@ -258,6 +258,27 @@ fn main() {
         "an edited preview is kept"
     );
 
+    // An edit not yet sent (its debounce has not run) goes to the core's buffer when the window
+    // flushes its drafts before closing.
+    rig.sent();
+    rig.cx
+        .update_window(rig.window.into(), |_, window: &mut Window, cx| {
+            editors.set_value(doc, "# Work!!", false, window, cx)
+        })
+        .unwrap();
+    rig.cx.run_until_parked();
+    assert!(
+        !rig.sent().iter().any(|f| f["type"] == "fs.buffer.set"),
+        "not sent before its debounce"
+    );
+    rig.ws(|ws, _, cx| ws.flush_drafts(cx));
+    let sent = rig.sent();
+    assert!(
+        sent.iter()
+            .any(|f| f["type"] == "fs.buffer.set" && f["content"] == "# Work!!"),
+        "{sent:?}"
+    );
+
     // Closing asks nothing: the tab goes, the document stays in the store.
     let closed = rig
         .ws(|ws, window, cx| ws.run_command("tabs.close", Some(&json!({ "id": id })), window, cx));

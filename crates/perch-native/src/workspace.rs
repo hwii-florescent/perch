@@ -725,6 +725,13 @@ impl Workspace {
 
     /// Sends the store's frames, wakes for its next draft deadline, and redraws when a
     /// workspace's files moved.
+    /// Sends the core every draft its buffer may lack (the window is closing or the app quitting),
+    /// so no edit made in the last moments is lost.
+    pub fn flush_drafts(&mut self, cx: &mut Context<Self>) {
+        self.files.store.flush_pending_buffers();
+        self.pump_files(cx);
+    }
+
     fn pump_files(&mut self, cx: &mut Context<Self>) {
         self.pump(false, cx);
     }
