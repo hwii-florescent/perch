@@ -6922,6 +6922,7 @@ dependencies = [
  "raw-window-handle",
  "serde",
  "serde_json",
+ "syntect",
  "tokio",
  "tokio-tungstenite",
  "ttf-parser",
