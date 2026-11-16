@@ -26,6 +26,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -167,7 +168,9 @@ function namedElements() {
 /** The runtime bundle's code. */
 async function bundleRuntime(table) {
   const { build } = await load("vite");
-  const virtual = { "virtual:perch-css-table": table, "virtual:perch-named-elements": namedElements() };
+  // `digest`: the table's identity, so every screen built from it shares one parsed sheet (`sheet.mjs`).
+  const digest = createHash("sha256").update(JSON.stringify(table)).digest("hex").slice(0, 16);
+  const virtual = { "virtual:perch-css-table": { ...table, digest }, "virtual:perch-named-elements": namedElements() };
   const result = await build({
     configFile: false,
     root: here,

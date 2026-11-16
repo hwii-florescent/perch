@@ -42,7 +42,7 @@
 // This file is written by hand and shared by every React screen (`mods/react-runtime/`, which the mod host writes into
 // each screen's folder); `build.mjs` leaves it alone.
 import { copyFor, files, naming, runningHost } from "./host.js";
-import { View, div, image, unchanged } from "gpui-kit";
+import { View, div, image, renderGeneration, reuse, unchanged } from "gpui-kit";
 import { ScrollHandle } from "gpui-base";
 import { close, inRegion as inRegionOf, props as screenProps, scale } from "perch";
 import { describeToGpui, mount, NAMED_ELEMENTS, sdk } from "./runtime.mjs";
@@ -50,7 +50,8 @@ import { describeToGpui, mount, NAMED_ELEMENTS, sdk } from "./runtime.mjs";
 // This folder's `@perch/sdk` calls the host of this folder's running copy, whichever screen loads after it.
 sdk.bindHost(runningHost);
 
-const KIT = { div, image };
+// `reuse`/`renderGeneration`: unchanged subtrees keep the last frame's elements (`toGpui` in the runtime).
+const KIT = { div, image, reuse, renderGeneration };
 
 // The result the screen closes with at the end of this turn (`undefined`: none yet).
 let ending;

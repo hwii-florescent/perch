@@ -475,6 +475,13 @@ function sourceName(selectorText, steps) {
 }
 
 /** Interaction pseudo-classes a complex selector uses, on its subject and on an ancestor. */
+/** Whether the state assumed on the element (`Cascade.matching`'s `assume`) can change whether `steps` match it: an
+ * interaction pseudo-class on its subject compound, at any depth (`:not(:hover)` too). */
+function readsAssumed(steps) {
+  const inPseudos = (pseudos) => pseudos.some((p) => INTERACTION.has(p.name) || (p.list ?? []).some((inner) => inner.some(({ compound }) => inPseudos(compound.pseudos))));
+  return inPseudos(steps[steps.length - 1].compound.pseudos);
+}
+
 function statesOf(steps) {
   const subject = new Set(), ancestor = new Set();
   const visit = (list, isSubjectCompound) => {
@@ -549,7 +556,7 @@ export class StyleSheet {
           const states = statesOf(steps);
           ancestorStateClasses(steps, this.trackedStates);
           const pseudo = steps[steps.length - 1].compound.pseudoElement;
-          const entry = { steps, media, layer, origin, order: order++, specificity: specificity(steps), decls, states, pseudo, own: ownOnly(steps), above: classesAbove(steps), source: origin === 0 ? `ua:${steps[steps.length - 1].compound.tag ?? "*"}` : sourceName(part, steps) };
+          const entry = { steps, media, layer, origin, order: order++, specificity: specificity(steps), decls, states, pseudo, own: ownOnly(steps), assumed: readsAssumed(steps), above: classesAbove(steps), source: origin === 0 ? `ua:${steps[steps.length - 1].compound.tag ?? "*"}` : sourceName(part, steps) };
           this.rules.push(entry);
           add(entry, steps);
         }
@@ -562,12 +569,14 @@ export class StyleSheet {
   /** Rules that may match `element` (by its classes, its tag, and the universal ones), or its `pseudo` box
    * (`before`, `after`). */
   candidates(element, pseudo = null) {
-    const key = `${element.tagName} ${element.className}|${pseudo ?? ""}`;
+    const id = element.getAttribute?.("id") ?? null;
+    const key = `${element.tagName} ${element.className}|${pseudo ?? ""}|${id ?? ""}`;
     const known = this.candidateCache.get(key);
     if (known) return known;
     const out = [];
     const seen = new Set();
-    const push = (list) => { if (list) for (const rule of list) if (!seen.has(rule) && rule.pseudo === pseudo) { seen.add(rule); out.push(rule); } };
+    const classes = new Set(element.classList);
+    const push = (list) => { if (list) for (const rule of list) if (!seen.has(rule) && rule.pseudo === pseudo) { seen.add(rule); if (subjectMayMatch(rule.steps[rule.steps.length - 1].compound, element.tagName, classes, id)) out.push(rule); } };
     for (const cls of element.classList) push(this.index.get(`.${cls}`));
     push(this.index.get(element.tagName));
     push(this.index.get("*"));
@@ -609,6 +618,21 @@ export class StyleSheet {
     for (const cls of element.classList) if (this.trackedStates.has(`${state}:${cls}`)) return true;
     return false;
   }
+}
+
+/** Whether a subject compound may match an element with this tag, classes and id: false only when its tag, id or
+ * classes rule it out, or `:root` (the document's `html`), or a `:where()`/`:is()` of compounds that all do. Checks
+ * nothing `compoundMatches` would reach after a pseudo-class with an effect (`:has()` marks the element). */
+function subjectMayMatch(compound, tag, classes, id) {
+  if (compound.tag && compound.tag !== "*" && compound.tag !== tag) return false;
+  if (compound.id && compound.id !== id) return false;
+  for (const name of compound.classes) if (!classes.has(name)) return false;
+  for (const p of compound.pseudos) {
+    if (p.name === "has") return true;
+    if (p.name === "root" && tag !== "html") return false;
+    if ((p.name === "where" || p.name === "is") && p.list.every((steps) => steps.length === 1 && !subjectMayMatch(steps[0].compound, tag, classes, id))) return false;
+  }
+  return true;
 }
 
 const STRUCTURAL = new Set(["first-child", "last-child", "only-child", "nth-child"]);
@@ -730,7 +754,7 @@ export class Cascade {
 
   /** Rules matching `element`; `assume` is the set of interaction states assumed on the element itself
    * (`"*"`: any, for finding variant rules). Ancestors use their real state. */
-  matching(element, assume, pseudo = null) {
+  matching(element, assume, pseudo = null, memo = null) {
     const state = (el, name, isSubject) => {
       if (name === "disabled") return !!el.props?.disabled && ["button", "input", "select", "textarea", "fieldset"].includes(el.tagName);
       if (name === "enabled") return !el.props?.disabled && ["button", "input", "select", "textarea"].includes(el.tagName);
@@ -759,13 +783,23 @@ export class Cascade {
       above ??= ancestorClasses(element);
       return rule.above.every((name) => above.has(name));
     };
-    return candidates.filter((rule) => (rule.own ? own.has(rule) : this.mediaHolds(rule) && ancestorsHave(rule) && matchesComplex(element, rule.steps, options)));
+    // `memo` (one element's, within one pass over it): a rule that reads no assumed state matches the same under every
+    // assumed state but `*` (which assumes every state on the ancestors too), so it is matched once.
+    const fixed = memo && assume !== "*" ? (memo[pseudo ?? ""] ??= new Map()) : null;
+    const test = (rule) => this.mediaHolds(rule) && ancestorsHave(rule) && matchesComplex(element, rule.steps, options);
+    return candidates.filter((rule) => {
+      if (rule.own) return own.has(rule);
+      if (!fixed || rule.assumed) return test(rule);
+      let hit = fixed.get(rule);
+      if (hit === undefined) fixed.set(rule, (hit = test(rule)));
+      return hit;
+    });
   }
 
   /** `element`'s computed style, or with `pseudo` (`before`, `after`) that of its pseudo-element's box, whose parent
    * is the element (pass the element's own computed style as `parent`). */
-  compute(element, parent, assume = new Set(), pseudo = null) {
-    const rules = this.matching(element, assume, pseudo);
+  compute(element, parent, assume = new Set(), pseudo = null, memo = null) {
+    const rules = this.matching(element, assume, pseudo, memo);
     const attrs = pseudo ? [] : presentational(element);
     const inline = pseudo ? [] : inlineDeclarations(element.inlineStyle ?? element.props?.style);
     let known = this.rootComputed;
@@ -776,7 +810,8 @@ export class Cascade {
     const key = `${rules.map((rule) => rule.order).join(",")}|${attrs.length ? JSON.stringify(attrs) : ""}|${inline.length ? JSON.stringify(inline) : ""}`;
     let style = known.get(key);
     if (!style) known.set(key, (style = this.cascade(rules, attrs, inline, parent)));
-    return { ...style, rules, element };
+    // `shared`: the computed style itself, the same object for every element computed alike.
+    return { ...style, rules, element, shared: style };
   }
 
   /** The computed style from the matched `rules`, presentational `attrs`, `inline` declarations and the parent's. */
