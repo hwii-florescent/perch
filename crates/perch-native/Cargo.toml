@@ -51,6 +51,11 @@ path = "tests/editor_engine.rs"
 harness = false
 
 [[test]]
+name = "editor_typing"
+path = "tests/editor_typing.rs"
+harness = false
+
+[[test]]
 name = "mods_engines"
 path = "tests/mods_engines.rs"
 harness = false
