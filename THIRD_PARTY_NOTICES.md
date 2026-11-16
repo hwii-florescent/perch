@@ -316,6 +316,15 @@ it from its upstreams. Each copy keeps its upstream licence file and herdr's
   - `vendor/gpui-kit/crates/shell/src/measure.rs` and `vendor/gpui-kit/crates/shell/src/view.rs`:
     the boxes `measure` keeps are each script copy's own (by the policy it runs under), and go
     once the copy closes.
+  - `vendor/gpui-kit/crates/shell/src/materialize.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
+    `vendor/gpui-kit/crates/shell/src/typings.rs`: hover groups, `group(name)` on an element and
+    `group_hover(name, ...)` styles on a descendant, drawn while the pointer is over the group
+    without calling the script.
+  - `vendor/gpui-kit/crates/shell/src/engine/quickjs/sandbox.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
+    `vendor/gpui-kit/crates/shell/src/view.rs`: an event, timer or task that the time budget
+    stops says so over its view, as a failed render does, instead of only being logged.
 - `vendor/quickjs-jit-runtime/`: the `jit` crate of
   [longbridge/quickjs-jit](https://github.com/longbridge/quickjs-jit) at `96593cd` with
   herdr's fix for longbridge/quickjs-jit#38, MIT (Copyright (c) 2020 Mees Delzenne,

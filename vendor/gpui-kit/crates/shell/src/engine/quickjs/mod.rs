@@ -5127,6 +5127,20 @@ impl ShellRuntime {
                 self.pending_nested
                     .borrow_mut()
                     .truncate(pending_checkpoint);
+                // PERCH: a call the deadline stopped outside a render (an event, a timer, a task) would otherwise
+                // only be logged: its view says so. A stopped render is the build's own error already.
+                if let Some(why) = sandbox::take_cut() {
+                    if !matches!(
+                        scope::current_phase(),
+                        Some(ScopePhase::Render | ScopePhase::Layout)
+                    ) {
+                        if let Some(view) = scope::current_view() {
+                            scope::with_current_app(|cx| {
+                                view.update(cx, |view, cx| view.stopped(why, cx))
+                            });
+                        }
+                    }
+                }
                 Err(error)
             }
         }

@@ -474,6 +474,8 @@ thread_local! {
 /// budget. Render, layout, event, and task calls continue to use their scope
 /// generation, so nested engine helpers cannot refresh those tighter budgets.
 pub(super) fn begin_host_execution() {
+    // PERCH: a cut is the call's that it stopped, never a later one's.
+    CUT.with(|last| last.borrow_mut().take());
     DETACHED_EXECUTION.with(|epoch| {
         epoch.set(
             epoch
@@ -482,6 +484,16 @@ pub(super) fn begin_host_execution() {
                 .expect("gpui-shell exhausted detached execution epochs"),
         );
     });
+}
+
+thread_local! {
+    /// PERCH: why the deadline last stopped a script, until the host call it stopped takes it.
+    static CUT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// PERCH: why the deadline stopped the script since this was last asked, if it did.
+pub(super) fn take_cut() -> Option<String> {
+    CUT.with(|last| last.borrow_mut().take())
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -516,7 +528,17 @@ fn deadline(budgets: Budgets) -> impl FnMut() -> bool + 'static {
             None => budgets.detached,
         };
 
-        started.elapsed() > budget
+        let cut = started.elapsed() > budget;
+        if cut {
+            let phase = scope::current_phase().map_or("module evaluation", |phase| phase.as_str());
+            CUT.with(|last| {
+                *last.borrow_mut() = Some(format!(
+                    "The script was stopped: a {phase} call ran past its {} ms budget.",
+                    budget.as_millis()
+                ))
+            });
+        }
+        cut
     }
 }
 
