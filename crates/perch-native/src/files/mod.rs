@@ -1,8 +1,11 @@
 //! Workspace files for the window: the store that keeps listings, documents and drafts as the
 //! web's `filesystemStore.ts` does ([`store`]), and [`Files`], which ties it to the window: its
 //! frames go to the core, the core's `fs.*` messages and connection changes come in, and the
-//! draft debounce runs on the window's clock.
+//! draft debounce runs on the window's clock. Media in the file pane is [`media`] (Quick Look on macOS).
 
+pub mod media;
+#[cfg(target_os = "macos")]
+pub mod quick_look;
 pub mod store;
 
 use serde_json::Value;

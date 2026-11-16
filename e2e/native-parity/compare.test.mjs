@@ -207,3 +207,31 @@ test("accepted failures: an unlisted failure fails, a listed one is accepted, a 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("with --web-dir, a state of the state list that has no web reference fails, even when accepted", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "parity-list-"));
+  try {
+    for (const sub of ["web", "native", "fixtures"]) fs.mkdirSync(path.join(dir, sub));
+    fs.writeFileSync(path.join(dir, "fixtures", "demo.json"), JSON.stringify({ states: [{ id: "one" }, { id: "two" }] }));
+    const doc = synthetic();
+    for (const theme of ["light", "dark"]) {
+      const themed = { ...clone(doc), theme };
+      for (const side of ["web", "native"]) fs.writeFileSync(path.join(dir, side, `demo.one.${theme}.json`), JSON.stringify(themed));
+    }
+    const accepted = path.join(dir, "accepted.json");
+    fs.writeFileSync(accepted, JSON.stringify({ accepted: [{ state: "demo/two/dark", reason: "known" }] }));
+    const run = (screens) => spawnSync(process.execPath, [path.join(here, "compare.mjs"), "--web-dir", path.join(dir, "web"), "--native-dir", path.join(dir, "native"), "--out", path.join(dir, "out"), "--accepted", accepted, "--fixtures", path.join(dir, "fixtures"), "--screens", screens], { encoding: "utf8" });
+
+    const partial = run("demo");
+    assert.equal(partial.status, 1, partial.stdout);
+    assert.match(partial.stdout, /2 of 4 states pass/);
+    assert.match(partial.stdout, /No web reference \(.*\): demo\/two\/light, demo\/two\/dark\./);
+
+    fs.writeFileSync(path.join(dir, "fixtures", "demo.json"), JSON.stringify({ states: [{ id: "one" }] }));
+    const whole = run("demo");
+    assert.equal(whole.status, 0, whole.stdout);
+    assert.equal(run("demo,gone").status, 2, "a screen without a fixture is a broken list");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

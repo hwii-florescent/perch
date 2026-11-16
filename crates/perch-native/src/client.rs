@@ -269,6 +269,55 @@ impl Core {
             .await
     }
 
+    /// `GET {base}workspace-file`: the bytes of `path` in a workspace, read by the core inside the
+    /// workspace's confinement, refused past `max` bytes. Blocking: call it off the UI thread.
+    pub fn fetch_file(&self, workspace_id: &str, path: &str, max: u64) -> Result<Vec<u8>> {
+        use std::io::{Read, Write};
+        let target = format!(
+            "{}workspace-file?workspaceId={}&path={}",
+            self.base_path,
+            percent_encode(workspace_id),
+            percent_encode(path)
+        );
+        let mut stream = std::net::TcpStream::connect(&self.authority)
+            .with_context(|| format!("could not reach the core at {}", self.authority))?;
+        stream.set_read_timeout(Some(REPLY_TIMEOUT))?;
+        write!(
+            stream,
+            "GET {target} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",
+            self.authority, self.token
+        )?;
+        // The head, a byte at a time up to its blank line (it is short).
+        let mut head = Vec::new();
+        let mut byte = [0u8; 1];
+        while !head.ends_with(b"\r\n\r\n") {
+            if stream.read(&mut byte)? == 0 || head.len() > 16 * 1024 {
+                bail!("the core sent no answer");
+            }
+            head.push(byte[0]);
+        }
+        let head = String::from_utf8_lossy(&head);
+        let status = head
+            .split_whitespace()
+            .nth(1)
+            .unwrap_or_default()
+            .to_string();
+        let mut body = Vec::new();
+        stream.take(max + 1).read_to_end(&mut body)?;
+        if status != "200" {
+            let said: String = String::from_utf8_lossy(&body)
+                .trim()
+                .chars()
+                .take(300)
+                .collect();
+            bail!("{REFUSED}{said} ({status})");
+        }
+        if body.len() as u64 > max {
+            bail!("the file is larger than {max} bytes");
+        }
+        Ok(body)
+    }
+
     /// One HTTP/1.1 POST of `length` bytes read from `body`, answered with the `path` of the
     /// core's JSON reply. The core's reason is kept when it says no.
     async fn post(
@@ -2777,5 +2826,80 @@ mod tests {
         assert!(split_base_url("https://127.0.0.1:1/").is_err());
         assert!(split_base_url("http://example.com:80/").is_err());
         assert!(Core::with_token("http://127.0.0.1:1/", "bad token").is_err());
+    }
+}
+
+#[cfg(test)]
+mod fetch_file_tests {
+    use super::Core;
+    use std::io::{Read, Write};
+
+    /// A one-request core: answers `reply` and hands back the request it read.
+    fn stub(reply: Vec<u8>) -> (Core, std::thread::JoinHandle<String>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let core = Core::with_token(
+            &format!("http://{}/base/", listener.local_addr().unwrap()),
+            "tok",
+        )
+        .unwrap();
+        let served = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut byte = [0u8; 1];
+            while !request.ends_with(b"\r\n\r\n") && stream.read(&mut byte).unwrap() == 1 {
+                request.push(byte[0]);
+            }
+            stream.write_all(&reply).unwrap();
+            String::from_utf8(request).unwrap()
+        });
+        (core, served)
+    }
+
+    fn answer(status: &str, body: &[u8]) -> Vec<u8> {
+        let mut out = format!(
+            "HTTP/1.1 {status}\r\ncontent-length: {}\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        out.extend_from_slice(body);
+        out
+    }
+
+    #[test]
+    fn fetch_file_sends_the_token_and_returns_the_body() {
+        let (core, served) = stub(answer("200 OK", b"\x89PNG bytes"));
+        let bytes = core.fetch_file("ws 1", "a b/c.png", 1024).unwrap();
+        assert_eq!(bytes, b"\x89PNG bytes");
+        let request = served.join().unwrap();
+        assert!(
+            request.starts_with(
+                "GET /base/workspace-file?workspaceId=ws%201&path=a%20b%2Fc.png HTTP/1.1\r\n"
+            ),
+            "{request}"
+        );
+        assert!(
+            request.contains("Authorization: Bearer tok\r\n"),
+            "{request}"
+        );
+    }
+
+    #[test]
+    fn fetch_file_keeps_the_core_reason_on_refusal() {
+        let (core, _served) = stub(answer(
+            "501 Not Implemented",
+            b"Remote media/download transport is not available",
+        ));
+        let error = core.fetch_file("w", "x.png", 1024).unwrap_err();
+        assert!(super::is_refusal(&error), "{error}");
+        assert!(error.to_string().contains("Remote media"), "{error}");
+    }
+
+    #[test]
+    fn fetch_file_stops_past_the_cap() {
+        let (core, _served) = stub(answer("200 OK", &[7u8; 64]));
+        let error = core.fetch_file("w", "x.png", 63).unwrap_err();
+        assert!(error.to_string().contains("larger than 63"), "{error}");
+        let (core, _served) = stub(answer("200 OK", &[7u8; 64]));
+        assert_eq!(core.fetch_file("w", "x.png", 64).unwrap().len(), 64);
     }
 }

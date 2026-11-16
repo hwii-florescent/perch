@@ -35,6 +35,7 @@ import * as perch from "perch";
 import { Icon, bounds, forgetBounds, probing, textWidth } from "perch-react";
 import * as engines from "perch-engine";
 import * as editors from "perch-editor";
+import * as media from "perch-media";
 import { ICONS, LETTERS, LETTER } from "./agent-icons.js";
 
 export const INERT = [
@@ -424,6 +425,9 @@ export function copyFor(cx, screen) {
     // Context Bridge: whether Ask agent is offered for a workspace, and asking (the window opens its dialog).
     contextBridgeAvailable: (id) => snapshot(`contextBridgeAvailable:${id}`, () => perch.contextBridgeAvailable(id)),
     askAgent: (workspaceId, source) => perch.askAgent(workspaceId, source),
+    // `FileAsset`: a file's folder on this computer and its extraction, and `perch-media` (images, Quick Look).
+    mediaFile: (workspaceId, path) => snapshot(`mediaFile:${workspaceId}\n${path}`, () => perch.mediaFile(workspaceId, path)),
+    media,
     statusLine: () => snapshot("statusLine", () => perch.statusLine()),
     zoom: () => snapshot("zoom", () => perch.zoom()),
     paneLook: () => snapshot("paneLook", () => perch.paneLook()),

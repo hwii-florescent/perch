@@ -18,6 +18,10 @@
 //! Accepted failures: `accepted-failures.json` beside this file (or `--accepted <file>`) lists failing states by label
 //! (`screen/state/theme`) with a reason. Exits 1 when a state fails that is not listed, or when a listed state was
 //! compared and now passes (take it off the list). Listed states that were not compared in this run are ignored.
+//!
+//! With --web-dir, every state of every screen in the state list (`screens.json`, or `PARITY_SCREENS` / `--screens`
+//! for a part of it; each screen's states in `fixtures/<screen>.json`, in both themes) must have a web reference: a
+//! state without one fails and cannot be accepted, so a stale or partial reference set cannot drop states silently.
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -199,12 +203,14 @@ export function report(results, verdict = judge(results, new Map())) {
   const failed = results.filter((r) => !r.pass);
   const accepted = failed.length - verdict.unlisted.length;
   out.push(`# Native parity: ${verdict.ok ? "PASS" : "FAIL"} (${results.length - failed.length} of ${results.length} states pass, ${accepted} failing accepted, ${verdict.unlisted.length} failing not accepted, ${verdict.nowPassing.length} accepted but now passing)`, "");
+  const noReference = results.filter((r) => r.noReference).map((r) => r.label);
+  if (noReference.length) out.push(`No web reference (in the state list, never compared; regenerate the references): ${noReference.join(", ")}.`, "");
   if (verdict.unlisted.length) out.push(`Failing and not accepted: ${verdict.unlisted.join(", ")}.`, "");
   if (verdict.nowPassing.length) out.push(`Accepted but now passing (take them off the accepted list): ${verdict.nowPassing.join(", ")}.`, "");
   out.push(table(
     ["State", "Gate", "Elements web/native", "Missing", "Extra", "Failed checks", "Pixels differing", "Side by side"],
     results.map((r) => [
-      r.label, r.pass ? "PASS" : verdict.accepted.has(r.label) ? "FAIL (accepted)" : "FAIL", `${r.counts.web}/${r.counts.native}`, r.counts.missing, r.counts.extra, r.failures.length,
+      r.label, r.pass ? "PASS" : r.noReference ? "NO REFERENCE" : verdict.accepted.has(r.label) ? "FAIL (accepted)" : "FAIL", `${r.counts.web}/${r.counts.native}`, r.counts.missing, r.counts.extra, r.failures.length,
       r.pixels ? `${r.pixels.percent.toFixed(2)}% (${r.pixels.differing} of ${r.pixels.total}, mean ${r.pixels.meanAbs.toFixed(2)}/255${r.pixels.sizeMatch ? "" : `, SIZE web ${r.pixels.web} native ${r.pixels.native}`})` : r.pixelNote || "n/a",
       r.sideBySide ?? "-",
     ]),
@@ -226,6 +232,19 @@ export function report(results, verdict = judge(results, new Map())) {
   return out.join("\n");
 }
 
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+/** The state list: `screen.state.theme` for every state of every screen named (default: `screens.json`). */
+export function expectedStates(fixturesDir, screens) {
+  const out = [];
+  for (const screen of screens) {
+    const file = path.join(fixturesDir, `${screen}.json`);
+    if (!fs.existsSync(file)) throw new Error(`the state list names ${screen}, which has no fixture ${file}`);
+    for (const state of JSON.parse(fs.readFileSync(file, "utf8")).states) for (const theme of ["light", "dark"]) out.push(`${screen}.${state.id}.${theme}`);
+  }
+  return out;
+}
+
 const DEFAULT_ACCEPTED = path.join(path.dirname(fileURLToPath(import.meta.url)), "accepted-failures.json");
 
 /** Accepted failures by label, from `{ "accepted": [{ "state": "screen/state/theme", "reason": "..." }] }`. */
@@ -242,7 +261,7 @@ export function loadAccepted(file) {
 
 /** The exit verdict: failing states not on the list, and listed states compared in this run that now pass. */
 export function judge(results, accepted) {
-  const unlisted = results.filter((r) => !r.pass && !accepted.has(r.label)).map((r) => r.label);
+  const unlisted = results.filter((r) => !r.pass && (r.noReference || !accepted.has(r.label))).map((r) => r.label);
   const nowPassing = results.filter((r) => r.pass && accepted.has(r.label)).map((r) => r.label);
   return { ok: unlisted.length === 0 && nowPassing.length === 0, unlisted, nowPassing, accepted };
 }
@@ -257,7 +276,7 @@ function parseArgs(argv) {
   return args;
 }
 
-const USAGE = "usage: compare.mjs --web <web.json> --native <native.json> [--web-png p] [--native-png p] [--out dir] [--accepted file]\n       compare.mjs --web-dir <dir> --native-dir <dir> [--out dir] [--accepted file]";
+const USAGE = "usage: compare.mjs --web <web.json> --native <native.json> [--web-png p] [--native-png p] [--out dir] [--accepted file]\n       compare.mjs --web-dir <dir> --native-dir <dir> [--out dir] [--accepted file] [--screens a,b] [--fixtures dir]";
 
 export function main(argv) {
   let args;
@@ -266,12 +285,18 @@ export function main(argv) {
   try { accepted = args.accepted || fs.existsSync(DEFAULT_ACCEPTED) ? loadAccepted(args.accepted ?? DEFAULT_ACCEPTED) : new Map(); } catch (error) { console.error(error.message); return 2; }
   const out = args.out ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../artifacts-native-parity/compare");
   const jobs = [];
+  let missing = [];
   if (args["web-dir"] && args["native-dir"]) {
     for (const file of fs.readdirSync(args["web-dir"]).filter((f) => f.endsWith(".json")).sort()) {
       const base = file.slice(0, -5);
       jobs.push({ label: base, webJson: path.join(args["web-dir"], file), nativeJson: path.join(args["native-dir"], file), webPng: path.join(args["web-dir"], `${base}.png`), nativePng: path.join(args["native-dir"], `${base}.png`), outDir: out });
     }
     if (!jobs.length) { console.error(`no web JSON in ${args["web-dir"]}`); return 2; }
+    const screens = (args.screens ?? process.env.PARITY_SCREENS)?.split(",") ?? JSON.parse(fs.readFileSync(path.join(HERE, "screens.json"), "utf8")).screens;
+    let expected;
+    try { expected = expectedStates(args.fixtures ?? path.join(HERE, "fixtures"), screens); } catch (error) { console.error(error.message); return 2; }
+    const found = new Set(jobs.map((job) => job.label));
+    missing = expected.filter((label) => !found.has(label));
   } else if (args.web && args.native) {
     jobs.push({ label: path.basename(args.web, ".json"), webJson: args.web, nativeJson: args.native, webPng: args["web-png"] ?? args.web.replace(/\.json$/, ".png"), nativePng: args["native-png"] ?? args.native.replace(/\.json$/, ".png"), outDir: out });
   } else { console.error(USAGE); return 2; }
@@ -282,6 +307,10 @@ export function main(argv) {
       return { label: job.label.replace(/^([^.]+)\.(.+)\.(dark|light)$/, "$1/$2/$3"), pass: false, failures: [{ id: "document", check: "readable", web: job.webJson, native: job.nativeJson, detail: error.message }], widths: [], info: { textDiffs: [], colourDiffs: 0, fontDiffs: 0 }, counts: { web: 0, native: 0, missing: 0, extra: 0 }, pixels: null, pixelNote: "" };
     }
   });
+  for (const label of missing) {
+    const [screen, state, theme] = [label.split(".")[0], label.split(".").slice(1, -1).join("."), label.split(".").at(-1)];
+    results.push({ label: `${screen}/${state}/${theme}`, pass: false, noReference: true, failures: [{ id: "document", check: "web reference", web: path.join(args["web-dir"], `${label}.json`), native: "", detail: "the state is in the state list but has no web reference: regenerate the references (npm run parity:web in e2e) rather than copying an older set" }], widths: [], info: { textDiffs: [], colourDiffs: 0, fontDiffs: 0 }, counts: { web: 0, native: 0, missing: 0, extra: 0 }, pixels: null, pixelNote: "" });
+  }
   const verdict = judge(results, accepted);
   console.log(report(results, verdict));
   return verdict.ok ? 0 : 1;
