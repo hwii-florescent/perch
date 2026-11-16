@@ -327,6 +327,7 @@ impl Workspace {
         let observed = cx.observe(&sidebar, |this, sidebar, cx| {
             this.close_deleted(cx);
             this.open_sub_sessions(cx);
+            this.follow_order(cx);
             let connected = sidebar.read(cx).model().connected;
             this.files_connected(connected, cx);
             this.refresh_bridge(cx);
@@ -1563,7 +1564,9 @@ impl Workspace {
         }
         match drag.drop {
             Drop::Strip(Some(slot)) => {
+                let before = self.strip_sessions(cx);
                 self.tabs.move_tab(&drag.id, slot + 1);
+                self.save_strip(before, cx);
             }
             Drop::Pane {
                 target,
@@ -2079,6 +2082,7 @@ impl Workspace {
             None => self.tabs.open(&id),
         }
         self.open_sub_sessions(cx);
+        self.follow_order(cx);
         self.keep_in_bounds(cx);
         self.note_shown();
         cx.notify();
@@ -2227,6 +2231,73 @@ impl Workspace {
         }
         self.notice = None;
         self.after_change(cx);
+    }
+
+    /// Every strip's sessions in the order the sidebar lists them (`workspaceTabs`): oldest
+    /// first, then the core's chat order, each sub-session after its lead. Files keep their slots.
+    fn follow_order(&mut self, cx: &mut Context<Self>) {
+        let sidebar = self.sidebar.read(cx);
+        let store = &sidebar.model().store;
+        let strips =
+            std::iter::once(&mut self.tabs).chain(self.parked.values_mut().map(|(t, _)| t));
+        for tabs in strips {
+            let mut done: HashSet<String> = HashSet::new();
+            for id in tabs.strip().to_vec() {
+                if done.contains(&id) {
+                    continue;
+                }
+                let Some(session) = store.sessions.iter().find(|s| s.id == id) else {
+                    continue;
+                };
+                let order = navigation::shown_strip_of_workspace(store, session);
+                tabs.follow(&order);
+                done.extend(order);
+            }
+        }
+    }
+
+    /// The strip's sessions, in its order.
+    fn strip_sessions(&self, cx: &App) -> Vec<String> {
+        let store = &self.sidebar.read(cx).model().store;
+        self.tabs
+            .strip()
+            .iter()
+            .filter(|id| store.sessions.iter().any(|s| s.id == **id))
+            .cloned()
+            .collect()
+    }
+
+    /// A drag in the strip moved a tab (`saveTabStrip`): when the sessions' order changed, that is
+    /// the core's chat order too, so the sidebar and every other screen follow. Only this strip's
+    /// sessions are written; the rest of the core's list keeps its place.
+    fn save_strip(&mut self, before: Vec<String>, cx: &mut Context<Self>) {
+        let after = self.strip_sessions(cx);
+        if before == after || after.is_empty() {
+            return;
+        }
+        self.sidebar.update(cx, |sidebar, cx| {
+            let store = &sidebar.model().store;
+            let host = store
+                .sessions
+                .iter()
+                .find(|s| s.id == after[0])
+                .map(|s| s.host_id.clone())
+                .unwrap_or_else(|| LOCAL.into());
+            let live: HashSet<String> = store
+                .sessions
+                .iter()
+                .filter(|s| s.host_id == host)
+                .map(|s| s.id.clone())
+                .collect();
+            let after: Vec<String> = after.into_iter().filter(|id| live.contains(id)).collect();
+            let core = store
+                .order
+                .get(&host)
+                .map(|o| o.1.clone())
+                .unwrap_or_default();
+            let sessions = navigation::write_scope(&core, &after, Some(&live));
+            sidebar.set_order(host, None, Some(sessions), cx);
+        });
     }
 
     /// Every sub-session of a lead with a tab here has a tab too, as the web's strip lists every
@@ -2846,8 +2917,8 @@ impl Workspace {
                         "{target} is on another computer, so {id} was not moved."
                     ));
                 }
-                // ponytail: the group is the sidebar's siblings, not also each workspace's strip
-                // order as the web's `moveChat` refills; the native strip keeps no order of its own.
+                // The siblings are the sidebar's rows, which are the strip's order: the strip
+                // follows the core's order ([`Self::follow_order`]), so no refill is needed.
                 // Only this computer's sessions go into its order: an unknown id is left out.
                 let mut group: Vec<String> =
                     siblings.into_iter().filter(|s| live.contains(s)).collect();
@@ -2863,10 +2934,8 @@ impl Workspace {
                     .unwrap_or_default();
                 let moved = navigation::move_beside(&group, &id, &target, after);
                 let sessions = navigation::write_scope(&core, &moved, Some(&live));
-                self.sidebar.read(cx).send(Command::SetOrder {
-                    host_id: host,
-                    projects: None,
-                    sessions: Some(sessions),
+                self.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.set_order(host, None, Some(sessions), cx)
                 });
             }
             "project.move" => {
@@ -2897,10 +2966,9 @@ impl Workspace {
                     .map(|o| o.0.clone())
                     .unwrap_or_default();
                 let order = navigation::move_beside(&shown, &moved.id, &target.id, after);
-                self.sidebar.read(cx).send(Command::SetOrder {
-                    host_id: moved.host_id,
-                    projects: Some(navigation::write_scope(&core, &order, None)),
-                    sessions: None,
+                let projects = navigation::write_scope(&core, &order, None);
+                self.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.set_order(moved.host_id, Some(projects), None, cx)
                 });
             }
             "project.close" => {
@@ -3477,12 +3545,14 @@ impl Workspace {
                     .map(str::to_string)
                     .or_else(|| self.tabs.active().map(str::to_string))
                     .ok_or("There is no tab to move.")?;
+                let before = self.strip_sessions(cx);
                 if !self.tabs.move_tab(&id, index) {
                     return Err(format!(
                         "This command needs {{index: 1-{}}}.",
                         self.tabs.strip().len()
                     ));
                 }
+                self.save_strip(before, cx);
             }
             "panes.splitRight" => self.split(Side::Right, cx)?,
             "panes.splitDown" => self.split(Side::Down, cx)?,

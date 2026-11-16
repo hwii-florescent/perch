@@ -279,6 +279,40 @@ impl Sidebar {
         }
     }
 
+    /// Ask the core to keep this order, and show it at once (the web's `setWorkspaceOrder`): the
+    /// strip and the sidebar follow the move before the core's broadcast confirms it. Absent
+    /// lists keep what is stored. Nothing changes while the core is away.
+    pub fn set_order(
+        &mut self,
+        host_id: String,
+        projects: Option<Vec<String>>,
+        sessions: Option<Vec<String>>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.model.connected {
+            self.send(Command::SetOrder {
+                host_id,
+                projects,
+                sessions,
+            });
+            return;
+        }
+        let store = std::sync::Arc::make_mut(&mut self.model.store);
+        let entry = store.order.entry(host_id.clone()).or_default();
+        if let Some(projects) = &projects {
+            entry.0.clone_from(projects);
+        }
+        if let Some(sessions) = &sessions {
+            entry.1.clone_from(sessions);
+        }
+        self.send(Command::SetOrder {
+            host_id,
+            projects,
+            sessions,
+        });
+        cx.notify();
+    }
+
     /// Whether a command was refused since the last call, because the core was away.
     pub fn take_refused(&self) -> bool {
         self.refused.replace(false)

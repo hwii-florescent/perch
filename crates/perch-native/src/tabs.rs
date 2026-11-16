@@ -429,6 +429,27 @@ impl Tabs {
         true
     }
 
+    /// The tabs `order` lists take its order in their own slots; every other tab (a file, a
+    /// session of another workspace) keeps its place (the web's `refillSlots`). True when the
+    /// strip changed.
+    pub fn follow(&mut self, order: &[String]) -> bool {
+        let mut fill = order.iter().filter(|id| self.contains(id)).cloned();
+        let next: Vec<String> = self
+            .strip
+            .iter()
+            .map(|tab| {
+                if order.contains(tab) {
+                    fill.next().unwrap_or_else(|| tab.clone())
+                } else {
+                    tab.clone()
+                }
+            })
+            .collect();
+        let changed = next != self.strip;
+        self.strip = next;
+        changed
+    }
+
     /// Take a tab out of its split; a set left with one pane dissolves.
     fn leave(&mut self, id: &str) {
         let sets = std::mem::take(&mut self.sets);

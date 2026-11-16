@@ -439,6 +439,38 @@ pub fn strip_of_workspace(store: &Store, session: &SessionSummary) -> Vec<String
         .collect()
 }
 
+/// [`strip_of_workspace`] with each sub-session straight after its lead, as the sidebar's
+/// `nestSessions` lists them: the one order the tab strip and the sidebar both show.
+pub fn shown_strip_of_workspace(store: &Store, session: &SessionSummary) -> Vec<String> {
+    let ids = strip_of_workspace(store, session);
+    let parent_of = |id: &str| {
+        store
+            .sessions
+            .iter()
+            .find(|s| s.id == id)?
+            .parent_session_id
+            .clone()
+            .filter(|parent| parent != id && ids.contains(parent))
+    };
+    // One level, as Perch's sub-sessions: a lead is a session whose own lead is not listed.
+    let leads: HashSet<&str> = ids
+        .iter()
+        .filter(|id| parent_of(id).is_none())
+        .map(String::as_str)
+        .collect();
+    let lead_of = |id: &str| parent_of(id).filter(|parent| leads.contains(parent.as_str()));
+    ids.iter()
+        .filter(|id| lead_of(id).is_none())
+        .flat_map(|lead| {
+            std::iter::once(lead).chain(
+                ids.iter()
+                    .filter(|id| lead_of(id).as_deref() == Some(lead.as_str())),
+            )
+        })
+        .cloned()
+        .collect()
+}
+
 /// `sessionsForWorkspace`: newest first.
 fn sessions_for_workspace<'a>(
     sessions: &[&'a SessionSummary],
