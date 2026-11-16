@@ -336,7 +336,6 @@ pub struct SettingsPatch {
     pub mods: Option<crate::mods::Policy>,
     // The per-run limits (`RunLimits`), each validated to its range.
     pub max_live_sub_sessions: Option<u32>,
-    pub max_sub_sessions: Option<u32>,
     pub max_messages_per_run: Option<u32>,
     /// Legacy field retained for compatibility; no longer restricts delivery.
     pub max_lead_wakes_per_run: Option<u32>,
@@ -493,7 +492,6 @@ impl SettingsStore {
         let old = guard.run_limits;
         let limits = crate::sub_sessions::RunLimits {
             live: patch.max_live_sub_sessions.unwrap_or(old.live),
-            total: patch.max_sub_sessions.unwrap_or(old.total),
             messages: patch.max_messages_per_run.unwrap_or(old.messages),
             wakes: patch.max_lead_wakes_per_run.unwrap_or(old.wakes),
             interrupts: patch
@@ -771,24 +769,21 @@ mod keybinding_tests {
         assert_eq!(
             (
                 store.get().run_limits.live,
-                store.get().run_limits.total,
                 store.get().run_limits.messages,
                 store.get().run_limits.wakes,
                 store.get().run_limits.interrupts,
                 store.get().run_limits.waiting_cards,
             ),
-            (4, 8, 50, 10, 3, 10)
+            (4, 50, 10, 3, 10)
         );
         let patch =
             |value: serde_json::Value| -> SettingsPatch { serde_json::from_value(value).unwrap() };
         store
-            .update(patch(
-                serde_json::json!({"maxLiveSubSessions": 6, "maxSubSessions": 12}),
-            ))
+            .update(patch(serde_json::json!({"maxLiveSubSessions": 6})))
             .unwrap();
         let loaded = SettingsStore::load(&path).get();
-        assert_eq!((loaded.run_limits.live, loaded.run_limits.total), (6, 12));
-        // Out of range, or a total below the live limit: refused with the reason, nothing changes.
+        assert_eq!(loaded.run_limits.live, 6);
+        // Out of range: refused with the reason, nothing changes.
         let error = store
             .update(patch(
                 serde_json::json!({"theme": "dark", "maxMessagesPerRun": 5000}),
@@ -799,11 +794,19 @@ mod keybinding_tests {
             error.contains("messages per run must be 1 to 1000"),
             "{error}"
         );
-        let error = store
+        // The removed per-run total is ignored, in a patch and in an old settings file.
+        store
             .update(patch(serde_json::json!({"maxSubSessions": 5})))
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("cannot be fewer than live"), "{error}");
+            .unwrap();
+        assert_eq!(store.get().run_limits, loaded.run_limits);
+        std::fs::write(
+            &path,
+            r#"{"runLimits":{"live":6,"total":12,"messages":40}}"#,
+        )
+        .unwrap();
+        let old_file = SettingsStore::load(&path).get().run_limits;
+        assert_eq!((old_file.live, old_file.messages), (6, 40));
+        std::fs::write(&path, serde_json::to_string(&loaded).unwrap()).unwrap();
         assert_eq!(store.get().run_limits, loaded.run_limits);
         assert_ne!(store.get().theme, "dark");
         // Legacy wake limits remain readable but do not validate or restrict delivery.

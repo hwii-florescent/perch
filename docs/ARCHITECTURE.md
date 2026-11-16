@@ -452,19 +452,19 @@ the core, not the agent, decides:
 
 - *Admission before dispatch*, in one transaction that also writes the child's session row
   (`sessions.parent_session_id`) and its record (`sub_sessions`): not a child itself (depth 1),
-  at most `live` live children and `total` ever (`RunLimits`, below), and the key (`--key`, else one per
+  at most `live` live children (`RunLimits`, below; no per-run total), and the key (`--key`, else one per
   invocation) names the spawn, so a retry returns the first child and starts nothing. A refusal
   creates nothing and names the limit and where it is set.
 - *Runs go on without a person's prompt* (owner decision 2026-11-08). Spawn, steer and interrupt need
   no turn a person opened: any turn of the lead may use them, including one a delivered message
   started, so the core no longer tracks who opened a turn (the in-memory origin mark and its
   listeners are gone). What bounds a run is `RunLimits` (`sub_sessions.rs`), every counter **per run**
-  and never reset by a person's message: live sub-sessions 4, sub-sessions ever 8, messages 50,
+  and never reset by a person's message: live sub-sessions 4, messages 50,
   interrupts per sub-session 3, waiting suggestion cards 10. Automatic lead notifications have no
   per-run delivery limit (owner decision 2026-11-09). The remaining limits are the
   person's settings (Settings > Sub-sessions; `Settings.run_limits`, flat optional `max_*` fields on
-  the wire `Settings`/`SettingsPatch`), validated on update (each 1 to its ceiling: 16, 64, 1000,
-  20, 50; total never below live) and repaired to the defaults if a stored file is out of range. The
+  the wire `Settings`/`SettingsPatch`), validated on update (each 1 to its ceiling: 16, 1000,
+  20, 50) and repaired to the defaults if a stored file is out of range. The
   core holds them in `HistoryDb::limits()`, set at boot and on every settings update, and each
   admission rule reads them there. A limit reached refuses with the reason (and, for spawn, a 409
   naming Settings > Sub-sessions); nothing is queued silently. Unchanged: depth 1, a message is
@@ -771,7 +771,7 @@ A lead puts tasks in front of the person instead of starting them; nothing start
   says nothing was started. With it on, `perch spawn` is exactly as before (the person-opened-turn rule).
 - *Person's actions* (`suggestion.act`, under the lead chat's input lease, as typing in it): **Start** takes
   `pending` to `starting` once (a second click finds it taken), then runs `sub_sessions::start` with the click
-  standing for the person-opened turn: the same depth, limits (4 live, 8 total), key (`suggestion-<id>`),
+  standing for the person-opened turn: the same depth, limit (4 live), key (`suggestion-<id>`),
   worktree and launch as `perch spawn`, and a refusal puts the task back to `pending` with the core's reason.
   A launch that left a record (`start_unknown`) keeps the card following that sub-session; it is never started
   a second time. **Start all** does the same for every waiting task in order, each refusal named. **Options**

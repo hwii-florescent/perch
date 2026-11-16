@@ -483,7 +483,7 @@ UI rows from step 0 continue between slices.
    makes `perch list` the caller's run (decided); the daemon list becomes `perch daemon list`.
 4. **Spawn, list, stop and reports. Done 2026-11-06**:
    `perch spawn|list|stop`, parent link (`sessions.parent_session_id`) and `sub_sessions`
-   records, limits (4 live, 8 total, depth 1; since 2026-11-08 per-run settings, no person-turn rule) admitted in one
+   records, limits (4 live, depth 1; since 2026-11-08 per-run settings, no person-turn rule) admitted in one
    transaction before anything starts, an idempotency key, stop confirmed by perchd, reports
    as labelled claims with a last-message fallback, bare `list`/`serve`/`connect` aliases
    gone, `perch guide` extended. Live: a haiku lead spawned a haiku child, read its report and
