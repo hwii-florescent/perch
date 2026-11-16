@@ -1412,6 +1412,86 @@ fn a_deleted_session_closes_its_tab_whenever_the_core_says_so() {
     println!("workspace_render: deleted session ok");
 }
 
+/// Every sub-session of a lead with a tab here has a tab, as the web's strip lists every session of
+/// the workspace: opened behind the lead's family as the core lists it, leaving the keyboard where it
+/// is. Other sessions open only when picked.
+fn sub_sessions_open_beside_their_lead() {
+    let terminal = |parent: Option<&str>| match parent {
+        Some(p) => json!({"cliProviderId": "terminal", "parentSessionId": p}),
+        None => json!({"cliProviderId": "terminal"}),
+    };
+    let mut h = Harness::new(model(&[
+        ("lead", terminal(None)),
+        ("k1", terminal(Some("lead"))),
+        ("loose", terminal(None)),
+    ]));
+    h.open("lead");
+    h.open("loose");
+    h.open("lead");
+    let strip = |h: &mut Harness| h.ws(|ws| ws.tabs().strip().to_vec());
+    assert_eq!(
+        strip(&mut h),
+        ["lead", "k1", "loose"],
+        "the lead's sub-session opens with it"
+    );
+    assert_eq!(
+        h.ws(|ws| ws.tabs().active().map(str::to_string)),
+        Some("lead".into())
+    );
+
+    // The lead spawns another: its tab opens after the lead's family, before the next tab, and the
+    // lead keeps the keyboard. A sub-session of a lead with no tab here opens nowhere.
+    let more = model(&[
+        ("lead", terminal(None)),
+        ("k1", terminal(Some("lead"))),
+        ("loose", terminal(None)),
+        ("k2", terminal(Some("lead"))),
+        ("k3", terminal(Some("elsewhere"))),
+    ]);
+    h.window
+        .update(&mut h.cx, |ws, _, cx| {
+            ws.sidebar()
+                .update(cx, |sidebar, cx| sidebar.apply(Update::Model(more), cx))
+        })
+        .unwrap();
+    h.cx.run_until_parked();
+    assert_eq!(strip(&mut h), ["lead", "k1", "k2", "loose"]);
+    assert_eq!(
+        h.ws(|ws| ws.tabs().active().map(str::to_string)),
+        Some("lead".into())
+    );
+
+    // A sub-session's tab closed without ending it (this window only watches it) stays closed
+    // while the lead's family changes, until it is picked again.
+    h.open("k1");
+    h.draw();
+    let (_rx, core) = h.live();
+    core.unbounded_send(FromCore::Attached {
+        replay: String::new(),
+        input: false,
+        resize: false,
+        agent: None,
+    })
+    .unwrap();
+    h.cx.run_until_parked();
+    assert_eq!(h.run("tabs.close", json!({})), Ok(()));
+    h.open("lead");
+    h.window
+        .update(&mut h.cx, |ws, _, cx| {
+            ws.sidebar().update(cx, |_, cx| cx.notify())
+        })
+        .unwrap();
+    h.cx.run_until_parked();
+    assert_eq!(
+        strip(&mut h),
+        ["lead", "k2", "loose"],
+        "put away, it stays away"
+    );
+    h.open("k1");
+    assert!(h.ws(|ws| ws.tabs().contains("k1")), "picked, it opens");
+    println!("workspace_render: sub-session tabs ok");
+}
+
 /// A session with no recorded launch provider is not attached under a guessed one.
 fn a_session_with_no_launch_provider_is_not_attached() {
     let mut cx = HeadlessAppContext::with_platform(
@@ -1615,6 +1695,7 @@ fn main() {
     a_tab_that_cannot_end_its_session_is_put_away();
     a_session_with_no_launch_provider_is_not_attached();
     a_deleted_session_closes_its_tab_whenever_the_core_says_so();
+    sub_sessions_open_beside_their_lead();
     the_pane_menu_opens_on_right_click();
     a_peek_is_a_terminal_over_the_window();
     tabs_out_of_sight_are_parked_beyond_twelve();
