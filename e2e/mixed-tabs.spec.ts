@@ -103,8 +103,9 @@ test("Files and Git share the drawer shell across every theme without making can
               const diff = surface.getByTestId("git-diff");
               await diff.evaluate((el) => { el.scrollTop = 200; });
               await expect.poll(() => diff.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
-              // Only review comments/composers stick horizontally; compare/status controls are separate flex scroll regions.
-              expect(await surface.evaluate((el) => [...el.querySelectorAll("*")].filter((node) => getComputedStyle(node).position === "sticky").every((node) => getComputedStyle(node).top === "auto"))).toBe(true);
+              // Review comments/composers stick horizontally; only each file's header (`article > header`) also pins to the top
+              // of the diff on purpose. Compare/status controls are separate flex scroll regions.
+              expect(await surface.evaluate((el) => [...el.querySelectorAll("*")].filter((node) => getComputedStyle(node).position === "sticky" && !node.matches("article > header")).every((node) => getComputedStyle(node).top === "auto"))).toBe(true);
             }
             await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`drawer-${theme}-${tab}-${glass ? "glass" : "opaque"}.png`) });
           }

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { effectiveWorkspace, usePerchStore } from "./store";
+import { deletingSessionIds, effectiveWorkspace, usePerchStore } from "./store";
 import { readViewerStored, viewerKey } from "./viewer";
 import { recordClosedFile } from "./closedTabs";
 import { useWorkspaceFilesStore } from "./filesystemStore";
@@ -168,7 +168,7 @@ usePerchStore.subscribe((state, previous) => {
   const sameWorkspace = workspaceId === effectiveWorkspace(previous)?.id;
   if (state.sessionId === previous.sessionId && sameWorkspace) return;
   const closed = state.sessionId === null && previous.sessionId !== null && sameWorkspace
-    && !state.sessions.some((session) => session.id === previous.sessionId);
+    && (deletingSessionIds.has(previous.sessionId) || !state.sessions.some((session) => session.id === previous.sessionId));
   const left = closed ? files.tabs.findLast((tab) => tab.workspaceId === workspaceId) : undefined;
   if (left) {
     // Already open: show that tab itself (a re-open would drop its terminal scope, or a mod's props).
