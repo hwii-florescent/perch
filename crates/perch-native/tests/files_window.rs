@@ -381,6 +381,16 @@ fn main() {
     rig.settle();
     let state: Value = serde_json::from_slice(&std::fs::read(&kept).unwrap()).unwrap();
     assert_eq!(state["files"], json!(["w1\nsrc/lib.rs"]), "{state}");
+
+    // Back and Forward move over file tabs as over sessions.
+    let active = |rig: &mut Rig| rig.ws(|ws, _, _| ws.tabs().active().map(str::to_string));
+    assert_eq!(active(&mut rig).as_deref(), Some("w1\ndocs/clean.md"));
+    let back = rig.ws(|ws, window, cx| ws.run_command("nav.back", None, window, cx));
+    assert!(back.is_ok(), "{back:?}");
+    assert_eq!(active(&mut rig).as_deref(), Some("w1\nsrc/lib.rs"));
+    let forward = rig.ws(|ws, window, cx| ws.run_command("nav.forward", None, window, cx));
+    assert!(forward.is_ok(), "{forward:?}");
+    assert_eq!(active(&mut rig).as_deref(), Some("w1\ndocs/clean.md"));
     let next = rig.cx.update(|cx| {
         cx.new(|cx| Workspace::new(state_model(), None, cx).with_window_state(kept.clone()))
     });

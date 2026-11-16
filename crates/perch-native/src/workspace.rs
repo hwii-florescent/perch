@@ -2437,14 +2437,21 @@ impl Workspace {
         }
     }
 
-    /// Back (`-1`) or Forward (`1`) to a tab shown before, passing over sessions gone since.
+    /// Back (`-1`) or Forward (`1`) to a tab shown before: a session, or a tab still in the strip
+    /// (a file, review, page or browser); tabs closed and sessions gone since are passed over.
     fn step_history(&mut self, by: isize, cx: &mut Context<Self>) -> Result<(), String> {
         let sidebar = self.sidebar.read(cx);
-        let panes = &self.panes;
+        let (panes, tabs) = (&self.panes, &self.tabs);
         let place = self.history.step(by, |id| {
-            panes.contains_key(id) || sidebar.session_to_open(id).is_some()
+            panes.contains_key(id) || tabs.contains(id) || sidebar.session_to_open(id).is_some()
         });
         match place {
+            Some(id) if !self.panes.contains_key(&id) && self.tabs.contains(&id) => {
+                if self.tabs.show(&id) {
+                    self.after_change(cx);
+                }
+                Ok(())
+            }
             Some(id) => self.show_session(&id, cx),
             None => Ok(()),
         }
