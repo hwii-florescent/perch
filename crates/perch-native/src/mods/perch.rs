@@ -427,6 +427,19 @@ impl Perch {
                 reader.read(&id, &format!("files:{workspace_id}"));
                 Ok(to_host(&reader.workspace_files(&workspace_id)))
             })
+            // What `workspaceFiles` would read has moved when this number has: a screen's host checks it
+            // before reading a whole tree again.
+            .function("workspaceFilesRevision", {
+                let reader = self.clone();
+                move |args| {
+                    let workspace_id = args.string(0)?;
+                    let revisions = reader.0.revisions.borrow();
+                    let at = |part: &str| revisions.get(part).copied().unwrap_or(0);
+                    Ok(to_host(&json!(
+                        at(STORE) + at(&format!("files:{workspace_id}"))
+                    )))
+                }
+            })
             .function("filesDo", move |args| {
                 let action = args.string(0)?.to_string();
                 let workspace_id = args.string(1)?.to_string();

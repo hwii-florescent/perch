@@ -232,6 +232,23 @@ export function copyFor(cx, screen) {
     }
     return entry.value;
   }
+  /** `snapshot` for data with a cheap `revision()`: a refresh reads it again only when that moved (a workspace's
+   * files can be thousands of rows, too many to read and compare after every event). */
+  function revised(key, revision, read) {
+    const value = snapshot(key, read);
+    const entry = snapshots.get(key);
+    if (!("revision" in entry)) {
+      entry.revision = revision();
+      // The revision read with a new value is the entry's once that value is (`refresh` with `tell`).
+      entry.read = () => {
+        const now = revision();
+        if (now !== undefined && now === entry.revision) return entry.value;
+        entry.next = now;
+        return read();
+      };
+    }
+    return value;
+  }
   let rendering = false;
   let handle = null;
 
@@ -348,7 +365,7 @@ export function copyFor(cx, screen) {
     hosts: () => snapshot("hosts", () => perch.hosts()),
     workspaceTabs: () => snapshot("workspaceTabs", () => perch.workspaceTabs()),
     // `useWorkspaceFiles`: one workspace's files from the window's store, and its actions run there.
-    workspaceFiles: (id) => snapshot(`workspaceFiles:${id}`, () => perch.workspaceFiles(id)),
+    workspaceFiles: (id) => revised(`workspaceFiles:${id}`, () => perch.workspaceFilesRevision?.(id), () => perch.workspaceFiles(id)),
     filesDo: (action, workspaceId, ...args) => perch.filesDo(action, workspaceId, ...args),
     statusLine: () => snapshot("statusLine", () => perch.statusLine()),
     zoom: () => snapshot("zoom", () => perch.zoom()),
@@ -611,10 +628,11 @@ export function copyFor(cx, screen) {
       }
       for (const entry of snapshots.values()) {
         const value = entry.read();
+        if ("revision" in entry && value === entry.value) continue;
         const text = JSON.stringify(value);
-        if (text === entry.text) continue;
+        if (text === entry.text) { if (tell && "next" in entry) entry.revision = entry.next; continue; }
         changed = true;
-        if (tell) Object.assign(entry, { value, text });
+        if (tell) Object.assign(entry, { value, text }, "next" in entry ? { revision: entry.next } : {});
       }
       if (changed && tell) for (const listener of [...listeners]) listener();
       return changed;
