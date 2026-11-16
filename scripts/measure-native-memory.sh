@@ -14,8 +14,9 @@
 # directory and the page is served on the loopback only.
 #
 # Budgets (native client, window hidden): a at most 120 MB; t +60, e +35, f +80, g +100 (client
-# plus the WebKit helpers the pane started) over a of the same run; h: every helper the pane
-# started gone within 5 s of the close, and the client back within 10 MB of a. A state over its
+# plus the WebKit helpers the pane started) over a of the same run; h: the page's WebContent gone
+# within 5 s of the close, and at most +40 MB left over a (client plus the GPU and Networking
+# helpers, which WebKit keeps for the app's life). A state over its
 # budget makes the script exit 1, after the tables. Physical footprint (`footprint`), summed over the app's own processes: the one
 # process of the native client; the Tauri host plus the WebKit helpers that appeared after it was
 # launched. Each state runs in a fresh process, settles SETTLE seconds, then takes SAMPLES samples
@@ -409,7 +410,7 @@ native_script() { # state dir -> the script for the native client
 
 run_native() { # state dir hidden(0|1) -> median MB
   local state=$1 dir=$2 hidden=$3
-  local envs script log_file pid before after known helpers=""
+  local envs script log_file pid before after known helpers="" content="" h
   envs=$(run_env "$dir"); script=$(native_script "$state" "$dir")
   known=$(webkit_pids | tr '\n' ' ')
   log_file=$dir/logs/native-$state-hidden$hidden.log
@@ -423,16 +424,18 @@ run_native() { # state dir hidden(0|1) -> median MB
     wait_for "the browser pane" 120 sh -c "grep -q 'step 1 done' '$log_file' || ! kill -0 $pid 2> /dev/null"
     grep -q "step 1 done" "$log_file" || { cat "$log_file" >&2; return 1; }
     helpers=$(new_helpers "$known")
+    for h in $helpers; do ps -o command= -p "$h" | grep -q 'WebKit\.WebContent' && content="$content $h"; done
   fi
   wait_for "the script to finish" 120 sh -c "grep -q 'script done' '$log_file' || ! kill -0 $pid 2> /dev/null"
   grep -q "script done" "$log_file" || { cat "$log_file" >&2; return 1; }
-  if [ "$state" = h ]; then
+  if [ "$state" = h ]; then # WebContent ends with the last page; GPU and Networking stay for the app's life
     local gone_in=no
-    wait_for "the pane's WebKit helpers to go" 5 sh -c "! ps -p '$(echo $helpers | tr ' ' ',')' > /dev/null 2>&1" && gone_in=yes
-    [ -n "$helpers" ] || gone_in="none seen"
-    log "  browser pane helpers [$helpers] gone within 5 s: $gone_in"
-    record "native-hidden$hidden-helpers-gone" h "$([ "$gone_in" = yes ] && echo 1 || echo 0)"
-    helpers=""
+    [ -n "$content" ] && wait_for "the page's WebContent to go" 5 sh -c "! ps -p '$(echo $content | tr ' ' ',')' > /dev/null 2>&1" && gone_in=yes
+    [ -n "$content" ] || gone_in="none seen"
+    log "  browser page WebContent [$content ] gone within 5 s: $gone_in"
+    record "native-hidden$hidden-webcontent-gone" h "$([ "$gone_in" = yes ] && echo 1 || echo 0)"
+    content=$helpers; helpers=""
+    for h in $content; do ps -p "$h" > /dev/null 2>&1 && helpers="$helpers $h"; done # measured with the client
   fi
   [ "$state" = g ] && helpers=$(new_helpers "$known")
   after=$(front_name)
