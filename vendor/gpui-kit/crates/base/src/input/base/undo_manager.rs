@@ -364,6 +364,15 @@ impl UndoManager {
         Some(replay)
     }
 
+    // PERCH: whether undo or redo has anything to replay, for an editor's menu.
+    pub(super) fn can_undo(&self) -> bool {
+        !self.undo_transactions.is_empty() || self.pending.is_some()
+    }
+
+    pub(super) fn can_redo(&self) -> bool {
+        !self.redo_transactions.is_empty()
+    }
+
     #[cfg(test)]
     pub(super) fn has_undos(&self) -> bool {
         !self.undo_transactions.is_empty()

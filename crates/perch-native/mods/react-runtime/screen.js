@@ -30,6 +30,11 @@
 // The web reads its per-viewer settings (`localStorage`, here the window's sidebar settings) once, when it mounts;
 // when they change anywhere but in the screen (a key such as `sidebar.organize`), the screen is mounted again.
 //
+// Engine slots (`perch-engine`, an element with `data-perch-engine`): GPUI focus is the truth. A key that reaches the
+// screen while its own focus handle is not the focused one came from an engine inside it and stays the engine's; an
+// engine that took the keyboard becomes the document's `activeElement` (so the in-flow hold counts it as the screen's
+// own); the source focusing an engine's node (`ref.focus()`) gives that engine the keyboard.
+//
 // Copies: each `init` is a copy of the screen with its own host, data and timers (`copyFor` in `host.js`), entered
 // whenever the engine calls into it (`init`, `render`, its events and timers), and closed by the view's final call
 // (`close`), which unmounts the tree.
@@ -68,6 +73,15 @@ function focusedHere(document) {
   if (!node || node === document.body) return false;
   while (node && node !== document.documentElement) node = node.parentNode;
   return node === document.documentElement;
+}
+/** The engine slot of `document` that has the keyboard (`perch-engine`'s `focused()`), or null. */
+export function focusedEngine(host, document) {
+  const at = host?.engines?.focused?.();
+  if (!at || !document?.querySelectorAll) return null;
+  for (const node of document.querySelectorAll("[data-perch-engine]")) {
+    if (node.getAttribute("data-perch-engine") === at.engine && node.getAttribute("data-perch-key") === at.key) return node;
+  }
+  return null;
 }
 /** The web's DOM `key` for a GPUI key name. */
 const KEY_NAMES = {
@@ -129,7 +143,11 @@ export function screen(id, Component, options = {}) {
           // Before the focus moves, so the window does not hand the keyboard straight back to a terminal.
           if (options.keyboard === "in-flow") this.hold(true);
           cx.timer.after(0, (task) => {
-            if (!this.keys.is_focused()) this.keys.focus();
+            // An engine slot focused by the source (`ref.focus()`, a press) takes the keyboard itself.
+            const active = this.handle.document?.activeElement;
+            const engine = active?.getAttribute?.("data-perch-engine");
+            if (engine != null) copy.host.engines?.focus?.(engine, active.getAttribute("data-perch-key") ?? "");
+            else if (!this.keys.is_focused()) this.keys.focus();
             this.armed = true;
             task.notify();
           });
@@ -210,11 +228,26 @@ export function screen(id, Component, options = {}) {
           }
         }
         if (!this.keys) return drawn;
+        // An engine slot that took the keyboard (a press on it) is the document's focused element, as on the web.
+        const engine = focusedEngine(copy.host, this.handle.document);
+        if (engine && this.handle.document.activeElement !== engine && !this.focusingEngine) {
+          this.focusingEngine = true;
+          cx.timer.after(0, (task) => {
+            this.focusingEngine = false;
+            if (copy.closed) return;
+            copy.enter();
+            this.handle.focus(engine.id);
+            task.notify();
+          });
+        }
+        const ownFocus = this.keys.is_focused() || !!engine;
         // Nothing of its own is focused any more (its form closed), or the keyboard went elsewhere: it lets go.
-        if (this.held && (!focusedHere(this.handle.document) || (this.armed && !this.keys.is_focused()))) this.hold(false);
+        if (this.held && (!focusedHere(this.handle.document) || (this.armed && !ownFocus))) this.hold(false);
         // Not holding it, an in-flow screen takes no keyboard: a press on it leaves the keyboard where it was.
         if (options.keyboard === "in-flow" && !this.held) return drawn;
         return drawn.track_focus(this.keys).on_key_down((event, cx) => {
+          // A key from an engine inside the screen (its focus is not the screen's own) is the engine's alone.
+          if (!this.keys.is_focused()) return;
           if (this.handle.key(domKey(event))) cx.stop_propagation();
           cx.notify();
         });

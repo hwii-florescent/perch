@@ -325,6 +325,9 @@ it from its upstreams. Each copy keeps its upstream licence file and herdr's
     `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
     `vendor/gpui-kit/crates/shell/src/view.rs`: an event, timer or task that the time budget
     stops says so over its view, as a failed render does, instead of only being logged.
+  - `vendor/gpui-kit/crates/base/src/input/base/state.rs` and
+    `vendor/gpui-kit/crates/base/src/input/base/undo_manager.rs`: `can_undo` and `can_redo`,
+    whether undo or redo has anything to replay, for an editor's menu.
 - `vendor/quickjs-jit-runtime/`: the `jit` crate of
   [longbridge/quickjs-jit](https://github.com/longbridge/quickjs-jit) at `96593cd` with
   herdr's fix for longbridge/quickjs-jit#38, MIT (Copyright (c) 2020 Mees Delzenne,
