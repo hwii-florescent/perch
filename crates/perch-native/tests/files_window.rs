@@ -43,6 +43,10 @@ fn state() -> State {
     state
 }
 
+fn state_model() -> perch_native::sidebar::Model {
+    state().model()
+}
+
 struct Rig {
     cx: HeadlessAppContext,
     window: WindowHandle<Workspace>,
@@ -94,6 +98,46 @@ impl Rig {
         self.ws(|ws, _, cx| ws.on_files_message(&message, cx));
     }
 
+    fn right_click(&mut self, at: gpui::Point<gpui::Pixels>) {
+        self.cx
+            .update_window(self.window.into(), |_, window: &mut Window, cx| {
+                window.dispatch_event(
+                    PlatformInput::MouseDown(MouseDownEvent {
+                        button: MouseButton::Right,
+                        position: at,
+                        modifiers: Modifiers::default(),
+                        click_count: 1,
+                        first_mouse: false,
+                    }),
+                    cx,
+                );
+                window.dispatch_event(
+                    PlatformInput::MouseUp(MouseUpEvent {
+                        button: MouseButton::Right,
+                        position: at,
+                        modifiers: Modifiers::default(),
+                        click_count: 1,
+                    }),
+                    cx,
+                );
+            })
+            .unwrap();
+    }
+
+    /// Clicks the element named `suffix`, failing with every name drawn when there is none.
+    fn click_named(&mut self, suffix: &str) {
+        let records = self.settle();
+        let at = named(&records, suffix)
+            .unwrap_or_else(|| {
+                let mut names: Vec<_> = records.iter().map(|r| r.name.to_string()).collect();
+                names.sort();
+                panic!("no {suffix}: {names:?}")
+            })
+            .bounds
+            .center();
+        self.click(at);
+    }
+
     fn click(&mut self, at: gpui::Point<gpui::Pixels>) {
         self.cx
             .update_window(self.window.into(), |_, window: &mut Window, cx| {
@@ -138,11 +182,13 @@ fn main() {
     );
     let (tx, asked) = unbounded();
     let model = state().model();
+    let kept = scratch.join("window.json");
     let window = cx
         .open_window(size(px(1200.), px(800.)), |_, cx| {
             cx.new(|cx| {
-                Workspace::new(model, Some(tx), cx)
+                Workspace::new(model.clone(), Some(tx), cx)
                     .with_core(|| Err(anyhow::anyhow!("no core in this test")))
+                    .with_window_state(kept.clone())
             })
         })
         .unwrap();
@@ -252,6 +298,27 @@ fn main() {
         "an edited preview is kept"
     );
 
+    // An edit not yet sent (its debounce has not run) goes to the core's buffer when the window
+    // flushes its drafts before closing.
+    rig.sent();
+    rig.cx
+        .update_window(rig.window.into(), |_, window: &mut Window, cx| {
+            editors.set_value(doc, "# Work!!", false, window, cx)
+        })
+        .unwrap();
+    rig.cx.run_until_parked();
+    assert!(
+        !rig.sent().iter().any(|f| f["type"] == "fs.buffer.set"),
+        "not sent before its debounce"
+    );
+    rig.ws(|ws, _, cx| ws.flush_drafts(cx));
+    let sent = rig.sent();
+    assert!(
+        sent.iter()
+            .any(|f| f["type"] == "fs.buffer.set" && f["content"] == "# Work!!"),
+        "{sent:?}"
+    );
+
     // Closing asks nothing: the tab goes, the document stays in the store.
     let closed = rig
         .ws(|ws, window, cx| ws.run_command("tabs.close", Some(&json!({ "id": id })), window, cx));
@@ -259,6 +326,39 @@ fn main() {
     rig.settle();
     assert!(rig.ws(|ws, _, _| ws.tabs().shown().is_empty()));
     assert!(rig.ws(|ws, _, _| ws.files().document("w1", "README.md").is_some()));
+
+    // The entry menu: Delete, confirmed, asks the core to delete the entry; once it has, the
+    // entry's open tab closes.
+    rig.ws(|ws, _, cx| ws.open_file("w1", "README.md", false, cx));
+    rig.ws(|ws, _, cx| ws.show_files("w1", cx));
+    let records = rig.settle();
+    let row = named(&records, "files-entry:README.md")
+        .expect("README.md's row")
+        .bounds
+        .center();
+    rig.sent();
+    rig.right_click(row);
+    rig.click_named(":file-menu-delete");
+    rig.click_named("confirm-accept");
+    rig.settle();
+    let sent = rig.sent();
+    let delete = sent
+        .iter()
+        .find(|f| f["type"] == "fs.mutate")
+        .unwrap_or_else(|| panic!("the entry is deleted: {sent:?}"));
+    assert_eq!(
+        (delete["op"].as_str(), delete["path"].as_str()),
+        (Some("delete"), Some("README.md"))
+    );
+    rig.answer(
+        json!({"type": "fs.mutate.result", "requestId": delete["requestId"], "workspaceId": "w1",
+        "op": "delete", "path": "README.md"}),
+    );
+    rig.settle();
+    assert!(
+        !rig.ws(|ws, _, _| ws.tabs().contains("w1\nREADME.md")),
+        "its tab closed"
+    );
 
     // `files.extract` asks the core to extract the archive.
     rig.sent();
@@ -273,6 +373,24 @@ fn main() {
             .any(|f| f["type"] == "fs.extract" && f["path"] == "a.zip"),
         "{sent:?}"
     );
+
+    // A regular file tab is kept in the window's state file and opened again by the next window,
+    // without the keyboard; a preview is not kept.
+    rig.ws(|ws, _, cx| ws.open_file("w1", "src/lib.rs", false, cx));
+    rig.ws(|ws, _, cx| ws.open_file("w1", "docs/clean.md", true, cx));
+    rig.settle();
+    let state: Value = serde_json::from_slice(&std::fs::read(&kept).unwrap()).unwrap();
+    assert_eq!(state["files"], json!(["w1\nsrc/lib.rs"]), "{state}");
+    let next = rig.cx.update(|cx| {
+        cx.new(|cx| Workspace::new(state_model(), None, cx).with_window_state(kept.clone()))
+    });
+    let strip = rig.cx.update(|cx| {
+        (
+            next.read(cx).tabs().strip().to_vec(),
+            next.read(cx).tabs().active().map(str::to_string),
+        )
+    });
+    assert_eq!(strip, (vec!["w1\nsrc/lib.rs".to_string()], None));
 
     let _ = std::fs::remove_dir_all(&scratch);
     println!("files window: ok");

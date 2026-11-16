@@ -630,3 +630,70 @@ fn the_snapshot_names_what_the_screen_reads() {
     fs.store.set_wrap(true, "ws-snap");
     assert!(fs.store.take_changed().contains("ws-snap"));
 }
+
+#[test]
+fn a_mutation_reports_its_answer_and_lists_the_folders_it_touched_again() {
+    use perch_core::protocol::FsMutateOp;
+    let mut fs = Fs::new();
+    fs.store.request_tree("w", "src");
+    let tree = fs.outgoing("fs.tree", "w", Some("src"));
+    fs.respond(
+        json!({"type": "fs.tree.result", "requestId": tree["requestId"], "workspaceId": "w",
+        "path": "src", "entries": [entry("src/a.rs")], "truncated": false}),
+    );
+    let trees = fs.count("fs.tree", "w");
+
+    fs.store
+        .mutate("w", FsMutateOp::Rename, "src/a.rs", Some("src/b.rs"));
+    let asked = fs.outgoing("fs.mutate", "w", Some("src/a.rs"));
+    assert_eq!(
+        (asked["op"].as_str(), asked["to"].as_str()),
+        (Some("rename"), Some("src/b.rs"))
+    );
+    assert!(fs.store.take_mutated().is_empty(), "nothing answered yet");
+    fs.respond(
+        json!({"type": "fs.mutate.result", "requestId": asked["requestId"], "workspaceId": "w",
+        "op": "rename", "path": "src/a.rs", "to": "src/b.rs"}),
+    );
+    let done = fs.store.take_mutated();
+    assert_eq!(done.len(), 1);
+    assert_eq!(
+        (done[0].to.as_deref(), done[0].error.as_deref()),
+        (Some("src/b.rs"), None)
+    );
+    assert_eq!(
+        fs.count("fs.tree", "w"),
+        trees + 1,
+        "the listed folder is listed again"
+    );
+
+    // The core's refusal is the mutation's error.
+    fs.store
+        .mutate("w", FsMutateOp::CreateFile, "src/b.rs", None);
+    let asked = fs.outgoing("fs.mutate", "w", Some("src/b.rs"));
+    fs.respond(
+        json!({"type": "fs.error", "requestId": asked["requestId"], "workspaceId": "w",
+        "code": "exists", "message": "src/b.rs already exists."}),
+    );
+    assert_eq!(
+        fs.store.take_mutated()[0].error.as_deref(),
+        Some("src/b.rs already exists.")
+    );
+
+    // Asked while disconnected, or cut off by a disconnect, it says so.
+    fs.store.mutate("w", FsMutateOp::Delete, "src/b.rs", None);
+    fs.store.set_connected(false);
+    let lost = fs.store.take_mutated();
+    assert!(
+        lost[0]
+            .error
+            .as_deref()
+            .is_some_and(|e| e.starts_with("Connection lost")),
+        "{lost:?}"
+    );
+    fs.store.mutate("w", FsMutateOp::Delete, "src/b.rs", None);
+    assert!(fs.store.take_mutated()[0]
+        .error
+        .as_deref()
+        .is_some_and(|e| e.starts_with("Disconnected")));
+}

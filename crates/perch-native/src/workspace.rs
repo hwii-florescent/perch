@@ -383,6 +383,9 @@ impl Workspace {
     /// Keeps the drawer's tab and the column widths in `file`, on this device.
     pub fn with_window_state(mut self, file: std::path::PathBuf) -> Self {
         self.chrome = Chrome::kept_in(file);
+        for id in self.chrome.files().to_vec() {
+            self.tabs.append(&id);
+        }
         self
     }
 
@@ -724,6 +727,65 @@ impl Workspace {
 
     /// Sends the store's frames, wakes for its next draft deadline, and redraws when a
     /// workspace's files moved.
+    /// An entry was created, moved, copied or deleted (or the core refused): a refusal is the
+    /// window's notice; a new file opens in a tab; the tabs of a deleted entry close and those of a
+    /// moved one follow it, as the web's file operations do.
+    fn follow_mutation(&mut self, done: crate::files::store::Mutation, cx: &mut Context<Self>) {
+        use perch_core::protocol::FsMutateOp as Op;
+        if let Some(error) = done.error {
+            self.notice = Some(error);
+            cx.notify();
+            return;
+        }
+        let w = done.workspace_id.as_str();
+        if done.op == Op::CreateFile {
+            self.open_file(w, &done.path, false, cx);
+            return;
+        }
+        if !matches!(done.op, Op::Rename | Op::Delete) {
+            return;
+        }
+        let within = |path: &str| {
+            path == done.path
+                || path
+                    .strip_prefix(done.path.as_str())
+                    .is_some_and(|r| r.starts_with('/'))
+        };
+        let affected: Vec<(String, String)> = self
+            .tabs
+            .strip()
+            .iter()
+            .filter_map(|id| {
+                file_tab(id)
+                    .map(|(tw, path)| (id.clone(), tw == w && within(path), path.to_string()))
+            })
+            .filter(|(_, hit, _)| *hit)
+            .map(|(id, _, path)| (id, path))
+            .collect();
+        let active = self.tabs.active().map(str::to_string);
+        for (id, _) in &affected {
+            self.tabs.close(id);
+        }
+        // A renamed file that was on screen stays on screen under its new name.
+        if let (Op::Rename, Some(to)) = (done.op, done.to.as_deref()) {
+            if let Some((_, path)) = affected.iter().find(|(id, _)| Some(id) == active.as_ref()) {
+                let moved = format!("{to}{}", &path[done.path.len()..]);
+                self.open_file(w, &moved, false, cx);
+                return;
+            }
+        }
+        if !affected.is_empty() {
+            self.after_change(cx);
+        }
+    }
+
+    /// Sends the core every draft its buffer may lack (the window is closing or the app quitting),
+    /// so no edit made in the last moments is lost.
+    pub fn flush_drafts(&mut self, cx: &mut Context<Self>) {
+        self.files.store.flush_pending_buffers();
+        self.pump_files(cx);
+    }
+
     fn pump_files(&mut self, cx: &mut Context<Self>) {
         self.pump(false, cx);
     }
@@ -735,6 +797,9 @@ impl Workspace {
         let (sent, changed, arm) = self.files.drain();
         for frame in sent {
             self.send_to_core(frame, cx);
+        }
+        for mutation in self.files.store.take_mutated() {
+            self.follow_mutation(mutation, cx);
         }
         if let Some(at) = arm {
             cx.spawn(async move |this, cx| {
@@ -1766,7 +1831,9 @@ impl Workspace {
                 let args = word(&args, 0).map(|id| json!({ "workspaceId": id }));
                 self.run_command("browser.open", args.as_ref(), window, cx)
             }
-            Some("focusWorkspace") => Err(NO_FILES.into()),
+            // The launcher's New file draws its own name prompt (`NewFilePrompt`); the workspace
+            // it names is the one the file is made in.
+            Some("focusWorkspace") => Ok(()),
             Some("addProject") => self.ask_add_project(cx),
             Some(other) => Err(format!("The native window cannot {other} yet.")),
         }
@@ -4267,14 +4334,28 @@ fn program_in(argv: &Value, task: Option<&str>) -> Result<String, String> {
 
 /// A file tab's workspace and path: its id is the web's `fileTabKey`, `<workspace id>\n<path>`
 /// (a session id never holds a line break).
+impl Workspace {
+    /// The strip's regular file tabs go to the window's state file; an untouched preview, a
+    /// review or a page does not.
+    fn keep_file_tabs(&mut self) {
+        let files = self
+            .tabs
+            .strip()
+            .iter()
+            .filter(|id| {
+                file_tab(id).is_some_and(|(_, path)| !path.is_empty() && !path.starts_with('\0'))
+                    && !self.tabs.is_preview(id)
+            })
+            .cloned()
+            .collect();
+        self.chrome.set_files(files);
+    }
+}
+
 pub fn file_tab(id: &str) -> Option<(&str, &str)> {
     id.split_once('\n')
         .filter(|_| !is_browser_tab(id) && review_tab(id).is_none())
 }
-
-/// Why New file is refused here: it names the file in the files view's prompt.
-const NO_FILES: &str =
-    "A new file needs the files view, which the native window does not have yet.";
 
 fn word(args: &[Value], at: usize) -> Option<String> {
     args.get(at).and_then(Value::as_str).map(str::to_string)
@@ -4351,6 +4432,7 @@ impl Workspace {
 impl gpui::Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_editors(window, cx);
+        self.keep_file_tabs();
         self.viewport_height = f32::from(window.viewport_size().height);
         if window.focused(cx).is_none() {
             self.root_focus.focus(window, cx);

@@ -32,6 +32,7 @@ class PerchSocket {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private sessionId: string | null = null;
   private started = false;
+  private info: ServerMessage | null = null;
 
   connect(): void {
     if (this.started) return;
@@ -82,6 +83,7 @@ class PerchSocket {
       } catch {
         return;
       }
+      if (msg.type === "server.info") this.info = msg;
       if (msg.type === "session.created") {
         this.sessionId = msg.sessionId;
         storeSessionId(msg.sessionId);
@@ -91,6 +93,7 @@ class PerchSocket {
     });
 
     ws.addEventListener("close", () => {
+      this.info = null;
       for (const handler of this.connectionHandlers) handler(false);
       this.scheduleReconnect();
     });
@@ -150,9 +153,13 @@ class PerchSocket {
     return this.sessionId;
   }
 
-  /** Subscribe to every inbound ServerMessage; returns an unsubscribe fn. */
+  /** Subscribe to every inbound ServerMessage; returns an unsubscribe fn. The core's one `server.info` per
+   * connection is also given to a handler that subscribes after it arrived (a lazily loaded module), a tick
+   * later so the module can finish loading first. */
   onMessage(handler: ServerMessageHandler): () => void {
     this.handlers.add(handler);
+    const info = this.info;
+    if (info) queueMicrotask(() => { if (this.handlers.has(handler) && this.info === info) handler(info); });
     return () => this.handlers.delete(handler);
   }
 
