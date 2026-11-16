@@ -1577,6 +1577,27 @@ fn the_active_window_sizes_its_terminals_and_hands_the_size_back() {
     say(&mut h, info(false, false));
     h.view(|v| v.window_active(false));
     assert_eq!(leases(&mut rx), vec![], "nothing held, nothing given");
+    // A take on its way when the connection drops is not answered: attached again, the window
+    // takes the size on the new connection.
+    h.view(|v| v.window_active(true));
+    assert_eq!(leases(&mut rx), vec![ToCore::TakeSize]);
+    say(&mut h, FromCore::Disconnected("the core went away".into()));
+    say(
+        &mut h,
+        FromCore::Attached {
+            replay: String::new(),
+            input: true,
+            resize: false,
+            agent: None,
+        },
+    );
+    h.view(|v| v.window_active(true));
+    assert_eq!(
+        leases(&mut rx),
+        vec![ToCore::TakeSize],
+        "asked again after attaching"
+    );
+    say(&mut h, info(false, false));
     // A phone holds it: becoming active does not take it (the phone-size notice offers that).
     say(&mut h, info(false, true));
     h.view(|v| v.window_active(true));
