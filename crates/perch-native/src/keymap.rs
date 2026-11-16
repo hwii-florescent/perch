@@ -47,6 +47,10 @@ pub enum Scope {
     Directory,
     /// The Navigator's result keys, asked for by its screen as `Directory`'s are.
     Navigator,
+    /// The file editor's own keys (save, find, go to line): they apply only while a native editor has
+    /// the keyboard, which resolves them on every key ([`Keymap::editor_shortcut`]); the window never
+    /// runs them.
+    Editor,
 }
 
 /// A named command and its default keys, by the web's id and wording.
@@ -406,6 +410,55 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Scope::Resize,
     ),
     scoped(
+        "editor.save",
+        "Save file",
+        &["cmd+s", "ctrl+s"],
+        Scope::Editor,
+    ),
+    scoped(
+        "editor.find",
+        "Find in file",
+        &["cmd+f", "ctrl+f"],
+        Scope::Editor,
+    ),
+    scoped(
+        "editor.replace",
+        "Replace in file",
+        &["cmd+alt+f", "ctrl+h"],
+        Scope::Editor,
+    ),
+    scoped(
+        "editor.replaceAlt",
+        "Replace in file (alternate)",
+        &["cmd+shift+f", ""],
+        Scope::Editor,
+    ),
+    scoped(
+        "editor.findNext",
+        "Next file match (while Find is open)",
+        &["f3"],
+        Scope::Editor,
+    ),
+    scoped(
+        "editor.findPrevious",
+        "Previous file match (while Find is open)",
+        &["shift+f3"],
+        Scope::Editor,
+    ),
+    scoped(
+        "editor.findNextAlt",
+        "Next file match (alternate)",
+        &["cmd+g", ""],
+        Scope::Editor,
+    ),
+    scoped(
+        "editor.findPreviousAlt",
+        "Previous file match (alternate)",
+        &["cmd+shift+g", ""],
+        Scope::Editor,
+    ),
+    scoped("editor.gotoLine", "Go to line", &["ctrl+g"], Scope::Editor),
+    scoped(
         "navigator.next",
         "Next Navigator result",
         &["ctrl+j"],
@@ -475,6 +528,7 @@ fn help_group(id: &str) -> &'static str {
         "resize" => "resize",
         "directory" => "directory",
         "navigator" => "navigator",
+        "editor" => "editor",
         _ => "global",
     }
 }
@@ -814,6 +868,7 @@ fn applies_to(shortcut: &Shortcut, context: &str) -> bool {
         Scope::Terminal => context == "terminal",
         Scope::Directory => context == "directory",
         Scope::Navigator => context == "navigator",
+        Scope::Editor => context == "editor",
     }
 }
 
@@ -991,12 +1046,13 @@ impl Keymap {
     /// key as the person has it (`""` for none) and whether they changed it from the default.
     /// The jump ranges are rows of their own here, one per key, as in the web's table.
     pub fn settings_groups(&self) -> Value {
-        const GROUPS: [(&str, &str); 9] = [
+        const GROUPS: [(&str, &str); 10] = [
             ("global", "Global"),
             ("tabs", "Tabs"),
             ("nests", "Workspaces and projects"),
             ("panes", "Splits and panes"),
             ("terminal", "Terminal"),
+            ("editor", "File editor"),
             ("navigator", "Navigator"),
             ("directory", "Folder picker"),
             ("leader", "Leader and follow-up keys"),
@@ -1198,7 +1254,8 @@ impl Keymap {
                         | Scope::Resize
                         | Scope::Terminal
                         | Scope::Directory
-                        | Scope::Navigator => false,
+                        | Scope::Navigator
+                        | Scope::Editor => false,
                     })
                     .find(bound)
             })
@@ -1216,6 +1273,21 @@ impl Keymap {
                     })
                     .map(|(_, text)| Hit::Edit(text))
             })
+    }
+
+    /// The editor command `keystroke` presses (`editor.save`, ...), as the web's `shortcutFor(event,
+    /// "editor")` and `runEditorShortcut` find it on every key: the editor's own commands first, then
+    /// the window's that apply in an editor; the person's bindings count, an empty one disabling the
+    /// command. A key that a window command wins stays the window's (`None`).
+    pub fn editor_shortcut(&self, keystroke: &Keystroke) -> Option<&'static str> {
+        let bound = |s: &Shortcut| {
+            applies_to(s, "editor")
+                && effective_spec(s, &self.chosen, self.mac).is_some_and(|c| matches(&c, keystroke))
+        };
+        let editor = all_shortcuts().filter(|s| s.scope == Scope::Editor);
+        let others = all_shortcuts().filter(|s| s.scope != Scope::Editor);
+        let hit = editor.chain(others).find(bound)?;
+        (hit.scope == Scope::Editor).then_some(hit.id)
     }
 
     /// The command of screen scope `scope` (`"directory"`) a DOM key event (`{key, ctrlKey,
@@ -1977,5 +2049,72 @@ mod tests {
             ..Context::default()
         };
         assert_eq!(at("shift-/", leader), "global.help");
+    }
+
+    #[test]
+    fn editor_shortcuts_have_the_webs_defaults() {
+        let mac = keymap(&[], None);
+        let other = Keymap::new(BTreeMap::new(), None).with_platform(false);
+        for (spec, id) in [
+            ("cmd-s", "editor.save"),
+            ("cmd-f", "editor.find"),
+            ("cmd-alt-f", "editor.replace"),
+            ("cmd-shift-f", "editor.replaceAlt"),
+            ("f3", "editor.findNext"),
+            ("shift-f3", "editor.findPrevious"),
+            ("cmd-g", "editor.findNextAlt"),
+            ("cmd-shift-g", "editor.findPreviousAlt"),
+            ("ctrl-g", "editor.gotoLine"),
+        ] {
+            assert_eq!(
+                mac.editor_shortcut(&press(spec)),
+                Some(id),
+                "{spec} on a Mac"
+            );
+        }
+        assert_eq!(other.editor_shortcut(&press("ctrl-s")), Some("editor.save"));
+        assert_eq!(
+            other.editor_shortcut(&press("ctrl-h")),
+            Some("editor.replace")
+        );
+        assert_eq!(
+            other.editor_shortcut(&press("ctrl-shift-g")),
+            None,
+            "no alternate elsewhere"
+        );
+        assert_eq!(mac.editor_shortcut(&press("a")), None);
+    }
+
+    #[test]
+    fn an_editor_override_applies_and_an_empty_one_disables() {
+        let moved = keymap(&[("editor.save", "ctrl+alt+s")], None);
+        assert_eq!(moved.editor_shortcut(&press("cmd-s")), None);
+        assert_eq!(
+            moved.editor_shortcut(&press("ctrl-alt-s")),
+            Some("editor.save")
+        );
+        let off = keymap(&[("editor.save", "")], None);
+        assert_eq!(off.editor_shortcut(&press("cmd-s")), None);
+    }
+
+    #[test]
+    fn a_global_binding_is_not_run_as_an_editor_shortcut() {
+        let global = keymap(&[("editor.save", ""), ("global.navigator", "ctrl+s")], None);
+        assert_eq!(global.editor_shortcut(&press("ctrl-s")), None);
+        // The window's own commands never resolve to an editor command, and the editor's never reach it.
+        assert_eq!(keymap(&[], None).editor_shortcut(&press("cmd-p")), None);
+        let context = Context {
+            in_terminal: false,
+            typing: true,
+            leader: false,
+            resize: false,
+        };
+        assert_ne!(
+            run(keymap(&[], None).resolve(&press("ctrl-g"), context)),
+            "editor.gotoLine"
+        );
+        // An editor command wins a key it shares with a window command, as the web's editor context.
+        let shared = keymap(&[("editor.save", "cmd+p")], None);
+        assert_eq!(shared.editor_shortcut(&press("cmd-p")), Some("editor.save"));
     }
 }

@@ -598,7 +598,8 @@ impl Perch {
         list
     }
 
-    fn keymap(&self) -> Keymap {
+    /// The window's key bindings as the person has them.
+    pub fn keymap(&self) -> Keymap {
         let data = self.0.data.borrow();
         Keymap::new(data.model.keybindings.clone(), data.model.keys_file.clone())
     }

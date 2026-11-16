@@ -4,6 +4,7 @@
 
 pub mod highlight;
 pub mod host;
+pub mod keys;
 pub mod theme;
 
 pub use host::Editors;
