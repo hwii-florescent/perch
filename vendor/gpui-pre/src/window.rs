@@ -9536,11 +9536,13 @@ pub mod perf_log {
     use std::sync::OnceLock;
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+    /// Whether `PERCH_NATIVE_PERF` is set (read once).
     pub fn enabled() -> bool {
         static ON: OnceLock<bool> = OnceLock::new();
         *ON.get_or_init(|| std::env::var_os("PERCH_NATIVE_PERF").is_some())
     }
 
+    /// Wall-clock milliseconds, to line frames up with other logs.
     pub fn now_ms() -> f64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -9548,6 +9550,7 @@ pub mod perf_log {
             .unwrap_or(0.)
     }
 
+    /// Logs one frame request: whether it drew, how long it took, how late it ran.
     pub fn frame(drew: bool, started: Instant, signal_at: Option<Instant>) {
         if !enabled() {
             return;
