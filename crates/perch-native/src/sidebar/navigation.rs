@@ -390,6 +390,11 @@ fn workspaces_for_project<'a>(
     all
 }
 
+/// The id the Quickchat section has on `host_id` before the core has made its project.
+pub fn quickchat_placeholder(host_id: &str) -> String {
+    format!("quickchat:{host_id}")
+}
+
 /// The checkout a new tab of project `project_id` lands in (the web's launcher): the one session
 /// `shown` belongs to when it is the project's, else the project's first. `(id, path)`.
 pub fn landing_workspace(
@@ -406,7 +411,7 @@ pub fn landing_workspace(
 }
 
 /// Whether `session` belongs to `workspace`: by id, or for an older record by folder.
-fn in_workspace(session: &SessionSummary, workspace: &WorkspaceSummary) -> bool {
+pub fn in_workspace(session: &SessionSummary, workspace: &WorkspaceSummary) -> bool {
     match &session.workspace_id {
         Some(id) => *id == workspace.id,
         None => session.host_id == workspace.host_id && session.cwd == workspace.path,
@@ -924,7 +929,22 @@ impl<'a> Builder<'a> {
             .filter(|p| !is_chats(p))
             .map(|p| (p, self.project_info(p)))
             .collect();
-        let quickchat = chats.map(|p| self.project_info(p));
+        // The web's client makes the Quickchat project as it connects (its blank session); this
+        // one does not, so until the first quickchat the section stands for the project the core
+        // makes then, with nothing in it, as the web draws it.
+        let placeholder = (chats.is_none() && reachable(store, host_id)).then(|| ProjectSummary {
+            id: quickchat_placeholder(host_id),
+            host_id: host_id.to_string(),
+            name: "Chats".into(),
+            path: "~/.perch/scratch".into(),
+            repo_path: None,
+            default_branch: None,
+            favorite: false,
+            settings: None,
+            created_at: 0,
+            updated_at: 0,
+        });
+        let quickchat = chats.or(placeholder.as_ref()).map(|p| self.project_info(p));
         let mut shown: Vec<(usize, bool, usize, &ProjectInfo)> = visible
             .iter()
             .enumerate()

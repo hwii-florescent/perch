@@ -582,6 +582,185 @@ fn new_project_running(rig: &mut Rig) {
     println!("new project running: ok");
 }
 
+/// Closing the last tab: the terminal that goes lets go of the keyboard, even while something
+/// still holds its view, and the window keeps it, so its keys still work.
+fn close_last_tab(rig: &mut Rig) {
+    rig.open("alpha");
+    let mut closed = Vec::new();
+    while rig.active().is_some() {
+        let handle = rig.ws(|ws, _, cx| ws.terminal().expect("a terminal").focus_handle(cx));
+        rig.ws(|ws, window, cx| ws.run_command("tabs.close", None, window, cx))
+            .unwrap();
+        rig.draw();
+        if rig.ws(|ws, _, _| ws.screens_open()) == ["confirm"] {
+            rig.press("enter");
+        }
+        closed.push(handle);
+        assert!(closed.len() < 20, "the tabs close");
+    }
+    let held = rig.ws(|_, window, _| closed.iter().any(|h| h.is_focused(window)));
+    assert!(!held, "no closed terminal keeps the keyboard");
+    assert!(
+        rig.ws(|_, window, cx| window.focused(cx).is_some()),
+        "the window has it"
+    );
+    assert!(
+        rig.press(if MAC { "cmd-b" } else { "ctrl-b" }),
+        "its keys still work"
+    );
+    rig.press(if MAC { "cmd-b" } else { "ctrl-b" });
+    println!("close last tab: ok");
+}
+
+/// A workspace key landing on a workspace with no session shows its start page, as the web's
+/// `openEmptyWorkspace`: no tab of the other workspace stays on screen.
+fn empty_workspace(rig: &mut Rig) {
+    let mut more = state();
+    more.apply(&message(json!({
+        "type": "project.list", "requestId": "r2", "hostId": "local", "snapshotEpoch": "e",
+        "snapshotRevision": 2, "projects": [
+            {"id": "p", "hostId": "local", "name": "Work", "path": "/work", "favorite": false,
+             "createdAt": 0, "updatedAt": 0},
+            {"id": "q", "hostId": "local", "name": "Empty", "path": "/empty", "favorite": false,
+             "createdAt": 1, "updatedAt": 1}]})));
+    more.apply(&message(json!({
+        "type": "workspace.snapshot", "requestId": "r2", "hostId": "local", "snapshotEpoch": "e",
+        "snapshotRevision": 2,
+        "projects": [
+            {"id": "p", "hostId": "local", "name": "Work", "path": "/work", "favorite": false,
+             "createdAt": 0, "updatedAt": 0},
+            {"id": "q", "hostId": "local", "name": "Empty", "path": "/empty", "favorite": false,
+             "createdAt": 1, "updatedAt": 1}],
+        "workspaces": [
+            {"id": "w1", "projectId": "p", "hostId": "local", "path": "/work", "name": "main",
+             "dirty": false, "state": "active", "createdAt": 0, "updatedAt": 0, "pinned": false},
+            {"id": "w2", "projectId": "q", "hostId": "local", "path": "/empty", "name": "main",
+             "dirty": false, "state": "active", "createdAt": 1, "updatedAt": 1, "pinned": false}]})));
+    rig.ws(|ws, _, cx| {
+        ws.sidebar()
+            .update(cx, |s, cx| s.apply(Update::Model(more.model()), cx))
+    });
+    rig.open("alpha");
+    assert!(rig.active().is_some());
+    let mut seen_empty = false;
+    for _ in 0..4 {
+        assert!(rig.press("ctrl-shift-down"), "the workspace key is taken");
+        if rig.active().is_none() {
+            seen_empty = true;
+            assert!(rig.drawn("start-card") || rig.ws(|ws, _, _| ws.tabs().visible().is_none()));
+            break;
+        }
+    }
+    assert!(seen_empty, "the empty workspace shows its start page");
+    println!("empty workspace: ok");
+}
+
+/// Before the core has made the Quickchat project, the sidebar draws the Quickchat section with
+/// its +, and New quickchat shows Quickchat's start page, as the web's (whose client makes the
+/// project as it connects).
+fn quickchat_before_first(rig: &mut Rig) {
+    let names: Vec<String> = rig.draw().into_iter().map(|r| r.name.to_string()).collect();
+    for name in ["chats-header", "chats-new-button"] {
+        assert!(
+            names.iter().any(|n| n == name),
+            "{name} is drawn with no Quickchat project"
+        );
+    }
+    rig.ws(|ws, window, cx| ws.run_command("quickchat.new", None, window, cx))
+        .expect("New quickchat works before the first quickchat");
+    rig.draw();
+    assert_eq!(rig.active(), None, "the start page");
+    let drawn = rig.draw();
+    assert!(
+        drawn.iter().any(|r| r.name == "start-target"),
+        "Quickchat's start page, not home"
+    );
+    // An agent picked there starts a quickchat (no folder), which makes the project.
+    rig.asked();
+    let start = drawn
+        .iter()
+        .find(|r| r.name == "start-action:workspace-start-claude")
+        .expect("the start page's agents")
+        .bounds
+        .center();
+    click_at(rig, start);
+    let asked = rig.asked();
+    assert!(
+        asked
+            .iter()
+            .any(|c| matches!(c, Command::Launch { cwd: None, provider, .. }
+            if provider == "claude")),
+        "started in the home folder: {asked:?}"
+    );
+    println!("quickchat before first: ok");
+}
+
+/// Commands the web has that the window now runs as it does: `key.bind` keeps a key in the core's
+/// settings (and refuses one the web refuses), leader 9 is the 9th tab or the last, leader c
+/// starts a terminal in the project on screen with no picker, and `agent.next` skips terminals.
+fn web_commands(rig: &mut Rig) {
+    let run = |rig: &mut Rig, name: &str, args: Value| {
+        rig.ws(|ws, window, cx| ws.run_command(name, Some(&args), window, cx))
+    };
+    rig.asked();
+    run(
+        rig,
+        "key.bind",
+        json!({"command": "global.sidebar", "keys": "cmd+shift+y"}),
+    )
+    .unwrap();
+    let saved: Vec<Value> = rig
+        .asked()
+        .into_iter()
+        .filter_map(|c| match c {
+            Command::UpdateSettings(patch) => Some(patch),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        saved,
+        [json!({"keybindings": {"global.sidebar": "cmd+shift+y"}})]
+    );
+    let refused = run(
+        rig,
+        "key.bind",
+        json!({"command": "global.sidebar", "keys": "y"}),
+    );
+    assert!(refused.unwrap_err().contains("cannot be bound"));
+    assert!(
+        run(rig, "key.bind", json!({"keys": "cmd+y"})).is_err(),
+        "needs a command"
+    );
+    assert!(rig.asked().is_empty(), "nothing saved for a refused key");
+
+    rig.open("alpha");
+    rig.open("bravo");
+    run(rig, "tabs.jump1", json!({})).unwrap();
+    assert_eq!(rig.active().as_deref(), Some("alpha"));
+    run(rig, "leader.jump9", json!({})).unwrap();
+    assert_eq!(
+        rig.active().as_deref(),
+        Some("bravo"),
+        "fewer than 9: the last"
+    );
+
+    rig.asked();
+    run(rig, "leader.newSession", json!({})).unwrap();
+    let launched: Vec<_> = rig
+        .asked()
+        .into_iter()
+        .filter_map(|c| match c {
+            Command::Launch { cwd, provider, .. } => Some((cwd, provider)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        launched,
+        [(Some("/work".to_string()), "terminal".to_string())]
+    );
+    println!("web-commands: ok");
+}
+
 fn main() {
     let scratch: PathBuf =
         std::env::temp_dir().join(format!("perch-keys-window-{}", std::process::id()));
@@ -591,6 +770,7 @@ fn main() {
     let mut rig = rig(scratch.join("native-mods"));
     rig.draw();
 
+    quickchat_before_first(&mut rig);
     history(&mut rig);
     next_project(&mut rig);
     resize(&mut rig);
@@ -598,6 +778,9 @@ fn main() {
     held_keyboard(&mut rig);
     close_untabbed(&mut rig);
     new_project_running(&mut rig);
+    empty_workspace(&mut rig);
+    close_last_tab(&mut rig);
+    web_commands(&mut rig);
 
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())

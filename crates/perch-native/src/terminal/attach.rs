@@ -32,6 +32,8 @@ pub enum ToCore {
     TakeControl,
     /// Take only the size, from whichever view or phone holds it.
     TakeSize,
+    /// Give the size up, so another view sizes the shell.
+    GiveSize,
     /// End the shell. Needs the input lease.
     Kill,
     /// End the session, from this connection, which holds the keyboard: the core refuses to end
@@ -307,11 +309,11 @@ async fn run(
                     Some(ToCore::Resize(cols, rows)) => {
                         connection.terminal_resize(&terminal, cols, rows).await
                     }
-                    Some(taking @ (ToCore::TakeControl | ToCore::TakeSize)) => {
-                        let taken = if taking == ToCore::TakeControl {
-                            connection.take_control(&mut terminal).await
-                        } else {
-                            connection.take_resize(&mut terminal).await
+                    Some(taking @ (ToCore::TakeControl | ToCore::TakeSize | ToCore::GiveSize)) => {
+                        let taken = match taking {
+                            ToCore::TakeControl => connection.take_control(&mut terminal).await,
+                            ToCore::TakeSize => connection.take_resize(&mut terminal).await,
+                            _ => connection.release_resize(&mut terminal).await,
                         };
                         if taken.is_ok()
                             && events.unbounded_send(FromCore::Agent(AgentInfo::of(&terminal))).is_err()

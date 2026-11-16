@@ -588,6 +588,26 @@ impl Connection {
         Ok(())
     }
 
+    /// Give up the resize lease this connection holds, so another view (the other window on this
+    /// computer) sizes the shell. Nothing to do when it holds none.
+    pub async fn release_resize(&mut self, terminal: &mut Terminal) -> Result<()> {
+        let Some(generation) = terminal.resize else {
+            return Ok(());
+        };
+        let id = self.request_id();
+        self.send(json!({"type": "agent.control.release", "requestId": id,
+            "sessionId": terminal.session_id, "workspaceId": terminal.workspace_id,
+            "agentId": terminal.provider, "channel": "resize", "generation": generation}))
+            .await?;
+        self.reply(Some(&id), |m| match m {
+            ServerMessage::AgentControl { request_id, .. } if *request_id == id => Some(()),
+            _ => None,
+        })
+        .await?;
+        terminal.resize = None;
+        Ok(())
+    }
+
     /// End the shell. Only the view holding the input lease may.
     pub async fn terminal_kill(&mut self, terminal: &Terminal) -> Result<()> {
         if terminal.input.is_none() {

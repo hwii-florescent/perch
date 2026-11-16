@@ -701,10 +701,12 @@ fn main() {
     rig.press("cmd-p");
     assert!(rig.ws(|ws, _, _| ws.screens_open()).is_empty());
 
-    // New quickchat opens no menu: with no Quickchat project it says so. Cmd+T asks the tab strip,
-    // which draws the menu itself.
-    let refused = rig.ws(|ws, window, cx| ws.run_command("nests.scratchpad", None, window, cx));
-    assert!(refused.is_err_and(|e| e.contains("Quickchat")));
+    // New quickchat opens no menu: with no Quickchat project yet it shows the Quickchat start page
+    // (the core makes the project with the first one). Cmd+T asks the tab strip, which draws the
+    // menu itself.
+    rig.ws(|ws, window, cx| ws.run_command("nests.scratchpad", None, window, cx))
+        .unwrap();
+    assert!(rig.ws(|ws, _, _| ws.screens_open()).is_empty());
     let asks = rig.ws(|ws, _, _| ws.new_tab_asks());
     rig.ws(|ws, window, cx| ws.run_command("tabs.new", None, window, cx))
         .unwrap();

@@ -330,6 +330,8 @@ pub struct TerminalView {
     /// A take-over this view asked for, until the core answers (the leases change) or the
     /// connection changes: the web's `pending`.
     taking: bool,
+    /// The window asked the core for the size as it became active, and has no answer yet.
+    claiming: bool,
     /// The agent-control props last drawn: a change tells the window ([`TerminalEvent::Chrome`]).
     drawn_control: Value,
 }
@@ -404,6 +406,7 @@ impl TerminalView {
             target: None,
             reconnects: false,
             taking: false,
+            claiming: false,
             drawn_control: Value::Null,
         }
     }
@@ -829,6 +832,7 @@ impl TerminalView {
                 }
                 let offered = self.offers_take_back();
                 self.taking = false;
+                self.claiming = false;
                 self.input_lease = agent.input;
                 self.resize_lease = agent.resize;
                 self.agent = Some(agent);
@@ -1913,6 +1917,23 @@ impl TerminalView {
             }
         }
         cx.notify();
+    }
+
+    /// The window became active or not. The active window sizes the terminals it shows, taking
+    /// the size from another window on this computer (never from a phone, which the person takes
+    /// back on purpose); an inactive one gives the size up, so the other window sizes them. The
+    /// core's resize lease keeps one owner throughout.
+    pub fn window_active(&mut self, active: bool) {
+        if self.to_core.is_none() || self.status != Status::Live {
+            return;
+        }
+        let phone = self.agent.is_some_and(|a| a.resize_on_device);
+        if active && !self.hidden && !self.resize_lease && !phone && !self.claiming {
+            self.claiming = true;
+            self.send(ToCore::TakeSize);
+        } else if !active && self.resize_lease {
+            self.send(ToCore::GiveSize);
+        }
     }
 
     /// Scale the text and the padding by `factor` (the window's zoom), refitting the grid.

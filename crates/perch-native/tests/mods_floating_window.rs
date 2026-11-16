@@ -789,6 +789,38 @@ fn tab_drag(rig: &mut Rig) {
         ws.run_command("pane.unsplit", Some(&json!({"id": "alpha"})), window, cx)
     })
     .unwrap();
+
+    // A tab that is not the one shown drags too, from its first press (which never reaches the
+    // head under the strip: that would move the window), and drops on the left edge of the pane.
+    select(rig, "alpha");
+    assert_eq!(layout(rig).1, ids(&["alpha"]));
+    let tab = rig.center("tab:bravo");
+    let left_edge = (WIDTH / 2. - 150., HEIGHT / 2.);
+    let pane = rig.ws(|ws, _, _| ws.tabs().shown());
+    assert_eq!(pane, ids(&["alpha"]));
+    rig.down(tab);
+    rig.held_to((tab.0, tab.1 + 20.));
+    rig.held_to(left_edge);
+    let zone = rig
+        .record("tab-drop-zone:left")
+        .expect("the left half a split takes");
+    assert!(
+        f32::from(zone.bounds.origin.x + zone.bounds.size.width / 2.) < WIDTH / 2. + 150.,
+        "the left half: {:?}",
+        zone.bounds
+    );
+    rig.shot("tab-drop-zone-left");
+    rig.up(left_edge);
+    assert_eq!(
+        layout(rig).1,
+        ids(&["bravo", "alpha"]),
+        "bravo split in on the left"
+    );
+    assert_eq!(rig.shown().as_deref(), Some("bravo"));
+    rig.ws(|ws, window, cx| {
+        ws.run_command("pane.unsplit", Some(&json!({"id": "bravo"})), window, cx)
+    })
+    .unwrap();
     println!("tab-drag: ok");
 }
 
@@ -1037,6 +1069,20 @@ fn new_session(rig: &mut Rig) {
         .ws(|ws, _, _| ws.screen_props("new-session").cloned())
         .unwrap();
     assert_eq!(props["fixedCwd"], "/home/dev/.perch/scratch");
+    // With a workspace, the strip's extras follow the agents, as the web's "+" menu.
+    let extras: Vec<_> = props["extras"]
+        .as_array()
+        .expect("the strip's extras reach the menu")
+        .iter()
+        .map(|e| (e["id"].as_str().unwrap(), e["label"].as_str().unwrap()))
+        .collect();
+    assert_eq!(extras, [("browser", "New browser"), ("file", "New file")]);
+    for row in [
+        "launcher-option:new-tab-browser",
+        "launcher-option:new-tab-file",
+    ] {
+        assert!(rig.record(row).is_some(), "{row} is drawn");
+    }
     assert_eq!(
         (
             props["anchorRect"]["x"].as_f64(),

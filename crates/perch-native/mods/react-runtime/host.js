@@ -40,7 +40,6 @@ export const INERT = [
   "shortcutFor",
   "overlay:folder-browser",
   "overlay:worktree",
-  "overlay:new-file",
 ];
 
 /** Overlays that open as one of the window's screens: the screen, its props from the overlay's, and what the
@@ -48,9 +47,11 @@ export const INERT = [
 const OVERLAY_SCREENS = {
   "new-session-menu": {
     screen: "new-session",
-    props: (p) => ({ hostId: p.hostId, projectCwds: p.projects ?? [], ...(p.cwd ? { fixedCwd: p.cwd } : {}), ...(p.anchorRect ? { anchorRect: p.anchorRect } : {}) }),
+    // The strip's extras (New browser, New file) cross as their ids and labels; the one picked runs its own onSelect.
+    props: (p) => ({ hostId: p.hostId, projectCwds: p.projects ?? [], ...(p.cwd ? { fixedCwd: p.cwd } : {}), ...(p.anchorRect ? { anchorRect: p.anchorRect } : {}), ...(Array.isArray(p.extras) ? { extras: p.extras.map(({ id, label }) => ({ id, label })) } : {}) }),
     result: (p, r) => {
       if (r && typeof r === "object" && typeof r.agent === "string") p.onSelect?.(r.cwd ?? null, r.agent);
+      else if (r && typeof r === "object" && typeof r.extra === "string") p.extras?.find((extra) => extra.id === r.extra)?.onSelect?.();
       p.onClose?.();
     },
   },
@@ -487,6 +488,12 @@ export function copyFor(cx, screen) {
     openOverlay(kind, props = {}) {
       const id = nextOverlay++;
       const known = OVERLAY_SCREENS[kind];
+      // The window has no files view: New file is refused with the reason, as the launcher's is.
+      if (kind === "new-file") {
+        perch.run("file.open", {}).catch((error) => console.error(`react-runtime: ${error?.message ?? error}`));
+        props.onClose?.();
+        return id;
+      }
       if (!known) {
         dismiss(kind, props, "no screen draws it yet");
         return id;

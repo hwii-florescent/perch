@@ -447,7 +447,7 @@ function reportDeclarations(computed, report) {
     const value = v[prop];
     switch (prop) {
       case "letter-spacing":
-        if (value !== "normal" && !(value?.px === 0)) report("approximated", prop, value?.px !== undefined ? `${Math.round(value.px * 1000) / 1000}px` : value, source, "the run is as wide as with the spacing (room after it), the letters are not spread");
+        if (value !== "normal" && !(value?.px === 0)) report("approximated", prop, value?.px !== undefined ? `${Math.round(value.px * 1000) / 1000}px` : value, source, value?.px < 0 ? "the run's box is as wide as with the spacing (the glyphs reach past it; where the element clips, the run is drawn smaller to fit)" : "the run is as wide as with the spacing (room after it), the letters are not spread");
         break;
       case "font-variant-numeric":
         if (value !== "normal" && numericFeatures(value) === null) report("unsupported", prop, value, source);
@@ -538,6 +538,27 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
   return { computed, style, tokens, extra, meta: meta(element), reports, childText: inheritText(inheritedText, ownText), where, shift };
 }
 
+/** The boxes `::before` and `::after` rules draw inside `element` (whose computed style is `computed`): a box for
+ * each with a `content`, its text the content's string. A switch's knob is one. */
+function pseudoBoxes(element, computed, inheritedText, ctx) {
+  const boxes = { before: null, after: null };
+  for (const pseudo of ["before", "after"]) {
+    if (!ctx.cascade.matching(element, new Set(), pseudo).length) continue;
+    const own = ctx.cascade.compute(element, computed, new Set(), pseudo);
+    const content = String(own.values.content ?? "none").trim();
+    if (content === "none" || content === "normal") continue;
+    const text = /^(["'])(.*)\1$/.exec(content)?.[2] ?? "";
+    const report = (kind, property, value, source, note) => ctx.findings.add(kind, property, value, source ?? "(user agent)", `${label(element)}::${pseudo}`, note);
+    const tokens = {};
+    const base = boxStyle(own, report, ctx.viewport);
+    const style = encode({ ...base, ...textStyle(own, textWanted(own, ctx.measure), inheritedText) }, tokens);
+    const box = { kind: "div", style, tokens, children: text ? [{ kind: "text", text }] : [] };
+    Object.defineProperty(box, DISPLAY, { value: own.values.display });
+    boxes[pseudo] = box;
+  }
+  return boxes;
+}
+
 /** One described subtree. `chain` names the element's ancestors with their versions. */
 function describeElement(element, parentComputed, inheritedText, ctx, chain = "") {
   const key = `${chain}/${element.id}.${element.version}`;
@@ -575,6 +596,9 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
       const rows = Number(element.props.rows) > 0 ? Math.floor(Number(element.props.rows)) : 2;
       style.h = rows * lineHeightPx(v, ctx.measure) + px(v["padding-top"]) + px(v["padding-bottom"]) + border("top") + border("bottom");
     }
+    // A check box drawn by the page (`appearance: none`) draws its marks with its pseudo-elements (a switch's knob).
+    const { before, after } = pseudoBoxes(element, computed, childText, ctx);
+    if (before || after) node.children = [before, after].filter(Boolean);
     return node;
   }
   if (tag === "img") {
@@ -676,13 +700,26 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
   // after each character as room after the run, so the run's box is as wide as the page's (the letters are not
   // spread). A row of single characters with gaps spreads them, but every character's box snaps to the device pixel
   // grid and the run comes out 2.7 to 5.8 px wider than the page's.
+  // Negative spacing (`tracking-[-0.02em]`) takes the room back the same way (a negative padding), so the box is the
+  // page's width and the glyphs reach past it. Where the element clips (`overflow-hidden` on the start card's
+  // heading) that would cut the last glyph, so there the run is drawn a little smaller instead, as wide as tracked.
   const spacing = computed.values["letter-spacing"]?.px;
+  const clips = computed.values["overflow-x"] !== "visible";
   if (spacing) {
     for (let i = 0; i < kids.length; i++) {
       const run = kids[i];
       if (run.kind !== "text") continue;
       const room = Math.round(spacing * [...run.text].length * 1000) / 1000;
-      kids[i] = { kind: "div", style: { pr: room }, tokens: {}, children: [run] };
+      if (spacing > 0 || !clips) {
+        kids[i] = { kind: "div", style: { pr: room }, tokens: {}, children: [run] };
+        continue;
+      }
+      // ponytail: the run's width is judged from an average advance of 0.55em, not measured, so the drawn width is
+      // within a pixel or two of the page's; measuring the run in the engine would make it exact.
+      const size = computed.values["font-size"];
+      const scale = Math.max(0.8, 1 + spacing / (0.55 * size));
+      const lineHeight = Math.round(lineHeightPx(computed.values, ctx.measure) * 1000) / 1000;
+      kids[i] = { kind: "div", style: { text_size: Math.round(size * scale * 1000) / 1000, line_height: `${lineHeight}px` }, tokens: {}, children: [run] };
     }
   }
   node.children = kids;

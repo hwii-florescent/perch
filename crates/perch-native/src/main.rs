@@ -56,6 +56,9 @@ fn main() {
                             px(shell::LIGHTS_TOP),
                         )),
                     }),
+                    // The window moves only from its heads' empty space (`shell::drags_window`):
+                    // AppKit's own title bar drag would take presses on the tab strip there.
+                    app_owns_titlebar_drag: true,
                     // A test window is ordered in without taking the keyboard, and the app is
                     // never activated.
                     focus: test.is_none(),

@@ -433,6 +433,13 @@ impl Perch {
         (self.host_id(), self.0.data.borrow().workspace_id.clone())
     }
 
+    /// No workspace is focused: the start page is not any workspace's. Call [`Self::flush`] after.
+    pub fn unfocus_workspace(&self) {
+        if self.0.data.borrow_mut().workspace_id.take().is_some() {
+            self.bump(VIEW);
+        }
+    }
+
     /// The computer the navigation shows: the one picked, else the focused session's.
     fn host_id(&self) -> String {
         let data = self.0.data.borrow();
@@ -469,7 +476,19 @@ impl Perch {
             workspace_id: data
                 .workspace_id
                 .clone()
-                .or_else(|| session.and_then(|s| s.workspace_id.clone())),
+                // A session with no workspace recorded belongs to the one at its folder, as the
+                // web's tab strip places it.
+                .or_else(|| {
+                    let s = session?;
+                    s.workspace_id.clone().or_else(|| {
+                        let store = &data.model.store;
+                        store
+                            .workspaces
+                            .iter()
+                            .find(|w| navigation::in_workspace(s, w))
+                            .map(|w| w.id.clone())
+                    })
+                }),
             show_terminals: flag("showTerminals"),
             sort_by_attention: flag("sortByAttention"),
         }
@@ -1387,6 +1406,7 @@ impl Perch {
     }
 
     /// `hostId`'s agents by id and name, for a screen to tell them apart (and draw their icons).
+    /// A plain terminal is not one, though the new-tab choices list it.
     fn providers(&self, host_id: &str) -> Value {
         let store = self.store();
         let list: Vec<Value> = store
@@ -1394,6 +1414,7 @@ impl Perch {
             .get(host_id)
             .into_iter()
             .flatten()
+            .filter(|p| p.id != perch_core::agent_fleet::TERMINAL_PROVIDER)
             .map(|p| json!({ "id": p.id, "name": p.name }))
             .collect();
         json!(list)

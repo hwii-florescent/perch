@@ -739,7 +739,6 @@ impl State {
                     .filter(|m| {
                         m.available
                             && m.enabled != Some(false)
-                            && m.id != TERMINAL_PROVIDER
                             && m.supported_modes.iter().any(|mode| mode == "cli")
                             && m.capabilities.iter().any(|c| c == "interactiveTerminal")
                     })
@@ -1045,7 +1044,16 @@ impl State {
             self.host_capabilities.get(&id)
         };
         if capabilities.is_some_and(|c| has(c, MANIFEST_CAPABILITY)) {
-            providers.extend(self.providers.get(&id).cloned().unwrap_or_default());
+            // The core lists Terminal among its agents (the web's menus show it there); this
+            // list already starts with it.
+            providers.extend(
+                self.providers
+                    .get(&id)
+                    .into_iter()
+                    .flatten()
+                    .filter(|p| p.id != TERMINAL_PROVIDER)
+                    .cloned(),
+            );
         } else {
             providers.extend(KNOWN_AGENTS.iter().map(|(id, name)| Provider {
                 id: (*id).into(),
@@ -1722,6 +1730,13 @@ mod tests {
         let model = state.model();
         let ids: Vec<_> = model.hosts[0].providers.iter().map(|p| &*p.id).collect();
         assert_eq!(ids, ["terminal", "claude"]);
+        // The React menus (tab "+", Cmd+T, the launcher) read the core's list, which keeps
+        // Terminal, as the web's `useAgentChoices`.
+        let listed: Vec<_> = model.store.providers[LOCAL]
+            .iter()
+            .map(|p| &*p.id)
+            .collect();
+        assert_eq!(listed, ["claude", "terminal"]);
         let row = &model.hosts[0].projects[0].sessions[0];
         assert_eq!(
             (row.provider.as_str(), row.provider_id.as_deref()),

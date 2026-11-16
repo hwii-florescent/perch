@@ -217,12 +217,19 @@ pub struct Workspace {
     /// The window's own keyboard focus, held while nothing in it has the keyboard (nothing open),
     /// so its keys still reach the window, as a page's reach the document.
     root_focus: gpui::FocusHandle,
+    /// The terminal the window last gave the keyboard to. When it is no longer on screen (its tab
+    /// closed, the last one too) and still has the keyboard, the window takes it back.
+    given_keyboard: Option<gpui::WeakFocusHandle>,
     notifications: Vec<Notification>,
     next_notification: u64,
     /// Cmd+T asks the tab strip mod for a new tab this many times (`perch.requests()`).
     new_tab_asks: u64,
     /// The place the start page's picker chose, for the workspace it was chosen in.
     start_place: Option<(String, String)>,
+    /// New quickchat was asked for before the core made the Quickchat project: the start page is
+    /// Quickchat's, starting in the home folder (which makes the project), until anything else is
+    /// shown.
+    quickchat_start: bool,
     /// The last Add project request (`useAddProject`): `{status, error?, hostId?}`.
     add_project: Value,
     /// How many times the sidebar was asked to open its Add project form, and when last.
@@ -312,10 +319,12 @@ impl Workspace {
             screens: Screens::default(),
             screen_focus: cx.focus_handle(),
             root_focus: cx.focus_handle(),
+            given_keyboard: None,
             notifications: Vec::new(),
             next_notification: 0,
             new_tab_asks: 0,
             start_place: None,
+            quickchat_start: false,
             add_project: json!({ "status": "idle" }),
             add_project_asks: (0, None),
             worktree_request: Value::Null,
@@ -1265,8 +1274,18 @@ impl Workspace {
         if !store.connected {
             return base("connecting");
         }
-        let Some(workspace) = focused.and_then(|id| store.workspaces.iter().find(|w| w.id == id))
-        else {
+        let focused = focused.and_then(|id| store.workspaces.iter().find(|w| w.id == id));
+        if focused.is_none() && self.quickchat_start {
+            // Quickchat before its project exists: its start page, starting in the home folder.
+            let mut props = base("workspace");
+            props["targets"] = json!([{
+                "key": "~", "label": "Quickchat (current folder)", "name": "Quickchat", "path": "~",
+            }]);
+            props["targetKey"] = json!("~");
+            props["choices"] = json!(choices);
+            return props;
+        }
+        let Some(workspace) = focused else {
             // New session offers the project a session would start in (the sidebar's target).
             let mut props = base("home");
             let project = host.and_then(|host| {
@@ -1427,14 +1446,8 @@ impl Workspace {
                 let agent = word(&args, 1).ok_or("start needs an agent.")?;
                 self.start_session(host_id, word(&args, 0), &agent, cx)
             }
-            Some("openBrowser") => {
-                Err("A browser tab does not open in the native window yet.".into())
-            }
-            // New file names the file in the files view's prompt, which this window lacks.
-            Some("focusWorkspace") => Err(
-                "A new file needs the files view, which the native window does not have yet."
-                    .into(),
-            ),
+            Some("openBrowser") => Err(NO_BROWSER.into()),
+            Some("focusWorkspace") => Err(NO_FILES.into()),
             Some("addProject") => self.ask_add_project(cx),
             Some(other) => Err(format!("The native window cannot {other} yet.")),
         }
@@ -1767,6 +1780,7 @@ impl Workspace {
 
     /// Tell the sidebar which tab is shown, so it is marked read and highlighted.
     fn after_change(&mut self, cx: &mut Context<Self>) {
+        self.quickchat_start = false;
         self.keep_in_bounds(cx);
         self.note_shown();
         let target = self.tabs.active().and_then(|id| {
@@ -2086,9 +2100,43 @@ impl Workspace {
             "global.navigator" | "global.navigatorAlt" | "app.palette" => {
                 self.toggle_palette(window, cx)
             }
-            "global.help" | "global.helpPlain" => self.open_keybind_help(cx),
+            "global.help" | "global.helpPlain" | "app.help" => self.open_keybind_help(cx),
             // As the web's Cmd+Shift+T and the sidebar's New session: the launcher, for the
             // sidebar's target.
+            // As the web's: set a command's key (`keys` null: back to its default, "": none), kept
+            // in the core's settings, which every window follows.
+            "key.bind" => {
+                let command = text("command").filter(|c| !c.is_empty());
+                let keys = args.and_then(|a| a.get("keys")).unwrap_or(&Value::Null);
+                let (Some(command), true) = (command, keys.is_null() || keys.is_string()) else {
+                    return Err(
+                        "key.bind needs {command: <id>, keys: \"cmd+shift+y\" | \"\" | null}."
+                            .into(),
+                    );
+                };
+                let keys = keys.as_str();
+                if let Some(combo) = keys.filter(|k| !k.is_empty()) {
+                    if !crate::keymap::bindable(combo, cfg!(target_os = "macos")) {
+                        return Err(format!(
+                            "\"{combo}\" cannot be bound: it is reserved or has no modifier."
+                        ));
+                    }
+                }
+                let sidebar = self.sidebar.read(cx);
+                let mut next = sidebar.model().keybindings.clone();
+                match keys {
+                    None => next.remove(command),
+                    Some(combo) => next.insert(command.to_string(), combo.to_string()),
+                };
+                sidebar.send(Command::UpdateSettings(json!({ "keybindings": next })));
+            }
+            // The 9th tab, or the last when there are fewer, as the web's leader 9 (Cmd+9 is
+            // always the last).
+            "leader.jump9" => self.select(Some(9), cx)?,
+            // As the web's leader c: a terminal in the project on screen, with no picker.
+            "leader.newSession" => self.sidebar.update(cx, |sidebar, cx| {
+                sidebar.launch(perch_core::agent_fleet::TERMINAL_PROVIDER, cx)
+            })?,
             "sessions.new" => {
                 if !self.screens.has("launcher", cx) {
                     return Err("No mod draws the launcher.".into());
@@ -2263,8 +2311,7 @@ impl Workspace {
             }
             "workspace.open" => {
                 let id = self.known_workspace(text("id"), cx)?;
-                // Its session last shown here, else the workspace alone (the native window has no
-                // start screen).
+                // Its session last shown here, else the workspace's start page.
                 let store = self.sidebar.read(cx).model().store.clone();
                 let last = self.tabs.strip().iter().rev().find(|tab| {
                     store
@@ -2275,7 +2322,17 @@ impl Workspace {
                 match last.cloned() {
                     Some(tab) => self.show_session(&tab, cx)?,
                     None => {
-                        self.run_command("workspace.focus", Some(&json!({ "id": id })), window, cx)?
+                        self.run_command(
+                            "workspace.focus",
+                            Some(&json!({ "id": id })),
+                            window,
+                            cx,
+                        )?;
+                        // Its start page: no tab of another workspace stays on screen, and the
+                        // window takes the keyboard from the terminal that goes.
+                        self.tabs.hide();
+                        self.root_focus.focus(window, cx);
+                        self.after_change(cx);
                     }
                 }
             }
@@ -2408,9 +2465,18 @@ impl Workspace {
                     sidebar.run_action("nests.scratchpad", cx);
                     sidebar.take_new_session()
                 });
-                let chats = target
-                    .and_then(|t| t.project_id)
-                    .ok_or("There is no Quickchat on this computer.")?;
+                let Some(chats) = target.and_then(|t| t.project_id) else {
+                    // No Quickchat project yet: its start page all the same, as the web's.
+                    if let Some((_, perch)) = screens::mods(cx) {
+                        perch.unfocus_workspace();
+                        perch.flush(cx);
+                    }
+                    self.tabs.hide();
+                    self.root_focus.focus(window, cx);
+                    self.after_change(cx);
+                    self.quickchat_start = true;
+                    return Ok(());
+                };
                 let focused = screens::mods(cx)
                     .and_then(|(_, perch)| {
                         let result = perch.run_own("project.focus", &json!({ "id": chats }))?;
@@ -2440,6 +2506,10 @@ impl Workspace {
                 };
                 self.hand_off(place)?;
             }
+            // The strip's "+" lists New browser and New file, as the web's; this window has
+            // neither view, so they are refused with the reason (as the launcher's are).
+            "browser.open" => return Err(NO_BROWSER.into()),
+            "file.open" => return Err(NO_FILES.into()),
             "link.open" => {
                 let url = text("url").ok_or("This command needs {url}.")?;
                 crate::handoff::open_link(url).map_err(|e| e.to_string())?;
@@ -2786,11 +2856,30 @@ impl Workspace {
                         }
                     }
                     None => {
-                        let handled = self
-                            .sidebar
-                            .update(cx, |sidebar, cx| sidebar.run_action(name, cx));
+                        let (handled, empty) = self.sidebar.update(cx, |sidebar, cx| {
+                            (sidebar.run_action(name, cx), sidebar.take_workspace())
+                        });
                         if !handled {
                             return Err(format!("No command {name}."));
+                        }
+                        // A workspace with no session: its start page, as the web's
+                        // `openEmptyWorkspace`. A project shown as one place names its checkout.
+                        if let Some(place) = empty {
+                            let store = self.sidebar.read(cx).model().store.clone();
+                            let id = if store.workspaces.iter().any(|w| w.id == place) {
+                                Some(place)
+                            } else {
+                                crate::sidebar::navigation::landing_workspace(&store, &place, None)
+                                    .map(|(id, _)| id)
+                            };
+                            if let Some(id) = id {
+                                self.run_command(
+                                    "workspace.open",
+                                    Some(&json!({ "id": id })),
+                                    window,
+                                    cx,
+                                )?;
+                            }
                         }
                     }
                 }
@@ -2847,10 +2936,7 @@ impl Workspace {
     /// The tab at `index` (1 is first), or the last one.
     fn select(&mut self, index: Option<usize>, cx: &mut Context<Self>) -> Result<(), String> {
         if !self.tabs.jump(index) {
-            return Err(match index {
-                Some(n) => format!("No tab {n}: there are {}.", self.tabs.strip().len()),
-                None => "There are no tabs.".into(),
-            });
+            return Err("There are no tabs.".into());
         }
         self.after_change(cx);
         Ok(())
@@ -3702,6 +3788,12 @@ fn program_in(argv: &Value, task: Option<&str>) -> Result<String, String> {
         .join(" "))
 }
 
+/// Why New browser is refused here.
+const NO_BROWSER: &str = "A browser tab does not open in the native window yet.";
+/// Why New file is refused here: it names the file in the files view's prompt.
+const NO_FILES: &str =
+    "A new file needs the files view, which the native window does not have yet.";
+
 fn word(args: &[Value], at: usize) -> Option<String> {
     args.get(at).and_then(Value::as_str).map(str::to_string)
 }
@@ -3789,6 +3881,14 @@ impl gpui::Render for Workspace {
                 window,
                 move |this, window, cx| {
                     send(window.is_window_active(), &this.sidebar, cx);
+                    // The active window sizes the terminals it shows; an inactive one hands the
+                    // size to the other window on this computer.
+                    let active = window.is_window_active();
+                    for pane in this.panes.values() {
+                        if let Some(view) = &pane.view {
+                            view.update(cx, |view, _| view.window_active(active));
+                        }
+                    }
                     // As the web's blur: a tab drag, or a press a mod follows, ends with nothing
                     // changed.
                     if !window.is_window_active() {
@@ -3820,8 +3920,16 @@ impl gpui::Render for Workspace {
                 .and_then(|pane| pane.view.as_ref());
             if let Some(view) = peeked.or_else(|| self.terminal()) {
                 let handle = view.focus_handle(cx);
+                self.given_keyboard = Some(handle.downgrade());
                 if !handle.is_focused(window) {
                     window.defer(cx, move |window, cx| handle.focus(window, cx));
+                }
+            } else if let Some(gone) = self.given_keyboard.take().and_then(|h| h.upgrade()) {
+                // No terminal on screen: the one that had the keyboard lets go of it, as a page's
+                // removed element does, and the window keeps it so its keys still work.
+                if gone.is_focused(window) {
+                    let root = self.root_focus.clone();
+                    window.defer(cx, move |window, cx| root.focus(window, cx));
                 }
             }
         } else if self.screens.top_modal().is_some() && window.focused(cx).is_none() {
@@ -3852,6 +3960,10 @@ impl gpui::Render for Workspace {
             let Some(view) = &pane.view else { continue };
             let on_screen = shown.contains(id) || self.peek.as_ref() == Some(id);
             view.update(cx, |view, cx| view.set_visible(on_screen, cx));
+            // A terminal shown in the active window is sized by it.
+            if on_screen && window.is_window_active() {
+                view.update(cx, |view, _| view.window_active(true));
+            }
             if on_screen {
                 pane.settle.reset();
             } else if let Some(room) = room {
@@ -3981,7 +4093,7 @@ impl gpui::Render for Workspace {
                 .flex_none()
                 .w(px(width))
                 .child(
-                    shell::head()
+                    shell::drags_window(shell::head())
                         .justify_between()
                         .gap_2()
                         .px_2()
@@ -4038,11 +4150,9 @@ impl gpui::Render for Workspace {
                 .top_0()
                 .left_0()
                 .size_full();
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
+                // The strip's empty space drags the window (the web's `data-tauri-drag-region`);
+                // a tab, its controls and anything else a mod handles take their own presses.
+                shell::drags_window(div().relative().flex_1().min_w_0().h_full())
                     .child(view)
                     .child(measure)
                     .into_any_element()
