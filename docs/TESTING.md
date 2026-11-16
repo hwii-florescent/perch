@@ -463,9 +463,9 @@ three failures for the same reason.
   `scripts/native-memory-budgets.py` (`python3 -I scripts/native-memory-budgets.py --self-test` checks them).
   A test-mode step whose feature is not built fails the run rather than skipping the state.
 - Timing budgets run strict in release: `PERCH_BUDGET_STRICT=1 cargo test --release -p perch-native --test
-  editor_engine --test diff_element --test files_window` fails at the budgets themselves rather than at twice them
-  (the default, for noisy machines); each test prints its numbers under its report flag
-  (`PERCH_EDITOR_REPORT=1`, `PERCH_DIFF_REPORT=1`, `PERCH_MEDIA_REPORT=1`).
+  editor_engine` (and every other timing test that names the variable in its header) fails at the budgets
+  themselves rather than at twice them, the default for noisy machines; each test prints its numbers under its
+  report flag (`PERCH_EDITOR_REPORT=1` for the editor).
 - Nothing opens a window, takes focus or calls `open`. The render tests draw through GPUI's test
   platform into a texture (set `SHOT=<folder>` to save each frame as a PNG); keys go through the window's
   own `dispatch_keystroke`, so the dispatcher that runs before the terminal is what is tested. The
