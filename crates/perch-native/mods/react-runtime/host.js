@@ -67,6 +67,8 @@ function fileMenuResult(p, r) {
     case "openFile": return p.onOpenFile?.(args[0]);
     case "expand": return p.onExpand?.(args[0]);
     case "refresh": return p.onRefresh?.();
+    // Ask agent about file…: the window opens the Context Bridge on this view's draft of it, else the file on disk.
+    case "askAgent": return perch.askAgentAboutFile(ws, args[0]);
     case "hold": heldEntry = { workspaceId: ws, path: args[0], cut: !!args[1] }; return;
     case "mutate": return mutate(args[0], args[1], args[2]);
     case "createFileAt": {
@@ -81,7 +83,7 @@ function fileMenuResult(p, r) {
 }
 
 /** The props of the `dialog` screen for a file menu or a new-file prompt: the folders' names give a copy its free
- * name. Open in Default App, Reveal and Ask agent are not offered. */
+ * name. Open in Default App and Reveal are not offered; Ask agent is where the Context Bridge is. */
 function fileMenuProps(p) {
   const files = p.workspaceId ? perch.workspaceFiles(p.workspaceId) : null;
   const names = Object.fromEntries(Object.entries(files?.trees ?? {}).map(([dir, tree]) => [dir, (tree?.entries ?? []).map((e) => e.name)]));
@@ -89,7 +91,7 @@ function fileMenuProps(p) {
   return {
     workspaceId: p.workspaceId, workspacePath: p.workspacePath ?? files?.workspace?.path ?? "", target: p.target ?? null,
     x: p.x ?? 0, y: p.y ?? 0, ...(p.initialStage ? { initialStage: p.initialStage } : {}),
-    held, nativeAvailable: false, canAsk: false, names,
+    held, nativeAvailable: false, canAsk: !!p.workspaceId && perch.contextBridgeAvailable(p.workspaceId), names,
   };
 }
 
@@ -404,6 +406,9 @@ export function copyFor(cx, screen) {
     // `useWorkspaceFiles`: one workspace's files from the window's store, and its actions run there.
     workspaceFiles: (id) => snapshot(`workspaceFiles:${id}`, () => perch.workspaceFiles(id)),
     filesDo: (action, workspaceId, ...args) => perch.filesDo(action, workspaceId, ...args),
+    // Context Bridge: whether Ask agent is offered for a workspace, and asking (the window opens its dialog).
+    contextBridgeAvailable: (id) => snapshot(`contextBridgeAvailable:${id}`, () => perch.contextBridgeAvailable(id)),
+    askAgent: (workspaceId, source) => perch.askAgent(workspaceId, source),
     statusLine: () => snapshot("statusLine", () => perch.statusLine()),
     zoom: () => snapshot("zoom", () => perch.zoom()),
     paneLook: () => snapshot("paneLook", () => perch.paneLook()),

@@ -716,12 +716,12 @@ impl Connection {
         }
     }
 
-    fn request_id(&mut self) -> String {
+    pub(crate) fn request_id(&mut self) -> String {
         self.next_request += 1;
         format!("native-{}", self.next_request)
     }
 
-    async fn send(&mut self, frame: Value) -> Result<()> {
+    pub(crate) async fn send(&mut self, frame: Value) -> Result<()> {
         self.socket
             .send(Message::text(frame.to_string()))
             .await
@@ -873,8 +873,9 @@ pub const NOT_CONNECTED: &str =
     "Perch is not connected to its core, so nothing was changed. Try again once it is back.";
 
 /// The questions a screen puts to the core that change nothing there.
-const READS: [&str; 10] = [
+const READS: [&str; 11] = [
     "fs.browse",
+    "context.preview",
     "instructions.get",
     "memory.list",
     "memory.get",
@@ -1151,8 +1152,26 @@ impl Field {
 }
 
 /// The answer `message` gives to one of this connection's requests: its id and the outcome.
-fn answer_of(message: &ServerMessage) -> Option<(&str, Result<Value, String>)> {
+pub(crate) fn answer_of(message: &ServerMessage) -> Option<(&str, Result<Value, String>)> {
     match message {
+        // Context Bridge: the prepared packet and its agents, and the answer to a send.
+        ServerMessage::ContextPreviewResult {
+            request_id,
+            packet,
+            agents,
+        } => Some((
+            request_id,
+            Ok(json!({ "packet": packet, "agents": agents })),
+        )),
+        ServerMessage::AgentUiResult {
+            request_id,
+            session_id,
+            accepted,
+            ..
+        } => Some((
+            request_id,
+            Ok(json!({ "sessionId": session_id, "accepted": accepted })),
+        )),
         // The state the core answers with, as the web's clients keep it (without its kind and id).
         ServerMessage::InstructionsState { request_id, .. }
         | ServerMessage::MemoryState { request_id, .. }

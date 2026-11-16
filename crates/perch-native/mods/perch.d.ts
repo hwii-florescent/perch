@@ -501,6 +501,22 @@ declare module "perch" {
   /** Whether computer `hostId`'s core (default this one) has `capability` (its `server.info`), e.g.
    * `"memory.off.v1"`. */
   export function coreCan(capability: string, hostId?: string): boolean;
+  /** Context Bridge: whether Ask agent is offered for a workspace (this computer's core can, the workspace is local). */
+  export function contextBridgeAvailable(workspaceId: string): boolean;
+  /** Ask an agent about `source` (`{kind: "file" | "editor" | "diff" | "terminal", ...}`): the window opens the
+   * Context Bridge dialog on it. Nothing is sent. */
+  export function askAgent(workspaceId: string, source: Record<string, unknown>): void;
+  /** Ask about a file: this window's unsaved draft of it when there is one, else the file on disk. */
+  export function askAgentAboutFile(workspaceId: string, path: string): void;
+  /** The Context Bridge menu's Ask agent: its terminal selection becomes what the dialog asks about. */
+  export function contextAsk(): void;
+  /** Prepares the window's capture with `instruction`: `{packet, agents}`, or the core's refusal. Takes no lease. */
+  export function contextPreview(instruction: string): Promise<{ packet: Record<string, unknown>; agents: Record<string, unknown>[] }>;
+  /** Sends the window's capture to the agent `targetSessionId`, once per capture (a second call is refused), never
+   * retried; resolves when the core confirms delivery. `preview` is what the screen showed. */
+  export function contextSend(instruction: string, digest: string, targetSessionId: string, preview: unknown): Promise<null>;
+  /** Goes to agent `sessionId`'s tab; false when it is gone. */
+  export function contextOpenAgent(sessionId: string): boolean;
   /** Settings' "Empty workspace opens": the pane a new workspace starts with (`""` for none), null until the core
    * has sent its settings. */
   export function emptyWorkspaceAgent(): string | null;

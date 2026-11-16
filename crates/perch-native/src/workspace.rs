@@ -60,7 +60,9 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 mod browsing;
+mod context_bridge;
 pub use browsing::is_browser_tab;
+pub use context_bridge::bridge_available;
 
 /// How long a follow-up key after the leader chord is awaited.
 const LEADER_TIMEOUT: Duration = Duration::from_millis(1500);
@@ -275,6 +277,8 @@ pub struct Workspace {
     files: crate::files::Files,
     /// The workspace the drawer's Files tab was opened on, for when no tab on screen names one.
     explorer_workspace: Option<String>,
+    /// Context Bridge: the terminal's Ask agent menu, the capture being asked about and its send.
+    bridge: context_bridge::Bridge,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -319,6 +323,7 @@ impl Workspace {
             this.open_sub_sessions(cx);
             let connected = sidebar.read(cx).model().connected;
             this.files_connected(connected, cx);
+            this.refresh_bridge(cx);
             cx.notify()
         });
         // A window opened on a live connection: the store starts connected.
@@ -367,6 +372,7 @@ impl Workspace {
             browsing: Default::default(),
             files: crate::files::Files::new(files_live),
             explorer_workspace: None,
+            bridge: Default::default(),
             _subscriptions: vec![opened, failed, observed],
         }
     }
@@ -2078,6 +2084,9 @@ impl Workspace {
         match event {
             // A click on a link is a person's: the window runs the system's handler for it.
             TerminalEvent::OpenLink(target) => (self.opener)(target),
+            TerminalEvent::AskAgentOffered(at) => self.offer_ask_agent(id, *at, cx),
+            // The bridge's menu took this right-click (the web's stops it there).
+            TerminalEvent::MenuAsked(_) if self.bridge.took_click() => {}
             TerminalEvent::MenuAsked(at) => self.open_menu(id, *at, cx),
             TerminalEvent::Chose(provider) => self.start_chosen(id, provider, cx),
             // Its find bar or phone-size notice comes or goes (`inflow_wanted`).
