@@ -16,7 +16,7 @@
 //!   file tab's pane (`files#<tab id>`);
 //! - floating, opened by the window over the whole of it, as the web's take the whole page:
 //!   `navigator`, `pane-menu`, `tab-menu`, `confirm`, `dialog`, `new-session`, `session-split`,
-//!   `keybind-help`, `launcher`, `instructions`, `memory` (modal), `toast` and `tab-drag`
+//!   `keybind-help`, `launcher`, `instructions`, `memory`, `context-bridge` (modal), `toast` and `tab-drag`
 //!   (not modal: shown while there are notifications).
 //!
 //! A screen gets its arguments from `perch.props()` (the web's prop names, with each callback
@@ -243,6 +243,13 @@ pub const SCREENS: &[Screen] = &[
     },
     Screen {
         id: "memory",
+        place: MODAL,
+        width: 0.,
+        height: 0.,
+    },
+    // Context Bridge: the terminal selection's Ask agent menu and the dialog over the whole window.
+    Screen {
+        id: "context-bridge",
         place: MODAL,
         width: 0.,
         height: 0.,

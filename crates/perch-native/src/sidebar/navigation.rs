@@ -421,6 +421,24 @@ pub fn in_workspace(session: &SessionSummary, workspace: &WorkspaceSummary) -> b
     }
 }
 
+/// Whether two sessions are of one workspace: by id, or for an older record by folder.
+pub fn same_workspace(a: &SessionSummary, b: &SessionSummary) -> bool {
+    match (&a.workspace_id, &b.workspace_id) {
+        (Some(x), Some(y)) => x == y,
+        _ => a.host_id == b.host_id && a.cwd == b.cwd,
+    }
+}
+
+/// The ids of the sessions of `session`'s workspace in its tab strip's order (the sidebar lists
+/// them in it): oldest first, then the core's chat order over them.
+pub fn strip_of_workspace(store: &Store, session: &SessionSummary) -> Vec<String> {
+    Builder::new(store, &View::default())
+        .strip_of(&session.host_id, |s| same_workspace(s, session))
+        .into_iter()
+        .map(|s| s.id.clone())
+        .collect()
+}
+
 /// `sessionsForWorkspace`: newest first.
 fn sessions_for_workspace<'a>(
     sessions: &[&'a SessionSummary],
@@ -686,14 +704,18 @@ impl<'a> Builder<'a> {
     /// `workspaceTabs` for `workspace`, sessions only: every session of the checkout (listed or
     /// not) oldest first, then the core's chat order over them.
     fn strip(&self, workspace: &WorkspaceSummary) -> Vec<&'a SessionSummary> {
-        let mut mine: Vec<&SessionSummary> = self
-            .store
-            .sessions
-            .iter()
-            .filter(|s| in_workspace(s, workspace))
-            .collect();
+        self.strip_of(&workspace.host_id, |s| in_workspace(s, workspace))
+    }
+
+    /// [`Self::strip`] for the sessions `of` accepts, on computer `host_id`.
+    fn strip_of(
+        &self,
+        host_id: &str,
+        of: impl Fn(&SessionSummary) -> bool,
+    ) -> Vec<&'a SessionSummary> {
+        let mut mine: Vec<&SessionSummary> = self.store.sessions.iter().filter(|s| of(s)).collect();
         mine.sort_by_key(|s| s.created_at);
-        let order = self.session_order(&workspace.host_id);
+        let order = self.session_order(host_id);
         if order.is_empty() {
             return mine;
         }

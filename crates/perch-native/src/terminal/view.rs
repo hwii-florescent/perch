@@ -1169,6 +1169,21 @@ impl TerminalView {
         self.place.available() && self.vt.has_selection()
     }
 
+    /// Puts `frame` (a Context Bridge send) to the core on this terminal's own connection, the
+    /// one that holds the agent's input lease. None when it holds none (or is not live): another
+    /// connection's request is then the core's to refuse or allow.
+    pub fn request(
+        &self,
+        frame: serde_json::Value,
+    ) -> Option<futures::channel::oneshot::Receiver<Result<serde_json::Value, String>>> {
+        if !self.can_stop() {
+            return None;
+        }
+        let (reply, answer) = attach::Reply::new();
+        self.send(ToCore::Request { frame, reply });
+        Some(answer)
+    }
+
     /// The core this terminal is attached to, for preparing and sending a context packet.
     pub fn core(&self) -> Option<&Core> {
         self.core.as_ref()
