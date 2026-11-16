@@ -144,7 +144,7 @@ fn row(kind: &str, url: String, title: &str) -> AddressRow {
 }
 
 /// The URL's `host` as the web reads it: the host name, and the port when it is not the scheme's default.
-fn url_host(url: &str) -> Option<String> {
+pub fn url_host(url: &str) -> Option<String> {
     let url = Url::parse(url).ok()?;
     let host = url.host_str()?;
     Some(match url.port() {

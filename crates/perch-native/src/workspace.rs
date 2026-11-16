@@ -58,6 +58,9 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+mod browsing;
+pub use browsing::is_browser_tab;
+
 /// How long a follow-up key after the leader chord is awaited.
 const LEADER_TIMEOUT: Duration = Duration::from_millis(1500);
 /// Pixels one resize key grows or shrinks the focused pane by, as the web's.
@@ -258,6 +261,8 @@ pub struct Workspace {
     column_drag: Option<ColumnDrag>,
     /// The window's width as last drawn.
     viewport_width: f32,
+    /// Browser pages: browser tabs and the drawer's (`browsing`).
+    browsing: browsing::Browsing,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -341,6 +346,7 @@ impl Workspace {
             chrome: Chrome::default(),
             column_drag: None,
             viewport_width: 0.0,
+            browsing: Default::default(),
             _subscriptions: vec![opened, failed, observed],
         }
     }
@@ -1494,6 +1500,9 @@ impl Workspace {
                 wanted.push((id, key, props));
             }
         };
+        for (id, key, props) in self.browser_wanted(cx) {
+            want(id, key, props);
+        }
         if self.sidebar.read(cx).visible() {
             want("sidebar", "sidebar".into(), json!({}));
         }
@@ -2080,6 +2089,9 @@ impl Workspace {
     /// A tab's name: the session's title now (a plain terminal is not listed), else the title its
     /// program set, else what it was opened as.
     fn title_of(&self, id: &str, cx: &App) -> String {
+        if let Some(title) = self.browser_title(id) {
+            return title;
+        }
         let named = |title: String| Some(title).filter(|t| !t.trim().is_empty());
         let listed = self
             .sidebar
@@ -2120,6 +2132,9 @@ impl Workspace {
             })
         };
         self.sidebar.read(cx).take_refused();
+        if let Some(result) = self.browser_command(name, args, window, cx) {
+            return result;
+        }
         match name {
             "global.navigator" | "global.navigatorAlt" | "app.palette" => {
                 self.toggle_palette(window, cx)
@@ -3008,6 +3023,9 @@ impl Workspace {
     /// deleting the session later still closes the tab, whatever the wait said. A tab with no
     /// attached terminal has no connection to ask over: it closes, and the session keeps running.
     fn close(&mut self, id: &str, cx: &mut Context<Self>) {
+        if is_browser_tab(id) {
+            return self.close_browser_tab(id, cx);
+        }
         let Some(pane) = self.panes.get(id) else {
             return;
         };
@@ -3740,6 +3758,9 @@ impl Workspace {
     }
 
     fn pane_body(&self, id: &str, focused: bool, cx: &mut Context<Self>) -> AnyElement {
+        if let Some(page) = self.browser_body(id, focused, cx) {
+            return page;
+        }
         let target = id.to_string();
         let frame = div()
             .id(format!("pane-{id}"))
@@ -3922,6 +3943,7 @@ impl gpui::Render for Workspace {
                 },
             ));
         }
+        self.browser_frame(window, cx);
         // Screens mods draw: the notifications screen is up while there are notifications, the
         // floating ones opened since the last draw get their views, the in-flow ones are placed.
         let toast_up = self.screens.is_open("toast");
@@ -4076,6 +4098,10 @@ impl gpui::Render for Workspace {
             )
         });
         let tools = self.chrome.tools();
+        let mut drawer_browser = (tools == Some(shell::Tools::Browser))
+            .then(|| self.drawer_browser(cx))
+            .flatten();
+        let drawer_has_page = drawer_browser.is_some();
         let drawer_card = tools.map(|tab| {
             let width = self
                 .chrome
@@ -4124,28 +4150,35 @@ impl gpui::Render for Workspace {
                         .child(div().flex().items_center().gap(px(2.)).children(tabs))
                         .child(shell::drawer_toggle(tokens, toggle_drawer.clone())),
                 )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .justify_center()
-                        .gap_3()
-                        .px_6()
-                        .child(
-                            div()
-                                .text_size(px(12.))
-                                .text_color(tokens.subtext)
-                                .text_center()
-                                .child(format!(
-                                    "{} for this workspace opens in the Perch app for now.",
-                                    tab.label()
-                                )),
-                        )
-                        .child(open),
+                .children(
+                    drawer_browser
+                        .take()
+                        .map(|page| div().flex_1().min_h_0().child(page).into_any_element()),
                 )
+                .when(!drawer_has_page, |card| {
+                    card.child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .justify_center()
+                            .gap_3()
+                            .px_6()
+                            .child(
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(tokens.subtext)
+                                    .text_center()
+                                    .child(format!(
+                                        "{} for this workspace opens in the Perch app for now.",
+                                        tab.label()
+                                    )),
+                            )
+                            .child(open),
+                    )
+                })
                 .child(shell::round_corners(tokens.backdrop))
         });
         let drawer_handle = tools.map(|_| {
@@ -4323,6 +4356,8 @@ impl gpui::Render for Workspace {
         // While a tab is pressed the window follows the pointer wherever it is, before anything
         // under it: what is under a drag does not react to it. While a press a mod follows lasts,
         // the pointer is forwarded to that mod, and only then.
+        // Painted after every page's slot: the pages follow what was drawn.
+        let pages_follow = self.browser_reconcile();
         let follow = (self.drag.is_some() || self.follow.is_some()).then(|| {
             let this = cx.entity().downgrade();
             canvas(
@@ -4445,6 +4480,7 @@ impl gpui::Render for Workspace {
             .children(floating)
             .children(follow)
             .children(columns)
+            .children(pages_follow)
     }
 }
 

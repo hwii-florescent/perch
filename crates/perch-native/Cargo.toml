@@ -60,6 +60,11 @@ path = "tests/browser_pane.rs"
 harness = false
 
 [[test]]
+name = "browser_tabs_window"
+path = "tests/browser_tabs_window.rs"
+harness = false
+
+[[test]]
 name = "browser_webkit"
 path = "tests/browser_webkit.rs"
 harness = false
