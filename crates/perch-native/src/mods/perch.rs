@@ -433,6 +433,13 @@ impl Perch {
         (self.host_id(), self.0.data.borrow().workspace_id.clone())
     }
 
+    /// No workspace is focused: the start page is not any workspace's. Call [`Self::flush`] after.
+    pub fn unfocus_workspace(&self) {
+        if self.0.data.borrow_mut().workspace_id.take().is_some() {
+            self.bump(VIEW);
+        }
+    }
+
     /// The computer the navigation shows: the one picked, else the focused session's.
     fn host_id(&self) -> String {
         let data = self.0.data.borrow();

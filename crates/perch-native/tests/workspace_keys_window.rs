@@ -655,6 +655,46 @@ fn empty_workspace(rig: &mut Rig) {
     println!("empty workspace: ok");
 }
 
+/// Before the core has made the Quickchat project, the sidebar draws the Quickchat section with
+/// its +, and New quickchat shows Quickchat's start page, as the web's (whose client makes the
+/// project as it connects).
+fn quickchat_before_first(rig: &mut Rig) {
+    let names: Vec<String> = rig.draw().into_iter().map(|r| r.name.to_string()).collect();
+    for name in ["chats-header", "chats-new-button"] {
+        assert!(
+            names.iter().any(|n| n == name),
+            "{name} is drawn with no Quickchat project"
+        );
+    }
+    rig.ws(|ws, window, cx| ws.run_command("quickchat.new", None, window, cx))
+        .expect("New quickchat works before the first quickchat");
+    rig.draw();
+    assert_eq!(rig.active(), None, "the start page");
+    let drawn = rig.draw();
+    assert!(
+        drawn.iter().any(|r| r.name == "start-target"),
+        "Quickchat's start page, not home"
+    );
+    // An agent picked there starts a quickchat (no folder), which makes the project.
+    rig.asked();
+    let start = drawn
+        .iter()
+        .find(|r| r.name == "start-action:workspace-start-claude")
+        .expect("the start page's agents")
+        .bounds
+        .center();
+    click_at(rig, start);
+    let asked = rig.asked();
+    assert!(
+        asked
+            .iter()
+            .any(|c| matches!(c, Command::Launch { cwd: None, provider, .. }
+            if provider == "claude")),
+        "started in the home folder: {asked:?}"
+    );
+    println!("quickchat before first: ok");
+}
+
 fn main() {
     let scratch: PathBuf =
         std::env::temp_dir().join(format!("perch-keys-window-{}", std::process::id()));
@@ -664,6 +704,7 @@ fn main() {
     let mut rig = rig(scratch.join("native-mods"));
     rig.draw();
 
+    quickchat_before_first(&mut rig);
     history(&mut rig);
     next_project(&mut rig);
     resize(&mut rig);

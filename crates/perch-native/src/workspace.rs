@@ -226,6 +226,10 @@ pub struct Workspace {
     new_tab_asks: u64,
     /// The place the start page's picker chose, for the workspace it was chosen in.
     start_place: Option<(String, String)>,
+    /// New quickchat was asked for before the core made the Quickchat project: the start page is
+    /// Quickchat's, starting in the home folder (which makes the project), until anything else is
+    /// shown.
+    quickchat_start: bool,
     /// The last Add project request (`useAddProject`): `{status, error?, hostId?}`.
     add_project: Value,
     /// How many times the sidebar was asked to open its Add project form, and when last.
@@ -320,6 +324,7 @@ impl Workspace {
             next_notification: 0,
             new_tab_asks: 0,
             start_place: None,
+            quickchat_start: false,
             add_project: json!({ "status": "idle" }),
             add_project_asks: (0, None),
             worktree_request: Value::Null,
@@ -1269,8 +1274,18 @@ impl Workspace {
         if !store.connected {
             return base("connecting");
         }
-        let Some(workspace) = focused.and_then(|id| store.workspaces.iter().find(|w| w.id == id))
-        else {
+        let focused = focused.and_then(|id| store.workspaces.iter().find(|w| w.id == id));
+        if focused.is_none() && self.quickchat_start {
+            // Quickchat before its project exists: its start page, starting in the home folder.
+            let mut props = base("workspace");
+            props["targets"] = json!([{
+                "key": "~", "label": "Quickchat (current folder)", "name": "Quickchat", "path": "~",
+            }]);
+            props["targetKey"] = json!("~");
+            props["choices"] = json!(choices);
+            return props;
+        }
+        let Some(workspace) = focused else {
             // New session offers the project a session would start in (the sidebar's target).
             let mut props = base("home");
             let project = host.and_then(|host| {
@@ -1767,6 +1782,7 @@ impl Workspace {
 
     /// Tell the sidebar which tab is shown, so it is marked read and highlighted.
     fn after_change(&mut self, cx: &mut Context<Self>) {
+        self.quickchat_start = false;
         self.keep_in_bounds(cx);
         self.note_shown();
         let target = self.tabs.active().and_then(|id| {
@@ -2417,9 +2433,18 @@ impl Workspace {
                     sidebar.run_action("nests.scratchpad", cx);
                     sidebar.take_new_session()
                 });
-                let chats = target
-                    .and_then(|t| t.project_id)
-                    .ok_or("There is no Quickchat on this computer.")?;
+                let Some(chats) = target.and_then(|t| t.project_id) else {
+                    // No Quickchat project yet: its start page all the same, as the web's.
+                    if let Some((_, perch)) = screens::mods(cx) {
+                        perch.unfocus_workspace();
+                        perch.flush(cx);
+                    }
+                    self.tabs.hide();
+                    self.root_focus.focus(window, cx);
+                    self.after_change(cx);
+                    self.quickchat_start = true;
+                    return Ok(());
+                };
                 let focused = screens::mods(cx)
                     .and_then(|(_, perch)| {
                         let result = perch.run_own("project.focus", &json!({ "id": chats }))?;
