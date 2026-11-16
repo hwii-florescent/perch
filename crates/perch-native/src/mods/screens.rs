@@ -537,10 +537,23 @@ impl Screens {
         self.floating.iter().rev().find(|f| f.modal()).map(|f| f.id)
     }
 
-    /// Why open screen `id` is not drawn as its mod means: the mod would not load, or its last render threw.
+    /// Why screen `id` is not drawn as its mod means: the mod would not load, its last render threw, or a call into
+    /// it was stopped past its time budget. A floating screen when open, else every in-flow copy of it (`files`,
+    /// `files#drawer`, `files#<tab id>`), each error after its key.
     pub fn error(&self, id: &str, cx: &App) -> Option<String> {
-        let view = self.floating.iter().find(|f| f.id == id)?.view.as_ref()?;
-        view.read(cx).error(cx)
+        if let Some(open) = self.floating.iter().find(|f| f.id == id) {
+            return open.view.as_ref()?.read(cx).error(cx);
+        }
+        let mut errors: Vec<String> = self
+            .inflow
+            .iter()
+            .filter(|(key, _)| {
+                *key == id || key.strip_prefix(id).is_some_and(|k| k.starts_with('#'))
+            })
+            .filter_map(|(key, view)| Some(format!("{key:?}: {}", view.read(cx).error(cx)?)))
+            .collect();
+        errors.sort();
+        (!errors.is_empty()).then(|| errors.join("\n"))
     }
 
     /// Whether open screen `id` keeps Escape for itself.

@@ -564,6 +564,17 @@ pub fn start_in(
     start_host(ModHost::new(dir), workspace, window, cx);
 }
 
+/// [`start`] with the mods of `dir`, watched as the app's are: a mod looks at its files only when the file system
+/// says they changed, which a test's executor never hears, so nothing it does depends on a poll.
+pub fn start_watched_in(
+    dir: PathBuf,
+    workspace: &Entity<crate::workspace::Workspace>,
+    window: gpui::AnyWindowHandle,
+    cx: &mut App,
+) {
+    start_host(ModHost::watched(dir), workspace, window, cx);
+}
+
 fn start_host(
     host: Result<ModHost>,
     workspace: &Entity<crate::workspace::Workspace>,
@@ -786,6 +797,8 @@ impl ModHost {
                 load_error: None,
                 restarted: None,
                 stopped: None,
+                watching: None,
+                _retry: Task::ready(()),
                 _poll: Task::ready(()),
             };
             view.check(window, cx);
@@ -887,6 +900,10 @@ pub struct ModView {
     restarted: Option<Instant>,
     /// Why that call was stopped: still reported (`error`) by the fresh copy, until the mod's files change.
     stopped: Option<String>,
+    /// The script view whose stops this copy follows ([`Self::watch_stops`]), and the subscription doing it.
+    watching: Option<(gpui::EntityId, gpui::Subscription)>,
+    /// A look again once a copy stopped too soon after its last fresh start may start afresh.
+    _retry: Task<()>,
     _poll: Task<()>,
 }
 
@@ -959,6 +976,41 @@ impl ModView {
         true
     }
 
+    /// Follows the shown script view: a call into it stopped past its time budget makes the copy look again at once
+    /// ([`Self::check`] starts it afresh), not at the next change of its files, which in the app (a watched host)
+    /// may never come. One stopped again within [`RESTART_EVERY`] looks again when that has passed.
+    fn watch_stops(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(view) = self.script_view(cx) else {
+            self.watching = None;
+            return;
+        };
+        if self
+            .watching
+            .as_ref()
+            .is_some_and(|(id, _)| *id == view.entity_id())
+        {
+            return;
+        }
+        let subscription = cx.observe_in(&view, window, |this, view, window, cx| {
+            if !view.read(cx).was_stopped() {
+                return;
+            }
+            let wait = this
+                .restarted
+                .map(|at| RESTART_EVERY.saturating_sub(at.elapsed()))
+                .unwrap_or_default();
+            if wait.is_zero() {
+                this.check(window, cx);
+                return;
+            }
+            this._retry = cx.spawn_in(window, async move |this, cx| {
+                cx.background_executor().timer(wait).await;
+                let _ = this.update_in(cx, |this, window, cx| this.check(window, cx));
+            });
+        });
+        self.watching = Some((view.entity_id(), subscription));
+    }
+
     /// Looks at the mod's files and loads, reloads or switches source when they changed.
     fn check(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(info) = self.host.find(&self.id) else {
@@ -973,6 +1025,7 @@ impl ModView {
         let current = Some((info.dir.clone(), stamp));
         let restart = self.stopped_half_way(cx);
         if self.tried == current && !restart {
+            self.watch_stops(window, cx);
             return;
         }
         if self.tried != current {
@@ -993,6 +1046,7 @@ impl ModView {
             _ => self.load(&info, window, cx),
         };
         self.load_error = outcome.err().map(|error| format!("{error:#}"));
+        self.watch_stops(window, cx);
         if let Some(error) = &self.load_error {
             let kept = if self.shown.is_some() {
                 "kept its last version"

@@ -4,6 +4,8 @@
 //! cut leaves that React tree half done (the drawer was blank), so the copy must start afresh and draw its rows
 //! again. Then sessions are busy for a while and the drawer is closed and opened again; the rows stay.
 //!
+//! The mods are watched as the app's are (no poll of their files), so the fresh start must come from the stop itself.
+//!
 //! Offscreen, as the other render tests: no window is shown or focused, no core runs (this test plays it).
 
 use futures::channel::mpsc::{unbounded, UnboundedReceiver};
@@ -138,6 +140,18 @@ impl Rig {
     /// Answers every `fs.tree` the window asked for with the repository's root.
     fn serve(&mut self, repo: &Path) {
         for frame in self.sent() {
+            if frame["type"] == "fs.read" {
+                let path = frame["path"].as_str().unwrap().to_string();
+                let content = std::fs::read_to_string(repo.join(&path)).unwrap();
+                let answer = message(
+                    json!({"type": "fs.read.result", "requestId": frame["requestId"],
+                    "workspaceId": "w0", "content": content, "version": "v1",
+                    "metadata": {"path": path, "name": path, "size": 1, "readonly": false,
+                        "executable": false, "kind": "file", "mediaType": "text/markdown"}}),
+                );
+                self.ws(|ws, _, cx| ws.on_files_message(&answer, cx));
+                continue;
+            }
             if frame["type"] == "fs.tree" {
                 assert_eq!(frame["workspaceId"], "w0");
                 let answer = message(
@@ -238,7 +252,8 @@ fn main() {
         })
         .unwrap();
     let workspace = window.entity(&cx).unwrap();
-    cx.update(|cx| mods::start_in(user.clone(), &workspace, window.into(), cx));
+    // Watched as the app's mods are: a copy stopped half-way must start afresh without a poll of its files.
+    cx.update(|cx| mods::start_watched_in(user.clone(), &workspace, window.into(), cx));
 
     // The person's copy of the stock screen: the same explorer, whose React commit that first draws the tree runs
     // past the 500 ms a timer may take.
@@ -256,6 +271,7 @@ fn main() {
         "import { createElement } from \"react\";\nimport { useWorkspaceFiles } from \"@perch/sdk\";\n\
          function Slow(p) { const f = useWorkspaceFiles(p.workspaceId); let slow = false; \
          if (p.layout === \"explorer\" && f.trees[\"\"]?.state === \"ready\" && !globalThis.__slowOnce) { globalThis.__slowOnce = 1; slow = true; } \
+         if (p.layout === \"editor\" && f.documents[p.initialPath]?.state === \"ready\" && !globalThis.__slowEditor) { globalThis.__slowEditor = 1; slow = true; } \
          if (slow) { const t = Date.now(); while (Date.now() - t < 700) {} } \
          return createElement(Files, p); }\n\
          export default screen(\"files\", Slow,",
@@ -290,6 +306,48 @@ fn main() {
         rig.settle();
     }
     rig.rows(&repo, "files-drawer-reopened");
+
+    // A file's editor, the other copy of the same screen, is cut the same way (as a long Markdown preview was); its
+    // tab closes and the drawer is closed and opened again: the drawer still draws its rows.
+    rig.ws(|ws, _, cx| ws.open_file("w0", "AGENTS.md", false, cx));
+    rig.settle();
+    let tab = "w0\nAGENTS.md";
+    assert!(
+        rig.ws(|ws, _, _| ws.tabs().contains(tab)),
+        "the file opened"
+    );
+    // The core answers the read: the editor's next commit, drawing the document, is cut. The copy starts afresh at
+    // once, as the drawer's did, with no change to its files.
+    for _ in 0..4 {
+        rig.serve(&repo);
+        rig.settle();
+    }
+    let editor = rig
+        .ws(|ws, _, _| ws.screen_view(&format!("files#{tab}")))
+        .expect("the file's copy");
+    let stopped = rig.cx.update(|cx| {
+        let view = editor.read(cx);
+        (
+            view.error(cx),
+            view.script_view(cx)
+                .is_some_and(|s| s.read(cx).was_stopped()),
+        )
+    });
+    assert!(
+        stopped.0.is_some_and(|e| e.contains("stopped")),
+        "the editor's commit was cut"
+    );
+    assert!(!stopped.1, "the cut editor started afresh");
+    let closed = rig
+        .ws(|ws, window, cx| ws.run_command("tabs.close", Some(&json!({ "id": tab })), window, cx));
+    assert!(closed.is_ok(), "{closed:?}");
+    rig.settle();
+    for _ in 0..2 {
+        rig.ws(|ws, window, cx| ws.run_command("global.drawer", None, window, cx))
+            .unwrap();
+        rig.settle();
+    }
+    rig.rows(&repo, "files-drawer-after-editor-cut");
 
     let _ = std::fs::remove_dir_all(&scratch);
     println!("files drawer: ok");
