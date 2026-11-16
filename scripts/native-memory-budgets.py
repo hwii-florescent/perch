@@ -1,6 +1,9 @@
 """Memory budgets of the native client (docs/TESTING.md), checked against the results file of
 scripts/measure-native-memory.sh: one `app state value` line per measurement, MB medians of the
-hidden window under `native-hidden1`, and `native-hidden1-webcontent-gone h 1|0` for the closed pane.
+hidden window under `native-hidden1` (or, from an --offscreen run, `native-offscreen`), and
+`native-hidden1-webcontent-gone h 1|0` for the closed pane. An offscreen run presents every frame into
+GPU targets a hidden window does not hold, so its idle footprint is not judged against the idle budget:
+only the growth over its own idle is.
 
     python3 -I scripts/native-memory-budgets.py <results.tsv>   prints the table, exits 1 when over
     python3 -I scripts/native-memory-budgets.py --self-test
@@ -15,7 +18,8 @@ CLOSED_PANE_MB = 40  # client plus the GPU and Networking helpers WebKit keeps f
 
 def judge(rows):
     """rows: {(app, state): value} -> (table lines, every budget held)."""
-    get = lambda s: rows.get(("native-hidden1", s))
+    app = "native-hidden1" if any(a == "native-hidden1" for a, _ in rows) else "native-offscreen"
+    get = lambda s: rows.get((app, s))
     idle, lines, ok_all = get("a"), [], True
 
     def check(label, measured, limit, ok):
@@ -23,7 +27,9 @@ def judge(rows):
         ok_all &= ok
         lines.append(f"{label:30}{measured:>16}{limit:>22}  {'ok' if ok else 'OVER'}")
 
-    if idle is not None:
+    if idle is not None and app == "native-offscreen":
+        lines.append(f"{'a idle (offscreen, not judged)':30}{idle:>13.1f} MB")
+    elif idle is not None:
         check("a idle", f"{idle:.1f} MB", f"{IDLE_MB} MB", idle <= IDLE_MB)
     for s, (name, budget) in OVER_IDLE_MB.items():
         if get(s) is None:
@@ -49,6 +55,9 @@ def self_test():
     assert not judge(rows(a=115, h=120, gone=0))[1], "WebContent left"
     assert not judge(rows(a=115, h=155.1, gone=1))[1], "closed pane kept memory"
     assert judge(rows(a=115, b=300))[1], "states without a budget are not judged"
+    offscreen = lambda e: {("native-offscreen", "a"): 230.0, ("native-offscreen", "e"): e}
+    assert judge(offscreen(265))[1], "an offscreen run's idle is not judged"
+    assert not judge(offscreen(265.1))[1], "an offscreen run's growth is judged by the same budgets"
     try:
         judge(rows(e=140))
         raise AssertionError("a budget over idle needs idle")

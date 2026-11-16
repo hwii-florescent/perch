@@ -2,7 +2,12 @@
 # Memory of the native client (perch-native) against the Tauri desktop app (perch-desktop) in
 # the same four states, and the shared core/daemon cost, with no input event and no focus change.
 #
-#   scripts/measure-native-memory.sh [--build] [--apps tauri,native] [--states a,b,c,d]
+#   scripts/measure-native-memory.sh [--build] [--apps tauri,native] [--states a,b,c,d] [--offscreen]
+#
+# --offscreen measures the native client without a window (examples/measure_offscreen: GPUI's headless
+# renderer draws every frame into a texture), for when the display sleeps or the console is locked and a
+# window gets no frames. Its numbers stand for the hidden window's; browser panes (g, h) need a real
+# window and are refused.
 #
 # Release builds are expected in target/release (perch-core, perch-desktop, perch-native, and
 # examples/measure_setup); --build makes them (needs ZIG, see docs/TESTING.md).
@@ -48,12 +53,14 @@ WINDOW=${WINDOW:-1280x800}
 APPS=tauri,native
 STATES=a,b,c,d
 BUILD=0
+OFFSCREEN=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --build) BUILD=1 ;;
     --apps) APPS=$2; shift ;;
     --states) STATES=$2; shift ;;
+    --offscreen) OFFSCREEN=1 ;;
     -h | --help) sed -n '2,28p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -70,12 +77,16 @@ if [ "$BUILD" = 1 ]; then
   (cd "$ROOT" \
     && cargo build --release -p perch-core \
     && cargo build --release -p perch-desktop \
-    && cargo build --release -p perch-native --example measure_setup \
+    && cargo build --release -p perch-native --example measure_setup --example measure_offscreen \
     && cargo build --release -p perch-native) || die "cargo build"
 fi
 CORE=$BIN/perch-core
 DESKTOP=$BIN/perch-desktop
 NATIVE=$BIN/perch-native
+if [ "$OFFSCREEN" = 1 ]; then
+  NATIVE=$BIN/examples/measure_offscreen
+  for s in g h; do has "$s" "$STATES" && die "state $s needs a real window (a browser pane); drop --offscreen and wake the display"; done
+fi
 SETUP=$BIN/examples/measure_setup
 for f in "$CORE" "$NATIVE" "$SETUP"; do
   [ -x "$f" ] || die "$f is missing; run with --build"
@@ -408,7 +419,9 @@ native_script() { # state dir -> the script for the native client
   esac
 }
 
-run_native() { # state dir hidden(0|1) -> median MB
+native_label() { [ "$1" = offscreen ] && echo native-offscreen || echo "native-hidden$1"; }
+
+run_native() { # state dir hidden(0|1|offscreen) -> median MB
   local state=$1 dir=$2 hidden=$3
   local envs script log_file pid before after known helpers="" content="" h
   envs=$(run_env "$dir"); script=$(native_script "$state" "$dir")
@@ -576,10 +589,10 @@ if has native "$APPS"; then
   make_sessions "$D" 2 || die "could not make sessions"
   if needs_work; then make_work "$D" || die "could not make the files, repository and page"; fi
   for s in $(order_states); do
-    for hidden in 1 0; do
+    for hidden in $([ "$OFFSCREEN" = 1 ] && echo offscreen || echo 1 0); do
       log "- native state $s hidden=$hidden"
       mb=$(run_native "$s" "$D" "$hidden") || die "native state $s failed"
-      record native-hidden$hidden "$s" "$mb"
+      record "$(native_label "$hidden")" "$s" "$mb"
     done
   done
   log "- core and daemon footprint (native run, sessions idle)"
@@ -636,7 +649,7 @@ for s in "abcd":
     est = None
     if tauri_idle is not None and webkit is not None and webkit_idle is not None:
         est = tauri_idle + (webkit - webkit_idle)
-    nh, ns = get("native-hidden1", s), get("native-hidden0", s)
+    nh, ns = get("native-hidden1", s) or get("native-offscreen", s), get("native-hidden0", s)
     nc = ns + core if ns is not None and core is not None else None
     diff = est - nc if est is not None and nc is not None else None
     if all(v is None for v in (tauri, webkit, nh, ns)):
