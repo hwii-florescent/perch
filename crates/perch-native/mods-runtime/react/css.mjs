@@ -17,7 +17,8 @@ const INTERACTION = new Set(["hover", "focus", "focus-visible", "focus-within", 
 
 /** WebKit's user-agent stylesheet for the tags a stock screen draws (`Source/WebCore/css/html.css`), trimmed to
  * them. `button` padding is WebKit's `2px 6px 3px` (the reference's host switcher shows it: chip at y 2, 5 px of
- * height around it). `-webkit-small-control` is 13.33 px in the system face. */
+ * height around it). A control that sets no font size of its own is 11 px in the system face, as the reference
+ * measures a field or a button (WebKit's small control). */
 const UA_RULES = [
   ["html", { display: "block", "font-size": "16px", "font-family": "Times", color: "#000000", "line-height": "normal" }],
   ["body", { display: "block", margin: "8px" }],
@@ -28,16 +29,13 @@ const UA_RULES = [
   ["em, i", { "font-style": "italic" }],
   ["kbd, code, samp, pre", { "font-family": "monospace" }],
   ["button, input, select, textarea", {
-    display: "inline-block", "font-family": "system-ui", "font-size": "13.333333px", "font-weight": "400", "font-style": "normal",
+    display: "inline-block", "font-family": "system-ui", "font-size": "11px", "font-weight": "400", "font-style": "normal",
     "line-height": "normal", "letter-spacing": "normal", "text-transform": "none", "text-indent": "0", "text-align": "start", margin: "0",
   }],
   ["button", {
     padding: "2px 6px 3px 6px", "border-width": "2px", "border-style": "outset", "border-color": "buttonborder", "background-color": "buttonface",
     color: "buttontext", "text-align": "center", cursor: "default", "box-sizing": "border-box",
   }],
-  // A field's own text is the small system size (11 px, as the web reference measures a field that sets no size of
-  // its own); a field that sets its size is unaffected.
-  ["input, select, textarea", { "font-size": "11px" }],
   ["input", { padding: "1px 2px", "border-width": "2px", "border-style": "inset", "border-color": "buttonborder", "background-color": "field", color: "fieldtext" }],
   // A check box or radio button is WebKit's 12 px control with its margins (the reference's memory switch: 12 x 12,
   // 2 px from the label's edge, its row 18 px high).

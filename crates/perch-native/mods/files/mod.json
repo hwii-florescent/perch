@@ -1,0 +1,5 @@
+{
+  "name": "Files",
+  "description": "The web app's stock files screen, unchanged: a workspace's explorer in the drawer and a file's editor in its tab, drawn natively through the React runtime on the window's own file store.",
+  "runtime": "react"
+}

@@ -135,7 +135,7 @@ const PROP = {
   click: "onClick", dblclick: "onDoubleClick", contextmenu: "onContextMenu", mousedown: "onMouseDown", mouseup: "onMouseUp", mousemove: "onMouseMove",
   pointerdown: "onPointerDown", pointerup: "onPointerUp", pointermove: "onPointerMove", pointercancel: "onPointerCancel",
   keydown: "onKeyDown", keyup: "onKeyUp", focus: "onFocus", blur: "onBlur", input: "onInput", change: "onChange",
-  submit: "onSubmit",
+  submit: "onSubmit", scroll: "onScroll",
 };
 
 const MOUSE_BUTTON_EVENTS = new Set(["click", "dblclick", "mousedown", "mouseup"]);
@@ -263,7 +263,8 @@ export function mount(perch, Component, options = {}) {
       if (MOUSE_BUTTON_EVENTS.has(type) && insideDisabled(target)) return false;
       const event = new HostEvent(type, init, target);
       const chain = [];
-      for (let node = target; node; node = node.parentNode) chain.push(node);
+      // A scroll event is the scrolled element's alone: it does not bubble (React's `onScroll` neither).
+      for (let node = target; node; node = type === "scroll" ? null : node.parentNode) chain.push(node);
       const path = [...chain, document, window];
       discrete(() => {
         for (let i = path.length - 1; i > 0 && !event.propagationStopped; i--) fire(path[i], event, true);

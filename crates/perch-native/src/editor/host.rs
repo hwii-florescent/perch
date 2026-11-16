@@ -45,9 +45,13 @@ struct Doc {
     _subscriptions: Vec<Subscription>,
 }
 
+/// A Rust listener for edits and caret moves ([`Editors::bind`]).
+type Listener = Rc<dyn Fn(&str, &str, &mut App) -> bool>;
+
 #[derive(Default)]
 struct Shared {
     docs: HashMap<String, Doc>,
+    listeners: Vec<Listener>,
     /// Parked keys, least recently parked first.
     parked: VecDeque<String>,
     hosts: Vec<ModHost>,
@@ -76,6 +80,18 @@ impl Editors {
     /// Queues `event` (`save`, `goto`) for `key`'s screen, as a key the window resolved asks.
     pub fn emit(&self, key: &str, event: &str, cx: &mut App) {
         self.push(key, object([("type", event.into())]), cx);
+    }
+
+    /// Lets Rust take `key`'s edits and caret moves: `listener(key, "change" | "caret", cx)`
+    /// returns whether it took them, and what it took is not queued for the screen (a file's
+    /// document kept by the window's store, so a key costs the screen nothing).
+    pub fn bind(&self, listener: impl Fn(&str, &str, &mut App) -> bool + 'static) {
+        self.0.borrow_mut().listeners.push(Rc::new(listener));
+    }
+
+    /// `key`'s caret, 1-based `(line, col)`.
+    pub fn caret(&self, key: &str) -> Option<(usize, usize)> {
+        self.0.borrow().docs.get(key).map(|d| d.caret)
     }
 
     /// Keys with an editor, parked or not.
@@ -120,6 +136,17 @@ impl Editors {
     }
 
     fn push(&self, key: &str, event: HostValue, cx: &mut App) {
+        let kind = event.get("type").and_then(HostValue::as_str);
+        if let Some(kind) = kind.filter(|k| *k == "change" || *k == "caret") {
+            let listeners = self.0.borrow().listeners.clone();
+            let mut taken = false;
+            for listener in listeners {
+                taken |= listener(key, kind, cx);
+            }
+            if taken {
+                return;
+            }
+        }
         let owner = {
             let mut shared = self.0.borrow_mut();
             let Some(doc) = shared.docs.get_mut(key) else {

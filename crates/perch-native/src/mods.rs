@@ -428,6 +428,20 @@ pub const STOCK: &[(&str, &str)] = &[
         "status/status/usage.js",
         include_str!("../mods/status/status/usage.js"),
     ),
+    ("files/main.js", include_str!("../mods/files/main.js")),
+    ("files/mod.json", include_str!("../mods/files/mod.json")),
+    (
+        "files/files/explorerNav.js",
+        include_str!("../mods/files/files/explorerNav.js"),
+    ),
+    (
+        "files/files/files.js",
+        include_str!("../mods/files/files/files.js"),
+    ),
+    (
+        "files/files/main.js",
+        include_str!("../mods/files/files/main.js"),
+    ),
     ("tabs/main.js", include_str!("../mods/tabs/main.js")),
     ("tabs/mod.json", include_str!("../mods/tabs/mod.json")),
     (

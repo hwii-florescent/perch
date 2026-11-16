@@ -69,6 +69,7 @@ const EVENTS = {
   click: ["onClick", "onClickCapture"], double_click: ["onDoubleClick"], context_menu: ["onContextMenu"],
   mouse_down: ["onPointerDown", "onMouseDown", "onPointerDownCapture", "onMouseDownCapture"], mouse_up: ["onPointerUp", "onMouseUp", "onPointerCancel"],
   mouse_move: ["onPointerMove", "onMouseMove"], key_down: ["onKeyDown", "onKeyUp"], focus: ["onFocus", "onBlur"], input: ["onChange", "onInput"],
+  scroll: ["onScroll"],
 };
 const DOCUMENT_EVENTS = { pointerdown: "mouse_down", mousedown: "mouse_down", click: "click", keydown: "key_down", pointerup: "mouse_up", mouseup: "mouse_up" };
 
