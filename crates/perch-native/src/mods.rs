@@ -696,6 +696,7 @@ impl ModHost {
                 tried: None,
                 load_error: None,
                 restarted: None,
+                stopped: None,
                 _poll: Task::ready(()),
             };
             view.check(window, cx);
@@ -786,6 +787,8 @@ pub struct ModView {
     load_error: Option<String>,
     /// When the copy last started afresh after a call into it was stopped half-way.
     restarted: Option<Instant>,
+    /// Why that call was stopped: still reported (`error`) by the fresh copy, until the mod's files change.
+    stopped: Option<String>,
     _poll: Task<()>,
 }
 
@@ -819,9 +822,12 @@ impl ModView {
         error
     }
 
-    /// The load error, else the render error.
+    /// The load error, else the render error, else why a call was stopped before the copy started afresh.
     pub fn error(&self, cx: &App) -> Option<String> {
-        self.load_error.clone().or_else(|| self.render_error(cx))
+        self.load_error
+            .clone()
+            .or_else(|| self.render_error(cx))
+            .or_else(|| self.stopped.clone())
     }
 
     /// The shell's view of the mod, for tests and tools that read its description.
@@ -850,6 +856,7 @@ impl ModView {
             "perch-native: mod {} was stopped half-way and starts afresh",
             self.key
         );
+        self.stopped = self.render_error(cx);
         self.restarted = Some(Instant::now());
         true
     }
@@ -869,6 +876,9 @@ impl ModView {
         let restart = self.stopped_half_way(cx);
         if self.tried == current && !restart {
             return;
+        }
+        if self.tried != current {
+            self.stopped = None;
         }
         self.tried = current;
         let outcome = match &self.shown {

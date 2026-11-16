@@ -64,7 +64,7 @@ fn sessions(tick: usize) -> Value {
         .map(|i| {
             let p = i % PROJECTS;
             json!({"id": format!("s{i}"), "title": format!("Session {i} · {tick}"), "cwd": "/work",
-                "createdAt": 0, "updatedAt": tick, "status": if (i + tick) % 3 == 0 { "running" } else { "idle" },
+                "createdAt": 0, "updatedAt": tick, "status": if (i + tick).is_multiple_of(3) { "running" } else { "idle" },
                 "hostId": "local", "projectId": format!("p{p}"), "workspaceId": format!("w{p}"),
                 "cliProviderId": "claude"})
         })
