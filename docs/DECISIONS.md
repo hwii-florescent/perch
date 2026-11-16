@@ -42,6 +42,27 @@ connector ("└") from the parent instead of the bracket-shaped left border. Eve
 (on hover, focus or when active) that opens the row's existing menu; it **replaces the hover ×**, so Close is in that
 menu, plus the existing close shortcut and middle-click.
 
+## 2026-11-15 — Native Files, editor, Git and review: host engines under stock screens (lead, delegated by the owner)
+
+The owner agreed to the direction (Files, Git and review stay React stock screens on the native mod engine; a native
+GPUI editor fills CodeMirror's host-owned slot; a web view only for browser panes, created on first use; PDF, audio and
+video open in Quick Look or the default app) and left the plan's open choices to the lead, who adopted these:
+
+- The review's diff is a native `DiffView` engine written for Perch (virtualized rows, comment threads drawn from
+  data), placed by `stock:review`; React rows cannot open a useful diff natively (500 lines took 1.9 s).
+- The editor's syntax highlighting is Perch's own incremental highlighter in `perch-native`; the vendored adapter
+  stays as shipped.
+- The file store (drafts, versions, conflicts) and the Git/review store are the host's, in Rust, so unsent work
+  outlives a screen reload or a mod swap.
+- A GPUI menu, dialog or palette over a browser pane hides the live page and draws a still snapshot in its place.
+- Memory budgets of the native client (physical footprint, hidden window): idle 120 MB; a 10,000-line file +35 MB;
+  a 5,000-line review +80 MB; a browser pane +100 MB, all of it returned within 5 s of the last pane closing (within
+  10 MB); a Files tree of 5,000 entries +60 MB. `scripts/measure-native-memory.sh` fails over them.
+- The parity gate fails on any failing state not in `e2e/native-parity/accepted-failures.json`, and on a listed state
+  that passes again.
+- A person's pass on a lit screen (input methods, real typing, Quick Look, browser pane focus) is required before
+  this work merges into `main`.
+
 ## 2026-11-15 — Mods in the native client are trusted code, as on the web (owner)
 
 Extends "Mods: trusted JavaScript" (2026-11-08) to the native client's mod engine. Any mod, stock or a

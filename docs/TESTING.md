@@ -457,7 +457,15 @@ three failures for the same reason.
 - `scripts/measure-native-memory.sh` measures the footprint of the native client and the Tauri app in
   four states with scratch state. It opens real windows, so it uses `PERCH_NATIVE_TEST=1` (the window is
   ordered in without the keyboard and the app is never activated; `test_mode.rs`) and
-  `PERCH_DESKTOP_TEST=1`. Read its header before running it.
+  `PERCH_DESKTOP_TEST=1`. Read its header before running it. `--apps native --states a,t,e,f,g,h` adds the
+  native client's Files tree, open file, review, browser pane and closed pane (fixtures and a loopback page made
+  in the scratch directory) and exits 1 when a state is over its budget; the budgets are in
+  `scripts/native-memory-budgets.py` (`python3 -I scripts/native-memory-budgets.py --self-test` checks them).
+  A test-mode step whose feature is not built fails the run rather than skipping the state.
+- Timing budgets run strict in release: `PERCH_BUDGET_STRICT=1 cargo test --release -p perch-native --test
+  editor_engine --test diff_element --test files_window` fails at the budgets themselves rather than at twice them
+  (the default, for noisy machines); each test prints its numbers under its report flag
+  (`PERCH_EDITOR_REPORT=1`, `PERCH_DIFF_REPORT=1`, `PERCH_MEDIA_REPORT=1`).
 - Nothing opens a window, takes focus or calls `open`. The render tests draw through GPUI's test
   platform into a texture (set `SHOT=<folder>` to save each frame as a PNG); keys go through the window's
   own `dispatch_keystroke`, so the dispatcher that runs before the terminal is what is tested. The
