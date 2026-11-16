@@ -122,6 +122,18 @@ pub const STOCK: &[(&str, &str)] = &[
         include_str!("../mods/sidebar/folder-browser/main.js"),
     ),
     (
+        "context-bridge/main.js",
+        include_str!("../mods/context-bridge/main.js"),
+    ),
+    (
+        "context-bridge/mod.json",
+        include_str!("../mods/context-bridge/mod.json"),
+    ),
+    (
+        "context-bridge/context-bridge/main.js",
+        include_str!("../mods/context-bridge/context-bridge/main.js"),
+    ),
+    (
         "instructions/main.js",
         include_str!("../mods/instructions/main.js"),
     ),

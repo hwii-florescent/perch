@@ -1,0 +1,5 @@
+{
+  "name": "Ask agent",
+  "description": "The web app's stock Context Bridge screen (the terminal selection's Ask agent menu and the dialog that prepares context and sends it to an agent only on Send), unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

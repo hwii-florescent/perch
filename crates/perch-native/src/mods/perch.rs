@@ -1160,6 +1160,82 @@ impl Perch {
             // folder browser's listing (`fs.browse`, which the core routes to a remote host),
             // Instructions and Project memory. Resolves with the core's answer, or null when no
             // core answers; rejects with its refusal.
+            // Context Bridge (`docs/CONTEXT-BRIDGE.md`): whether it is offered for a workspace, and asking an
+            // agent about a source or a file (the dialog opens on it).
+            .function(
+                "contextBridgeAvailable",
+                reader(STORE, |perch, args| {
+                    let workspace = args.get(0).and_then(HostValue::as_str).unwrap_or("");
+                    json!(crate::workspace::bridge_available(
+                        &perch.store(),
+                        workspace
+                    ))
+                }),
+            )
+            .function("askAgent", {
+                let perch = self.clone();
+                move |args| {
+                    let workspace = args.string(0)?.to_string();
+                    let source = serde_json::from_value(from_host(args.value(1)?))
+                        .map_err(|e| HostError::new(format!("Not a context source: {e}")))?;
+                    perch.in_workspace(move |ws, cx| drop(ws.ask_agent(&workspace, source, cx)))?;
+                    Ok(HostValue::Null)
+                }
+            })
+            .function("askAgentAboutFile", {
+                let perch = self.clone();
+                move |args| {
+                    let workspace = args.string(0)?.to_string();
+                    let path = args.string(1)?.to_string();
+                    perch.in_workspace(move |ws, cx| {
+                        drop(ws.ask_agent_about_file(&workspace, &path, cx))
+                    })?;
+                    Ok(HostValue::Null)
+                }
+            })
+            // The context-bridge screen's actions on the window's capture: the menu's Ask agent, Preview, the one
+            // Send (the window keeps its operation id and refuses a second) and Open agent.
+            .function("contextAsk", {
+                let perch = self.clone();
+                move |_| {
+                    perch.in_workspace(|ws, cx| ws.bridge_ask_from_menu(cx))?;
+                    Ok(HostValue::Null)
+                }
+            })
+            .async_function("contextPreview", {
+                let perch = self.clone();
+                move |args| {
+                    let instruction = args.string(0)?.to_string();
+                    let answer = perch.bridge(move |ws, cx| ws.bridge_preview(instruction, cx))?;
+                    Ok(answered(answer))
+                }
+            })
+            .async_function("contextSend", {
+                let perch = self.clone();
+                move |args| {
+                    let instruction = args.string(0)?.to_string();
+                    let digest = args.string(1)?.to_string();
+                    let target = args.string(2)?.to_string();
+                    let preview = args.get(3).map(from_host).unwrap_or(Value::Null);
+                    let answer = perch.bridge(move |ws, cx| {
+                        ws.bridge_send(instruction, digest, target, preview, cx)
+                    })?;
+                    Ok(answered(answer))
+                }
+            })
+            .function("contextOpenAgent", {
+                let perch = self.clone();
+                move |args| {
+                    let session = args.string(0)?.to_string();
+                    if !perch.store().sessions.iter().any(|s| s.id == session) {
+                        return Ok(HostValue::Bool(false));
+                    }
+                    perch.in_workspace(move |ws, cx| {
+                        ws.bridge_open_agent(&session, cx);
+                    })?;
+                    Ok(HostValue::Bool(true))
+                }
+            })
             .async_function("ask", {
                 let perch = self.clone();
                 move |args| {
@@ -1441,6 +1517,25 @@ impl Perch {
                 // No core followed: the sender goes unanswered, and so does the screen.
                 if let Ok(answer) = answer.await {
                     let _ = tx.send(answer);
+                }
+            })
+            .detach();
+        })?;
+        Ok(rx)
+    }
+
+    /// Runs `f` (a Context Bridge request) on the attached window's workspace once the calling script has unwound;
+    /// the receiver gets its answer.
+    fn bridge(
+        &self,
+        f: impl FnOnce(&mut Workspace, &mut gpui::Context<Workspace>) -> Answer + 'static,
+    ) -> Result<Answer, HostError> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        self.in_workspace(move |ws, cx| {
+            let answer = f(ws, cx);
+            cx.spawn(async move |_, _| {
+                if let Ok(outcome) = answer.await {
+                    let _ = tx.send(outcome);
                 }
             })
             .detach();
@@ -2114,6 +2209,17 @@ const USAGE_COMMANDS: [(&str, &str, &str); 2] = [
         "{accountId}",
     ),
 ];
+
+type Answer = futures::channel::oneshot::Receiver<Result<Value, String>>;
+
+/// The promise half of a question to the window: its answer, or its refusal as the error.
+async fn answered(answer: Answer) -> HostResult {
+    match answer.await {
+        Ok(Ok(value)) => Ok(to_host(&value)),
+        Ok(Err(error)) => Err(HostError::new(error)),
+        Err(_) => Err(HostError::new("The window went before it answered.")),
+    }
+}
 
 /// The promise half of a window command.
 async fn settled(rx: futures::channel::oneshot::Receiver<Result<(), String>>) -> HostResult {

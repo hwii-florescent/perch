@@ -48,7 +48,10 @@ returns to its tab; the original file and unsaved draft remain open.
   cannot dispatch it twice. Disconnects and unconfirmed deliveries are never
   retried automatically: inspect the CLI before making another send.
 - The dialog is a stock screen (`stock:context-bridge`) a person may replace
-  with a copy, but the send is Perch's (`components/ContextBridge.tsx`): one
+  with a copy, but the send is Perch's (`components/ContextBridge.tsx`; in the
+  native client the window's, `crates/perch-native/src/workspace/context_bridge.rs`,
+  which sends on the target terminal's own connection when the window holds its
+  input): one
   operation id per capture and at most one send, whatever calls the screen's
   `send` action; Perch's own screen calls it only from Send. A copy swapped in
   mid-send sees the send as made and cannot send again. A copy is trusted code
