@@ -242,11 +242,11 @@ fn tree(rig: &mut Rig, files: usize, steps: usize) {
         let records = rig.step(true);
         if records
             .iter()
-            .any(|r| r.name.ends_with(":workspace-file-entry-file-00000.rs"))
+            .any(|r| r.name.ends_with("files-entry:file-00000.rs"))
         {
             break records
                 .iter()
-                .find(|r| r.name.contains("workspace-file-tree-scroll"))
+                .find(|r| r.name == "files-tree")
                 .map(|r| r.bounds)
                 .expect("the tree's scroll box");
         }
@@ -303,8 +303,7 @@ fn tree(rig: &mut Rig, files: usize, steps: usize) {
         .iter()
         .filter_map(|r| {
             r.name
-                .rsplit_once(":workspace-file-entry-file-")?
-                .1
+                .strip_prefix("files-entry:file-")?
                 .strip_suffix(".rs")?
                 .parse::<usize>()
                 .ok()

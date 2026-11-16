@@ -167,7 +167,7 @@ fn main() {
             {"path": "README.md", "name": "README.md", "kind": "file", "size": 6, "readonly": false, "executable": false},
         ], "truncated": false}));
     let records = rig.settle();
-    let row = named(&records, ":workspace-file-entry-README.md").unwrap_or_else(|| {
+    let row = named(&records, "files-entry:README.md").unwrap_or_else(|| {
         let mut names: Vec<_> = records.iter().map(|r| r.name.to_string()).collect();
         names.sort();
         panic!("README.md has a row: {names:?}")
