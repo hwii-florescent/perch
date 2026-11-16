@@ -529,6 +529,8 @@ export class StyleSheet {
     this.index = new Map();
     /** `state:class` pairs whose element's interaction state a descendant's rule reads (`hover:group/row`). */
     this.trackedStates = new Set();
+    this.dependsCache = new Map();
+    this.candidateCache = new Map();
     const add = (entry, steps) => {
       const subject = steps[steps.length - 1].compound;
       const key = subject.classes.length ? `.${subject.classes[0]}` : subject.tag && subject.tag !== "*" ? subject.tag : "*";
@@ -547,7 +549,7 @@ export class StyleSheet {
           const states = statesOf(steps);
           ancestorStateClasses(steps, this.trackedStates);
           const pseudo = steps[steps.length - 1].compound.pseudoElement;
-          const entry = { steps, media, layer, origin, order: order++, specificity: specificity(steps), decls, states, pseudo, source: origin === 0 ? `ua:${steps[steps.length - 1].compound.tag ?? "*"}` : sourceName(part, steps) };
+          const entry = { steps, media, layer, origin, order: order++, specificity: specificity(steps), decls, states, pseudo, own: ownOnly(steps), above: classesAbove(steps), source: origin === 0 ? `ua:${steps[steps.length - 1].compound.tag ?? "*"}` : sourceName(part, steps) };
           this.rules.push(entry);
           add(entry, steps);
         }
@@ -560,13 +562,41 @@ export class StyleSheet {
   /** Rules that may match `element` (by its classes, its tag, and the universal ones), or its `pseudo` box
    * (`before`, `after`). */
   candidates(element, pseudo = null) {
+    const key = `${element.tagName} ${element.className}|${pseudo ?? ""}`;
+    const known = this.candidateCache.get(key);
+    if (known) return known;
     const out = [];
     const seen = new Set();
     const push = (list) => { if (list) for (const rule of list) if (!seen.has(rule) && rule.pseudo === pseudo) { seen.add(rule); out.push(rule); } };
     for (const cls of element.classList) push(this.index.get(`.${cls}`));
     push(this.index.get(element.tagName));
     push(this.index.get("*"));
+    this.candidateCache.set(key, out);
     return out;
+  }
+
+  /** What the rules that may match `element` (any pseudo-element) read besides the element and its parent's computed
+   * style: `anc`, an ancestor's attributes or state; `pos`, whether it is its parent's first or last child; `nth`, its
+   * index; `ancPos`, an ancestor's position. The description's cache keys on exactly these (`describe.mjs`). */
+  depends(element) {
+    const key = `${element.tagName} ${element.className}`;
+    let deps = this.dependsCache.get(key);
+    if (deps) return deps;
+    deps = { anc: false, pos: false, nth: false, ancPos: false };
+    const seen = new Set();
+    const read = (list) => {
+      for (const rule of list ?? []) {
+        if (seen.has(rule)) continue;
+        seen.add(rule);
+        const d = (rule.reads ??= reads(rule.steps));
+        deps.anc ||= d.anc; deps.pos ||= d.pos; deps.nth ||= d.nth; deps.ancPos ||= d.ancPos;
+      }
+    };
+    for (const cls of element.classList) read(this.index.get(`.${cls}`));
+    read(this.index.get(element.tagName));
+    read(this.index.get("*"));
+    this.dependsCache.set(key, deps);
+    return deps;
   }
 
   /** Whether a rule that may match `element` reads interaction `state` on one of its ancestors (`group-hover:`). */
@@ -579,6 +609,58 @@ export class StyleSheet {
     for (const cls of element.classList) if (this.trackedStates.has(`${state}:${cls}`)) return true;
     return false;
   }
+}
+
+const STRUCTURAL = new Set(["first-child", "last-child", "only-child", "nth-child"]);
+
+/** The classes a selector needs on the subject's ancestors (its compounds joined to the subject by descendant and
+ * child combinators only): an element none of whose ancestors carries one of them cannot match. */
+function classesAbove(steps) {
+  const out = [];
+  for (let i = steps.length - 1; i > 0; i--) {
+    if (steps[i].combinator !== " " && steps[i].combinator !== ">") break;
+    out.push(...steps[i - 1].compound.classes);
+  }
+  return out;
+}
+
+/** The classes on `element`'s ancestors, kept on it while its parent and the parent's classes stay the same. */
+function ancestorClasses(element) {
+  const parent = element.parentElement;
+  if (!parent) return EMPTY;
+  const base = ancestorClasses(parent);
+  const kept = element.aboveCache;
+  if (kept && kept.parent === parent && kept.name === parent.className && kept.base === base) return kept.set;
+  const own = parent.classSet;
+  const set = own.size === 0 ? base : new Set([...base, ...own]);
+  element.aboveCache = { parent, name: parent.className, base, set };
+  return set;
+}
+const EMPTY = new Set();
+
+/** Whether a selector reads only the element's tag and classes, and the interaction state assumed on it (`hover:x`):
+ * whether it matches is then the same for every element with that tag and class list. */
+function ownOnly(steps) {
+  if (steps.length !== 1) return false;
+  const { compound } = steps[0];
+  return !compound.id && !compound.attrs.length && compound.pseudos.every((p) => INTERACTION.has(p.name) && p.name !== "focus-within");
+}
+/** What a selector reads beyond its subject's own attributes and state (`StyleSheet.depends`); `:has()` reads
+ * descendants, which touch their watcher (`HostElement.touchWatchers`). */
+function reads(steps, subjectLevel = true, out = { anc: false, pos: false, nth: false, ancPos: false }) {
+  steps.forEach((step, i) => {
+    const subject = subjectLevel && i === steps.length - 1;
+    if (!subject) out.anc = true;
+    for (const pseudo of step.compound.pseudos) {
+      if (STRUCTURAL.has(pseudo.name)) {
+        if (subject) out.pos = true;
+        else out.ancPos = true;
+        if (pseudo.name === "nth-child" && subject) out.nth = true;
+      }
+      if (pseudo.list && pseudo.name !== "has") for (const inner of pseudo.list) reads(inner, subject, out);
+    }
+  });
+  return out;
 }
 
 // --------------------------------------------------------------------------------------------------------------
@@ -628,6 +710,20 @@ export class Cascade {
     // decides one: the rules, svg size attributes and inline style. Rows of a list compute their cascade once.
     this.computed = new WeakMap();
     this.rootComputed = new Map();
+    // Media query results: the viewport is fixed for the cascade's life.
+    this.media = new Map();
+    // For each tag, class list, pseudo-element and assumed state: the rules reading only those that match (`own`).
+    this.ownMatches = new Map();
+  }
+
+  mediaHolds(rule) {
+    if (!rule.media) return true;
+    for (const query of rule.media) {
+      let holds = this.media.get(query);
+      if (holds === undefined) this.media.set(query, (holds = mediaMatches(query, this.viewport)));
+      if (!holds) return false;
+    }
+    return true;
   }
 
   themeHex(name) { return this.theme?.[name] ?? null; }
@@ -649,7 +745,21 @@ export class Cascade {
       if (name === "focus-visible") return !!el.state?.focus && !el.state?.pointerFocus;
       return !!el.state?.[name];
     };
-    return this.sheet.candidates(element, pseudo).filter((rule) => (!rule.media || rule.media.every((query) => mediaMatches(query, this.viewport))) && matchesComplex(element, rule.steps, { state, pseudo }));
+    const options = { state, pseudo };
+    const candidates = this.sheet.candidates(element, pseudo);
+    const key = `${element.tagName} ${element.className}|${pseudo ?? ""}|${assume === "*" ? "*" : [...assume].sort().join(",")}`;
+    let own = this.ownMatches.get(key);
+    if (!own) {
+      own = new Set(candidates.filter((rule) => rule.own && this.mediaHolds(rule) && matchesComplex(element, rule.steps, options)));
+      this.ownMatches.set(key, own);
+    }
+    let above = null;
+    const ancestorsHave = (rule) => {
+      if (!rule.above.length) return true;
+      above ??= ancestorClasses(element);
+      return rule.above.every((name) => above.has(name));
+    };
+    return candidates.filter((rule) => (rule.own ? own.has(rule) : this.mediaHolds(rule) && ancestorsHave(rule) && matchesComplex(element, rule.steps, options)));
   }
 
   /** `element`'s computed style, or with `pseudo` (`before`, `after`) that of its pseudo-element's box, whose parent

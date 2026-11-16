@@ -421,7 +421,10 @@ fn session_menu(rig: &mut Rig) {
             "tab-menu-split-below"
         ])
     );
-    assert!(rig.record("tab-menu-show-beside").is_some(), "one Show beside row");
+    assert!(
+        rig.record("tab-menu-show-beside").is_some(),
+        "one Show beside row"
+    );
     rig.click("tab-menu-show-beside");
     assert_eq!(
         rig.keys("tab-menu-beside-item"),

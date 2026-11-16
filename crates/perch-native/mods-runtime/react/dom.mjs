@@ -37,13 +37,22 @@ class Target {
   }
 }
 
+/** The clock the description's cache reads: every change to the tree takes the next tick. */
+let clock = 0;
+export const tick = () => ++clock;
+
 export class HostText {
   constructor(text) {
     this.nodeType = 3;
-    this.data = String(text);
     this.parentNode = null;
-    this.hidden = false;
+    this.chars = String(text);
+    this.hide = false;
   }
+  /** A text's change re-describes its element (`HostElement.mark`), not its style. */
+  get data() { return this.chars; }
+  set data(text) { this.chars = String(text); this.parentNode?.mark?.(); }
+  get hidden() { return this.hide; }
+  set hidden(on) { this.hide = on; this.parentNode?.mark?.(); }
   get parentElement() { return this.parentNode; }
   get textContent() { return this.data; }
 }
@@ -68,11 +77,25 @@ export class HostElement extends Target {
     /** Bumped when what its style depends on changes (props, children, interaction state); the description
      * recomputes an element whose own or an ancestor's version moved. */
     this.version = 0;
+    /** The tick its attributes or interaction state last changed: a descendant whose rules read an ancestor
+     * (`StyleSheet.depends`) is styled again after it. */
+    this.attrStamp = 0;
+    /** The tick anything in its subtree last changed: an unchanged subtree's description is kept whole. */
+    this.stamp = 0;
   }
-  touch() { this.version++; }
-  /** The element and every ancestor whose style asked what lies below it (`:has()`, `selector.mjs`). */
+  /** Its props, attributes or state changed. */
+  touch() { this.version++; this.attrStamp = tick(); this.mark(); }
+  /** Its subtree changed: it and its ancestors are described again (their styles are kept unless they changed). */
+  mark() {
+    const at = tick();
+    for (let n = this; n instanceof HostElement; n = n.parentNode) n.stamp = at;
+  }
+  /** Its children changed: its own style (`:empty`-like reads, `:has()` below) and every ancestor whose style asked what
+   * lies below it (`:has()`, `selector.mjs`). Its descendants keep theirs: a sibling moving changes only the first and
+   * last children's positions, which their own cache keys read. */
   touchWatchers() {
-    this.touch();
+    this.version++;
+    this.mark();
     for (let n = this.parentElement; n; n = n.parentElement) if (n.watchesDescendants) n.touch();
   }
   get nodeName() { return this.tagName.toUpperCase(); }
@@ -83,8 +106,16 @@ export class HostElement extends Target {
   get className() { return typeof this.props.className === "string" ? this.props.className : ""; }
   get classList() {
     const name = this.className;
-    if (this.classCache?.name !== name) this.classCache = { name, list: name.split(/\s+/).filter(Boolean) };
+    if (this.classCache?.name !== name) {
+      const list = name.split(/\s+/).filter(Boolean);
+      this.classCache = { name, list, set: new Set(list) };
+    }
     return this.classCache.list;
+  }
+  /** The classes as a set, for selector matching. */
+  get classSet() {
+    this.classList;
+    return this.classCache.set;
   }
   get textContent() { return this.childNodes.map((n) => n.textContent).join(""); }
   get dataset() {
