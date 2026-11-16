@@ -22,7 +22,8 @@
 //! length), and a box whose CSS height follows from its lengths that sum as its height. It works from the
 //! description's CSS values and the window's scale only.
 //!
-//! `kit` is `{ div, image }` from `gpui-kit`; `files.icon(id, markup, color)` gives the element that draws an icon's
+//! `kit` is `{ div, image }` from `gpui-kit`; `files.engine(engine, key)` gives the host's native element for an
+//! engine slot (`perch-engine`); `files.icon(id, markup, color)` gives the element that draws an icon's
 //! markup (`currentColor` as `color`; the mod's `perch-react` `Icon`), as gpui-kit's `svg()` and `image()` read
 //! files through an asset source the host may not have. An icon is drawn once per colour it is described with; one
 //! under a node whose own `hover:` changes the text colour is drawn twice, the hover copy shown by the engine while the
@@ -145,6 +146,8 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
   let el;
   if (node.kind === "image" && !node.markup) el = kit.image(node.src);
   else el = kit.div();
+  // An engine slot holds the host's element for its key, filling the box.
+  if (node.kind === "engine") el = el.child(files.engine ? files.engine(node.engine, node.key) : kit.div());
   // An icon is a box with the icon drawn in it (`svg`: in the colour its text would have, `image`: as drawn).
   if (node.markup && node.kind === "svg" && hoverIcon && hoverIcon.color !== color) {
     // Both copies are laid out on the icon's box; the hover only changes which one is painted.
@@ -400,7 +403,7 @@ export function snapRows(roots, scale, measure, overrides) {
       const w = measure(node.text, { size: font.text_size, weight: font.font_weight ?? 400, family: font.font_family ?? ".SystemUIFont", italic: !!font.italic });
       return Number.isFinite(w) ? w : NaN;
     }
-    if (!drawn(node) || node.kind === "input" || node.markup) return explicitWidth(node);
+    if (!drawn(node) || node.kind === "input" || node.kind === "engine" || node.markup) return explicitWidth(node);
     const own = { ...font };
     for (const key of FONT_KEYS) if (node.style[key] !== undefined) own[key] = node.style[key];
     // `text-overflow` is not inherited: an ellipsis cuts the text of the box that asks for it, not the text of the
@@ -687,6 +690,8 @@ export function snapColumns(roots, scale) {
     const kidHeights = kids.map((kid) => height(kid, own));
     let h;
     if (s.h !== undefined && s.h !== "auto") h = px(s.h);
+    // An engine's content height is the host's, not known here.
+    else if (node.kind === "engine") h = NaN;
     else if (node.kind === "input") {
       // A one-line field is its line box inside its padding and border.
       h = (node.input_type === "textarea" || node.input_type === "select" ? NaN : (lineHeightPx(own) ?? NaN)) + px(s.pt) + px(s.pb) + px(s.border_t) + px(s.border_b);
