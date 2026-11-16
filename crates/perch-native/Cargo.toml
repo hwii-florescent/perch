@@ -162,3 +162,8 @@ harness = false
 name = "workspace_offline_window"
 path = "tests/workspace_offline_window.rs"
 harness = false
+
+[[test]]
+name = "diff_list_spike"
+path = "tests/diff_list_spike.rs"
+harness = false
