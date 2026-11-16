@@ -11,6 +11,8 @@
 //!   `[{ group, style, tokens? }]`, its styles while that ancestor group is under the pointer)
 //! - `{ kind: "text", text, source? }` (`source`: the text before `text-transform`)
 //! - `{ kind: "svg", id, markup, style, ... }` (tinted with the text colour) and `{ kind: "image", markup }` (as drawn)
+//! - `{ kind: "engine", id, engine, key, style }`: a box the host fills with a native element (`data-perch-engine`,
+//!   `data-perch-key`; `gpui.mjs` draws `files.engine(engine, key)` in it)
 //! - `{ kind: "input", id, value, placeholder, checked, input_type, style, ... }` (`value`: what the field holds,
 //!   typed text included; `field_w`: a line field's content width when its content sizes it)
 //! - `break_anywhere` on a node whose text breaks a word too long for its line anywhere (`overflow-wrap`)
@@ -591,6 +593,15 @@ function pseudoBoxes(element, computed, inheritedText, ctx) {
 const groupName = (element) => `~g${element.id}`;
 
 /** One described subtree. `chain` names the element's ancestors with their versions. */
+/** An inline element that may join its line's text: it holds only text and draws nothing of its own (no margin, padding,
+ * border or background, which would be lost), has no handlers, and no test id (tests and the parity gate name it, so it
+ * stays a box: a count in a label, the number in a state badge). */
+const BOX_KEYS = ["pt", "pr", "pb", "pl", "mt", "mr", "mb", "ml", "border_t", "border_r", "border_b", "border_l", "bg"];
+function joinsLine(k) {
+  return k.kind === "div" && k[DISPLAY] === "inline" && !k.events?.length && !k.meta?.attrs?.["data-testid"] &&
+    !BOX_KEYS.some((key) => k.style?.[key]) && k.children?.every((c) => c.kind === "text");
+}
+
 function describeElement(element, parentComputed, inheritedText, ctx, chain = "") {
   const key = `${chain}/${element.id}.${element.version}`;
   let entry = ctx.cache.get(element);
@@ -606,6 +617,14 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
   if (element.measured && element.ownerDocument?.measureKey) node.measure = element.ownerDocument.measureKey(element);
 
   const tag = element.tagName;
+  // An engine slot: a native element the host draws in this box by key (`perch-engine`); the source's children,
+  // if any, are not drawn.
+  if (element.props["data-perch-engine"] != null) {
+    node.kind = "engine";
+    node.engine = String(element.props["data-perch-engine"]);
+    node.key = String(element.props["data-perch-key"] ?? "");
+    return node;
+  }
   if (tag === "svg") {
     node.kind = element.props["data-perch-image"] ? "image" : "svg";
     node.markup = svgMarkup(element);
@@ -686,9 +705,9 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
   // A block holding inline content and elements: the engine has no inline formatting, so its inline children are
   // laid out as a row on the text baseline (one line; wrapping inline runs would need text runs in the engine).
   // Inline elements holding only text (a `<code>` in a sentence) cannot be a box in a row that wraps, and the engine has no
-  // text runs: their text joins the sentence, in the sentence's own font.
+  // text runs: their text joins the sentence, in the sentence's own font (`joinsLine`).
   // ponytail: the inline element's own face (a monospace path) and colour are lost; wrapping needs engine text runs.
-  if (!style.display && inline && kids.some((k) => k.kind !== "text") && kids.every((k) => k.kind === "text" || (k.kind === "div" && k[DISPLAY] === "inline" && !k.events?.length && k.children?.every((c) => c.kind === "text")))) {
+  if (!style.display && inline && kids.some((k) => k.kind !== "text") && kids.every((k) => k.kind === "text" || joinsLine(k))) {
     const text = kids.map((k) => (k.kind === "text" ? k.text : k.children.map((c) => c.text).join(""))).join("");
     report("approximated", "display", "inline text elements in a line of text", "(inline formatting)", "their text joined to the line, in its font");
     kids.splice(0, kids.length, { kind: "text", text });

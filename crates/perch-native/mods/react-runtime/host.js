@@ -33,6 +33,7 @@
 // window lack are refused by it and logged.
 import * as perch from "perch";
 import { Icon, bounds, forgetBounds, textWidth } from "perch-react";
+import * as engines from "perch-engine";
 import { ICONS, LETTERS, LETTER } from "./agent-icons.js";
 
 export const INERT = [
@@ -343,6 +344,9 @@ export function copyFor(cx, screen) {
     },
     hosts: () => snapshot("hosts", () => perch.hosts()),
     workspaceTabs: () => snapshot("workspaceTabs", () => perch.workspaceTabs()),
+    // `useWorkspaceFiles`: one workspace's files from the window's store, and its actions run there.
+    workspaceFiles: (id) => snapshot(`workspaceFiles:${id}`, () => perch.workspaceFiles(id)),
+    filesDo: (action, workspaceId, ...args) => perch.filesDo(action, workspaceId, ...args),
     statusLine: () => snapshot("statusLine", () => perch.statusLine()),
     zoom: () => snapshot("zoom", () => perch.zoom()),
     paneLook: () => snapshot("paneLook", () => perch.paneLook()),
@@ -521,6 +525,13 @@ export function copyFor(cx, screen) {
     closeOverlay(id) {
       if (openOverlays.delete(id)) perch.run("overlay.close").catch(() => {});
     },
+    // Engine slots (`perch-engine`): `focus(engine, key)` gives an engine the keyboard, `focused()` says which has it
+    // (`{ engine, key }` or null), `release(engine, key)` lets a key go (the slot unmounted or was re-keyed).
+    engines: {
+      focus: (engine, key) => engines.focus(engine, key),
+      focused: () => engines.focused(),
+      release: (engine, key) => engines.release(engine, key),
+    },
     // A screen's own keys (`directory`: Use this folder); the native keymap has no `navigator.*` bindings, so the
     // Navigator's home-row keys are not matched, and the window's own keys stay the window's.
     shortcutFor: (event, scope) => {
@@ -625,6 +636,8 @@ export function copyFor(cx, screen) {
  * measures text. */
 export const files = {
   icon: (id, markup, color) => Icon.new(id, { markup, color: color ?? "" }),
+  // An engine slot's native element, by kind and key (`perch-engine`).
+  engine: (engine, key) => engines.Engine.new(key, { engine }),
   // The exact width of a line of text (`perch-react` shapes it), for laying rows out on device pixels.
   measure: (text, font) => {
     const key = `${font.size}|${font.weight}|${font.family}|${font.italic ? 1 : 0}|${text}`;

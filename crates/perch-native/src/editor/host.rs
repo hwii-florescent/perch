@@ -554,6 +554,20 @@ impl Editors {
     }
 }
 
+/// The editor as an engine a screen places (`data-perch-engine="editor"`): drawn by key, parked when the screen lets
+/// the key go, focused through its own handle.
+impl crate::mods::engines::EngineKind for Editors {
+    fn draw(&self, key: &str, window: &mut Window, cx: &mut App) -> AnyElement {
+        Editors::draw(self, key, window, cx)
+    }
+    fn release(&self, key: &str, _cx: &mut App) {
+        self.park(key);
+    }
+    fn focus_handle(&self, key: &str, cx: &App) -> Option<gpui::FocusHandle> {
+        self.state(key).map(|state| state.read(cx).focus_handle(cx))
+    }
+}
+
 /// A new editor on `value`, its language from `path`'s file name.
 fn create(path: &str, value: &str, window: &mut Window, cx: &mut App) -> Entity<EditorState> {
     let name = path.rsplit('/').next().unwrap_or(path).to_string();

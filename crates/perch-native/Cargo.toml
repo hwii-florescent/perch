@@ -51,6 +51,11 @@ path = "tests/editor_engine.rs"
 harness = false
 
 [[test]]
+name = "mods_engines"
+path = "tests/mods_engines.rs"
+harness = false
+
+[[test]]
 name = "terminal_session"
 path = "tests/terminal_session.rs"
 harness = false
