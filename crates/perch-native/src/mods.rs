@@ -492,6 +492,12 @@ impl ModHost {
         &self.0.user_dir
     }
 
+    /// What the mods' runtime has spent so far (script renders, materializations), for tests
+    /// that bound what an interaction costs.
+    pub fn metrics(&self) -> gpui_shell::metrics::RuntimeMetrics {
+        self.0.runtime.read_metrics()
+    }
+
     /// Adds a host module mods may import, built for each mod (by id) as it loads. Modules
     /// registered later reach mods loaded later; a reload keeps the modules it was loaded with.
     pub fn register_module(&self, factory: impl Fn(&str) -> HostModule + 'static) {
