@@ -559,7 +559,8 @@ fn settings(rig: &mut Rig) {
     // Every section, in the web's order.
     let mut at: Vec<(f32, &str)> = Vec::new();
     for id in SECTIONS {
-        let name = by_test_id(rig, &format!("settings-nav-{id}"));
+        // The parity table names the section list's rows by section.
+        let name = format!("settings-nav:{id}");
         let y = f32::from(rig.record(&name).expect("drawn").bounds.origin.y);
         at.push((y, id));
     }
@@ -569,7 +570,7 @@ fn settings(rig: &mut Rig) {
     rig.asked();
 
     // Keyboard: record a key for the help, and the core is told to keep it.
-    let nav = by_test_id(rig, "settings-nav-keyboard");
+    let nav = "settings-nav:keyboard".to_string();
     rig.click(&nav);
     let broken: Vec<String> = rig
         .draw()

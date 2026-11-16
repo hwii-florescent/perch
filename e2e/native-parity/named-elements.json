@@ -2812,6 +2812,102 @@
           "description": "The status bar, below the cards on the backdrop."
         }
       ]
+    },
+    "settings": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 8,
+      "elements": [
+        {
+          "name": "settings-modal",
+          "selector": "[data-testid=\"settings-modal\"]",
+          "description": "The page over the whole window: the app's backdrop with 8 px around two cards."
+        },
+        {
+          "name": "settings-nav-card",
+          "selector": "[data-testid=\"settings-modal\"] > nav",
+          "description": "The section list's card: 15 rem wide, the full height, the card fill."
+        },
+        {
+          "name": "settings-close",
+          "selector": "[data-testid=\"settings-close\"]",
+          "description": "'Back to app': a ghost button with a chevron, after room for the traffic lights.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "settings-nav",
+          "selector": "nav [data-testid^=\"settings-nav-\"]",
+          "description": "A section's button in the list; the chosen one has the raised fill.",
+          "text": true,
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "settings-nav-"
+          }
+        },
+        {
+          "name": "settings-main-card",
+          "selector": "[data-testid=\"settings-modal\"] > main",
+          "description": "The section's card: the rest of the width, the card fill."
+        },
+        {
+          "name": "settings-search",
+          "selector": "[data-testid=\"settings-search\"]",
+          "description": "The search field, 16 rem wide at the card's top right.",
+          "text": true
+        },
+        {
+          "name": "settings-title",
+          "selector": "[data-testid=\"settings-modal\"] > main h1",
+          "description": "The section's name (or 'Search results'), 1.6 rem.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "settings-body",
+          "selector": "[data-testid=\"settings-modal\"] .settings-modal__body",
+          "description": "The scrolling body: 2 rem at the sides, the section centred in at most 46 rem."
+        },
+        {
+          "name": "settings-group-title",
+          "selector": "[data-testid=\"settings-modal\"] > main h3",
+          "description": "A block's heading above its card.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "settings-group-card",
+          "selector": "[data-testid=\"settings-modal\"] > main section > div.rounded-ui",
+          "description": "A block's card: the surface fill, 1 rem at the sides."
+        },
+        {
+          "name": "settings-row",
+          "selector": "[data-testid=\"settings-modal\"] [data-setting-row]",
+          "description": "One setting: its name and description on the left, its control on the right."
+        },
+        {
+          "name": "settings-row-title",
+          "selector": "[data-testid=\"settings-modal\"] [data-setting-row] > div:first-child > div:first-child",
+          "description": "A setting's name.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "settings-row-description",
+          "selector": "[data-testid=\"settings-modal\"] [data-setting-row] > div:first-child > div:nth-child(2)",
+          "description": "A setting's description.",
+          "text": true
+        },
+        {
+          "name": "settings-result-title",
+          "selector": "[data-testid^=\"settings-result-\"] > h2",
+          "description": "A section's name above its matching rows while searching.",
+          "text": true,
+          "textSized": true
+        }
+      ]
     }
   }
 }

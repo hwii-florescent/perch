@@ -123,7 +123,7 @@ function Settings({ page: opened }) {
   return h("div", { className: "fixed inset-0 z-[1000] flex gap-2 bg-[var(--backdrop)] p-2", "data-testid": "settings-modal", role: "region", "aria-label": "Settings" },
     h("nav", { className: cn(CARD, "w-[15rem]"), "aria-label": "Settings sections" },
       // The window's traffic lights sit here, as the web's desktop app leaves room for them.
-      h("div", { className: "box-border flex h-11 shrink-0 items-center pl-[84px]" },
+      h("div", { className: "box-border flex h-11 shrink-0 items-center", style: { paddingLeft: 84 } },
         h("button", { type: "button", className: cn(ghostButton, "flex items-center gap-1 py-[0.3rem] pr-2 pl-1 text-left text-[0.85rem]"), "data-testid": "settings-close", "aria-label": "Close settings", onClick: () => closeWith(null) }, CHEVRON, "Back to app")),
       h("div", { className: "flex min-h-0 flex-1 flex-col gap-[2px] overflow-y-auto px-2 pb-3" },
         ...TABS.map(({ id, label }) => h("button", {

@@ -198,6 +198,12 @@ pub fn state_from(data: &Value) -> State {
     state.apply(&message(
         json!({ "type": "hosts.list", "hosts": data["hosts"] }),
     ));
+    // The core's settings as it sent them (`settings.current`), for the screens that read them.
+    if data["settings"].is_object() {
+        state.apply(&message(
+            json!({ "type": "settings.current", "settings": data["settings"] }),
+        ));
+    }
     let projects = data["workspaceProjects"]
         .as_array()
         .cloned()
