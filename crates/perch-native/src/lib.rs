@@ -4,6 +4,7 @@
 
 pub mod actions;
 pub mod client;
+pub mod editor;
 pub mod files;
 pub mod handoff;
 pub mod keymap;
