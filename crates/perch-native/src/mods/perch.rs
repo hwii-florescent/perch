@@ -1406,6 +1406,7 @@ impl Perch {
     }
 
     /// `hostId`'s agents by id and name, for a screen to tell them apart (and draw their icons).
+    /// A plain terminal is not one, though the new-tab choices list it.
     fn providers(&self, host_id: &str) -> Value {
         let store = self.store();
         let list: Vec<Value> = store
@@ -1413,6 +1414,7 @@ impl Perch {
             .get(host_id)
             .into_iter()
             .flatten()
+            .filter(|p| p.id != perch_core::agent_fleet::TERMINAL_PROVIDER)
             .map(|p| json!({ "id": p.id, "name": p.name }))
             .collect();
         json!(list)
