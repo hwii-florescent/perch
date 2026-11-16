@@ -557,8 +557,15 @@ export function copyFor(cx, screen) {
     startSession: (hostId, cwd, agent) => {
       perch.startSession(hostId, cwd ?? undefined, agent).catch(answer((error) => console.error(`perch.startSession: ${error?.message ?? error}`)));
     },
+    // A command the window refuses (one it does not know throws at once) is logged, never thrown: the caller's own
+    // next step (a menu's `onClose`) still runs.
     command(name, args) {
-      perch.run(name, args && Object.keys(args).length ? args : undefined).catch(answer((error) => console.error(`perch.run ${name}: ${error?.message ?? error}`)));
+      const failed = answer((error) => console.error(`perch.run ${name}: ${error?.message ?? error}`));
+      try {
+        perch.run(name, args && Object.keys(args).length ? args : undefined).catch(failed);
+      } catch (error) {
+        failed(error);
+      }
       return true;
     },
     // The web's own marks (`agent-icons.js`, rendered from its `AgentIcon`); a provider without one gets the letter

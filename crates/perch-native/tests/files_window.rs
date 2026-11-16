@@ -417,7 +417,17 @@ fn main() {
             next.read(cx).tabs().active().map(str::to_string),
         )
     });
-    assert_eq!(strip, (vec!["w1\nsrc/lib.rs".to_string()], None));
+    // The kept tab belongs to w1's strip: no workspace is on screen yet, so none is drawn, and it
+    // is there again once w1 is.
+    assert_eq!(strip, (vec![], None));
+    next.update(&mut rig.cx, |ws, cx| {
+        ws.open_file("w1", "docs/new.md", false, cx)
+    });
+    let strip = rig.cx.update(|cx| next.read(cx).tabs().strip().to_vec());
+    assert_eq!(
+        strip,
+        vec!["w1\nsrc/lib.rs".to_string(), "w1\ndocs/new.md".to_string()]
+    );
 
     let _ = std::fs::remove_dir_all(&scratch);
     println!("files window: ok");
