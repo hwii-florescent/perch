@@ -91,8 +91,11 @@ it("Markdown preview follows edits made in Source", async () => {
   expect(get("workspace-markdown-preview")!.textContent).toContain("two");
 });
 
-it("non-Markdown files keep the server Preview button and have no toggle", async () => {
+it("a code file has no Preview button and no toggle; an HTML file keeps the server Preview", async () => {
   await openMarkdown("w", "main.ts", "const a = 1;");
+  expect(button("Preview")).toBeUndefined();
+  expect(host.querySelector('[aria-label="Markdown view"]')).toBeNull();
+  await openMarkdown("w", "page.html", "<p>hi</p>");
   expect(button("Preview")).toBeDefined();
   expect(host.querySelector('[aria-label="Markdown view"]')).toBeNull();
 });
