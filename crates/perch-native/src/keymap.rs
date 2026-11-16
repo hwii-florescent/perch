@@ -135,6 +135,11 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Close the focused pane, file or tab (agents ask first)",
         &["mod+w"],
     ),
+    s(
+        "tabs.keepOpen",
+        "Keep the preview tab open (make it a regular tab)",
+        &["cmd+alt+enter", "ctrl+alt+enter"],
+    ),
     s("tabs.jump1", "Jump to tab 1", &["cmd+1", "alt+1"]),
     s("tabs.jump2", "Jump to tab 2", &["cmd+2", "alt+2"]),
     s("tabs.jump3", "Jump to tab 3", &["cmd+3", "alt+3"]),
@@ -1846,9 +1851,9 @@ mod tests {
             for entry in fixture[section].as_array().unwrap() {
                 let id = entry[0].as_str().unwrap();
                 let Some(shortcut) = all_shortcuts().find(|s| s.id == id) else {
-                    // The window has no drawer and no preview tabs to keep.
+                    // The window has no drawer shortcut yet.
                     assert!(
-                        ["global.drawer", "tabs.keepOpen"].contains(&id),
+                        ["global.drawer"].contains(&id),
                         "{id}: the web ships it and this window has no such shortcut"
                     );
                     continue;

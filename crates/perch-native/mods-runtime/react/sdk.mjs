@@ -24,6 +24,8 @@ import { DOT_GLYPH, sessionDotState } from "../../../../packages/web/src/statusD
 import { isNestedIn, nestUnderLeads } from "../../../../packages/web/src/sidebarOrder.ts";
 import { computeAnchoredPopoverStyle, useDismissOnOutsideClick } from "../../../../packages/web/src/components/popoverPosition.ts";
 import { PageIcon } from "../../../../packages/web/src/components/PageIcon.tsx";
+import { FileIcon, GitMarker } from "../../../../packages/web/src/components/fileDecorations.tsx";
+import { assetKind } from "../../../../packages/web/src/components/workspaceFileKind.ts";
 
 /** The SDK version this surface implements (`perch-sdk.d.ts`'s navigation part). */
 export const version = "1.3.0";
@@ -391,6 +393,52 @@ export const beginReorderDrag = (event, options) => {
 // ---- chrome (1.2: tabs, status bar, pane header) ------------------------------------------------------------------
 
 export const useWorkspaceTabs = () => useHostSnapshot((perch) => perch.workspaceTabs());
+
+// ---- files ----------------------------------------------------------------------------------------------------
+
+export { FileIcon, GitMarker, assetKind };
+// ponytail: stand-ins until the native engines land: the editor shows the draft as plain text (phase 2's engine node
+// replaces `CodeEditor`), a media file shows its name and size (Quick Look replaces `FileAsset`), Markdown shows its
+// source (the token renderer replaces `MarkdownPreview`) and the entry menu is not offered yet.
+export function CodeEditor({ value, label }) {
+  return createElement("pre", { "aria-label": label, className: "m-0 min-h-0 flex-1 overflow-auto p-3 text-[0.78rem] leading-[1.45] whitespace-pre text-fg [font-family:var(--font-mono)]" }, value);
+}
+export function FileAsset({ metadata }) {
+  return createElement("div", { className: "grid content-center justify-items-center gap-1 p-5 text-[0.72rem] text-subtext-0" },
+    createElement("strong", { className: "text-[0.9rem] text-fg" }, metadata?.name ?? ""),
+    createElement("span", null, `${metadata?.mediaType ?? "file"} · ${metadata?.size ?? 0} bytes`));
+}
+export function MarkdownPreview({ content }) {
+  return createElement("pre", { className: "m-0 min-h-0 flex-1 overflow-auto p-3 whitespace-pre-wrap text-fg" }, content);
+}
+export const FileEntryMenu = () => null;
+
+const NO_MARKS = new Map();
+const FILE_ACTIONS = ["requestTree", "searchFiles", "openFile", "reloadFile", "requestPreview", "updateDraft", "saveFile", "overwriteFile", "setWrap"];
+/** `useWorkspaceFiles`: a workspace's files as the window's store keeps them (listings, documents with their drafts,
+ * previews, the last search), its Git marks with `{git: true}`, and the store's actions. An action runs once the
+ * current call has unwound and returns null (the web's request ids are not used by a screen). */
+export function useWorkspaceFiles(workspaceId, options = {}) {
+  const data = useHostSnapshot((perch) => perch.workspaceFiles(workspaceId));
+  const withGit = !!options.git;
+  const marks = data.git?.decorations;
+  const decorations = useMemo(() => (withGit && marks?.length ? new Map(marks) : NO_MARKS), [marks, withGit]);
+  const actions = useMemo(() => Object.fromEntries(FILE_ACTIONS.map((action) => [action, (...args) => {
+    host().filesDo(action, workspaceId, ...args);
+    return null;
+  }])), [workspaceId]);
+  return useMemo(() => ({
+    workspace: data.workspace,
+    connected: data.connected,
+    trees: data.trees,
+    documents: data.documents,
+    previews: data.previews,
+    search: data.search ?? undefined,
+    wrap: data.wrap,
+    git: { ...data.git, decorations },
+    actions,
+  }), [data, decorations, actions]);
+}
 export const useStatusLine = () => useHostSnapshot((perch) => perch.statusLine());
 export const useZoom = () => useHostSnapshot((perch) => perch.zoom());
 export const usePaneLook = () => useHostSnapshot((perch) => perch.paneLook());

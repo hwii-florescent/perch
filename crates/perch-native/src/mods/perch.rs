@@ -1856,11 +1856,16 @@ const OWN: [(&str, &str, &str); 10] = [
 
 /// Window commands beyond the keymap's: the web's ids the window can perform (some under the
 /// name its keys use), and the native ones screens need.
-const WINDOW_COMMANDS: [(&str, &str, &str); 37] = [
+const WINDOW_COMMANDS: [(&str, &str, &str); 38] = [
     (
         "files.extract",
         "Extract a workspace's archive beside it",
         "{workspaceId, path}",
+    ),
+    (
+        "file.open",
+        "Open a workspace's file in a tab (its preview tab with preview: true)",
+        "{workspaceId, path, preview?}",
     ),
     (
         "handoff.open",

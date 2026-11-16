@@ -6,7 +6,10 @@
 //! - `PERCH_NATIVE_HIDDEN=1`: the window is created but never ordered in.
 //! - `PERCH_NATIVE_SCRIPT` (or `PERCH_NATIVE_SCRIPT_FILE`): steps separated by `;` or new lines,
 //!   run in order once the core has been heard from: `open <session id>` shows that session as a
-//!   tab, `split right|down` starts a terminal beside the focused one, `pause <ms>` waits.
+//!   tab, `split right|down` starts a terminal beside the focused one, `files <workspace id>`
+//!   opens the drawer's Files tab on that workspace, `file <workspace id> <path> [preview]` opens
+//!   a file tab (the workspace's preview tab with `preview`), `close <tab id>` or
+//!   `close <workspace id> <path>` closes a tab, `pause <ms>` waits.
 //!   Blank lines and lines starting with `#` are skipped.
 //!
 //! The terminal never asks the system which Option key is down in this mode (it sees none), so a
@@ -24,6 +27,13 @@ const POLL: Duration = Duration::from_millis(100);
 pub enum Step {
     Open(String),
     Split(Direction),
+    Files(String),
+    File {
+        workspace: String,
+        path: String,
+        preview: bool,
+    },
+    Close(String),
     Pause(Duration),
 }
 
@@ -100,6 +110,14 @@ pub fn parse_script(text: &str) -> Result<Vec<Step>, String> {
                 ["open", id] if id.bytes().all(|b| b.is_ascii_graphic()) => {
                     Ok(Step::Open((*id).to_string()))
                 }
+                ["files", ws] => Ok(Step::Files((*ws).to_string())),
+                ["file", ws, path] | ["file", ws, path, "preview"] => Ok(Step::File {
+                    workspace: (*ws).to_string(),
+                    path: (*path).to_string(),
+                    preview: words.len() == 4,
+                }),
+                ["close", id] => Ok(Step::Close((*id).to_string())),
+                ["close", ws, path] => Ok(Step::Close(format!("{ws}\n{path}"))),
                 ["split", "right"] => Ok(Step::Split(Direction::Right)),
                 ["split", "down"] => Ok(Step::Split(Direction::Down)),
                 ["pause", ms] => ms
@@ -123,6 +141,31 @@ pub async fn run(steps: Vec<Step>, window: WindowHandle<Workspace>, cx: &mut Asy
             }
             Step::Open(id) => open(id, window, cx).await,
             Step::Split(direction) => split(*direction, window, cx).await,
+            Step::Files(ws) => window
+                .update(cx, |workspace, _, cx| workspace.show_files(ws, cx))
+                .is_ok(),
+            Step::File {
+                workspace: ws,
+                path,
+                preview,
+            } => {
+                let id = format!("{ws}\n{path}");
+                window
+                    .update(cx, |workspace, _, cx| {
+                        workspace.open_file(ws, path, *preview, cx)
+                    })
+                    .is_ok()
+                    && until(cx, |cx| shown(window, cx).contains(&id)).await
+            }
+            Step::Close(id) => {
+                window
+                    .update(cx, |workspace, window, cx| {
+                        let args = serde_json::json!({ "id": id });
+                        workspace.run_command("tabs.close", Some(&args), window, cx)
+                    })
+                    .is_ok_and(|r| r.is_ok())
+                    && until(cx, |cx| !shown(window, cx).contains(id)).await
+            }
         };
         if !done {
             eprintln!(
@@ -226,8 +269,39 @@ mod tests {
     }
 
     #[test]
+    fn the_files_openers_name_a_workspace_and_a_path() {
+        let file = |path: &str, preview| Step::File {
+            workspace: "w1".into(),
+            path: path.into(),
+            preview,
+        };
+        assert_eq!(
+            parse_script(
+                "files w1; file w1 src/a.rs; file w1 b.md preview; close w1 b.md; close s1"
+            )
+            .unwrap(),
+            [
+                Step::Files("w1".into()),
+                file("src/a.rs", false),
+                file("b.md", true),
+                Step::Close("w1\nb.md".into()),
+                Step::Close("s1".into()),
+            ]
+        );
+    }
+
+    #[test]
     fn a_step_that_is_not_understood_is_refused() {
-        for bad in ["open", "open a b", "split left", "pause soon", "dance"] {
+        for bad in [
+            "open",
+            "open a b",
+            "split left",
+            "pause soon",
+            "dance",
+            "files",
+            "file w1",
+            "file w1 a b",
+        ] {
             assert!(parse_script(bad).is_err(), "{bad}");
         }
     }

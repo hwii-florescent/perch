@@ -260,6 +260,8 @@ pub struct Workspace {
     viewport_width: f32,
     /// The workspace files this window has open: listings, documents and their drafts.
     files: crate::files::Files,
+    /// The workspace the drawer's Files tab was opened on, for when no tab on screen names one.
+    explorer_workspace: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -348,6 +350,7 @@ impl Workspace {
             column_drag: None,
             viewport_width: 0.0,
             files: crate::files::Files::new(files_live),
+            explorer_workspace: None,
             _subscriptions: vec![opened, failed, observed],
         }
     }
@@ -582,6 +585,78 @@ impl Workspace {
         let result = change(&mut self.files.store, Instant::now());
         self.pump_files(cx);
         result
+    }
+
+    /// Opens `path` of workspace `workspace_id` in a file tab: as the workspace's preview tab
+    /// (replacing its previous preview in place) when `preview`, else as a regular tab.
+    pub fn open_file(
+        &mut self,
+        workspace_id: &str,
+        path: &str,
+        preview: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let id = format!("{workspace_id}\n{path}");
+        if preview {
+            self.tabs.open_preview(&id, |other| {
+                file_tab(other).is_some_and(|(w, _)| w == workspace_id)
+            });
+        } else {
+            self.tabs.open(&id);
+            self.tabs.pin(&id);
+        }
+        self.after_change(cx);
+    }
+
+    /// Opens the drawer's Files tab on workspace `workspace_id` (while no tab on screen names
+    /// one).
+    pub fn show_files(&mut self, workspace_id: &str, cx: &mut Context<Self>) {
+        self.explorer_workspace = Some(workspace_id.to_string());
+        self.chrome.set_tools(Some(shell::Tools::Files));
+        cx.notify();
+    }
+
+    /// The workspace on screen: the active file tab's, or the active session's, else the one
+    /// the Files tab was last opened on.
+    fn shown_workspace(&self, cx: &App) -> Option<String> {
+        self.active_workspace(cx)
+            .or_else(|| self.explorer_workspace.clone())
+    }
+
+    fn active_workspace(&self, cx: &App) -> Option<String> {
+        let active = self.tabs.active()?;
+        if let Some((workspace_id, _)) = file_tab(active) {
+            return Some(workspace_id.to_string());
+        }
+        let store = &self.sidebar.read(cx).model().store;
+        store
+            .sessions
+            .iter()
+            .find(|s| s.id == active)
+            .and_then(|s| s.workspace_id.clone())
+    }
+
+    /// The files screens the window places: the explorer in the drawer's Files tab, a file's
+    /// editor in each file tab on screen.
+    fn files_wanted(&self, want: &mut impl FnMut(&'static str, String, Value), cx: &App) {
+        if self.chrome.tools() == Some(shell::Tools::Files) {
+            if let Some(workspace_id) = self.shown_workspace(cx) {
+                want(
+                    "files",
+                    "files#drawer".into(),
+                    json!({ "workspaceId": workspace_id, "layout": "explorer" }),
+                );
+            }
+        }
+        for id in self.tabs.shown() {
+            if let Some((workspace_id, path)) = file_tab(&id) {
+                want(
+                    "files",
+                    format!("files#{id}"),
+                    json!({ "workspaceId": workspace_id, "initialPath": path, "layout": "editor" }),
+                );
+            }
+        }
     }
 
     /// An edited preview becomes a regular tab, as the web's.
@@ -1621,6 +1696,7 @@ impl Workspace {
         if self.tabs.visible().is_none() {
             want("start", "start".into(), self.start_props(cx));
         }
+        self.files_wanted(&mut want, cx);
         let shown = self.tabs.shown();
         if shown.len() > 1 {
             for id in &shown {
@@ -2654,13 +2730,26 @@ impl Workspace {
             // The strip's "+" lists New browser and New file, as the web's; this window has
             // neither view, so they are refused with the reason (as the launcher's are).
             "browser.open" => return Err(NO_BROWSER.into()),
-            "file.open" => return Err(NO_FILES.into()),
+            "file.open" => {
+                let workspace =
+                    text("workspaceId").ok_or("This command needs {workspaceId, path}.")?;
+                let path = text("path").ok_or("This command needs {workspaceId, path}.")?;
+                let preview = args.and_then(|a| a["preview"].as_bool()).unwrap_or(false);
+                self.open_file(&workspace.to_string(), &path.to_string(), preview, cx);
+            }
             "files.extract" => {
                 let (Some(workspace), Some(path)) = (text("workspaceId"), text("path")) else {
                     return Err("This command needs {workspaceId, path}.".into());
                 };
                 let (workspace, path) = (workspace.to_string(), path.to_string());
                 self.with_files(|store, _| store.extract_archive(&workspace, &path), cx);
+            }
+            "tabs.keepOpen" => {
+                if let Some(id) = self.tabs.active().map(str::to_string) {
+                    if self.tabs.pin(&id) {
+                        cx.notify();
+                    }
+                }
             }
             "link.open" => {
                 let url = text("url").ok_or("This command needs {url}.")?;
@@ -3888,6 +3977,12 @@ impl Workspace {
             );
         // What a mod draws over the terminal, in the pane's box: the agent's controls, the find
         // bar, the phone-size notice.
+        if file_tab(id).is_some() {
+            return match self.screens.inflow(&format!("files#{id}")) {
+                Some(view) => frame.relative().child(view).into_any_element(),
+                None => frame.child(self.title_of(id, cx)).into_any_element(),
+            };
+        }
         let over = ["agent-control", "terminal-search", "phone-size"]
             .into_iter()
             .filter_map(|screen| self.screens.inflow(&format!("{screen}#{id}")))
@@ -4264,7 +4359,16 @@ impl gpui::Render for Workspace {
                         .child(div().flex().items_center().gap(px(2.)).children(tabs))
                         .child(shell::drawer_toggle(tokens, toggle_drawer.clone())),
                 )
-                .child(self.handoff_body(tab, open, tokens))
+                .child(match (tab, self.screens.inflow("files#drawer")) {
+                    (shell::Tools::Files, Some(explorer)) => div()
+                        .flex_1()
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .child(explorer)
+                        .into_any_element(),
+                    _ => self.handoff_body(tab, open, tokens),
+                })
                 .child(shell::round_corners(tokens.backdrop))
         });
         let drawer_handle = tools.map(|_| {
