@@ -5,7 +5,9 @@ import { defineConfig, devices } from "@playwright/test";
 import * as path from "node:path";
 
 const here = __dirname;
-const PORT = 7810; // vite.config.ts pins the same port; a busy port fails the run instead of moving it
+// vite.config.ts reads the same port; a busy port fails the run instead of moving it. `PERCH_PARITY_PORT` picks another, so
+// two checkouts can make their references at once.
+const PORT = Number(process.env.PERCH_PARITY_PORT ?? 7810);
 export default defineConfig({
   testDir: here,
   testMatch: "web-reference.spec.ts",

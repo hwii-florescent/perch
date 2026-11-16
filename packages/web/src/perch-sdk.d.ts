@@ -732,6 +732,17 @@ declare module "@perch/sdk" {
   export function beginReorderDrag(event: import("react").PointerEvent, options: ReorderDragOptions): void;
   /** A menu row's classes (`danger` red). */
   export function menuItemClass(options?: { danger?: boolean }): string;
+  /** A menu row that opens a list of choices beside the menu, as a native menu's submenu: on hover, a click, Right
+   * arrow, Enter or Space; Up and Down move in it, Left arrow or Escape close it. `side` is where it opens (the
+   * caller knows where its menu sits), `up` opens it upward from the row, `maxHeight` makes it scroll. */
+  export function Submenu(props: {
+    label: string;
+    items: { key: string; label: string; testId?: string; onSelect: () => void }[];
+    testId?: string;
+    side?: "right" | "left";
+    up?: boolean;
+    maxHeight?: number;
+  }): import("react").ReactElement;
   /** A glyph button at the end of a list row (⋯, +, ×), shown on hover of its `group/ph` (`project`) or `group/row`
    * (`session`) row, on focus and on touch; `always` always. */
   export function rowActionClass(options?: { reveal?: "always" | "project" | "session"; tone?: "default" | "danger"; className?: string }): string;

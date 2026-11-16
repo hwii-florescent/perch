@@ -12,7 +12,7 @@
 //! (docs/MOD-SDK.md).
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { buttonClass as button, menuDividerClass as menuDivider, menuItemClass as menuItem, menuPanel, type TabMenuScreenProps } from "@perch/sdk";
+import { buttonClass as button, cn, menuDividerClass as menuDivider, menuItemClass as menuItem, menuPanel, Submenu, type TabMenuScreenProps } from "@perch/sdk";
 
 export default function TabMenu({ x, y, onClose, self, canSplitNew, canSplitMore, offered, inSplit, canStopAgent, extraItems, actions }: TabMenuScreenProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -38,14 +38,18 @@ export default function TabMenu({ x, y, onClose, self, canSplitNew, canSplitMore
   }, [renaming]);
 
   const left = Math.max(8, Math.min(x, window.innerWidth - 288));
-  const top = Math.max(8, Math.min(y, window.innerHeight - 48 - 36 * (offered.length + extraItems.length + 7)));
+  const top = Math.max(8, Math.min(y, window.innerHeight - 48 - 36 * (extraItems.length + 8)));
+  // "Show beside" opens its list of tabs beside the menu: on the side with room, and upward when the row is low.
+  const besideRow = top + 14 + 36 * (self.kind === "session" ? 3 : 2);
+  const listHeight = 12 + 36 * offered.length;
+  const besideUp = window.innerHeight - besideRow < listHeight && besideRow > window.innerHeight / 2;
   const then = (run: () => void) => () => { run(); onClose(); };
   function commitRename() {
     if (self.kind === "session" && name.trim()) actions.rename(name.trim());
     onClose();
   }
   return createPortal(
-    <div ref={ref} className={`${menuPanel} overflow-y-auto max-[700px]:[&_button]:min-h-11`} aria-label="Tab actions" data-testid="tab-split-menu" style={{ position: "fixed", top, left, zIndex: 9999, width: 280, maxWidth: "calc(100vw - 16px)", maxHeight: window.innerHeight - top - 8 }}>
+    <div ref={ref} className={cn(menuPanel, "overflow-visible max-[700px]:[&_button]:min-h-11")} aria-label="Tab actions" data-testid="tab-split-menu" style={{ position: "fixed", top, left, zIndex: 9999, width: 280, maxWidth: "calc(100vw - 16px)" }}>
       {renaming ? <form className="flex gap-2 p-2" onSubmit={(event) => { event.preventDefault(); commitRename(); }}>
         <input ref={renameRef} aria-label="Tab name" data-testid="tab-menu-rename-input" className="min-w-0 flex-1 rounded-ui bg-surface-0 px-2 py-1 text-sm text-fg focus:[outline:1px_solid_var(--accent)]" value={name} onChange={(event) => setName(event.target.value)} />
         <button type="submit" className={button({ size: "sm", variant: "primary" })}>Save</button>
@@ -53,13 +57,17 @@ export default function TabMenu({ x, y, onClose, self, canSplitNew, canSplitMore
       {self.kind === "session" && <button type="button" className={menuItem()} data-testid="tab-menu-rename" onClick={() => { setName(self.title ?? ""); setRenaming(true); }}>Rename tab</button>}
       {(["right", "below"] as const).map((direction) => <button key={direction} type="button" className={menuItem()} data-testid={`tab-menu-split-${direction}`} disabled={!canSplitNew || !canSplitMore} onClick={then(() => actions.splitNew(direction))}>Split {direction} with new terminal</button>)}
       <div className={menuDivider} />
-      {offered.length > 0 && <p className="m-0 px-[0.9rem] py-1 text-xs text-subtext-0">Show an open tab beside this one</p>}
-      {offered.map((entry) => (
-        <button key={entry.id} type="button" className={menuItem()} data-testid={`tab-split-with-${entry.id}`} onClick={then(() => actions.showBeside(entry.id))}>
-          <span className="block truncate">Show beside {entry.label}</span>
-        </button>
-      ))}
-      {offered.length === 0 && !inSplit && <div className="px-[0.9rem] py-[0.45rem] text-[0.82rem] text-subtext-0">No other open tab available</div>}
+      {offered.length > 0 && (
+        <Submenu
+          label="Show beside"
+          testId="tab-menu-show-beside"
+          side={left + 280 + 240 + 8 > window.innerWidth ? "left" : "right"}
+          up={besideUp}
+          maxHeight={besideUp ? besideRow + 36 - 8 : window.innerHeight - besideRow - 8}
+          items={offered.map((entry) => ({ key: entry.id, label: entry.label, testId: `tab-split-with-${entry.id}`, onSelect: then(() => actions.showBeside(entry.id)) }))}
+        />
+      )}
+      {offered.length === 0 && !inSplit && <div data-testid="tab-menu-empty" className="px-[0.9rem] py-[0.45rem] text-[0.82rem] text-subtext-0">No other open tab available</div>}
       {inSplit && (
         <>
           {offered.length > 0 && <div className={menuDivider} />}

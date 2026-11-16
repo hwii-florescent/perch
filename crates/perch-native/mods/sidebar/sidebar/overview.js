@@ -181,8 +181,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }) {
         onNavigate?.();
     }
     /** One chat row. `variant`: the tree's and Quickchat's (state badge), By status's (one line with `detail`), or
-     * the flat list's (its project's name, then the badge). A lead with sub-sessions and the sub-sessions are filled
-     * cards; each sub-session hangs off an elbow connector, and the lead carries the fold chevron. */
+     * the flat list's (its project's name, then the badge). No row is filled at rest, only the
+     * active and the hovered one; each sub-session hangs off an elbow connector, and the lead carries the fold chevron. */
     function sessionRow(session, siblings, group, variant, detail = "", family = {}) {
         const { kids = [], folded = false, nested = false, last = false } = family;
         const active = session.id === sessionId;
@@ -234,7 +234,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }) {
                     }), !lead && badge] })
         }));
         return (_jsxs("div", {
-            className: cn("group/row flex min-w-0 items-stretch rounded-ui", lit ? "bg-surface-1" : cn((lead || nested) && "bg-surface-0", "hover:bg-surface-1 focus-within:bg-surface-1")),
+            className: cn("group/row flex min-w-0 items-stretch rounded-ui", lit ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1"),
             "data-sub-session": nested || undefined,
             ...sessionRowProps(session, siblings, group),
             children: [
