@@ -355,7 +355,9 @@ it from its upstreams. Each copy keeps its upstream licence file and herdr's
   with nothing to draw and the window's `frame_waker` restarts it
   (`vendor/gpui-pre-macos/src/display_link.rs` `FrameDemand`, and `step`, `draw` and
   `frame_waker` in `vendor/gpui-pre-macos/src/window.rs`); `PERCH_NATIVE_PERF=1` logs each
-  frame request on stderr (`perf_log` in `vendor/gpui-pre/src/window.rs`).
+  frame request on stderr (`perf_log` in `vendor/gpui-pre/src/window.rs`); and
+  `HeadlessAppContext::present` (`vendor/gpui-pre/src/app/headless_app_context.rs`), for the
+  offscreen measuring example, presents only after a draw, as a display tick does.
 
 The shell also pulls `quickjs-jit` (MIT, with QuickJS-ng's MIT C sources) and
 [LLRT](https://github.com/awslabs/llrt) modules (Apache-2.0) from git at the revisions
