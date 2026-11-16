@@ -4044,7 +4044,7 @@ impl gpui::Render for Workspace {
                 .flex_none()
                 .w(px(width))
                 .child(
-                    shell::head()
+                    shell::drags_window(shell::head())
                         .justify_between()
                         .gap_2()
                         .px_2()
@@ -4101,11 +4101,9 @@ impl gpui::Render for Workspace {
                 .top_0()
                 .left_0()
                 .size_full();
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
+                // The strip's empty space drags the window (the web's `data-tauri-drag-region`);
+                // a tab, its controls and anything else a mod handles take their own presses.
+                shell::drags_window(div().relative().flex_1().min_w_0().h_full())
                     .child(view)
                     .child(measure)
                     .into_any_element()

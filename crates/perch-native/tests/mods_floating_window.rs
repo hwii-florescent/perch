@@ -789,6 +789,38 @@ fn tab_drag(rig: &mut Rig) {
         ws.run_command("pane.unsplit", Some(&json!({"id": "alpha"})), window, cx)
     })
     .unwrap();
+
+    // A tab that is not the one shown drags too, from its first press (which never reaches the
+    // head under the strip: that would move the window), and drops on the left edge of the pane.
+    select(rig, "alpha");
+    assert_eq!(layout(rig).1, ids(&["alpha"]));
+    let tab = rig.center("tab:bravo");
+    let left_edge = (WIDTH / 2. - 150., HEIGHT / 2.);
+    let pane = rig.ws(|ws, _, _| ws.tabs().shown());
+    assert_eq!(pane, ids(&["alpha"]));
+    rig.down(tab);
+    rig.held_to((tab.0, tab.1 + 20.));
+    rig.held_to(left_edge);
+    let zone = rig
+        .record("tab-drop-zone:left")
+        .expect("the left half a split takes");
+    assert!(
+        f32::from(zone.bounds.origin.x + zone.bounds.size.width / 2.) < WIDTH / 2. + 150.,
+        "the left half: {:?}",
+        zone.bounds
+    );
+    rig.shot("tab-drop-zone-left");
+    rig.up(left_edge);
+    assert_eq!(
+        layout(rig).1,
+        ids(&["bravo", "alpha"]),
+        "bravo split in on the left"
+    );
+    assert_eq!(rig.shown().as_deref(), Some("bravo"));
+    rig.ws(|ws, window, cx| {
+        ws.run_command("pane.unsplit", Some(&json!({"id": "bravo"})), window, cx)
+    })
+    .unwrap();
     println!("tab-drag: ok");
 }
 
