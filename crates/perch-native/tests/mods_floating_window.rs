@@ -1037,6 +1037,20 @@ fn new_session(rig: &mut Rig) {
         .ws(|ws, _, _| ws.screen_props("new-session").cloned())
         .unwrap();
     assert_eq!(props["fixedCwd"], "/home/dev/.perch/scratch");
+    // With a workspace, the strip's extras follow the agents, as the web's "+" menu.
+    let extras: Vec<_> = props["extras"]
+        .as_array()
+        .expect("the strip's extras reach the menu")
+        .iter()
+        .map(|e| (e["id"].as_str().unwrap(), e["label"].as_str().unwrap()))
+        .collect();
+    assert_eq!(extras, [("browser", "New browser"), ("file", "New file")]);
+    for row in [
+        "launcher-option:new-tab-browser",
+        "launcher-option:new-tab-file",
+    ] {
+        assert!(rig.record(row).is_some(), "{row} is drawn");
+    }
     assert_eq!(
         (
             props["anchorRect"]["x"].as_f64(),

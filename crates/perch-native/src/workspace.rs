@@ -1431,14 +1431,10 @@ impl Workspace {
                 let agent = word(&args, 1).ok_or("start needs an agent.")?;
                 self.start_session(host_id, word(&args, 0), &agent, cx)
             }
-            Some("openBrowser") => {
-                Err("A browser tab does not open in the native window yet.".into())
-            }
-            // New file names the file in the files view's prompt, which this window lacks.
-            Some("focusWorkspace") => Err(
-                "A new file needs the files view, which the native window does not have yet."
-                    .into(),
-            ),
+            // The window has no browser or files view: New browser and New file are the desktop
+            // app's, as the window's other hand-offs.
+            Some("openBrowser") => self.hand_off(Place::Browser),
+            Some("focusWorkspace") => self.hand_off(Place::Files),
             Some("addProject") => self.ask_add_project(cx),
             Some(other) => Err(format!("The native window cannot {other} yet.")),
         }
@@ -2453,6 +2449,8 @@ impl Workspace {
                 };
                 self.hand_off(place)?;
             }
+            "browser.open" => self.hand_off(Place::Browser)?,
+            "file.open" => self.hand_off(Place::Files)?,
             "link.open" => {
                 let url = text("url").ok_or("This command needs {url}.")?;
                 crate::handoff::open_link(url).map_err(|e| e.to_string())?;

@@ -469,7 +469,19 @@ impl Perch {
             workspace_id: data
                 .workspace_id
                 .clone()
-                .or_else(|| session.and_then(|s| s.workspace_id.clone())),
+                // A session with no workspace recorded belongs to the one at its folder, as the
+                // web's tab strip places it.
+                .or_else(|| {
+                    let s = session?;
+                    s.workspace_id.clone().or_else(|| {
+                        let store = &data.model.store;
+                        store
+                            .workspaces
+                            .iter()
+                            .find(|w| navigation::in_workspace(s, w))
+                            .map(|w| w.id.clone())
+                    })
+                }),
             show_terminals: flag("showTerminals"),
             sort_by_attention: flag("sortByAttention"),
         }

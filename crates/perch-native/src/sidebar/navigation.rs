@@ -406,7 +406,7 @@ pub fn landing_workspace(
 }
 
 /// Whether `session` belongs to `workspace`: by id, or for an older record by folder.
-fn in_workspace(session: &SessionSummary, workspace: &WorkspaceSummary) -> bool {
+pub fn in_workspace(session: &SessionSummary, workspace: &WorkspaceSummary) -> bool {
     match &session.workspace_id {
         Some(id) => *id == workspace.id,
         None => session.host_id == workspace.host_id && session.cwd == workspace.path,
