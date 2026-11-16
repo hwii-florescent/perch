@@ -117,8 +117,8 @@ impl Sidebar {
                     "Asked {name} to start a session. It is listed once it has activity."
                 ));
             }
-            // Heard, not seen: the app plays it.
-            Update::Alert(_) => {}
+            // Heard, not seen: the app plays it. Files are the window's, not the sidebar's.
+            Update::Alert(_) | Update::Files(_) => {}
         }
         cx.notify();
     }

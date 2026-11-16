@@ -405,6 +405,23 @@ declare module "perch" {
   export function statusLine(): StatusLine;
   /** `useWorkspaceTabs`: the window's tab strip. */
   export function workspaceTabs(): WorkspaceTabs;
+  /** `useWorkspaceFiles(workspaceId)`'s data: the workspace (null when gone), the connection, its folder listings,
+   * open documents and previews by path, the last search, word wrap, and its Git marks (`decorations`: `[path, mark]`
+   * pairs). Re-read when any of them changes. */
+  export function workspaceFiles(workspaceId: string): {
+    workspace: { id: string; name: string; path: string; hostId: string } | null;
+    connected: boolean;
+    trees: Record<string, unknown>;
+    documents: Record<string, unknown>;
+    previews: Record<string, unknown>;
+    search: unknown | null;
+    wrap: boolean;
+    git: { isGit: boolean; ready: boolean; statusState: string; decorations: [string, unknown][] };
+  };
+  /** Runs one of `useWorkspaceFiles`' actions on the window's file store, once the current call has unwound:
+   * `requestTree(path)`, `searchFiles(query)`, `openFile(path, force?)`, `reloadFile(path)`, `requestPreview(path)`,
+   * `updateDraft(path, content)`, `saveFile(path)`, `overwriteFile(path)`, `extractArchive(path)`, `setWrap(on)`. */
+  export function filesDo(action: string, workspaceId: string, ...args: unknown[]): void;
   /** What has the keyboard, and the panes on screen. */
   export function focus(): Focus;
   /** Every session on every computer, as a terminal record. */
@@ -510,6 +527,12 @@ declare module "perch" {
   export function inRegion(id: string): boolean;
   /** `useZoom`: the terminals' zoom factor (1 is 100%). */
   export function zoom(): number;
+  /** `useBrowserPages`: the drawer's browser pages of a workspace, the one shown and its browser tab count. */
+  export function browserPages(workspaceId: string): {
+    pages: { id: string; url: string; title?: string; icon?: string }[];
+    shownId: string | null;
+    tabCount: number;
+  };
   /** A tab drag in flight, for the tab strip to slide its tabs as the web's does (`slideDrag.ts`): the dragged
    * tab, whether the pointer is over the strip, and each tab's offset along it (`slideOffsets`); null when no tab
    * is dragged. */

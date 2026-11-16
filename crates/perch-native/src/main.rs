@@ -70,6 +70,7 @@ fn main() {
                         Workspace::new(Model::default(), Some(command_tx), cx)
                             .with_core(|| Core::discover(&perchd::server::default_dir()))
                             .with_window_state(perch_native::mods::user_dir().join(".window.json"))
+                            .with_browser_file(perch_native::mods::user_dir().join(".browser.json"))
                     })
                 },
             )
@@ -89,6 +90,10 @@ fn main() {
                     announce(heard, silent, sound::play, notify::show, |heard| {
                         workspace.update(cx, |workspace, cx| workspace.toast(heard, cx))
                     });
+                    continue;
+                }
+                if let Update::Files(message) = update {
+                    workspace.update(cx, |workspace, cx| workspace.on_files_message(&message, cx));
                     continue;
                 }
                 let sidebar = workspace.read_with(cx, |workspace, _| workspace.sidebar().clone());

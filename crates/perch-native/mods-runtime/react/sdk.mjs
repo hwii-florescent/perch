@@ -5,7 +5,7 @@
 //! (`perch.navigation(options)`, `perch.hosts()`, ...), which must return the same object until the data changes.
 //! Menus and dialogs Perch draws itself (session menu, new session menu, confirm, select, folder browser,
 //! instructions, memory) open through `perch.openOverlay(kind, props)`; their callbacks are plain functions.
-import { createElement, Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createElement, Fragment, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { cn } from "../../../../packages/web/src/lib/cn.ts";
 import { beginSlideDrag } from "../../../../packages/web/src/slideDrag.ts";
 import { formatCombo } from "../../../../packages/web/src/keyCombo.ts";
@@ -18,6 +18,7 @@ import { CloseIcon, EllipsisIcon, GearIcon, PlusIcon } from "../../../../package
 import { HostStateDot } from "../../../../packages/web/src/components/HostStateDot.tsx";
 import StockDialog from "../../../../packages/web/src/stock-ui/dialog/main.tsx";
 import StockSelect from "../../../../packages/web/src/stock-ui/select/main.tsx";
+import StockEditorMenu from "../../../../packages/web/src/stock-ui/editor-menu/main.tsx";
 import { SELECT } from "../../../../packages/web/src/components/ui/settings.ts";
 import { Chevron } from "../../../../packages/web/src/components/ui/chevron.tsx";
 import { DOT_GLYPH, sessionDotState } from "../../../../packages/web/src/statusDot.ts";
@@ -442,3 +443,157 @@ export const NewFilePrompt = overlay("new-file");
 
 /** The file pane's media viewer (`fileAsset.mjs`), drawn through this copy's host. */
 export function FileAsset(props) { return createElement(NativeFileAsset, { ...props, perch: host() }); }
+
+// ---- the file editor ------------------------------------------------------------------------------------------
+
+/** The text and line range `askAgent` sends: the selection, or the whole file without one (the web's rule). */
+function askAgentRange(editor, docKey) {
+  const selected = editor.selection(docKey);
+  if (selected) return selected;
+  const text = editor.value(docKey);
+  const lines = text.split("\n").length - (text.endsWith("\n") && text.length ? 1 : 0);
+  return { text, startLine: 1, endLine: Math.max(1, lines) };
+}
+
+/** Go to line, as CodeMirror's panel: `line` or `line:col`, Enter goes, Escape closes; the editor gets the keyboard back. */
+function GotoLine({ onGo, onClose }) {
+  const [text, setText] = useState("");
+  const go = (event) => {
+    event?.preventDefault?.();
+    const [line, col] = text.split(":").map((part) => Number.parseInt(part, 10));
+    if (Number.isFinite(line)) onGo(line, Number.isFinite(col) ? col : 1);
+    else onClose();
+  };
+  return createElement("div", { className: "flex shrink-0 items-center gap-2 border-b border-border px-3 py-1 text-[0.75rem] text-subtext-0", "data-testid": "editor-goto" },
+    createElement("label", { htmlFor: "perch-editor-goto" }, "Go to line"),
+    createElement("input", {
+      id: "perch-editor-goto", "data-testid": "editor-goto-line", autoFocus: true, value: text, className: "min-w-0 flex-1 rounded border border-border bg-transparent px-1 text-text",
+      onChange: (event) => setText(event.target.value),
+      onKeyDown: (event) => { if (event.key === "Escape") { event.preventDefault(); onClose(); } else if (event.key === "Enter") go(event); },
+    }),
+    createElement("button", { type: "button", className: GHOST_BUTTON, onClick: go }, "OK"));
+}
+
+/**
+ * The file editor (the web's `CodeEditor`, same props and handle): Perch's native editor, placed in this box as an
+ * engine slot (`data-perch-engine="editor"`) and driven through the host's `perch-editor` (`perch.editor`). The editor
+ * lives in Rust by `docKey`: a re-render reaches it only when a prop changed, a new `docKey` (the web re-keys by path
+ * and reload) parks the old one, and unmounting parks it. The store's `value` goes in as an outside edit (no undo
+ * entry, no change event) only when it differs from what the editor last reported; user edits leave through
+ * `onChange`. Keys (save, find, go to line) and typing rules are the editor's own, in Rust.
+ */
+export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, label, path, docKey, onAskAgent, ref }) {
+  const editor = host().editor;
+  const latest = useRef(null);
+  latest.current = { onChange, onSave, onCaret, onAskAgent };
+  // The text the editor and the store last agreed on: the store echoing it back is not an outside edit.
+  const known = useRef(value);
+  const [menu, setMenu] = useState(null);
+  const [goto, setGoto] = useState(false);
+
+  const askAgent = () => {
+    if (!editor || !latest.current.onAskAgent) return;
+    const { text, startLine, endLine } = askAgentRange(editor, docKey);
+    latest.current.onAskAgent(text, startLine, endLine);
+  };
+  useImperativeHandle(ref, () => ({
+    openGoto: () => setGoto(true),
+    focus: () => editor?.focus(docKey),
+    askAgent,
+  }), [docKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useLayoutEffect(() => {
+    if (!editor) return undefined;
+    editor.open(docKey, { path, value, readonly: !!readOnly, wrap: !!wrap, label });
+    known.current = value;
+    const unwatch = editor.watch(docKey, (events) => {
+      for (const event of events) {
+        if (event.type === "change") {
+          const text = editor.value(docKey);
+          known.current = text;
+          latest.current.onChange?.(text);
+        } else if (event.type === "caret") latest.current.onCaret?.({ line: event.line, col: event.col });
+        else if (event.type === "save") latest.current.onSave?.();
+        else if (event.type === "goto") setGoto(true);
+        else if (event.type === "contextmenu") setMenu({ x: event.x, y: event.y });
+      }
+    });
+    return () => { unwatch(); editor.park(docKey); };
+  }, [docKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!editor || value === known.current) return;
+    known.current = value;
+    editor.setValue(docKey, value, { external: true });
+  }, [docKey, value]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { editor?.setReadonly(docKey, !!readOnly); }, [docKey, readOnly]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { editor?.setWrap(docKey, !!wrap); }, [docKey, wrap]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!editor) {
+    // A host without the native editor (a test, an older window): a plain field keeps the screen usable.
+    return createElement("textarea", { className: "h-full min-h-0 w-full flex-1 bg-transparent font-mono text-text", "aria-label": label, value, readOnly, onChange: (event) => onChange?.(event.target.value) });
+  }
+  const refocus = (task) => () => { setMenu(null); task(); editor.focus(docKey); };
+  const hasSelection = menu ? !!editor.selection(docKey) : false;
+  return createElement("div", { className: "relative flex h-full min-h-0 min-w-0 flex-1 flex-col", "aria-label": label },
+    goto && createElement(GotoLine, {
+      onGo: (line, col) => { setGoto(false); editor.goTo(docKey, line, col); editor.focus(docKey); },
+      onClose: () => { setGoto(false); editor.focus(docKey); },
+    }),
+    createElement("div", { "data-perch-engine": "editor", "data-perch-key": docKey, className: "min-h-0 min-w-0 flex-1" }),
+    menu && createElement(StockEditorMenu, {
+      x: menu.x, y: menu.y, readOnly: !!readOnly, canUndo: editor.canUndo(docKey), canRedo: editor.canRedo(docKey), hasSelection,
+      onClose: () => setMenu(null),
+      actions: {
+        undo: refocus(() => editor.undo(docKey)), redo: refocus(() => editor.redo(docKey)),
+        cut: refocus(() => editor.cut(docKey)), copy: refocus(() => editor.copy(docKey)), paste: refocus(() => editor.paste(docKey)),
+        selectAll: refocus(() => editor.selectAll(docKey)),
+        find: refocus(() => editor.openSearch(docKey, false)), replace: refocus(() => editor.openSearch(docKey, true)),
+        gotoLine: () => { setMenu(null); setGoto(true); },
+        ...(onAskAgent ? { askAgent: () => { setMenu(null); askAgent(); } } : {}),
+      },
+    }));
+}
+
+
+// ---- browser pages ----------------------------------------------------------------------------------------------
+
+const NO_BROWSER_PAGES = Object.freeze({ pages: [], shownId: null, tabCount: 0 });
+/** The drawer's browser pages of `workspaceId` (`perch.browserPages`), the one shown and how many browser tabs the
+ * workspace has, with the window's commands for them. `open()` names the new page and returns its id. */
+export function useBrowserPages(workspaceId) {
+  const data = useHostSnapshot((perch) => perch.browserPages?.(workspaceId) ?? NO_BROWSER_PAGES);
+  return useMemo(() => {
+    const run = (command, args) => host().command(command, { workspaceId, ...args });
+    return {
+      pages: data.pages ?? [],
+      shownId: data.shownId ?? null,
+      tabCount: data.tabCount ?? 0,
+      open: () => {
+        const id = `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+        run("browser.drawer.open", { id });
+        return id;
+      },
+      select: (id) => run("browser.drawer.select", { id }),
+      close: (id) => run("browser.drawer.close", { id }),
+      closeAll: () => run("browser.drawer.closeAll", {}),
+      // The window follows the page itself; nothing to keep here.
+      setUrl: () => {},
+    };
+  }, [data, workspaceId]);
+}
+
+/** A drawer page with its toolbar: a box the window fills with the native page (`data-perch-engine="browser"`).
+ * `active`: the page takes the keyboard once shown. */
+export function BrowserPage({ pageId, active }) {
+  const key = `drawer\n${pageId}`;
+  useEffect(() => {
+    if (active) host().command("browser.focus", { key });
+  }, [active, key]);
+  return createElement("div", {
+    "data-perch-engine": "browser",
+    "data-perch-key": key,
+    "data-testid": "browser-page",
+    style: { display: "flex", flex: "1 1 0%", minHeight: 0, minWidth: 0 },
+  });
+}

@@ -33,6 +33,8 @@
 // window lack are refused by it and logged.
 import * as perch from "perch";
 import { Icon, bounds, forgetBounds, textWidth } from "perch-react";
+import * as engines from "perch-engine";
+import * as editors from "perch-editor";
 import { ICONS, LETTERS, LETTER } from "./agent-icons.js";
 
 export const INERT = [
@@ -220,6 +222,8 @@ export function copyFor(cx, screen) {
   const listeners = new Set();
   const focusListeners = new Set();
   const openOverlays = new Set();
+  // Editors this copy placed (`perch.editor.watch`): their queued events, read on `refresh()`.
+  const watched = new Map();
   function snapshot(key, read) {
     let entry = snapshots.get(key);
     if (!entry) {
@@ -343,6 +347,9 @@ export function copyFor(cx, screen) {
     },
     hosts: () => snapshot("hosts", () => perch.hosts()),
     workspaceTabs: () => snapshot("workspaceTabs", () => perch.workspaceTabs()),
+    // `useWorkspaceFiles`: one workspace's files from the window's store, and its actions run there.
+    workspaceFiles: (id) => snapshot(`workspaceFiles:${id}`, () => perch.workspaceFiles(id)),
+    filesDo: (action, workspaceId, ...args) => perch.filesDo(action, workspaceId, ...args),
     statusLine: () => snapshot("statusLine", () => perch.statusLine()),
     zoom: () => snapshot("zoom", () => perch.zoom()),
     paneLook: () => snapshot("paneLook", () => perch.paneLook()),
@@ -521,6 +528,24 @@ export function copyFor(cx, screen) {
     closeOverlay(id) {
       if (openOverlays.delete(id)) perch.run("overlay.close").catch(() => {});
     },
+    // The native editor (`perch-editor`, functions by document key) for `@perch/sdk`'s `CodeEditor`, and
+    // `watch(docKey, handler)`: the editor's events (change, caret, save, goto, contextmenu) reach `handler` in
+    // batches from `refresh()`, which the module's re-render of this copy runs. Returns the unwatch function.
+    editor: {
+      ...editors,
+      watch(key, handler) {
+        const entry = { handler, pending: [] };
+        watched.set(key, entry);
+        return () => { if (watched.get(key) === entry) watched.delete(key); };
+      },
+    },
+    // Engine slots (`perch-engine`): `focus(engine, key)` gives an engine the keyboard, `focused()` says which has it
+    // (`{ engine, key }` or null), `release(engine, key)` lets a key go (the slot unmounted or was re-keyed).
+    engines: {
+      focus: (engine, key) => engines.focus(engine, key),
+      focused: () => engines.focused(),
+      release: (engine, key) => engines.release(engine, key),
+    },
     // A screen's own keys (`directory`: Use this folder); the native keymap has no `navigator.*` bindings, so the
     // Navigator's home-row keys are not matched, and the window's own keys stay the window's.
     shortcutFor: (event, scope) => {
@@ -578,6 +603,12 @@ export function copyFor(cx, screen) {
      * subscribers; without, only looks. */
     refresh(tell) {
       let changed = false;
+      for (const [key, entry] of watched) {
+        entry.pending.push(...editors.events(key));
+        if (!entry.pending.length) continue;
+        changed = true;
+        if (tell) entry.handler(entry.pending.splice(0));
+      }
       for (const entry of snapshots.values()) {
         const value = entry.read();
         const text = JSON.stringify(value);
@@ -609,6 +640,7 @@ export function copyFor(cx, screen) {
       COPIES.delete(copy);
       listeners.clear();
       focusListeners.clear();
+      watched.clear();
       openOverlays.clear();
       snapshots.clear();
       for (const [id, timer] of TIMERS.all) if (timer.copy === copy) clearTimeout(id);
@@ -625,6 +657,8 @@ export function copyFor(cx, screen) {
  * measures text. */
 export const files = {
   icon: (id, markup, color) => Icon.new(id, { markup, color: color ?? "" }),
+  // An engine slot's native element, by kind and key (`perch-engine`).
+  engine: (engine, key) => engines.Engine.new(key, { engine }),
   // The exact width of a line of text (`perch-react` shapes it), for laying rows out on device pixels.
   measure: (text, font) => {
     const key = `${font.size}|${font.weight}|${font.family}|${font.italic ? 1 : 0}|${text}`;

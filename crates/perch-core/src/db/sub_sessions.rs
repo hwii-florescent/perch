@@ -123,19 +123,17 @@ impl HistoryDb {
             .optional()?
             .ok_or_else(|| anyhow::anyhow!("the lead session no longer exists"))?;
         let live_placeholders = vec!["?"; SubState::LIVE.len()].join(",");
-        let count = |live_only: bool| -> anyhow::Result<usize> {
-            let mut sql = "SELECT COUNT(*) FROM sub_sessions WHERE parent_run_id = ?".to_string();
+        let live_children = {
+            let sql = format!(
+                "SELECT COUNT(*) FROM sub_sessions WHERE parent_run_id = ? AND state IN ({live_placeholders})"
+            );
             let mut values: Vec<&dyn rusqlite::ToSql> = vec![&run];
-            if live_only {
-                sql += &format!(" AND state IN ({live_placeholders})");
-                values.extend(SubState::LIVE.iter().map(|s| s as &dyn rusqlite::ToSql));
-            }
-            Ok(tx.query_row(&sql, values.as_slice(), |row| row.get::<_, i64>(0))? as usize)
+            values.extend(SubState::LIVE.iter().map(|s| s as &dyn rusqlite::ToSql));
+            tx.query_row(&sql, values.as_slice(), |row| row.get::<_, i64>(0))? as usize
         };
         let context = SpawnContext {
             caller_is_child,
-            live_children: count(true)?,
-            all_children: count(false)?,
+            live_children,
             limits: self.limits(),
         };
         if let Err(refusal) = sub_sessions::admit(&context) {
@@ -416,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn the_fifth_live_child_and_the_ninth_child_are_refused_before_a_session_exists() {
+    fn the_fifth_live_child_is_refused_before_a_session_exists_and_stopped_ones_free_their_slot() {
         let (db, workspace) = db_with_lead();
         for n in 1..=4 {
             assert!(matches!(reserve(&db, &workspace, n), Reserved::New(_)));
@@ -426,14 +424,14 @@ mod tests {
             Reserved::Refused(Refusal::Concurrent(4))
         );
         assert!(!db.session_exists("child-5").unwrap());
-        // Stopped children free their slot but still count toward the total.
+        // Stopped children free their slot, and a run has no total limit: it goes on past 16 children.
         for n in 1..=4 {
             let id = format!("child-{n}");
             assert!(db
                 .move_sub_session(&id, &[SubState::Starting], SubState::Stopped)
                 .unwrap());
         }
-        for n in 5..=8 {
+        for n in 5..=20 {
             assert!(
                 matches!(reserve(&db, &workspace, n), Reserved::New(_)),
                 "{n}"
@@ -442,10 +440,6 @@ mod tests {
             db.move_sub_session(&id, &[SubState::Starting], SubState::Exited)
                 .unwrap();
         }
-        assert_eq!(
-            reserve(&db, &workspace, 9),
-            Reserved::Refused(Refusal::Descendants(8))
-        );
     }
 
     #[test]
@@ -485,7 +479,6 @@ mod tests {
         let (db, workspace) = db_with_lead();
         db.set_limits(sub_sessions::RunLimits {
             live: 1,
-            total: 2,
             ..Default::default()
         });
         reserve(&db, &workspace, 1);
