@@ -1201,6 +1201,28 @@ pub enum Update {
     },
     /// A session finished or needs you and the person should hear it.
     Alert(Heard),
+    /// A message for the window's file store (`files::store`): an `fs.*` reply or `fs.changed`.
+    Files(Box<ServerMessage>),
+}
+
+/// Whether the window's file store reads `message`. `fs.browse` stays a screen's question.
+fn for_files(message: &ServerMessage) -> bool {
+    use ServerMessage as M;
+    matches!(
+        message,
+        M::FsTreeResult { .. }
+            | M::FsSearchResult { .. }
+            | M::FsExtractResult { .. }
+            | M::FsReadResult { .. }
+            | M::FsPreviewResult { .. }
+            | M::FsMutateResult { .. }
+            | M::FsWriteResult { .. }
+            | M::FsBufferListResult { .. }
+            | M::FsBufferResult { .. }
+            | M::FsBufferCloseResult { .. }
+            | M::FsChanged { .. }
+            | M::FsError { .. }
+    )
 }
 
 /// A launch on the core's own computer, waiting for the core to say it worked.
@@ -1417,6 +1439,11 @@ async fn live(
         tokio::select! {
             message = connection.next() => {
                 let message = message?;
+                if for_files(&message)
+                    && updates.unbounded_send(Update::Files(Box::new(message.clone()))).is_err()
+                {
+                    return Ok(());
+                }
                 if let Some((id, outcome)) = answer_of(&message) {
                     if let Some(reply) = pending.remove(id) {
                         let _ = reply.send(outcome);
