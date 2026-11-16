@@ -243,6 +243,11 @@ impl DiffView {
         self.pinned
     }
 
+    /// The view state the screen last sent.
+    pub fn props(&self) -> &DiffProps {
+        &self.props
+    }
+
     pub fn list_state(&self) -> &ListState {
         &self.list
     }

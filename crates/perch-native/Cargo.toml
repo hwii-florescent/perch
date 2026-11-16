@@ -184,3 +184,8 @@ harness = false
 name = "diff_element"
 path = "tests/diff_element.rs"
 harness = false
+
+[[test]]
+name = "diff_engine_window"
+path = "tests/diff_engine_window.rs"
+harness = false
