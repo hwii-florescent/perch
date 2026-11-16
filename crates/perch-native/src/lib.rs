@@ -4,6 +4,7 @@
 
 pub mod actions;
 pub mod client;
+pub mod diff;
 pub mod git;
 pub mod handoff;
 pub mod keymap;
