@@ -208,12 +208,12 @@ fn tree(rig: &mut Rig, files: usize, steps: usize) {
     rig.ws(|ws, _, cx| ws.show_files(&workspace, cx));
     rig.settle();
     let asked = rig.asked_for("fs.tree");
-    eprintln!("asked {asked}");
     let entries: Vec<Value> = (0..files)
         .map(|i| entry(&format!("file-{i:05}.rs")))
         .collect();
     // Timed: the reply and the frames that follow it. Each is then checked with an untimed full redraw (the probe
     // records only what a frame draws again).
+    let before = rig.cx.update(|cx| cx.global::<WindowMods>().host.metrics());
     let mut first = Duration::ZERO;
     let at = Instant::now();
     rig.answer(json!({"type": "fs.tree.result", "requestId": asked["requestId"],
@@ -259,6 +259,17 @@ fn tree(rig: &mut Rig, files: usize, steps: usize) {
             panic!("{files} files: the rows are never drawn; store {held:?}; error {error:?}; {names:?}");
         }
     };
+    let opening = rig
+        .cx
+        .update(|cx| cx.global::<WindowMods>().host.metrics())
+        .since(&before);
+    println!(
+        "tree {files} files: script renders {}, script time {:?} (slowest {:?}), materialize time {:?}",
+        opening.script_renders(),
+        opening.script_render_time(),
+        opening.slowest_script_render(),
+        opening.materialize_time()
+    );
     let rss_drawn = rss_mb();
     let mut each: Vec<Duration> = (0..steps)
         .map(|_| {
@@ -268,6 +279,30 @@ fn tree(rig: &mut Rig, files: usize, steps: usize) {
             at.elapsed()
         })
         .collect();
+    // The rows drawn followed the wheel: after more steps, a row well below the first window is drawn.
+    for _ in 0..60 {
+        rig.wheel(scroll.center());
+        rig.step(false);
+    }
+    let records = rig.step(true);
+    let deepest = records
+        .iter()
+        .filter_map(|r| {
+            r.name
+                .rsplit_once(":workspace-file-entry-file-")?
+                .1
+                .strip_suffix(".rs")?
+                .parse::<usize>()
+                .ok()
+        })
+        .max()
+        .unwrap_or(0);
+    if files >= 1_000 {
+        assert!(
+            deepest >= 200,
+            "{files} files: after the wheel the deepest row drawn is {deepest}"
+        );
+    }
     let (mean, median, worst) = stats(&mut each);
     println!(
         "tree {files} files: first draw {first:?} ({frames} frames); {steps} wheel steps, mean {mean:?}, median \

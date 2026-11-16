@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DirectoryEntry } from "@perch/shared";
-import { explorerKey, flattenTree } from "./explorerNav";
+import { explorerKey, flattenTree, treeItems, treeWindow } from "./explorerNav";
 
 const entry = (path: string, kind: "file" | "directory" = "file"): DirectoryEntry =>
   ({ name: path.split("/").pop()!, path, kind, size: 0, readonly: false, executable: false }) as DirectoryEntry;
@@ -42,5 +42,24 @@ describe("explorer keyboard", () => {
     expect(explorerKey(rows, "a.txt", "Enter", open)).toEqual({ open: { path: "a.txt", pin: true } });
     expect(explorerKey(rows, "src", "Enter", open)).toEqual({ toggle: "src" });
     expect(explorerKey(rows, "a.txt", "x", open)).toBeNull();
+  });
+
+  it("draws the tree's rows flat at their depth, with each folder's state line", () => {
+    const rows = treeItems(trees, open).map((item) => `${item.level}:${item.kind}:${item.kind === "entry" ? item.entry.path : item.path}`);
+    expect(rows).toEqual(["0:entry:src", "1:entry:src/b.ts", "1:entry:src/lib", "0:entry:a.txt", "0:entry:z", "1:loading:z"]);
+    expect(treeItems({ "": { state: "ready", entries: [], truncated: true } }, open).map((item) => item.kind)).toEqual(["truncated", "empty"]);
+  });
+
+  it("windows a long tree around the view in chunks", () => {
+    expect(treeWindow(30, 0, 36, 16)).toEqual({ start: 0, end: 30 });
+    expect(treeWindow(1000, 0, 36, 16)).toEqual({ start: 0, end: 64 });
+    expect(treeWindow(1000, 15, 36, 16)).toEqual({ start: 0, end: 80 });
+    expect(treeWindow(1000, 120, 36, 16)).toEqual({ start: 96, end: 176 });
+    // Every row in view is drawn, wherever the view is.
+    for (const top of [0, 7, 15, 16, 100, 500, 963]) {
+      const { start, end } = treeWindow(1000, top, 36, 16);
+      expect(start <= top && Math.min(1000, top + 36) <= end).toBe(true);
+    }
+    expect(treeWindow(1000, 5000, 36, 16)).toEqual({ start: 984, end: 1000 });
   });
 });

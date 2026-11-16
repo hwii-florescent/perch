@@ -9,9 +9,9 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 //! engines, placed here as `CodeEditor`, `FileAsset` and `MarkdownPreview`; the Markdown sanitizer is fixed.
 //! Tree expansion, the search box and the cursor are this view's own and start over when it is remounted, as
 //! before; a draft never does.
-import { Suspense, useEffect, useRef, useState } from "react";
+import { memo, Suspense, useEffect, useRef, useState } from "react";
 import { assetKind, Chevron, cn, CodeEditor, FileAsset, FileEntryMenu, FileIcon, GitMarker, ghostButton as GHOST_BUTTON, MarkdownPreview, shortcutLabel, useWorkspaceFiles, useZoom, } from "@perch/sdk";
-import { explorerKey, flattenTree } from "./explorerNav.js";
+import { explorerKey, flattenTree, treeItems, treeWindow } from "./explorerNav.js";
 /** A workspace-relative path as the store keys it: no `./`, no leading or trailing slash. */
 function normalizePath(path) {
     if (!path || path === ".")
@@ -82,126 +82,172 @@ function formatModifiedAt(metadata) {
     const date = new Date(metadata.modifiedAtMs);
     return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
 }
-function FileTree({ workspaceId, path, level, expanded, selectedPath, cursor, trees, decorations, onToggle, onOpenFile, onMenu, }) {
+/** A folder's state line. */
+const TREE_LINES = { loading: "Loading…", truncated: "Large folder · narrow the view to load more", empty: "Empty folder" };
+/** A long tree draws the rows in view and a chunk of this many more on each side (`treeWindow`). */
+const TREE_CHUNK = 16;
+/** The workspace's tree as one flat list of rows, each indented by its depth as the nested folders were; a long one
+ * draws only the rows around the view, with room kept above and below for the rest. */
+function FileTree({ expanded, selectedPath, cursor, trees, decorations, scroller, onScroll, onToggle, onOpenFile, onMenu, }) {
     const zoom = useZoom();
-    const tree = trees[path];
-    if (!tree)
+    const listRef = useRef(null);
+    // The latest handlers, behind one ref the rows keep: a row draws again only when what it shows changes.
+    const act = useRef({ onToggle, onOpenFile, onMenu });
+    act.current = { onToggle, onOpenFile, onMenu };
+    const items = treeItems(trees, expanded);
+    // Where the view is, in rows: the first row in it and how many it shows (a tall drawer's worth until measured).
+    const [view, setView] = useState({ top: 0, shown: 48 });
+    const rowHeight = () => listRef.current?.querySelector("[data-path]")?.getBoundingClientRect().height || 22 * zoom;
+    const rows = (at) => treeWindow(items.length, at.top, at.shown, TREE_CHUNK);
+    const { start, end } = rows(view);
+    // The view measured against the list in its scroll area; the tree draws again only when that changes its rows.
+    onScroll.current = () => {
+        const area = scroller.current?.getBoundingClientRect();
+        const list = listRef.current?.getBoundingClientRect();
+        if (!area || !list)
+            return;
+        const height = rowHeight();
+        const now = { top: Math.max(0, (area.top - list.top) / height), shown: Math.ceil(area.height / height) };
+        const next = rows(now);
+        if (next.start !== start || next.end !== end)
+            setView(now);
+    };
+    // The cursor's row is drawn wherever the keyboard took it.
+    useEffect(() => {
+        const at = cursor ? items.findIndex((item) => item.kind === "entry" && item.entry.path === cursor) : -1;
+        if (at >= 0 && (at < start || at >= end))
+            setView({ ...view, top: at });
+    }, [cursor]);
+    if (!trees[""])
         return null;
-    return (_jsxs("div", {
+    const height = rowHeight();
+    // One box per chunk, always there: those in view hold their rows, the rest only their height. A move fills one box
+    // and empties another, so the rows that stay are not drawn again (in Perch's own runtime a list that gains or loses
+    // a child is described again whole).
+    const chunks = Array.from({ length: Math.ceil(items.length / TREE_CHUNK) }, (_, at) => at * TREE_CHUNK);
+    return (_jsx("div", {
+        ref: listRef,
         className: "min-w-0",
-        "data-testid": `workspace-file-tree-${path || "root"}`,
+        "data-testid": "workspace-file-tree-root",
+        children: chunks.map((first) => {
+            const last = Math.min(items.length, first + TREE_CHUNK);
+            if (first >= end || last <= start)
+                return _jsx("div", {
+                    "aria-hidden": true,
+                    style: { height: (last - first) * height }
+                }, first);
+            return _jsx("div", {
+                className: "min-w-0",
+                children: items.slice(first, last).map(row)
+            }, first);
+        })
+    }));
+    function row(item) {
+        const indent = item.level ? { marginLeft: `${item.level * 0.5}rem` } : undefined;
+        if (item.kind === "error") {
+            return (_jsxs("div", {
+                className: cn(TREE_STATE, "text-red"),
+                style: indent,
+                children: [
+                    item.error || "Could not load folder.",
+                    _jsx("button", {
+                        type: "button",
+                        className: TREE_BUTTON,
+                        onClick: () => onToggle(item.entry),
+                        children: "Retry"
+                    })
+                ]
+            }, `${item.path}\0error`));
+        }
+        if (item.kind !== "entry")
+            return _jsx("div", {
+                className: TREE_STATE,
+                style: indent,
+                children: TREE_LINES[item.kind]
+            }, `${item.path}\0${item.kind}`);
+        const entry = item.entry;
+        const button = (_jsx(TreeRow, {
+            entry: entry,
+            open: expanded.has(entry.path),
+            selected: selectedPath === entry.path,
+            cursor: cursor === entry.path,
+            decoration: decorations.get(entry.path),
+            zoom: zoom,
+            act: act
+        }, entry.path));
+        // A nested row sits in a box indented by its depth, as the nested folders were.
+        return indent ? _jsx("div", {
+            className: "min-w-0",
+            style: indent,
+            children: button
+        }, entry.path) : button;
+    }
+}
+/** One entry's row in the tree. */
+const TreeRow = memo(function TreeRow({ entry, open, selected, cursor, decoration, zoom, act }) {
+    const isDirectory = entry.kind === "directory";
+    return (_jsxs("button", {
+        type: "button",
+        className: cn(cn(ROW_MIN_H, ROW_FONT), "flex w-full cursor-pointer items-center gap-1 rounded-ui py-0 pr-3 text-left leading-none [border:0] [font-family:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg max-[700px]:min-h-11", selected || cursor ? "bg-surface-1 text-fg" : "bg-transparent text-subtext-0", cursor && CURSOR_RING),
+        style: { paddingLeft: "0.75rem" },
+        role: "treeitem",
+        "aria-selected": selected,
+        "aria-expanded": isDirectory ? open : undefined,
+        tabIndex: -1,
+        "data-path": entry.path,
+        "data-testid": `workspace-file-entry-${entry.path}`,
+        title: entry.path,
+        onClick: () => (isDirectory ? act.current.onToggle(entry) : act.current.onOpenFile(entry)),
+        onDoubleClick: () => { if (!isDirectory)
+            act.current.onOpenFile(entry, true); },
+        // VS Code pins on a middle click too.
+        onAuxClick: (event) => { if (event.button === 1 && !isDirectory) {
+            event.preventDefault();
+            act.current.onOpenFile(entry, true);
+        } },
+        onContextMenu: (event) => { event.preventDefault(); event.stopPropagation(); act.current.onMenu(entry, event.clientX, event.clientY); },
         children: [
-            tree.entries.map((entry) => {
-                const isDirectory = entry.kind === "directory";
-                const isOpen = expanded.has(entry.path);
-                const childTree = trees[entry.path];
-                const selected = selectedPath === entry.path;
-                return (_jsxs("div", {
-                    className: "min-w-0",
-                    children: [
-                        _jsxs("button", {
-                            type: "button",
-                            className: cn(cn(ROW_MIN_H, ROW_FONT), "flex w-full cursor-pointer items-center gap-1 rounded-ui py-0 pr-3 text-left leading-none [border:0] [font-family:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg max-[700px]:min-h-11", selected || cursor === entry.path ? "bg-surface-1 text-fg" : "bg-transparent text-subtext-0", cursor === entry.path && CURSOR_RING),
-                            style: { paddingLeft: "0.75rem" },
-                            role: "treeitem",
-                            "aria-selected": selected,
-                            "aria-expanded": isDirectory ? isOpen : undefined,
-                            tabIndex: -1,
-                            "data-path": entry.path,
-                            "data-testid": `workspace-file-entry-${entry.path}`,
-                            title: entry.path,
-                            onClick: () => (isDirectory ? onToggle(entry) : onOpenFile(entry)),
-                            onDoubleClick: () => { if (!isDirectory)
-                                onOpenFile(entry, true); },
-                            // VS Code pins on a middle click too.
-                            onAuxClick: (event) => { if (event.button === 1 && !isDirectory) {
-                                event.preventDefault();
-                                onOpenFile(entry, true);
-                            } },
-                            onContextMenu: (event) => { event.preventDefault(); event.stopPropagation(); onMenu(entry, event.clientX, event.clientY); },
-                            children: [
-                                _jsx(Chevron, {
-                                    open: isOpen,
-                                    size: Math.round(10 * zoom),
-                                    className: cn("mx-[3px] shrink-0 text-overlay-1", !isDirectory && "invisible")
-                                }),
-                                _jsx(FileIcon, {
-                                    name: entry.name,
-                                    directory: isDirectory,
-                                    open: isOpen
-                                }),
-                                _jsx("span", {
-                                    className: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
-                                    children: entry.name
-                                }),
-                                entry.kind === "symlink" && _jsx("svg", {
-                                    className: "size-3 shrink-0 text-subtext-0",
-                                    viewBox: "0 0 16 16",
-                                    fill: "none",
-                                    stroke: "currentColor",
-                                    strokeWidth: "1.2",
-                                    role: "img",
-                                    "aria-label": "symlink",
-                                    children: _jsx("path", { d: "M6 10 10 6M6 5l2-2a3 3 0 0 1 4 4l-2 2M10 11l-2 2a3 3 0 0 1-4-4l2-2" })
-                                }),
-                                entry.readonly && _jsx("span", {
-                                    className: "shrink-0 text-[0.54rem] text-yellow",
-                                    children: "RO"
-                                }),
-                                _jsx(GitMarker, {
-                                    decoration: decorations.get(entry.path),
-                                    directory: isDirectory
-                                })
-                            ]
-                        }),
-                        isDirectory && isOpen && childTree && (_jsxs("div", {
-                            className: "ml-2",
-                            children: [
-                                childTree.state === "loading" && _jsx("div", {
-                                    className: TREE_STATE,
-                                    children: "Loading\u2026"
-                                }),
-                                childTree.state === "error" && (_jsxs("div", {
-                                    className: cn(TREE_STATE, "text-red"),
-                                    children: [
-                                        childTree.error || "Could not load folder.",
-                                        _jsx("button", {
-                                            type: "button",
-                                            className: TREE_BUTTON,
-                                            onClick: () => onToggle(entry),
-                                            children: "Retry"
-                                        })
-                                    ]
-                                })),
-                                childTree.state === "ready" && (_jsx(FileTree, {
-                                    workspaceId: workspaceId,
-                                    path: entry.path,
-                                    level: level + 1,
-                                    expanded: expanded,
-                                    selectedPath: selectedPath,
-                                    cursor: cursor,
-                                    trees: trees,
-                                    decorations: decorations,
-                                    onToggle: onToggle,
-                                    onOpenFile: onOpenFile,
-                                    onMenu: onMenu
-                                }))
-                            ]
-                        }))
-                    ]
-                }, entry.path));
+            isDirectory ? (_jsx(Chevron, {
+                open: open,
+                size: Math.round(10 * zoom),
+                className: "mx-[3px] shrink-0 text-overlay-1"
+            })) : (
+            // A file has no chevron, only its room (cheaper than a hidden one in a long tree).
+            _jsx("span", {
+                "aria-hidden": true,
+                className: "mx-[3px] shrink-0",
+                style: { width: Math.round(10 * zoom), height: Math.round(10 * zoom) }
+            })),
+            _jsx(FileIcon, {
+                name: entry.name,
+                directory: isDirectory,
+                open: open
             }),
-            tree.truncated && _jsx("div", {
-                className: TREE_STATE,
-                children: "Large folder \u00B7 narrow the view to load more"
+            _jsx("span", {
+                className: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
+                children: entry.name
             }),
-            tree.state === "ready" && tree.entries.length === 0 && _jsx("div", {
-                className: TREE_STATE,
-                children: "Empty folder"
+            entry.kind === "symlink" && _jsx("svg", {
+                className: "size-3 shrink-0 text-subtext-0",
+                viewBox: "0 0 16 16",
+                fill: "none",
+                stroke: "currentColor",
+                strokeWidth: "1.2",
+                role: "img",
+                "aria-label": "symlink",
+                children: _jsx("path", { d: "M6 10 10 6M6 5l2-2a3 3 0 0 1 4 4l-2 2M10 11l-2 2a3 3 0 0 1-4-4l2-2" })
+            }),
+            entry.readonly && _jsx("span", {
+                className: "shrink-0 text-[0.54rem] text-yellow",
+                children: "RO"
+            }),
+            _jsx(GitMarker, {
+                decoration: decoration,
+                directory: isDirectory
             })
         ]
     }));
-}
+});
 function metadataSummary(metadata) {
     if (!metadata)
         return "";
@@ -436,6 +482,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
     // The keyboard cursor over the explorer's rows (`explorerNav.ts`); `treeRef` is the focusable list.
     const [cursor, setCursor] = useState(null);
     const treeRef = useRef(null);
+    const treeScrolled = useRef(null);
     const editorRef = useRef(null);
     const restoredPath = normalizePath(initialPath);
     useEffect(() => {
@@ -683,6 +730,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
                                 "data-explorer-keynav": "false",
                                 className: "group/tree min-h-0 flex-1 overflow-y-auto px-1 outline-none",
                                 "data-testid": "workspace-file-tree-scroll",
+                                onScroll: () => treeScrolled.current?.(),
                                 onKeyDown: handleTreeKey,
                                 onMouseDown: (event) => {
                                     // WebKit does not focus a clicked button: take focus here so the arrows work after a click.
@@ -723,13 +771,13 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
                                             ]
                                         })), rootTree?.state === "ready" && (_jsx(FileTree, {
                                             workspaceId: workspaceId,
-                                            path: "",
-                                            level: 0,
                                             expanded: expanded,
                                             selectedPath: selectedPath,
                                             cursor: cursor,
                                             trees: trees,
                                             decorations: decorations,
+                                            scroller: treeRef,
+                                            onScroll: treeScrolled,
                                             onToggle: handleToggle,
                                             onOpenFile: handleOpenFile,
                                             onMenu: (entry, x, y) => setMenu({ entry, x, y })

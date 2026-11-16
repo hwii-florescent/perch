@@ -113,9 +113,9 @@ function t0(n, l) {
     }
     if (s === ":") {
       if (n[l + 1] === ":") {
-        const [p, x] = bl(n, l + 2), S = p.toLowerCase();
-        if (S !== "before" && S !== "after") throw new re(`::${S} is not supported`);
-        if (o.pseudoElement = S, l = x, i = !0, l < n.length && !/[\s>]/.test(n[l])) throw new re(`nothing may follow ::${S} in ${JSON.stringify(n)}`);
+        const [p, x] = bl(n, l + 2), E = p.toLowerCase();
+        if (E !== "before" && E !== "after") throw new re(`::${E} is not supported`);
+        if (o.pseudoElement = E, l = x, i = !0, l < n.length && !/[\s>]/.test(n[l])) throw new re(`nothing may follow ::${E} in ${JSON.stringify(n)}`);
         break;
       }
       const [d, m] = bl(n, l + 1);
@@ -132,9 +132,9 @@ function t0(n, l) {
           if (!/^\d+$/.test(x)) throw new re(`:nth-child(${x}) is not supported (only a number)`);
           o.pseudos.push({ name: f, n: Number(x) });
         } else {
-          const S = gs(x).map(bs);
-          if (f === "has" && S.some((k) => k.length !== 1)) throw new re(`:has(${x}) is not supported (only a compound selector)`);
-          o.pseudos.push({ name: f, list: S });
+          const E = gs(x).map(bs);
+          if (f === "has" && E.some((k) => k.length !== 1)) throw new re(`:has(${x}) is not supported (only a compound selector)`);
+          o.pseudos.push({ name: f, list: E });
         }
       } else {
         if (!$h.has(f)) throw new re(`:${f} is not supported`);
@@ -272,7 +272,7 @@ function qa(n, l, o, i = !0) {
     if (!kf(d, p, o, f)) return !1;
     if (m === 0) return !0;
     if (x === ">") return !!d.parentElement && s(d.parentElement, m - 1, !1);
-    for (let S = d.parentElement; S; S = S.parentElement) if (s(S, m - 1, !1)) return !0;
+    for (let E = d.parentElement; E; E = E.parentElement) if (s(E, m - 1, !1)) return !0;
     return !1;
   };
   return s(n, l.length - 1, i);
@@ -800,11 +800,11 @@ var Md;
 function p0() {
   if (Md) return pt;
   Md = 1;
-  var n = Symbol.for("react.transitional.element"), l = Symbol.for("react.portal"), o = Symbol.for("react.fragment"), i = Symbol.for("react.strict_mode"), s = Symbol.for("react.profiler"), d = Symbol.for("react.consumer"), m = Symbol.for("react.context"), f = Symbol.for("react.forward_ref"), p = Symbol.for("react.suspense"), x = Symbol.for("react.memo"), S = Symbol.for("react.lazy"), k = Symbol.for("react.activity"), w = Symbol.iterator;
+  var n = Symbol.for("react.transitional.element"), l = Symbol.for("react.portal"), o = Symbol.for("react.fragment"), i = Symbol.for("react.strict_mode"), s = Symbol.for("react.profiler"), d = Symbol.for("react.consumer"), m = Symbol.for("react.context"), f = Symbol.for("react.forward_ref"), p = Symbol.for("react.suspense"), x = Symbol.for("react.memo"), E = Symbol.for("react.lazy"), k = Symbol.for("react.activity"), w = Symbol.iterator;
   function N(C) {
     return C === null || typeof C != "object" ? null : (C = w && C[w] || C["@@iterator"], typeof C == "function" ? C : null);
   }
-  var E = {
+  var S = {
     isMounted: function() {
       return !1;
     },
@@ -816,7 +816,7 @@ function p0() {
     }
   }, v = Object.assign, z = {};
   function R(C, K, at) {
-    this.props = C, this.context = K, this.refs = z, this.updater = at || E;
+    this.props = C, this.context = K, this.refs = z, this.updater = at || S;
   }
   R.prototype.isReactComponent = {}, R.prototype.setState = function(C, K) {
     if (typeof C != "object" && typeof C != "function" && C != null)
@@ -831,7 +831,7 @@ function p0() {
   }
   D.prototype = R.prototype;
   function A(C, K, at) {
-    this.props = C, this.context = K, this.refs = z, this.updater = at || E;
+    this.props = C, this.context = K, this.refs = z, this.updater = at || S;
   }
   var X = A.prototype = new D();
   X.constructor = A, v(X, R.prototype), X.isPureReactComponent = !0;
@@ -906,7 +906,7 @@ function p0() {
             case l:
               Et = !0;
               break;
-            case S:
+            case E:
               return Et = C._init, L(
                 Et(C._payload),
                 K,
@@ -1089,7 +1089,7 @@ function p0() {
     return { $$typeof: f, render: C };
   }, pt.isValidElement = T, pt.lazy = function(C) {
     return {
-      $$typeof: S,
+      $$typeof: E,
       _payload: { _status: -1, _result: C },
       _init: $
     };
@@ -1280,7 +1280,7 @@ function k0() {
         return m.now() - f;
       };
     }
-    var p = [], x = [], S = 1, k = null, w = 3, N = !1, E = !1, v = !1, z = !1, R = typeof setTimeout == "function" ? setTimeout : null, D = typeof clearTimeout == "function" ? clearTimeout : null, A = typeof setImmediate < "u" ? setImmediate : null;
+    var p = [], x = [], E = 1, k = null, w = 3, N = !1, S = !1, v = !1, z = !1, R = typeof setTimeout == "function" ? setTimeout : null, D = typeof clearTimeout == "function" ? clearTimeout : null, A = typeof setImmediate < "u" ? setImmediate : null;
     function X(L) {
       for (var Z = o(x); Z !== null; ) {
         if (Z.callback === null) i(x);
@@ -1291,9 +1291,9 @@ function k0() {
       }
     }
     function U(L) {
-      if (v = !1, X(L), !E)
+      if (v = !1, X(L), !S)
         if (o(p) !== null)
-          E = !0, H || (H = !0, O());
+          S = !0, H || (H = !0, O());
         else {
           var Z = o(x);
           Z !== null && tt(U, Z.startTime - L);
@@ -1310,7 +1310,7 @@ function k0() {
         var Z = !0;
         try {
           t: {
-            E = !1, v && (v = !1, D(h), h = -1), N = !0;
+            S = !1, v && (v = !1, D(h), h = -1), N = !0;
             var $ = w;
             try {
               e: {
@@ -1432,13 +1432,13 @@ function k0() {
           V = 5e3;
       }
       return V = $ + V, L = {
-        id: S++,
+        id: E++,
         callback: Z,
         priorityLevel: L,
         startTime: $,
         expirationTime: V,
         sortIndex: -1
-      }, $ > Y ? (L.sortIndex = $, l(x, L), o(p) === null && L === o(x) && (v ? (D(h), h = -1) : v = !0, tt(U, $ - Y))) : (L.sortIndex = V, l(p, L), E || N || (E = !0, H || (H = !0, O()))), L;
+      }, $ > Y ? (L.sortIndex = $, l(x, L), o(p) === null && L === o(x) && (v ? (D(h), h = -1) : v = !0, tt(U, $ - Y))) : (L.sortIndex = V, l(p, L), S || N || (S = !0, H || (H = !0, O()))), L;
     }, n.unstable_shouldYield = _, n.unstable_wrapCallback = function(L) {
       var Z = w;
       return function() {
@@ -1576,7 +1576,7 @@ function E0() {
         }
         return null;
       }
-      function S(t) {
+      function E(t) {
         return t === null || typeof t != "object" ? null : (t = Vu && t[Vu] || t["@@iterator"], typeof t == "function" ? t : null);
       }
       function k(t) {
@@ -1626,7 +1626,7 @@ function E0() {
       function N(t) {
         0 > _a || (t.current = yo[_a], yo[_a] = null, _a--);
       }
-      function E(t, e) {
+      function S(t, e) {
         _a++, yo[_a] = t.current, t.current = e;
       }
       function v(t) {
@@ -2019,15 +2019,15 @@ Error generating stack: ` + r.message + `
         Ce[Me++] = Ke, Ce[Me++] = Ze, Ce[Me++] = Sn, Ke = e.id, Ze = e.overflow, Sn = t;
       }
       function ct(t, e) {
-        E(En, e), E(ol, t), E(ne, null), t = cp(e), N(ne), E(ne, t);
+        S(En, e), S(ol, t), S(ne, null), t = cp(e), N(ne), S(ne, t);
       }
       function ut() {
         N(ne), N(ol), N(En);
       }
       function Et(t) {
-        t.memoizedState !== null && E(fr, t);
+        t.memoizedState !== null && S(fr, t);
         var e = ne.current, a = up(e, t.type);
-        e !== a && (E(ol, t), E(ne, a));
+        e !== a && (S(ol, t), S(ne, a));
       }
       function Wt(t) {
         ol.current === t && (N(ne), N(ol)), fr.current === t && (N(fr), an ? $n._currentValue = xa : $n._currentValue2 = xa);
@@ -2100,7 +2100,7 @@ Error generating stack: ` + r.message + `
         zn === null ? zn = [t] : zn.push(t);
       }
       function hn(t, e, a) {
-        an ? (E(mr, e._currentValue), e._currentValue = a) : (E(mr, e._currentValue2), e._currentValue2 = a);
+        an ? (S(mr, e._currentValue), e._currentValue = a) : (S(mr, e._currentValue2), e._currentValue2 = a);
       }
       function Ie(t) {
         var e = mr.current;
@@ -2377,7 +2377,7 @@ Error generating stack: ` + r.message + `
         return t !== null ? t : At.pooledCache;
       }
       function jl(t, e) {
-        e === null ? E(ea, ea.current) : E(ea, e.pool);
+        e === null ? S(ea, ea.current) : S(ea, e.pool);
       }
       function Bs() {
         var t = si();
@@ -2554,7 +2554,7 @@ Error generating stack: ` + r.message + `
               case kn:
                 return j = Xn(j), W(B, j, q);
             }
-            if (rr(j) || S(j))
+            if (rr(j) || E(j))
               return j = Fn(
                 j,
                 B.mode,
@@ -2586,7 +2586,7 @@ Error generating stack: ` + r.message + `
               case kn:
                 return q = Xn(q), lt(B, j, q, F);
             }
-            if (rr(q) || S(q))
+            if (rr(q) || E(q))
               return ft !== null ? null : P(B, j, q, F, null);
             if (typeof q.then == "function")
               return lt(
@@ -2628,7 +2628,7 @@ Error generating stack: ` + r.message + `
                   ft
                 );
             }
-            if (rr(F) || S(F))
+            if (rr(F) || E(F))
               return B = B.get(q) || null, P(j, B, F, ft, null);
             if (typeof F.then == "function")
               return gt(
@@ -2811,8 +2811,8 @@ Error generating stack: ` + r.message + `
                 q,
                 F
               );
-            if (S(q)) {
-              if (ft = S(q), typeof ft != "function")
+            if (E(q)) {
+              if (ft = E(q), typeof ft != "function")
                 throw Error(s(150));
               return q = ft.call(q), gl(
                 B,
@@ -3048,26 +3048,26 @@ Error generating stack: ` + r.message + `
             Vs(a[t], e);
       }
       function Ks(t, e) {
-        t = cn, E(vr, t), E(ja, e), cn = t | e.baseLanes;
+        t = cn, S(vr, t), S(ja, e), cn = t | e.baseLanes;
       }
       function mi() {
-        E(vr, cn), E(ja, ja.current);
+        S(vr, cn), S(ja, ja.current);
       }
       function pi() {
         cn = vr.current, N(ja), N(vr);
       }
       function vn(t) {
         var e = t.alternate;
-        E(qt, qt.current & 1), E(Se, t), Oe === null && (e === null || ja.current !== null || e.memoizedState !== null) && (Oe = t);
+        S(qt, qt.current & 1), S(Se, t), Oe === null && (e === null || ja.current !== null || e.memoizedState !== null) && (Oe = t);
       }
       function hi(t) {
-        E(qt, qt.current), E(Se, t), Oe === null && (Oe = t);
+        S(qt, qt.current), S(Se, t), Oe === null && (Oe = t);
       }
       function Zs(t) {
-        t.tag === 22 ? (E(qt, qt.current), E(Se, t), Oe === null && (Oe = t)) : yn();
+        t.tag === 22 ? (S(qt, qt.current), S(Se, t), Oe === null && (Oe = t)) : yn();
       }
       function yn() {
-        E(qt, qt.current), E(Se, Se.current);
+        S(qt, qt.current), S(Se, Se.current);
       }
       function ve(t) {
         N(Se), Oe === t && (Oe = null), N(qt);
@@ -4403,7 +4403,7 @@ Error generating stack: ` + r.message + `
         var r = e.pendingProps, c = r.revealOrder, u = r.tail;
         r = r.children;
         var g = qt.current, M = (g & 2) !== 0;
-        if (M ? (g = g & 1 | 2, e.flags |= 128) : g &= 1, E(qt, g), ee(t, e, r, a), r = St ? il : 0, !M && t !== null && (t.flags & 128) !== 0)
+        if (M ? (g = g & 1 | 2, e.flags |= 128) : g &= 1, S(qt, g), ee(t, e, r, a), r = St ? il : 0, !M && t !== null && (t.flags & 128) !== 0)
           t: for (t = e.child; t !== null; ) {
             if (t.tag === 13)
               t.memoizedState !== null && Vc(t, a, e);
@@ -4549,7 +4549,7 @@ Error generating stack: ` + r.message + `
                 );
               e.flags |= 128;
             }
-            if (c = e.memoizedState, c !== null && (c.rendering = null, c.tail = null, c.lastEffect = null), E(qt, qt.current), r) break;
+            if (c = e.memoizedState, c !== null && (c.rendering = null, c.tail = null, c.lastEffect = null), S(qt, qt.current), r) break;
             return null;
           case 22:
             return e.lanes = 0, Bc(
@@ -5231,7 +5231,7 @@ Error generating stack: ` + r.message + `
                     if (u = ql(t), u !== null) {
                       for (e.flags |= 128, Fa(r, !1), t = u.updateQueue, e.updateQueue = t, Il(e, t), e.subtreeFlags = 0, t = a, a = e.child; a !== null; )
                         Du(a, t), a = a.sibling;
-                      return E(
+                      return S(
                         qt,
                         qt.current & 1 | 2
                       ), St && V(e, r.treeForkCount), e.child;
@@ -5249,7 +5249,7 @@ Error generating stack: ` + r.message + `
                   2 * he() - r.renderingStartTime > pl && a !== 536870912 && (e.flags |= 128, c = !0, Fa(r, !1), e.lanes = 4194304);
               r.isBackwards ? (u.sibling = e.child, e.child = u) : (t = r.last, t !== null ? t.sibling = u : e.child = u, r.last = u);
             }
-            return r.tail !== null ? (t = r.tail, r.rendering = t, r.tail = t.sibling, r.renderingStartTime = he(), t.sibling = null, a = qt.current, E(
+            return r.tail !== null ? (t = r.tail, r.rendering = t, r.tail = t.sibling, r.renderingStartTime = he(), t.sibling = null, a = qt.current, S(
               qt,
               c ? a & 1 | 2 : a & 1
             ), St && V(e, r.treeForkCount), t) : (jt(e), null);
@@ -8499,8 +8499,8 @@ function rs(n, l, o = 0) {
     let m = 1, f = d + 4;
     for (; f < n.length && m; f++)
       n[f] === "(" ? m++ : n[f] === ")" && m--;
-    const p = n.slice(d + 4, f - 1), x = ie(p, ","), S = x[0].trim(), k = x.length > 1 ? p.slice(p.indexOf(",") + 1).trim() : null;
-    let w = l(S);
+    const p = n.slice(d + 4, f - 1), x = ie(p, ","), E = x[0].trim(), k = x.length > 1 ? p.slice(p.indexOf(",") + 1).trim() : null;
+    let w = l(E);
     if ((w == null || w === "initial") && (w = k), w == null) return null;
     const N = rs(w, l, o + 1);
     if (N === null) return null;
@@ -8550,13 +8550,13 @@ function Gn(n, l) {
       default:
         return null;
     }
-  }, d = (w, N, E) => w && N ? { px: w.px + E * N.px, pct: w.pct + E * N.pct, num: w.num + E * N.num, unitless: w.unitless && N.unitless } : null, m = (w, N) => w ? { px: w.px * N, pct: w.pct * N, num: w.num * N, unitless: w.unitless } : null, f = (w) => w && w.unitless;
+  }, d = (w, N, S) => w && N ? { px: w.px + S * N.px, pct: w.pct + S * N.pct, num: w.num + S * N.num, unitless: w.unitless && N.unitless } : null, m = (w, N) => w ? { px: w.px * N, pct: w.pct * N, num: w.num * N, unitless: w.unitless } : null, f = (w) => w && w.unitless;
   function p() {
     const w = o[i++];
     if (!w) return null;
     if (w.num !== void 0) return s(w);
     if (w.op === "(") {
-      const N = S();
+      const N = E();
       return o[i]?.op !== ")" ? null : (i++, N);
     }
     if (w.op === "-" || w.op === "+") {
@@ -8566,7 +8566,7 @@ function Gn(n, l) {
     if (w.fn) {
       const N = [];
       for (; ; ) {
-        N.push(S());
+        N.push(E());
         const z = o[i++];
         if (!z) return null;
         if (z.op === ")") break;
@@ -8583,13 +8583,13 @@ function Gn(n, l) {
   function x() {
     let w = p();
     for (; o[i] && (o[i].op === "*" || o[i].op === "/"); ) {
-      const N = o[i++].op, E = p();
-      if (!w || !E) return null;
-      N === "*" ? w = f(E) ? m(w, E.num) : f(w) ? m(E, w.num) : null : w = f(E) && E.num !== 0 ? m(w, 1 / E.num) : null;
+      const N = o[i++].op, S = p();
+      if (!w || !S) return null;
+      N === "*" ? w = f(S) ? m(w, S.num) : f(w) ? m(S, w.num) : null : w = f(S) && S.num !== 0 ? m(w, 1 / S.num) : null;
     }
     return w;
   }
-  function S() {
+  function E() {
     let w = x();
     for (; o[i] && (o[i].op === "+" || o[i].op === "-"); ) {
       const N = o[i++].op;
@@ -8597,7 +8597,7 @@ function Gn(n, l) {
     }
     return w;
   }
-  const k = S();
+  const k = E();
   return i !== o.length || !k ? null : k;
 }
 function is(n, l) {
@@ -8619,8 +8619,8 @@ function Xr(n, l) {
   if (o === "currentcolor") return "currentcolor";
   const i = /^perchtoken\(([a-z0-9-]+)\)$/.exec(o);
   if (i) {
-    const x = l(i[1]), S = x && Yd(x);
-    return S ? { rgba: S, token: i[1] } : null;
+    const x = l(i[1]), E = x && Yd(x);
+    return E ? { rgba: E, token: i[1] } : null;
   }
   if (o.startsWith("#")) {
     const x = Yd(o);
@@ -8632,16 +8632,16 @@ function Xr(n, l) {
   if (s[1] === "color-mix") {
     const x = ie(s[2], ",");
     if (x.length !== 3 || !/^in\s+(srgb|srgb-linear|oklab|lab|oklch|lch|hsl|xyz)/.test(x[0])) return null;
-    const S = (Q) => {
+    const E = (Q) => {
       const I = ie(Q), tt = I.findIndex(($) => /%$/.test($)), L = tt >= 0 ? parseFloat(I[tt]) / 100 : null;
       return { color: Xr(I.filter(($, Y) => Y !== tt).join(" "), l), pct: L };
-    }, k = S(x[1]), w = S(x[2]);
+    }, k = E(x[1]), w = E(x[2]);
     if (!k.color || !w.color || k.color === "currentcolor" || w.color === "currentcolor") return null;
-    let N = k.pct, E = w.pct;
-    N === null && E === null ? (N = 0.5, E = 0.5) : N === null ? N = 1 - E : E === null && (E = 1 - N);
-    const v = N + E, z = v < 1 ? v : 1;
-    N /= v, E /= v;
-    const [R, D, A, X] = k.color.rgba, [U, H, h, b] = w.color.rgba, y = X * N + b * E, _ = (Q, I) => y === 0 ? 0 : (Q * X * N + I * b * E) / y, T = [_(R, U), _(D, H), _(A, h), y * z], O = b === 0 ? k.color.token : X === 0 ? w.color.token : null;
+    let N = k.pct, S = w.pct;
+    N === null && S === null ? (N = 0.5, S = 0.5) : N === null ? N = 1 - S : S === null && (S = 1 - N);
+    const v = N + S, z = v < 1 ? v : 1;
+    N /= v, S /= v;
+    const [R, D, A, X] = k.color.rgba, [U, H, h, b] = w.color.rgba, y = X * N + b * S, _ = (Q, I) => y === 0 ? 0 : (Q * X * N + I * b * S) / y, T = [_(R, U), _(D, H), _(A, h), y * z], O = b === 0 ? k.color.token : X === 0 ? w.color.token : null;
     return { rgba: T, token: O };
   }
   const d = s[2].includes(",") ? ie(s[2], ",") : ie(s[2].replace("/", " / ")).filter((x) => x !== "/");
@@ -8819,8 +8819,8 @@ function U0(n, l) {
       if (!f) return !1;
       const p = f[1].trim(), x = /^([a-z-]+)\s*:\s*(.+)$/.exec(p);
       if (x) {
-        const [, k, w] = x, N = (E) => {
-          const v = is(E, { viewport: l });
+        const [, k, w] = x, N = (S) => {
+          const v = is(S, { viewport: l });
           return typeof v == "object" && "px" in v ? v.px : NaN;
         };
         switch (k) {
@@ -8846,10 +8846,10 @@ function U0(n, l) {
             return !1;
         }
       }
-      const S = /^(width|height)\s*(>=|<=|>|<|=)\s*(.+)$/.exec(p);
-      if (S) {
-        const k = S[1] === "width" ? l.width : l.height, w = is(S[3], { viewport: l }), N = typeof w == "object" && "px" in w ? w.px : NaN;
-        switch (S[2]) {
+      const E = /^(width|height)\s*(>=|<=|>|<|=)\s*(.+)$/.exec(p);
+      if (E) {
+        const k = E[1] === "width" ? l.width : l.height, w = is(E[3], { viewport: l }), N = typeof w == "object" && "px" in w ? w.px : NaN;
+        switch (E[2]) {
           case ">=":
             return k >= N;
           case "<=":
@@ -8876,7 +8876,7 @@ function G0(n) {
     s.forEach(({ compound: m }, f) => {
       const p = d && f === s.length - 1;
       for (const x of m.pseudos)
-        if (Of.has(x.name) && (p ? l : o).add(x.name), x.list && x.name !== "not") for (const S of x.list) i(S, p);
+        if (Of.has(x.name) && (p ? l : o).add(x.name), x.list && x.name !== "not") for (const E of x.list) i(E, p);
     });
   };
   return i(n, !0), { subject: l, ancestor: o };
@@ -8892,8 +8892,8 @@ function Y0(n, l) {
   const o = (i, s) => {
     i.forEach(({ compound: d }, m) => {
       const f = s && m === i.length - 1, p = d.pseudos.filter((x) => Of.has(x.name)).map((x) => x.name);
-      if (!f) for (const x of p) for (const S of xs(d)) l.add(`${x}:${S}`);
-      for (const x of d.pseudos) if (x.list && x.name !== "not") for (const S of x.list) o(S, f);
+      if (!f) for (const x of p) for (const E of xs(d)) l.add(`${x}:${E}`);
+      for (const x of d.pseudos) if (x.list && x.name !== "not") for (const E of x.list) o(E, f);
     });
   };
   o(n, !0);
@@ -8907,7 +8907,7 @@ class L0 {
     };
     let i = 0;
     const s = (d, m) => {
-      for (const [f, p, x, S] of d)
+      for (const [f, p, x, E] of d)
         for (const k of gs(f)) {
           let w;
           try {
@@ -8921,7 +8921,7 @@ class L0 {
           }
           const N = G0(w);
           Y0(w, this.trackedStates);
-          const E = w[w.length - 1].compound.pseudoElement, v = { steps: w, media: p, layer: x, origin: m, order: i++, specificity: wf(w), decls: S, states: N, pseudo: E, source: m === 0 ? `ua:${w[w.length - 1].compound.tag ?? "*"}` : q0(k, w) };
+          const S = w[w.length - 1].compound.pseudoElement, v = { steps: w, media: p, layer: x, origin: m, order: i++, specificity: wf(w), decls: E, states: N, pseudo: S, source: m === 0 ? `ua:${w[w.length - 1].compound.tag ?? "*"}` : q0(k, w) };
           this.rules.push(v), o(v, w);
         }
     };
@@ -8997,8 +8997,8 @@ class Z0 {
     let p = this.rootComputed;
     o && (p = this.computed.get(o.values), p || this.computed.set(o.values, p = /* @__PURE__ */ new Map()));
     const x = `${d.map((k) => k.order).join(",")}|${m.length ? JSON.stringify(m) : ""}|${f.length ? JSON.stringify(f) : ""}`;
-    let S = p.get(x);
-    return S || p.set(x, S = this.cascade(d, m, f, o)), { ...S, rules: d, element: l };
+    let E = p.get(x);
+    return E || p.set(x, E = this.cascade(d, m, f, o)), { ...E, rules: d, element: l };
   }
   /** The computed style from the matched `rules`, presentational `attrs`, `inline` declarations and the parent's. */
   cascade(l, o, i, s) {
@@ -9011,12 +9011,12 @@ class Z0 {
     const m = this.sheet.properties, f = Object.create(s?.customs ?? null), p = /* @__PURE__ */ new Map(), x = /* @__PURE__ */ new Map();
     for (const h of d) h.prop.startsWith("--") && x.set(h.prop, h.value);
     if (!s && this.theme) for (const h of jf) this.theme[h] && x.set(`--${h}`, `perchtoken(${h})`);
-    const S = (h) => {
+    const E = (h) => {
       if (p.has(h)) return p.get(h);
       const b = m[h];
       return b && !b.inherits ? b.initial ?? null : h in f ? f[h] : b?.initial ?? null;
     }, k = /* @__PURE__ */ new Set(), w = (h) => {
-      if (!x.has(h)) return S(h);
+      if (!x.has(h)) return E(h);
       if (k.has(h)) return null;
       k.add(h);
       const b = rs(x.get(h), w);
@@ -9026,36 +9026,36 @@ class Z0 {
     const N = /* @__PURE__ */ new Map();
     for (const h of d) {
       if (h.prop.startsWith("--")) continue;
-      const b = rs(h.value, S);
+      const b = rs(h.value, E);
       if (b === null) {
         for (const [y] of os(h.prop, "unset")) N.set(y, { value: "unset", source: h.source, origin: h.origin });
         continue;
       }
       for (const [y, _] of os(h.prop, b)) N.set(y, { value: _, source: h.source, origin: h.origin });
     }
-    const E = {}, v = {}, z = /* @__PURE__ */ new Set(), R = /* @__PURE__ */ new Set(), D = s?.values, A = { fontSize: D?.["font-size"] ?? as, viewport: this.viewport }, X = (h, b) => {
-      if (/currentcolor/i.test(b)) return this.parseValue(h, b, A, E, D);
+    const S = {}, v = {}, z = /* @__PURE__ */ new Set(), R = /* @__PURE__ */ new Set(), D = s?.values, A = { fontSize: D?.["font-size"] ?? as, viewport: this.viewport }, X = (h, b) => {
+      if (/currentcolor/i.test(b)) return this.parseValue(h, b, A, S, D);
       const y = `${h}\0${b}\0${A.fontSize}`;
       let _ = this.parsed.get(y);
-      return _ === void 0 && this.parsed.set(y, _ = this.parseValue(h, b, A, E, D)), _;
+      return _ === void 0 && this.parsed.set(y, _ = this.parseValue(h, b, A, S, D)), _;
     }, U = N.size ? [...ls, ...[...N.keys()].filter((h) => !O0.has(h))] : ls;
     for (const h of U) {
       const b = N.get(h);
       let y = b?.value;
       const _ = j0.has(h);
       if ((y === void 0 || y === "unset" || y === "revert" || y === "revert-layer") && (y = _ ? "inherit" : "initial"), b && (v[h] = b.source, b.origin !== 0 && z.add(h)), y === "inherit" && D && h in D) {
-        E[h] = D[h], R.add(h);
+        S[h] = D[h], R.add(h);
         continue;
       }
-      (y === "inherit" || y === "initial") && (y = _ ? Df[h] : Rf[h]), E[h] = X(h, y), h === "font-size" && (A.fontSize = E["font-size"]);
+      (y === "inherit" || y === "initial") && (y = _ ? Df[h] : Rf[h]), S[h] = X(h, y), h === "font-size" && (A.fontSize = S["font-size"]);
     }
     for (const h of xl) {
-      const b = E[`border-${h}-style`];
-      (b === "none" || b === "hidden") && (E[`border-${h}-width`] = { px: 0 });
+      const b = S[`border-${h}-style`];
+      (b === "none" || b === "hidden") && (S[`border-${h}-width`] = { px: 0 });
     }
-    E["outline-style"] === "none" && (E["outline-width"] = { px: 0 });
+    S["outline-style"] === "none" && (S["outline-width"] = { px: 0 });
     const H = D?.display;
-    return (H === "flex" || H === "inline-flex" || H === "grid" || H === "inline-grid") && E.position !== "absolute" && E.position !== "fixed" && (E.display = Qd(E.display)), (E.position === "absolute" || E.position === "fixed") && (E.display = Qd(E.display)), { values: E, sources: v, own: z, inherited: R, customs: f };
+    return (H === "flex" || H === "inline-flex" || H === "grid" || H === "inline-grid") && S.position !== "absolute" && S.position !== "fixed" && (S.display = Qd(S.display)), (S.position === "absolute" || S.position === "fixed") && (S.display = Qd(S.display)), { values: S, sources: v, own: z, inherited: R, customs: f };
   }
   parseValue(l, o, i, s, d) {
     const m = String(o).trim();
@@ -9245,7 +9245,8 @@ const P0 = /* @__PURE__ */ new Set([
   mouse_move: ["onPointerMove", "onMouseMove"],
   key_down: ["onKeyDown", "onKeyUp"],
   focus: ["onFocus", "onBlur"],
-  input: ["onChange", "onInput"]
+  input: ["onChange", "onInput"],
+  scroll: ["onScroll"]
 }, Vd = { pointerdown: "mouse_down", mousedown: "mouse_down", click: "click", keydown: "key_down", pointerup: "mouse_up", mouseup: "mouse_up" }, ws = (n) => {
   const l = n.props["data-testid"];
   if (l) return `${n.tagName}[data-testid="${l}"]`;
@@ -9309,8 +9310,8 @@ function Xd(n, l, o, i = !1) {
     const N = Gn(k, f);
     if (!(!N || N.unitless && N.num))
       return N.pct ? typeof w == "number" ? N.px + N.pct / 100 * w : void 0 : N.px;
-  }, x = d ? p(d[0], l.w) : void 0, S = d ? p(d[1], l.h) : void 0;
-  if (x === void 0 || S === void 0) {
+  }, x = d ? p(d[0], l.w) : void 0, E = d ? p(d[1], l.h) : void 0;
+  if (x === void 0 || E === void 0) {
     const k = !i && d ? d.map((w) => Gn(w, f)) : null;
     if (k?.every((w) => w && !(w.unitless && w.num))) {
       l[Bf] = k.map((w) => [w.px, w.pct ?? 0]);
@@ -9320,17 +9321,17 @@ function Xd(n, l, o, i = !1) {
     return;
   }
   if (i) {
-    x && (l.left = x), S && (l.top = S);
+    x && (l.left = x), E && (l.top = E);
     return;
   }
-  x && (l.ml = (l.ml ?? 0) + x), S && (l.mt = (l.mt ?? 0) + S);
+  x && (l.ml = (l.ml ?? 0) + x), E && (l.mt = (l.mt ?? 0) + E);
 }
 const Bf = Symbol("perch.shift");
 function cg(n, l, o) {
   const i = n.ownerDocument, s = i?.measure?.(n) ?? null;
   if (s) {
-    const [[m, f], [p, x]] = o, S = m + f / 100 * s.width, k = p + x / 100 * s.height;
-    S && (l.ml = (typeof l.ml == "number" ? l.ml : 0) + S), k && (l.mt = (typeof l.mt == "number" ? l.mt : 0) + k);
+    const [[m, f], [p, x]] = o, E = m + f / 100 * s.width, k = p + x / 100 * s.height;
+    E && (l.ml = (typeof l.ml == "number" ? l.ml : 0) + E), k && (l.mt = (typeof l.mt == "number" ? l.mt : 0) + k);
   }
   const d = s ? `${s.width}x${s.height}` : "";
   d === n.shiftSeen ? n.shiftTries = 0 : (n.shiftTries ?? 0) < Nf && i?.retries && (n.shiftSeen = d, n.shiftTries = (n.shiftTries ?? 0) + 1, i.retries.push(() => i.afterCommit?.()));
@@ -9359,8 +9360,8 @@ function Ur(n, l, o = null) {
   i["flex-grow"] && (s.flex_grow = i["flex-grow"]), i["flex-shrink"] !== 1 && (s.flex_shrink = i["flex-shrink"]);
   const x = mn(i["flex-basis"]);
   x !== void 0 && x !== "auto" && (s.flex_basis = x);
-  const S = { "flex-start": "start", start: "start", "flex-end": "end", end: "end", center: "center", baseline: "baseline", stretch: "stretch" }[i["align-self"]];
-  S && (s.self = S);
+  const E = { "flex-start": "start", start: "start", "flex-end": "end", end: "end", center: "center", baseline: "baseline", stretch: "stretch" }[i["align-self"]];
+  E && (s.self = E);
   for (const [A, X] of [["w", "width"], ["h", "height"], ["min_w", "min-width"], ["min_h", "min-height"], ["max_w", "max-width"], ["max_h", "max-height"]]) {
     const U = i[X], H = mn(U);
     if (H === void 0 && X === "width" && sg(U, i)) {
@@ -9411,10 +9412,10 @@ function Ur(n, l, o = null) {
   (i.visibility === "hidden" || i.visibility === "collapse") && (s.visibility = "invisible");
   const N = i["background-color"];
   N?.unreadable ? l("unsupported", "background-color", N.unreadable, d("background-color")) : N?.rgba && N.rgba[3] > 0 && (s.bg = Kr(N)), i["background-image"] && i["background-image"] !== "none" && l("unsupported", "background-image", i["background-image"], d("background-image"));
-  const E = k.map((A) => mn(i[`border-${A}-width`]) || 0), v = [];
+  const S = k.map((A) => mn(i[`border-${A}-width`]) || 0), v = [];
   k.forEach((A, X) => {
-    if (!E[X]) return;
-    s[`border_${A[0]}`] = E[X];
+    if (!S[X]) return;
+    s[`border_${A[0]}`] = S[X];
     const U = i[`border-${A}-style`];
     U !== "solid" && l("approximated", `border-${A}-style`, U, d(`border-${A}-style`), "drawn solid");
     const H = Kr(i[`border-${A}-color`]);
@@ -9557,9 +9558,9 @@ function Jd(n, l) {
   }
 }
 function fg(n, l, o, i) {
-  const s = ws(n), d = [], m = (R, D, A, X, U) => d.push([R, D, A, X ?? "(user agent)", s, U]), f = i.cascade.compute(n, l), p = {}, x = Ur(f, m, i.viewport), S = x[Bf];
+  const s = ws(n), d = [], m = (R, D, A, X, U) => d.push([R, D, A, X ?? "(user agent)", s, U]), f = i.cascade.compute(n, l), p = {}, x = Ur(f, m, i.viewport), E = x[Bf];
   Jd(f, m);
-  const k = qr(f, i.measure), w = Gr(f, k, o), N = Yr({ ...x, ...w }, p), E = {}, v = i.cascade.matching(n, "*").filter((R) => R.states.subject.size);
+  const k = qr(f, i.measure), w = Gr(f, k, o), N = Yr({ ...x, ...w }, p), S = {}, v = i.cascade.matching(n, "*").filter((R) => R.states.subject.size);
   for (const [R, D] of [["hover", ["hover"]], ["focus", ["focus", "focus-visible"]], ["active", ["active", "hover"]]]) {
     if (!v.some((h) => D.some((b) => h.states.subject.has(b)))) continue;
     const A = i.cascade.compute(n, l, new Set(D)), X = {}, U = Yr({ ...Ur(A, () => {
@@ -9567,12 +9568,12 @@ function fg(n, l, o, i) {
     R === "focus" && Jd(A, m);
     const H = Zd(N, U);
     if (Object.keys(H).length) {
-      E[R] = H;
+      S[R] = H;
       const h = Object.fromEntries(Object.entries(X).filter(([b]) => b in H));
-      Object.keys(h).length && (E[`${R}_tokens`] = h);
+      Object.keys(h).length && (S[`${R}_tokens`] = h);
     }
   }
-  if (i.cascade.sheet.tracks(n, "hover") && (E.group = Wd(n), E.track_hover = !0), i.cascade.sheet.readsAncestor(n, "hover"))
+  if (i.cascade.sheet.tracks(n, "hover") && (S.group = Wd(n), S.track_hover = !0), i.cascade.sheet.readsAncestor(n, "hover"))
     for (let R = n.parentNode; R?.state; R = R.parentNode) {
       if (!i.cascade.sheet.tracks(R, "hover")) continue;
       const D = R.state.hover;
@@ -9587,15 +9588,15 @@ function fg(n, l, o, i) {
       }), ...Gr(A, qr(A, i.measure), o) }, X), H = Zd(N, U);
       if (!Object.keys(H).length) continue;
       const h = Object.fromEntries(Object.entries(X).filter(([b]) => b in H));
-      (E.group_hover ??= []).push({ group: Wd(R), style: H, ...Object.keys(h).length ? { tokens: h } : {} });
+      (S.group_hover ??= []).push({ group: Wd(R), style: H, ...Object.keys(h).length ? { tokens: h } : {} });
     }
-  if (/tabular/.test(String(f.values["font-variant-numeric"] ?? "")) && (E.tabular = !0), /^(anywhere|break-word)$/.test(String(f.values["overflow-wrap"] ?? "")) && (E.break_anywhere = !0), x.overflow_y === "scroll") {
+  if (/tabular/.test(String(f.values["font-variant-numeric"] ?? "")) && (S.tabular = !0), /^(anywhere|break-word)$/.test(String(f.values["overflow-wrap"] ?? "")) && (S.break_anywhere = !0), x.overflow_y === "scroll") {
     const R = Number.parseFloat(f.customs?.["--scrollbar-size"] ?? "");
-    R > 0 && (E.scrollbar = R);
+    R > 0 && (S.scrollbar = R);
   }
-  f.values["pointer-events"] !== "none" && l?.values["pointer-events"] === "none" && (E.blocks_pointer = !0), f.values["pointer-events"] === "none" && (E.pointer_none = !0);
+  f.values["pointer-events"] !== "none" && l?.values["pointer-events"] === "none" && (S.blocks_pointer = !0), f.values["pointer-events"] === "none" && (S.pointer_none = !0);
   const z = Object.entries(ag).filter(([, R]) => R.some((D) => typeof n.props[D] == "function")).map(([R]) => R);
-  return !z.includes("click") && ns(n) && z.push("click"), z.length && (E.events = z), { computed: f, style: N, tokens: p, extra: E, meta: yg(n), reports: d, childText: dg(o, w), where: s, shift: S };
+  return !z.includes("click") && ns(n) && z.push("click"), z.length && (S.events = z), { computed: f, style: N, tokens: p, extra: S, meta: yg(n), reports: d, childText: dg(o, w), where: s, shift: E };
 }
 function mg(n, l, o, i) {
   const s = { before: null, after: null };
@@ -9603,7 +9604,7 @@ function mg(n, l, o, i) {
     if (!i.cascade.matching(n, /* @__PURE__ */ new Set(), d).length) continue;
     const m = i.cascade.compute(n, l, /* @__PURE__ */ new Set(), d), f = String(m.values.content ?? "none").trim();
     if (f === "none" || f === "normal") continue;
-    const p = /^(["'])(.*)\1$/.exec(f)?.[2] ?? "", x = (E, v, z, R, D) => i.findings.add(E, v, z, R ?? "(user agent)", `${ws(n)}::${d}`, D), S = {}, k = Ur(m, x, i.viewport), N = { kind: "div", style: Yr({ ...k, ...Gr(m, qr(m, i.measure), o) }, S), tokens: S, children: p ? [{ kind: "text", text: p }] : [] };
+    const p = /^(["'])(.*)\1$/.exec(f)?.[2] ?? "", x = (S, v, z, R, D) => i.findings.add(S, v, z, R ?? "(user agent)", `${ws(n)}::${d}`, D), E = {}, k = Ur(m, x, i.viewport), N = { kind: "div", style: Yr({ ...k, ...Gr(m, qr(m, i.measure), o) }, E), tokens: E, children: p ? [{ kind: "text", text: p }] : [] };
     Object.defineProperty(N, qn, { value: m.values.display }), s[d] = N;
   }
   return s;
@@ -9616,11 +9617,11 @@ function Gf(n, l, o, i, s = "") {
   const d = `${s}/${n.id}.${n.version}`;
   let m = i.cache.get(n);
   (!m || m.key !== d) && i.cache.set(n, m = { key: d, part: fg(n, l, o, i) });
-  const { computed: f, tokens: p, extra: x, reports: S, childText: k, where: w } = m.part;
-  for (const y of S) i.findings.add(...y);
-  const N = (y, _, T, O, Q) => i.findings.add(y, _, T, O, w, Q), E = { ...m.part.style };
-  m.part.shift && cg(n, E, m.part.shift);
-  const v = { kind: "div", id: n.id, style: E, tokens: p, meta: m.part.meta, ...x };
+  const { computed: f, tokens: p, extra: x, reports: E, childText: k, where: w } = m.part;
+  for (const y of E) i.findings.add(...y);
+  const N = (y, _, T, O, Q) => i.findings.add(y, _, T, O, w, Q), S = { ...m.part.style };
+  m.part.shift && cg(n, S, m.part.shift);
+  const v = { kind: "div", id: n.id, style: S, tokens: p, meta: m.part.meta, ...x };
   Object.defineProperty(v, qn, { value: f.values.display }), n.measured && n.ownerDocument?.measureKey && (v.measure = n.ownerDocument.measureKey(n));
   const z = n.tagName;
   if (n.props["data-perch-engine"] != null)
@@ -9630,9 +9631,9 @@ function Gf(n, l, o, i, s = "") {
   if (z === "input" || z === "textarea" || z === "select") {
     v.kind = "input", v.input_type = z === "input" ? String(n.props.type ?? "text") : z;
     for (const T of ["placeholder", "checked", "disabled"]) n.props[T] !== void 0 && (v[T] = n.props[T]);
-    if (/^(checkbox|radio)$/.test(v.input_type) && (v.checked = n.checked), z !== "select" && (v.value = n.value), z === "input" && rg.test(v.input_type) && (v.field_w = ig * f.values["font-size"]), z === "textarea" && E.h === void 0) {
+    if (/^(checkbox|radio)$/.test(v.input_type) && (v.checked = n.checked), z !== "select" && (v.value = n.value), z === "input" && rg.test(v.input_type) && (v.field_w = ig * f.values["font-size"]), z === "textarea" && S.h === void 0) {
       const T = f.values, O = (tt) => tt && typeof tt == "object" && "px" in tt ? tt.px : 0, Q = (tt) => T[`border-${tt}-style`] === "none" ? 0 : O(T[`border-${tt}-width`]), I = Number(n.props.rows) > 0 ? Math.floor(Number(n.props.rows)) : 2;
-      E.h = I * _l(T, i.measure) + O(T["padding-top"]) + O(T["padding-bottom"]) + Q("top") + Q("bottom");
+      S.h = I * _l(T, i.measure) + O(T["padding-top"]) + O(T["padding-bottom"]) + Q("top") + Q("bottom");
     }
     const { before: y, after: _ } = mg(n, f, k, i);
     return (y || _) && (v.children = [y, _].filter(Boolean)), v;
@@ -9641,7 +9642,7 @@ function Gf(n, l, o, i, s = "") {
     v.kind = "image", v.src = n.props.src ?? null;
     for (const [y, _] of [["width", "w"], ["height", "h"]]) {
       const T = Number(n.props[y]);
-      E[_] === void 0 && n.props[y] != null && Number.isFinite(T) && (E[_] = T);
+      S[_] === void 0 && n.props[y] != null && Number.isFinite(T) && (S[_] = T);
     }
     return v;
   }
@@ -9664,22 +9665,22 @@ function Gf(n, l, o, i, s = "") {
     const _ = Gf(y, f, k, i, d), T = _[qn];
     T === "inline" || T === "inline-block" || T === "inline-flex" ? A = !0 : T !== "none" && (X = !0), D.push(_);
   }
-  if (/(^|\s)inline-flex(\s|$)/.test(String(n.props?.className ?? "")) && E.w === void 0)
+  if (/(^|\s)inline-flex(\s|$)/.test(String(n.props?.className ?? "")) && S.w === void 0)
     for (const y of D)
       y.style?.flex_grow && y.style.min_w === 0 && y.style.overflow_x === "hidden" && (delete y.style.min_w, delete y.style.flex_grow, delete y.style.flex_basis, delete y.style.overflow_x, delete y.style.overflow_y);
-  if (!E.display && A && D.some((y) => y.kind !== "text") && D.every((y) => y.kind === "text" || hg(y))) {
+  if (!S.display && A && D.some((y) => y.kind !== "text") && D.every((y) => y.kind === "text" || hg(y))) {
     const y = D.map((_) => _.kind === "text" ? _.text : _.children.map((T) => T.text).join("")).join("");
     N("approximated", "display", "inline text elements in a line of text", "(inline formatting)", "their text joined to the line, in its font"), D.splice(0, D.length, { kind: "text", text: y });
   }
   const U = D.some((y) => y.kind !== "text"), H = D.length === 1 && D[0].kind !== "text" && /^inline-(block|flex)$/.test(D[0][qn]) ? D[0] : null;
-  if (!E.display && H) {
+  if (!S.display && H) {
     const y = i.cache.get(n.childNodes.find((T) => T.id === H.id))?.part.computed, _ = y ? Wr(f.values, i.measure) - vg(y.values, i.measure, H) : 0;
-    E.display = "flex", E.flex_direction = "col", E.items = "start", _ > 0 && (H.style.mt = Math.round(((H.style.mt ?? 0) + _) * 100) / 100), N("approximated", "display", `${f.values.display} holding one ${H[qn]} box`, "(inline formatting)", "a column, the box lowered to the line's baseline");
-  } else if (!E.display && D.length === 1 && (D[0].kind === "svg" || D[0].kind === "image") && D[0][qn] === "inline" && typeof D[0].style.h == "number") {
+    S.display = "flex", S.flex_direction = "col", S.items = "start", _ > 0 && (H.style.mt = Math.round(((H.style.mt ?? 0) + _) * 100) / 100), N("approximated", "display", `${f.values.display} holding one ${H[qn]} box`, "(inline formatting)", "a column, the box lowered to the line's baseline");
+  } else if (!S.display && D.length === 1 && (D[0].kind === "svg" || D[0].kind === "image") && D[0][qn] === "inline" && typeof D[0].style.h == "number") {
     const y = D[0], _ = Wr(f.values, i.measure), T = _l(f.values, i.measure) - _, O = (Q) => Math.round(Q * 100) / 100;
-    E.display = "flex", E.flex_direction = "col", E.items = "start", _ > y.style.h && (y.style.mt = O((y.style.mt ?? 0) + _ - y.style.h)), T > 0 && (y.style.mb = O((y.style.mb ?? 0) + T)), N("approximated", "display", `${f.values.display} holding one inline image`, "(inline formatting)", "a column, the image on the line's baseline");
-  } else if (!E.display && A && U) {
-    if (E.display = "flex", E.flex_direction = X ? "col" : "row", !X) E.items = "baseline";
+    S.display = "flex", S.flex_direction = "col", S.items = "start", _ > y.style.h && (y.style.mt = O((y.style.mt ?? 0) + _ - y.style.h)), T > 0 && (y.style.mb = O((y.style.mb ?? 0) + T)), N("approximated", "display", `${f.values.display} holding one inline image`, "(inline formatting)", "a column, the image on the line's baseline");
+  } else if (!S.display && A && U) {
+    if (S.display = "flex", S.flex_direction = X ? "col" : "row", !X) S.items = "baseline";
     else for (const y of D) y.kind !== "text" && /^inline-(block|flex)$/.test(y[qn]) && !y.style.self && (y.style.self = "start");
     N("approximated", "display", `${f.values.display} with inline content`, "(inline formatting)", X ? "a column of its children" : "a row on the text baseline");
   }
@@ -9708,13 +9709,13 @@ function bg(n, l, o) {
     for (const f of m.children) {
       const p = o.get(f.id);
       if (p)
-        for (const [x, S] of i) {
+        for (const [x, E] of i) {
           const k = x.textRange ? "range_name" : "name";
-          if (x.textRange && p[k] != null || !S.some((v) => Sf(f, v))) continue;
+          if (x.textRange && p[k] != null || !E.some((v) => Sf(f, v))) continue;
           const w = gg(f, x.key), N = w == null ? s.get(x.name) ?? 0 : 0;
           w == null && s.set(x.name, N + 1);
-          const E = w != null ? `${x.name}:${w}` : N ? `${x.name}@${N}` : x.name;
-          p[k] == null ? p[k] = E : (p.also ??= []).push(E);
+          const S = w != null ? `${x.name}:${w}` : N ? `${x.name}@${N}` : x.name;
+          p[k] == null ? p[k] = S : (p.also ??= []).push(S);
         }
       d(f);
     }
@@ -9760,20 +9761,20 @@ const kg = { font_features: "" };
 function Sg(n, l, o, i = {}, s = null) {
   const d = _g(l), m = l.viewport?.() ?? { width: 1e3, height: 800 }, f = JSON.stringify([d, m]);
   (i.look !== f || i.sheet !== o) && Object.assign(i, { look: f, sheet: o, cache: /* @__PURE__ */ new WeakMap(), cascade: new Z0(o, { theme: d, viewport: m }), top: null });
-  const { cascade: p, cache: x } = i, S = { cascade: p, cache: x, viewport: m, findings: new lg(), measure: l.lineHeight ? (N) => l.lineHeight(N) : null };
+  const { cascade: p, cache: x } = i, E = { cascade: p, cache: x, viewport: m, findings: new lg(), measure: l.lineHeight ? (N) => l.lineHeight(N) : null };
   i.top ??= p.compute(n.body, p.compute(n.documentElement, null));
-  const k = n.body.children.map((N) => Gf(N, i.top, kg, S));
+  const k = n.body.children.map((N) => Gf(N, i.top, kg, E));
   if (s?.length) {
-    const N = /* @__PURE__ */ new Map(), E = (v) => {
+    const N = /* @__PURE__ */ new Map(), S = (v) => {
       v.id && N.set(v.id, v);
-      for (const z of v.children ?? []) E(z);
+      for (const z of v.children ?? []) S(z);
     };
-    k.forEach(E), bg(n, s, N);
+    k.forEach(S), bg(n, s, N);
   }
   const w = /* @__PURE__ */ new Set();
   for (const N of [n, n.defaultView])
-    for (const { type: E } of N?.listeners ?? []) Vd[E] && w.add(Vd[E]);
-  return { schema: I0, root: k[0] ?? null, overlays: k.slice(1), document_events: [...w].sort(), unsupported: S.findings.list() };
+    for (const { type: S } of N?.listeners ?? []) Vd[S] && w.add(Vd[S]);
+  return { schema: I0, root: k[0] ?? null, overlays: k.slice(1), document_events: [...w].sort(), unsupported: E.findings.list() };
 }
 const Eg = { layers: ["properties", "theme", "base", "utilities"], properties: { "--tw-translate-x": { inherits: !1, initial: "0" }, "--tw-translate-y": { inherits: !1, initial: "0" }, "--tw-translate-z": { inherits: !1, initial: "0" }, "--tw-rotate-x": { inherits: !1, initial: null }, "--tw-rotate-y": { inherits: !1, initial: null }, "--tw-rotate-z": { inherits: !1, initial: null }, "--tw-skew-x": { inherits: !1, initial: null }, "--tw-skew-y": { inherits: !1, initial: null }, "--tw-space-y-reverse": { inherits: !1, initial: "0" }, "--tw-border-style": { inherits: !1, initial: "solid" }, "--tw-leading": { inherits: !1, initial: null }, "--tw-font-weight": { inherits: !1, initial: null }, "--tw-tracking": { inherits: !1, initial: null }, "--tw-ordinal": { inherits: !1, initial: null }, "--tw-slashed-zero": { inherits: !1, initial: null }, "--tw-numeric-figure": { inherits: !1, initial: null }, "--tw-numeric-spacing": { inherits: !1, initial: null }, "--tw-numeric-fraction": { inherits: !1, initial: null }, "--tw-shadow": { inherits: !1, initial: "0 0 #0000" }, "--tw-shadow-color": { inherits: !1, initial: null }, "--tw-shadow-alpha": { inherits: !1, initial: "100%" }, "--tw-inset-shadow": { inherits: !1, initial: "0 0 #0000" }, "--tw-inset-shadow-color": { inherits: !1, initial: null }, "--tw-inset-shadow-alpha": { inherits: !1, initial: "100%" }, "--tw-ring-color": { inherits: !1, initial: null }, "--tw-ring-shadow": { inherits: !1, initial: "0 0 #0000" }, "--tw-inset-ring-color": { inherits: !1, initial: null }, "--tw-inset-ring-shadow": { inherits: !1, initial: "0 0 #0000" }, "--tw-ring-inset": { inherits: !1, initial: null }, "--tw-ring-offset-width": { inherits: !1, initial: "0" }, "--tw-ring-offset-color": { inherits: !1, initial: "#fff" }, "--tw-ring-offset-shadow": { inherits: !1, initial: "0 0 #0000" }, "--tw-outline-style": { inherits: !1, initial: "solid" }, "--tw-blur": { inherits: !1, initial: null }, "--tw-brightness": { inherits: !1, initial: null }, "--tw-contrast": { inherits: !1, initial: null }, "--tw-grayscale": { inherits: !1, initial: null }, "--tw-hue-rotate": { inherits: !1, initial: null }, "--tw-invert": { inherits: !1, initial: null }, "--tw-opacity": { inherits: !1, initial: null }, "--tw-saturate": { inherits: !1, initial: null }, "--tw-sepia": { inherits: !1, initial: null }, "--tw-drop-shadow": { inherits: !1, initial: null }, "--tw-drop-shadow-color": { inherits: !1, initial: null }, "--tw-drop-shadow-alpha": { inherits: !1, initial: "100%" }, "--tw-drop-shadow-size": { inherits: !1, initial: null }, "--tw-backdrop-blur": { inherits: !1, initial: null }, "--tw-backdrop-brightness": { inherits: !1, initial: null }, "--tw-backdrop-contrast": { inherits: !1, initial: null }, "--tw-backdrop-grayscale": { inherits: !1, initial: null }, "--tw-backdrop-hue-rotate": { inherits: !1, initial: null }, "--tw-backdrop-invert": { inherits: !1, initial: null }, "--tw-backdrop-opacity": { inherits: !1, initial: null }, "--tw-backdrop-saturate": { inherits: !1, initial: null }, "--tw-backdrop-sepia": { inherits: !1, initial: null }, "--tw-duration": { inherits: !1, initial: null }, "--tw-ease": { inherits: !1, initial: null }, "--tw-content": { inherits: !1, initial: '""' } }, rules: [[":root, :host", null, 2, [["--spacing", ".25rem"], ["--text-xs", ".75rem"], ["--text-xs--line-height", "calc(1 / .75)"], ["--text-sm", ".875rem"], ["--text-sm--line-height", "calc(1.25 / .875)"], ["--font-weight-normal", "400"], ["--font-weight-medium", "500"], ["--font-weight-semibold", "600"], ["--font-weight-bold", "700"], ["--tracking-normal", "0em"], ["--tracking-wide", ".025em"], ["--leading-tight", "1.25"], ["--leading-relaxed", "1.625"], ["--ease-out", "cubic-bezier(0, 0, .2, 1)"], ["--animate-pulse", "pulse 2s cubic-bezier(.4, 0, .6, 1) infinite"], ["--blur-xl", "24px"], ["--default-transition-duration", ".15s"], ["--default-transition-timing-function", "cubic-bezier(.4, 0, .2, 1)"], ["--animate-toast-in", "toast-in .2s cubic-bezier(.22, 1, .36, 1)"], ["--animate-host-pulse", "host-connecting-pulse 1.4s ease-in-out infinite"], ["--animate-drop-zone", "drop-zone-in .14s ease-out, drop-zone-pulse 1.2s ease-in-out .14s infinite"]]], ["::selection", null, 3, [["background", "var(--accent)"], ["color", "var(--panel-bg)"]]], [":where(input, textarea)::placeholder", null, 3, [["color", "var(--subtext-0)"], ["opacity", "1"]]], [":where(button, input, select, textarea)", null, 3, [["border", "0"]]], [':where(button, a[href], select, summary, [role="button"], [role="menuitem"]):focus-visible', null, 3, [["outline", "2px solid var(--accent)"], ["outline-offset", "-2px"]]], ["::-webkit-scrollbar", null, 3, [["width", "var(--scrollbar-size)"], ["height", "var(--scrollbar-size)"]]], ["::-webkit-scrollbar-track", null, 3, [["background", "none"]]], ["::-webkit-scrollbar-corner", null, 3, [["background", "none"]]], ["::-webkit-scrollbar-thumb", null, 3, [["background", "var(--text)"]]], ["::-webkit-scrollbar-thumb", null, 3, [["background", "color-mix(in srgb, var(--text) 20%, transparent)"]]], ["::-webkit-scrollbar-thumb", null, 3, [["border-radius", "var(--scrollbar-size)"]]], ["::-webkit-scrollbar-thumb:hover", null, 3, [["background", "var(--text)"]]], ["::-webkit-scrollbar-thumb:hover", null, 3, [["background", "color-mix(in srgb, var(--text) 40%, transparent)"]]], [".xterm .xterm-scrollable-element > .xterm-scrollbar > .xterm-slider", null, 3, [["border-radius", "var(--scrollbar-size)"]]], [".\\@container, .\\[container-type\\:inline-size\\]", null, 4, [["container-type", "inline-size"]]], [".pointer-events-auto", null, 4, [["pointer-events", "auto"]]], [".pointer-events-none", null, 4, [["pointer-events", "none"]]], [".collapse", null, 4, [["visibility", "collapse"]]], [".invisible", null, 4, [["visibility", "hidden"]]], [".visible", null, 4, [["visibility", "visible"]]], [".sr-only", null, 4, [["clip-path", "inset(50%)"], ["white-space", "nowrap"], ["border-width", "0"], ["width", "1px"], ["height", "1px"], ["margin", "-1px"], ["padding", "0"], ["position", "absolute"], ["overflow", "hidden"]]], [".absolute", null, 4, [["position", "absolute"]]], [".fixed", null, 4, [["position", "fixed"]]], [".relative", null, 4, [["position", "relative"]]], [".static", null, 4, [["position", "static"]]], [".sticky", null, 4, [["position", "sticky"]]], [".inset-0", null, 4, [["inset", "0"]]], [".inset-x-0", null, 4, [["inset-inline", "0"]]], [".inset-x-2", null, 4, [["inset-inline", "calc(var(--spacing) * 2)"]]], [".-top-1", null, 4, [["top", "calc(var(--spacing) * -1)"]]], [".-top-1\\.5", null, 4, [["top", "calc(var(--spacing) * -1.5)"]]], [".top-0", null, 4, [["top", "0"]]], [".top-1", null, 4, [["top", "var(--spacing)"]]], [".top-1\\.5", null, 4, [["top", "calc(var(--spacing) * 1.5)"]]], [".top-1\\/2", null, 4, [["top", "50%"]]], [".top-2", null, 4, [["top", "calc(var(--spacing) * 2)"]]], [".top-4", null, 4, [["top", "calc(var(--spacing) * 4)"]]], [".top-\\[0\\.1rem\\]", null, 4, [["top", ".1rem"]]], [".top-\\[7px\\]", null, 4, [["top", "7px"]]], [".top-\\[max\\(0\\.75rem\\,env\\(safe-area-inset-top\\)\\)\\]", null, 4, [["top", "max(.75rem, env(safe-area-inset-top))"]]], [".top-full", null, 4, [["top", "100%"]]], [".top-px", null, 4, [["top", "1px"]]], [".-right-1", null, 4, [["right", "calc(var(--spacing) * -1)"]]], [".-right-1\\.5", null, 4, [["right", "calc(var(--spacing) * -1.5)"]]], [".right-0", null, 4, [["right", "0"]]], [".right-1", null, 4, [["right", "var(--spacing)"]]], [".right-3", null, 4, [["right", "calc(var(--spacing) * 3)"]]], [".right-4", null, 4, [["right", "calc(var(--spacing) * 4)"]]], [".right-\\[0\\.8rem\\]", null, 4, [["right", ".8rem"]]], [".right-\\[0\\.25rem\\]", null, 4, [["right", ".25rem"]]], [".right-\\[max\\(0\\.75rem\\,env\\(safe-area-inset-right\\)\\)\\]", null, 4, [["right", "max(.75rem, env(safe-area-inset-right))"]]], [".bottom-0", null, 4, [["bottom", "0"]]], [".bottom-2", null, 4, [["bottom", "calc(var(--spacing) * 2)"]]], [".bottom-3", null, 4, [["bottom", "calc(var(--spacing) * 3)"]]], [".bottom-\\[0\\.8rem\\]", null, 4, [["bottom", ".8rem"]]], [".bottom-full", null, 4, [["bottom", "100%"]]], [".-left-8", null, 4, [["left", "calc(var(--spacing) * -8)"]]], [".-left-\\[2px\\]", null, 4, [["left", "-2px"]]], [".left-0", null, 4, [["left", "0"]]], [".left-2", null, 4, [["left", "calc(var(--spacing) * 2)"]]], [".left-\\[0\\.1rem\\]", null, 4, [["left", ".1rem"]]], [".left-\\[max\\(0\\.75rem\\,env\\(safe-area-inset-left\\)\\)\\]", null, 4, [["left", "max(.75rem, env(safe-area-inset-left))"]]], [".left-px", null, 4, [["left", "1px"]]], [".isolate", null, 4, [["isolation", "isolate"]]], [".z-4", null, 4, [["z-index", "4"]]], [".z-5", null, 4, [["z-index", "5"]]], [".z-10", null, 4, [["z-index", "10"]]], [".z-20", null, 4, [["z-index", "20"]]], [".z-30", null, 4, [["z-index", "30"]]], [".z-40", null, 4, [["z-index", "40"]]], [".z-50", null, 4, [["z-index", "50"]]], [".z-\\[2\\]", null, 4, [["z-index", "2"]]], [".z-\\[3\\]", null, 4, [["z-index", "3"]]], [".z-\\[5\\]", null, 4, [["z-index", "5"]]], [".z-\\[1000\\]", null, 4, [["z-index", "1000"]]], [".z-\\[2000\\]", null, 4, [["z-index", "2000"]]], [".z-\\[2100\\]", null, 4, [["z-index", "2100"]]], [".z-\\[2200\\]", null, 4, [["z-index", "2200"]]], [".z-\\[3000\\]", null, 4, [["z-index", "3000"]]], [".z-\\[3100\\]", null, 4, [["z-index", "3100"]]], [".z-\\[4000\\]", null, 4, [["z-index", "4000"]]], [".z-\\[9998\\]", null, 4, [["z-index", "9998"]]], [".z-\\[9999\\]", null, 4, [["z-index", "9999"]]], [".z-\\[10000\\]", null, 4, [["z-index", "10000"]]], [".z-auto", null, 4, [["z-index", "auto"]]], [".order-last", null, 4, [["order", "9999"]]], [".col-\\[1\\/-1\\]", null, 4, [["grid-column", "1 / -1"]]], [".container", null, 4, [["width", "100%"]]], [".container", ["(min-width: 40rem)"], 4, [["max-width", "40rem"]]], [".container", ["(min-width: 48rem)"], 4, [["max-width", "48rem"]]], [".container", ["(min-width: 64rem)"], 4, [["max-width", "64rem"]]], [".container", ["(min-width: 80rem)"], 4, [["max-width", "80rem"]]], [".container", ["(min-width: 96rem)"], 4, [["max-width", "96rem"]]], [".m-0", null, 4, [["margin", "0"]]], [".m-2", null, 4, [["margin", "calc(var(--spacing) * 2)"]]], [".m-\\[0\\.7rem\\]", null, 4, [["margin", ".7rem"]]], [".m-auto", null, 4, [["margin", "auto"]]], [".mx-0", null, 4, [["margin-inline", "0"]]], [".mx-0\\.5", null, 4, [["margin-inline", "calc(var(--spacing) * .5)"]]], [".mx-2", null, 4, [["margin-inline", "calc(var(--spacing) * 2)"]]], [".mx-3", null, 4, [["margin-inline", "calc(var(--spacing) * 3)"]]], [".mx-4", null, 4, [["margin-inline", "calc(var(--spacing) * 4)"]]], [".mx-\\[0\\.3rem\\]", null, 4, [["margin-inline", ".3rem"]]], [".mx-\\[0\\.7rem\\]", null, 4, [["margin-inline", ".7rem"]]], [".mx-\\[0\\.65rem\\]", null, 4, [["margin-inline", ".65rem"]]], [".mx-\\[3px\\]", null, 4, [["margin-inline", "3px"]]], [".mx-\\[11px\\]", null, 4, [["margin-inline", "11px"]]], [".mx-auto", null, 4, [["margin-inline", "auto"]]], [".my-0\\.5", null, 4, [["margin-block", "calc(var(--spacing) * .5)"]]], [".my-1", null, 4, [["margin-block", "var(--spacing)"]]], [".my-2", null, 4, [["margin-block", "calc(var(--spacing) * 2)"]]], [".my-\\[0\\.2rem\\]", null, 4, [["margin-block", ".2rem"]]], [".my-\\[0\\.3rem\\]", null, 4, [["margin-block", ".3rem"]]], [".my-\\[0\\.6rem\\]", null, 4, [["margin-block", ".6rem"]]], [".my-\\[0\\.28rem\\]", null, 4, [["margin-block", ".28rem"]]], [".my-\\[0\\.45rem\\]", null, 4, [["margin-block", ".45rem"]]], [".my-\\[0\\.55rem\\]", null, 4, [["margin-block", ".55rem"]]], [".my-\\[3px\\]", null, 4, [["margin-block", "3px"]]], [".-mt-\\[2px\\]", null, 4, [["margin-top", "-2px"]]], [".mt-0", null, 4, [["margin-top", "0"]]], [".mt-0\\.5", null, 4, [["margin-top", "calc(var(--spacing) * .5)"]]], [".mt-1", null, 4, [["margin-top", "var(--spacing)"]]], [".mt-1\\.5", null, 4, [["margin-top", "calc(var(--spacing) * 1.5)"]]], [".mt-2", null, 4, [["margin-top", "calc(var(--spacing) * 2)"]]], [".mt-3", null, 4, [["margin-top", "calc(var(--spacing) * 3)"]]], [".mt-4", null, 4, [["margin-top", "calc(var(--spacing) * 4)"]]], [".mt-\\[0\\.1rem\\]", null, 4, [["margin-top", ".1rem"]]], [".mt-\\[0\\.2rem\\]", null, 4, [["margin-top", ".2rem"]]], [".mt-\\[0\\.3rem\\]", null, 4, [["margin-top", ".3rem"]]], [".mt-\\[0\\.4rem\\]", null, 4, [["margin-top", ".4rem"]]], [".mt-\\[0\\.5rem\\]", null, 4, [["margin-top", ".5rem"]]], [".mt-\\[0\\.15rem\\]", null, 4, [["margin-top", ".15rem"]]], [".mt-\\[0\\.35rem\\]", null, 4, [["margin-top", ".35rem"]]], [".mr-1", null, 4, [["margin-right", "var(--spacing)"]]], [".mr-1\\.5", null, 4, [["margin-right", "calc(var(--spacing) * 1.5)"]]], [".mr-\\[0\\.3rem\\]", null, 4, [["margin-right", ".3rem"]]], [".mr-\\[0\\.7rem\\]", null, 4, [["margin-right", ".7rem"]]], [".mr-auto", null, 4, [["margin-right", "auto"]]], [".mb-0", null, 4, [["margin-bottom", "0"]]], [".mb-0\\.5", null, 4, [["margin-bottom", "calc(var(--spacing) * .5)"]]], [".mb-1", null, 4, [["margin-bottom", "var(--spacing)"]]], [".mb-2", null, 4, [["margin-bottom", "calc(var(--spacing) * 2)"]]], [".mb-3", null, 4, [["margin-bottom", "calc(var(--spacing) * 3)"]]], [".mb-4", null, 4, [["margin-bottom", "calc(var(--spacing) * 4)"]]], [".mb-8", null, 4, [["margin-bottom", "calc(var(--spacing) * 8)"]]], [".mb-\\[0\\.2rem\\]", null, 4, [["margin-bottom", ".2rem"]]], [".mb-\\[0\\.3rem\\]", null, 4, [["margin-bottom", ".3rem"]]], [".mb-\\[0\\.4rem\\]", null, 4, [["margin-bottom", ".4rem"]]], [".mb-\\[0\\.6rem\\]", null, 4, [["margin-bottom", ".6rem"]]], [".mb-\\[0\\.7rem\\]", null, 4, [["margin-bottom", ".7rem"]]], [".mb-\\[0\\.9rem\\]", null, 4, [["margin-bottom", ".9rem"]]], [".mb-\\[0\\.15rem\\]", null, 4, [["margin-bottom", ".15rem"]]], [".mb-\\[0\\.35rem\\]", null, 4, [["margin-bottom", ".35rem"]]], [".mb-\\[0\\.55rem\\]", null, 4, [["margin-bottom", ".55rem"]]], [".mb-\\[1\\.1rem\\]", null, 4, [["margin-bottom", "1.1rem"]]], [".-ml-0\\.5", null, 4, [["margin-left", "calc(var(--spacing) * -.5)"]]], [".-ml-1", null, 4, [["margin-left", "calc(var(--spacing) * -1)"]]], [".-ml-2", null, 4, [["margin-left", "calc(var(--spacing) * -2)"]]], [".ml-1", null, 4, [["margin-left", "var(--spacing)"]]], [".ml-2", null, 4, [["margin-left", "calc(var(--spacing) * 2)"]]], [".ml-\\[0\\.4rem\\]", null, 4, [["margin-left", ".4rem"]]], [".ml-\\[0\\.5rem\\]", null, 4, [["margin-left", ".5rem"]]], [".ml-\\[0\\.9rem\\]", null, 4, [["margin-left", ".9rem"]]], [".ml-\\[0\\.35rem\\]", null, 4, [["margin-left", ".35rem"]]], [".ml-\\[0\\.55rem\\]", null, 4, [["margin-left", ".55rem"]]], [".ml-\\[1\\.15rem\\]", null, 4, [["margin-left", "1.15rem"]]], [".ml-\\[1\\.45rem\\]", null, 4, [["margin-left", "1.45rem"]]], [".ml-\\[2\\.025rem\\]", null, 4, [["margin-left", "2.025rem"]]], [".ml-\\[2\\.375rem\\]", null, 4, [["margin-left", "2.375rem"]]], [".ml-\\[6\\.1rem\\]", null, 4, [["margin-left", "6.1rem"]]], [".ml-auto", null, 4, [["margin-left", "auto"]]], [".box-border", null, 4, [["box-sizing", "border-box"]]], [".\\!hidden", null, 4, [["display", "none", 1]]], [".\\[display\\:-webkit-box\\]", null, 4, [["display", "-webkit-box"]]], [".\\[display\\:var\\(--pane-grip\\,flex\\)\\]", null, 4, [["display", "var(--pane-grip, flex)"]]], [".block", null, 4, [["display", "block"]]], [".contents", null, 4, [["display", "contents"]]], [".flex", null, 4, [["display", "flex"]]], [".grid", null, 4, [["display", "grid"]]], [".hidden", null, 4, [["display", "none"]]], [".inline", null, 4, [["display", "inline"]]], [".inline-block", null, 4, [["display", "inline-block"]]], [".inline-flex", null, 4, [["display", "inline-flex"]]], [".table", null, 4, [["display", "table"]]], [".size-1", null, 4, [["width", "var(--spacing)"], ["height", "var(--spacing)"]]], [".size-1\\.5", null, 4, [["width", "calc(var(--spacing) * 1.5)"], ["height", "calc(var(--spacing) * 1.5)"]]], [".size-2", null, 4, [["width", "calc(var(--spacing) * 2)"], ["height", "calc(var(--spacing) * 2)"]]], [".size-3", null, 4, [["width", "calc(var(--spacing) * 3)"], ["height", "calc(var(--spacing) * 3)"]]], [".size-5", null, 4, [["width", "calc(var(--spacing) * 5)"], ["height", "calc(var(--spacing) * 5)"]]], [".size-6", null, 4, [["width", "calc(var(--spacing) * 6)"], ["height", "calc(var(--spacing) * 6)"]]], [".size-7", null, 4, [["width", "calc(var(--spacing) * 7)"], ["height", "calc(var(--spacing) * 7)"]]], [".size-8", null, 4, [["width", "calc(var(--spacing) * 8)"], ["height", "calc(var(--spacing) * 8)"]]], [".size-11", null, 4, [["width", "calc(var(--spacing) * 11)"], ["height", "calc(var(--spacing) * 11)"]]], [".size-14", null, 4, [["width", "calc(var(--spacing) * 14)"], ["height", "calc(var(--spacing) * 14)"]]], [".size-\\[0\\.6rem\\]", null, 4, [["width", ".6rem"], ["height", ".6rem"]]], [".size-\\[1\\.2rem\\]", null, 4, [["width", "1.2rem"], ["height", "1.2rem"]]], [".size-\\[5px\\]", null, 4, [["width", "5px"], ["height", "5px"]]], [".size-\\[14px\\]", null, 4, [["width", "14px"], ["height", "14px"]]], [".size-\\[calc\\(14px\\*var\\(--zoom\\,1\\)\\)\\]", null, 4, [["width", "calc(14px * var(--zoom, 1))"], ["height", "calc(14px * var(--zoom, 1))"]]], [".size-full", null, 4, [["width", "100%"], ["height", "100%"]]], [".h-1", null, 4, [["height", "var(--spacing)"]]], [".h-1\\.5", null, 4, [["height", "calc(var(--spacing) * 1.5)"]]], [".h-2", null, 4, [["height", "calc(var(--spacing) * 2)"]]], [".h-3", null, 4, [["height", "calc(var(--spacing) * 3)"]]], [".h-4", null, 4, [["height", "calc(var(--spacing) * 4)"]]], [".h-5", null, 4, [["height", "calc(var(--spacing) * 5)"]]], [".h-6", null, 4, [["height", "calc(var(--spacing) * 6)"]]], [".h-7", null, 4, [["height", "calc(var(--spacing) * 7)"]]], [".h-8", null, 4, [["height", "calc(var(--spacing) * 8)"]]], [".h-9", null, 4, [["height", "calc(var(--spacing) * 9)"]]], [".h-11", null, 4, [["height", "calc(var(--spacing) * 11)"]]], [".h-12", null, 4, [["height", "calc(var(--spacing) * 12)"]]], [".h-44", null, 4, [["height", "calc(var(--spacing) * 44)"]]], [".h-\\[1\\.1rem\\]", null, 4, [["height", "1.1rem"]]], [".h-\\[1\\.3rem\\]", null, 4, [["height", "1.3rem"]]], [".h-\\[1\\.4rem\\]", null, 4, [["height", "1.4rem"]]], [".h-\\[1\\.25rem\\]", null, 4, [["height", "1.25rem"]]], [".h-\\[2px\\]", null, 4, [["height", "2px"]]], [".h-\\[14px\\]", null, 4, [["height", "14px"]]], [".h-\\[18px\\]", null, 4, [["height", "18px"]]], [".h-\\[43px\\]", null, 4, [["height", "43px"]]], [".h-\\[calc\\(100\\%-max\\(0\\.5rem\\,env\\(safe-area-inset-top\\)\\)\\)\\]", null, 4, [["height", "calc(100% - max(.5rem, env(safe-area-inset-top)))"]]], [".h-full", null, 4, [["height", "100%"]]], [".h-px", null, 4, [["height", "1px"]]], [".max-h-40", null, 4, [["max-height", "calc(var(--spacing) * 40)"]]], [".max-h-56", null, 4, [["max-height", "calc(var(--spacing) * 56)"]]], [".max-h-72", null, 4, [["max-height", "calc(var(--spacing) * 72)"]]], [".max-h-\\[8rem\\]", null, 4, [["max-height", "8rem"]]], [".max-h-\\[13rem\\]", null, 4, [["max-height", "13rem"]]], [".max-h-\\[30\\%\\]", null, 4, [["max-height", "30%"]]], [".max-h-\\[30vh\\]", null, 4, [["max-height", "30vh"]]], [".max-h-\\[35vh\\]", null, 4, [["max-height", "35vh"]]], [".max-h-\\[40\\%\\]", null, 4, [["max-height", "40%"]]], [".max-h-\\[50dvh\\]", null, 4, [["max-height", "50dvh"]]], [".max-h-\\[60\\%\\]", null, 4, [["max-height", "60%"]]], [".max-h-\\[70\\%\\]", null, 4, [["max-height", "70%"]]], [".max-h-\\[85vh\\]", null, 4, [["max-height", "85vh"]]], [".max-h-\\[90\\%\\]", null, 4, [["max-height", "90%"]]], [".max-h-\\[190px\\]", null, 4, [["max-height", "190px"]]], [".max-h-\\[240px\\]", null, 4, [["max-height", "240px"]]], [".max-h-\\[260px\\]", null, 4, [["max-height", "260px"]]], [".max-h-\\[calc\\(85vh-4rem\\)\\]", null, 4, [["max-height", "calc(85vh - 4rem)"]]], [".max-h-\\[calc\\(100dvh_-_4rem\\)\\]", null, 4, [["max-height", "calc(100dvh - 4rem)"]]], [".max-h-\\[min\\(420px\\,calc\\(100dvh_-_16vh_-_2rem\\)\\)\\]", null, 4, [["max-height", "min(420px, 100dvh - 16vh - 2rem)"]]], [".max-h-\\[min\\(480px\\,calc\\(100dvh_-_16vh_-_2rem\\)\\)\\]", null, 4, [["max-height", "min(480px, 100dvh - 16vh - 2rem)"]]], [".max-h-full", null, 4, [["max-height", "100%"]]], [".min-h-0", null, 4, [["min-height", "0"]]], [".min-h-6", null, 4, [["min-height", "calc(var(--spacing) * 6)"]]], [".min-h-7", null, 4, [["min-height", "calc(var(--spacing) * 7)"]]], [".min-h-8", null, 4, [["min-height", "calc(var(--spacing) * 8)"]]], [".min-h-9", null, 4, [["min-height", "calc(var(--spacing) * 9)"]]], [".min-h-10", null, 4, [["min-height", "calc(var(--spacing) * 10)"]]], [".min-h-11", null, 4, [["min-height", "calc(var(--spacing) * 11)"]]], [".min-h-20", null, 4, [["min-height", "calc(var(--spacing) * 20)"]]], [".min-h-40", null, 4, [["min-height", "calc(var(--spacing) * 40)"]]], [".min-h-\\[1\\.5em\\]", null, 4, [["min-height", "1.5em"]]], [".min-h-\\[1\\.8rem\\]", null, 4, [["min-height", "1.8rem"]]], [".min-h-\\[2\\.5rem\\]", null, 4, [["min-height", "2.5rem"]]], [".min-h-\\[3\\.2rem\\]", null, 4, [["min-height", "3.2rem"]]], [".min-h-\\[3\\.25rem\\]", null, 4, [["min-height", "3.25rem"]]], [".min-h-\\[6rem\\]", null, 4, [["min-height", "6rem"]]], [".min-h-\\[8rem\\]", null, 4, [["min-height", "8rem"]]], [".min-h-\\[10rem\\]", null, 4, [["min-height", "10rem"]]], [".min-h-\\[12rem\\]", null, 4, [["min-height", "12rem"]]], [".min-h-\\[13rem\\]", null, 4, [["min-height", "13rem"]]], [".min-h-\\[32px\\]", null, 4, [["min-height", "32px"]]], [".min-h-\\[44px\\]", null, 4, [["min-height", "44px"]]], [".min-h-\\[60px\\]", null, 4, [["min-height", "60px"]]], [".min-h-\\[100dvh\\]", null, 4, [["min-height", "100dvh"]]], [".min-h-\\[calc\\(22px\\*var\\(--zoom\\,1\\)\\)\\]", null, 4, [["min-height", "calc(22px * var(--zoom, 1))"]]], [".min-h-full", null, 4, [["min-height", "100%"]]], [".w-2", null, 4, [["width", "calc(var(--spacing) * 2)"]]], [".w-2\\.5", null, 4, [["width", "calc(var(--spacing) * 2.5)"]]], [".w-3", null, 4, [["width", "calc(var(--spacing) * 3)"]]], [".w-4", null, 4, [["width", "calc(var(--spacing) * 4)"]]], [".w-5", null, 4, [["width", "calc(var(--spacing) * 5)"]]], [".w-7", null, 4, [["width", "calc(var(--spacing) * 7)"]]], [".w-8", null, 4, [["width", "calc(var(--spacing) * 8)"]]], [".w-9", null, 4, [["width", "calc(var(--spacing) * 9)"]]], [".w-10", null, 4, [["width", "calc(var(--spacing) * 10)"]]], [".w-20", null, 4, [["width", "calc(var(--spacing) * 20)"]]], [".w-40", null, 4, [["width", "calc(var(--spacing) * 40)"]]], [".w-44", null, 4, [["width", "calc(var(--spacing) * 44)"]]], [".w-\\[1\\.1rem\\]", null, 4, [["width", "1.1rem"]]], [".w-\\[1\\.4rem\\]", null, 4, [["width", "1.4rem"]]], [".w-\\[1\\.6rem\\]", null, 4, [["width", "1.6rem"]]], [".w-\\[1\\.25rem\\]", null, 4, [["width", "1.25rem"]]], [".w-\\[2\\.4rem\\]", null, 4, [["width", "2.4rem"]]], [".w-\\[2\\.25rem\\]", null, 4, [["width", "2.25rem"]]], [".w-\\[6rem\\]", null, 4, [["width", "6rem"]]], [".w-\\[7rem\\]", null, 4, [["width", "7rem"]]], [".w-\\[11rem\\]", null, 4, [["width", "11rem"]]], [".w-\\[15rem\\]", null, 4, [["width", "15rem"]]], [".w-\\[16rem\\]", null, 4, [["width", "16rem"]]], [".w-\\[18px\\]", null, 4, [["width", "18px"]]], [".w-\\[100cqi\\]", null, 4, [["width", "100cqi"]]], [".w-\\[calc\\(\\(100\\%-0\\.875rem\\)\\/8\\)\\]", null, 4, [["width", "calc(12.5% - .109375rem)"]]], [".w-\\[calc\\(100\\%_-_0\\.6rem\\)\\]", null, 4, [["width", "calc(100% - .6rem)"]]], [".w-\\[calc\\(100\\%_-_1rem\\)\\]", null, 4, [["width", "calc(100% - 1rem)"]]], [".w-\\[min\\(22rem\\,calc\\(100vw-3rem\\)\\)\\]", null, 4, [["width", "min(22rem, 100vw - 3rem)"]]], [".w-\\[min\\(26rem\\,100\\%\\)\\]", null, 4, [["width", "min(26rem, 100%)"]]], [".w-\\[min\\(28rem\\,calc\\(100vw-2\\.5rem\\)\\)\\]", null, 4, [["width", "min(28rem, 100vw - 2.5rem)"]]], [".w-\\[min\\(30rem\\,92vw\\)\\]", null, 4, [["width", "min(30rem, 92vw)"]]], [".w-\\[min\\(32rem\\,100\\%\\)\\]", null, 4, [["width", "min(32rem, 100%)"]]], [".w-\\[min\\(340px\\,calc\\(100vw-16px\\)\\)\\]", null, 4, [["width", "min(340px, 100vw - 16px)"]]], [".w-\\[min\\(360px\\,calc\\(100vw_-_2rem\\)\\)\\]", null, 4, [["width", "min(360px, 100vw - 2rem)"]]], [".w-\\[min\\(420px\\,calc\\(100vw_-_16px\\)\\)\\]", null, 4, [["width", "min(420px, 100vw - 16px)"]]], [".w-\\[min\\(480px\\,calc\\(100vw_-_2rem\\)\\)\\]", null, 4, [["width", "min(480px, 100vw - 2rem)"]]], [".w-\\[min\\(560px\\,calc\\(100vw_-_2rem\\)\\)\\]", null, 4, [["width", "min(560px, 100vw - 2rem)"]]], [".w-\\[var\\(--sidebar-width\\,240px\\)\\]", null, 4, [["width", "var(--sidebar-width, 240px)"]]], [".w-\\[var\\(--tools-width\\)\\]", null, 4, [["width", "var(--tools-width)"]]], [".w-auto", null, 4, [["width", "auto"]]], [".w-full", null, 4, [["width", "100%"]]], [".w-px", null, 4, [["width", "1px"]]], [".max-w-24", null, 4, [["max-width", "calc(var(--spacing) * 24)"]]], [".max-w-32", null, 4, [["max-width", "calc(var(--spacing) * 32)"]]], [".max-w-\\[9rem\\]", null, 4, [["max-width", "9rem"]]], [".max-w-\\[10rem\\]", null, 4, [["max-width", "10rem"]]], [".max-w-\\[14rem\\]", null, 4, [["max-width", "14rem"]]], [".max-w-\\[16rem\\]", null, 4, [["max-width", "16rem"]]], [".max-w-\\[24rem\\]", null, 4, [["max-width", "24rem"]]], [".max-w-\\[25\\%\\]", null, 4, [["max-width", "25%"]]], [".max-w-\\[26rem\\]", null, 4, [["max-width", "26rem"]]], [".max-w-\\[28rem\\]", null, 4, [["max-width", "28rem"]]], [".max-w-\\[35\\%\\]", null, 4, [["max-width", "35%"]]], [".max-w-\\[38\\%\\]", null, 4, [["max-width", "38%"]]], [".max-w-\\[45\\%\\]", null, 4, [["max-width", "45%"]]], [".max-w-\\[46rem\\]", null, 4, [["max-width", "46rem"]]], [".max-w-\\[55\\%\\]", null, 4, [["max-width", "55%"]]], [".max-w-\\[56rem\\]", null, 4, [["max-width", "56rem"]]], [".max-w-\\[85\\%\\]", null, 4, [["max-width", "85%"]]], [".max-w-\\[140px\\]", null, 4, [["max-width", "140px"]]], [".max-w-\\[320px\\]", null, 4, [["max-width", "320px"]]], [".max-w-\\[min\\(22rem\\,calc\\(100\\%-1\\.5rem\\)\\)\\]", null, 4, [["max-width", "min(22rem, 100% - 1.5rem)"]]], [".max-w-\\[min\\(30rem\\,calc\\(100\\%-1\\.6rem\\)\\)\\]", null, 4, [["max-width", "min(30rem, 100% - 1.6rem)"]]], [".max-w-\\[min\\(34rem\\,calc\\(100\\%-1\\.5rem\\)\\)\\]", null, 4, [["max-width", "min(34rem, 100% - 1.5rem)"]]], [".max-w-\\[min\\(320px\\,calc\\(100vw_-_24px\\)\\)\\]", null, 4, [["max-width", "min(320px, 100vw - 24px)"]]], [".max-w-full", null, 4, [["max-width", "100%"]]], [".max-w-none", null, 4, [["max-width", "none"]]], [".min-w-0", null, 4, [["min-width", "0"]]], [".min-w-6", null, 4, [["min-width", "calc(var(--spacing) * 6)"]]], [".min-w-8", null, 4, [["min-width", "calc(var(--spacing) * 8)"]]], [".min-w-12", null, 4, [["min-width", "calc(var(--spacing) * 12)"]]], [".min-w-24", null, 4, [["min-width", "calc(var(--spacing) * 24)"]]], [".min-w-36", null, 4, [["min-width", "calc(var(--spacing) * 36)"]]], [".min-w-56", null, 4, [["min-width", "calc(var(--spacing) * 56)"]]], [".min-w-\\[5\\.5rem\\]", null, 4, [["min-width", "5.5rem"]]], [".min-w-\\[7rem\\]", null, 4, [["min-width", "7rem"]]], [".min-w-\\[12rem\\]", null, 4, [["min-width", "12rem"]]], [".min-w-\\[14px\\]", null, 4, [["min-width", "14px"]]], [".min-w-\\[200px\\]", null, 4, [["min-width", "200px"]]], [".min-w-fit", null, 4, [["min-width", "fit-content"]]], [".min-w-max", null, 4, [["min-width", "max-content"]]], [".flex-1", null, 4, [["flex", "1"]]], [".flex-\\[0_0_5rem\\]", null, 4, [["flex", "0 0 5rem"]]], [".flex-\\[0_0_8px\\]", null, 4, [["flex", "0 0 8px"]]], [".flex-\\[0_1_40\\%\\]", null, 4, [["flex", "0 40%"]]], [".flex-\\[1_1_100\\%\\]", null, 4, [["flex", "100%"]]], [".flex-\\[2\\]", null, 4, [["flex", "2"]]], [".flex-initial", null, 4, [["flex", "0 auto"]]], [".flex-none", null, 4, [["flex", "none"]]], [".shrink", null, 4, [["flex-shrink", "1"]]], [".shrink-0", null, 4, [["flex-shrink", "0"]]], [".shrink-\\[0\\.001\\]", null, 4, [["flex-shrink", ".001"]]], [".shrink-\\[2\\]", null, 4, [["flex-shrink", "2"]]], [".shrink-\\[3\\]", null, 4, [["flex-shrink", "3"]]], [".grow", null, 4, [["flex-grow", "1"]]], [".basis-0", null, 4, [["flex-basis", "0"]]], [".basis-\\[14rem\\]", null, 4, [["flex-basis", "14rem"]]], [".-translate-y-1\\/2", null, 4, [["--tw-translate-y", "calc(calc(1 / 2 * 100%) * -1)"], ["translate", "var(--tw-translate-x) var(--tw-translate-y)"]]], [".\\[transform\\:translateY\\(-50\\%\\)\\]", null, 4, [["transform", "translateY(-50%)"]]], [".transform", null, 4, [["transform", "var(--tw-rotate-x, ) var(--tw-rotate-y, ) var(--tw-rotate-z, ) var(--tw-skew-x, ) var(--tw-skew-y, )"]]], [".animate-drop-zone", null, 4, [["animation", "var(--animate-drop-zone)"]]], [".animate-host-pulse", null, 4, [["animation", "var(--animate-host-pulse)"]]], [".animate-pulse", null, 4, [["animation", "var(--animate-pulse)"]]], [".animate-toast-in", null, 4, [["animation", "var(--animate-toast-in)"]]], [".cursor-col-resize", null, 4, [["cursor", "col-resize"]]], [".cursor-default", null, 4, [["cursor", "default"]]], [".cursor-grab", null, 4, [["cursor", "grab"]]], [".cursor-grabbing", null, 4, [["cursor", "grabbing"]]], [".cursor-pointer", null, 4, [["cursor", "pointer"]]], [".cursor-row-resize", null, 4, [["cursor", "row-resize"]]], [".touch-none", null, 4, [["touch-action", "none"]]], [".resize", null, 4, [["resize", "both"]]], [".resize-none", null, 4, [["resize", "none"]]], [".resize-y", null, 4, [["resize", "vertical"]]], [".\\[scrollbar-width\\:none\\]", null, 4, [["scrollbar-width", "none"]]], [".list-disc", null, 4, [["list-style-type", "disc"]]], [".list-none", null, 4, [["list-style-type", "none"]]], [".appearance-none", null, 4, [["appearance", "none"]]], [".grid-cols-8", null, 4, [["grid-template-columns", "repeat(8, minmax(0, 1fr))"]]], [".grid-cols-\\[1fr_auto_1fr\\]", null, 4, [["grid-template-columns", "1fr auto 1fr"]]], [".grid-cols-\\[2\\.5rem_2\\.5rem_0\\.9rem_minmax\\(0\\,1fr\\)\\]", null, 4, [["grid-template-columns", "2.5rem 2.5rem .9rem minmax(0, 1fr)"]]], [".grid-cols-\\[auto_minmax\\(0\\,1fr\\)\\]", null, 4, [["grid-template-columns", "auto minmax(0, 1fr)"]]], [".grid-cols-\\[minmax\\(4rem\\,10rem\\)_1fr_auto\\]", null, 4, [["grid-template-columns", "minmax(4rem, 10rem) 1fr auto"]]], [".grid-cols-\\[repeat\\(2\\,minmax\\(0\\,1fr\\)\\)\\]", null, 4, [["grid-template-columns", "repeat(2, minmax(0, 1fr))"]]], [".grid-cols-\\[repeat\\(auto-fit\\,minmax\\(8rem\\,1fr\\)\\)\\]", null, 4, [["grid-template-columns", "repeat(auto-fit, minmax(8rem, 1fr))"]]], [".flex-col", null, 4, [["flex-direction", "column"]]], [".flex-row", null, 4, [["flex-direction", "row"]]], [".flex-wrap", null, 4, [["flex-wrap", "wrap"]]], [".place-items-center", null, 4, [["place-items", "center"]]], [".content-center", null, 4, [["align-content", "center"]]], [".items-baseline", null, 4, [["align-items", "baseline"]]], [".items-center", null, 4, [["align-items", "center"]]], [".items-end", null, 4, [["align-items", "flex-end"]]], [".items-start", null, 4, [["align-items", "flex-start"]]], [".items-stretch", null, 4, [["align-items", "stretch"]]], [".justify-between", null, 4, [["justify-content", "space-between"]]], [".justify-center", null, 4, [["justify-content", "center"]]], [".justify-end", null, 4, [["justify-content", "flex-end"]]], [".justify-start", null, 4, [["justify-content", "flex-start"]]], [".justify-items-center", null, 4, [["justify-items", "center"]]], [".justify-items-start", null, 4, [["justify-items", "start"]]], [".gap-0", null, 4, [["gap", "0"]]], [".gap-0\\.5", null, 4, [["gap", "calc(var(--spacing) * .5)"]]], [".gap-1", null, 4, [["gap", "var(--spacing)"]]], [".gap-1\\.5", null, 4, [["gap", "calc(var(--spacing) * 1.5)"]]], [".gap-2", null, 4, [["gap", "calc(var(--spacing) * 2)"]]], [".gap-3", null, 4, [["gap", "calc(var(--spacing) * 3)"]]], [".gap-4", null, 4, [["gap", "calc(var(--spacing) * 4)"]]], [".gap-6", null, 4, [["gap", "calc(var(--spacing) * 6)"]]], [".gap-\\[0\\.1rem\\]", null, 4, [["gap", ".1rem"]]], [".gap-\\[0\\.3rem\\]", null, 4, [["gap", ".3rem"]]], [".gap-\\[0\\.4rem\\]", null, 4, [["gap", ".4rem"]]], [".gap-\\[0\\.05rem\\]", null, 4, [["gap", ".05rem"]]], [".gap-\\[0\\.6rem\\]", null, 4, [["gap", ".6rem"]]], [".gap-\\[0\\.8rem\\]", null, 4, [["gap", ".8rem"]]], [".gap-\\[0\\.16rem\\]", null, 4, [["gap", ".16rem"]]], [".gap-\\[0\\.32rem\\]", null, 4, [["gap", ".32rem"]]], [".gap-\\[0\\.35rem\\]", null, 4, [["gap", ".35rem"]]], [".gap-\\[0\\.45rem\\]", null, 4, [["gap", ".45rem"]]], [".gap-\\[0\\.55rem\\]", null, 4, [["gap", ".55rem"]]], [".gap-\\[0\\.65rem\\]", null, 4, [["gap", ".65rem"]]], [".gap-\\[0\\.85rem\\]", null, 4, [["gap", ".85rem"]]], [".gap-\\[1px\\]", null, 4, [["gap", "1px"]]], [".gap-\\[2px\\]", null, 4, [["gap", "2px"]]], [".gap-\\[3px\\]", null, 4, [["gap", "3px"]]], [".gap-\\[7px\\]", null, 4, [["gap", "7px"]]], [".gap-\\[13px\\]", null, 4, [["gap", "13px"]]], [":where(.space-y-0\\.5 > :not(:last-child))", null, 4, [["--tw-space-y-reverse", "0"], ["margin-block-start", "calc(calc(var(--spacing) * .5) * var(--tw-space-y-reverse))"], ["margin-block-end", "calc(calc(var(--spacing) * .5) * calc(1 - var(--tw-space-y-reverse)))"]]], [".gap-x-3", null, 4, [["column-gap", "calc(var(--spacing) * 3)"]]], [".gap-x-4", null, 4, [["column-gap", "calc(var(--spacing) * 4)"]]], [".gap-x-\\[0\\.7rem\\]", null, 4, [["column-gap", ".7rem"]]], [".gap-x-\\[0\\.9rem\\]", null, 4, [["column-gap", ".9rem"]]], [".gap-y-1", null, 4, [["row-gap", "var(--spacing)"]]], [".gap-y-\\[0\\.3rem\\]", null, 4, [["row-gap", ".3rem"]]], [".self-center", null, 4, [["align-self", "center"]]], [".self-end", null, 4, [["align-self", "flex-end"]]], [".self-start", null, 4, [["align-self", "flex-start"]]], [".self-stretch", null, 4, [["align-self", "stretch"]]], [".justify-self-start", null, 4, [["justify-self", "flex-start"]]], [".truncate", null, 4, [["text-overflow", "ellipsis"], ["white-space", "nowrap"], ["overflow", "hidden"]]], [".overflow-auto", null, 4, [["overflow", "auto"]]], [".overflow-hidden", null, 4, [["overflow", "hidden"]]], [".overflow-visible", null, 4, [["overflow", "visible"]]], [".overflow-x-auto", null, 4, [["overflow-x", "auto"]]], [".overflow-y-auto", null, 4, [["overflow-y", "auto"]]], [".overscroll-contain", null, 4, [["overscroll-behavior", "contain"]]], [".rounded, .rounded-\\[0\\.25rem\\]", null, 4, [["border-radius", ".25rem"]]], [".rounded-\\[1\\.5rem\\]", null, 4, [["border-radius", "1.5rem"]]], [".rounded-\\[2px\\]", null, 4, [["border-radius", "2px"]]], [".rounded-\\[3px\\]", null, 4, [["border-radius", "3px"]]], [".rounded-\\[12px\\]", null, 4, [["border-radius", "12px"]]], [".rounded-\\[50\\%\\]", null, 4, [["border-radius", "50%"]]], [".rounded-\\[999px\\]", null, 4, [["border-radius", "999px"]]], [".rounded-\\[calc\\(var\\(--radius\\)\\*2\\)\\]", null, 4, [["border-radius", "calc(var(--radius) * 2)"]]], [".rounded-\\[var\\(--card-radius\\,8px\\)\\]", null, 4, [["border-radius", "var(--card-radius, 8px)"]]], [".rounded-\\[var\\(--card-radius\\,12px\\)\\]", null, 4, [["border-radius", "var(--card-radius, 12px)"]]], [".rounded-full", null, 4, [["border-radius", "3.40282e38px"]]], [".rounded-none", null, 4, [["border-radius", "0"]]], [".rounded-soft", null, 4, [["border-radius", "var(--radius-pane)"]]], [".rounded-ui", null, 4, [["border-radius", "var(--radius)"]]], [".rounded-t-\\[12px\\]", null, 4, [["border-top-left-radius", "12px"], ["border-top-right-radius", "12px"]]], [".rounded-t-none", null, 4, [["border-top-left-radius", "0"], ["border-top-right-radius", "0"]]], [".rounded-bl-\\[6px\\]", null, 4, [["border-bottom-left-radius", "6px"]]], [".border", null, 4, [["border-style", "var(--tw-border-style)"], ["border-width", "1px"]]], [".border-0", null, 4, [["border-style", "var(--tw-border-style)"], ["border-width", "0"]]], [".border-\\[1\\.5px\\]", null, 4, [["border-style", "var(--tw-border-style)"], ["border-width", "1.5px"]]], [".border-b", null, 4, [["border-bottom-style", "var(--tw-border-style)"], ["border-bottom-width", "1px"]]], [".border-l", null, 4, [["border-left-style", "var(--tw-border-style)"], ["border-left-width", "1px"]]], [".border-l-\\[3px\\]", null, 4, [["border-left-style", "var(--tw-border-style)"], ["border-left-width", "3px"]]], [".border-solid", null, 4, [["--tw-border-style", "solid"], ["border-style", "solid"]]], [".border-accent", null, 4, [["border-color", "var(--accent)"]]], [".border-overlay-0", null, 4, [["border-color", "var(--overlay-0)"]]], [".border-overlay-1", null, 4, [["border-color", "var(--overlay-1)"]]], [".border-red", null, 4, [["border-color", "var(--red)"]]], [".border-subtext-0", null, 4, [["border-color", "var(--subtext-0)"]]], [".border-surface-1", null, 4, [["border-color", "var(--surface-1)"]]], [".border-teal", null, 4, [["border-color", "var(--teal)"]]], [".border-yellow", null, 4, [["border-color", "var(--yellow)"]]], [".border-l-accent", null, 4, [["border-left-color", "var(--accent)"]]], [".border-l-green", null, 4, [["border-left-color", "var(--green)"]]], [".border-l-red", null, 4, [["border-left-color", "var(--red)"]]], [".border-l-yellow", null, 4, [["border-left-color", "var(--yellow)"]]], [".bg-\\[\\#161616\\]", null, 4, [["background-color", "#161616"]]], [".bg-\\[\\#fff\\]", null, 4, [["background-color", "#fff"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_8\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "var(--accent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_8\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--accent) 8%,var(--panel-bg))"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_12\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--accent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_12\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--accent) 12%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--accent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--accent) 15%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--blue\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--blue)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--blue\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--blue) 15%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--green\\)_9\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--green)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--green\\)_9\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--green) 9%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--red\\)_7\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--red)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--red\\)_7\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--red) 7%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--red\\)_9\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--red)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--red\\)_9\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--red) 9%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--surface-1\\)_42\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--surface-1\\)_42\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--surface-1) 42%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--surface-1\\)_70\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--surface-1\\)_70\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--surface-1) 70%,var(--panel-bg))"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--text\\)_10\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "var(--text)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--text\\)_10\\%\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--text) 10%,var(--panel-bg))"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--yellow\\)_8\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--yellow)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--yellow\\)_8\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--yellow) 8%,transparent)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--yellow\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "var(--yellow)"]]], [".bg-\\[color-mix\\(in_srgb\\,var\\(--yellow\\)_15\\%\\,transparent\\)\\]", null, 4, [["background-color", "color-mix(in srgb,var(--yellow) 15%,transparent)"]]], [".bg-\\[rgba\\(0\\,0\\,0\\,0\\.5\\)\\]", null, 4, [["background-color", "#00000080"]]], [".bg-\\[rgba\\(0\\,0\\,0\\,0\\.7\\)\\]", null, 4, [["background-color", "#000000b3"]]], [".bg-\\[rgba\\(0\\,0\\,0\\,0\\.55\\)\\]", null, 4, [["background-color", "#0000008c"]]], [".bg-\\[rgba\\(0\\,0\\,0\\,0\\.62\\)\\]", null, 4, [["background-color", "#0000009e"]]], [".bg-\\[var\\(--accent\\)\\]", null, 4, [["background-color", "var(--accent)"]]], [".bg-\\[var\\(--backdrop\\)\\]", null, 4, [["background-color", "var(--backdrop)"]]], [".bg-\\[var\\(--bg\\)\\]", null, 4, [["background-color", "var(--bg)"]]], [".bg-\\[var\\(--card-bg\\)\\]", null, 4, [["background-color", "var(--card-bg)"]]], [".bg-\\[var\\(--picker-bg\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "var(--picker-bg, var(--panel-bg))"]]], [".bg-\\[var\\(--surface-1\\)\\]", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-\\[var\\(--workspace-tools-bg\\,var\\(--panel-bg\\)\\)\\]", null, 4, [["background-color", "var(--workspace-tools-bg, var(--panel-bg))"]]], [".bg-accent, .bg-accent\\/10", null, 4, [["background-color", "var(--accent)"]]], [".bg-accent\\/10", null, 4, [["background-color", "color-mix(in oklab, var(--accent) 10%, transparent)"]]], [".bg-accent\\/35", null, 4, [["background-color", "var(--accent)"]]], [".bg-accent\\/35", null, 4, [["background-color", "color-mix(in oklab, var(--accent) 35%, transparent)"]]], [".bg-fg", null, 4, [["background-color", "var(--text)"]]], [".bg-green, .bg-green\\/15", null, 4, [["background-color", "var(--green)"]]], [".bg-green\\/15", null, 4, [["background-color", "color-mix(in oklab, var(--green) 15%, transparent)"]]], [".bg-overlay-0", null, 4, [["background-color", "var(--overlay-0)"]]], [".bg-overlay-1", null, 4, [["background-color", "var(--overlay-1)"]]], [".bg-panel-bg", null, 4, [["background-color", "var(--panel-bg)"]]], [".bg-red, .bg-red\\/15", null, 4, [["background-color", "var(--red)"]]], [".bg-red\\/15", null, 4, [["background-color", "color-mix(in oklab, var(--red) 15%, transparent)"]]], [".bg-subtext-0", null, 4, [["background-color", "var(--subtext-0)"]]], [".bg-surface-0", null, 4, [["background-color", "var(--surface-0)"]]], [".bg-surface-1, .bg-surface-1\\/30", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-surface-1\\/30", null, 4, [["background-color", "color-mix(in oklab, var(--surface-1) 30%, transparent)"]]], [".bg-surface-1\\/60", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-surface-1\\/60", null, 4, [["background-color", "color-mix(in oklab, var(--surface-1) 60%, transparent)"]]], [".bg-surface-1\\/70", null, 4, [["background-color", "var(--surface-1)"]]], [".bg-surface-1\\/70", null, 4, [["background-color", "color-mix(in oklab, var(--surface-1) 70%, transparent)"]]], [".bg-transparent", null, 4, [["background-color", "#0000"]]], [".bg-yellow", null, 4, [["background-color", "var(--yellow)"]]], [".object-contain", null, 4, [["object-fit", "contain"]]], [".object-cover", null, 4, [["object-fit", "cover"]]], [".p-0", null, 4, [["padding", "0"]]], [".p-0\\.5", null, 4, [["padding", "calc(var(--spacing) * .5)"]]], [".p-1", null, 4, [["padding", "var(--spacing)"]]], [".p-2", null, 4, [["padding", "calc(var(--spacing) * 2)"]]], [".p-3", null, 4, [["padding", "calc(var(--spacing) * 3)"]]], [".p-4", null, 4, [["padding", "calc(var(--spacing) * 4)"]]], [".p-5", null, 4, [["padding", "calc(var(--spacing) * 5)"]]], [".p-6", null, 4, [["padding", "calc(var(--spacing) * 6)"]]], [".p-\\[0\\.2rem\\]", null, 4, [["padding", ".2rem"]]], [".p-\\[0\\.4rem\\]", null, 4, [["padding", ".4rem"]]], [".p-\\[0\\.5rem\\]", null, 4, [["padding", ".5rem"]]], [".p-\\[0\\.9rem\\]", null, 4, [["padding", ".9rem"]]], [".p-\\[0\\.45rem\\]", null, 4, [["padding", ".45rem"]]], [".p-\\[0\\.55rem\\]", null, 4, [["padding", ".55rem"]]], [".p-\\[0\\.65rem\\]", null, 4, [["padding", ".65rem"]]], [".p-\\[2px\\]", null, 4, [["padding", "2px"]]], [".px-0", null, 4, [["padding-inline", "0"]]], [".px-1", null, 4, [["padding-inline", "var(--spacing)"]]], [".px-1\\.5", null, 4, [["padding-inline", "calc(var(--spacing) * 1.5)"]]], [".px-2", null, 4, [["padding-inline", "calc(var(--spacing) * 2)"]]], [".px-3", null, 4, [["padding-inline", "calc(var(--spacing) * 3)"]]], [".px-3\\.5", null, 4, [["padding-inline", "calc(var(--spacing) * 3.5)"]]], [".px-4", null, 4, [["padding-inline", "calc(var(--spacing) * 4)"]]], [".px-8", null, 4, [["padding-inline", "calc(var(--spacing) * 8)"]]], [".px-\\[0\\.2rem\\]", null, 4, [["padding-inline", ".2rem"]]], [".px-\\[0\\.3rem\\]", null, 4, [["padding-inline", ".3rem"]]], [".px-\\[0\\.4rem\\]", null, 4, [["padding-inline", ".4rem"]]], [".px-\\[0\\.5rem\\]", null, 4, [["padding-inline", ".5rem"]]], [".px-\\[0\\.6rem\\]", null, 4, [["padding-inline", ".6rem"]]], [".px-\\[0\\.7rem\\]", null, 4, [["padding-inline", ".7rem"]]], [".px-\\[0\\.8rem\\]", null, 4, [["padding-inline", ".8rem"]]], [".px-\\[0\\.9rem\\]", null, 4, [["padding-inline", ".9rem"]]], [".px-\\[0\\.26rem\\]", null, 4, [["padding-inline", ".26rem"]]], [".px-\\[0\\.28rem\\]", null, 4, [["padding-inline", ".28rem"]]], [".px-\\[0\\.35rem\\]", null, 4, [["padding-inline", ".35rem"]]], [".px-\\[0\\.42rem\\]", null, 4, [["padding-inline", ".42rem"]]], [".px-\\[0\\.45rem\\]", null, 4, [["padding-inline", ".45rem"]]], [".px-\\[0\\.48rem\\]", null, 4, [["padding-inline", ".48rem"]]], [".px-\\[0\\.55rem\\]", null, 4, [["padding-inline", ".55rem"]]], [".px-\\[0\\.65rem\\]", null, 4, [["padding-inline", ".65rem"]]], [".px-\\[0\\.75rem\\]", null, 4, [["padding-inline", ".75rem"]]], [".px-\\[0\\.85rem\\]", null, 4, [["padding-inline", ".85rem"]]], [".px-\\[1\\.4rem\\]", null, 4, [["padding-inline", "1.4rem"]]], [".px-\\[3px\\]", null, 4, [["padding-inline", "3px"]]], [".px-\\[10px\\]", null, 4, [["padding-inline", "10px"]]], [".py-0", null, 4, [["padding-block", "0"]]], [".py-0\\.5", null, 4, [["padding-block", "calc(var(--spacing) * .5)"]]], [".py-1", null, 4, [["padding-block", "var(--spacing)"]]], [".py-1\\.5", null, 4, [["padding-block", "calc(var(--spacing) * 1.5)"]]], [".py-2", null, 4, [["padding-block", "calc(var(--spacing) * 2)"]]], [".py-3", null, 4, [["padding-block", "calc(var(--spacing) * 3)"]]], [".py-4", null, 4, [["padding-block", "calc(var(--spacing) * 4)"]]], [".py-8", null, 4, [["padding-block", "calc(var(--spacing) * 8)"]]], [".py-\\[0\\.1rem\\]", null, 4, [["padding-block", ".1rem"]]], [".py-\\[0\\.2rem\\]", null, 4, [["padding-block", ".2rem"]]], [".py-\\[0\\.3rem\\]", null, 4, [["padding-block", ".3rem"]]], [".py-\\[0\\.4rem\\]", null, 4, [["padding-block", ".4rem"]]], [".py-\\[0\\.05rem\\]", null, 4, [["padding-block", ".05rem"]]], [".py-\\[0\\.6rem\\]", null, 4, [["padding-block", ".6rem"]]], [".py-\\[0\\.8rem\\]", null, 4, [["padding-block", ".8rem"]]], [".py-\\[0\\.12rem\\]", null, 4, [["padding-block", ".12rem"]]], [".py-\\[0\\.14rem\\]", null, 4, [["padding-block", ".14rem"]]], [".py-\\[0\\.15rem\\]", null, 4, [["padding-block", ".15rem"]]], [".py-\\[0\\.18rem\\]", null, 4, [["padding-block", ".18rem"]]], [".py-\\[0\\.25rem\\]", null, 4, [["padding-block", ".25rem"]]], [".py-\\[0\\.28rem\\]", null, 4, [["padding-block", ".28rem"]]], [".py-\\[0\\.32rem\\]", null, 4, [["padding-block", ".32rem"]]], [".py-\\[0\\.35rem\\]", null, 4, [["padding-block", ".35rem"]]], [".py-\\[0\\.42rem\\]", null, 4, [["padding-block", ".42rem"]]], [".py-\\[0\\.45rem\\]", null, 4, [["padding-block", ".45rem"]]], [".py-\\[0\\.55rem\\]", null, 4, [["padding-block", ".55rem"]]], [".py-\\[0\\.65rem\\]", null, 4, [["padding-block", ".65rem"]]], [".py-\\[2px\\]", null, 4, [["padding-block", "2px"]]], [".py-\\[3px\\]", null, 4, [["padding-block", "3px"]]], [".py-\\[6px\\]", null, 4, [["padding-block", "6px"]]], [".py-px", null, 4, [["padding-block", "1px"]]], [".pt-1", null, 4, [["padding-top", "var(--spacing)"]]], [".pt-2", null, 4, [["padding-top", "calc(var(--spacing) * 2)"]]], [".pt-2\\.5", null, 4, [["padding-top", "calc(var(--spacing) * 2.5)"]]], [".pt-3", null, 4, [["padding-top", "calc(var(--spacing) * 3)"]]], [".pt-4", null, 4, [["padding-top", "calc(var(--spacing) * 4)"]]], [".pt-5", null, 4, [["padding-top", "calc(var(--spacing) * 5)"]]], [".pt-\\[0\\.2rem\\]", null, 4, [["padding-top", ".2rem"]]], [".pt-\\[0\\.4rem\\]", null, 4, [["padding-top", ".4rem"]]], [".pt-\\[0\\.6rem\\]", null, 4, [["padding-top", ".6rem"]]], [".pt-\\[0\\.85rem\\]", null, 4, [["padding-top", ".85rem"]]], [".pt-\\[2px\\]", null, 4, [["padding-top", "2px"]]], [".pt-\\[12vh\\]", null, 4, [["padding-top", "12vh"]]], [".pt-\\[max\\(0\\.5rem\\,env\\(safe-area-inset-top\\)\\)\\]", null, 4, [["padding-top", "max(.5rem, env(safe-area-inset-top))"]]], [".pr-0\\.5", null, 4, [["padding-right", "calc(var(--spacing) * .5)"]]], [".pr-1", null, 4, [["padding-right", "var(--spacing)"]]], [".pr-1\\.5", null, 4, [["padding-right", "calc(var(--spacing) * 1.5)"]]], [".pr-2", null, 4, [["padding-right", "calc(var(--spacing) * 2)"]]], [".pr-3", null, 4, [["padding-right", "calc(var(--spacing) * 3)"]]], [".pr-12", null, 4, [["padding-right", "calc(var(--spacing) * 12)"]]], [".pr-\\[0\\.3rem\\]", null, 4, [["padding-right", ".3rem"]]], [".pr-\\[0\\.6rem\\]", null, 4, [["padding-right", ".6rem"]]], [".pr-\\[0\\.35rem\\]", null, 4, [["padding-right", ".35rem"]]], [".pr-\\[0\\.45rem\\]", null, 4, [["padding-right", ".45rem"]]], [".pr-\\[0\\.55rem\\]", null, 4, [["padding-right", ".55rem"]]], [".pr-\\[1\\.6rem\\]", null, 4, [["padding-right", "1.6rem"]]], [".pr-\\[3px\\]", null, 4, [["padding-right", "3px"]]], [".pr-\\[env\\(safe-area-inset-right\\)\\]", null, 4, [["padding-right", "env(safe-area-inset-right)"]]], [".pr-\\[max\\(0\\.5rem\\,env\\(safe-area-inset-right\\)\\)\\]", null, 4, [["padding-right", "max(.5rem, env(safe-area-inset-right))"]]], [".pb-1", null, 4, [["padding-bottom", "var(--spacing)"]]], [".pb-2", null, 4, [["padding-bottom", "calc(var(--spacing) * 2)"]]], [".pb-3", null, 4, [["padding-bottom", "calc(var(--spacing) * 3)"]]], [".pb-4", null, 4, [["padding-bottom", "calc(var(--spacing) * 4)"]]], [".pb-8", null, 4, [["padding-bottom", "calc(var(--spacing) * 8)"]]], [".pb-\\[0\\.3rem\\]", null, 4, [["padding-bottom", ".3rem"]]], [".pb-\\[0\\.4rem\\]", null, 4, [["padding-bottom", ".4rem"]]], [".pb-\\[0\\.25rem\\]", null, 4, [["padding-bottom", ".25rem"]]], [".pb-\\[0\\.55rem\\]", null, 4, [["padding-bottom", ".55rem"]]], [".pb-\\[1\\.4rem\\]", null, 4, [["padding-bottom", "1.4rem"]]], [".pb-\\[calc\\(1\\.5rem\\+env\\(safe-area-inset-bottom\\)\\)\\]", null, 4, [["padding-bottom", "calc(1.5rem + env(safe-area-inset-bottom))"]]], [".pb-\\[calc\\(1rem\\+env\\(safe-area-inset-bottom\\)\\)\\]", null, 4, [["padding-bottom", "calc(1rem + env(safe-area-inset-bottom))"]]], [".pb-\\[env\\(safe-area-inset-bottom\\)\\]", null, 4, [["padding-bottom", "env(safe-area-inset-bottom)"]]], [".pb-\\[max\\(0\\.5rem\\,env\\(safe-area-inset-bottom\\)\\)\\]", null, 4, [["padding-bottom", "max(.5rem, env(safe-area-inset-bottom))"]]], [".pl-1", null, 4, [["padding-left", "var(--spacing)"]]], [".pl-1\\.5", null, 4, [["padding-left", "calc(var(--spacing) * 1.5)"]]], [".pl-2", null, 4, [["padding-left", "calc(var(--spacing) * 2)"]]], [".pl-3", null, 4, [["padding-left", "calc(var(--spacing) * 3)"]]], [".pl-4", null, 4, [["padding-left", "calc(var(--spacing) * 4)"]]], [".pl-5", null, 4, [["padding-left", "calc(var(--spacing) * 5)"]]], [".pl-6", null, 4, [["padding-left", "calc(var(--spacing) * 6)"]]], [".pl-\\[0\\.4rem\\]", null, 4, [["padding-left", ".4rem"]]], [".pl-\\[0\\.45rem\\]", null, 4, [["padding-left", ".45rem"]]], [".pl-\\[0\\.75rem\\]", null, 4, [["padding-left", ".75rem"]]], [".pl-\\[0\\.85rem\\]", null, 4, [["padding-left", ".85rem"]]], [".pl-\\[1\\.2rem\\]", null, 4, [["padding-left", "1.2rem"]]], [".pl-\\[1\\.55rem\\]", null, 4, [["padding-left", "1.55rem"]]], [".pl-\\[1\\.075rem\\]", null, 4, [["padding-left", "1.075rem"]]], [".pl-\\[1\\.525rem\\]", null, 4, [["padding-left", "1.525rem"]]], [".pl-\\[1\\.875rem\\]", null, 4, [["padding-left", "1.875rem"]]], [".pl-\\[85px\\]", null, 4, [["padding-left", "85px"]]], [".pl-\\[max\\(0\\.5rem\\,env\\(safe-area-inset-left\\)\\)\\]", null, 4, [["padding-left", "max(.5rem, env(safe-area-inset-left))"]]], [".pl-\\[max\\(0\\.25rem\\,env\\(safe-area-inset-left\\)\\)\\]", null, 4, [["padding-left", "max(.25rem, env(safe-area-inset-left))"]]], [".text-center", null, 4, [["text-align", "center"]]], [".text-left", null, 4, [["text-align", "left"]]], [".text-right", null, 4, [["text-align", "right"]]], [".\\[font-family\\:inherit\\]", null, 4, [["font-family", "inherit"]]], [".\\[font-family\\:ui-monospace\\,SFMono-Regular\\,Menlo\\,monospace\\]", null, 4, [["font-family", "ui-monospace, SFMono-Regular, Menlo, monospace"]]], [".\\[font-family\\:var\\(--font-mono\\)\\]", null, 4, [["font-family", "var(--font-mono)"]]], [".text-sm", null, 4, [["font-size", "var(--text-sm)"], ["line-height", "var(--tw-leading, var(--text-sm--line-height))"]]], [".text-xs", null, 4, [["font-size", "var(--text-xs)"], ["line-height", "var(--tw-leading, var(--text-xs--line-height))"]]], [".\\[font-size\\:inherit\\]", null, 4, [["font-size", "inherit"]]], [".text-\\[0\\.6rem\\]", null, 4, [["font-size", ".6rem"]]], [".text-\\[0\\.7rem\\]", null, 4, [["font-size", ".7rem"]]], [".text-\\[0\\.8em\\]", null, 4, [["font-size", ".8em"]]], [".text-\\[0\\.8rem\\]", null, 4, [["font-size", ".8rem"]]], [".text-\\[0\\.9em\\]", null, 4, [["font-size", ".9em"]]], [".text-\\[0\\.9rem\\]", null, 4, [["font-size", ".9rem"]]], [".text-\\[0\\.54rem\\]", null, 4, [["font-size", ".54rem"]]], [".text-\\[0\\.58rem\\]", null, 4, [["font-size", ".58rem"]]], [".text-\\[0\\.62rem\\]", null, 4, [["font-size", ".62rem"]]], [".text-\\[0\\.63rem\\]", null, 4, [["font-size", ".63rem"]]], [".text-\\[0\\.64rem\\]", null, 4, [["font-size", ".64rem"]]], [".text-\\[0\\.65rem\\]", null, 4, [["font-size", ".65rem"]]], [".text-\\[0\\.66rem\\]", null, 4, [["font-size", ".66rem"]]], [".text-\\[0\\.66rem\\]\\!", null, 4, [["font-size", ".66rem", 1]]], [".text-\\[0\\.68rem\\]", null, 4, [["font-size", ".68rem"]]], [".text-\\[0\\.72rem\\]", null, 4, [["font-size", ".72rem"]]], [".text-\\[0\\.74rem\\]", null, 4, [["font-size", ".74rem"]]], [".text-\\[0\\.75rem\\]", null, 4, [["font-size", ".75rem"]]], [".text-\\[0\\.76rem\\]", null, 4, [["font-size", ".76rem"]]], [".text-\\[0\\.77rem\\]", null, 4, [["font-size", ".77rem"]]], [".text-\\[0\\.78rem\\]", null, 4, [["font-size", ".78rem"]]], [".text-\\[0\\.82rem\\]", null, 4, [["font-size", ".82rem"]]], [".text-\\[0\\.83rem\\]", null, 4, [["font-size", ".83rem"]]], [".text-\\[0\\.85rem\\]", null, 4, [["font-size", ".85rem"]]], [".text-\\[0\\.88rem\\]", null, 4, [["font-size", ".88rem"]]], [".text-\\[0\\.95rem\\]", null, 4, [["font-size", ".95rem"]]], [".text-\\[0\\.875rem\\]", null, 4, [["font-size", ".875rem"]]], [".text-\\[1\\.1rem\\]", null, 4, [["font-size", "1.1rem"]]], [".text-\\[1\\.4em\\]", null, 4, [["font-size", "1.4em"]]], [".text-\\[1\\.6rem\\]", null, 4, [["font-size", "1.6rem"]]], [".text-\\[1\\.15rem\\]", null, 4, [["font-size", "1.15rem"]]], [".text-\\[1rem\\]", null, 4, [["font-size", "1rem"]]], [".text-\\[2\\.4rem\\]", null, 4, [["font-size", "2.4rem"]]], [".text-\\[9px\\]", null, 4, [["font-size", "9px"]]], [".text-\\[10px\\]", null, 4, [["font-size", "10px"]]], [".text-\\[11px\\]", null, 4, [["font-size", "11px"]]], [".text-\\[12\\.5px\\]", null, 4, [["font-size", "12.5px"]]], [".text-\\[12px\\]", null, 4, [["font-size", "12px"]]], [".text-\\[13px\\]", null, 4, [["font-size", "13px"]]], [".text-\\[14px\\]", null, 4, [["font-size", "14px"]]], [".text-\\[calc\\(0\\.95rem\\*var\\(--chat-font-scale\\,1\\)\\)\\]", null, 4, [["font-size", "calc(.95rem * var(--chat-font-scale, 1))"]]], [".text-\\[length\\:calc\\(11px\\*var\\(--zoom\\,1\\)\\)\\]", null, 4, [["font-size", "calc(11px * var(--zoom, 1))"]]], [".text-\\[length\\:calc\\(13px\\*var\\(--zoom\\,1\\)\\)\\]", null, 4, [["font-size", "calc(13px * var(--zoom, 1))"]]], [".leading-4", null, 4, [["--tw-leading", "calc(var(--spacing) * 4)"], ["line-height", "calc(var(--spacing) * 4)"]]], [".leading-\\[1\\.1\\]", null, 4, [["--tw-leading", "1.1"], ["line-height", "1.1"]]], [".leading-\\[1\\.2\\]", null, 4, [["--tw-leading", "1.2"], ["line-height", "1.2"]]], [".leading-\\[1\\.3\\]", null, 4, [["--tw-leading", "1.3"], ["line-height", "1.3"]]], [".leading-\\[1\\.4\\]", null, 4, [["--tw-leading", "1.4"], ["line-height", "1.4"]]], [".leading-\\[1\\.5\\]", null, 4, [["--tw-leading", "1.5"], ["line-height", "1.5"]]], [".leading-\\[1\\.6\\]", null, 4, [["--tw-leading", "1.6"], ["line-height", "1.6"]]], [".leading-\\[1\\.45\\]", null, 4, [["--tw-leading", "1.45"], ["line-height", "1.45"]]], [".leading-\\[18px\\]", null, 4, [["--tw-leading", "18px"], ["line-height", "18px"]]], [".leading-none", null, 4, [["--tw-leading", "1"], ["line-height", "1"]]], [".leading-relaxed", null, 4, [["--tw-leading", "var(--leading-relaxed)"], ["line-height", "var(--leading-relaxed)"]]], [".leading-tight", null, 4, [["--tw-leading", "var(--leading-tight)"], ["line-height", "var(--leading-tight)"]]], [".\\[line-height\\:inherit\\]", null, 4, [["line-height", "inherit"]]], [".font-bold", null, 4, [["--tw-font-weight", "var(--font-weight-bold)"], ["font-weight", "var(--font-weight-bold)"]]], [".font-medium", null, 4, [["--tw-font-weight", "var(--font-weight-medium)"], ["font-weight", "var(--font-weight-medium)"]]], [".font-normal", null, 4, [["--tw-font-weight", "var(--font-weight-normal)"], ["font-weight", "var(--font-weight-normal)"]]], [".font-semibold", null, 4, [["--tw-font-weight", "var(--font-weight-semibold)"], ["font-weight", "var(--font-weight-semibold)"]]], [".\\[font-weight\\:inherit\\]", null, 4, [["font-weight", "inherit"]]], [".tracking-\\[-0\\.02em\\]", null, 4, [["--tw-tracking", "-.02em"], ["letter-spacing", "-.02em"]]], [".tracking-\\[0\\.03em\\]", null, 4, [["--tw-tracking", ".03em"], ["letter-spacing", ".03em"]]], [".tracking-\\[0\\.04em\\]", null, 4, [["--tw-tracking", ".04em"], ["letter-spacing", ".04em"]]], [".tracking-\\[0\\.06em\\]", null, 4, [["--tw-tracking", ".06em"], ["letter-spacing", ".06em"]]], [".tracking-\\[0\\.08em\\]", null, 4, [["--tw-tracking", ".08em"], ["letter-spacing", ".08em"]]], [".tracking-\\[0\\.09em\\]", null, 4, [["--tw-tracking", ".09em"], ["letter-spacing", ".09em"]]], [".tracking-\\[0\\.22em\\]", null, 4, [["--tw-tracking", ".22em"], ["letter-spacing", ".22em"]]], [".tracking-normal", null, 4, [["--tw-tracking", "var(--tracking-normal)"], ["letter-spacing", "var(--tracking-normal)"]]], [".tracking-wide", null, 4, [["--tw-tracking", "var(--tracking-wide)"], ["letter-spacing", "var(--tracking-wide)"]]], [".\\[overflow-wrap\\:anywhere\\]", null, 4, [["overflow-wrap", "anywhere"]]], [".break-words", null, 4, [["overflow-wrap", "break-word"]]], [".\\[word-break\\:break-word\\]", null, 4, [["word-break", "break-word"]]], [".text-ellipsis", null, 4, [["text-overflow", "ellipsis"]]], [".whitespace-normal", null, 4, [["white-space", "normal"]]], [".whitespace-nowrap", null, 4, [["white-space", "nowrap"]]], [".whitespace-pre", null, 4, [["white-space", "pre"]]], [".whitespace-pre-wrap", null, 4, [["white-space", "pre-wrap"]]], [".\\[tab-size\\:2\\]", null, 4, [["tab-size", "2"]]], [".text-\\[color\\:var\\(--git-muted\\)\\]", null, 4, [["color", "var(--git-muted)"]]], [".text-\\[var\\(--subtext-0\\)\\]", null, 4, [["color", "var(--subtext-0)"]]], [".text-\\[var\\(--text\\)\\]", null, 4, [["color", "var(--text)"]]], [".text-accent", null, 4, [["color", "var(--accent)"]]], [".text-blue", null, 4, [["color", "var(--blue)"]]], [".text-current", null, 4, [["color", "currentColor"]]], [".text-fg", null, 4, [["color", "var(--text)"]]], [".text-green", null, 4, [["color", "var(--green)"]]], [".text-inherit", null, 4, [["color", "inherit"]]], [".text-mauve", null, 4, [["color", "var(--mauve)"]]], [".text-overlay-0", null, 4, [["color", "var(--overlay-0)"]]], [".text-overlay-1", null, 4, [["color", "var(--overlay-1)"]]], [".text-panel-bg", null, 4, [["color", "var(--panel-bg)"]]], [".text-peach", null, 4, [["color", "var(--peach)"]]], [".text-red", null, 4, [["color", "var(--red)"]]], [".text-red\\!", null, 4, [["color", "var(--red)", 1]]], [".text-subtext-0", null, 4, [["color", "var(--subtext-0)"]]], [".text-yellow", null, 4, [["color", "var(--yellow)"]]], [".capitalize", null, 4, [["text-transform", "capitalize"]]], [".normal-case", null, 4, [["text-transform", "none"]]], [".uppercase", null, 4, [["text-transform", "uppercase"]]], [".italic", null, 4, [["font-style", "italic"]]], [".not-italic", null, 4, [["font-style", "normal"]]], [".tabular-nums", null, 4, [["--tw-numeric-spacing", "tabular-nums"], ["font-variant-numeric", "var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, )"]]], [".line-through", null, 4, [["text-decoration-line", "line-through"]]], [".no-underline", null, 4, [["text-decoration-line", "none"]]], [".underline", null, 4, [["text-decoration-line", "underline"]]], [".opacity-0", null, 4, [["opacity", "0"]]], [".opacity-40", null, 4, [["opacity", ".4"]]], [".opacity-60", null, 4, [["opacity", ".6"]]], [".opacity-70", null, 4, [["opacity", ".7"]]], [".opacity-75", null, 4, [["opacity", ".75"]]], [".opacity-80", null, 4, [["opacity", ".8"]]], [".opacity-100", null, 4, [["opacity", "1"]]], [".opacity-\\[0\\.72\\]", null, 4, [["opacity", ".72"]]], [".shadow", null, 4, [["--tw-shadow", "0 1px 3px 0 var(--tw-shadow-color, #0000001a), 0 1px 2px -1px var(--tw-shadow-color, #0000001a)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_1px_4px_rgba\\(0\\,0\\,0\\,0\\.4\\)\\]", null, 4, [["--tw-shadow", "0 1px 4px var(--tw-shadow-color, #0006)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_2px_8px_rgba\\(0\\,0\\,0\\,0\\.4\\)\\]", null, 4, [["--tw-shadow", "0 2px 8px var(--tw-shadow-color, #0006)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_2px_8px_rgba\\(0\\,0\\,0\\,0\\.35\\)\\]", null, 4, [["--tw-shadow", "0 2px 8px var(--tw-shadow-color, #00000059)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_6px_20px_rgba\\(0\\,0\\,0\\,0\\.3\\)\\]", null, 4, [["--tw-shadow", "0 6px 20px var(--tw-shadow-color, #0000004d)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_8px_24px_rgba\\(0\\,0\\,0\\,0\\.35\\)\\]", null, 4, [["--tw-shadow", "0 8px 24px var(--tw-shadow-color, #00000059)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_8px_24px_rgba\\(0\\,0\\,0\\,0\\.45\\)\\]", null, 4, [["--tw-shadow", "0 8px 24px var(--tw-shadow-color, #00000073)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_8px_32px_rgba\\(0\\,0\\,0\\,0\\.5\\)\\]", null, 4, [["--tw-shadow", "0 8px 32px var(--tw-shadow-color, #00000080)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_12px_32px_rgba\\(0\\,0\\,0\\,0\\.5\\)\\]", null, 4, [["--tw-shadow", "0 12px 32px var(--tw-shadow-color, #00000080)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[0_16px_48px_rgba\\(0\\,0\\,0\\,0\\.55\\)\\]", null, 4, [["--tw-shadow", "0 16px 48px var(--tw-shadow-color, #0000008c)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-\\[inset_0_0_24px_var\\(--accent\\)\\]", null, 4, [["--tw-shadow", "inset 0 0 24px var(--tw-shadow-color, var(--accent))"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".shadow-lg", null, 4, [["--tw-shadow", "0 10px 15px -3px var(--tw-shadow-color, #0000001a), 0 4px 6px -4px var(--tw-shadow-color, #0000001a)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".ring", null, 4, [["--tw-ring-shadow", "var(--tw-ring-inset, ) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".\\[box-shadow\\:0_1px_2px_rgba\\(0\\,0\\,0\\,0\\.3\\)\\]", null, 4, [["box-shadow", "0 1px 2px #0000004d"]]], [".\\[box-shadow\\:0_4px_14px_rgba\\(0\\,0\\,0\\,0\\.35\\)\\]", null, 4, [["box-shadow", "0 4px 14px #00000059"]]], [".\\[box-shadow\\:none\\]", null, 4, [["box-shadow", "none"]]], [".\\[outline\\:none\\]", null, 4, [["outline", "none"]]], [".outline, .outline-1", null, 4, [["outline-style", "var(--tw-outline-style)"], ["outline-width", "1px"]]], [".outline-2", null, 4, [["outline-style", "var(--tw-outline-style)"], ["outline-width", "2px"]]], [".outline-accent", null, 4, [["outline-color", "var(--accent)"]]], [".blur", null, 4, [["--tw-blur", "blur(8px)"], ["filter", "var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )"]]], [".\\!filter", null, 4, [["filter", "var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )", 1]]], [".\\[filter\\:drop-shadow\\(0_6px_10px_rgba\\(0\\,0\\,0\\,0\\.45\\)\\)\\]", null, 4, [["filter", "drop-shadow(0 6px 10px #00000073)"]]], [".filter", null, 4, [["filter", "var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )"]]], [".backdrop-blur-xl", null, 4, [["--tw-backdrop-blur", "blur(var(--blur-xl))"], ["-webkit-backdrop-filter", "var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, )"], ["backdrop-filter", "var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, )"]]], [".backdrop-saturate-150", null, 4, [["--tw-backdrop-saturate", "saturate(150%)"], ["-webkit-backdrop-filter", "var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, )"], ["backdrop-filter", "var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, )"]]], [".transition", null, 4, [["transition-property", "color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events"], ["transition-timing-function", "var(--tw-ease, var(--default-transition-timing-function))"], ["transition-duration", "var(--tw-duration, var(--default-transition-duration))"]]], [".transition-\\[left\\,top\\,width\\,height\\]", null, 4, [["transition-property", "left, top, width, height"], ["transition-timing-function", "var(--tw-ease, var(--default-transition-timing-function))"], ["transition-duration", "var(--tw-duration, var(--default-transition-duration))"]]], [".transition-opacity", null, 4, [["transition-property", "opacity"], ["transition-timing-function", "var(--tw-ease, var(--default-transition-timing-function))"], ["transition-duration", "var(--tw-duration, var(--default-transition-duration))"]]], [".duration-150", null, 4, [["--tw-duration", ".15s"], ["transition-duration", ".15s"]]], [".ease-out", null, 4, [["--tw-ease", "var(--ease-out)"], ["transition-timing-function", "var(--ease-out)"]]], [".outline-none", null, 4, [["--tw-outline-style", "none"], ["outline-style", "none"]]], [".outline-solid", null, 4, [["--tw-outline-style", "solid"], ["outline-style", "solid"]]], [".select-none", null, 4, [["-webkit-user-select", "none"], ["user-select", "none"]]], [".select-text", null, 4, [["-webkit-user-select", "text"], ["user-select", "text"]]], [".\\[--panel-bg\\:var\\(--surface-dim\\)\\]", null, 4, [["--panel-bg", "var(--surface-dim)"]]], [".\\[--picker-bg\\:var\\(--surface-0\\)\\]", null, 4, [["--picker-bg", "var(--surface-0)"]]], [".\\[--radius\\:var\\(--radius-pane\\)\\]", null, 4, [["--radius", "var(--radius-pane)"]]], [".\\[--workspace-tools-bg\\:transparent\\]", null, 4, [["--workspace-tools-bg", "transparent"]]], [".\\[-webkit-box-orient\\:vertical\\]", null, 4, [["-webkit-box-orient", "vertical"]]], [".\\[-webkit-line-clamp\\:3\\]", null, 4, [["-webkit-line-clamp", "3"]]], [".\\[-webkit-touch-callout\\:none\\]", null, 4, [["-webkit-touch-callout", "none"]]], [".\\[background\\:none\\]", null, 4, [["background", "none"]]], [".\\[border-right\\:1px_solid_var\\(--git-border\\)\\]", null, 4, [["border-right", "1px solid var(--git-border)"]]], [".\\[border-top\\:1px_solid_var\\(--git-border\\)\\]", null, 4, [["border-top", "1px solid var(--git-border)"]]], [".\\[border\\:0\\]", null, 4, [["border", "0"]]], [".\\[border\\:none\\]", null, 4, [["border", "none"]]], [".\\[font\\:1\\.15rem\\/1_var\\(--font-mono\\)\\]", null, 4, [["font", "1.15rem/1 var(--font-mono)"]]], [".\\[font\\:1rem\\/1\\.2_var\\(--font-mono\\)\\]", null, 4, [["font", "1rem/1.2 var(--font-mono)"]]], [".\\[font\\:inherit\\]", null, 4, [["font", "inherit"]]], [".\\[transition\\:background_0\\.1s_ease\\]", null, 4, [["transition", "background .1s"]]], [".\\[transition\\:background_0\\.12s_ease\\]", null, 4, [["transition", "background .12s"]]], [".\\[transition\\:background_0\\.15s_ease\\]", null, 4, [["transition", "background .15s"]]], [".\\[transition\\:color_0\\.1s_ease\\,background_0\\.1s_ease\\]", null, 4, [["transition", "color .1s, background .1s"]]], [".\\[transition\\:color_0\\.12s_ease\\,background_0\\.12s_ease\\]", null, 4, [["transition", "color .12s, background .12s"]]], [".\\[transition\\:color_0\\.15s_ease\\]", null, 4, [["transition", "color .15s"]]], [".\\[transition\\:opacity_0\\.12s_ease\\]", null, 4, [["transition", "opacity .12s"]]], [".\\[transition\\:transform_0\\.15s_ease\\,background_0\\.15s_ease\\]", null, 4, [["transition", "transform .15s, background .15s"]]], [".not-has-\\[\\[data-setting-row\\]\\]\\:hidden:not(:has([data-setting-row]))", null, 4, [["display", "none"]]], [".group-focus-within\\:flex:is(:where(.group):focus-within *)", null, 4, [["display", "flex"]]], [".group-focus-within\\/row\\:opacity-100:is(:where(.group\\/row):focus-within *)", null, 4, [["opacity", "1"]]], [".group-hover\\:flex:is(:where(.group):hover *)", null, 4, [["display", "flex"]]], [".group-hover\\:opacity-100:is(:where(.group):hover *)", null, 4, [["opacity", "1"]]], [".group-hover\\/line\\:opacity-90:is(:where(.group\\/line):hover *)", null, 4, [["opacity", ".9"]]], [".group-hover\\/ph\\:opacity-100:is(:where(.group\\/ph):hover *), .group-hover\\/row\\:opacity-100:is(:where(.group\\/row):hover *)", null, 4, [["opacity", "1"]]], [".group-focus\\/tree\\:ring-1:is(:where(.group\\/tree):focus *)", null, 4, [["--tw-ring-shadow", "var(--tw-ring-inset, ) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor)"], ["box-shadow", "var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)"]]], [".group-focus\\/tree\\:ring-overlay-1:is(:where(.group\\/tree):focus *)", null, 4, [["--tw-ring-color", "var(--overlay-1)"]]], [".group-focus\\/tree\\:ring-inset:is(:where(.group\\/tree):focus *)", null, 4, [["--tw-ring-inset", "inset"]]], ['.group-aria-checked\\:\\[transform\\:translateX\\(1\\.1rem\\)\\]:is(:where(.group)[aria-checked="true"] *)', null, 4, [["transform", "translateX(1.1rem)"]]], ['.group-aria-checked\\:border-accent:is(:where(.group)[aria-checked="true"] *)', null, 4, [["border-color", "var(--accent)"]]], ['.group-aria-checked\\:bg-accent:is(:where(.group)[aria-checked="true"] *)', null, 4, [["background-color", "var(--accent)"]]], ['.group-aria-checked\\:bg-panel-bg:is(:where(.group)[aria-checked="true"] *)', null, 4, [["background-color", "var(--panel-bg)"]]], ['.group-aria-checked\\:text-accent:is(:where(.group)[aria-checked="true"] *), .group-aria-\\[checked\\=false\\]\\:text-accent:is(:where(.group)[aria-checked="false"] *)', null, 4, [["color", "var(--accent)"]]], [".placeholder\\:text-subtext-0::placeholder", null, 4, [["color", "var(--subtext-0)"]]], [".before\\:absolute:before", null, 4, [["content", "var(--tw-content)"], ["position", "absolute"]]], [".before\\:top-\\[0\\.15rem\\]:before", null, 4, [["content", "var(--tw-content)"], ["top", ".15rem"]]], [".before\\:left-\\[0\\.15rem\\]:before", null, 4, [["content", "var(--tw-content)"], ["left", ".15rem"]]], [".before\\:h-\\[0\\.95rem\\]:before", null, 4, [["content", "var(--tw-content)"], ["height", ".95rem"]]], [".before\\:w-\\[0\\.95rem\\]:before", null, 4, [["content", "var(--tw-content)"], ["width", ".95rem"]]], [".before\\:rounded-full:before", null, 4, [["content", "var(--tw-content)"], ["border-radius", "3.40282e38px"]]], [".before\\:bg-fg:before", null, 4, [["content", "var(--tw-content)"], ["background-color", "var(--text)"]]], [".before\\:content-\\[\\'\\'\\]:before", null, 4, [["--tw-content", '""'], ["content", "var(--tw-content)"]]], [".before\\:\\[transition\\:transform_0\\.12s_ease\\]:before", null, 4, [["content", "var(--tw-content)"], ["transition", "transform .12s"]]], [".after\\:absolute:after", null, 4, [["content", "var(--tw-content)"], ["position", "absolute"]]], [".after\\:inset-0:after", null, 4, [["content", "var(--tw-content)"], ["inset", "0"]]], [".after\\:inset-x-0:after", null, 4, [["content", "var(--tw-content)"], ["inset-inline", "0"]]], [".after\\:-inset-y-2:after", null, 4, [["content", "var(--tw-content)"], ["inset-block", "calc(var(--spacing) * -2)"]]], [".after\\:m-auto:after", null, 4, [["content", "var(--tw-content)"], ["margin", "auto"]]], [".after\\:h-8:after", null, 4, [["content", "var(--tw-content)"], ["height", "calc(var(--spacing) * 8)"]]], [".after\\:h-12:after", null, 4, [["content", "var(--tw-content)"], ["height", "calc(var(--spacing) * 12)"]]], [".after\\:h-\\[3px\\]:after", null, 4, [["content", "var(--tw-content)"], ["height", "3px"]]], [".after\\:w-8:after", null, 4, [["content", "var(--tw-content)"], ["width", "calc(var(--spacing) * 8)"]]], [".after\\:w-\\[3px\\]:after", null, 4, [["content", "var(--tw-content)"], ["width", "3px"]]], [".after\\:rounded-full:after", null, 4, [["content", "var(--tw-content)"], ["border-radius", "3.40282e38px"]]], [".after\\:bg-transparent:after", null, 4, [["content", "var(--tw-content)"], ["background-color", "#0000"]]], [".after\\:content-\\[\\'\\'\\]:after", null, 4, [["--tw-content", '""'], ["content", "var(--tw-content)"]]], [".last\\:border-b-0:last-child", null, 4, [["border-bottom-style", "var(--tw-border-style)"], ["border-bottom-width", "0"]]], [".checked\\:bg-accent:checked", null, 4, [["background-color", "var(--accent)"]]], [".checked\\:before\\:translate-x-\\[1rem\\]:checked:before", null, 4, [["content", "var(--tw-content)"], ["--tw-translate-x", "1rem"], ["translate", "var(--tw-translate-x) var(--tw-translate-y)"]]], [".checked\\:before\\:bg-panel-bg:checked:before", null, 4, [["content", "var(--tw-content)"], ["background-color", "var(--panel-bg)"]]], [".focus-within\\:bg-surface-1:focus-within", null, 4, [["background-color", "var(--surface-1)"]]], [".focus-within\\:outline:focus-within, .focus-within\\:outline-1:focus-within", null, 4, [["outline-style", "var(--tw-outline-style)"], ["outline-width", "1px"]]], [".focus-within\\:outline-fg:focus-within", null, 4, [["outline-color", "var(--text)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_12\\%\\,transparent\\)\\]:hover", null, 4, [["background-color", "var(--accent)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_12\\%\\,transparent\\)\\]:hover", null, 4, [["background-color", "color-mix(in srgb,var(--accent) 12%,transparent)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_15\\%\\,transparent\\)\\]:hover", null, 4, [["background-color", "var(--accent)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--accent\\)_15\\%\\,transparent\\)\\]:hover", null, 4, [["background-color", "color-mix(in srgb,var(--accent) 15%,transparent)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--text\\)_10\\%\\,var\\(--panel-bg\\)\\)\\]:hover", null, 4, [["background-color", "var(--text)"]]], [".hover\\:bg-\\[color-mix\\(in_srgb\\,var\\(--text\\)_10\\%\\,var\\(--panel-bg\\)\\)\\]:hover", null, 4, [["background-color", "color-mix(in srgb,var(--text) 10%,var(--panel-bg))"]]], [".hover\\:bg-\\[var\\(--surface-0\\)\\]:hover", null, 4, [["background-color", "var(--surface-0)"]]], [".hover\\:bg-accent:hover", null, 4, [["background-color", "var(--accent)"]]], [".hover\\:bg-overlay-0:hover", null, 4, [["background-color", "var(--overlay-0)"]]], [".hover\\:bg-panel-bg:hover", null, 4, [["background-color", "var(--panel-bg)"]]], [".hover\\:bg-surface-0:hover", null, 4, [["background-color", "var(--surface-0)"]]], [".hover\\:bg-surface-1:hover", null, 4, [["background-color", "var(--surface-1)"]]], [".hover\\:bg-transparent:hover", null, 4, [["background-color", "#0000"]]], [".hover\\:text-accent:hover", null, 4, [["color", "var(--accent)"]]], [".hover\\:text-fg:hover", null, 4, [["color", "var(--text)"]]], [".hover\\:text-inherit:hover", null, 4, [["color", "inherit"]]], [".hover\\:text-overlay-0:hover", null, 4, [["color", "var(--overlay-0)"]]], [".hover\\:text-panel-bg:hover", null, 4, [["color", "var(--panel-bg)"]]], [".hover\\:text-red:hover", null, 4, [["color", "var(--red)"]]], [".hover\\:text-subtext-0:hover", null, 4, [["color", "var(--subtext-0)"]]], [".hover\\:text-yellow:hover", null, 4, [["color", "var(--yellow)"]]], [".hover\\:underline:hover", null, 4, [["text-decoration-line", "underline"]]], [".hover\\:opacity-60:hover", null, 4, [["opacity", ".6"]]], [".hover\\:opacity-100\\!:hover", null, 4, [["opacity", "1", 1]]], [".hover\\:opacity-\\[0\\.85\\]:hover", null, 4, [["opacity", ".85"]]], [".hover\\:brightness-110:hover", null, 4, [["--tw-brightness", "brightness(110%)"], ["filter", "var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )"]]], [".hover\\:\\[filter\\:brightness\\(1\\.08\\)\\]:hover", null, 4, [["filter", "brightness(1.08)"]]], [".hover\\:after\\:bg-overlay-1:hover:after", null, 4, [["content", "var(--tw-content)"], ["background-color", "var(--overlay-1)"]]], [".focus\\:\\[outline\\:1px_solid_var\\(--accent\\)\\]:focus", null, 4, [["outline", "1px solid var(--accent)"]]], [".focus\\:outline-2:focus", null, 4, [["outline-style", "var(--tw-outline-style)"], ["outline-width", "2px"]]], [".focus\\:outline-none:focus", null, 4, [["--tw-outline-style", "none"], ["outline-style", "none"]]], [".focus-visible\\:bg-accent:focus-visible", null, 4, [["background-color", "var(--accent)"]]], [".focus-visible\\:bg-surface-0:focus-visible", null, 4, [["background-color", "var(--surface-0)"]]], [".focus-visible\\:bg-surface-1:focus-visible", null, 4, [["background-color", "var(--surface-1)"]]], [".focus-visible\\:text-accent:focus-visible", null, 4, [["color", "var(--accent)"]]], [".focus-visible\\:text-fg:focus-visible", null, 4, [["color", "var(--text)"]]], [".focus-visible\\:text-panel-bg:focus-visible", null, 4, [["color", "var(--panel-bg)"]]], [".focus-visible\\:text-red:focus-visible", null, 4, [["color", "var(--red)"]]], [".focus-visible\\:text-yellow:focus-visible", null, 4, [["color", "var(--yellow)"]]], [".focus-visible\\:underline:focus-visible", null, 4, [["text-decoration-line", "underline"]]], [".focus-visible\\:opacity-100:focus-visible", null, 4, [["opacity", "1"]]], [".focus-visible\\:\\[outline\\:1px_solid_var\\(--accent\\)\\]:focus-visible", null, 4, [["outline", "1px solid var(--accent)"]]], [".focus-visible\\:\\[outline\\:1px_solid_var\\(--overlay-1\\)\\]:focus-visible", null, 4, [["outline", "1px solid var(--overlay-1)"]]], [".focus-visible\\:\\[outline\\:2px_solid_var\\(--accent\\)\\]:focus-visible", null, 4, [["outline", "2px solid var(--accent)"]]], [".focus-visible\\:outline:focus-visible, .focus-visible\\:outline-1:focus-visible", null, 4, [["outline-style", "var(--tw-outline-style)"], ["outline-width", "1px"]]], [".focus-visible\\:\\[outline-offset\\:-1px\\]:focus-visible", null, 4, [["outline-offset", "-1px"]]], [".focus-visible\\:\\[outline-offset\\:-2px\\]:focus-visible", null, 4, [["outline-offset", "-2px"]]], [".focus-visible\\:\\[outline-offset\\:2px\\]:focus-visible", null, 4, [["outline-offset", "2px"]]], [".focus-visible\\:outline-offset-1:focus-visible", null, 4, [["outline-offset", "1px"]]], [".focus-visible\\:outline-fg:focus-visible", null, 4, [["outline-color", "var(--text)"]]], [".focus-visible\\:after\\:bg-accent:focus-visible:after", null, 4, [["content", "var(--tw-content)"], ["background-color", "var(--accent)"]]], [".active\\:cursor-grabbing:active", null, 4, [["cursor", "grabbing"]]], [".active\\:bg-surface-1:active", null, 4, [["background-color", "var(--surface-1)"]]], [".active\\:text-fg:active", null, 4, [["color", "var(--text)"]]], [".active\\:after\\:bg-accent:active:after", null, 4, [["content", "var(--tw-content)"], ["background-color", "var(--accent)"]]], [".enabled\\:hover\\:bg-surface-1:enabled:hover", null, 4, [["background-color", "var(--surface-1)"]]], [".enabled\\:hover\\:text-fg:enabled:hover", null, 4, [["color", "var(--text)"]]], [".disabled\\:cursor-default:disabled", null, 4, [["cursor", "default"]]], [".disabled\\:cursor-not-allowed:disabled", null, 4, [["cursor", "not-allowed"]]], [".disabled\\:cursor-not-allowed\\!:disabled", null, 4, [["cursor", "not-allowed", 1]]], [".disabled\\:cursor-wait:disabled", null, 4, [["cursor", "wait"]]], [".disabled\\:bg-transparent:disabled", null, 4, [["background-color", "#0000"]]], [".disabled\\:text-fg:disabled", null, 4, [["color", "var(--text)"]]], [".disabled\\:opacity-40:disabled", null, 4, [["opacity", ".4"]]], [".disabled\\:opacity-50:disabled", null, 4, [["opacity", ".5"]]], [".disabled\\:opacity-\\[0\\.45\\]:disabled", null, 4, [["opacity", ".45"]]], [".disabled\\:opacity-\\[0\\.55\\]:disabled", null, 4, [["opacity", ".55"]]], [":where(.app--mac-desktop) .in-\\[\\.app--mac-desktop\\]\\:pl-\\[84px\\]", null, 4, [["padding-left", "84px"]]], [".has-\\[\\:checked\\]\\:bg-surface-0:has(:checked)", null, 4, [["background-color", "var(--surface-0)"]]], [".has-\\[\\:checked\\]\\:text-fg:has(:checked)", null, 4, [["color", "var(--text)"]]], [".has-\\[\\:focus-visible\\]\\:bg-surface-0:has(:focus-visible)", null, 4, [["background-color", "var(--surface-0)"]]], ['.aria-disabled\\:cursor-not-allowed[aria-disabled="true"]', null, 4, [["cursor", "not-allowed"]]], ['.aria-disabled\\:opacity-40[aria-disabled="true"]', null, 4, [["opacity", ".4"]]], ['.aria-expanded\\:opacity-100[aria-expanded="true"]', null, 4, [["opacity", "1"]]], ['.aria-pressed\\:bg-surface-0[aria-pressed="true"]', null, 4, [["background-color", "var(--surface-0)"]]], ['.aria-pressed\\:text-fg[aria-pressed="true"]', null, 4, [["color", "var(--text)"]]], [".motion-reduce\\:animate-none", ["(prefers-reduced-motion: reduce)"], 4, [["animation", "none"]]], [".max-\\[900px\\]\\:hidden", ["not all and (min-width: 900px)"], 4, [["display", "none"]]], [".max-\\[700px\\]\\:hidden", ["not all and (min-width: 700px)"], 4, [["display", "none"]]], [".max-\\[700px\\]\\:size-11", ["not all and (min-width: 700px)"], 4, [["width", "calc(var(--spacing) * 11)"], ["height", "calc(var(--spacing) * 11)"]]], [".max-\\[700px\\]\\:h-9", ["not all and (min-width: 700px)"], 4, [["height", "calc(var(--spacing) * 9)"]]], [".max-\\[700px\\]\\:h-12", ["not all and (min-width: 700px)"], 4, [["height", "calc(var(--spacing) * 12)"]]], [".max-\\[700px\\]\\:min-h-9", ["not all and (min-width: 700px)"], 4, [["min-height", "calc(var(--spacing) * 9)"]]], [".max-\\[700px\\]\\:min-h-11", ["not all and (min-width: 700px)"], 4, [["min-height", "calc(var(--spacing) * 11)"]]], [".max-\\[700px\\]\\:w-24", ["not all and (min-width: 700px)"], 4, [["width", "calc(var(--spacing) * 24)"]]], [".max-\\[700px\\]\\:min-w-11", ["not all and (min-width: 700px)"], 4, [["min-width", "calc(var(--spacing) * 11)"]]], [".max-\\[700px\\]\\:flex-1", ["not all and (min-width: 700px)"], 4, [["flex", "1"]]], [".max-\\[700px\\]\\:flex-\\[1_1_6rem\\]", ["not all and (min-width: 700px)"], 4, [["flex", "6rem"]]], [".max-\\[700px\\]\\:flex-\\[1_1_100\\%\\]", ["not all and (min-width: 700px)"], 4, [["flex", "100%"]]], [".max-\\[700px\\]\\:basis-56", ["not all and (min-width: 700px)"], 4, [["flex-basis", "calc(var(--spacing) * 56)"]]], [".max-\\[700px\\]\\:basis-full", ["not all and (min-width: 700px)"], 4, [["flex-basis", "100%"]]], [".max-\\[700px\\]\\:flex-wrap", ["not all and (min-width: 700px)"], 4, [["flex-wrap", "wrap"]]], [".max-\\[700px\\]\\:gap-y-2", ["not all and (min-width: 700px)"], 4, [["row-gap", "calc(var(--spacing) * 2)"]]], [".min-\\[701px\\]\\:left-auto", ["(min-width: 701px)"], 4, [["left", "auto"]]], [".min-\\[701px\\]\\:my-\\[3px\\]", ["(min-width: 701px)"], 4, [["margin-block", "3px"]]], [".min-\\[701px\\]\\:block", ["(min-width: 701px)"], 4, [["display", "block"]]], [".min-\\[701px\\]\\:hidden", ["(min-width: 701px)"], 4, [["display", "none"]]], [".min-\\[701px\\]\\:min-h-6", ["(min-width: 701px)"], 4, [["min-height", "calc(var(--spacing) * 6)"]]], [".min-\\[701px\\]\\:w-80", ["(min-width: 701px)"], 4, [["width", "calc(var(--spacing) * 80)"]]], [".min-\\[701px\\]\\:rounded-ui", ["(min-width: 701px)"], 4, [["border-radius", "var(--radius)"]]], [".min-\\[701px\\]\\:px-3", ["(min-width: 701px)"], 4, [["padding-inline", "calc(var(--spacing) * 3)"]]], [".min-\\[701px\\]\\:px-4", ["(min-width: 701px)"], 4, [["padding-inline", "calc(var(--spacing) * 4)"]]], [".min-\\[701px\\]\\:pr-\\[3px\\]", ["(min-width: 701px)"], 4, [["padding-right", "3px"]]], [".min-\\[701px\\]\\:pl-4", ["(min-width: 701px)"], 4, [["padding-left", "calc(var(--spacing) * 4)"]]], [".min-\\[701px\\]\\:text-\\[0\\.62rem\\]", ["(min-width: 701px)"], 4, [["font-size", ".62rem"]]], [".min-\\[701px\\]\\:text-\\[12\\.5px\\]", ["(min-width: 701px)"], 4, [["font-size", "12.5px"]]], [".min-\\[701px\\]\\:text-\\[12px\\]", ["(min-width: 701px)"], 4, [["font-size", "12px"]]], [".min-\\[701px\\]\\:font-medium", ["(min-width: 701px)"], 4, [["--tw-font-weight", "var(--font-weight-medium)"], ["font-weight", "var(--font-weight-medium)"]]], [".min-\\[701px\\]\\:font-semibold", ["(min-width: 701px)"], 4, [["--tw-font-weight", "var(--font-weight-semibold)"], ["font-weight", "var(--font-weight-semibold)"]]], [".min-\\[701px\\]\\:tracking-\\[0\\.045em\\]", ["(min-width: 701px)"], 4, [["--tw-tracking", ".045em"], ["letter-spacing", ".045em"]]], [".min-\\[701px\\]\\:text-subtext-0", ["(min-width: 701px)"], 4, [["color", "var(--subtext-0)"]]], [".min-\\[701px\\]\\:uppercase", ["(min-width: 701px)"], 4, [["text-transform", "uppercase"]]], [".min-\\[900px\\]\\:inline", ["(min-width: 900px)"], 4, [["display", "inline"]]], [".pointer-coarse\\:opacity-100", ["(pointer: coarse)"], 4, [["opacity", "1"]]], [".\\[\\&_\\.mode-switch\\]\\:ml-0 .mode-switch", null, 4, [["margin-left", "0"]]], [".max-\\[700px\\]\\:\\[\\&_button\\]\\:min-h-11 button", ["not all and (min-width: 700px)"], 4, [["min-height", "calc(var(--spacing) * 11)"]]], [".\\[\\&_pre\\]\\:m-\\[0\\.2rem_0_0\\.3rem_1\\.2rem\\] pre", null, 4, [["margin", ".2rem 0 .3rem 1.2rem"]]], [".\\[\\&_pre\\]\\:max-h-72 pre", null, 4, [["max-height", "calc(var(--spacing) * 72)"]]], [".\\[\\&_pre\\]\\:overflow-auto pre", null, 4, [["overflow", "auto"]]], [".\\[\\&_pre\\]\\:rounded-ui pre", null, 4, [["border-radius", "var(--radius)"]]], [".\\[\\&_pre\\]\\:bg-surface-0 pre", null, 4, [["background-color", "var(--surface-0)"]]], [".\\[\\&_pre\\]\\:p-2 pre", null, 4, [["padding", "calc(var(--spacing) * 2)"]]], [".\\[\\&_pre\\]\\:text-\\[0\\.78rem\\] pre", null, 4, [["font-size", ".78rem"]]], [".\\[\\&_pre\\]\\:\\[overflow-wrap\\:anywhere\\] pre", null, 4, [["overflow-wrap", "anywhere"]]], [".\\[\\&_pre\\]\\:whitespace-pre-wrap pre", null, 4, [["white-space", "pre-wrap"]]], [".\\[\\&_pre\\]\\:text-fg pre, .\\[\\&_strong\\]\\:text-fg strong", null, 4, [["color", "var(--text)"]]], [".\\[\\&_summary\\]\\:cursor-pointer summary", null, 4, [["cursor", "pointer"]]], [".\\[\\&\\:hover\\:not\\(\\:disabled\\)\\]\\:bg-surface-1:hover:not(:disabled)", null, 4, [["background-color", "var(--surface-1)"]]], [".\\[\\&\\:hover\\:not\\(\\:disabled\\)\\]\\:text-accent:hover:not(:disabled)", null, 4, [["color", "var(--accent)"]]], [".\\[\\&\\:hover\\:not\\(\\:disabled\\)\\]\\:text-red:hover:not(:disabled)", null, 4, [["color", "var(--red)"]]], [".\\[\\&\\:not\\(\\:has\\(\\[data-setting-row\\]\\)\\)\\>\\[data-none\\]\\]\\:block:not(:has([data-setting-row])) > [data-none]", null, 4, [["display", "block"]]], [".\\[\\&\\>\\*\\]\\:min-h-0 > *", null, 4, [["min-height", "0"]]], [".\\[\\&\\>\\*\\]\\:min-w-0 > *", null, 4, [["min-width", "0"]]], [".\\[\\&\\>\\*\\]\\:flex-1 > *", null, 4, [["flex", "1"]]], [".\\[\\&\\>\\*\\]\\:shrink-0 > *", null, 4, [["flex-shrink", "0"]]], [".\\[\\&\\>li\\]\\:text-\\[0\\.85rem\\] > li", null, 4, [["font-size", ".85rem"]]], [".\\[\\&\\>li\\]\\:leading-\\[1\\.5\\] > li", null, 4, [["--tw-leading", "1.5"], ["line-height", "1.5"]]], [".\\[\\&\\>li\\]\\:text-fg > li", null, 4, [["color", "var(--text)"]]], [".\\[\\&\\>summary\\]\\:flex > summary", null, 4, [["display", "flex"]]], [".\\[\\&\\>summary\\]\\:cursor-pointer > summary", null, 4, [["cursor", "pointer"]]], [".\\[\\&\\>summary\\]\\:list-none > summary", null, 4, [["list-style-type", "none"]]], [".\\[\\&\\>summary\\]\\:items-center > summary", null, 4, [["align-items", "center"]]], [".\\[\\&\\>summary\\]\\:gap-\\[0\\.4rem\\] > summary", null, 4, [["gap", ".4rem"]]], [".\\[\\&\\>summary\\]\\:rounded-ui > summary", null, 4, [["border-radius", "var(--radius)"]]], [".\\[\\&\\>summary\\]\\:px-\\[0\\.4rem\\] > summary", null, 4, [["padding-inline", ".4rem"]]], [".\\[\\&\\>summary\\]\\:py-\\[0\\.25rem\\] > summary", null, 4, [["padding-block", ".25rem"]]], [".\\[\\&\\>summary\\]\\:select-none > summary", null, 4, [["-webkit-user-select", "none"], ["user-select", "none"]]], [".\\[\\&\\>summary\\]\\:before\\:inline-block > summary:before", null, 4, [["content", "var(--tw-content)"], ["display", "inline-block"]]], [".\\[\\&\\>summary\\]\\:before\\:size-\\[0\\.4rem\\] > summary:before", null, 4, [["content", "var(--tw-content)"], ["width", ".4rem"], ["height", ".4rem"]]], [".\\[\\&\\>summary\\]\\:before\\:shrink-0 > summary:before", null, 4, [["content", "var(--tw-content)"], ["flex-shrink", "0"]]], [".\\[\\&\\>summary\\]\\:before\\:\\[transform\\:rotate\\(-45deg\\)\\] > summary:before", null, 4, [["content", "var(--tw-content)"], ["transform", "rotate(-45deg)"]]], [".\\[\\&\\>summary\\]\\:before\\:content-\\[\\'\\'\\] > summary:before", null, 4, [["--tw-content", '""'], ["content", "var(--tw-content)"]]], [".\\[\\&\\>summary\\]\\:before\\:\\[border-bottom\\:1\\.3px_solid_currentColor\\] > summary:before", null, 4, [["content", "var(--tw-content)"], ["border-bottom", "1.3px solid"]]], [".\\[\\&\\>summary\\]\\:before\\:\\[border-right\\:1\\.3px_solid_currentColor\\] > summary:before", null, 4, [["content", "var(--tw-content)"], ["border-right", "1.3px solid"]]], [".\\[\\&\\>summary\\]\\:before\\:\\[transition\\:transform_0\\.15s_ease\\] > summary:before", null, 4, [["content", "var(--tw-content)"], ["transition", "transform .15s"]]], [".\\[\\&\\>summary\\:hover\\]\\:bg-surface-1 > summary:hover", null, 4, [["background-color", "var(--surface-1)"]]], [".\\[\\&\\>summary\\:hover\\]\\:text-fg > summary:hover", null, 4, [["color", "var(--text)"]]], [".\\[\\&\\[open\\]\\>summary\\]\\:before\\:\\[transform\\:rotate\\(45deg\\)\\][open] > summary:before", null, 4, [["content", "var(--tw-content)"], ["transform", "rotate(45deg)"]]], [".app--mobile .\\[\\.app--mobile_\\&\\]\\:min-h-11", null, 4, [["min-height", "calc(var(--spacing) * 11)"]]], [".app--mobile .\\[\\.app--mobile_\\&\\]\\:min-h-\\[44px\\]", null, 4, [["min-height", "44px"]]], [".\\[\\@media\\(hover\\:none\\)\\]\\:opacity-60", ["(hover: none)"], 4, [["opacity", ".6"]]], [".\\[\\@media\\(hover\\:none\\)\\]\\:opacity-100", ["(hover: none)"], 4, [["opacity", "1"]]], [".\\[\\@media\\(max-width\\:700px\\)\\]\\:h-\\[2\\.75rem\\]", ["(max-width: 700px)"], 4, [["height", "2.75rem"]]], [".\\[\\@media\\(max-width\\:700px\\)\\]\\:min-h-\\[2\\.75rem\\]", ["(max-width: 700px)"], 4, [["min-height", "2.75rem"]]], [".\\[\\@media\\(max-width\\:700px\\)\\]\\:w-\\[2\\.75rem\\]", ["(max-width: 700px)"], 4, [["width", "2.75rem"]]], [".\\[\\@media\\(max-width\\:700px\\)\\]\\:min-w-\\[2\\.75rem\\]", ["(max-width: 700px)"], 4, [["min-width", "2.75rem"]]], [".\\[\\@media\\(max-width\\:700px\\)\\]\\:px-\\[0\\.65rem\\]", ["(max-width: 700px)"], 4, [["padding-inline", ".65rem"]]], ["div:hover > .\\[div\\:hover\\>\\&\\]\\:opacity-100", null, 4, [["opacity", "1"]]], [":root", null, 1e3, [["color-scheme", "dark"], ["--scrollbar-size", "6px"], ["--accent", "#c8c8c8"], ["--panel-bg", "#161616"], ["--surface-0", "#262626"], ["--surface-1", "#333"], ["--surface-dim", "#1c1c1c"], ["--backdrop", "#050505"], ["--overlay-0", "#3a3a3a"], ["--overlay-1", "#9b9b9b"], ["--text", "#d8d8d8"], ["--subtext-0", "#9b9b9b"], ["--mauve", "#a993c9"], ["--green", "#7fb685"], ["--yellow", "#d3b46a"], ["--red", "#df8c8c"], ["--blue", "#7aa2d7"], ["--teal", "#7fb8b8"], ["--peach", "#d39a6a"], ["--bg", "var(--panel-bg)"], ["--surface", "var(--surface-0)"], ["--surface-alt", "var(--surface-1)"], ["--border", "var(--overlay-0)"], ["--muted", "var(--subtext-0)"], ["--danger", "var(--red)"], ["--radius", "8px"], ["--radius-pane", "8px"], ["accent-color", "var(--accent)"], ["--font-ui", '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif'], ["--font-mono", `ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
     monospace`], ["font-family", "var(--font-ui)"]]], ["code, pre, kbd, samp", null, 1e3, [["font-family", "var(--font-mono)"]]], ["*", null, 1e3, [["box-sizing", "border-box"]]], ["html, body, #root", null, 1e3, [["height", "100%"], ["margin", "0"]]], ["html", null, 1e3, [["overscroll-behavior", "none"], ["--shell-bg", "var(--panel-bg)"]]], ["html[data-glass]", null, 1e3, [["--shell-bg", "var(--panel-bg)"]]], ["html[data-glass]", null, 1e3, [["--shell-bg", "color-mix(in srgb, var(--panel-bg) 86%, transparent)"]]], ["html", null, 1e3, [["--backdrop-bg", "var(--backdrop)"], ["--card-bg", "var(--panel-bg)"]]], ["html[data-glass]", null, 1e3, [["--backdrop-bg", "var(--backdrop)"]]], ["html[data-glass]", null, 1e3, [["--backdrop-bg", "color-mix(in srgb, var(--backdrop) 86%, transparent)"]]], ["html[data-glass]", null, 1e3, [["--card-bg", "var(--panel-bg)"]]], ["html[data-glass]", null, 1e3, [["--card-bg", "color-mix(in srgb, var(--panel-bg) 86%, transparent)"]]], ['body:has(.app--cards, .app--mobile), .app--cards .dock-area:has([data-testid="split-canvas"]:not([data-split="0"]))', null, 1e3, [["background", "var(--backdrop-bg)"]]], ["body", null, 1e3, [["background", "var(--shell-bg)"], ["color", "var(--text)"], ["overscroll-behavior", "none"], ["-webkit-tap-highlight-color", "transparent"], ["line-height", "1.3"]]], [".app", null, 1e3, [["flex-direction", "column"], ["height", "100dvh"], ["display", "flex"]]], [".app--mobile", null, 1e3, [["inset", "var(--visible-top, 0px) 0 auto 0"], ["height", "var(--visible-height, 100dvh)"], ["position", "fixed"]]], [".mobile-drawer-backdrop", null, 1e3, [["animation", ".15s ease-out mobile-fade"]]], [".mobile-drawer--left", null, 1e3, [["animation", ".2s cubic-bezier(.2, .8, .2, 1) mobile-slide-left"]]], [".mobile-drawer--right", null, 1e3, [["animation", ".2s cubic-bezier(.2, .8, .2, 1) mobile-slide-right"]]], [".mobile-sheet", null, 1e3, [["animation", ".22s cubic-bezier(.2, .8, .2, 1) mobile-rise"]]], [".mobile-drawer-backdrop, .mobile-drawer, .mobile-sheet", ["(prefers-reduced-motion: reduce)"], 1e3, [["animation", "none"]]], [".layout-drawer", null, 1e3, [["transform", "translateX(var(--float-hide, 0))"], ["transition", "transform .18s"]]], [".layout-drawer:hover, .layout-drawer:focus-within", null, 1e3, [["--float-hide", "0px"]]], [".dockview-theme-perch", null, 1e3, [["--dv-color-abyss-dark", "var(--panel-bg)"], ["--dv-color-abyss", "var(--surface-0)"], ["--dv-color-abyss-light", "var(--surface-1)"], ["--dv-color-abyss-lighter", "var(--overlay-0)"], ["--dv-color-abyss-accent", "var(--accent)"], ["--dv-color-abyss-primary-text", "var(--text)"], ["--dv-color-abyss-secondary-text", "var(--subtext-0)"], ["--dv-group-view-background-color", "var(--panel-bg)"], ["--dv-tabs-and-actions-container-background-color", "var(--surface-0)"], ["--dv-activegroup-visiblepanel-tab-background-color", "var(--panel-bg)"], ["--dv-activegroup-hiddenpanel-tab-background-color", "var(--surface-0)"], ["--dv-inactivegroup-visiblepanel-tab-background-color", "var(--panel-bg)"], ["--dv-inactivegroup-hiddenpanel-tab-background-color", "var(--surface-0)"], ["--dv-tab-divider-color", "var(--overlay-0)"], ["--dv-activegroup-visiblepanel-tab-color", "var(--text)"], ["--dv-activegroup-hiddenpanel-tab-color", "var(--subtext-0)"], ["--dv-inactivegroup-visiblepanel-tab-color", "var(--subtext-0)"], ["--dv-inactivegroup-hiddenpanel-tab-color", "var(--subtext-0)"], ["--dv-separator-border", "var(--overlay-0)"], ["--dv-paneview-header-border-color", "var(--overlay-0)"], ["--dv-tabs-and-actions-container-font-size", ".82rem"], ["--dv-tabs-and-actions-container-height", "2.1rem"]]], [".dockview-theme-perch .dv-tabs-and-actions-container", null, 1e3, [["z-index", "1"], ["position", "relative"]]], [".pane-tab", null, 1e3, [["align-items", "center"], ["width", "100%"], ["height", "100%"], ["display", "flex"]]], [".pane-tab__agent-badge", null, 1e3, [["color", "var(--subtext-0)"], ["white-space", "nowrap"], ["flex-shrink", "0"], ["margin-right", ".4rem"], ["font-size", ".78em"]]], ['.pane-tab[data-testid="pane-tab-chat"] .dv-default-tab-action', null, 1e3, [["display", "none"]]], [".dockview-group-action", null, 1e3, [["border-radius", "var(--radius)"], ["width", "1.5rem"], ["height", "1.5rem"], ["color", "var(--subtext-0)"], ["cursor", "pointer"], ["background", "none"], ["border", "none"], ["justify-content", "center"], ["align-self", "center"], ["align-items", "center"], ["margin", "0 .15rem"], ["font-size", "1rem"], ["line-height", "1"], ["transition", "color .1s, background .1s"], ["display", "flex"]]], [".dockview-group-action:hover", null, 1e3, [["color", "var(--text)"], ["background", "var(--surface-1)"]]], [".dockview-theme-perch .dv-view-container > .dv-view:has(.dv-inactive-group)", ["(max-width: 700px)"], 1e3, [["display", "none"]]], [".dockview-theme-perch .dv-view-container > .dv-view:has(.dv-active-group)", ["(max-width: 700px)"], 1e3, [["width", "100%", 1], ["left", "0", 1]]], [".chat", null, 1e3, [["isolation", "isolate"], ["flex-direction", "column"], ["flex", "1"], ["height", "100%"], ["min-height", "0"], ["display", "flex"]]], [".message__markdown p", null, 1e3, [["margin", "0 0 .5em"]]], [".message__markdown p:last-child", null, 1e3, [["margin-bottom", "0"]]], [".message__markdown h1, .message__markdown h2, .message__markdown h3, .message__markdown h4", null, 1e3, [["margin", ".6em 0 .3em"], ["line-height", "1.25"]]], [".message__markdown h1", null, 1e3, [["font-size", "1.25em"]]], [".message__markdown h2", null, 1e3, [["font-size", "1.12em"]]], [".message__markdown h3", null, 1e3, [["font-size", "1em"]]], [".message__markdown > * + *", null, 1e3, [["margin-top", ".5em"]]], [".message__markdown table, .md-table", null, 1e3, [["border-collapse", "separate"], ["border-spacing", "0"], ["background", "var(--surface-0)"], ["border-radius", "var(--radius)"], ["max-width", "100%"], ["margin", ".5em 0"], ["font-size", ".92em"], ["display", "block"], ["overflow-x", "auto"]]], [".md-table", null, 1e3, [["width", "100%"], ["margin", "0"], ["display", "table"]]], [".message__markdown th, .message__markdown td, .md-table th, .md-table td", null, 1e3, [["text-align", "left"], ["vertical-align", "top"], ["border-bottom", "1px solid var(--surface-1)"], ["padding", ".35em .75em"]]], [".message__markdown th, .md-table th", null, 1e3, [["color", "var(--subtext-0)"], ["white-space", "nowrap"], ["background", "var(--surface-1)"], ["font-weight", "600"]]], [".message__markdown tbody tr:last-child td, .md-table tbody tr:last-child td", null, 1e3, [["border-bottom", "0"]]], [".message__markdown tbody tr:hover td, .md-table tbody tr:hover td", null, 1e3, [["background", "var(--surface-1)"]]], [".md-table caption", null, 1e3, [["text-align", "left"], ["color", "var(--subtext-0)"], ["padding", ".4em .75em"]]], [".md-code", null, 1e3, [["background", "var(--surface-0)"], ["border-radius", "var(--radius)"], ["overflow", "hidden"]]], [".md-code__bar", null, 1e3, [["color", "var(--subtext-0)"], ["background", "var(--surface-1)"], ["justify-content", "space-between"], ["align-items", "center"], ["padding", ".1rem .4rem .1rem .75rem"], ["font-size", ".75em"], ["display", "flex"]]], [".message__markdown .md-code pre", null, 1e3, [["background", "none"], ["border-radius", "0"], ["margin", "0"]]], [".hl-keyword", null, 1e3, [["color", "var(--mauve)"]]], [".hl-string", null, 1e3, [["color", "var(--green)"]]], [".hl-number", null, 1e3, [["color", "var(--peach)"]]], [".hl-function", null, 1e3, [["color", "var(--blue)"]]], [".hl-type", null, 1e3, [["color", "var(--yellow)"]]], [".hl-tag", null, 1e3, [["color", "var(--teal)"]]], [".hl-comment", null, 1e3, [["color", "var(--overlay-1)"], ["font-style", "italic"]]], [".message__markdown ul, .message__markdown ol", null, 1e3, [["margin", ".3em 0 .5em 1.3em"], ["padding", "0"]]], [".message__markdown li", null, 1e3, [["margin-bottom", ".2em"]]], [".message__markdown code", null, 1e3, [["background", "var(--surface-0)"], ["border-radius", ".25rem"], ["padding", ".1em .35em"], ["font-family", "ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace"], ["font-size", ".88em"]]], [".message__markdown pre", null, 1e3, [["background", "var(--surface-0)"], ["border-radius", "var(--radius)"], ["margin", ".4em 0"], ["padding", ".6rem .75rem"], ["position", "relative"], ["overflow-x", "auto"]]], [".message__markdown pre code", null, 1e3, [["background", "none"], ["border", "none"], ["padding", "0"], ["font-size", ".85em"]]], [".message__markdown a", null, 1e3, [["color", "var(--accent)"], ["text-decoration", "underline"]]], [".message__markdown blockquote", null, 1e3, [["border-left", "3px solid var(--overlay-0)"], ["color", "var(--subtext-0)"], ["margin", ".4em 0"], ["padding", ".1em .6em"]]], [".message__markdown hr", null, 1e3, [["border", "none"], ["border-top", "1px solid var(--overlay-0)"], ["margin", ".75em 0"]]], [".file-markdown", null, 1e3, [["overflow-wrap", "anywhere"]]], [".file-markdown img", null, 1e3, [["max-width", "100%"]]], [".file-markdown table", null, 1e3, [["border-collapse", "collapse"], ["margin", ".4em 0"], ["display", "block"], ["overflow-x", "auto"]]], [".file-markdown th, .file-markdown td", null, 1e3, [["border", "1px solid var(--overlay-0)"], ["padding", ".2em .5em"]]], [".file-markdown .md-placeholder", null, 1e3, [["color", "var(--subtext-0)"], ["border", "1px dashed var(--overlay-0)"], ["border-radius", ".25rem"], ["padding", ".05em .35em"], ["font-size", ".9em"]]], [".terminal", null, 1e3, [["min-width", "0"], ["min-height", "0"], ["padding", "var(--terminal-padding, 0)"], ["opacity", "var(--terminal-opacity, 1)"], ["flex", "1"], ["display", "flex"], ["position", "relative"]]], [".terminal__surface", null, 1e3, [["flex", "1"], ["min-width", "0"], ["min-height", "0"], ["overflow", "hidden"]]], [".terminal__surface .xterm", null, 1e3, [["height", "100%"]]], [".terminal__surface .xterm:not(.allow-transparency) .xterm-viewport", null, 1e3, [["background-color", "#0000"]]], [".terminal__surface .xterm-scrollable-element", null, 1e3, [["position", "static", 1]]], [".terminal__surface .xterm-decoration-overview-ruler, .no-pane-scrollbars .terminal__surface .xterm-scrollable-element > .xterm-scrollbar", null, 1e3, [["display", "none"]]], [".terminal--persistent", null, 1e3, [["flex-direction", "column"]]], [".terminal__toolbar", null, 1e3, [["color", "var(--subtext-0)"], ["align-items", "center"], ["gap", ".5rem"], ["padding", ".25rem 1.5rem .25rem .5rem"], ["font-size", ".8rem"], ["display", "flex"]]], [".terminal__toolbar button", null, 1e3, [["border-radius", "var(--radius)"], ["min-height", "32px"], ["color", "var(--text)"], ["background", "var(--surface-0)"], ["border", "0"], ["padding", ".25rem .5rem"]]], [".terminal__toolbar--overlay", null, 1e3, [["z-index", "2"], ["border-radius", "var(--radius)"], ["background", "var(--surface-1)"], ["padding", ".2rem .3rem .2rem .6rem"], ["position", "absolute"], ["top", ".4rem"], ["right", ".9rem"], ["box-shadow", "0 2px 8px #00000040"]]], [".terminal__connection", null, 1e3, [["margin-right", "auto"]]], [".terminal__toolbar button:disabled", null, 1e3, [["opacity", ".5"]]], [".terminal__notice", null, 1e3, [["color", "var(--subtext-0)"], ["padding", ".75rem"], ["font-size", ".85rem"]]], [".app--mobile .terminal__toolbar button", null, 1e3, [["min-height", "44px"]]], [".app--mobile .terminal__connection", null, 1e3, [["display", "none"]]], [".app--mobile .terminal__toolbar", null, 1e3, [["padding-right", ".5rem"]]], [".terminal__exited", null, 1e3, [["background", "var(--surface-1)"], ["border-radius", "var(--radius)"], ["color", "var(--subtext-0)"], ["padding", ".35rem .75rem"], ["font-size", ".85rem"], ["position", "absolute"], ["bottom", ".75rem"], ["left", "50%"], ["transform", "translateX(-50%)"]]], [".terminal__exited--cli", null, 1e3, [["background", "var(--panel-bg)"], ["flex-direction", "column"], ["align-items", "center"], ["gap", ".6rem"], ["padding", ".9rem 1.1rem"], ["display", "flex"], ["top", "50%"], ["bottom", "auto"], ["transform", "translate(-50%, -50%)"], ["box-shadow", "0 6px 24px #00000059"]]], [".terminal__exited-actions", null, 1e3, [["gap", ".5rem"], ["display", "flex"]]], [".terminal__cli-error", null, 1e3, [["background", "var(--red)"], ["position", "absolute"], ["bottom", ".75rem"], ["left", "50%"], ["transform", "translateX(-50%)"]]], [".terminal__cli-error", null, 1e3, [["background", "color-mix(in srgb, var(--red) 20%, var(--panel-bg))"]]], [".terminal__cli-error", null, 1e3, [["border-radius", "var(--radius)"], ["color", "var(--red)"], ["text-align", "center"], ["white-space", "pre-wrap"], ["word-break", "break-word"], ["max-width", "90%"], ["padding", ".35rem .75rem"], ["font-size", ".85rem"]]], [".mobile-pane-shell__content > .chat, .mobile-pane-shell__content > .terminal, .mobile-pane-shell__content > .workspace-files, .mobile-pane-shell__content > .workspace-git", null, 1e3, [["flex", "1"], ["width", "100%"], ["min-width", "0"], ["height", "100%"], ["min-height", "0"]]], [".terminal__host", null, 1e3, [["width", "100%"], ["height", "100%"], ["overflow", "hidden"]]], [".workspace-git", null, 1e3, [["--git-border", "var(--overlay-0)"]]], [".workspace-git", null, 1e3, [["--git-border", "color-mix(in srgb, var(--overlay-0) 72%, transparent)"]]], [".workspace-git", null, 1e3, [["--git-muted", "var(--subtext-0)"], ["width", "100%"], ["min-width", "0"], ["height", "100%"], ["min-height", "0"], ["color", "var(--text)"], ["background", "var(--workspace-tools-bg, var(--panel-bg))"], ["flex-direction", "column"], ["font-size", ".78rem"], ["display", "flex"], ["position", "relative"], ["overflow", "hidden"], ["container-type", "inline-size"]]], [".workspace-git button, .workspace-git input, .workspace-git textarea", null, 1e3, [["font", "inherit"]]], [".workspace-git button", null, 1e3, [["cursor", "pointer"]]], ['.workspace-git button:focus-visible, .workspace-git input:focus-visible, .workspace-git textarea:focus-visible, .workspace-git [role="button"]:focus-visible', null, 1e3, [["outline", "2px solid var(--accent)"], ["outline-offset", "1px"]]], [".workspace-git__diff", null, 1e3, [["container-type", "inline-size"]]], [".workspace-git__line-comment-thread", null, 1e3, [["max-width", "max(0px, min(42rem, 100cqi - 6.9rem))"], ["position", "sticky"], ["left", "0"]]], [".workspace-git__comment-composer", null, 1e3, [["max-width", "max(0px, 100cqi - 1.4rem)"], ["position", "sticky"], ["left", "0"]]], [".dockview-group-action--split-session", null, 1e3, [["font-size", "13px"]]], [".session-split-popover", null, 1e3, [["display", "flex"], ["flex-direction", "column"], ["background", "var(--surface-1)"], ["border-radius", "var(--radius)"], ["box-shadow", "0 8px 24px rgba(0, 0, 0, 0.45)"], ["padding", "4px"], ["font-size", "12.5px"], ["color", "var(--text)"], ["overflow", "hidden"]]], [".session-split-popover__header", null, 1e3, [["padding", "6px 8px 4px"], ["font-size", "11px"], ["text-transform", "uppercase"], ["letter-spacing", "0.04em"], ["color", "var(--subtext-0)"]]], [".session-split-popover__empty", null, 1e3, [["padding", "8px"], ["color", "var(--subtext-0)"]]], [".session-split-popover__list", null, 1e3, [["overflow-y", "auto"]]], [".session-split-popover__item", null, 1e3, [["display", "flex"], ["flex-direction", "column"], ["align-items", "flex-start"], ["gap", "1px"], ["width", "100%"], ["padding", "6px 8px"], ["border", "none"], ["border-radius", "4px"], ["background", "transparent"], ["color", "inherit"], ["text-align", "left"], ["cursor", "grab"]]], [".session-split-popover__item:hover", null, 1e3, [["background", "var(--surface-0)"]]], [".session-split-popover__item-title", null, 1e3, [["font-weight", "500"], ["white-space", "nowrap"], ["overflow", "hidden"], ["text-overflow", "ellipsis"], ["max-width", "100%"]]], [".session-split-popover__item-cwd", null, 1e3, [["font-size", "11px"], ["color", "var(--subtext-0)"], ["white-space", "nowrap"], ["overflow", "hidden"], ["text-overflow", "ellipsis"], ["max-width", "100%"]]], [".session-split-popover__item-badge", null, 1e3, [["align-self", "flex-end"], ["font-size", "10px"], ["color", "var(--accent)"], ["margin-top", "-14px"]]], [".inactive-session-pane", null, 1e3, [["display", "flex"], ["flex-direction", "column"], ["align-items", "center"], ["justify-content", "center"], ["gap", "10px"], ["height", "100%"], ["padding", "24px"], ["text-align", "center"], ["color", "var(--subtext-0)"]]], [".inactive-session-pane__title", null, 1e3, [["font-size", "14px"], ["font-weight", "500"], ["color", "var(--text)"]]], [".inactive-session-pane__cwd", null, 1e3, [["font-size", "12px"], ["color", "var(--subtext-0)"], ["word-break", "break-all"]]], [".inactive-session-pane__note", null, 1e3, [["font-size", "12px"], ["max-width", "320px"], ["line-height", "1.5"]]], [".inactive-session-pane__switch", null, 1e3, [["margin-top", "4px"], ["padding", "6px 14px"], ["border-radius", "var(--radius)"], ["border", "0"], ["background", "var(--surface-0)"], ["color", "var(--text)"], ["cursor", "pointer"], ["font-size", "12.5px"]]], [".inactive-session-pane__switch:hover", null, 1e3, [["background", "var(--surface-1)"]]]], skipped: { "@supports evaluated false": 2, "@container": 6, "@keyframes": 9 } };
@@ -9940,7 +9941,8 @@ const Mg = {
   blur: "onBlur",
   input: "onInput",
   change: "onChange",
-  submit: "onSubmit"
+  submit: "onSubmit",
+  scroll: "onScroll"
 }, jg = /* @__PURE__ */ new Set(["click", "dblclick", "mousedown", "mouseup"]), Og = /* @__PURE__ */ new Set(["button", "input", "select", "textarea", "fieldset"]), Rg = (n) => {
   for (let l = n; l instanceof Pt; l = l.parentNode) if (l.props.disabled && Og.has(l.tagName)) return !0;
   return !1;
@@ -9985,10 +9987,10 @@ function Oy(n, l, o = {}) {
   const f = [];
   let p = null;
   const x = () => [i, s].map((H) => H.listeners.map((h) => `${h.type}:${h.capture}`).sort().join(",")).join("|");
-  let S = "";
+  let E = "";
   const k = {}, w = `m${Math.random().toString(36).slice(2, 10)}:`;
-  let N = 0, E = -1;
-  i.measureKey = (H) => w + H.id, i.stale = () => E !== N, i.computed = (H) => {
+  let N = 0, S = -1;
+  i.measureKey = (H) => w + H.id, i.stale = () => S !== N, i.computed = (H) => {
     if (!k.cascade || !k.top) return null;
     const h = [];
     for (let y = H; y instanceof Pt && y !== i.body; y = y.parentNode) h.unshift(y);
@@ -9996,8 +9998,8 @@ function Oy(n, l, o = {}) {
     for (const y of h) b = k.cascade.compute(y, b);
     return b.values;
   };
-  const v = () => (N += 1, p = Sg(i, n, Ng(), k, o.names), S = x(), n.render?.(p), p), z = () => {
-    Ne.flushPassiveEffects(), Ne.flushSyncWork(), x() !== S && v();
+  const v = () => (N += 1, p = Sg(i, n, Ng(), k, o.names), E = x(), n.render?.(p), p), z = () => {
+    Ne.flushPassiveEffects(), Ne.flushSyncWork(), x() !== E && v();
   };
   i.afterCommit = v;
   const R = (H) => {
@@ -10039,7 +10041,7 @@ function Oy(n, l, o = {}) {
       const y = typeof H == "string" ? A(H) : H;
       if (!y || jg.has(h) && Rg(y)) return !1;
       const _ = new Dg(h, b, y), T = [];
-      for (let I = y; I; I = I.parentNode) T.push(I);
+      for (let I = y; I; I = h === "scroll" ? null : I.parentNode) T.push(I);
       const O = [...T, i, s];
       X(() => {
         for (let I = O.length - 1; I > 0 && !_.propagationStopped; I--) Ar(O[I], _, !0);
@@ -10124,7 +10126,7 @@ function Oy(n, l, o = {}) {
     /** The engine is drawing the latest description: the boxes measured in this frame's layout are the tree's.
      * Returns whether effects wait for that layout (`measured`); run them with `retry` once the frame is drawn. */
     drawing() {
-      return E = N, i.retries.length > 0;
+      return S = N, i.retries.length > 0;
     },
     /** Runs the effects that waited for a fresh layout. */
     retry() {
@@ -10210,9 +10212,9 @@ const Bg = (n, l) => {
     return;
   const f = l === 0 ? n.join(Fr) : n.slice(l).join(Fr), p = m.length;
   for (let x = 0; x < p; x++) {
-    const S = m[x];
-    if (S.validator(f))
-      return S.classGroupId;
+    const E = m[x];
+    if (E.validator(f))
+      return E.classGroupId;
   }
 }, Yg = (n) => n.slice(1, -1).indexOf(":") === -1 ? void 0 : (() => {
   const l = n.slice(1, -1), o = l.indexOf(":"), i = l.slice(0, o);
@@ -10308,8 +10310,8 @@ const Bg = (n, l) => {
   let i = (s) => {
     const d = [];
     let m = 0, f = 0, p = 0, x;
-    const S = s.length;
-    for (let v = 0; v < S; v++) {
+    const E = s.length;
+    for (let v = 0; v < E; v++) {
       const z = s[v];
       if (m === 0 && f === 0) {
         if (z === tf) {
@@ -10332,8 +10334,8 @@ const Bg = (n, l) => {
        */
       k.startsWith(ss) && (w = k.slice(1), N = !0)
     );
-    const E = x && x > p ? x - p : void 0;
-    return ef(d, N, w, E);
+    const S = x && x > p ? x - p : void 0;
+    return ef(d, N, w, S);
   };
   if (l) {
     const s = l + tf, d = i;
@@ -10381,11 +10383,11 @@ const Bg = (n, l) => {
     postfixLookupClassGroupIds: m
   } = l, f = [], p = n.trim().split(eb);
   let x = "";
-  for (let S = p.length - 1; S >= 0; S -= 1) {
-    const k = p[S], {
+  for (let E = p.length - 1; E >= 0; E -= 1) {
+    const k = p[E], {
       isExternal: w,
       modifiers: N,
-      hasImportantModifier: E,
+      hasImportantModifier: S,
       baseClassName: v,
       maybePostfixModifierPosition: z
     } = o(k);
@@ -10412,7 +10414,7 @@ const Bg = (n, l) => {
       }
       R = !1;
     }
-    const A = N.length === 0 ? "" : N.length === 1 ? N[0] : d(N).join(":"), X = E ? A + ss : A, U = X + D;
+    const A = N.length === 0 ? "" : N.length === 1 ? N[0] : d(N).join(":"), X = S ? A + ss : A, U = X + D;
     if (f.indexOf(U) > -1)
       continue;
     f.push(U);
@@ -10439,14 +10441,14 @@ const Bg = (n, l) => {
 }, lb = (n, ...l) => {
   let o, i, s, d;
   const m = (p) => {
-    const x = l.reduce((S, k) => k(S), n());
+    const x = l.reduce((E, k) => k(E), n());
     return o = Pg(x), i = o.cache.get, s = o.cache.set, d = f, f(p);
   }, f = (p) => {
     const x = i(p);
     if (x)
       return x;
-    const S = nb(p, o);
-    return s(p, S), S;
+    const E = nb(p, o);
+    return s(p, E), E;
   };
   return d = m, (...p) => d(ab(...p));
 }, rb = [], Jt = (n) => {
@@ -10464,7 +10466,7 @@ const Bg = (n, l) => {
   const i = If.exec(n);
   return i ? i[1] ? l(i[1]) : o : !1;
 }, Pf = (n) => n === "position" || n === "percentage", tm = (n) => n === "image" || n === "url", em = (n) => n === "length" || n === "size" || n === "bg-size", nm = (n) => n === "length", Eb = (n) => n === "number", am = (n) => n === "family-name", lm = (n) => n === "number" || n === "weight", rm = (n) => n === "shadow", zb = () => {
-  const n = Jt("color"), l = Jt("font"), o = Jt("text"), i = Jt("font-weight"), s = Jt("tracking"), d = Jt("leading"), m = Jt("breakpoint"), f = Jt("container"), p = Jt("spacing"), x = Jt("radius"), S = Jt("shadow"), k = Jt("inset-shadow"), w = Jt("text-shadow"), N = Jt("drop-shadow"), E = Jt("blur"), v = Jt("perspective"), z = Jt("aspect"), R = Jt("ease"), D = Jt("animate"), A = () => ["auto", "avoid", "all", "avoid-page", "page", "left", "right", "column"], X = () => [
+  const n = Jt("color"), l = Jt("font"), o = Jt("text"), i = Jt("font-weight"), s = Jt("tracking"), d = Jt("leading"), m = Jt("breakpoint"), f = Jt("container"), p = Jt("spacing"), x = Jt("radius"), E = Jt("shadow"), k = Jt("inset-shadow"), w = Jt("text-shadow"), N = Jt("drop-shadow"), S = Jt("blur"), v = Jt("perspective"), z = Jt("aspect"), R = Jt("ease"), D = Jt("animate"), A = () => ["auto", "avoid", "all", "avoid-page", "page", "left", "right", "column"], X = () => [
     "center",
     "top",
     "bottom",
@@ -10502,7 +10504,7 @@ const Bg = (n, l) => {
     // Deprecated since Tailwind CSS v4.0.0
     "",
     "none",
-    E,
+    S,
     it,
     rt
   ], Qn = () => ["none", vt, it, rt], De = () => ["none", vt, it, rt], He = () => [vt, it, rt], pn = () => [On, "full", ...b()];
@@ -12007,7 +12009,7 @@ const Bg = (n, l) => {
           // Deprecated since Tailwind CSS v4.0.0
           "inner",
           "none",
-          S,
+          E,
           Or,
           jr
         ]
@@ -13162,8 +13164,8 @@ function Cb(n, l, o, i) {
   const s = n.map(() => 0), d = n[l];
   if (!d) return s;
   const m = n[l + 1], f = n[l - 1], p = d.end - d.start + (m ? m.start - d.end : f ? d.start - f.end : 0);
-  return n.forEach((x, S) => {
-    l < o && S > l && S <= o ? s[S] = -p : o < l && S >= o && S < l && (s[S] = p);
+  return n.forEach((x, E) => {
+    l < o && E > l && E <= o ? s[E] = -p : o < l && E >= o && E < l && (s[E] = p);
   }), s[l] = Math.min(Math.max(i, n[0].start - d.start), n[n.length - 1].end - d.end), s;
 }
 const rf = ["transform", "transition", "zIndex", "filter", "pointerEvents", "position"];
@@ -13178,9 +13180,9 @@ function Ab(n, l, o, i) {
   const s = n[l] ? Mb(n[l], o) : null, d = () => s ? o === "x" ? s.scrollLeft : s.scrollTop : 0, m = (z) => (o === "x" ? z.clientX : z.clientY) + d(), f = m(i), p = d(), x = n.map((z) => {
     const R = z.getBoundingClientRect();
     return o === "x" ? { start: R.left + p, end: R.right + p } : { start: R.top + p, end: R.bottom + p };
-  }), S = n.map((z) => rf.map((R) => z.style[R])), k = typeof matchMedia == "function" && matchMedia("(prefers-reduced-motion: reduce)").matches, w = o === "x" ? "translateX" : "translateY";
+  }), E = n.map((z) => rf.map((R) => z.style[R])), k = typeof matchMedia == "function" && matchMedia("(prefers-reduced-motion: reduce)").matches, w = o === "x" ? "translateX" : "translateY";
   let N = !1;
-  const E = { to: l };
+  const S = { to: l };
   n.forEach((z, R) => {
     if (z.style.pointerEvents = "none", R !== l) {
       k || (z.style.transition = "transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1)");
@@ -13189,14 +13191,14 @@ function Ab(n, l, o, i) {
     getComputedStyle(z).position === "static" && (z.style.position = "relative"), z.style.zIndex = "30", z.style.filter = "drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45))";
   });
   const v = (z, R) => {
-    E.to = z, Cb(x, l, z, R).forEach((D, A) => {
+    S.to = z, Cb(x, l, z, R).forEach((D, A) => {
       n[A].style.transform = D ? `${w}(${D}px)` : "";
     });
   };
   return {
     from: l,
     get to() {
-      return E.to;
+      return S.to;
     },
     slot: (z) => Tb(x, l, m(z)),
     apply: (z, R) => {
@@ -13207,7 +13209,7 @@ function Ab(n, l, o, i) {
     },
     end: () => {
       N || (N = !0, n.forEach((z, R) => rf.forEach((D, A) => {
-        z.style[D] = S[R][A];
+        z.style[D] = E[R][A];
       })));
     }
   };
@@ -13218,9 +13220,9 @@ function Ob(n, l) {
   if (n.button !== 0 || Fo) return;
   const o = { clientX: n.clientX, clientY: n.clientY }, i = n.currentTarget, s = n.pointerId;
   let d = null, m, f = !1;
-  const p = { cursor: document.body.style.cursor, userSelect: document.body.style.userSelect }, x = (E) => {
+  const p = { cursor: document.body.style.cursor, userSelect: document.body.style.userSelect }, x = (S) => {
     if (f) return;
-    f = !0, window.removeEventListener("pointermove", S), window.removeEventListener("pointerup", k), window.removeEventListener("pointercancel", w), window.removeEventListener("keydown", N, !0), window.removeEventListener("blur", w), i.removeEventListener("lostpointercapture", w);
+    f = !0, window.removeEventListener("pointermove", E), window.removeEventListener("pointerup", k), window.removeEventListener("pointercancel", w), window.removeEventListener("keydown", N, !0), window.removeEventListener("blur", w), i.removeEventListener("lostpointercapture", w);
     try {
       i.releasePointerCapture(s);
     } catch {
@@ -13228,10 +13230,10 @@ function Ob(n, l) {
     if (!d) return;
     Fo = !1, document.body.style.cursor = p.cursor, document.body.style.userSelect = p.userSelect, d.end();
     const v = (z) => z.stopPropagation();
-    window.addEventListener("click", v, { capture: !0, once: !0 }), setTimeout(() => window.removeEventListener("click", v, !0), 0), m?.(), l.onEnd(E, d);
-  }, S = (E) => {
+    window.addEventListener("click", v, { capture: !0, once: !0 }), setTimeout(() => window.removeEventListener("click", v, !0), 0), m?.(), l.onEnd(S, d);
+  }, E = (S) => {
     if (!d) {
-      if (Math.hypot(E.clientX - o.clientX, E.clientY - o.clientY) < jb) return;
+      if (Math.hypot(S.clientX - o.clientX, S.clientY - o.clientY) < jb) return;
       const v = l.items();
       d = Ab(v, l.from(v), l.axis, o), Fo = !0, document.body.style.cursor = "grabbing", document.body.style.userSelect = "none";
       try {
@@ -13242,11 +13244,11 @@ function Ob(n, l) {
       const z = l.onStart?.();
       m = typeof z == "function" ? z : void 0;
     }
-    l.onMove(E, d);
-  }, k = () => x(!0), w = () => x(!1), N = (E) => {
-    E.key === "Escape" && (E.stopPropagation(), x(!1));
+    l.onMove(S, d);
+  }, k = () => x(!0), w = () => x(!1), N = (S) => {
+    S.key === "Escape" && (S.stopPropagation(), x(!1));
   };
-  window.addEventListener("pointermove", S), window.addEventListener("pointerup", k), window.addEventListener("pointercancel", w), window.addEventListener("keydown", N, !0), window.addEventListener("blur", w);
+  window.addEventListener("pointermove", E), window.addEventListener("pointerup", k), window.addEventListener("pointercancel", w), window.addEventListener("keydown", N, !0), window.addEventListener("blur", w);
 }
 const im = typeof navigator < "u" && /Mac/i.test(navigator.platform), Ir = {
   "[": "BracketLeft",
@@ -13323,17 +13325,17 @@ const Ub = (n) => Db[n] ?? n.toUpperCase(), sf = (n) => typeof n == "boolean" ? 
   var i;
   if (l?.variants == null) return cf(n, o?.class, o?.className);
   const { variants: s, defaultVariants: d } = l, m = Object.keys(s).map((x) => {
-    const S = o?.[x], k = d?.[x];
-    if (S === null) return null;
-    const w = sf(S) || sf(k);
+    const E = o?.[x], k = d?.[x];
+    if (E === null) return null;
+    const w = sf(E) || sf(k);
     return s[x][w];
-  }), f = o && Object.entries(o).reduce((x, S) => {
-    let [k, w] = S;
+  }), f = o && Object.entries(o).reduce((x, E) => {
+    let [k, w] = E;
     return w === void 0 || (x[k] = w), x;
-  }, {}), p = l == null || (i = l.compoundVariants) === null || i === void 0 ? void 0 : i.reduce((x, S) => {
-    let { class: k, className: w, ...N } = S;
-    return Object.entries(N).every((E) => {
-      let [v, z] = E;
+  }, {}), p = l == null || (i = l.compoundVariants) === null || i === void 0 ? void 0 : i.reduce((x, E) => {
+    let { class: k, className: w, ...N } = E;
+    return Object.entries(N).every((S) => {
+      let [v, z] = S;
       return Array.isArray(z) ? z.includes({
         ...d,
         ...f
@@ -13473,13 +13475,13 @@ function Fb({ title: n, onClose: l, children: o, testId: i }) {
   );
 }
 const Rr = 4, Rn = 8, Ib = "flex w-full cursor-pointer items-center justify-between gap-3 px-[0.9rem] py-[0.4rem] text-left text-[0.82rem] text-fg max-[700px]:min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-40", df = (n) => n.text ?? (typeof n.label == "string" ? n.label : n.value);
-function $b({ value: n, onChange: l, options: o, className: i, ariaLabel: s, testId: d, id: m, title: f, disabled: p, placeholder: x, freeText: S, onKeyDown: k }) {
-  const w = nt.useId(), [N, E] = nt.useState(!1), [v, z] = nt.useState(-1), [R, D] = nt.useState(!1), A = nt.useRef(null), X = nt.useRef(null), [U, H] = nt.useState({}), h = nt.useRef({ text: "", at: 0 }), b = S && R && n ? o.filter((Y) => df(Y).toLowerCase().includes(n.toLowerCase()) || Y.value.toLowerCase().includes(n.toLowerCase())) : o, y = o.find((Y) => Y.value === n), _ = (Y) => `${w}-${Y}`;
+function $b({ value: n, onChange: l, options: o, className: i, ariaLabel: s, testId: d, id: m, title: f, disabled: p, placeholder: x, freeText: E, onKeyDown: k }) {
+  const w = nt.useId(), [N, S] = nt.useState(!1), [v, z] = nt.useState(-1), [R, D] = nt.useState(!1), A = nt.useRef(null), X = nt.useRef(null), [U, H] = nt.useState({}), h = nt.useRef({ text: "", at: 0 }), b = E && R && n ? o.filter((Y) => df(Y).toLowerCase().includes(n.toLowerCase()) || Y.value.toLowerCase().includes(n.toLowerCase())) : o, y = o.find((Y) => Y.value === n), _ = (Y) => `${w}-${Y}`;
   function T(Y) {
-    p || (z(Y), E(!0));
+    p || (z(Y), S(!0));
   }
   function O() {
-    E(!1), D(!1), z(-1);
+    S(!1), D(!1), z(-1);
   }
   function Q(Y) {
     !Y || Y.disabled || (l(Y.value), O());
@@ -13543,29 +13545,29 @@ function $b({ value: n, onChange: l, options: o, className: i, ariaLabel: s, tes
       else if (C === "ArrowDown" || C === "ArrowUp") {
         V(), b.length && z(v < 0 ? C === "ArrowDown" ? tt() : L() : I(v, C === "ArrowDown" ? 1 : -1));
         return;
-      } else if (C === "Home" && !S) {
+      } else if (C === "Home" && !E) {
         V(), z(tt());
         return;
-      } else if (C === "End" && !S) {
+      } else if (C === "End" && !E) {
         V(), z(L());
         return;
-      } else if (C === "Enter" || C === " " && !S) {
+      } else if (C === "Enter" || C === " " && !E) {
         if (v >= 0 && b[v]) {
           V(), Q(b[v]);
           return;
         }
-        if (!S) {
+        if (!E) {
           V(), O();
           return;
         }
-      } else if (!S && C.length === 1 && !Y.metaKey && !Y.ctrlKey && !Y.altKey) {
+      } else if (!E && C.length === 1 && !Y.metaKey && !Y.ctrlKey && !Y.altKey) {
         const K = Date.now();
         h.current = { text: (K - h.current.at > 600 ? "" : h.current.text) + C.toLowerCase(), at: K };
         const at = Math.max(v, 0), st = [...b.slice(at + (h.current.text.length === 1 ? 1 : 0)), ...b.slice(0, at + 1)].find((ct) => !ct.disabled && df(ct).toLowerCase().startsWith(h.current.text));
         st && (V(), z(b.indexOf(st)));
         return;
       }
-    } else if (C === "ArrowDown" || C === "ArrowUp" || !S && (C === "Enter" || C === " ")) {
+    } else if (C === "ArrowDown" || C === "ArrowUp" || !E && (C === "Enter" || C === " ")) {
       V(), T(Math.max(0, b.findIndex((K) => K.value === n)));
       return;
     }
@@ -13586,7 +13588,7 @@ function $b({ value: n, onChange: l, options: o, className: i, ariaLabel: s, tes
     onKeyDown: Z
   };
   return /* @__PURE__ */ et.jsxs(et.Fragment, { children: [
-    S ? /* @__PURE__ */ et.jsx(
+    E ? /* @__PURE__ */ et.jsx(
       "input",
       {
         ...$,
@@ -13598,7 +13600,7 @@ function $b({ value: n, onChange: l, options: o, className: i, ariaLabel: s, tes
         className: i,
         value: n,
         onChange: (Y) => {
-          l(Y.target.value), D(!0), N ? z(-1) : (z(-1), E(!0));
+          l(Y.target.value), D(!0), N ? z(-1) : (z(-1), S(!0));
         },
         onBlur: () => O()
       }
@@ -13662,16 +13664,16 @@ const ff = 230, Pb = 370;
 function tv({ x: n, y: l, readOnly: o, canUndo: i, canRedo: s, hasSelection: d, onClose: m, actions: f }) {
   const p = nt.useRef(null);
   de(() => {
-    const w = (E) => {
-      p.current?.contains(E.target) || m();
-    }, N = (E) => {
-      E.key === "Escape" && (E.preventDefault(), m());
+    const w = (S) => {
+      p.current?.contains(S.target) || m();
+    }, N = (S) => {
+      S.key === "Escape" && (S.preventDefault(), m());
     };
     return document.addEventListener("mousedown", w), document.addEventListener("keydown", N), window.addEventListener("blur", m), window.addEventListener("resize", m), () => {
       document.removeEventListener("mousedown", w), document.removeEventListener("keydown", N), window.removeEventListener("blur", m), window.removeEventListener("resize", m);
     };
   }, [m]);
-  const x = (w, N) => fs(bm ? w : N), S = (w, N, E, v, z = !1) => /* @__PURE__ */ et.jsxs("button", { type: "button", className: Vt(vm(), "flex items-center justify-between gap-6"), "data-testid": E, disabled: z, onClick: N, children: [
+  const x = (w, N) => fs(bm ? w : N), E = (w, N, S, v, z = !1) => /* @__PURE__ */ et.jsxs("button", { type: "button", className: Vt(vm(), "flex items-center justify-between gap-6"), "data-testid": S, disabled: z, onClick: N, children: [
     /* @__PURE__ */ et.jsx("span", { children: w }),
     /* @__PURE__ */ et.jsx("span", { className: "text-[0.72rem] text-subtext-0", children: v })
   ] }), k = f.askAgent;
@@ -13692,20 +13694,20 @@ function tv({ x: n, y: l, readOnly: o, canUndo: i, canRedo: s, hasSelection: d, 
         onContextMenu: (w) => w.preventDefault(),
         children: [
           k && /* @__PURE__ */ et.jsxs(et.Fragment, { children: [
-            S(d ? "Ask agent about selection…" : "Ask agent about file…", k, "editor-menu-ask-agent", ""),
+            E(d ? "Ask agent about selection…" : "Ask agent about file…", k, "editor-menu-ask-agent", ""),
             /* @__PURE__ */ et.jsx("div", { className: Qr })
           ] }),
-          S("Undo", f.undo, "editor-menu-undo", x("cmd+z", "ctrl+z"), o || !i),
-          S("Redo", f.redo, "editor-menu-redo", x("cmd+shift+z", "ctrl+y"), o || !s),
+          E("Undo", f.undo, "editor-menu-undo", x("cmd+z", "ctrl+z"), o || !i),
+          E("Redo", f.redo, "editor-menu-redo", x("cmd+shift+z", "ctrl+y"), o || !s),
           /* @__PURE__ */ et.jsx("div", { className: Qr }),
-          S("Cut", f.cut, "editor-menu-cut", x("cmd+x", "ctrl+x"), o || !d),
-          S("Copy", f.copy, "editor-menu-copy", x("cmd+c", "ctrl+c"), !d),
-          S("Paste", f.paste, "editor-menu-paste", x("cmd+v", "ctrl+v"), o),
-          S("Select All", f.selectAll, "editor-menu-select-all", x("cmd+a", "ctrl+a")),
+          E("Cut", f.cut, "editor-menu-cut", x("cmd+x", "ctrl+x"), o || !d),
+          E("Copy", f.copy, "editor-menu-copy", x("cmd+c", "ctrl+c"), !d),
+          E("Paste", f.paste, "editor-menu-paste", x("cmd+v", "ctrl+v"), o),
+          E("Select All", f.selectAll, "editor-menu-select-all", x("cmd+a", "ctrl+a")),
           /* @__PURE__ */ et.jsx("div", { className: Qr }),
-          S("Find…", f.find, "editor-menu-find", x("cmd+f", "ctrl+f")),
-          !o && S("Replace…", f.replace, "editor-menu-replace", x("cmd+alt+f", "ctrl+h")),
-          S("Go to Line…", f.gotoLine, "editor-menu-goto", fs("ctrl+g"))
+          E("Find…", f.find, "editor-menu-find", x("cmd+f", "ctrl+f")),
+          !o && E("Replace…", f.replace, "editor-menu-replace", x("cmd+alt+f", "ctrl+h")),
+          E("Go to Line…", f.gotoLine, "editor-menu-goto", fs("ctrl+g"))
         ]
       }
     ),
@@ -13742,7 +13744,7 @@ function bv(n) {
 }
 const Dr = 6, mf = 8;
 function vv(n, l = {}) {
-  const { minWidth: o = 220, align: i = "right", minSpaceAbove: s = 100 } = l, d = n.getBoundingClientRect(), m = window.innerWidth, f = window.innerHeight, p = i === "right" ? { right: Math.max(0, m - d.right) } : { left: Math.max(0, d.left) }, x = d.top - Dr - mf, S = f - d.bottom - Dr - mf;
+  const { minWidth: o = 220, align: i = "right", minSpaceAbove: s = 100 } = l, d = n.getBoundingClientRect(), m = window.innerWidth, f = window.innerHeight, p = i === "right" ? { right: Math.max(0, m - d.right) } : { left: Math.max(0, d.left) }, x = d.top - Dr - mf, E = f - d.bottom - Dr - mf;
   return x >= s ? {
     position: "fixed",
     bottom: f - d.top + Dr,
@@ -13755,7 +13757,7 @@ function vv(n, l = {}) {
     top: d.bottom + Dr,
     ...p,
     minWidth: o,
-    maxHeight: Math.min(S, f * 0.75),
+    maxHeight: Math.min(E, f * 0.75),
     overflowY: "auto"
   };
 }
@@ -13890,7 +13892,7 @@ const Ga = function(n, l) {
   let s = n;
   const d = wl[l];
   let m = null, f = 0, p = null;
-  const x = [], S = {}, k = function(h, b) {
+  const x = [], E = {}, k = function(h, b) {
     f = s * 4 + 17, m = (function(y) {
       const _ = new Array(y);
       for (let T = 0; T < y; T += 1) {
@@ -13899,7 +13901,7 @@ const Ga = function(n, l) {
           _[T][O] = null;
       }
       return _;
-    })(f), w(0, 0), w(f - 7, 0), w(0, f - 7), v(), E(), R(h, b), s >= 7 && z(h), p == null && (p = X(s, d, x)), D(p, b);
+    })(f), w(0, 0), w(f - 7, 0), w(0, f - 7), v(), S(), R(h, b), s >= 7 && z(h), p == null && (p = X(s, d, x)), D(p, b);
   }, w = function(h, b) {
     for (let y = -1; y <= 7; y += 1)
       if (!(h + y <= -1 || f <= h + y))
@@ -13909,11 +13911,11 @@ const Ga = function(n, l) {
     let h = 0, b = 0;
     for (let y = 0; y < 8; y += 1) {
       k(!0, y);
-      const _ = Hn.getLostPoint(S);
+      const _ = Hn.getLostPoint(E);
       (y == 0 || h > _) && (h = _, b = y);
     }
     return b;
-  }, E = function() {
+  }, S = function() {
     for (let h = 8; h < f - 8; h += 1)
       m[h][6] == null && (m[h][6] = h % 2 == 0);
     for (let h = 8; h < f - 8; h += 1)
@@ -14009,7 +14011,7 @@ const Ga = function(n, l) {
       T.put(17, 8);
     return A(T, _);
   };
-  S.addData = function(h, b) {
+  E.addData = function(h, b) {
     b = b || "Byte";
     let y = null;
     switch (b) {
@@ -14029,13 +14031,13 @@ const Ga = function(n, l) {
         throw "mode:" + b;
     }
     x.push(y), p = null;
-  }, S.isDark = function(h, b) {
+  }, E.isDark = function(h, b) {
     if (h < 0 || f <= h || b < 0 || f <= b)
       throw h + "," + b;
     return m[h][b];
-  }, S.getModuleCount = function() {
+  }, E.getModuleCount = function() {
     return f;
-  }, S.make = function() {
+  }, E.make = function() {
     if (s < 1) {
       let h = 1;
       for (; h < 40; h++) {
@@ -14053,41 +14055,41 @@ const Ga = function(n, l) {
       s = h;
     }
     k(!1, N());
-  }, S.createTableTag = function(h, b) {
+  }, E.createTableTag = function(h, b) {
     h = h || 2, b = typeof b > "u" ? h * 4 : b;
     let y = "";
     y += '<table style="', y += " border-width: 0px; border-style: none;", y += " border-collapse: collapse;", y += " padding: 0px; margin: " + b + "px;", y += '">', y += "<tbody>";
-    for (let _ = 0; _ < S.getModuleCount(); _ += 1) {
+    for (let _ = 0; _ < E.getModuleCount(); _ += 1) {
       y += "<tr>";
-      for (let T = 0; T < S.getModuleCount(); T += 1)
-        y += '<td style="', y += " border-width: 0px; border-style: none;", y += " border-collapse: collapse;", y += " padding: 0px; margin: 0px;", y += " width: " + h + "px;", y += " height: " + h + "px;", y += " background-color: ", y += S.isDark(_, T) ? "#000000" : "#ffffff", y += ";", y += '"/>';
+      for (let T = 0; T < E.getModuleCount(); T += 1)
+        y += '<td style="', y += " border-width: 0px; border-style: none;", y += " border-collapse: collapse;", y += " padding: 0px; margin: 0px;", y += " width: " + h + "px;", y += " height: " + h + "px;", y += " background-color: ", y += E.isDark(_, T) ? "#000000" : "#ffffff", y += ";", y += '"/>';
       y += "</tr>";
     }
     return y += "</tbody>", y += "</table>", y;
-  }, S.createSvgTag = function(h, b, y, _) {
+  }, E.createSvgTag = function(h, b, y, _) {
     let T = {};
     typeof arguments[0] == "object" && (T = arguments[0], h = T.cellSize, b = T.margin, y = T.alt, _ = T.title), h = h || 2, b = typeof b > "u" ? h * 4 : b, y = typeof y == "string" ? { text: y } : y || {}, y.text = y.text || null, y.id = y.text ? y.id || "qrcode-description" : null, _ = typeof _ == "string" ? { text: _ } : _ || {}, _.text = _.text || null, _.id = _.text ? _.id || "qrcode-title" : null;
-    const O = S.getModuleCount() * h + b * 2;
+    const O = E.getModuleCount() * h + b * 2;
     let Q, I, tt, L, Z = "", $;
-    for ($ = "l" + h + ",0 0," + h + " -" + h + ",0 0,-" + h + "z ", Z += '<svg version="1.1" xmlns="http://www.w3.org/2000/svg"', Z += T.scalable ? "" : ' width="' + O + 'px" height="' + O + 'px"', Z += ' viewBox="0 0 ' + O + " " + O + '" ', Z += ' preserveAspectRatio="xMinYMin meet"', Z += _.text || y.text ? ' role="img" aria-labelledby="' + U([_.id, y.id].join(" ").trim()) + '"' : "", Z += ">", Z += _.text ? '<title id="' + U(_.id) + '">' + U(_.text) + "</title>" : "", Z += y.text ? '<description id="' + U(y.id) + '">' + U(y.text) + "</description>" : "", Z += '<rect width="100%" height="100%" fill="white" cx="0" cy="0"/>', Z += '<path d="', tt = 0; tt < S.getModuleCount(); tt += 1)
-      for (L = tt * h + b, Q = 0; Q < S.getModuleCount(); Q += 1)
-        S.isDark(tt, Q) && (I = Q * h + b, Z += "M" + I + "," + L + $);
+    for ($ = "l" + h + ",0 0," + h + " -" + h + ",0 0,-" + h + "z ", Z += '<svg version="1.1" xmlns="http://www.w3.org/2000/svg"', Z += T.scalable ? "" : ' width="' + O + 'px" height="' + O + 'px"', Z += ' viewBox="0 0 ' + O + " " + O + '" ', Z += ' preserveAspectRatio="xMinYMin meet"', Z += _.text || y.text ? ' role="img" aria-labelledby="' + U([_.id, y.id].join(" ").trim()) + '"' : "", Z += ">", Z += _.text ? '<title id="' + U(_.id) + '">' + U(_.text) + "</title>" : "", Z += y.text ? '<description id="' + U(y.id) + '">' + U(y.text) + "</description>" : "", Z += '<rect width="100%" height="100%" fill="white" cx="0" cy="0"/>', Z += '<path d="', tt = 0; tt < E.getModuleCount(); tt += 1)
+      for (L = tt * h + b, Q = 0; Q < E.getModuleCount(); Q += 1)
+        E.isDark(tt, Q) && (I = Q * h + b, Z += "M" + I + "," + L + $);
     return Z += '" stroke="transparent" fill="black"/>', Z += "</svg>", Z;
-  }, S.createDataURL = function(h, b) {
+  }, E.createDataURL = function(h, b) {
     h = h || 2, b = typeof b > "u" ? h * 4 : b;
-    const y = S.getModuleCount() * h + b * 2, _ = b, T = y - b;
+    const y = E.getModuleCount() * h + b * 2, _ = b, T = y - b;
     return Yv(y, y, function(O, Q) {
       if (_ <= O && O < T && _ <= Q && Q < T) {
         const I = Math.floor((O - _) / h), tt = Math.floor((Q - _) / h);
-        return S.isDark(tt, I) ? 0 : 1;
+        return E.isDark(tt, I) ? 0 : 1;
       } else
         return 1;
     });
-  }, S.createImgTag = function(h, b, y) {
+  }, E.createImgTag = function(h, b, y) {
     h = h || 2, b = typeof b > "u" ? h * 4 : b;
-    const _ = S.getModuleCount() * h + b * 2;
+    const _ = E.getModuleCount() * h + b * 2;
     let T = "";
-    return T += "<img", T += ' src="', T += S.createDataURL(h, b), T += '"', T += ' width="', T += _, T += '"', T += ' height="', T += _, T += '"', y && (T += ' alt="', T += U(y), T += '"'), T += "/>", T;
+    return T += "<img", T += ' src="', T += E.createDataURL(h, b), T += '"', T += ' width="', T += _, T += '"', T += ' height="', T += _, T += '"', y && (T += ' alt="', T += U(y), T += '"'), T += "/>", T;
   };
   const U = function(h) {
     let b = "";
@@ -14114,7 +14116,7 @@ const Ga = function(n, l) {
     return b;
   }, H = function(h) {
     h = typeof h > "u" ? 2 : h;
-    const y = S.getModuleCount() * 1 + h * 2, _ = h, T = y - h;
+    const y = E.getModuleCount() * 1 + h * 2, _ = h, T = y - h;
     let O, Q, I, tt, L;
     const Z = {
       "██": "█",
@@ -14130,35 +14132,35 @@ const Ga = function(n, l) {
     let Y = "";
     for (O = 0; O < y; O += 2) {
       for (I = Math.floor((O - _) / 1), tt = Math.floor((O + 1 - _) / 1), Q = 0; Q < y; Q += 1)
-        L = "█", _ <= Q && Q < T && _ <= O && O < T && S.isDark(I, Math.floor((Q - _) / 1)) && (L = " "), _ <= Q && Q < T && _ <= O + 1 && O + 1 < T && S.isDark(tt, Math.floor((Q - _) / 1)) ? L += " " : L += "█", Y += h < 1 && O + 1 >= T ? $[L] : Z[L];
+        L = "█", _ <= Q && Q < T && _ <= O && O < T && E.isDark(I, Math.floor((Q - _) / 1)) && (L = " "), _ <= Q && Q < T && _ <= O + 1 && O + 1 < T && E.isDark(tt, Math.floor((Q - _) / 1)) ? L += " " : L += "█", Y += h < 1 && O + 1 >= T ? $[L] : Z[L];
       Y += `
 `;
     }
     return y % 2 && h > 0 ? Y.substring(0, Y.length - y - 1) + Array(y + 1).join("▀") : Y.substring(0, Y.length - 1);
   };
-  return S.createASCII = function(h, b) {
+  return E.createASCII = function(h, b) {
     if (h = h || 1, h < 2)
       return H(b);
     h -= 1, b = typeof b > "u" ? h * 2 : b;
-    const y = S.getModuleCount() * h + b * 2, _ = b, T = y - b;
+    const y = E.getModuleCount() * h + b * 2, _ = b, T = y - b;
     let O, Q, I, tt;
     const L = Array(h + 1).join("██"), Z = Array(h + 1).join("  ");
     let $ = "", Y = "";
     for (O = 0; O < y; O += 1) {
       for (I = Math.floor((O - _) / h), Y = "", Q = 0; Q < y; Q += 1)
-        tt = 1, _ <= Q && Q < T && _ <= O && O < T && S.isDark(I, Math.floor((Q - _) / h)) && (tt = 0), Y += tt ? L : Z;
+        tt = 1, _ <= Q && Q < T && _ <= O && O < T && E.isDark(I, Math.floor((Q - _) / h)) && (tt = 0), Y += tt ? L : Z;
       for (I = 0; I < h; I += 1)
         $ += Y + `
 `;
     }
     return $.substring(0, $.length - 1);
-  }, S.renderTo2dContext = function(h, b) {
+  }, E.renderTo2dContext = function(h, b) {
     b = b || 2;
-    const y = S.getModuleCount();
+    const y = E.getModuleCount();
     for (let _ = 0; _ < y; _++)
       for (let T = 0; T < y; T++)
-        h.fillStyle = S.isDark(_, T) ? "black" : "white", h.fillRect(T * b, _ * b, b, b);
-  }, S;
+        h.fillStyle = E.isDark(_, T) ? "black" : "white", h.fillRect(T * b, _ * b, b, b);
+  }, E;
 };
 Ga.stringToBytes = function(n) {
   const l = [];
@@ -14180,7 +14182,7 @@ Ga.createStringToBytes = function(n, l) {
     for (; ; ) {
       const p = s.read();
       if (p == -1) break;
-      const x = d(), S = d(), k = d(), w = String.fromCharCode(p << 8 | x), N = S << 8 | k;
+      const x = d(), E = d(), k = d(), w = String.fromCharCode(p << 8 | x), N = E << 8 | k;
       f[w] = N, m += 1;
     }
     if (m != l)
@@ -14370,11 +14372,11 @@ const ue = {
     for (let k = 0; k < f; k += 1)
       for (let w = 0; w < f; w += 1) {
         let N = 0;
-        const E = m.isDark(k, w);
+        const S = m.isDark(k, w);
         for (let v = -1; v <= 1; v += 1)
           if (!(k + v < 0 || f <= k + v))
             for (let z = -1; z <= 1; z += 1)
-              w + z < 0 || f <= w + z || v == 0 && z == 0 || E == m.isDark(k + v, w + z) && (N += 1);
+              w + z < 0 || f <= w + z || v == 0 && z == 0 || S == m.isDark(k + v, w + z) && (N += 1);
         N > 5 && (p += 3 + N - 5);
       }
     for (let k = 0; k < f - 1; k += 1)
@@ -14392,8 +14394,8 @@ const ue = {
     for (let k = 0; k < f; k += 1)
       for (let w = 0; w < f; w += 1)
         m.isDark(w, k) && (x += 1);
-    const S = Math.abs(100 * x / f / f - 50) / 5;
-    return p += S * 10, p;
+    const E = Math.abs(100 * x / f / f - 50) / 5;
+    return p += E * 10, p;
   }, s;
 })(), Bn = (function() {
   const n = new Array(256), l = new Array(256);
@@ -14676,8 +14678,8 @@ const ue = {
       throw "bad rs block @ typeNumber:" + s + "/errorCorrectionLevel:" + d;
     const f = m.length / 3, p = [];
     for (let x = 0; x < f; x += 1) {
-      const S = m[x * 3 + 0], k = m[x * 3 + 1], w = m[x * 3 + 2];
-      for (let N = 0; N < S; N += 1)
+      const E = m[x * 3 + 0], k = m[x * 3 + 1], w = m[x * 3 + 2];
+      for (let N = 0; N < E; N += 1)
         p.push(l(k, w));
     }
     return p;
@@ -14897,55 +14899,55 @@ const ue = {
   return d;
 }, Gv = function(n, l) {
   const o = n, i = l, s = new Array(n * l), d = {};
-  d.setPixel = function(x, S, k) {
-    s[S * o + x] = k;
+  d.setPixel = function(x, E, k) {
+    s[E * o + x] = k;
   }, d.write = function(x) {
     x.writeString("GIF87a"), x.writeShort(o), x.writeShort(i), x.writeByte(128), x.writeByte(0), x.writeByte(0), x.writeByte(0), x.writeByte(0), x.writeByte(0), x.writeByte(255), x.writeByte(255), x.writeByte(255), x.writeString(","), x.writeShort(0), x.writeShort(0), x.writeShort(o), x.writeShort(i), x.writeByte(0);
-    const S = 2, k = f(S);
-    x.writeByte(S);
+    const E = 2, k = f(E);
+    x.writeByte(E);
     let w = 0;
     for (; k.length - w > 255; )
       x.writeByte(255), x.writeBytes(k, w, 255), w += 255;
     x.writeByte(k.length - w), x.writeBytes(k, w, k.length - w), x.writeByte(0), x.writeString(";");
   };
   const m = function(x) {
-    const S = x;
+    const E = x;
     let k = 0, w = 0;
     const N = {};
-    return N.write = function(E, v) {
-      if (E >>> v)
+    return N.write = function(S, v) {
+      if (S >>> v)
         throw "length over";
       for (; k + v >= 8; )
-        S.writeByte(255 & (E << k | w)), v -= 8 - k, E >>>= 8 - k, w = 0, k = 0;
-      w = E << k | w, k = k + v;
+        E.writeByte(255 & (S << k | w)), v -= 8 - k, S >>>= 8 - k, w = 0, k = 0;
+      w = S << k | w, k = k + v;
     }, N.flush = function() {
-      k > 0 && S.writeByte(w);
+      k > 0 && E.writeByte(w);
     }, N;
   }, f = function(x) {
-    const S = 1 << x, k = (1 << x) + 1;
+    const E = 1 << x, k = (1 << x) + 1;
     let w = x + 1;
     const N = p();
-    for (let D = 0; D < S; D += 1)
+    for (let D = 0; D < E; D += 1)
       N.add(String.fromCharCode(D));
-    N.add(String.fromCharCode(S)), N.add(String.fromCharCode(k));
-    const E = hm(), v = m(E);
-    v.write(S, w);
+    N.add(String.fromCharCode(E)), N.add(String.fromCharCode(k));
+    const S = hm(), v = m(S);
+    v.write(E, w);
     let z = 0, R = String.fromCharCode(s[z]);
     for (z += 1; z < s.length; ) {
       const D = String.fromCharCode(s[z]);
       z += 1, N.contains(R + D) ? R = R + D : (v.write(N.indexOf(R), w), N.size() < 4095 && (N.size() == 1 << w && (w += 1), N.add(R + D)), R = D);
     }
-    return v.write(N.indexOf(R), w), v.write(k, w), v.flush(), E.toByteArray();
+    return v.write(N.indexOf(R), w), v.write(k, w), v.flush(), S.toByteArray();
   }, p = function() {
     const x = {};
-    let S = 0;
+    let E = 0;
     const k = {};
     return k.add = function(w) {
       if (k.contains(w))
         throw "dup key:" + w;
-      x[w] = S, S += 1;
+      x[w] = E, E += 1;
     }, k.size = function() {
-      return S;
+      return E;
     }, k.indexOf = function(w) {
       return x[w];
     }, k.contains = function(w) {
@@ -15266,20 +15268,20 @@ function Sm(n, l, o, i = kt()) {
   }), p();
 }
 function V1({ hostId: n, path: l, className: o, worktrees: i, request: s, parentChoices: d, emptyAgent: m, ...f }) {
-  const [p, x] = nt.useState(i), S = (_) => !!kt().coreCan?.(_, n), k = ym(), w = `${n}:${l}`, N = nt.useMemo(() => {
+  const [p, x] = nt.useState(i), E = (_) => !!kt().coreCan?.(_, n), k = ym(), w = `${n}:${l}`, N = nt.useMemo(() => {
     if (Array.isArray(d)) return d;
-    if (!S("workspace.nest")) return [];
+    if (!E("workspace.nest")) return [];
     const _ = k?.projects?.find((Q) => Q.hostId === n && Q.repoPath === l), T = [], O = (Q, I) => {
       for (const tt of Q ?? [])
         I && T.push({ id: tt.id, name: tt.name, path: tt.path }), O(tt.children, !0);
     };
     return O(_?.workspaces, !1), T;
-  }, [d, k, n, l]), E = n === "local" && S("worktree.job"), v = f.deleteSupported ?? S("worktree.delete"), z = f.startFromSupported ?? S("worktree.startFrom"), R = Xt((_) => _.emptyWorkspaceAgent?.() ?? void 0), D = m ?? R ?? void 0, A = Xt((_) => _.worktreeMenuRequest?.() ?? null), X = A?.projectKey === w ? A.nonce : null, U = nt.useMemo(() => s ?? (X == null ? null : A), [s, X]), [H, h] = nt.useState(U);
+  }, [d, k, n, l]), S = n === "local" && E("worktree.job"), v = f.deleteSupported ?? E("worktree.delete"), z = f.startFromSupported ?? E("worktree.startFrom"), R = Xt((_) => _.emptyWorkspaceAgent?.() ?? void 0), D = m ?? R ?? void 0, A = Xt((_) => _.worktreeMenuRequest?.() ?? null), X = A?.projectKey === w ? A.nonce : null, U = nt.useMemo(() => s ?? (X == null ? null : A), [s, X]), [H, h] = nt.useState(U);
   de(() => {
     U && h(U);
   }, [U]);
   const b = nt.useRef({});
-  b.current = { background: E, deleteSupported: v };
+  b.current = { background: S, deleteSupported: v };
   const y = nt.useMemo(() => {
     const _ = (T, O) => kt().ask(T, { hostId: n, repoPath: l, ...O });
     return {
@@ -15310,7 +15312,7 @@ function V1({ hostId: n, path: l, className: o, worktrees: i, request: s, parent
     projectKey: w,
     className: o,
     worktrees: p,
-    background: E,
+    background: S,
     startFromSupported: z,
     deleteSupported: v,
     parentChoices: N,
@@ -15404,10 +15406,10 @@ function by({ onGo: n, onClose: l }) {
     nt.createElement("button", { type: "button", className: Ss, onClick: s }, "OK")
   );
 }
-function vy({ value: n, onChange: l, onSave: o, onCaret: i, readOnly: s, wrap: d, label: m, path: f, docKey: p, onAskAgent: x, ref: S }) {
+function vy({ value: n, onChange: l, onSave: o, onCaret: i, readOnly: s, wrap: d, label: m, path: f, docKey: p, onAskAgent: x, ref: E }) {
   const k = kt().editor, w = nt.useRef(null);
   w.current = { onChange: l, onSave: o, onCaret: i, onAskAgent: x };
-  const [N, , E] = String(p).split("\0"), v = !!k && E !== void 0 && /^\d+$/.test(E), z = Xt((y) => v ? y.workspaceFiles(N)?.carets?.[p] ?? null : null);
+  const [N, , S] = String(p).split("\0"), v = !!k && S !== void 0 && /^\d+$/.test(S), z = Xt((y) => v ? y.workspaceFiles(N)?.carets?.[p] ?? null : null);
   de(() => {
     z && w.current.onCaret?.({ line: z.line, col: z.col });
   }, [z?.line, z?.col]);
@@ -15416,7 +15418,7 @@ function vy({ value: n, onChange: l, onSave: o, onCaret: i, readOnly: s, wrap: d
     const { text: y, startLine: _, endLine: T } = gy(k, p);
     w.current.onAskAgent(y, _, T);
   };
-  if (nt.useImperativeHandle(S, () => ({
+  if (nt.useImperativeHandle(E, () => ({
     openGoto: () => U(!0),
     focus: () => k?.focus(p),
     askAgent: H
@@ -15704,20 +15706,20 @@ function zm(n, l = /* @__PURE__ */ new Set()) {
   for (const o of n.children ?? []) o.kind !== "text" && zm(o, l);
   return l;
 }
-function ps(n, l, o, i, s = !1, d = !1, m = null, f = {}, p = !1, x = /* @__PURE__ */ new Map(), S = null) {
+function ps(n, l, o, i, s = !1, d = !1, m = null, f = {}, p = !1, x = /* @__PURE__ */ new Map(), E = null) {
   if (n.kind === "text") return x.get(n)?.text ?? n.text;
   const k = yf.has(n);
-  d ||= n.style.opacity === 0 || n.style.visibility === "invisible" || n.style.display === "hidden", d && (n.name || n.range_name) && (n = { ...n, name: void 0, range_name: void 0, also: void 0 }), n.style.text_color !== void 0 && (S = null), m = n.style.text_color ?? m;
+  d ||= n.style.opacity === 0 || n.style.visibility === "invisible" || n.style.display === "hidden", d && (n.name || n.range_name) && (n = { ...n, name: void 0, range_name: void 0, also: void 0 }), n.style.text_color !== void 0 && (E = null), m = n.style.text_color ?? m;
   const w = !!n.hover?.text_color && Mm(n), N = n.group ?? (w ? `~g${n.id}` : null);
-  w && (S = { group: N, color: n.hover.text_color }), f = { ...f };
+  w && (E = { group: N, color: n.hover.text_color }), f = { ...f };
   for (const _ of ["text_size", "line_height", "whitespace", "text_ellipsis"]) n.style[_] !== void 0 && (f[_] = n.style[_]);
-  const E = new Set(n.events ?? []);
+  const S = new Set(n.events ?? []);
   let v;
-  if (n.kind === "image" && !n.markup ? v = l.image(n.src) : v = l.div(), n.kind === "engine" && (v = v.child(i.engine ? i.engine(n.engine, n.key) : l.div())), n.markup && n.kind === "svg" && S && S.color !== m) {
-    const { group: _, color: T } = S, O = () => l.div().absolute().top(0).left(0).size_full();
+  if (n.kind === "image" && !n.markup ? v = l.image(n.src) : v = l.div(), n.kind === "engine" && (v = v.child(i.engine ? i.engine(n.engine, n.key) : l.div())), n.markup && n.kind === "svg" && E && E.color !== m) {
+    const { group: _, color: T } = E, O = () => l.div().absolute().top(0).left(0).size_full();
     v = v.child(O().group_hover(_, (Q) => Q.invisible()).child(i.icon(`~icon-${n.id}`, n.markup, m))).child(O().invisible().group_hover(_, (Q) => Q.visible()).child(i.icon(`~icon-${n.id}-hover`, n.markup, T)));
   } else n.markup && (v = v.child(i.icon(`~icon-${n.id}`, n.markup, n.kind === "svg" ? m : "")));
-  const z = _y(n, E, s);
+  const z = _y(n, S, s);
   if (z && (v = v.id(z)), n.measure && (v = v.measure(n.measure)), n.name && v.also_named) for (const _ of n.also ?? []) v = v.also_named(_);
   v = Io(v, { ...n.style, ...x.get(n) });
   const R = f.whitespace !== "nowrap" && !f.text_ellipsis;
@@ -15737,7 +15739,9 @@ function ps(n, l, o, i, s = !1, d = !1, m = null, f = {}, p = !1, x = /* @__PURE
     }
   }
   const D = n.style.overflow_x === "scroll" || n.style.overflow_y === "scroll", A = s && !n.pointer_none || n.blocks_pointer;
-  if ((D && $o.has(n) || A) && (v = v.on_scroll_wheel((_, T) => T.stop_propagation?.())), D || $o.has(n)) for (const _ of n.children ?? []) _.kind !== "text" && $o.add(_);
+  if ((D && $o.has(n) || A) && (v = v.on_scroll_wheel((_, T) => T.stop_propagation?.())), D && S.has("scroll") && (v = v.on_scroll_wheel(() => {
+    o.dispatch(n.id, "scroll", {});
+  })), D || $o.has(n)) for (const _ of n.children ?? []) _.kind !== "text" && $o.add(_);
   n.kind === "input" && !n.disabled && (v = v.on_mouse_down("left", (_, T) => {
     _.bounds && o.setBounds(n.id, _.bounds), o.focus(n.id), T.notify();
   }));
@@ -15745,7 +15749,7 @@ function ps(n, l, o, i, s = !1, d = !1, m = null, f = {}, p = !1, x = /* @__PURE
   X && !X.disabled && /^(checkbox|radio)$/.test(X.input_type) && (v = v.on_click((_, T) => {
     T.stop_propagation?.(), o.toggle(X.id), T.notify();
   }));
-  const U = ["click", "double_click", "context_menu", "mouse_down", "mouse_up"].some((_) => E.has(_));
+  const U = ["click", "double_click", "context_menu", "mouse_down", "mouse_up"].some((_) => S.has(_));
   if (U || k) for (const _ of n.children ?? []) _.kind !== "text" && yf.add(_);
   if (U && (v = v.on_mouse_down("left", (_, T) => {
     T.stop_propagation?.(), _.bounds && o.setBounds(n.id, _.bounds);
@@ -15760,7 +15764,7 @@ function ps(n, l, o, i, s = !1, d = !1, m = null, f = {}, p = !1, x = /* @__PURE
     const O = { ...Un(_), button: 0 };
     o.dispatch(n.id, "pointerup", { ...O, pointerType: "mouse" }), o.dispatch(n.id, "mouseup", O), T.notify();
   }), v = v.on_click((_, T) => {
-    o.dispatch(n.id, _.click_count === 2 && E.has("double_click") ? "dblclick" : "click", { detail: _.click_count, button: 0 }), T.notify();
+    o.dispatch(n.id, _.click_count === 2 && S.has("double_click") ? "dblclick" : "click", { detail: _.click_count, button: 0 }), T.notify();
   })), n.blocks_pointer && !U)
     for (const _ of ["left", "right"]) v = v.on_mouse_down(_, (T, O) => O.stop_propagation?.());
   else if (k && !U)
@@ -15769,7 +15773,7 @@ function ps(n, l, o, i, s = !1, d = !1, m = null, f = {}, p = !1, x = /* @__PURE
         const O = Un(T);
         (o.pressed?.x !== O.clientX || o.pressed?.y !== O.clientY) && (o.pressed = { id: n.id, x: O.clientX, y: O.clientY });
       });
-  if (E.has("mouse_move") && (v = v.on_mouse_move((_) => {
+  if (S.has("mouse_move") && (v = v.on_mouse_move((_) => {
     o.dispatch(n.id, "pointermove", { ...Un(_), pointerType: "mouse" });
   })), n.track_hover && $r.has(n.group) && (v = v.on_hover((_, T) => {
     o.hover(n.id, _), T.notify();
@@ -15787,7 +15791,7 @@ function ps(n, l, o, i, s = !1, d = !1, m = null, f = {}, p = !1, x = /* @__PURE
   for (const _ of (n.children ?? []).filter(Te)) {
     const T = _.style?.flex_basis;
     y && _.style.flex_grow > 0 && (T === 0 || typeof T == "string" && T.endsWith("%")) && x.set(_, { ...x.get(_), flex_basis: "auto" });
-    let O = ps(_, l, o, i, !1, d, m, f, h && _.style?.position !== "absolute", x, S);
+    let O = ps(_, l, o, i, !1, d, m, f, h && _.style?.position !== "absolute", x, E);
     const Q = !b && (_.kind === "text" || !_.meta), I = _.kind === "text" ? x.get(_)?.h ?? H : null, tt = _.kind === "text" ? x.get(_)?.w : void 0;
     if (Q || I || tt !== void 0) {
       let L = l.div();
@@ -15819,82 +15823,82 @@ function ca(n) {
 function By(n, l, o, i, s = 0, d = !1) {
   const m = [n.root, ...n.overlays];
   $r = /* @__PURE__ */ new Set();
-  for (const S of m) zm(S, $r);
+  for (const E of m) zm(E, $r);
   const f = s > 0 ? Ay(m, s) : /* @__PURE__ */ new Map();
   s > 0 && i.measure && Ey(m, s, i.measure, f), Cy(m, f), Ty(m, f), i.measure && Ny(m, i.measure, f);
   let p = l.div().relative().size_full().child(ps(n.root, l, o, i, !1, !1, null, {}, !1, f)), x = d && n.overlays.length ? l.div().relative().size_full().window_layer() : p;
-  for (const S of n.overlays) x = x.child(ps(S, l, o, i, !0, !1, null, {}, !1, f));
+  for (const E of n.overlays) x = x.child(ps(E, l, o, i, !0, !1, null, {}, !1, f));
   return x === p ? p : p.child(x);
 }
 function Ey(n, l, o, i) {
-  const s = (E, v) => i.set(E, { ...i.get(E), ...v }), d = /* @__PURE__ */ new Map(), m = /* @__PURE__ */ new Map(), f = ["text_size", "font_weight", "font_family", "italic", "whitespace", "text_ellipsis"];
-  function p(E, v, z) {
-    if (E.kind === "text") {
-      if (!(v.whitespace === "nowrap" || Nm.test(E.text)) || v.text_ellipsis || z || typeof v.text_size != "number") return NaN;
-      const h = o(E.text, { size: v.text_size, weight: v.font_weight ?? 400, family: v.font_family ?? ".SystemUIFont", italic: !!v.italic });
+  const s = (S, v) => i.set(S, { ...i.get(S), ...v }), d = /* @__PURE__ */ new Map(), m = /* @__PURE__ */ new Map(), f = ["text_size", "font_weight", "font_family", "italic", "whitespace", "text_ellipsis"];
+  function p(S, v, z) {
+    if (S.kind === "text") {
+      if (!(v.whitespace === "nowrap" || Nm.test(S.text)) || v.text_ellipsis || z || typeof v.text_size != "number") return NaN;
+      const h = o(S.text, { size: v.text_size, weight: v.font_weight ?? 400, family: v.font_family ?? ".SystemUIFont", italic: !!v.italic });
       return Number.isFinite(h) ? h : NaN;
     }
-    if (!Te(E) || E.kind === "input" || E.kind === "engine" || E.markup) return x(E);
+    if (!Te(S) || S.kind === "input" || S.kind === "engine" || S.markup) return x(S);
     const R = { ...v };
-    for (const H of f) E.style[H] !== void 0 && (R[H] = E.style[H]);
-    R.text_ellipsis = !!E.style.text_ellipsis, m.set(E, R);
-    const D = E.style, A = (E.children ?? []).filter(Le), X = A.map((H) => p(H, R, z || !!E.tabular));
-    let U = x(E);
+    for (const H of f) S.style[H] !== void 0 && (R[H] = S.style[H]);
+    R.text_ellipsis = !!S.style.text_ellipsis, m.set(S, R);
+    const D = S.style, A = (S.children ?? []).filter(Le), X = A.map((H) => p(H, R, z || !!S.tabular));
+    let U = x(S);
     if (!Number.isFinite(U) && D.w === void 0) {
       const H = A.map((b, y) => X[y] + (b.kind === "text" ? 0 : ot(b.style.ml) + ot(b.style.mr)));
       let h;
-      A.length ? Re(E) ? h = A.some((b) => b.kind !== "text" && b.style.flex_grow > 0) || D.flex_wrap === "wrap" ? NaN : H.reduce((b, y) => b + y, 0) + ot(D.gap_x) * (A.length - 1) : h = Math.max(...H) : h = 0, U = h + ot(D.pl) + ot(D.pr) + ot(D.border_l) + ot(D.border_r), typeof D.min_w == "number" && (U = Math.max(U, D.min_w)), typeof D.max_w == "number" && (U = Math.min(U, D.max_w));
+      A.length ? Re(S) ? h = A.some((b) => b.kind !== "text" && b.style.flex_grow > 0) || D.flex_wrap === "wrap" ? NaN : H.reduce((b, y) => b + y, 0) + ot(D.gap_x) * (A.length - 1) : h = Math.max(...H) : h = 0, U = h + ot(D.pl) + ot(D.pr) + ot(D.border_l) + ot(D.border_r), typeof D.min_w == "number" && (U = Math.max(U, D.min_w)), typeof D.max_w == "number" && (U = Math.min(U, D.max_w));
     }
-    return d.set(E, U), U;
+    return d.set(S, U), U;
   }
-  const x = (E) => typeof E.style?.w == "number" ? E.style.w : NaN, S = () => ({ exact: 0, laid: 0 }), k = (E, v) => {
+  const x = (S) => typeof S.style?.w == "number" ? S.style.w : NaN, E = () => ({ exact: 0, laid: 0 }), k = (S, v) => {
     if (!Number.isFinite(v))
-      return Object.assign(E, S()), NaN;
-    E.exact += v;
-    const z = Math.round(E.exact * l + 1e-9) / l, R = z - E.laid;
-    return E.laid = z, R;
-  }, w = (E) => Re(E) && E.style.flex_wrap !== "wrap" && (E.style.justify ?? "start") === "start";
-  function N(E) {
-    if (!E || E.kind === "text" || !Te(E)) return;
-    const v = (E.children ?? []).filter(Le);
-    if (w(E) && v.length > 1) {
-      const z = ot(E.style.gap_x), R = S(), D = !(z && v.some((A) => A.kind === "text" || !Number.isFinite(ot(A.style.ml))));
-      s(E, { border_l: k(R, ot(E.style.border_l)), pl: k(R, ot(E.style.pl)) }), D && z && s(E, { gap_x: 0 }), v.forEach((A, X) => {
+      return Object.assign(S, E()), NaN;
+    S.exact += v;
+    const z = Math.round(S.exact * l + 1e-9) / l, R = z - S.laid;
+    return S.laid = z, R;
+  }, w = (S) => Re(S) && S.style.flex_wrap !== "wrap" && (S.style.justify ?? "start") === "start";
+  function N(S) {
+    if (!S || S.kind === "text" || !Te(S)) return;
+    const v = (S.children ?? []).filter(Le);
+    if (w(S) && v.length > 1) {
+      const z = ot(S.style.gap_x), R = E(), D = !(z && v.some((A) => A.kind === "text" || !Number.isFinite(ot(A.style.ml))));
+      s(S, { border_l: k(R, ot(S.style.border_l)), pl: k(R, ot(S.style.pl)) }), D && z && s(S, { gap_x: 0 }), v.forEach((A, X) => {
         const U = (X && D ? z : 0) + (A.kind === "text" ? 0 : ot(A.style.ml));
         if (A.kind === "text")
-          U && Object.assign(R, S());
+          U && Object.assign(R, E());
         else {
           const y = k(R, U);
           Number.isFinite(y) && s(A, { ml: y });
         }
-        const H = A.kind === "text" ? m.get(E) ?? {} : null, h = A.kind === "text" ? p(A, H, !!E.tabular) : d.get(A);
+        const H = A.kind === "text" ? m.get(S) ?? {} : null, h = A.kind === "text" ? p(A, H, !!S.tabular) : d.get(A);
         if ((A.kind === "text" || !(A.style.flex_grow > 0)) && Number.isFinite(h)) {
           const y = { w: k(R, h) };
           A.kind !== "text" && typeof A.style.w != "number" && A.style.min_w === void 0 && (y.whitespace = "nowrap", y.flex_shrink = 0), s(A, y);
-        } else Object.assign(R, S());
+        } else Object.assign(R, E());
         if (A.kind !== "text") {
           const y = k(R, ot(A.style.mr));
           Number.isFinite(y) && s(A, { mr: y });
         }
       });
     }
-    for (const z of E.children ?? []) z.kind !== "text" && N(z);
+    for (const z of S.children ?? []) z.kind !== "text" && N(z);
   }
-  for (const E of n)
-    E && (p(E, {}, !1), N(E));
+  for (const S of n)
+    S && (p(S, {}, !1), N(S));
 }
 const zy = /(?<= +)(?=[^ ])|(?<=[\p{L}\p{N}]-)(?=[\p{L}\p{N}])/u;
 function Ny(n, l, o) {
-  const i = ["text_size", "font_weight", "font_family", "italic", "line_height"], s = (f) => typeof f == "number" ? f : 0, d = (f, p) => p && Pr(p) && !Re(p) && f.style.position !== "absolute" && !["start", "center", "end"].includes(f.style.self) && !["start", "center", "end"].includes(p.style.items), m = (f, p, x, S) => {
+  const i = ["text_size", "font_weight", "font_family", "italic", "line_height"], s = (f) => typeof f == "number" ? f : 0, d = (f, p) => p && Pr(p) && !Re(p) && f.style.position !== "absolute" && !["start", "center", "end"].includes(f.style.self) && !["start", "center", "end"].includes(p.style.items), m = (f, p, x, E) => {
     if (!f || f.kind === "text" || !Te(f)) return;
     const k = f.style;
     let w = typeof k.w == "number" ? k.w : k.w === "100%" ? x : d(f, p) ? x - s(k.ml) - s(k.mr) : NaN;
     typeof k.max_w == "number" && (w = Math.min(w, k.max_w));
-    const N = w - s(k.pl) - s(k.pr) - s(k.border_l) - s(k.border_r), E = { ...S };
-    for (const z of i) k[z] !== void 0 && (E[z] = k[z]);
+    const N = w - s(k.pl) - s(k.pr) - s(k.border_l) - s(k.border_r), S = { ...E };
+    for (const z of i) k[z] !== void 0 && (S[z] = k[z]);
     const v = f.children ?? [];
-    if (f.break_anywhere && Number.isFinite(N) && N > 0 && typeof E.text_size == "number" && v.length && v.every((z) => z.kind === "text")) {
-      const z = { size: E.text_size, weight: E.font_weight ?? 400, family: E.font_family ?? ".SystemUIFont", italic: !!E.italic }, R = (X) => l(X.trimEnd(), z) <= N + 0.01;
+    if (f.break_anywhere && Number.isFinite(N) && N > 0 && typeof S.text_size == "number" && v.length && v.every((z) => z.kind === "text")) {
+      const z = { size: S.text_size, weight: S.font_weight ?? 400, family: S.font_family ?? ".SystemUIFont", italic: !!S.italic }, R = (X) => l(X.trimEnd(), z) <= N + 0.01;
       let D = 0;
       for (const X of v) {
         const U = [];
@@ -15916,10 +15920,10 @@ function Ny(n, l, o) {
 `);
         U.every((h) => !h || R(h)) ? H !== X.text && o.set(X, { ...o.get(X), text: H }) : D = NaN, D += U.length;
       }
-      const A = ca(E);
+      const A = ca(S);
       Number.isFinite(D) && A && k.h === void 0 && v.length === 1 && o.set(f, { ...o.get(f), h: D * A + s(k.pt) + s(k.pb) + s(k.border_t) + s(k.border_b) });
     }
-    for (const z of v) m(z, f, Re(f) ? NaN : N, E);
+    for (const z of v) m(z, f, Re(f) ? NaN : N, S);
   };
   for (const f of n) m(f, null, NaN, {});
 }
@@ -15941,30 +15945,30 @@ function Cy(n, l) {
     const x = i(p);
     if (Number.isFinite(x)) return x;
     if (p.kind === "text" || !Te(p)) return 0;
-    const S = p.style, k = typeof S.min_h == "number" ? S.min_h : 0, w = (p.children ?? []).filter(Le), N = w.map((z) => s(z) + (z.kind === "text" ? 0 : Math.max(0, ot(z.style.mt) || 0) + Math.max(0, ot(z.style.mb) || 0))), E = w.length ? Re(p) ? Math.max(...N) : N.reduce((z, R) => z + R, 0) + (S.display === "flex" ? (ot(S.gap_y) || 0) * (w.length - 1) : 0) : 0, v = [S.pt, S.pb, S.border_t, S.border_b].reduce((z, R) => z + (ot(R) || 0), 0);
-    return Math.max(k, E + v);
+    const E = p.style, k = typeof E.min_h == "number" ? E.min_h : 0, w = (p.children ?? []).filter(Le), N = w.map((z) => s(z) + (z.kind === "text" ? 0 : Math.max(0, ot(z.style.mt) || 0) + Math.max(0, ot(z.style.mb) || 0))), S = w.length ? Re(p) ? Math.max(...N) : N.reduce((z, R) => z + R, 0) + (E.display === "flex" ? (ot(E.gap_y) || 0) * (w.length - 1) : 0) : 0, v = [E.pt, E.pb, E.border_t, E.border_b].reduce((z, R) => z + (ot(R) || 0), 0);
+    return Math.max(k, S + v);
   }, d = (p) => !(p.children ?? []).filter(Le).length || Re(p) ? NaN : s({ ...p, style: { ...p.style, h: void 0, max_h: void 0, min_h: void 0 } }), m = (p, x) => {
-    const S = p.style;
-    if (typeof S.h == "number") return S.h;
-    if (typeof S.max_h == "number") return S.max_h;
+    const E = p.style;
+    if (typeof E.h == "number") return E.h;
+    if (typeof E.max_h == "number") return E.max_h;
     if (!x || !Pr(x) || Re(x)) return NaN;
     const k = x.style, w = typeof k.h == "number" ? k.h : typeof k.max_h == "number" ? k.max_h : NaN, N = (x.children ?? []).filter(Le);
-    let E = 0;
+    let S = 0;
     for (const z of N) {
       if (z === p) continue;
       const R = i(z);
       if (!Number.isFinite(R)) return NaN;
-      E += R + (z.kind === "text" ? 0 : ot(z.style.mt) + ot(z.style.mb));
+      S += R + (z.kind === "text" ? 0 : ot(z.style.mt) + ot(z.style.mb));
     }
     const v = k.display === "flex" ? ot(k.gap_y) * Math.max(0, N.length - 1) : 0;
-    return w - ot(k.pt) - ot(k.pb) - ot(k.border_t) - ot(k.border_b) - E - v - ot(S.mt) - ot(S.mb);
+    return w - ot(k.pt) - ot(k.pb) - ot(k.border_t) - ot(k.border_b) - S - v - ot(E.mt) - ot(E.mb);
   }, f = (p, x) => {
     if (!(!p || p.kind === "text" || !Te(p))) {
       if (p.scrollbar > 0 && p.style.overflow_y === "scroll") {
-        const S = d(p), k = m(p, x);
-        Number.isFinite(S) && Number.isFinite(k) && S > k + 0.01 && l.set(p, { ...l.get(p), pr: ot(p.style.pr) + p.scrollbar });
+        const E = d(p), k = m(p, x);
+        Number.isFinite(E) && Number.isFinite(k) && E > k + 0.01 && l.set(p, { ...l.get(p), pr: ot(p.style.pr) + p.scrollbar });
       }
-      for (const S of p.children ?? []) f(S, p);
+      for (const E of p.children ?? []) f(E, p);
     }
   };
   for (const p of n) f(p, null);
@@ -16006,7 +16010,7 @@ function Ay(n, l) {
     }
     return D + A;
   }
-  const x = () => ({ exact: 0, laid: 0 }), S = (v, z) => {
+  const x = () => ({ exact: 0, laid: 0 }), E = (v, z) => {
     if (!Number.isFinite(z))
       return Object.assign(v, x()), NaN;
     v.exact += z;
@@ -16018,7 +16022,7 @@ function Ay(n, l) {
       for (const z of (v.children ?? []).filter((R) => R.kind !== "text" && Te(R) && R.style.position === "absolute")) k(z);
       if (Pr(v) && !Re(v)) {
         const z = x();
-        i(v, { border_t: S(z, ot(v.style.border_t)), pt: S(z, ot(v.style.pt)) }), w(v, z);
+        i(v, { border_t: E(z, ot(v.style.border_t)), pt: E(z, ot(v.style.pt)) }), w(v, z);
       } else for (const z of (v.children ?? []).filter(Le)) z.kind !== "text" && k(z);
     }
   }
@@ -16031,39 +16035,39 @@ function Ay(n, l) {
     return D && i(v, { gap_y: 0 }), R.forEach((A, X) => {
       if (A.kind === "text") {
         const U = s.get(A) ?? m(A, d.get(v) ?? {});
-        Number.isFinite(U) ? i(A, { h: S(z, U) }) : Object.assign(z, x());
+        Number.isFinite(U) ? i(A, { h: E(z, U) }) : Object.assign(z, x());
         return;
       }
-      if (i(A, { mt: S(z, (X ? D : 0) + ot(A.style.mt)) }), Number.isFinite(s.get(A))) E(A, z);
+      if (i(A, { mt: E(z, (X ? D : 0) + ot(A.style.mt)) }), Number.isFinite(s.get(A))) S(A, z);
       else if (N(A)) {
         const U = A.style;
-        i(A, { border_t: S(z, ot(U.border_t)), pt: S(z, ot(U.pt)) }), i(A, { pb: S(z, ot(U.pb)), border_b: S(z, ot(U.border_b)) });
+        i(A, { border_t: E(z, ot(U.border_t)), pt: E(z, ot(U.pt)) }), i(A, { pb: E(z, ot(U.pb)), border_b: E(z, ot(U.border_b)) });
       } else
         k(A), Object.assign(z, x());
-      i(A, { mb: S(z, ot(A.style.mb)) });
+      i(A, { mb: E(z, ot(A.style.mb)) });
     }), !0;
   }
   function N(v) {
     const z = v.style, R = (v.children ?? []).filter(Le), D = ca(d.get(v) ?? {});
     return v.kind === "div" && !Re(v) && R.length > 0 && R.every((A) => A.kind === "text") && Number.isInteger(D) && [z.h, z.min_h, z.max_h].every((A) => A === void 0 || A === "auto");
   }
-  function E(v, z) {
+  function S(v, z) {
     const R = v.style;
     for (const H of (v.children ?? []).filter((h) => h.kind !== "text" && Te(h) && h.style.position === "absolute")) k(H);
     const D = z.laid, A = z.exact;
-    i(v, { border_t: S(z, ot(R.border_t)), pt: S(z, ot(R.pt)) });
+    i(v, { border_t: E(z, ot(R.border_t)), pt: E(z, ot(R.pt)) });
     const X = R.h !== void 0 && R.h !== "auto", U = s.get(v) - ot(R.pt) - ot(R.pb) - ot(R.border_t) - ot(R.border_b);
     if (v.kind === "input")
-      X || S(z, U);
+      X || E(z, U);
     else if (Re(v) || X && (R.justify ?? "start") !== "start") {
       for (const H of (v.children ?? []).filter(Le)) H.kind !== "text" && k(H);
-      X || S(z, U);
-    } else !w(v, z) && !X && S(z, U);
+      X || E(z, U);
+    } else !w(v, z) && !X && E(z, U);
     if (X) {
       z.exact = A + s.get(v), z.laid = Math.round(z.exact * l + 1e-9) / l, i(v, { h: z.laid - D });
       return;
     }
-    i(v, { pb: S(z, ot(R.pb)), border_b: S(z, ot(R.border_b)) }), i(v, { h: z.laid - D });
+    i(v, { pb: E(z, ot(R.pb)), border_b: E(z, ot(R.border_b)) }), i(v, { h: z.laid - D });
   }
   for (const v of n)
     m(v, {}), k(v);

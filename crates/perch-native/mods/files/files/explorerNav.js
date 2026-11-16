@@ -7,6 +7,37 @@ export function flattenTree(trees, expanded, path = "") {
         ...(entry.kind === "directory" && expanded.has(entry.path) && trees[entry.path]?.state === "ready" ? flattenTree(trees, expanded, entry.path) : []),
     ]);
 }
+/** The explorer's rows, top to bottom, as the nested tree draws them: a folder's state line or its children right
+ * after it while it is expanded and its listing has been asked for. */
+export function treeItems(trees, expanded, path = "", level = 0) {
+    const tree = trees[path];
+    if (!tree)
+        return [];
+    const items = [];
+    for (const entry of tree.entries) {
+        items.push({ kind: "entry", entry, level });
+        const child = entry.kind === "directory" && expanded.has(entry.path) ? trees[entry.path] : undefined;
+        if (child?.state === "loading")
+            items.push({ kind: "loading", path: entry.path, level: level + 1 });
+        else if (child?.state === "error")
+            items.push({ kind: "error", path: entry.path, level: level + 1, error: child.error, entry });
+        else if (child?.state === "ready")
+            items.push(...treeItems(trees, expanded, entry.path, level + 1));
+    }
+    if (tree.truncated)
+        items.push({ kind: "truncated", path, level });
+    if (tree.state === "ready" && tree.entries.length === 0)
+        items.push({ kind: "empty", path, level });
+    return items;
+}
+/** The rows a tree of `count` rows draws when the view shows `shown` rows from row `top`: the chunks (of `chunk`
+ * rows) the view is in, with one more chunk before and after it. A move inside a chunk keeps the same rows. */
+export function treeWindow(count, top, shown, chunk) {
+    const first = Math.floor(Math.max(0, top) / chunk) - 1;
+    const last = Math.floor((Math.max(0, top) + shown) / chunk) + 1;
+    const start = Math.min(Math.max(0, first * chunk), Math.max(0, count - chunk));
+    return { start: Math.max(0, start), end: Math.min(count, Math.max(start + chunk, (last + 1) * chunk)) };
+}
 const parentOf = (path) => path.split("/").slice(0, -1).join("/");
 /** The effect of `key` with the cursor on `cursor` (null/unknown = none yet), or null when the key is not the explorer's. */
 export function explorerKey(rows, cursor, key, expanded) {
