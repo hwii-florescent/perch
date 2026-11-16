@@ -189,3 +189,8 @@ harness = false
 name = "diff_engine_window"
 path = "tests/diff_engine_window.rs"
 harness = false
+
+[[test]]
+name = "git_store_window"
+path = "tests/git_store_window.rs"
+harness = false
