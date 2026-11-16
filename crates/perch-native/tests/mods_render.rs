@@ -270,6 +270,22 @@ fn main() {
         "the text is drawn in the box ({text} white pixels)"
     );
 
+    // With nothing changing on disk, the view does not look at its files again (it used to,
+    // four times a second). The watcher's events from writing the stock mods pass first.
+    std::thread::sleep(Duration::from_millis(500));
+    cx.advance_clock(POLL);
+    cx.run_until_parked();
+    let checks = host.file_checks();
+    for _ in 0..20 {
+        cx.advance_clock(Duration::from_millis(250));
+        cx.run_until_parked();
+    }
+    assert_eq!(
+        host.file_checks(),
+        checks,
+        "an idle mod does not look at its files"
+    );
+
     // An edit on disk is drawn by the same view, without a restart.
     write(&dir, &box_mod("#0000ff", 200, "Hello again"));
     let (frame, second) = until(&mut cx, window, "the edit", |_, _, record| {

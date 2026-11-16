@@ -13,8 +13,9 @@
 //!   read only `mods/`, so neither ever sees these. A user folder with a stock mod's id replaces it.
 //!
 //! A [`ModView`] is one mod as a GPUI view the workspace can place anywhere. It looks at the mod's
-//! files every [`POLL`] and reloads it in place when they change; when the user adds or removes an
-//! override folder it switches source. A new version that throws while loading never replaces
+//! files when the file system says something under the mods folder changed (one watcher per
+//! host, [`POLL`] after the event), and reloads it in place when they did; when the user adds or
+//! removes an override folder it switches source. Nothing runs while no file changes. A new version that throws while loading never replaces
 //! the one on screen ([`ModView::load_error`]); one that throws in `render()` leaves the last good
 //! render drawn under the shell's error banner ([`ModView::render_error`]). A mod gets no more
 //! than a web mod ([`ModHost::policy_for`]): it reads its own folder, writes and keeps
@@ -35,6 +36,8 @@ pub mod screens;
 pub mod theme;
 
 use anyhow::{anyhow, Context as _, Result};
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
+use futures::StreamExt as _;
 use gpui::{div, prelude::*, AnyView, App, Context, Entity, Task, WeakEntity, Window};
 use gpui_shell::policy::Policy;
 use gpui_shell::{Capabilities, HostModule, ScriptView, ShellRoot, ShellRuntime};
@@ -43,10 +46,13 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 
-/// How often a shown mod's files are looked at. A save shows within this.
-pub const POLL: Duration = Duration::from_millis(250);
+/// How long after a file event a shown mod looks at its files: a save is often several events,
+/// taken together. A save shows within this (and the file system's own delay).
+pub const POLL: Duration = Duration::from_millis(50);
 
 /// The stock mods: path under `crates/perch-native/mods/`, and the file. Every file in that folder
 /// must be listed here (a unit test checks).
@@ -588,6 +594,11 @@ type ModuleFactory = Rc<dyn Fn(&str) -> HostModule>;
 
 struct Inner {
     user_dir: PathBuf,
+    changes: Arc<Changes>,
+    /// `None` when the system would not watch the folder (said on stderr): mods then load once.
+    watcher: RefCell<Option<notify::RecommendedWatcher>>,
+    /// Folders outside `user_dir` watched for a linked mod folder (the watcher does not follow links).
+    watched: RefCell<HashSet<PathBuf>>,
     runtime: Rc<ShellRuntime>,
     modules: RefCell<Vec<ModuleFactory>>,
     views: RefCell<Vec<WeakEntity<ModView>>>,
@@ -604,8 +615,15 @@ impl ModHost {
     pub fn new(user_dir: PathBuf) -> Result<Self> {
         write_stock(&user_dir.join(".stock"), STOCK)?;
         let runtime = ShellRuntime::new_isolated().context("could not start the mod runtime")?;
+        let changes = Arc::new(Changes::default());
+        let watcher = watch(&user_dir, &changes)
+            .map_err(|error| eprintln!("perch-native: mod files are not watched: {error:#}"))
+            .ok();
         let host = Self(Rc::new(Inner {
             user_dir,
+            changes,
+            watcher: RefCell::new(watcher),
+            watched: RefCell::default(),
             runtime,
             modules: RefCell::default(),
             views: RefCell::default(),
@@ -623,6 +641,38 @@ impl ModHost {
 
     pub fn user_dir(&self) -> &Path {
         &self.0.user_dir
+    }
+
+    /// How many times the mods' files changed (as the watcher saw it), to compare with an earlier
+    /// count.
+    pub fn files_generation(&self) -> u64 {
+        self.0.changes.generation.load(Ordering::SeqCst)
+    }
+
+    /// How many times this host's views looked at their mods' files, for tests that bound it.
+    pub fn file_checks(&self) -> u64 {
+        self.0.changes.checks.load(Ordering::SeqCst)
+    }
+
+    /// Watches a mod folder found through a link out of the mods folder, which the folder's
+    /// watcher does not follow.
+    fn watch_linked(&self, dir: &Path) {
+        let Ok(real) = dir.canonicalize() else { return };
+        let root = self
+            .0
+            .user_dir
+            .canonicalize()
+            .unwrap_or_else(|_| self.0.user_dir.clone());
+        if real.starts_with(&root) || !self.0.watched.borrow_mut().insert(real.clone()) {
+            return;
+        }
+        if let Some(watcher) = self.0.watcher.borrow_mut().as_mut() {
+            if let Err(error) =
+                notify::Watcher::watch(watcher, &real, notify::RecursiveMode::Recursive)
+            {
+                eprintln!("perch-native: {} is not watched: {error}", real.display());
+            }
+        }
     }
 
     /// What the mods' runtime has spent so far (script renders, materializations), for tests
@@ -685,6 +735,7 @@ impl ModHost {
         cx: &mut App,
     ) -> Entity<ModView> {
         let host = self.clone();
+        let mut changes = self.0.changes.subscribe();
         let key = key.to_string();
         let id = id.to_string();
         let entity = cx.new(|cx| {
@@ -698,13 +749,16 @@ impl ModHost {
                 _poll: Task::ready(()),
             };
             view.check(window, cx);
-            view._poll = cx.spawn_in(window, async move |this, cx| loop {
-                cx.background_executor().timer(POLL).await;
-                if this
-                    .update_in(cx, |view, window, cx| view.check(window, cx))
-                    .is_err()
-                {
-                    break;
+            view._poll = cx.spawn_in(window, async move |this, cx| {
+                while changes.next().await.is_some() {
+                    cx.background_executor().timer(POLL).await;
+                    while changes.try_recv().is_ok() {}
+                    if this
+                        .update_in(cx, |view, window, cx| view.check(window, cx))
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
             });
             view
@@ -833,8 +887,8 @@ impl ModView {
             }
             return;
         };
-        // ponytail: a stat per file on the window's thread every poll; a mod folder holds a
-        // handful. A large one would want an OS file watcher (herdr-app uses `notify`).
+        self.host.0.changes.checks.fetch_add(1, Ordering::SeqCst);
+        self.host.watch_linked(&info.dir);
         let stamp = stamp(&info.dir);
         let current = Some((info.dir.clone(), stamp));
         if self.tried == current {
@@ -907,6 +961,50 @@ impl Render for ModView {
             (None, None) => view,
         }
     }
+}
+
+/// File changes under a host's mods folder: counted, and passed to every view's task.
+#[derive(Default)]
+struct Changes {
+    generation: AtomicU64,
+    checks: AtomicU64,
+    wakers: Mutex<Vec<UnboundedSender<()>>>,
+}
+
+impl Changes {
+    fn changed(&self) {
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        let mut wakers = self.wakers.lock().unwrap_or_else(PoisonError::into_inner);
+        wakers.retain(|waker| waker.unbounded_send(()).is_ok());
+    }
+
+    fn subscribe(&self) -> UnboundedReceiver<()> {
+        let (waker, changes) = futures::channel::mpsc::unbounded();
+        self.wakers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(waker);
+        changes
+    }
+}
+
+/// Watches `dir` (the system's file events, off the window's thread). What mods keep in
+/// `.data/` (their `localStorage`) is not a change to a mod.
+fn watch(dir: &Path, changes: &Arc<Changes>) -> Result<notify::RecommendedWatcher> {
+    use notify::Watcher as _;
+    let data = [dir.join(".data"), dir.canonicalize()?.join(".data")];
+    let changes = changes.clone();
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        if let Ok(event) = &event {
+            let ours = |path: &PathBuf| data.iter().any(|data| path.starts_with(data));
+            if event.kind.is_access() || (!event.paths.is_empty() && event.paths.iter().all(ours)) {
+                return;
+            }
+        }
+        changes.changed();
+    })?;
+    watcher.watch(dir, notify::RecursiveMode::Recursive)?;
+    Ok(watcher)
 }
 
 /// What a folder's files looked like: each counted file's path, size and modified time.
