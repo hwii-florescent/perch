@@ -258,6 +258,8 @@ pub struct Workspace {
     column_drag: Option<ColumnDrag>,
     /// The window's width as last drawn.
     viewport_width: f32,
+    /// The workspace files this window has open: listings, documents and their drafts.
+    files: crate::files::Files,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -297,10 +299,14 @@ impl Workspace {
             cx.notify();
         });
         // The sidebar's own changes (hiding it, a count, a session's state) redraw the window.
-        let observed = cx.observe(&sidebar, |this, _, cx| {
+        let observed = cx.observe(&sidebar, |this, sidebar, cx| {
             this.close_deleted(cx);
+            let connected = sidebar.read(cx).model().connected;
+            this.files_connected(connected, cx);
             cx.notify()
         });
+        // A window opened on a live connection: the store starts connected.
+        let files_live = sidebar.read(cx).model().connected;
         Self {
             sidebar,
             locate: None,
@@ -341,6 +347,7 @@ impl Workspace {
             chrome: Chrome::default(),
             column_drag: None,
             viewport_width: 0.0,
+            files: crate::files::Files::new(files_live),
             _subscriptions: vec![opened, failed, observed],
         }
     }
@@ -559,6 +566,117 @@ impl Workspace {
     /// computer. The sidebar follows the core's broadcast, not this request.
     pub fn send_to_core(&self, frame: Value, cx: &App) {
         self.sidebar.read(cx).send(Command::Send(frame));
+    }
+
+    /// The window's file store.
+    pub fn files(&self) -> &crate::files::store::FileStore {
+        &self.files.store
+    }
+
+    /// Runs `change` on the file store, then sends what it asked of the core and redraws.
+    pub fn with_files<R>(
+        &mut self,
+        change: impl FnOnce(&mut crate::files::store::FileStore, Instant) -> R,
+        cx: &mut Context<Self>,
+    ) -> R {
+        let result = change(&mut self.files.store, Instant::now());
+        self.pump_files(cx);
+        result
+    }
+
+    /// An edited preview becomes a regular tab, as the web's.
+    fn keep_edited_previews(&mut self) -> bool {
+        let edited: Vec<String> = self
+            .tabs
+            .previews()
+            .iter()
+            .filter(|id| {
+                file_tab(id).is_some_and(|(w, p)| {
+                    self.files.store.document(w, p).is_some_and(|d| d.dirty())
+                })
+            })
+            .cloned()
+            .collect();
+        for id in &edited {
+            self.tabs.pin(id);
+        }
+        !edited.is_empty()
+    }
+
+    /// The drawer's body for a tab this window does not draw: a word and the hand-off to Perch.
+    fn handoff_body(
+        &self,
+        tab: shell::Tools,
+        open: impl IntoElement,
+        tokens: Tokens,
+    ) -> AnyElement {
+        div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap_3()
+            .px_6()
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(tokens.subtext)
+                    .text_center()
+                    .child(format!(
+                        "{} for this workspace opens in the Perch app for now.",
+                        tab.label()
+                    )),
+            )
+            .child(open)
+            .into_any_element()
+    }
+
+    /// One of the core's `fs.*` messages.
+    pub fn on_files_message(
+        &mut self,
+        message: &perch_core::protocol::ServerMessage,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_files(|store, now| store.handle(message, now), cx);
+    }
+
+    fn files_connected(&mut self, connected: bool, cx: &mut Context<Self>) {
+        if self.files.store.is_connected() != connected {
+            self.with_files(|store, _| store.set_connected(connected), cx);
+        }
+    }
+
+    /// Sends the store's frames, wakes for its next draft deadline, and redraws when a
+    /// workspace's files moved.
+    fn pump_files(&mut self, cx: &mut Context<Self>) {
+        let (sent, changed, arm) = self.files.drain();
+        for frame in sent {
+            self.send_to_core(frame, cx);
+        }
+        if let Some(at) = arm {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(at.saturating_duration_since(Instant::now()))
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    this.files.fired(Instant::now());
+                    this.pump_files(cx);
+                });
+            })
+            .detach();
+        }
+        if !changed.is_empty() {
+            self.keep_edited_previews();
+            if let Some((_, perch)) = screens::mods(cx) {
+                for workspace_id in &changed {
+                    perch.set_files(workspace_id, self.files.store.snapshot(workspace_id));
+                }
+                perch.flush(cx);
+            }
+            cx.notify();
+        }
     }
 
     /// Registers `path` on `host_id` as a project, as the sidebar's Add project form does
@@ -2080,6 +2198,9 @@ impl Workspace {
     /// A tab's name: the session's title now (a plain terminal is not listed), else the title its
     /// program set, else what it was opened as.
     fn title_of(&self, id: &str, cx: &App) -> String {
+        if let Some((_, path)) = file_tab(id) {
+            return path.rsplit('/').next().unwrap_or(path).to_string();
+        }
         let named = |title: String| Some(title).filter(|t| !t.trim().is_empty());
         let listed = self
             .sidebar
@@ -2534,6 +2655,13 @@ impl Workspace {
             // neither view, so they are refused with the reason (as the launcher's are).
             "browser.open" => return Err(NO_BROWSER.into()),
             "file.open" => return Err(NO_FILES.into()),
+            "files.extract" => {
+                let (Some(workspace), Some(path)) = (text("workspaceId"), text("path")) else {
+                    return Err("This command needs {workspaceId, path}.".into());
+                };
+                let (workspace, path) = (workspace.to_string(), path.to_string());
+                self.with_files(|store, _| store.extract_archive(&workspace, &path), cx);
+            }
             "link.open" => {
                 let url = text("url").ok_or("This command needs {url}.")?;
                 crate::handoff::open_link(url).map_err(|e| e.to_string())?;
@@ -3008,6 +3136,12 @@ impl Workspace {
     /// deleting the session later still closes the tab, whatever the wait said. A tab with no
     /// attached terminal has no connection to ask over: it closes, and the session keeps running.
     fn close(&mut self, id: &str, cx: &mut Context<Self>) {
+        // A file's tab just goes: its draft stays in the core's buffer, as the web's does.
+        if file_tab(id).is_some() {
+            self.tabs.close(id);
+            self.after_change(cx);
+            return;
+        }
         let Some(pane) = self.panes.get(id) else {
             return;
         };
@@ -3812,6 +3946,12 @@ fn program_in(argv: &Value, task: Option<&str>) -> Result<String, String> {
         .join(" "))
 }
 
+/// A file tab's workspace and path: its id is the web's `fileTabKey`, `<workspace id>\n<path>`
+/// (a session id never holds a line break).
+pub fn file_tab(id: &str) -> Option<(&str, &str)> {
+    id.split_once('\n')
+}
+
 /// Why New browser is refused here.
 const NO_BROWSER: &str = "A browser tab does not open in the native window yet.";
 /// Why New file is refused here: it names the file in the files view's prompt.
@@ -4124,28 +4264,7 @@ impl gpui::Render for Workspace {
                         .child(div().flex().items_center().gap(px(2.)).children(tabs))
                         .child(shell::drawer_toggle(tokens, toggle_drawer.clone())),
                 )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .justify_center()
-                        .gap_3()
-                        .px_6()
-                        .child(
-                            div()
-                                .text_size(px(12.))
-                                .text_color(tokens.subtext)
-                                .text_center()
-                                .child(format!(
-                                    "{} for this workspace opens in the Perch app for now.",
-                                    tab.label()
-                                )),
-                        )
-                        .child(open),
-                )
+                .child(self.handoff_body(tab, open, tokens))
                 .child(shell::round_corners(tokens.backdrop))
         });
         let drawer_handle = tools.map(|_| {

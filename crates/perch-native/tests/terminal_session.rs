@@ -327,7 +327,7 @@ impl Watch {
             Update::Model(model) => self.latest = model,
             Update::Launched { session_id, .. } => self.launched.push_back(Ok(session_id)),
             Update::LaunchFailed(error) => self.launched.push_back(Err(error)),
-            Update::Requested { .. } | Update::Alert(_) => {}
+            Update::Requested { .. } | Update::Alert(_) | Update::Files(_) => {}
         }
     }
 

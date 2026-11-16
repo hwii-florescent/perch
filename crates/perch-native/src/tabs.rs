@@ -330,6 +330,11 @@ impl Tabs {
         self.show(&id);
     }
 
+    /// The preview tabs.
+    pub fn previews(&self) -> &[String] {
+        &self.previews
+    }
+
     /// Whether tab `id` is a preview.
     pub fn is_preview(&self, id: &str) -> bool {
         self.previews.iter().any(|p| p == id)

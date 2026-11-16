@@ -130,6 +130,8 @@ impl SidebarSettings {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WindowState {
     pub strip: Vec<String>,
+    /// The strip's preview tabs (files opened by a single click).
+    pub previews: Vec<String>,
     pub shown: Vec<String>,
     pub active: Option<String>,
     pub zoomed: bool,
@@ -185,6 +187,8 @@ struct Data {
     applied: Option<Theme>,
     /// What each screen was opened with, by its key (`perch.props()`).
     props: HashMap<String, Value>,
+    /// Each workspace's files as the window's store last published them (`FileStore::snapshot`).
+    files: HashMap<String, Value>,
 }
 
 /// Where window commands run.
@@ -270,6 +274,7 @@ impl Perch {
             let model = ws.sidebar().read(cx).model();
             let window = WindowState {
                 strip: tabs.strip().to_vec(),
+                previews: tabs.previews().to_vec(),
                 shown: tabs.shown(),
                 active: tabs.active().map(str::to_string),
                 zoomed: tabs.zoomed(),
@@ -367,6 +372,95 @@ impl Perch {
             drop(data);
             self.bump(&format!("props:{key}"));
         }
+    }
+
+    /// Publishes workspace `workspace_id`'s files (`FileStore::snapshot`). Call [`Self::flush`]
+    /// after.
+    pub fn set_files(&self, workspace_id: &str, snapshot: Value) {
+        self.0
+            .data
+            .borrow_mut()
+            .files
+            .insert(workspace_id.to_string(), snapshot);
+        self.bump(&format!("files:{workspace_id}"));
+    }
+
+    /// `useWorkspaceFiles(workspaceId, {git})`'s data: the workspace, the connection, the
+    /// store's snapshot of its files and its Git marks (none until the window keeps Git).
+    fn workspace_files(&self, workspace_id: &str) -> Value {
+        let store = self.store();
+        let data = self.0.data.borrow();
+        let workspace = store.workspaces.iter().find(|w| w.id == workspace_id);
+        let mut files = data.files.get(workspace_id).cloned().unwrap_or_else(
+            || json!({ "trees": {}, "documents": {}, "previews": {}, "search": null, "wrap": false }),
+        );
+        files["workspace"] = workspace.map_or(
+            Value::Null,
+            |w| json!({ "id": w.id, "name": w.name, "path": w.path, "hostId": w.host_id }),
+        );
+        files["connected"] = json!(data.model.connected);
+        files["git"] = json!({
+            "isGit": workspace.is_some_and(|w| w.branch.is_some()),
+            "ready": false,
+            "statusState": "idle",
+            "decorations": [],
+        });
+        files
+    }
+
+    /// The `perch` functions of the files screen: `workspaceFiles(workspaceId)` and
+    /// `filesDo(action, workspaceId, ...args)`, which runs one of `useWorkspaceFiles`' actions
+    /// on the window's store.
+    fn files_functions(&self, id: &Rc<str>, module: HostModule) -> HostModule {
+        let (reader, id) = (self.clone(), id.clone());
+        let runner = self.clone();
+        module
+            .function("workspaceFiles", move |args| {
+                let workspace_id = args.string(0)?.to_string();
+                reader.read(&id, STORE);
+                reader.read(&id, &format!("files:{workspace_id}"));
+                Ok(to_host(&reader.workspace_files(&workspace_id)))
+            })
+            .function("filesDo", move |args| {
+                let action = args.string(0)?.to_string();
+                let workspace_id = args.string(1)?.to_string();
+                let rest: Vec<Value> = (2..args.len())
+                    .filter_map(|i| args.get(i).map(from_host))
+                    .collect();
+                runner.in_workspace(move |ws, cx| {
+                    let text = |i: usize| {
+                        rest.get(i)
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string()
+                    };
+                    let w = workspace_id.as_str();
+                    ws.with_files(
+                        |store, now| match action.as_str() {
+                            "requestTree" => drop(store.request_tree(w, &text(0))),
+                            "searchFiles" => drop(store.search_files(w, &text(0))),
+                            "openFile" => drop(store.open_file(
+                                w,
+                                &text(0),
+                                rest.get(1).and_then(Value::as_bool).unwrap_or(false),
+                            )),
+                            "reloadFile" => drop(store.reload_file(w, &text(0))),
+                            "requestPreview" => drop(store.request_preview(w, &text(0))),
+                            "updateDraft" => store.update_draft(w, &text(0), text(1), now),
+                            "saveFile" => drop(store.save_file(w, &text(0), None)),
+                            "overwriteFile" => drop(store.overwrite_file(w, &text(0))),
+                            "extractArchive" => drop(store.extract_archive(w, &text(0))),
+                            "setWrap" => store.set_wrap(
+                                rest.first().and_then(Value::as_bool).unwrap_or(false),
+                                w,
+                            ),
+                            _ => {}
+                        },
+                        cx,
+                    )
+                })?;
+                Ok(HostValue::Null)
+            })
     }
 
     /// The props screen copy `key` was last given, while it has any.
@@ -796,7 +890,7 @@ impl Perch {
         let (close, close_id) = (self.clone(), id.clone());
         let opener = self.clone();
         let (notifier, notify_id) = (self.clone(), id.clone());
-        HostModule::new("perch")
+        self.files_functions(&id, HostModule::new("perch"))
             .function("props", move |_| {
                 props.read(&props_id, &format!("props:{props_id}"));
                 let value = props.0.data.borrow().props.get(&*props_id).cloned();
@@ -1511,7 +1605,29 @@ impl Perch {
         }
     }
 
-    /// `useWorkspaceTabs`: the window's strip. Every tab is a session.
+    /// A file tab's `TabInfo` (its id is `<workspace id>\n<path>`), as the web's `tabInfo`: its
+    /// name, ● while its document is dirty, italic while a preview.
+    fn file_tab(&self, data: &Data, id: &str) -> Option<Value> {
+        let (workspace_id, path) = crate::workspace::file_tab(id)?;
+        let dirty = data.files.get(workspace_id).is_some_and(|files| {
+            let document = &files["documents"][path];
+            document.is_object() && document["content"] != document["savedContent"]
+        });
+        Some(json!({
+            "id": id,
+            "kind": "file",
+            "label": path.rsplit('/').next().unwrap_or(path),
+            "title": path,
+            "state": self.tab_state(id),
+            "dirty": dirty,
+            "preview": data.window.previews.iter().any(|p| p == id),
+            "path": path,
+            "workspaceId": workspace_id,
+            "blank": false,
+        }))
+    }
+
+    /// `useWorkspaceTabs`: the window's strip: sessions and files.
     fn workspace_tabs(&self) -> Value {
         let store = self.store();
         let view = self.view(None);
@@ -1525,6 +1641,9 @@ impl Perch {
             .strip
             .iter()
             .map(|id| {
+                if let Some(tab) = self.file_tab(&data, id) {
+                    return tab;
+                }
                 let session = store.sessions.iter().find(|s| s.id == *id);
                 let title = session.map(|s| s.title.clone()).unwrap_or_default();
                 let mut tab = json!({
@@ -1737,7 +1856,12 @@ const OWN: [(&str, &str, &str); 10] = [
 
 /// Window commands beyond the keymap's: the web's ids the window can perform (some under the
 /// name its keys use), and the native ones screens need.
-const WINDOW_COMMANDS: [(&str, &str, &str); 36] = [
+const WINDOW_COMMANDS: [(&str, &str, &str); 37] = [
+    (
+        "files.extract",
+        "Extract a workspace's archive beside it",
+        "{workspaceId, path}",
+    ),
     (
         "handoff.open",
         "Open a place in the Perch desktop app (a click's choice)",

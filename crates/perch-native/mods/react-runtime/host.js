@@ -343,6 +343,9 @@ export function copyFor(cx, screen) {
     },
     hosts: () => snapshot("hosts", () => perch.hosts()),
     workspaceTabs: () => snapshot("workspaceTabs", () => perch.workspaceTabs()),
+    // `useWorkspaceFiles`: one workspace's files from the window's store, and its actions run there.
+    workspaceFiles: (id) => snapshot(`workspaceFiles:${id}`, () => perch.workspaceFiles(id)),
+    filesDo: (action, workspaceId, ...args) => perch.filesDo(action, workspaceId, ...args),
     statusLine: () => snapshot("statusLine", () => perch.statusLine()),
     zoom: () => snapshot("zoom", () => perch.zoom()),
     paneLook: () => snapshot("paneLook", () => perch.paneLook()),
