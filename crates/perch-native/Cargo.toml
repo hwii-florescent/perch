@@ -49,7 +49,7 @@ block2 = "0.6"
 raw-window-handle = "0.6"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSURL", "NSObject", "NSBundle", "NSError"] }
 # Notifications under the app's own identity, the version and features the Tauri app uses.
-objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNUserNotificationCenter", "UNNotification", "UNNotificationRequest", "UNNotificationContent", "UNNotificationTrigger"] }
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNUserNotificationCenter", "UNNotification", "UNNotificationRequest", "UNNotificationContent", "UNNotificationResponse", "UNNotificationTrigger"] }
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSResponder"] }
 
 [dev-dependencies]

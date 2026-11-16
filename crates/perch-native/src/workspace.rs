@@ -3969,7 +3969,7 @@ impl Workspace {
     }
 
     /// Go to a session's tab, opening one if it has none: a peek of it becomes that tab.
-    fn show_session(&mut self, id: &str, cx: &mut Context<Self>) -> Result<(), String> {
+    pub fn show_session(&mut self, id: &str, cx: &mut Context<Self>) -> Result<(), String> {
         let open = match self.panes.get(id) {
             Some(pane) => pane.open.clone(),
             None => self

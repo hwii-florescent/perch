@@ -40,7 +40,8 @@ fn main() {
             ));
     });
     gpui_platform::application().run(move |cx: &mut App| {
-        notify::init();
+        let (opened_tx, mut opened_rx) = futures::channel::mpsc::unbounded();
+        notify::init(opened_tx);
         let (width, height) = test.as_ref().and_then(|t| t.size).unwrap_or((1100., 720.));
         let bounds = Bounds::centered(None, size(px(width), px(height)), cx);
         let window = cx
@@ -100,6 +101,19 @@ fn main() {
             cx.spawn(async move |cx| test_mode::run(test.steps, window, cx).await)
                 .detach();
         }
+        // A clicked notification brings the window forward on the session it is about.
+        cx.spawn(async move |cx| {
+            while let Some(id) = opened_rx.next().await {
+                let _ = window.update(cx, |workspace, window, cx| {
+                    cx.activate(true);
+                    window.activate_window();
+                    if id != perch_native::sidebar::USAGE_NOTIFICATION {
+                        let _ = workspace.show_session(&id, cx);
+                    }
+                });
+            }
+        })
+        .detach();
         cx.spawn(async move |cx| {
             while let Some(update) = update_rx.next().await {
                 // A sound is due: play it here, not in the view, so no test ever does.
@@ -110,7 +124,6 @@ fn main() {
                         notify::available(),
                         sound::play,
                         notify::show,
-                        |heard| workspace.update(cx, |workspace, cx| workspace.toast(heard, cx)),
                     );
                     continue;
                 }
@@ -127,25 +140,24 @@ fn main() {
 }
 
 /// What a due alert does: its sound and its system notification are for a person, so `silent`
-/// (a scripted test run) skips both; the window's own toast is not. Without a bundle
-/// (`bundled` false) a system notification would carry another app's name, so the window's
-/// toast stands in for it.
+/// (a scripted test run) skips both. The desktop client never toasts in its window (that is the
+/// phone's); without a bundle (`bundled` false) a system notification would carry another app's
+/// name, so nothing is posted. Whatever the delivery, "app" or "system", it is a system
+/// notification; only "off" posts none.
 fn announce(
     heard: Heard,
     silent: bool,
     bundled: bool,
     play: impl FnOnce(&Heard),
-    show: impl FnOnce(&str),
-    toast: impl FnOnce(Heard),
+    show: impl FnOnce(&str, &str, &str),
 ) {
-    if !silent {
-        play(&heard);
+    if silent {
+        return;
     }
-    match heard.toast {
-        Toast::Off => {}
-        Toast::System if silent => {}
-        Toast::System if bundled => show(&heard.text()),
-        Toast::System | Toast::App => toast(heard),
+    play(&heard);
+    if bundled && heard.toast != Toast::Off {
+        let (title, body) = heard.system_note();
+        show(&title, &body, &heard.session_id);
     }
 }
 
@@ -153,7 +165,7 @@ fn announce(
 mod tests {
     use super::*;
     use perch_native::sidebar::Alert;
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
 
     fn heard(toast: Toast) -> Heard {
         Heard {
@@ -167,42 +179,69 @@ mod tests {
         }
     }
 
-    /// How many times it played, posted a notification and showed a toast.
-    fn run(toast: Toast, silent: bool, bundled: bool) -> (u32, u32, u32) {
-        let (played, shown, toasted) = (Cell::new(0), Cell::new(0), Cell::new(0));
+    /// How many times it played, and what it posted.
+    fn run(heard: Heard, silent: bool, bundled: bool) -> (u32, Vec<(String, String, String)>) {
+        let (played, shown) = (Cell::new(0), RefCell::new(Vec::new()));
         announce(
-            heard(toast),
+            heard,
             silent,
             bundled,
             |_| played.set(played.get() + 1),
-            |_| shown.set(shown.get() + 1),
-            |_| toasted.set(toasted.get() + 1),
+            |title, body, id| {
+                shown
+                    .borrow_mut()
+                    .push((title.into(), body.into(), id.into()))
+            },
         );
-        (played.get(), shown.get(), toasted.get())
+        (played.get(), shown.take())
+    }
+
+    fn note(title: &str, body: &str, id: &str) -> Vec<(String, String, String)> {
+        vec![(title.into(), body.into(), id.into())]
     }
 
     #[test]
-    fn a_test_run_plays_no_sound_and_posts_no_notification() {
-        assert_eq!(run(Toast::System, false, true), (1, 1, 0));
-        assert_eq!(run(Toast::System, true, true), (0, 0, 0));
+    fn a_session_finishing_posts_the_tauri_apps_notification() {
         assert_eq!(
-            run(Toast::App, true, true),
-            (0, 0, 1),
-            "the window's toast stays"
+            run(heard(Toast::System), false, true),
+            (1, note("Session finished", "t", "s"))
         );
-        assert_eq!(run(Toast::Off, true, true), (0, 0, 0));
-        assert_eq!(run(Toast::Off, false, true), (1, 0, 0));
+        let mut blocked = heard(Toast::System);
+        blocked.alert = Alert::Blocked;
+        assert_eq!(
+            run(blocked.clone(), false, true).1,
+            note("Session needs attention", "t", "s")
+        );
+        blocked.title.clear();
+        assert_eq!(
+            run(blocked, false, true).1,
+            note("Session needs attention", "(untitled session)", "s")
+        );
+        let mut usage = heard(Toast::System);
+        (usage.alert, usage.session_id) = (Alert::Usage, "usage".into());
+        usage.body = Some("Resets in 42 minutes".into());
+        assert_eq!(
+            run(usage, false, true).1,
+            note("t", "Resets in 42 minutes", "usage")
+        );
     }
 
     #[test]
-    fn without_a_bundle_the_window_toasts_instead_of_a_system_notification() {
-        assert_eq!(run(Toast::System, false, false), (1, 0, 1));
+    fn every_delivery_but_off_is_a_system_notification_never_a_window_toast() {
+        assert_eq!(run(heard(Toast::App), false, true).1.len(), 1);
+        assert_eq!(run(heard(Toast::System), false, true).1.len(), 1);
         assert_eq!(
-            run(Toast::System, true, false),
-            (0, 0, 0),
-            "a test run stays quiet"
+            run(heard(Toast::Off), false, true),
+            (1, vec![]),
+            "off keeps the sound only"
         );
-        assert_eq!(run(Toast::App, false, false), (1, 0, 1));
-        assert_eq!(run(Toast::Off, false, false), (1, 0, 0));
+    }
+
+    #[test]
+    fn without_a_bundle_or_in_a_test_run_nothing_is_posted() {
+        for toast in [Toast::App, Toast::System, Toast::Off] {
+            assert_eq!(run(heard(toast), false, false), (1, vec![]), "unbundled");
+            assert_eq!(run(heard(toast), true, true), (0, vec![]), "a test run");
+        }
     }
 }
