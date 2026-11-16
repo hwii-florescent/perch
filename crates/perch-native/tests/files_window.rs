@@ -43,6 +43,10 @@ fn state() -> State {
     state
 }
 
+fn state_model() -> perch_native::sidebar::Model {
+    state().model()
+}
+
 struct Rig {
     cx: HeadlessAppContext,
     window: WindowHandle<Workspace>,
@@ -138,11 +142,13 @@ fn main() {
     );
     let (tx, asked) = unbounded();
     let model = state().model();
+    let kept = scratch.join("window.json");
     let window = cx
         .open_window(size(px(1200.), px(800.)), |_, cx| {
             cx.new(|cx| {
-                Workspace::new(model, Some(tx), cx)
+                Workspace::new(model.clone(), Some(tx), cx)
                     .with_core(|| Err(anyhow::anyhow!("no core in this test")))
+                    .with_window_state(kept.clone())
             })
         })
         .unwrap();
@@ -273,6 +279,24 @@ fn main() {
             .any(|f| f["type"] == "fs.extract" && f["path"] == "a.zip"),
         "{sent:?}"
     );
+
+    // A regular file tab is kept in the window's state file and opened again by the next window,
+    // without the keyboard; a preview is not kept.
+    rig.ws(|ws, _, cx| ws.open_file("w1", "src/lib.rs", false, cx));
+    rig.ws(|ws, _, cx| ws.open_file("w1", "docs/clean.md", true, cx));
+    rig.settle();
+    let state: Value = serde_json::from_slice(&std::fs::read(&kept).unwrap()).unwrap();
+    assert_eq!(state["files"], json!(["w1\nsrc/lib.rs"]), "{state}");
+    let next = rig.cx.update(|cx| {
+        cx.new(|cx| Workspace::new(state_model(), None, cx).with_window_state(kept.clone()))
+    });
+    let strip = rig.cx.update(|cx| {
+        (
+            next.read(cx).tabs().strip().to_vec(),
+            next.read(cx).tabs().active().map(str::to_string),
+        )
+    });
+    assert_eq!(strip, (vec!["w1\nsrc/lib.rs".to_string()], None));
 
     let _ = std::fs::remove_dir_all(&scratch);
     println!("files window: ok");

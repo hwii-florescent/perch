@@ -381,6 +381,9 @@ impl Workspace {
     /// Keeps the drawer's tab and the column widths in `file`, on this device.
     pub fn with_window_state(mut self, file: std::path::PathBuf) -> Self {
         self.chrome = Chrome::kept_in(file);
+        for id in self.chrome.files().to_vec() {
+            self.tabs.append(&id);
+        }
         self
     }
 
@@ -4249,6 +4252,24 @@ fn program_in(argv: &Value, task: Option<&str>) -> Result<String, String> {
 
 /// A file tab's workspace and path: its id is the web's `fileTabKey`, `<workspace id>\n<path>`
 /// (a session id never holds a line break).
+impl Workspace {
+    /// The strip's regular file tabs go to the window's state file; an untouched preview, a
+    /// review or a page does not.
+    fn keep_file_tabs(&mut self) {
+        let files = self
+            .tabs
+            .strip()
+            .iter()
+            .filter(|id| {
+                file_tab(id).is_some_and(|(_, path)| !path.is_empty() && !path.starts_with('\0'))
+                    && !self.tabs.is_preview(id)
+            })
+            .cloned()
+            .collect();
+        self.chrome.set_files(files);
+    }
+}
+
 pub fn file_tab(id: &str) -> Option<(&str, &str)> {
     id.split_once('\n').filter(|_| !is_browser_tab(id))
 }
@@ -4332,6 +4353,7 @@ impl Workspace {
 impl gpui::Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_editors(window, cx);
+        self.keep_file_tabs();
         self.viewport_height = f32::from(window.viewport_size().height);
         if window.focused(cx).is_none() {
             self.root_focus.focus(window, cx);

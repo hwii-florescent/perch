@@ -284,6 +284,13 @@ impl Tabs {
         self.show(id);
     }
 
+    /// Add a tab at the end, leaving the keyboard where it is (a tab kept from the last run).
+    pub fn append(&mut self, id: &str) {
+        if !self.contains(id) {
+            self.strip.push(id.into());
+        }
+    }
+
     /// Add a tab after `after`'s family (the tabs right after it whose id `family` accepts),
     /// leaving the keyboard where it is. One already open stays where it is.
     pub fn add_after(&mut self, id: &str, after: &str, family: impl Fn(&str) -> bool) {
