@@ -13,6 +13,11 @@ import sys
 IDLE_MB = 120
 OVER_IDLE_MB = {"t": ("files, 5,000 entries", 60), "e": ("10,000-line file open", 35),
                 "f": ("review, 5,000 lines", 80), "g": ("one browser pane", 100)}
+# The JavaScript of each view a stock mod screen adds (its module parsed and compiled again per view):
+# budgeted apart from the state's own memory, so e's +35 MB is the editor's (highlighting, editor, store,
+# gpui input). State -> the views its script adds.
+PER_VIEW_JS_MB = 15
+VIEWS_ADDED = {"e": 1}
 CLOSED_PANE_MB = 40  # client plus the GPU and Networking helpers WebKit keeps for the app's life
 
 
@@ -36,7 +41,10 @@ def judge(rows):
             continue
         if idle is None:
             raise ValueError(f"state {s} needs state a in the same run for its budget")
-        check(f"{s} {name}", f"+{get(s) - idle:.1f} MB", f"+{budget} MB", get(s) - idle <= budget)
+        views = VIEWS_ADDED.get(s, 0)
+        limit = budget + views * PER_VIEW_JS_MB
+        shown = f"+{budget} +{views}x{PER_VIEW_JS_MB} view JS" if views else f"+{budget} MB"
+        check(f"{s} {name}", f"+{get(s) - idle:.1f} MB", shown, get(s) - idle <= limit)
     if get("h") is not None:
         if idle is None:
             raise ValueError("state h needs state a in the same run for its budget")
@@ -50,14 +58,16 @@ def judge(rows):
 def self_test():
     rows = lambda **kv: {(("native-hidden1-webcontent-gone" if k == "gone" else "native-hidden1"), "h" if k == "gone" else k): v for k, v in kv.items()}
     assert judge(rows(a=115, e=140, g=210, h=155, gone=1))[1]
-    assert not judge(rows(a=115, e=150.1))[1], "e over +35"
+    assert judge(rows(a=115, e=165))[1], "e: +35 editor, +15 for the file view's JavaScript"
+    assert not judge(rows(a=115, e=165.1))[1], "e over +35 and one view's +15"
+    assert not judge(rows(a=115, t=175.1))[1], "t adds no view beyond its budget"
     assert not judge(rows(a=120.1))[1], "idle over 120"
     assert not judge(rows(a=115, h=120, gone=0))[1], "WebContent left"
     assert not judge(rows(a=115, h=155.1, gone=1))[1], "closed pane kept memory"
     assert judge(rows(a=115, b=300))[1], "states without a budget are not judged"
     offscreen = lambda e: {("native-offscreen", "a"): 230.0, ("native-offscreen", "e"): e}
-    assert judge(offscreen(265))[1], "an offscreen run's idle is not judged"
-    assert not judge(offscreen(265.1))[1], "an offscreen run's growth is judged by the same budgets"
+    assert judge(offscreen(280))[1], "an offscreen run's idle is not judged"
+    assert not judge(offscreen(280.1))[1], "an offscreen run's growth is judged by the same budgets"
     try:
         judge(rows(e=140))
         raise AssertionError("a budget over idle needs idle")
