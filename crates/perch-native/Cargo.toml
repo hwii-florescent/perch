@@ -53,6 +53,11 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = 
 gpui-shell = { path = "../../vendor/gpui-kit/crates/shell", features = ["render-test-support"] }
 
 [[test]]
+name = "browser_pane"
+path = "tests/browser_pane.rs"
+harness = false
+
+[[test]]
 name = "terminal_session"
 path = "tests/terminal_session.rs"
 harness = false

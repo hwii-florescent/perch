@@ -697,8 +697,9 @@ impl Browsers {
     }
 }
 
-#[cfg(test)]
-pub mod tests {
+/// A page view that records what it is told, for tests here and in `tests/` (no WebKit runs headless).
+#[doc(hidden)]
+pub mod fake {
     use super::*;
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -797,6 +798,14 @@ pub mod tests {
             calls,
         )
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fake::{browsers, Calls};
+    use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     fn take(calls: &Rc<RefCell<Calls>>) -> Vec<String> {
         std::mem::take(&mut calls.borrow_mut().log)
