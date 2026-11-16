@@ -182,6 +182,9 @@ pub struct Workspace {
     panes: HashMap<String, Pane>,
     /// A split that was asked for and waits for its new terminal to be opened.
     pending_split: Option<(Side, Instant)>,
+    /// Sessions whose tab the person closed here without ending them: not opened again with their
+    /// lead until they are picked.
+    put_away: HashSet<String>,
     /// The zoom every terminal in the window is at.
     zoom: Zoom,
     /// Counts the changes of what is on screen, for [`Pane::seen`].
@@ -301,6 +304,7 @@ impl Workspace {
         // The sidebar's own changes (hiding it, a count, a session's state) redraw the window.
         let observed = cx.observe(&sidebar, |this, sidebar, cx| {
             this.close_deleted(cx);
+            this.open_sub_sessions(cx);
             let connected = sidebar.read(cx).model().connected;
             this.files_connected(connected, cx);
             cx.notify()
@@ -313,6 +317,7 @@ impl Workspace {
             tabs: Tabs::default(),
             panes: HashMap::new(),
             pending_split: None,
+            put_away: HashSet::new(),
             zoom: Zoom::default(),
             tick: 0,
             viewport_height: 0.0,
@@ -1708,6 +1713,7 @@ impl Workspace {
     /// A session was picked in the sidebar, launched, or a tab was chosen: show it.
     fn on_open(&mut self, event: &OpenSession, cx: &mut Context<Self>) {
         let id = event.session_id.clone();
+        self.put_away.remove(&id);
         let side = self
             .pending_split
             .take()
@@ -1724,6 +1730,7 @@ impl Workspace {
             }
             None => self.tabs.open(&id),
         }
+        self.open_sub_sessions(cx);
         self.keep_in_bounds(cx);
         self.note_shown();
         cx.notify();
@@ -1869,6 +1876,71 @@ impl Workspace {
         }
         self.notice = None;
         self.after_change(cx);
+    }
+
+    /// Every sub-session of a lead with a tab here has a tab too, as the web's strip lists every
+    /// session of the workspace: opened behind the lead's family when the core lists it, without
+    /// taking the keyboard. It goes as any tab does, when the core deletes the session.
+    fn open_sub_sessions(&mut self, cx: &mut Context<Self>) {
+        let sidebar = self.sidebar.read(cx);
+        let store = &sidebar.model().store;
+        let parent_of = |id: &str| {
+            store
+                .sessions
+                .iter()
+                .find(|s| s.id == id)
+                .and_then(|s| s.parent_session_id.clone())
+        };
+        let mut opened = Vec::new();
+        // In the core's order, so a lead opened just now brings its own sub-sessions in.
+        for session in &store.sessions {
+            let Some(lead) = session.parent_session_id.as_deref() else {
+                continue;
+            };
+            let here = |id: &str| self.tabs.contains(id) || opened.iter().any(|(o, _)| o == id);
+            if !here(lead)
+                || here(&session.id)
+                || store.deleted.contains(&session.id)
+                || self.put_away.contains(&session.id)
+            {
+                continue;
+            }
+            // A session the sidebar does not list (a plain terminal, a hidden worktree's) opens as
+            // the core lists it.
+            let open = sidebar
+                .session_to_open(&session.id)
+                .unwrap_or_else(|| OpenSession {
+                    host_id: session.host_id.clone(),
+                    session_id: session.id.clone(),
+                    title: session.title.clone(),
+                    provider_id: session.cli_provider_id.clone(),
+                    blank: session.cli_provider_id.is_none() && !session.cli_started,
+                    core_url: sidebar.model().core_url.clone(),
+                });
+            opened.push((session.id.clone(), (lead.to_string(), open)));
+        }
+        if opened.is_empty() {
+            return;
+        }
+        let family: Vec<_> = opened
+            .iter()
+            .map(|(id, (lead, _))| (id.clone(), lead.clone()))
+            .chain(
+                self.tabs
+                    .strip()
+                    .iter()
+                    .filter_map(|id| Some((id.clone(), parent_of(id)?))),
+            )
+            .collect();
+        for (id, (lead, open)) in opened {
+            self.ensure_pane(&open, cx);
+            self.tabs.add_after(&id, &lead, |tab| {
+                family
+                    .iter()
+                    .any(|(kid, parent)| kid == tab && *parent == lead)
+            });
+        }
+        cx.notify();
     }
 
     /// The connection of a terminal dropped. The shell is not known to have ended, so the screen
@@ -3410,6 +3482,7 @@ impl Workspace {
             return;
         };
         self.tabs.close(id);
+        self.put_away.insert(id.to_string());
         let again = if is_plain(&pane.open) {
             "Turn on Show terminals in the sidebar to open it again."
         } else {

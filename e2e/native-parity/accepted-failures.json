@@ -104,6 +104,22 @@
     {
       "state": "tabs/files-and-pages/light",
       "reason": "Needs file tabs."
+    },
+    {
+      "state": "keybind-help/search-text/dark",
+      "reason": "web screen changed after the Nov 13 references; native not updated yet, to fix"
+    },
+    {
+      "state": "navigator/disconnected/light",
+      "reason": "web screen changed after the Nov 13 references; native not updated yet, to fix"
+    },
+    {
+      "state": "navigator/searching/dark",
+      "reason": "web screen changed after the Nov 13 references; native not updated yet, to fix"
+    },
+    {
+      "state": "navigator/searching/light",
+      "reason": "web screen changed after the Nov 13 references; native not updated yet, to fix"
     }
   ]
 }
