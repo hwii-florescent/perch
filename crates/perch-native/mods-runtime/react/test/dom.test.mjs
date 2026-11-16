@@ -283,3 +283,38 @@ test("letter spacing widens a run by room after it; a negative one never becomes
     handle.unmount();
   }
 });
+
+test("a switch's knob (its ::before) is drawn inside its track, moved across when it is checked", async () => {
+  const { runtime } = await loadSidebar();
+  const { createElement: h } = await import("react");
+  const perch = { isMac: true, render() {}, error: (e) => { throw e; } };
+  // `components/ui/switch.tsx`'s classes.
+  const SWITCH = "relative h-[1.25rem] w-[2.25rem] shrink-0 cursor-pointer appearance-none rounded-full bg-overlay-0 [transition:background_0.12s_ease] before:absolute before:top-[0.15rem] before:left-[0.15rem] before:h-[0.95rem] before:w-[0.95rem] before:rounded-full before:bg-fg before:content-[''] before:[transition:transform_0.12s_ease] checked:bg-accent checked:before:translate-x-[1rem] checked:before:bg-panel-bg focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px]";
+  function Probe() {
+    return h("div", null,
+      h("input", { type: "checkbox", role: "switch", "data-testid": "off", checked: false, onChange() {}, className: SWITCH }),
+      h("input", { type: "checkbox", role: "switch", "data-testid": "on", checked: true, onChange() {}, className: SWITCH }));
+  }
+  const handle = runtime.mount(perch, Probe, { container: { width: 300, height: 100 } });
+  try {
+    await settle();
+    const node = (id) => {
+      const walk = (n) => (n.meta?.attrs?.["data-testid"] === id ? n : (n.children ?? []).map(walk).find(Boolean));
+      return walk(handle.description.root);
+    };
+    for (const id of ["off", "on"]) {
+      const knob = node(id).children?.[0];
+      assert.ok(knob, `${id}: the knob is drawn`);
+      assert.equal(knob.style.position, "absolute");
+      assert.ok(Math.abs(knob.style.w - 15.2) < 0.01 && Math.abs(knob.style.h - 15.2) < 0.01, `${id}: 0.95rem square: ${JSON.stringify(knob.style)}`);
+      assert.ok(knob.style.rounded > 0 || knob.style.rounded === "full" || knob.style.rounded_full, `${id}: round: ${JSON.stringify(knob.style)}`);
+    }
+    const left = (id) => (node(id).children[0].style.left ?? 0) + (node(id).children[0].style.ml ?? 0);
+    assert.ok(Math.abs(left("on") - left("off") - 16) < 0.01, `checked moves it 1rem across: ${left("on") - left("off")}`);
+    const fill = (id) => JSON.stringify([node(id).children[0].style.bg, node(id).children[0].tokens]);
+    assert.notEqual(fill("on"), fill("off"), `its colour follows the state: ${fill("on")}`);
+    assert.ok(node("off").children[0].style.bg !== undefined || Object.keys(node("off").children[0].tokens).length, "it is filled");
+  } finally {
+    handle.unmount();
+  }
+});

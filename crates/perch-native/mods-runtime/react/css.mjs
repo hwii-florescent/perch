@@ -546,7 +546,8 @@ export class StyleSheet {
           }
           const states = statesOf(steps);
           ancestorStateClasses(steps, this.trackedStates);
-          const entry = { steps, media, layer, origin, order: order++, specificity: specificity(steps), decls, states, source: origin === 0 ? `ua:${steps[steps.length - 1].compound.tag ?? "*"}` : sourceName(part, steps) };
+          const pseudo = steps[steps.length - 1].compound.pseudoElement;
+          const entry = { steps, media, layer, origin, order: order++, specificity: specificity(steps), decls, states, pseudo, source: origin === 0 ? `ua:${steps[steps.length - 1].compound.tag ?? "*"}` : sourceName(part, steps) };
           this.rules.push(entry);
           add(entry, steps);
         }
@@ -556,11 +557,12 @@ export class StyleSheet {
     ingest(table.rules, 1);
   }
 
-  /** Rules that may match `element` (by its classes, its tag, and the universal ones). */
-  candidates(element) {
+  /** Rules that may match `element` (by its classes, its tag, and the universal ones), or its `pseudo` box
+   * (`before`, `after`). */
+  candidates(element, pseudo = null) {
     const out = [];
     const seen = new Set();
-    const push = (list) => { if (list) for (const rule of list) if (!seen.has(rule)) { seen.add(rule); out.push(rule); } };
+    const push = (list) => { if (list) for (const rule of list) if (!seen.has(rule) && rule.pseudo === pseudo) { seen.add(rule); out.push(rule); } };
     for (const cls of element.classList) push(this.index.get(`.${cls}`));
     push(this.index.get(element.tagName));
     push(this.index.get("*"));
@@ -623,7 +625,7 @@ export class Cascade {
 
   /** Rules matching `element`; `assume` is the set of interaction states assumed on the element itself
    * (`"*"`: any, for finding variant rules). Ancestors use their real state. */
-  matching(element, assume) {
+  matching(element, assume, pseudo = null) {
     const state = (el, name, isSubject) => {
       if (name === "disabled") return !!el.props?.disabled && ["button", "input", "select", "textarea", "fieldset"].includes(el.tagName);
       if (name === "enabled") return !el.props?.disabled && ["button", "input", "select", "textarea"].includes(el.tagName);
@@ -638,17 +640,19 @@ export class Cascade {
       if (name === "focus-visible") return !!el.state?.focus && !el.state?.pointerFocus;
       return !!el.state?.[name];
     };
-    return this.sheet.candidates(element).filter((rule) => (!rule.media || rule.media.every((query) => mediaMatches(query, this.viewport))) && matchesComplex(element, rule.steps, { state }));
+    return this.sheet.candidates(element, pseudo).filter((rule) => (!rule.media || rule.media.every((query) => mediaMatches(query, this.viewport))) && matchesComplex(element, rule.steps, { state, pseudo }));
   }
 
-  compute(element, parent, assume = new Set()) {
-    const rules = this.matching(element, assume);
+  /** `element`'s computed style, or with `pseudo` (`before`, `after`) that of its pseudo-element's box, whose parent
+   * is the element (pass the element's own computed style as `parent`). */
+  compute(element, parent, assume = new Set(), pseudo = null) {
+    const rules = this.matching(element, assume, pseudo);
     const declared = [];
     for (const rule of rules) {
       for (const [prop, value, important] of rule.decls) declared.push({ prop, value, important: important ? 1 : 0, origin: rule.origin === 0 ? 0 : 2, layer: rule.layer, specificity: rule.specificity, order: rule.order, source: rule.source });
     }
-    for (const [prop, value] of presentational(element)) declared.push({ prop, value, important: 0, origin: 1, layer: 0, specificity: [0, 0, 0], order: 0, source: `attr:${prop}` });
-    for (const [prop, value] of inlineDeclarations(element.inlineStyle ?? element.props?.style)) declared.push({ prop, value, important: 0, origin: 3, layer: 0, specificity: [1, 0, 0], order: 0, source: "style" });
+    if (!pseudo) for (const [prop, value] of presentational(element)) declared.push({ prop, value, important: 0, origin: 1, layer: 0, specificity: [0, 0, 0], order: 0, source: `attr:${prop}` });
+    if (!pseudo) for (const [prop, value] of inlineDeclarations(element.inlineStyle ?? element.props?.style)) declared.push({ prop, value, important: 0, origin: 3, layer: 0, specificity: [1, 0, 0], order: 0, source: "style" });
     declared.sort(compareRank);
 
     // Custom properties. Inheriting ones chain to the parent's (a prototype chain, so nothing is copied); a

@@ -64,7 +64,7 @@ export function splitList(text) {
 }
 
 function parseCompound(text, at) {
-  const compound = { tag: null, id: null, classes: [], attrs: [], pseudos: [] };
+  const compound = { tag: null, id: null, classes: [], attrs: [], pseudos: [], pseudoElement: null };
   let any = false;
   while (at < text.length) {
     const c = text[at];
@@ -82,10 +82,27 @@ function parseCompound(text, at) {
       at = end + 1; any = true; continue;
     }
     if (c === ":") {
-      if (text[at + 1] === ":") throw new SelectorError(`pseudo-elements are not supported (${JSON.stringify(text)})`);
+      if (text[at + 1] === ":") {
+        // `::before` and `::after` end a compound (the style of a box drawn inside the element); no other is read.
+        const [name, end] = readIdent(text, at + 2);
+        const lower = name.toLowerCase();
+        if (lower !== "before" && lower !== "after") throw new SelectorError(`::${lower} is not supported`);
+        compound.pseudoElement = lower;
+        at = end;
+        any = true;
+        if (at < text.length && !/[\s>]/.test(text[at])) throw new SelectorError(`nothing may follow ::${lower} in ${JSON.stringify(text)}`);
+        break;
+      }
       const [name, end] = readIdent(text, at + 1);
       at = end;
       const lower = name.toLowerCase();
+      // The legacy one-colon form, as a minifier writes it.
+      if ((lower === "before" || lower === "after") && text[at] !== "(") {
+        compound.pseudoElement = lower;
+        any = true;
+        if (at < text.length && !/[\s>]/.test(text[at])) throw new SelectorError(`nothing may follow :${lower} in ${JSON.stringify(text)}`);
+        break;
+      }
       if (text[at] === "(") {
         if (!FUNCTIONAL.has(lower)) throw new SelectorError(`:${lower}() is not supported`);
         const close = closeParen(text, at + 1);
@@ -120,6 +137,7 @@ export function parseComplex(text) {
   text = text.trim();
   while (at < text.length) {
     const [compound, end] = parseCompound(text, at);
+    if (steps.at(-1)?.compound.pseudoElement) throw new SelectorError(`::${steps.at(-1).compound.pseudoElement} must end ${JSON.stringify(text)}`);
     steps.push({ compound, combinator });
     at = end;
     let sawSpace = false;
@@ -154,6 +172,7 @@ export function specificity(steps) {
     if (compound.id) total[0]++;
     total[1] += compound.classes.length + compound.attrs.length;
     if (compound.tag && compound.tag !== "*") total[2]++;
+    if (compound.pseudoElement) total[2]++;
     for (const pseudo of compound.pseudos) {
       if (pseudo.name === "where") continue;
       if (pseudo.list) {
@@ -191,6 +210,8 @@ function hasDescendant(element, test) {
 }
 
 function compoundMatches(element, compound, options, isSubject) {
+  // A pseudo-element's rule styles that box (`options.pseudo`), never the element itself.
+  if ((compound.pseudoElement ?? null) !== (isSubject ? options.pseudo ?? null : null)) return false;
   if (compound.tag && compound.tag !== "*" && element.tagName !== compound.tag) return false;
   if (compound.id && element.getAttribute("id") !== compound.id) return false;
   if (compound.classes.length) {

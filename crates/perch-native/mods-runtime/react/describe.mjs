@@ -538,6 +538,27 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
   return { computed, style, tokens, extra, meta: meta(element), reports, childText: inheritText(inheritedText, ownText), where, shift };
 }
 
+/** The boxes `::before` and `::after` rules draw inside `element` (whose computed style is `computed`): a box for
+ * each with a `content`, its text the content's string. A switch's knob is one. */
+function pseudoBoxes(element, computed, inheritedText, ctx) {
+  const boxes = { before: null, after: null };
+  for (const pseudo of ["before", "after"]) {
+    if (!ctx.cascade.matching(element, new Set(), pseudo).length) continue;
+    const own = ctx.cascade.compute(element, computed, new Set(), pseudo);
+    const content = String(own.values.content ?? "none").trim();
+    if (content === "none" || content === "normal") continue;
+    const text = /^(["'])(.*)\1$/.exec(content)?.[2] ?? "";
+    const report = (kind, property, value, source, note) => ctx.findings.add(kind, property, value, source ?? "(user agent)", `${label(element)}::${pseudo}`, note);
+    const tokens = {};
+    const base = boxStyle(own, report, ctx.viewport);
+    const style = encode({ ...base, ...textStyle(own, textWanted(own, ctx.measure), inheritedText) }, tokens);
+    const box = { kind: "div", style, tokens, children: text ? [{ kind: "text", text }] : [] };
+    Object.defineProperty(box, DISPLAY, { value: own.values.display });
+    boxes[pseudo] = box;
+  }
+  return boxes;
+}
+
 /** One described subtree. `chain` names the element's ancestors with their versions. */
 function describeElement(element, parentComputed, inheritedText, ctx, chain = "") {
   const key = `${chain}/${element.id}.${element.version}`;
@@ -575,6 +596,9 @@ function describeElement(element, parentComputed, inheritedText, ctx, chain = ""
       const rows = Number(element.props.rows) > 0 ? Math.floor(Number(element.props.rows)) : 2;
       style.h = rows * lineHeightPx(v, ctx.measure) + px(v["padding-top"]) + px(v["padding-bottom"]) + border("top") + border("bottom");
     }
+    // A check box drawn by the page (`appearance: none`) draws its marks with its pseudo-elements (a switch's knob).
+    const { before, after } = pseudoBoxes(element, computed, childText, ctx);
+    if (before || after) node.children = [before, after].filter(Boolean);
     return node;
   }
   if (tag === "img") {

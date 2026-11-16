@@ -183,7 +183,60 @@ impl Rig {
         self.draw();
     }
 
-    /// A click in the middle of what is named `name`.
+    /// The window as drawn, at the screen's scale.
+    fn image(&mut self) -> image::RgbaImage {
+        self.draw();
+        self.cx
+            .update_window(self.window.into(), |_, window: &mut Window, _| {
+                window.render_to_image().expect("offscreen render")
+            })
+            .unwrap()
+    }
+
+    /// The first switch below the first Settings row (the chat mode's), read from the pixels:
+    /// its track's colour at the ends, the colours a quarter and three quarters across on its
+    /// centre line (a knob drawn in the track makes one differ), and its centre in the window.
+    fn switch(&mut self) -> Switch {
+        let row = self.record("settings-row").expect("a row is drawn").bounds;
+        let image = self.image();
+        let scale = image.width() as f32 / WIDTH;
+        let pixel = |x: u32, y: u32| {
+            let p = image.get_pixel(x, y).0;
+            [p[0], p[1], p[2]]
+        };
+        // Down the column through the middle of a track (it ends 18 px in from the row's right,
+        // 36 px long) from the first row's bottom: the next thing drawn there is the switch.
+        let column = ((f32::from(row.right()) - 36.) * scale) as u32;
+        let mut y = (f32::from(row.bottom()) * scale) as u32 + 2;
+        let fill = pixel(column, y);
+        while near(pixel(column, y), fill) {
+            y += 1;
+        }
+        let top = y;
+        while !near(pixel(column, y), fill) {
+            y += 1;
+        }
+        let y = (top + y) / 2;
+        let at = |x: u32| pixel(x, y);
+        // The row's own fill in its right padding; the track is what differs from it to the left.
+        let mut x = (f32::from(row.right()) * scale) as u32 - 8;
+        while near(at(x), fill) {
+            x -= 1;
+        }
+        let right = x;
+        while !near(at(x), fill) {
+            x -= 1;
+        }
+        let (left, width) = (x, right - x);
+        assert!(width as f32 > 30. * scale, "a track is drawn: {width} px");
+        Switch {
+            track: at(left + 4),
+            quarter: at(left + width / 4),
+            three_quarters: at(left + 3 * width / 4),
+            center: ((left + width / 2) as f32 / scale, y as f32 / scale),
+        }
+    }
+
     /// The window as drawn, written to `PERCH_NATIVE_SHOT_DIR/<name>.png` when that is set.
     fn shot(&mut self, name: &str) {
         let Some(dir) = std::env::var_os("PERCH_NATIVE_SHOT_DIR") else {
@@ -521,6 +574,20 @@ fn rig_with_nothing_open(user: PathBuf) -> Rig {
     rig
 }
 
+/// A Settings switch as drawn (`Rig::switch`).
+#[derive(Debug)]
+struct Switch {
+    track: [u8; 3],
+    quarter: [u8; 3],
+    three_quarters: [u8; 3],
+    center: (f32, f32),
+}
+
+/// Two colours a person would not tell apart.
+fn near(a: [u8; 3], b: [u8; 3]) -> bool {
+    a.iter().zip(b).all(|(a, b)| a.abs_diff(b) < 12)
+}
+
 /// The sections of Settings, top to bottom, as the web lists them.
 const SECTIONS: [&str; 10] = [
     "general",
@@ -537,9 +604,30 @@ const SECTIONS: [&str; 10] = [
 
 /// The core's `settings.current` after it saved `keybindings`, as every follower receives it.
 fn core_keeps(rig: &mut Rig, keybindings: Value) {
+    core_saves(rig, json!({"keybindings": keybindings}));
+}
+
+/// The frames among `asked` commands.
+fn sent(asked: Vec<Command>) -> Vec<Value> {
+    asked
+        .into_iter()
+        .filter_map(|c| match c {
+            Command::Send(frame) => Some(frame),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The core's `settings.current` holding `settings`, as every follower receives it.
+fn core_saves(rig: &mut Rig, settings: Value) {
     let mut state = state();
-    state.apply(&message(json!({"type": "settings.current", "settings":
-        {"defaultCwd": null, "keybindings": keybindings}})));
+    let mut all = json!({"defaultCwd": null});
+    all.as_object_mut()
+        .unwrap()
+        .extend(settings.as_object().unwrap().clone());
+    state.apply(&message(
+        json!({"type": "settings.current", "settings": all}),
+    ));
     let model = state.model();
     rig.ws(|ws, _, cx| {
         ws.sidebar()
@@ -566,6 +654,47 @@ fn settings(rig: &mut Rig) {
     }
     assert!(at.windows(2).all(|w| w[0].0 < w[1].0), "in order: {at:?}");
     rig.shot("settings-general");
+    // "Warn before closing an agent" is on: its knob (the switch's `::before`) is drawn at the
+    // track's right end in another colour; the switch is not a blank pill.
+    let on = rig.switch();
+    assert!(
+        near(on.quarter, on.track),
+        "on: the left of the track is bare: {on:?}"
+    );
+    assert!(
+        !near(on.three_quarters, on.track),
+        "on: the knob is at the right: {on:?}"
+    );
+    // Off: the knob moves to the left end and the track takes the off fill.
+    rig.mouse(on.center.0, on.center.1);
+    let warn = |on: bool| json!({"type": "settings.update", "patch": {"warnCloseAgent": on}});
+    assert_eq!(
+        sent(rig.asked()),
+        [warn(false)],
+        "the core is asked to save it"
+    );
+    core_saves(rig, json!({"warnCloseAgent": false}));
+    rig.shot("settings-switch-off");
+    let off = rig.switch();
+    assert!(
+        !near(off.quarter, off.track),
+        "off: the knob is at the left: {off:?}"
+    );
+    assert!(
+        near(off.three_quarters, off.track),
+        "off: the right of the track is bare: {off:?}"
+    );
+    assert!(
+        !near(off.track, on.track),
+        "the track's fill follows the state: {on:?} {off:?}"
+    );
+    rig.mouse(on.center.0, on.center.1);
+    assert_eq!(sent(rig.asked()), [warn(true)]);
+    core_saves(rig, json!({"warnCloseAgent": true}));
+    assert!(
+        near(rig.switch().three_quarters, on.three_quarters),
+        "back on"
+    );
     // The core answers what the pages ask of it; none of it is needed to draw them.
     rig.asked();
 
@@ -594,14 +723,7 @@ fn settings(rig: &mut Rig) {
     );
     rig.click(&row);
     rig.press("cmd-alt-j");
-    let frames: Vec<Value> = rig
-        .asked()
-        .into_iter()
-        .filter_map(|c| match c {
-            Command::Send(frame) => Some(frame),
-            _ => None,
-        })
-        .collect();
+    let frames = sent(rig.asked());
     assert_eq!(frames.len(), 1, "one save: {frames:?}");
     assert_eq!(frames[0]["type"], "settings.update");
     let saved = frames[0]["patch"]["keybindings"].clone();
