@@ -199,6 +199,8 @@ pub struct DiffView {
     width: Rc<Cell<f32>>,
     /// The keyboard's row (an index into rows), drawn with a ring while the view has focus.
     cursor: Option<usize>,
+    /// The cursor's ring shows: the keyboard moved it (the web's `:focus-visible`), not a click.
+    keyed: bool,
     /// The edit field of the comment being edited, made when editing starts.
     edit: Option<(String, gpui::Entity<TextareaState>)>,
     /// The file whose header was pinned at the last draw.
@@ -231,6 +233,7 @@ impl DiffView {
             offset_x: 0.,
             width: Rc::new(Cell::new(0.)),
             cursor: None,
+            keyed: false,
             edit: None,
             pinned: None,
             builds: 0,
@@ -421,6 +424,7 @@ impl DiffView {
             return;
         }
         let shift = event.keystroke.modifiers.shift;
+        self.keyed = true;
         match event.keystroke.key.as_str() {
             "down" => self.move_cursor(true, cx),
             "up" => self.move_cursor(false, cx),
@@ -898,6 +902,7 @@ impl Frame {
                 let extend = event.modifiers.shift;
                 view.update(cx, |view, cx| {
                     window.focus(&view.focus, cx);
+                    view.keyed = false;
                     view.select_row(ix, extend, cx);
                 })
                 .ok();
@@ -1098,7 +1103,7 @@ impl Render for DiffView {
             content_width: self.content_width(),
             gutters: self.gutters(),
             view_width: self.width.get(),
-            cursor: self.cursor,
+            cursor: self.cursor.filter(|_| self.keyed),
             focused: self.focus.is_focused(window),
             edit: self.edit.clone(),
         };
