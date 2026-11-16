@@ -24,6 +24,7 @@ import { DOT_GLYPH, sessionDotState } from "../../../../packages/web/src/statusD
 import { isNestedIn, nestUnderLeads } from "../../../../packages/web/src/sidebarOrder.ts";
 import { computeAnchoredPopoverStyle, useDismissOnOutsideClick } from "../../../../packages/web/src/components/popoverPosition.ts";
 import { PageIcon } from "../../../../packages/web/src/components/PageIcon.tsx";
+import { FileAsset as NativeFileAsset } from "./fileAsset.mjs";
 
 /** The SDK version this surface implements (`perch-sdk.d.ts`'s navigation part). */
 export const version = "1.3.0";
@@ -438,3 +439,6 @@ export const TabMenu = () => null;
 /** A dragged tab's ghost is the host's; nothing is drawn in the strip. */
 export const TabDragLayer = () => null;
 export const NewFilePrompt = overlay("new-file");
+
+/** The file pane's media viewer (`fileAsset.mjs`), drawn through this copy's host. */
+export function FileAsset(props) { return createElement(NativeFileAsset, { ...props, perch: host() }); }
