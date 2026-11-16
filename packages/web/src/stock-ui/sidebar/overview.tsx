@@ -8,7 +8,7 @@
 //! Reorder: one operation, move X before/after Y within a group (a project's chats, the favourites). A pointer
 //! drag with the mouse (`beginReorderDrag`: the row follows the pointer, the others slide aside); Move up/down in
 //! the row menus serves the keyboard and the phone. The core keeps the order, so every screen shows it.
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactElement } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactElement } from "react";
 import {
   beginReorderDrag, buttonClass, cn, ConfirmDialog, Dialog, FolderBrowser, ghostButton, InstructionsDialog, MemoryDialog, nestSessions, NewSessionMenu,
   pickFolder, rowActionClass, runCommand, segmentClass, Select, SessionDot, SessionMenu, startSession, useAddProject, useAddProjectRequest, useHosts, useNavigation,
@@ -160,21 +160,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       return target ? [{ label, testId: `workspace-${kind}-move-${key}-${id}`, onSelect: () => moveRow(kind, id, target, step > 0, siblings, flip) }] : [];
     });
   }
-  function openSessionMenu(session: SessionInfo, x: number, y: number, siblings: SessionInfo[], flip = false) {
-    setSessionMenu({ id: session.id, x, y, extraItems: moveItems("session", session.id, siblings.map((other) => other.id), flip) });
-  }
-  /** A chat row's wrapper props: drag within `group`, and a menu (right-click or hold) with Move up/down. */
-  function sessionRowProps(session: SessionInfo, siblings: SessionInfo[], group: string) {
-    const flip = group === "chats" || group.startsWith("status:"); // groups shown newest first
-    const { handle, zone } = group === "list" ? { handle: {}, zone: {} } : dnd("session", session.id, group, siblings.map((other) => other.id), flip);
-    return {
-      ...zone,
-      ...withDrag(longPress((x, y) => openSessionMenu(session, x, y, siblings, flip)), handle),
-      onContextMenu: (event: React.MouseEvent) => {
-        event.preventDefault();
-        openSessionMenu(session, event.clientX, event.clientY, siblings, flip);
-      },
-    };
+  function openSessionMenu(session: SessionInfo, x: number, y: number, siblings: string[], flip = false) {
+    setSessionMenu({ id: session.id, x, y, extraItems: moveItems("session", session.id, siblings, flip) });
   }
   function pickSession(id: string) {
     runCommand("session.open", { id });
@@ -185,93 +172,40 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     onNavigate?.();
   }
 
-  /** One chat row. `variant`: the tree's and Quickchat's (state badge), By status's (one line with `detail`), or
-   * the flat list's (its project's name, then the badge). A lead with sub-sessions and the sub-sessions are filled
-   * cards; each sub-session hangs off an elbow connector, and the lead carries the fold chevron. */
+  // What a row's handlers do, read when they run: rows are memoised (`SessionRow`) and keep the props they drew with.
+  const rowActions = useRef<RowActions>(null!);
+  rowActions.current = {
+    pick: pickSession,
+    menu: openSessionMenu,
+    fold: toggleFolded,
+    drag: (event, id, group, shown, flip) => dnd("session", id, group, shown, flip).handle.onPointerDown?.(event),
+  };
+  /** One chat row (`SessionRow`) of `group`, among `siblings` as listed. */
   function sessionRow(session: SessionInfo, siblings: SessionInfo[], group: string, variant: "tree" | "status" | "list", detail = "", family: Family = {}) {
     const { kids = [], folded = false, nested = false, last = false } = family;
     const active = session.id === sessionId;
-    const lead = kids.length > 0;
-    const lit = active || (folded && kids.some((kid) => kid.id === sessionId));
-    const title = session.title || (variant === "tree" && group !== "chats" ? "New session" : "New chat");
-    const badge = reachable && session.provider !== "terminal" && variant !== "status" && <StateBadge section={session.section} testId={`session-state-${session.id}`} />;
     // Folded away, a lead still says what needs you among its sub-sessions.
     const hidden = folded ? (Object.keys(SECTION_WORDS) as StatusSection[]).filter((key) => key !== "idle").map((key) => ({ key, count: kids.filter((kid) => kid.section === key).length })).find((one) => one.count > 0) : undefined;
-    const button = (
-      <button
-        type="button"
-        className={cn(SESSION, lead && "w-auto min-w-0 flex-initial pr-1", variant === "status" && "min-h-9 py-0 min-[701px]:min-h-6", variant === "status" && !nested && "pl-[1.875rem]", variant === "tree" && group !== "chats" && !nested && "pl-[1.525rem]", nested && "pl-1", active ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
-        aria-current={active ? "page" : undefined}
-        title={variant === "tree" ? title : session.cwd}
-        data-testid={`workspace-session-${session.id}`}
-        data-session={variant === "status" ? session.id : undefined}
-        onClick={() => pickSession(session.id)}
-      >
-        {variant === "status" ? <>
-          {/* The section says the state, so the row is just the harness and the name. */}
-          <SessionDot plain id={session.id} className="h-4 w-4" />
-          {/* One line: the name, then what it adds (the workspace, or why it needs you), muted. */}
-          <span className="flex min-w-0 flex-1 items-baseline gap-2">
-            <span className="min-w-0 shrink-[2] truncate">{title}</span>
-            {detail && <span className="min-w-0 flex-1 truncate text-[0.62rem] text-subtext-0" data-testid="status-row-detail">{detail}</span>}
-          </span>
-        </> : <>
-          <SessionDot plain id={session.id} className="h-[18px] w-[18px]" />
-          <span className={cn(SESSION_TITLE, lead && "flex-initial")}>{title}</span>
-          {variant === "list" && session.projectName && <span className="min-w-0 max-w-[35%] truncate text-[0.62rem] text-subtext-0" title={session.projectName}>{session.projectName}</span>}
-          {!lead && badge}
-        </>}
-      </button>
-    );
     return (
-      <div
-        className={cn("group/row flex min-w-0 items-stretch rounded-ui", lit ? "bg-surface-1" : cn((lead || nested) && "bg-surface-0", "hover:bg-surface-1 focus-within:bg-surface-1"))}
-        data-sub-session={nested || undefined}
+      <SessionRow
         key={session.id}
-        {...sessionRowProps(session, siblings, group)}
-      >
-        {/* A sub-session spans the row like any other; only its elbow and content are indented. The elbow comes
-          * down from the lead's icon column (row padding + half the 18px icon) and turns into this row; the rows
-          * before the last go on. */}
-        {nested && (
-          <span className={cn("-mt-[2px] flex w-2.5 shrink-0 flex-col", variant === "status" ? "ml-[2.375rem]" : group === "chats" ? "ml-[1.15rem]" : "ml-[2.025rem]")} aria-hidden="true" data-testid={`session-elbow-${session.id}`}>
-            <span className="flex-1 rounded-bl-[6px] border-b border-l border-overlay-1" />
-            <span className={cn("flex-1", !last && "border-l border-overlay-1")} />
-          </span>
-        )}
-        {button}
-        {lead && <>
-          <button
-            type="button"
-            className={FOLD}
-            data-testid={`session-fold-${session.id}`}
-            title={folded ? "Show sub-sessions" : "Hide sub-sessions"}
-            aria-label={`${folded ? "Show" : "Hide"} sub-sessions of ${title}`}
-            aria-expanded={!folded}
-            onClick={() => toggleFolded(session.id)}
-          >
-            <Chevron open={!folded} size={10} />
-          </button>
-          {/* The rest of the line stays the row's own button, holding the state at its end. */}
-          <div role="presentation" className="flex flex-1 cursor-pointer items-center justify-end gap-1 px-1 whitespace-nowrap" onClick={(event) => { event.stopPropagation(); pickSession(session.id); }}>
-            {hidden ? <Rollup count={hidden.count} section={hidden.key} testId={`session-rollup-${session.id}`} /> : badge}
-          </div>
-        </>}
-        <button
-          type="button"
-          className={cn(SESSION_MENU, active && "opacity-100")}
-          data-testid={`session-menu-button-${session.id}`}
-          title="More"
-          aria-label={`More for ${session.title || (variant === "tree" && group !== "chats" ? "session" : "chat")}`}
-          aria-haspopup="menu"
-          onClick={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect();
-            openSessionMenu(session, rect.left, rect.bottom + 4, siblings, group === "chats" || group.startsWith("status:"));
-          }}
-        >
-          <EllipsisIcon />
-        </button>
-      </div>
+        session={session}
+        siblings={siblings.map((other) => other.id).join("\n")}
+        group={group}
+        variant={variant}
+        detail={detail}
+        lead={kids.length > 0}
+        folded={folded}
+        nested={nested}
+        last={last}
+        active={active}
+        lit={active || (folded && kids.some((kid) => kid.id === sessionId))}
+        hiddenKey={hidden?.key}
+        hiddenCount={hidden?.count ?? 0}
+        reachable={reachable}
+        draggable={!!reorderable && !compact && group !== "list"}
+        actions={rowActions}
+      />
     );
   }
   /** The rows of a list of chats, each lead followed by its sub-sessions unless it is folded. */
@@ -882,3 +816,131 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     </section>
   );
 }
+
+/** What a session row asks of the overview, by the time its handler runs (`siblings`: the row's group as listed). */
+type RowActions = {
+  pick: (id: string) => void;
+  menu: (session: SessionInfo, x: number, y: number, siblings: string[], flip?: boolean) => void;
+  fold: (id: string) => void;
+  drag: (event: ReactPointerEvent, id: string, group: string, siblings: string[], flip: boolean) => void;
+};
+
+type SessionRowProps = {
+  session: SessionInfo;
+  /** The ids of the row's group as listed, one per line (a string, so an unchanged group compares equal). */
+  siblings: string;
+  group: string;
+  variant: "tree" | "status" | "list";
+  detail: string;
+  lead: boolean;
+  folded: boolean;
+  nested: boolean;
+  last: boolean;
+  active: boolean;
+  lit: boolean;
+  hiddenKey?: StatusSection;
+  hiddenCount: number;
+  reachable: boolean;
+  draggable: boolean;
+  actions: { current: RowActions };
+};
+
+/** One chat row. `variant`: the tree's and Quickchat's (state badge), By status's (one line with `detail`), or
+ * the flat list's (its project's name, then the badge). A lead with sub-sessions and the sub-sessions are filled
+ * cards; each sub-session hangs off an elbow connector, and the lead carries the fold chevron. Memoised: a row whose
+ * session and place are unchanged is not rendered again when another row changes. */
+const SessionRow = memo(function SessionRow({ session, siblings: siblingIds, group, variant, detail, lead, folded, nested, last, active, lit, hiddenKey, hiddenCount, reachable, draggable, actions }: SessionRowProps) {
+  const siblings = siblingIds ? siblingIds.split("\n") : [];
+  const flip = group === "chats" || group.startsWith("status:"); // groups shown newest first
+  const title = session.title || (variant === "tree" && group !== "chats" ? "New session" : "New chat");
+  const badge = reachable && session.provider !== "terminal" && variant !== "status" && <StateBadge section={session.section} testId={`session-state-${session.id}`} />;
+  const pick = () => actions.current.pick(session.id);
+  const openMenu = (x: number, y: number) => actions.current.menu(session, x, y, siblings, flip);
+  const press = longPress(openMenu);
+  // A chat row's wrapper props: drag within `group`, and a menu (right-click or hold) with Move up/down.
+  const zone = draggable ? { "data-reorder-group": group, "data-reorder-id": session.id } : {};
+  const button = (
+    <button
+      type="button"
+      className={cn(SESSION, lead && "w-auto min-w-0 flex-initial pr-1", variant === "status" && "min-h-9 py-0 min-[701px]:min-h-6", variant === "status" && !nested && "pl-[1.875rem]", variant === "tree" && group !== "chats" && !nested && "pl-[1.525rem]", nested && "pl-1", active ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
+      aria-current={active ? "page" : undefined}
+      title={variant === "tree" ? title : session.cwd}
+      data-testid={`workspace-session-${session.id}`}
+      data-session={variant === "status" ? session.id : undefined}
+      onClick={pick}
+    >
+      {variant === "status" ? <>
+        {/* The section says the state, so the row is just the harness and the name. */}
+        <SessionDot plain id={session.id} className="h-4 w-4" />
+        {/* One line: the name, then what it adds (the workspace, or why it needs you), muted. */}
+        <span className="flex min-w-0 flex-1 items-baseline gap-2">
+          <span className="min-w-0 shrink-[2] truncate">{title}</span>
+          {detail && <span className="min-w-0 flex-1 truncate text-[0.62rem] text-subtext-0" data-testid="status-row-detail">{detail}</span>}
+        </span>
+      </> : <>
+        <SessionDot plain id={session.id} className="h-[18px] w-[18px]" />
+        <span className={cn(SESSION_TITLE, lead && "flex-initial")}>{title}</span>
+        {variant === "list" && session.projectName && <span className="min-w-0 max-w-[35%] truncate text-[0.62rem] text-subtext-0" title={session.projectName}>{session.projectName}</span>}
+        {!lead && badge}
+      </>}
+    </button>
+  );
+  return (
+    <div
+      className={cn("group/row flex min-w-0 items-stretch rounded-ui", lit ? "bg-surface-1" : cn((lead || nested) && "bg-surface-0", "hover:bg-surface-1 focus-within:bg-surface-1"))}
+      data-sub-session={nested || undefined}
+      {...zone}
+      {...press}
+      onPointerDown={(event: ReactPointerEvent) => {
+        press.onPointerDown(event);
+        if (draggable) actions.current.drag(event, session.id, group, siblings, flip);
+      }}
+      onContextMenu={(event: React.MouseEvent) => {
+        event.preventDefault();
+        openMenu(event.clientX, event.clientY);
+      }}
+    >
+      {/* A sub-session spans the row like any other; only its elbow and content are indented. The elbow comes
+        * down from the lead's icon column (row padding + half the 18px icon) and turns into this row; the rows
+        * before the last go on. */}
+      {nested && (
+        <span className={cn("-mt-[2px] flex w-2.5 shrink-0 flex-col", variant === "status" ? "ml-[2.375rem]" : group === "chats" ? "ml-[1.15rem]" : "ml-[2.025rem]")} aria-hidden="true" data-testid={`session-elbow-${session.id}`}>
+          <span className="flex-1 rounded-bl-[6px] border-b border-l border-overlay-1" />
+          <span className={cn("flex-1", !last && "border-l border-overlay-1")} />
+        </span>
+      )}
+      {button}
+      {lead && <>
+        <button
+          type="button"
+          className={FOLD}
+          data-testid={`session-fold-${session.id}`}
+          title={folded ? "Show sub-sessions" : "Hide sub-sessions"}
+          aria-label={`${folded ? "Show" : "Hide"} sub-sessions of ${title}`}
+          aria-expanded={!folded}
+          onClick={() => actions.current.fold(session.id)}
+        >
+          <Chevron open={!folded} size={10} />
+        </button>
+        {/* The rest of the line stays the row's own button, holding the state at its end. */}
+        <div role="presentation" className="flex flex-1 cursor-pointer items-center justify-end gap-1 px-1 whitespace-nowrap" onClick={(event) => { event.stopPropagation(); pick(); }}>
+          {hiddenKey ? <Rollup count={hiddenCount} section={hiddenKey} testId={`session-rollup-${session.id}`} /> : badge}
+        </div>
+      </>}
+      <button
+        type="button"
+        className={cn(SESSION_MENU, active && "opacity-100")}
+        data-testid={`session-menu-button-${session.id}`}
+        title="More"
+        aria-label={`More for ${session.title || (variant === "tree" && group !== "chats" ? "session" : "chat")}`}
+        aria-haspopup="menu"
+        onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          openMenu(rect.left, rect.bottom + 4);
+        }}
+      >
+        <EllipsisIcon />
+      </button>
+    </div>
+  );
+});
