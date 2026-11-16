@@ -16,7 +16,8 @@
 //! - `{ kind: "input", id, value, placeholder, checked, input_type, style, ... }` (`value`: what the field holds,
 //!   typed text included; `field_w`: a line field's content width when its content sizes it)
 //! - `break_anywhere` on a node whose text breaks a word too long for its line anywhere (`overflow-wrap`)
-//! - `blocks_pointer` on a node that takes pointer events under an ancestor that lets them through; `tabular` on one
+//! - `blocks_pointer` on a node that takes pointer events under an ancestor that lets them through; `pointer_none` on
+//!   one that lets them through (the wheel too); `tabular` on one
 //!   whose digits are tabular; `scrollbar` (its width) on a vertical scroller
 //! - a node `mount` was given a parity table for (`options.names`) carries `name` (`name` or `name:key`, the engine
 //!   id tests find it by) and, for a name that is the element's own text, `range_name`.
@@ -561,6 +562,8 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
   // An element that takes pointer events again under one that lets them through (`pointer-events-auto` in a
   // `pointer-events-none` stack): a press on it stops there and does not reach what is beneath the screen.
   if (computed.values["pointer-events"] !== "none" && parentComputed?.values["pointer-events"] === "none") extra.blocks_pointer = true;
+  // A box that lets pointer events through (`pointer-events-none`: a toast stack): the wheel goes through it as well.
+  if (computed.values["pointer-events"] === "none") extra.pointer_none = true;
   const events = Object.entries(EVENTS).filter(([, props]) => props.some((p) => typeof element.props[p] === "function")).map(([name]) => name);
   // A form's submit button submits it on a click, with or without a handler of its own.
   if (!events.includes("click") && submits(element)) events.push("click");

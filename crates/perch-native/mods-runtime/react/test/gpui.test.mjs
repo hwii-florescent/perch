@@ -315,3 +315,15 @@ test("a named text run in a flex column is as wide as its glyphs, where its alig
   const row = toGpui({ ...column("left"), style: { display: "flex" } }, kit, {}, files).record;
   assert.deepEqual(row.children.map((c) => c.record).find((c) => c?.id === "name").styles, [], "a row lays it out as it is");
 });
+
+test("a box over the page takes the wheel: an overlay root and a pointer-taking card do, a pass-through overlay does not", () => {
+  const wheelOn = (node, overlay) => {
+    const { kit, handlers } = recordingKit();
+    toGpui({ kind: "div", children: [], style: {}, ...node }, kit, { document: null }, files, overlay);
+    return [...handlers.keys()].some((key) => key.endsWith(":on_scroll_wheel"));
+  };
+  assert.equal(wheelOn({ id: 1 }, true), true, "a dialog's backdrop");
+  assert.equal(wheelOn({ id: 2, pointer_none: true }, true), false, "a toast stack lets the wheel through");
+  assert.equal(wheelOn({ id: 3, blocks_pointer: true }, false), true, "a toast card");
+  assert.equal(wheelOn({ id: 4 }, false), false, "a plain box");
+});
