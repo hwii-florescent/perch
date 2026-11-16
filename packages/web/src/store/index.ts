@@ -1439,7 +1439,10 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     const closing = get().sessions.find((session) => session.id === sessionId);
     if (closing) recordClosedTab(closing);
     socket.send({ type: "session.delete", sessionId });
-    leaveSession(get(), sessionId);
+    // The session is still in the list until the server says it is gone; subscribers of the move away from it
+    // (`fileTabs.ts`) must still be able to tell a closed session from one that lives on elsewhere.
+    deletingSessionIds.add(sessionId);
+    try { leaveSession(get(), sessionId); } finally { deletingSessionIds.delete(sessionId); }
   },
 
   renameSession: (sessionId, title) => {
@@ -1658,6 +1661,9 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   },
 }));
 bindContextBridgeStore(usePerchStore.getState);
+
+/** Sessions whose deletion is being applied right now (see `deleteSession`). */
+export const deletingSessionIds = new Set<string>();
 
 /** Leaving the active session lands on a neighbouring session of the same
  * workspace, like a browser; leaving its last session keeps the workspace
@@ -2069,7 +2075,7 @@ export function handleServerMessage(msg: ServerMessage): void {
         // First list seen by a profile that has never picked a scope: default
         // the nav to the most recent session's host + project. Afterwards the
         // latch is closed and only explicit actions move the scope.
-        if (!navSeedPending || msg.sessions.length === 0) {
+        if (!navSeedPending() || msg.sessions.length === 0) {
           return { sessions: msg.sessions };
         }
         const newest = [...msg.sessions].sort((a, b) => b.createdAt - a.createdAt)[0];

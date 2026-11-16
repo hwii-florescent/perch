@@ -102,17 +102,20 @@ function hold(id: string, wait: boolean): Promise<boolean> {
 
 /** Settle this window's viewer id. Run once, before anything reads `viewerId()` for storage. */
 export async function claimViewer(): Promise<string> {
+  // `current` is provisional until this settles: anything reading `viewerId()` meanwhile (before this ran, or during the
+  // wait for a lock) gets the stored id, which must not make this skip the claim.
+  let claimed: string | undefined;
   const mine = session();
   if (typeof navigator !== "undefined" && navigator.locks) {
     const idle = Object.entries(registry()).sort((a, b) => b[1] - a[1]).map(([id]) => id).filter((id) => id !== mine);
-    if (mine && await hold(mine, true)) current = mine;
-    for (const id of current ? [] : idle) if (await hold(id, false)) { current = id; break; }
-    if (!current) {
+    if (mine && await hold(mine, true)) claimed = mine;
+    for (const id of claimed ? [] : idle) if (await hold(id, false)) { claimed = id; break; }
+    if (!claimed) {
       const fresh = newId();
-      if (await hold(fresh, false)) current = fresh;
+      if (await hold(fresh, false)) claimed = fresh;
     }
   }
-  current ??= mine ?? newId();
+  current = claimed ?? mine ?? newId();
   try { sessionStorage.setItem(SESSION_KEY, current); } catch { /* a reload then starts as a new window */ }
   const id = current;
   remember(id);
