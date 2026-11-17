@@ -127,6 +127,10 @@ fn main() {
                     );
                     continue;
                 }
+                if let Update::Health(health) = update {
+                    workspace.update(cx, |workspace, cx| workspace.daemon_health(&health, cx));
+                    continue;
+                }
                 if let Update::Review(message) = update {
                     cx.update(|cx| {
                         if let Some(git) = perch_native::git::host(cx) {

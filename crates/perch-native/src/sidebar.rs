@@ -95,6 +95,14 @@ pub enum Alert {
 /// The session id a usage alert's notification carries (the web's `USAGE_NOTIFICATION_ID`).
 pub const USAGE_NOTIFICATION: &str = "usage";
 
+/// The core's announcement that the terminal host stopped answering or answers again
+/// (`daemon.health`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Health {
+    pub healthy: bool,
+    pub problem: Option<String>,
+}
+
 /// How a toast is delivered (`toastDelivery`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Toast {
@@ -336,6 +344,8 @@ pub struct State {
     sound_enabled: bool,
     window_active: bool,
     alerts: Vec<Heard>,
+    /// The terminal host's latest health announcement (`daemon.health`) not yet taken.
+    health: Option<Health>,
     /// Where the person's own sound files are: the folder that holds `mods/`.
     sounds_in: Option<std::path::PathBuf>,
     keybindings: BTreeMap<String, String>,
@@ -516,6 +526,11 @@ impl State {
         std::mem::take(&mut self.alerts)
     }
 
+    /// The terminal host's health, when the core announced a change since the last call.
+    pub fn take_health(&mut self) -> Option<Health> {
+        self.health.take()
+    }
+
     /// The frame that turns a configured computer on or off: its entry as the core sent it, with
     /// only `enabled` changed. `None` for this computer or one the core does not list.
     pub fn host_enabled_frame(&self, host_id: &str, enabled: bool) -> Option<Value> {
@@ -615,6 +630,12 @@ impl State {
                         body: (!body.is_empty()).then(|| body.clone()),
                     });
                 }
+            }
+            ServerMessage::DaemonHealth { healthy, problem } => {
+                self.health = Some(Health {
+                    healthy: *healthy,
+                    problem: problem.clone(),
+                });
             }
             ServerMessage::UsageRedeemResult { .. } => {
                 let result = serde_json::to_value(message).unwrap_or(Value::Null);
@@ -2382,6 +2403,24 @@ mod tests {
             {"defaultCwd": null, "soundEnabled": false, "toastDelivery": "off"}})));
         state.apply(&alert("threshold", "x"));
         assert!(state.take_alerts().is_empty());
+    }
+
+    #[test]
+    fn the_terminal_hosts_health_is_kept_until_taken() {
+        let mut state = state();
+        assert_eq!(state.take_health(), None);
+        state.apply(&message(json!({"type": "daemon.health", "healthy": false,
+            "problem": "No answer to a health check"})));
+        state.apply(&message(json!({"type": "daemon.health", "healthy": true})));
+        assert_eq!(
+            state.take_health(),
+            Some(Health {
+                healthy: true,
+                problem: None
+            }),
+            "the latest wins"
+        );
+        assert_eq!(state.take_health(), None, "taken once");
     }
 
     #[test]

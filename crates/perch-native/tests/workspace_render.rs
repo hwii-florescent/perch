@@ -1361,11 +1361,9 @@ fn a_tab_that_cannot_end_its_session_is_put_away() {
         )],
         &[],
     );
-    let mut h = Harness::build(
-        facts.model(),
-        Some(commands),
-        || Err(anyhow::anyhow!("no core in this test")),
-    );
+    let mut h = Harness::build(facts.model(), Some(commands), || {
+        Err(anyhow::anyhow!("no core in this test"))
+    });
     h.open_as("blank", None);
     h.draw();
     assert_eq!(h.run("tabs.close", json!({})), Ok(()));
