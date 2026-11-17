@@ -43,6 +43,9 @@ function readOrganize(): Organize {
 /** The tree's order: the core's (manual, with drag and favourites) or by what needs you (no drag). */
 const SORT_KEY = "perch.sidebar.sort";
 const SHOW_TERMINALS_KEY = "perch.sidebar.showTerminals";
+/** Sent on `window` by a host that keeps these settings itself (the native window) when they change elsewhere: the
+ * sidebar reads them again rather than being mounted again. The web never sends it. */
+export const SIDEBAR_SETTINGS_EVENT = "perch:sidebar-settings";
 
 type Drag = { handle: { onPointerDown?: (event: ReactPointerEvent) => void }; zone: Record<string, string> };
 
@@ -79,6 +82,16 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const [newSession, setNewSession] = useState<{ project: ProjectInfo; rect: DOMRect } | null>(null);
   // Folded projects hide their workspaces and sessions (per viewer).
   const [collapsed, setCollapsed] = useState<string[]>(readCollapsed);
+  useEffect(() => {
+    const reread = () => {
+      setShowTerminals(readFlag(SHOW_TERMINALS_KEY, "1"));
+      setOrganize(readOrganize());
+      setAttentionSort(readFlag(SORT_KEY, "attention"));
+      setCollapsed(readCollapsed());
+    };
+    window.addEventListener(SIDEBAR_SETTINGS_EVENT, reread);
+    return () => window.removeEventListener(SIDEBAR_SETTINGS_EVENT, reread);
+  }, []);
   function toggleCollapsed(projectId: string) {
     setCollapsed((current) => {
       const next = current.includes(projectId) ? current.filter((id) => id !== projectId) : [...current, projectId];
