@@ -524,7 +524,10 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
   if (!shared) {
     // ponytail: dropped whole past a bound, as the matched rules are (`Cascade.matching`).
     if (parts.size > 20000) parts.clear();
-    parts.set(key, (shared = computePart(element, parentComputed, inheritedText, ctx)));
+    shared = computePart(element, parentComputed, inheritedText, ctx);
+    // The part outlives its element (the cascade is shared by every copy): it keeps only what the key holds of it.
+    shared.computed = { ...shared.computed, element: { hidden: !!element.hidden } };
+    parts.set(key, shared);
   }
   const extra = { ...shared.extra };
   // Groups are named after their elements: this element's own, and its ancestors' as many steps up.
@@ -538,7 +541,6 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
   }
   const own = ownOf(element);
   if (own.events.length) extra.events = own.events;
-  // `computed.element` is the first element computed alike, which is read only for what the key holds (`hidden`).
   return {
     ...shared,
     extra,
@@ -1060,12 +1062,23 @@ const ENGINE_ROOT_TEXT = { font_features: "" };
  * `document.body`, in order), the `document_events` the source listens for on `document`/`window`, and every
  * declaration the engine cannot draw (`unsupported`).
  */
+/** One cascade per sheet and look, shared by every copy drawn with them: what it keeps is keyed by what selectors see,
+ * not by a document, so a copy just started (a file's editor) describes as warm as one long running. */
+const CASCADES = new WeakMap();
+function sharedCascade(sheet, look, theme, viewport) {
+  const shared = CASCADES.get(sheet);
+  if (shared?.look === look) return shared.cascade;
+  const cascade = new Cascade(sheet, { theme, viewport });
+  CASCADES.set(sheet, { look, cascade });
+  return cascade;
+}
+
 export function describe(document, perch, sheet, kept = {}, names = null) {
   const theme = themeOf(perch);
   const viewport = perch.viewport?.() ?? { width: 1000, height: 800 };
   // What was computed for the last description is kept (`kept`) while the sheet, theme and window stay the same.
   const look = JSON.stringify([theme, viewport]);
-  if (kept.look !== look || kept.sheet !== sheet) Object.assign(kept, { look, sheet, cache: new WeakMap(), cascade: new Cascade(sheet, { theme, viewport }), top: null });
+  if (kept.look !== look || kept.sheet !== sheet) Object.assign(kept, { look, sheet, cache: new WeakMap(), cascade: sharedCascade(sheet, look, theme, viewport), top: null });
   const { cascade, cache } = kept;
   const findings = new Findings();
   const log = [];

@@ -93,8 +93,8 @@ const BOUND: i64 = 2 * 1024 * 1024;
 /// stopped copy kept alive is some 130 objects and 24 KB of Settings alone; a whole tree, thousands).
 const STOPS: usize = 16;
 const STOP_BOUND: i64 = 400;
-/// A budget Settings' first draw does not fit in, though loading its module does.
-const STOP_BUDGET: Duration = Duration::from_millis(20);
+/// A budget Settings' draw does not fit in, though loading its module does, on any machine.
+const STOP_BUDGET: Duration = Duration::from_millis(3);
 /// A budget the sidebar's render does not fit in.
 const CUT_BUDGET: Duration = Duration::from_millis(1);
 /// Longer than a stopped copy waits before it starts afresh again (`RESTART_EVERY` in `mods.rs`).
@@ -201,6 +201,10 @@ fn main() {
 
     // Settings stopped part-way, again and again. The window changes after each, so the work a
     // stopped load left queued runs, as it does in the app.
+    // One whole draw first: the styles Settings computes are kept for every copy of it (the
+    // shared cascade), so a stopped load adds none and what it keeps is a leak.
+    run(&mut cx, "global.settings", json!({}));
+    run(&mut cx, "overlay.close", json!({}));
     let mut stopped = 0;
     let mut after = vec![];
     for _ in 0..STOPS {
@@ -217,7 +221,10 @@ fn main() {
         after.push(heap(&mut cx, true));
     }
     let mb = |bytes: i64| bytes as f64 / 1048576.;
-    let (first_stop, last_stop) = (after[1], *after.last().unwrap());
+    // The least of the last three: a leak raises every reading after it, work still settling
+    // raises one.
+    let last_stop = *after[after.len() - 3..].iter().min_by_key(|r| r.1).unwrap();
+    let first_stop = after[1];
     println!(
         "{stopped} of {STOPS} Settings loads stopped: js heap {:.2} MB ({} objects) after the second, {:.2} MB ({} objects) after the last",
         mb(first_stop.0), first_stop.1, mb(last_stop.0), last_stop.1
