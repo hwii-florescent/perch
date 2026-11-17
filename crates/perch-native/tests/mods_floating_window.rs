@@ -645,10 +645,13 @@ fn tab_menu(rig: &mut Rig) {
     })
     .unwrap();
 
-    // Close tab is the tab's ×: bravo's terminal is attached to nothing, so the tab is put away
-    // and its session is not ended (the close guard of an attached agent is `confirm`'s test).
+    // Close tab is the tab's ×: bravo's terminal is attached to nothing, so the core is asked to
+    // end it as the web does, through the close guard of an agent; Keep running puts the tab away
+    // and ends nothing (the guard's other answers are `confirm`'s test).
     rig.mouse_with(MouseButton::Right, x, y);
     rig.click("tab-menu-item:tab-menu-close");
+    assert_eq!(rig.open_screens(), ["confirm"], "an agent is asked first");
+    rig.click("confirm-extra");
     assert!(!tabs(rig).contains(&"bravo".to_string()), "the tab went");
     let notice = rig.ws(|ws, _, _| ws.notice().map(str::to_string));
     assert!(
@@ -1408,6 +1411,72 @@ fn toast(rig: &mut Rig) {
     println!("toast: ok");
 }
 
+/// The terminal host's health, as the core announces it: a toast that outlasts a finished chat's
+/// and is replaced, not stacked, by the recovery.
+fn daemon_health(rig: &mut Rig) {
+    let broadcast = |rig: &mut Rig, frame: Value| {
+        let mut follower = State::default();
+        follower.apply(&message(frame));
+        let health = follower.take_health().expect("the follower took it in");
+        rig.ws(|ws, _, cx| ws.daemon_health(&health, cx));
+        rig.draw();
+    };
+    broadcast(
+        rig,
+        json!({"type": "daemon.health", "healthy": false, "problem": "1 lock held for 12 s"}),
+    );
+    let titles = |rig: &mut Rig| {
+        rig.ws(|ws, _, _| {
+            ws.notifications()
+                .iter()
+                .map(|n| (n.heard.title.clone(), n.heard.body.clone()))
+                .collect::<Vec<_>>()
+        })
+    };
+    assert_eq!(
+        titles(rig),
+        [(
+            "Terminal host is not responding".to_string(),
+            Some(
+                "1 lock held for 12 s. Terminals were left running; nothing was restarted.".into()
+            )
+        )]
+    );
+    assert_eq!(rig.open_screens(), ["toast"]);
+    assert!(
+        rig.record("toast-detail").is_some(),
+        "its body is the detail line"
+    );
+    assert!(rig.terminal_focused(), "the keyboard stays on the terminal");
+    // Told again (a second client connecting) it is still one card, and it stays past a finished
+    // chat's 6 s.
+    broadcast(rig, json!({"type": "daemon.health", "healthy": false}));
+    assert_eq!(
+        titles(rig),
+        [(
+            "Terminal host is not responding".to_string(),
+            Some(
+                "No answer to a health check. Terminals were left running; nothing was restarted."
+                    .into()
+            )
+        )]
+    );
+    rig.cx.advance_clock(std::time::Duration::from_secs(7));
+    rig.draw();
+    assert_eq!(titles(rig).len(), 1, "it stays for 60 s");
+    // Recovery replaces it with a short, plain card that goes by itself.
+    broadcast(rig, json!({"type": "daemon.health", "healthy": true}));
+    assert_eq!(
+        titles(rig),
+        [("Terminal host is responding again".to_string(), None)]
+    );
+    rig.cx.advance_clock(std::time::Duration::from_secs(7));
+    rig.draw();
+    assert!(titles(rig).is_empty(), "it went");
+    assert!(rig.open_screens().is_empty());
+    println!("daemon health: ok");
+}
+
 fn main() {
     let scratch: PathBuf =
         std::env::temp_dir().join(format!("perch-floating-window-{}", std::process::id()));
@@ -1470,6 +1539,7 @@ fn main() {
     new_tab_over_a_page(&mut rig);
     dialog(&mut rig);
     toast(&mut rig);
+    daemon_health(&mut rig);
     confirm(&mut rig);
     readback(&mut rig, &scratch.join("native-mods"));
 

@@ -32,6 +32,11 @@ fn model(sessions: &[(&str, Value)]) -> Model {
 
 /// [`model`] where the core also offers the agents named in `agents`.
 fn model_with_agents(sessions: &[(&str, Value)], agents: &[&str]) -> Model {
+    state_with_agents(sessions, agents).model()
+}
+
+/// The state [`model_with_agents`] shows, for a test that changes what the core says later.
+fn state_with_agents(sessions: &[(&str, Value)], agents: &[&str]) -> State {
     let manifests: Vec<Value> = std::iter::once("terminal")
         .chain(agents.iter().copied())
         .map(|id| {
@@ -65,7 +70,7 @@ fn model_with_agents(sessions: &[(&str, Value)], agents: &[&str]) -> Model {
     state.apply(&message(
         json!({"type": "session.list", "sessions": sessions}),
     ));
-    state.model()
+    state
 }
 
 struct Shot {
@@ -1326,16 +1331,12 @@ fn closing_a_tab_ends_its_session() {
     println!("workspace_render: close ok");
 }
 
-/// A tab that only watches a session another view controls, and one with no attached terminal,
-/// leave the view and send nothing: the session keeps running.
+/// A tab that only watches a session another view controls leaves the view and sends nothing: the
+/// session keeps running. One with no attached terminal has no connection to end over, so the
+/// main connection asks the core to delete the session, as the web does, and the tab goes when
+/// the core says it is gone.
 fn a_tab_that_cannot_end_its_session_is_put_away() {
-    let mut h = Harness::new(model(&[
-        ("watched", json!({"cliProviderId": "claude"})),
-        (
-            "blank",
-            json!({"cliProviderId": null, "currentProviderId": "terminal"}),
-        ),
-    ]));
+    let mut h = Harness::new(model(&[("watched", json!({"cliProviderId": "claude"}))]));
     h.open_as("watched", None);
     h.draw();
     let (mut rx, core) = h.live();
@@ -1352,11 +1353,46 @@ fn a_tab_that_cannot_end_its_session_is_put_away() {
     assert!(!h.ws(|ws| ws.tabs().contains("watched")));
     assert!(h.notice().unwrap().contains("Another view controls"));
 
+    let (commands, mut sent) = unbounded();
+    let mut facts = state_with_agents(
+        &[(
+            "blank",
+            json!({"cliProviderId": null, "currentProviderId": "terminal"}),
+        )],
+        &[],
+    );
+    let mut h = Harness::build(facts.model(), Some(commands), || {
+        Err(anyhow::anyhow!("no core in this test"))
+    });
     h.open_as("blank", None);
     h.draw();
     assert_eq!(h.run("tabs.close", json!({})), Ok(()));
-    assert!(!h.ws(|ws| ws.tabs().contains("blank")));
-    assert!(h.notice().unwrap().contains("not attached"));
+    let asked: Vec<Command> = std::iter::from_fn(|| sent.try_recv().ok()).collect();
+    assert!(
+        asked
+            .iter()
+            .any(|c| matches!(c, Command::DeleteSession { session_id } if session_id == "blank")),
+        "the core is asked to delete it: {asked:?}"
+    );
+    assert!(
+        h.ws(|ws| ws.tabs().contains("blank")),
+        "the tab waits for the core"
+    );
+    facts.apply(&message(
+        json!({"type": "session.deleted", "sessionId": "blank"}),
+    ));
+    let model = facts.model();
+    h.window
+        .update(&mut h.cx, |ws, _, cx| {
+            ws.sidebar()
+                .update(cx, |sidebar, cx| sidebar.apply(Update::Model(model), cx))
+        })
+        .unwrap();
+    h.cx.run_until_parked();
+    assert!(
+        !h.ws(|ws| ws.tabs().contains("blank")),
+        "and goes when it says the session is deleted"
+    );
 }
 
 /// A session the core deletes closes its tab whenever the news comes: after the wait for it ran
