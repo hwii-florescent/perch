@@ -645,10 +645,13 @@ fn tab_menu(rig: &mut Rig) {
     })
     .unwrap();
 
-    // Close tab is the tab's ×: bravo's terminal is attached to nothing, so the tab is put away
-    // and its session is not ended (the close guard of an attached agent is `confirm`'s test).
+    // Close tab is the tab's ×: bravo's terminal is attached to nothing, so the core is asked to
+    // end it as the web does, through the close guard of an agent; Keep running puts the tab away
+    // and ends nothing (the guard's other answers are `confirm`'s test).
     rig.mouse_with(MouseButton::Right, x, y);
     rig.click("tab-menu-item:tab-menu-close");
+    assert_eq!(rig.open_screens(), ["confirm"], "an agent is asked first");
+    rig.click("confirm-extra");
     assert!(!tabs(rig).contains(&"bravo".to_string()), "the tab went");
     let notice = rig.ws(|ws, _, _| ws.notice().map(str::to_string));
     assert!(

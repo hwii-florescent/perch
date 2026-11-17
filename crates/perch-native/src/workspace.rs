@@ -13,8 +13,10 @@
 //! Closing a tab ends its session, as the web does (`closeGuard.ts`): the core is asked to delete
 //! it over the terminal's own connection, and the tab goes only when the core says it is deleted.
 //! An agent's tab asks first when Settings > Warn before closing an agent is on: the first close
-//! arms, the second ends. A tab that only watches a session another view controls, and one this
-//! window is not attached to, just close: the session keeps running.
+//! arms, the second ends. A tab that only watches a session another view controls just closes:
+//! the session keeps running. One this window is not attached to (a session left over after the
+//! terminal daemon restarted, or whose shell exited) asks the core to delete it over the main
+//! connection, as the web does, and goes when the core says it is deleted.
 //!
 //! `terminal.takeBack` and `terminal.takeBackAll` take the size back from a phone for the terminal on
 //! screen or for every terminal this window is attached to whose size a phone holds; none is
@@ -3787,7 +3789,8 @@ impl Workspace {
     /// the core refuses, does not answer in time, or the connection drops, the tab stays and says
     /// the session is still running: an unconfirmed end is never taken for an end. The core
     /// deleting the session later still closes the tab, whatever the wait said. A tab with no
-    /// attached terminal has no connection to ask over: it closes, and the session keeps running.
+    /// attached terminal has no connection to ask over, so the main connection asks for it instead
+    /// (as the web's `session.delete`), through the same guard; the tab goes when the core deletes.
     fn close(&mut self, id: &str, cx: &mut Context<Self>) {
         if is_browser_tab(id) {
             return self.close_browser_tab(id, cx);
@@ -3809,13 +3812,22 @@ impl Workspace {
         let view = pane.view.clone();
         let watching = view.as_ref().is_some_and(|view| view.read(cx).watching());
         let can_end = view.as_ref().is_some_and(|view| view.read(cx).can_end());
-        if watching || !can_end {
-            let why = if watching {
-                "Another view controls this session, so it keeps running."
-            } else {
-                "This window is not attached to the session, so it was not ended and keeps running."
-            };
-            self.put_away(id, why, cx);
+        if watching {
+            self.put_away(
+                id,
+                "Another view controls this session, so it keeps running.",
+                cx,
+            );
+            return;
+        }
+        if !can_end {
+            // This view has no connection that may end the session (it never attached, the core
+            // went away, or the shell has exited): the web's `requestCloseSession` asks the core
+            // to delete it over its own connection, so this does too, through the close guard
+            // for an agent. A session the core no longer lists has nothing to delete.
+            if self.close_untabbed(id, cx).is_err() {
+                self.put_away(id, "The core no longer lists it.", cx);
+            }
             return;
         }
         let armed = self.armed_close.take().is_some_and(|armed| armed == id);
@@ -3998,7 +4010,7 @@ impl Workspace {
     /// End session `id`, which has no tab here, as the web's `requestCloseSession`: an agent asks
     /// first through the close guard while Settings > Warn before closing an agent is on, and
     /// anything else is ended at once. Ending is the core's: the sidebar row goes when it says
-    /// the session is deleted. Keep running leaves it as it is, having no view here to dismiss.
+    /// the session is deleted. Keep running puts its tab away, if it has one, and ends nothing.
     fn close_untabbed(&mut self, id: &str, cx: &mut Context<Self>) -> Result<(), String> {
         // Wherever the core lists it, also outside any project.
         let open = {
@@ -4020,6 +4032,7 @@ impl Workspace {
         let delete = Command::DeleteSession {
             session_id: id.to_string(),
         };
+        let target = id.to_string();
         if !self.warns_before_ending(&open, cx) {
             self.sidebar.read(cx).send(delete);
             return Ok(());
@@ -4039,6 +4052,10 @@ impl Workspace {
             json!({ "sessionId": id, "label": label }),
             None,
             Some(Box::new(move |this, result, _, cx| {
+                if result.get("keepRunning").and_then(Value::as_bool) == Some(true) {
+                    this.put_away(&target, "It keeps running.", cx);
+                    return;
+                }
                 if result.get("confirmed").and_then(Value::as_bool) != Some(true) {
                     return;
                 }

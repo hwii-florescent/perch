@@ -148,14 +148,11 @@ fn a_shell_that_ended_before_attach(rig: &Rig, h: &mut Harness, id: &str) {
         alive_before,
         "no shell was started in its place"
     );
-    // A tab the core never attached has nothing to end over: it closes, and says the session
-    // keeps running.
+    // A tab the core never attached has no connection of its own to end over: the main
+    // connection asks the core to delete the session, as the web does, and the tab goes with it.
     assert!(h.press("cmd-w"));
     h.wait("the tab to go", |h| h.shown().is_empty());
-    let note = h
-        .ws(|ws, _| ws.notice().map(str::to_owned))
-        .unwrap_or_default();
-    assert!(note.contains("keeps running"), "{note}");
+    h.wait("the session to be gone", |h| h.attention(id).is_none());
 }
 
 /// The core goes away and comes back at another address. The pane keeps its screen and says it is

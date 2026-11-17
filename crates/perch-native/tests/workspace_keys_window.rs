@@ -596,8 +596,16 @@ fn close_last_tab(rig: &mut Rig) {
         rig.ws(|ws, window, cx| ws.run_command("tabs.close", None, window, cx))
             .unwrap();
         rig.draw();
+        // An agent attached to nothing asks first; Keep running puts its tab away.
         if rig.ws(|ws, _, _| ws.screens_open()) == ["confirm"] {
-            rig.press("enter");
+            let keep = rig
+                .draw()
+                .into_iter()
+                .find(|r| r.name == "confirm-extra")
+                .expect("the guard's Keep running")
+                .bounds
+                .center();
+            click_at(rig, keep);
         }
         closed.push(handle);
         assert!(closed.len() < 20, "the tabs close");
