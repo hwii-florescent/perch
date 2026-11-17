@@ -60,9 +60,16 @@ pub struct RuntimeMetrics {
     materialize_time: Duration,
     structure_repeats: u64,
     structure_changes: u64,
+    script_time: Duration,
 }
 
 impl RuntimeMetrics {
+    /// PERCH: all time spent running script on the main thread, whatever entered it (a render, an
+    /// event, a timer, a promise continuation, a call from inside a frame): nested entries count once.
+    pub fn script_time(&self) -> Duration {
+        self.script_time
+    }
+
     /// How many times script `render` has been entered.
     pub fn script_renders(&self) -> u64 {
         self.script_renders
@@ -208,6 +215,7 @@ impl RuntimeMetrics {
             structure_changes: self
                 .structure_changes
                 .saturating_sub(earlier.structure_changes),
+            script_time: self.script_time.saturating_sub(earlier.script_time),
         }
     }
 }
@@ -235,9 +243,25 @@ pub(crate) struct Metrics {
     materialize_nanos: Cell<u64>,
     structure_repeats: Cell<u64>,
     structure_changes: Cell<u64>,
+    script_nanos: Cell<u64>,
+    script_depth: Cell<u32>,
 }
 
 impl Metrics {
+    /// PERCH: times one entry into script; an entry inside another is part of the outer one.
+    pub fn time_script<R>(&self, call: impl FnOnce() -> R) -> R {
+        let depth = self.script_depth.get();
+        self.script_depth.set(depth + 1);
+        let started = instant::Instant::now();
+        let result = call();
+        self.script_depth.set(depth);
+        if depth == 0 {
+            self.script_nanos
+                .set(self.script_nanos.get() + elapsed_nanos(started));
+        }
+        result
+    }
+
     /// Times `build`, which is one entry into script `render`.
     pub fn time_script_render<R>(&self, build: impl FnOnce() -> R) -> R {
         let started = instant::Instant::now();
@@ -323,6 +347,7 @@ impl Metrics {
             materialize_time: Duration::from_nanos(self.materialize_nanos.get()),
             structure_repeats: self.structure_repeats.get(),
             structure_changes: self.structure_changes.get(),
+            script_time: Duration::from_nanos(self.script_nanos.get()),
         }
     }
 }

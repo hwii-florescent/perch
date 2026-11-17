@@ -147,6 +147,11 @@ path = "tests/mods_js_heap.rs"
 harness = false
 
 [[test]]
+name = "mods_view_change"
+path = "tests/mods_view_change.rs"
+harness = false
+
+[[test]]
 name = "mods_responsive"
 path = "tests/mods_responsive.rs"
 harness = false

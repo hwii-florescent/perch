@@ -5186,7 +5186,7 @@ impl ShellRuntime {
         }
         let pending_checkpoint = self.pending_nested.borrow().len();
         sandbox::begin_host_execution();
-        let result = self.context.with(|ctx| {
+        let result = self.metrics.time_script(|| self.context.with(|ctx| {
             // Restored rather than cleared, because a `with_js` reached from
             // inside a host call is the case this exists for.
             let outer = self.active_context.replace(Some(ctx.as_raw()));

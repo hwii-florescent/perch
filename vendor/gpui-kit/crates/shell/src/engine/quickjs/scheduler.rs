@@ -173,7 +173,7 @@ fn drain_runtime_job_batch(
 ) -> bool {
     for _ in 0..MAX_JOBS_PER_DRAIN {
         let pending_checkpoint = runtime.pending_nested.borrow().len();
-        match runtime.js_runtime.execute_pending_job() {
+        match runtime.metrics.time_script(|| runtime.js_runtime.execute_pending_job()) {
             Ok(true) => {
                 if let Err(error) = runtime.flush_pending_nested_views(window, cx) {
                     tracing::error!("error applying a nested view operation: {error}");
@@ -237,7 +237,7 @@ pub(crate) fn drain_jobs_transactionally(
     }
     for _ in 0..MAX_TRANSACTIONAL_JOBS {
         let pending_checkpoint = runtime.pending_nested.borrow().len();
-        match runtime.js_runtime.execute_pending_job() {
+        match runtime.metrics.time_script(|| runtime.js_runtime.execute_pending_job()) {
             Ok(true) => {
                 if let Err(error) = runtime.flush_pending_nested_views(window, cx) {
                     if let Some(terminal) = runtime.job_queue_error() {
