@@ -87,6 +87,18 @@ const END_WAIT: Duration = Duration::from_secs(5);
 const REATTACH_FIRST: Duration = Duration::from_millis(250);
 const REATTACH_LAST: Duration = Duration::from_secs(5);
 
+/// Where each workspace's last shown session is kept: beside the core's database, as `native-mods/` is.
+fn last_tabs_file() -> std::path::PathBuf {
+    crate::mods::user_dir().with_file_name("native-last-tabs.json")
+}
+
+fn load_last_tabs() -> HashMap<String, String> {
+    std::fs::read(last_tabs_file())
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
 /// Whether a tab is a plain terminal: its session was launched as one (or, for a blank session,
 /// was started as one from the tab's choices). A session whose launch provider is not known is
 /// never taken for one.
@@ -200,6 +212,9 @@ pub struct Workspace {
     tabs: Tabs,
     /// The workspace `tabs` and `history` belong to; empty before any is shown.
     tabs_of: String,
+    /// The session each workspace last showed, kept across launches (`last_tabs_file`): what opening a workspace
+    /// that has no tab yet shows.
+    last_tabs: HashMap<String, String>,
     /// The strips and histories of the other workspaces, each as it was left.
     parked: HashMap<String, (Tabs, History)>,
     panes: HashMap<String, Pane>,
@@ -347,6 +362,7 @@ impl Workspace {
             locate: None,
             tabs: Tabs::default(),
             tabs_of: String::new(),
+            last_tabs: load_last_tabs(),
             parked: HashMap::new(),
             panes: HashMap::new(),
             pending_split: None,
@@ -2092,7 +2108,7 @@ impl Workspace {
         self.open_sub_sessions(cx);
         self.follow_order(cx);
         self.keep_in_bounds(cx);
-        self.note_shown();
+        self.note_shown(cx);
         cx.notify();
     }
 
@@ -2465,7 +2481,7 @@ impl Workspace {
     fn after_change(&mut self, cx: &mut Context<Self>) {
         self.quickchat_start = false;
         self.keep_in_bounds(cx);
-        self.note_shown();
+        self.note_shown(cx);
         let target = self.tabs.active().and_then(|id| {
             let open = &self.panes.get(id)?.open;
             Some((
@@ -2481,11 +2497,37 @@ impl Workspace {
         cx.notify();
     }
 
+    /// The shown session is its workspace's last, for the next launch.
+    fn remember_shown(&mut self, cx: &App) {
+        let Some(id) = self.tabs.active().map(str::to_string) else {
+            return;
+        };
+        if id.contains('\n') {
+            return;
+        }
+        let workspace = self.tab_workspace(&id, cx);
+        if workspace.is_empty() || self.last_tabs.get(&workspace) == Some(&id) {
+            return;
+        }
+        self.last_tabs.insert(workspace, id);
+        // ponytail: written on each change of the shown session (a few bytes); a failed write only
+        // loses the next launch's choice.
+        let file = last_tabs_file();
+        if let Some(folder) = file.parent() {
+            let _ = std::fs::create_dir_all(folder);
+        }
+        let _ = std::fs::write(
+            file,
+            serde_json::to_vec(&self.last_tabs).unwrap_or_default(),
+        );
+    }
+
     /// The shown tab is a visit for Back and Forward.
-    fn note_shown(&mut self) {
+    fn note_shown(&mut self, cx: &App) {
         if let Some(id) = self.tabs.active() {
             self.history.record(id);
         }
+        self.remember_shown(cx);
     }
 
     /// Give the keyboard to the pane the person clicked.
@@ -3049,8 +3091,29 @@ impl Workspace {
                 let store = self.sidebar.read(cx).model().store.clone();
                 let is_session = |tab: &String| store.sessions.iter().any(|s| s.id == *tab);
                 // The window opens no tab of a workspace until it is shown, so after a launch its strip is
-                // empty: the core's newest session of it stands in, as the web's `navigateToWorkspace` does.
-                let newest_in_core = || crate::sidebar::navigation::newest_session_of(&store, &id);
+                // empty: the session it last showed (kept across launches), else the core's newest it can open,
+                // stands in, as the web's `navigateToWorkspace` does.
+                let sidebar = self.sidebar.read(cx);
+                let openable = |tab: &str| sidebar.session_to_open(tab).is_some();
+                let saved_or_newest = || {
+                    let workspace = store.workspaces.iter().find(|w| w.id == id)?;
+                    let mine = |s: &&perch_core::protocol::SessionSummary| {
+                        crate::sidebar::navigation::in_workspace(s, workspace) && openable(&s.id)
+                    };
+                    let saved = self
+                        .last_tabs
+                        .get(&id)
+                        .and_then(|tab| store.sessions.iter().filter(mine).find(|s| s.id == *tab));
+                    saved
+                        .or_else(|| {
+                            store
+                                .sessions
+                                .iter()
+                                .filter(mine)
+                                .max_by_key(|s| s.created_at)
+                        })
+                        .map(|s| s.id.clone())
+                };
                 let newest = || {
                     self.tabs
                         .strip()
@@ -3058,7 +3121,7 @@ impl Workspace {
                         .rev()
                         .find(|tab| is_session(tab))
                         .cloned()
-                        .or_else(newest_in_core)
+                        .or_else(saved_or_newest)
                 };
                 // A workspace already on screen shows its newest session; one switched to shows
                 // what it showed when it was left.

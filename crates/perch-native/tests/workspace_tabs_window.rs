@@ -157,11 +157,13 @@ fn main() {
     let perch = cx.update(|cx| cx.global::<WindowMods>().perch.clone());
     assert_eq!(perch.shown_place().1.as_deref(), Some("w1"));
 
-    // Another project: nothing of the first project's strip is there. With no tab it shows no
-    // strip (its start page); its own session opens its own strip.
+    // Another project: nothing of the first project's strip is there. With no tab yet it shows its
+    // newest session, as after a launch, when no workspace has a tab.
     run(&mut cx, "workspace.open", json!({"id": "w2"})).unwrap();
-    assert_eq!(tabs(&mut cx), (vec![], None), "w2 has no tabs");
-    open(&mut cx, "delta");
+    assert_eq!(tabs(&mut cx), (strings(&["delta"]), Some("delta".into())));
+    let saved = std::fs::read_to_string(scratch.join("home/.perch/native-last-tabs.json"))
+        .expect("the last shown session is kept for the next launch");
+    assert!(saved.contains("\"w2\":\"delta\""), "{saved}");
     assert_eq!(tabs(&mut cx), (strings(&["delta"]), Some("delta".into())));
     // Back and Forward stay in this workspace: w1's places are not offered.
     run(&mut cx, "nav.back", json!({})).unwrap();
