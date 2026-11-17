@@ -442,7 +442,9 @@ cargo test -p perch-native --test workspace_session # two shells in a split agai
 The React runtime's own tests (`npm run test:mods-runtime`) compare its descriptions with the web's drawing of the
 same screens, so they need the web references first: `(cd e2e && npm ci && npx playwright install webkit && npm run
 parity:web)` writes `e2e/artifacts-native-parity/web/` (headless WebKit, about a minute; ignored by git). Without
-them the comparing tests fail and say so.
+them the comparing tests are skipped with that reason; `PERCH_REQUIRE_REFERENCES=1` makes them fail instead (a gate
+run). The host modules the bundle imports (`perch`, `perch-markdown`, ...) exist only in the window: the tests stub
+every one the bundle's files import (`stubHostModules` in `test/support.mjs`), so a new one needs no test change.
 
 A Markdown file's Preview is drawn by the window's Markdown engine (`src/files/markdown.rs`, gpui-base's `TextView`), not by runtime elements: the runtime has no inline formatting, so a sentence with inline code could not wrap, and a long document was more script than a call may take. Its parity state is `files/markdown-preview`; the preview's box is gated, its text is compared by pixels only. Known difference: a table fills the column (the web's is as wide as its content).
 

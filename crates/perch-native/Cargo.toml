@@ -142,6 +142,11 @@ path = "tests/screen_engine_measure.rs"
 harness = false
 
 [[test]]
+name = "mods_js_heap"
+path = "tests/mods_js_heap.rs"
+harness = false
+
+[[test]]
 name = "mods_responsive"
 path = "tests/mods_responsive.rs"
 harness = false

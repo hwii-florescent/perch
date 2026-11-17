@@ -620,6 +620,27 @@ fn start_host(
         engines,
         diffs,
     });
+    // `PERCH_JS_HEAP_LOG=<seconds>`: the mods' script heap on stderr that often, as it stands (no
+    // collection forced), so a growing app tells its QuickJS heap from the rest of its memory.
+    let every = std::env::var("PERCH_JS_HEAP_LOG")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok());
+    if let Some(every) = every.filter(|s| *s > 0) {
+        cx.spawn(async move |cx| loop {
+            cx.background_executor()
+                .timer(Duration::from_secs(every))
+                .await;
+            let heap = cx.update(|cx| cx.try_global::<WindowMods>().map(|m| m.host.js_heap(false)));
+            let Some((bytes, objects)) = heap else {
+                break;
+            };
+            eprintln!(
+                "perch-native: js heap {:.2} MB, {objects} objects",
+                bytes as f64 / 1048576.
+            );
+        })
+        .detach();
+    }
 }
 
 /// A mod found on disk.
@@ -745,6 +766,11 @@ impl ModHost {
     /// that bound what an interaction costs.
     pub fn metrics(&self) -> gpui_shell::metrics::RuntimeMetrics {
         self.0.runtime.read_metrics()
+    }
+
+    /// The mods' script heap: bytes in use and objects, after a full collection with `collect`.
+    pub fn js_heap(&self, collect: bool) -> (i64, i64) {
+        self.0.runtime.js_heap(collect)
     }
 
     /// Adds a host module mods may import, built for each mod (by id) as it loads. Modules

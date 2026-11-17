@@ -2097,6 +2097,16 @@ impl ShellRuntime {
         self.metrics.read()
     }
 
+    /// PERCH: the bytes the script heap uses and its object count, after a full collection with
+    /// `collect`: what a leak test bounds and `PERCH_JS_HEAP_LOG` reports.
+    pub fn js_heap(&self, collect: bool) -> (i64, i64) {
+        if collect {
+            self.js_runtime.run_gc();
+        }
+        let usage = self.js_runtime.memory_usage();
+        (usage.memory_used_size, usage.obj_count)
+    }
+
     /// This runtime's retained state.
     ///
     /// Scoped to the runtime rather than shared, so one runtime cannot resolve

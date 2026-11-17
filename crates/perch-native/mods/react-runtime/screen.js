@@ -158,6 +158,7 @@ export function screen(id, Component, options = {}) {
       this.mountTree();
       // Where `scrollIntoView()` leaves its request (a handle can only be made here, not while drawing).
       this.kit = { ...KIT, scroll: ScrollHandle.new() };
+      copy.ready = true;
     }
 
     /** Mounts the source's tree with the props the window gives now. */

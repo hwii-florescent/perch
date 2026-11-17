@@ -48,6 +48,17 @@ pub struct ProbeRecord {
 thread_local! {
     static RECORDS: RefCell<BTreeMap<SharedString, ProbeRecord>> = const { RefCell::new(BTreeMap::new()) };
     static NAMED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+    static BUDGET: std::cell::Cell<Option<std::time::Duration>> = const { std::cell::Cell::new(None) };
+}
+
+/// The time budget every script call runs under while set, in place of the render and event
+/// budgets: a test stops a screen part-way on purpose, as a slow machine would. `None` restores them.
+pub fn set_budget(budget: Option<std::time::Duration>) {
+    BUDGET.with(|cell| cell.set(budget));
+}
+
+pub(crate) fn budget() -> Option<std::time::Duration> {
+    BUDGET.with(std::cell::Cell::get)
 }
 
 /// Whether scripts name their elements for the probe ([`crate::probing`]); on by default.

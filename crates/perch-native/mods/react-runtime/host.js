@@ -267,6 +267,10 @@ export const runningHost = () => mine?.host ?? BASE;
  * `copy.attach(handle)` with its mounted tree; `copy.close()` once, when it leaves the window.
  */
 export function copyFor(cx, screen) {
+  // A copy whose `init` was stopped past its time budget never became a view, so the engine never closes it, and a cut
+  // runs no `finally`: it is closed here, when the next copy starts (no other `init` runs then). Left, it kept its
+  // tree, listeners and timers for good, each time a screen's first draw was stopped.
+  for (const other of [...COPIES]) if (!other.ready) other.close();
   // The settings as this copy last read or wrote them. The web reads them once, when it mounts, so a change made
   // elsewhere (a key, another screen) is seen by mounting the screen again (`settingsMoved`).
   let seen = null;
