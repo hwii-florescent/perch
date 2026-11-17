@@ -23,6 +23,12 @@ export const named = JSON.parse(fs.readFileSync(path.join(parity, "named-element
 export const fixture = JSON.parse(fs.readFileSync(path.join(parity, "fixtures/sidebar.json"), "utf8"));
 export const THEMES = ["light", "dark"];
 
+/** The option of a test that compares with the web references: without any (`npm run parity:web` in `e2e/` has not run
+ * in this checkout) it is skipped with that reason, unless `PERCH_REQUIRE_REFERENCES=1` (a gate run), where it fails. */
+export const NEEDS_REFERENCES = {
+  skip: fs.existsSync(referenceDir) || process.env.PERCH_REQUIRE_REFERENCES === "1" ? false : "no web references in e2e/artifacts-native-parity/web: run `npm run parity:web` in e2e (see docs/TESTING.md)",
+};
+
 /** The web reference for one state and theme (`npm run parity:web` in `e2e/` writes it). */
 export function reference(state, theme) {
   const file = path.join(referenceDir, `sidebar.${state}.${theme}.json`);
@@ -40,6 +46,30 @@ registerHooks({
     return next(specifier, context);
   },
 });
+
+/** Stubs every host module (`perch`, `perch-react`, `perch-markdown`, ...) the bundle's files import: they exist only
+ * inside the window's engine. Read from the imports themselves, so a new host module needs no change here. Nothing a
+ * test runs calls them; a named import is exported as `0`. */
+export function stubHostModules() {
+  const names = new Map();
+  for (const file of fs.readdirSync(bundle).filter((f) => f.endsWith(".js"))) {
+    const source = fs.readFileSync(path.join(bundle, file), "utf8");
+    for (const [, what, specifier] of source.matchAll(/import\s+(\*\s+as\s+\w+|\{[^}]*\})\s+from\s+"(perch(?:-[a-z]+)*)"/g)) {
+      const set = names.get(specifier) ?? new Set();
+      if (what.startsWith("{")) for (const part of what.slice(1, -1).split(",")) { const name = part.trim().split(/\s+as\s+/)[0]; if (name) set.add(name); }
+      names.set(specifier, set);
+    }
+  }
+  registerHooks({
+    resolve(specifier, context, next) {
+      const exported = names.get(specifier);
+      if (!exported) return next(specifier, context);
+      const body = exported.size ? `export const ${[...exported].map((n) => `${n}=0`).join(",")};` : "export {};";
+      return { url: `data:text/javascript,${encodeURIComponent(body)}`, shortCircuit: true, format: "module" };
+    },
+  });
+  return [...names.keys()];
+}
 
 /** A host double: the reference's SDK data, its theme, the fixture state's per-viewer storage (as the reference page
  * wrote it), and a record of every command, overlay and render. */

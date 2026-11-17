@@ -2,7 +2,7 @@
 //! handlers the chains carry run the source's own handlers.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fixture, mountSidebar, namedInstances, THEMES, tree } from "./support.mjs";
+import { fixture, mountSidebar, namedInstances, THEMES, tree, NEEDS_REFERENCES } from "./support.mjs";
 import { breakLines, describeToGpui, scrollGutters, shrinkWrapBases, snapColumns, snapRows, toGpui } from "../gpui.mjs";
 
 /** A gpui-kit stand-in that records each call, and keeps the handlers. */
@@ -35,7 +35,7 @@ const cx = () => ({ notified: 0, stopped: 0, notify() { this.notified++; }, stop
 
 for (const { id: state } of fixture.states) {
   for (const theme of THEMES) {
-    test(`sidebar ${state} ${theme} converts to builder calls`, async () => {
+    test(`sidebar ${state} ${theme} converts to builder calls`, NEEDS_REFERENCES, async () => {
       const { handle, runtime } = await mountSidebar(state, theme);
       try {
         const { kit, calls } = recordingKit();
@@ -48,7 +48,7 @@ for (const { id: state } of fixture.states) {
   }
 }
 
-test("a press and click through the builders open the session", async () => {
+test("a press and click through the builders open the session", NEEDS_REFERENCES, async () => {
   const { handle, perch, runtime } = await mountSidebar("by-project", "dark");
   try {
     const { kit, handlers } = recordingKit();
@@ -67,7 +67,7 @@ test("a press and click through the builders open the session", async () => {
   }
 });
 
-test("named elements get their parity names as engine ids; hidden and hover-only ones none", async () => {
+test("named elements get their parity names as engine ids; hidden and hover-only ones none", NEEDS_REFERENCES, async () => {
   const { handle, runtime } = await mountSidebar("by-project", "dark", { names: (await import("./support.mjs")).named.elements });
   try {
     const { kit } = recordingKit();
@@ -94,7 +94,7 @@ function byId(el, out = new Map()) {
   return out;
 }
 
-test("a row item with wrappable text can shrink below its text; nowrap and truncated text cannot", async () => {
+test("a row item with wrappable text can shrink below its text; nowrap and truncated text cannot", NEEDS_REFERENCES, async () => {
   const { handle, runtime } = await mountSidebar("offline-host", "light", { names: (await import("./support.mjs")).named.elements });
   try {
     const records = byId(runtime.describeToGpui(handle.description, recordingKit().kit, handle, files));
@@ -106,7 +106,7 @@ test("a row item with wrappable text can shrink below its text; nowrap and trunc
   }
 });
 
-test("an icon takes its button's hover colour while the pointer is over it", async () => {
+test("an icon takes its button's hover colour while the pointer is over it", NEEDS_REFERENCES, async () => {
   const { handle, runtime } = await mountSidebar("by-project", "dark", { names: (await import("./support.mjs")).named.elements });
   try {
     const find = (n) => (n.name === "organize-button" ? n : (n.children ?? []).map(find).find(Boolean));
@@ -316,7 +316,7 @@ test("a named text run in a flex column is as wide as its glyphs, where its alig
   assert.deepEqual(row.children.map((c) => c.record).find((c) => c?.id === "name").styles, [], "a row lays it out as it is");
 });
 
-test("only plain inline text elements join their line; a named one or one with a margin stays a box", async () => {
+test("only plain inline text elements join their line; a named one or one with a margin stays a box", NEEDS_REFERENCES, async () => {
   const { handle, runtime } = await mountSidebar("folded-rollup", "dark");
   handle.unmount();
   const { jsx } = await import("../../../mods/react-runtime/react/jsx-runtime.js");
@@ -424,7 +424,7 @@ test("a kept node in new surroundings is drawn again: an inherited colour, a mar
   }
 });
 
-test("drawing again keeps unchanged subtrees and draws what drawing from scratch draws", async () => {
+test("drawing again keeps unchanged subtrees and draws what drawing from scratch draws", NEEDS_REFERENCES, async () => {
   const { handle, runtime } = await mountSidebar("by-project", "dark");
   try {
     const measure = (text, font) => text.length * font.size * 0.55;
