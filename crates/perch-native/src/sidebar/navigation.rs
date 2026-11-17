@@ -413,6 +413,18 @@ pub fn landing_workspace(
         .map(|w| (w.id.clone(), w.path.clone()))
 }
 
+/// The newest session the core lists for workspace `id`: what opening a workspace shows when this window has
+/// shown none of its tabs yet (right after a launch), as the web's `navigateToWorkspace` picks.
+pub fn newest_session_of(store: &Store, id: &str) -> Option<String> {
+    let workspace = store.workspaces.iter().find(|w| w.id == id)?;
+    store
+        .sessions
+        .iter()
+        .filter(|s| in_workspace(s, workspace))
+        .max_by_key(|s| s.created_at)
+        .map(|s| s.id.clone())
+}
+
 /// Whether `session` belongs to `workspace`: by id, or for an older record by folder.
 pub fn in_workspace(session: &SessionSummary, workspace: &WorkspaceSummary) -> bool {
     match &session.workspace_id {
@@ -1325,6 +1337,35 @@ mod tests {
             "hostId": host, "cliProviderId": "claude",
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_workspace_with_sessions_the_window_has_not_shown_opens_its_newest() {
+        let workspace: WorkspaceSummary = serde_json::from_value(json!({
+            "id": "w", "projectId": "p", "hostId": LOCAL, "path": "/a", "name": "a", "dirty": false,
+            "state": "active", "createdAt": 0, "updatedAt": 0,
+        }))
+        .unwrap();
+        let store = Store {
+            sessions: vec![
+                session("old", LOCAL, "/a", 1),
+                session("new", LOCAL, "/a", 5),
+                session("other", LOCAL, "/b", 9),
+            ],
+            workspaces: vec![workspace],
+            ..Store::default()
+        };
+        assert_eq!(newest_session_of(&store, "w").as_deref(), Some("new"));
+        assert_eq!(newest_session_of(&store, "missing"), None);
+        let empty = Store {
+            workspaces: store.workspaces.clone(),
+            ..Store::default()
+        };
+        assert_eq!(
+            newest_session_of(&empty, "w"),
+            None,
+            "an empty workspace keeps its start page"
+        );
     }
 
     #[test]

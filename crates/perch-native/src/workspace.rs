@@ -2343,9 +2343,10 @@ impl Workspace {
             let Some(lead) = parent_of(tab)
                 .and_then(|id| store.sessions.iter().find(|s| s.id == id))
                 .filter(|lead| {
-                    store.sessions.iter().any(|s| {
-                        s.id == *tab && navigation::same_workspace(lead, s)
-                    })
+                    store
+                        .sessions
+                        .iter()
+                        .any(|s| s.id == *tab && navigation::same_workspace(lead, s))
                 })
             else {
                 continue;
@@ -3047,6 +3048,9 @@ impl Workspace {
                 self.enter_workspace(&id);
                 let store = self.sidebar.read(cx).model().store.clone();
                 let is_session = |tab: &String| store.sessions.iter().any(|s| s.id == *tab);
+                // The window opens no tab of a workspace until it is shown, so after a launch its strip is
+                // empty: the core's newest session of it stands in, as the web's `navigateToWorkspace` does.
+                let newest_in_core = || crate::sidebar::navigation::newest_session_of(&store, &id);
                 let newest = || {
                     self.tabs
                         .strip()
@@ -3054,6 +3058,7 @@ impl Workspace {
                         .rev()
                         .find(|tab| is_session(tab))
                         .cloned()
+                        .or_else(newest_in_core)
                 };
                 // A workspace already on screen shows its newest session; one switched to shows
                 // what it showed when it was left.
