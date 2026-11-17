@@ -138,6 +138,7 @@ test("a focused text field carries a caret; an unfocused one, a check box and a 
     const walk = (n) => { if (n.kind === "input") inputs.push(n); (n.children ?? []).forEach(walk); };
     walk(handle.description.root);
     assert.deepEqual(inputs.map((n) => !!n.caret), [true, false, false, false]);
+    assert.deepEqual(inputs.map((n) => n.style.cursor), ["text", "text", "text", undefined], "text fields show the text cursor");
   } finally {
     handle.unmount();
   }

@@ -804,6 +804,8 @@ function describeNode(element, entry, ctx, anc, flags) {
     for (const key of ["placeholder", "checked", "disabled"]) if (element.props[key] !== undefined) node[key] = element.props[key];
     if (/^(checkbox|radio)$/.test(node.input_type)) node.checked = element.checked;
     if (tag !== "select") node.value = element.value;
+    // A text field shows the text cursor over it, as a browser does, unless its styles say otherwise.
+    if (style.cursor === undefined && !element.props.disabled && (tag === "textarea" || TEXT_FIELD.test(node.input_type))) style.cursor = "text";
     // The focused text field shows its caret (always at the end of its text; see `renderer.mjs`), as a browser does.
     if (element.state.focus && (tag === "textarea" || TEXT_FIELD.test(node.input_type)) && !element.props.disabled && !element.props.readOnly) node.caret = true;
     if (tag === "input" && TEXT_FIELD.test(node.input_type)) node.field_w = FIELD_EMS * computed.values["font-size"];
