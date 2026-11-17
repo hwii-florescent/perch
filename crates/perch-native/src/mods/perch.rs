@@ -45,6 +45,8 @@ const KEYS: &str = "keys";
 /// The workspaces' names, folders and Git presence, and whether the core is connected: what the
 /// files screen reads of the store, so a store change elsewhere does not read its files again.
 const WORKSPACES: &str = "workspaces";
+/// The sidebar's view settings: a change to them does not read again what follows the view.
+const SIDEBAR: &str = "sidebar";
 
 /// The sidebar's view settings, by the web's names (`perch.sidebar.*` in its localStorage).
 #[derive(Clone, Debug, PartialEq)]
@@ -236,6 +238,9 @@ struct Shared {
     revision: Cell<u64>,
     /// Per mod id, the revision of each part it read when it last rendered.
     reads: RefCell<HashMap<String, HashMap<String, u64>>>,
+    /// Per mod id, the parts its calls read since it last asked (`takeReads`): the screen's
+    /// snapshots are read again only when one of theirs moved.
+    touched: RefCell<HashMap<String, Vec<String>>>,
     hosts: RefCell<Vec<ModHost>>,
     /// Answers screens' questions in place of the window's core (`Self::set_asker`).
     asker: RefCell<Option<Asker>>,
@@ -269,6 +274,7 @@ impl Perch {
             revisions: RefCell::default(),
             revision: Cell::default(),
             reads: RefCell::default(),
+            touched: RefCell::default(),
             hosts: RefCell::default(),
             asker: RefCell::default(),
             sender: RefCell::default(),
@@ -790,7 +796,7 @@ impl Perch {
     /// Replaces the sidebar's view settings. Call [`Self::flush`] after.
     pub fn set_sidebar(&self, settings: SidebarSettings) {
         self.0.data.borrow_mut().sidebar = settings;
-        self.bump(VIEW);
+        self.bump(SIDEBAR);
     }
 
     pub fn sidebar(&self) -> SidebarSettings {
@@ -899,6 +905,12 @@ impl Perch {
     /// Notes that mod `id` read `part` at its current revision.
     fn read(&self, id: &str, part: &str) {
         let revision = self.0.revisions.borrow().get(part).copied().unwrap_or(0);
+        let mut touched = self.0.touched.borrow_mut();
+        let list = touched.entry(id.to_string()).or_default();
+        if !list.iter().any(|p| p == part) {
+            list.push(part.to_string());
+        }
+        drop(touched);
         self.0
             .reads
             .borrow_mut()
@@ -1103,7 +1115,7 @@ impl Perch {
                     list.push(project);
                 }
                 drop(data);
-                self.bump(VIEW);
+                self.bump(SIDEBAR);
                 Ok(())
             })(),
             "sidebar.organize" => {
@@ -1115,7 +1127,7 @@ impl Perch {
                 };
                 let patched = data.sidebar.patch(&json!({ "organize": next }));
                 drop(data);
-                self.bump(VIEW);
+                self.bump(SIDEBAR);
                 patched
             }
             "app.theme" => (|| {
@@ -1578,7 +1590,7 @@ impl Perch {
             )
             .function(
                 "sidebarSettings",
-                reader(VIEW, |perch, _| perch.sidebar().to_json()),
+                reader(SIDEBAR, |perch, _| perch.sidebar().to_json()),
             )
             .function("setSidebarSettings", move |args| {
                 let patch = from_host(args.value(0)?);
@@ -1593,6 +1605,24 @@ impl Perch {
             .function("revision", {
                 let perch = self.clone();
                 move |_| Ok(HostValue::Number(perch.0.revision.get() as f64))
+            })
+            // Every part's revision, and the parts this mod's calls read since it last asked: a
+            // screen reads a snapshot again only when a part that snapshot read has moved.
+            .function("revisions", {
+                let perch = self.clone();
+                move |_| Ok(to_host(&json!(*perch.0.revisions.borrow())))
+            })
+            .function("takeReads", {
+                let (perch, id) = (self.clone(), id.clone());
+                move |_| {
+                    let parts = perch
+                        .0
+                        .touched
+                        .borrow_mut()
+                        .remove(&*id)
+                        .unwrap_or_default();
+                    Ok(to_host(&json!(parts)))
+                }
             })
             .function(
                 "themeName",

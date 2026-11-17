@@ -126,6 +126,9 @@ function entered(copy, handle) {
   });
 }
 
+/** What the web sidebar listens for to read its settings again (`SIDEBAR_SETTINGS_EVENT` in its source). */
+const SETTINGS_EVENT = "perch:sidebar-settings";
+
 /** The mod class for stock screen `id` drawn by `Component`. `options.container`: the style of the box the screen
  * fills (as the web's layout gives it); `options.props`: props from `perch.props()` (default `resultProps`);
  * `options.names`: the names of its elements, as the parity table's, for a screen the table has none for;
@@ -204,8 +207,16 @@ export function screen(id, Component, options = {}) {
             copy.refresh(true);
             // A new window size changes media rules and `vw`, which no component re-renders for: describe again.
             if (JSON.stringify(copy.host.viewport()) !== size) this.handle.describe();
-            // The web reads its view settings when it mounts: settings changed elsewhere mount it again.
-            const moved = copy.settingsMoved();
+            // Settings changed elsewhere: a source that follows them (`SIDEBAR_SETTINGS_EVENT`) reads them again,
+            // which is far cheaper than mounting it again; one that reads them only when it mounts is mounted again.
+            let moved = copy.settingsMoved();
+            if (moved && this.handle.listensFor(SETTINGS_EVENT)) {
+              const event = { type: SETTINGS_EVENT, target: this.handle.window, currentTarget: this.handle.window };
+              for (const { type, listener } of [...this.handle.window.listeners]) {
+                if (type === SETTINGS_EVENT) listener.call(this.handle.window, event);
+              }
+              moved = false;
+            }
             if (moved) this.mounts += 1;
             if (raw !== this.raw || moved) {
               this.raw = raw;

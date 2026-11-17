@@ -271,8 +271,8 @@ export function copyFor(cx, screen) {
   // runs no `finally`: it is closed here, when the next copy starts (no other `init` runs then). Left, it kept its
   // tree, listeners and timers for good, each time a screen's first draw was stopped.
   for (const other of [...COPIES]) if (!other.ready) other.close();
-  // The settings as this copy last read or wrote them. The web reads them once, when it mounts, so a change made
-  // elsewhere (a key, another screen) is seen by mounting the screen again (`settingsMoved`).
+  // The settings as this copy last read or wrote them, so a change made elsewhere (a key, another screen) is seen
+  // (`settingsMoved`): the screen tells the source, or mounts it again (`screen.js`).
   let seen = null;
   const settings = () => {
     const now = perch.sidebarSettings();
@@ -309,10 +309,26 @@ export function copyFor(cx, screen) {
   function snapshot(key, read) {
     let entry = snapshots.get(key);
     if (!entry) {
-      const value = read();
-      snapshots.set(key, (entry = { read, value }));
+      entry = { read };
+      entry.value = readTracked(entry, perch.revisions?.() ?? null);
+      snapshots.set(key, entry);
     }
     return entry.value;
+  }
+  // A snapshot keeps the parts of the window's data its read touched (`perch.takeReads`) and their revisions, so a
+  // change elsewhere does not read it again. One that touched none (or a host without revisions) is read every time.
+  function readTracked(entry, revisions) {
+    perch.takeReads?.();
+    const value = entry.read();
+    const parts = perch.takeReads?.() ?? null;
+    entry.parts = revisions && parts?.length ? parts : null;
+    entry.revs = entry.parts ? entry.parts.map((part) => revisions[part] ?? 0) : null;
+    return value;
+  }
+  function partsMoved(entry, revisions) {
+    if (!revisions || !entry.parts) return true;
+    for (let i = 0; i < entry.parts.length; i++) if ((revisions[entry.parts[i]] ?? 0) !== entry.revs[i]) return true;
+    return false;
   }
   let rendering = false;
   let handle = null;
@@ -740,8 +756,11 @@ export function copyFor(cx, screen) {
         let moved = false;
         // A look keeps what it read for the catch-up that follows at the same revision, which reads nothing again.
         const looked = revision !== null && lookedAt === revision;
+        const revisions = revision === null ? null : (perch.revisions?.() ?? null);
         for (const entry of snapshots.values()) {
-          const value = looked && entry.next !== undefined ? entry.next : share(entry.value, entry.read());
+          const value = looked && entry.next !== undefined ? entry.next
+            : !partsMoved(entry, revisions) ? (entry.next ?? entry.value)
+            : share(entry.value, readTracked(entry, revisions));
           entry.next = tell || revision === null ? undefined : value;
           if (value === entry.value) continue;
           moved = true;

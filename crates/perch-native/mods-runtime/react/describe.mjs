@@ -76,6 +76,9 @@ const EVENTS = {
   mouse_move: ["onPointerMove", "onMouseMove"], key_down: ["onKeyDown", "onKeyUp"], focus: ["onFocus", "onBlur"], input: ["onChange", "onInput"],
   scroll: ["onScroll"],
 };
+const EVENT_NAMES = Object.keys(EVENTS);
+/** Each event prop's bit, by its event's place in `EVENT_NAMES` (`ownOf`). */
+const EVENT_BIT = Object.fromEntries(Object.entries(EVENTS).flatMap(([name, props], i) => props.map((prop) => [prop, 1 << i])));
 const DOCUMENT_EVENTS = { pointerdown: "mouse_down", mousedown: "mouse_down", click: "click", keydown: "key_down", pointerup: "mouse_up", mouseup: "mouse_up" };
 
 const label = (element) => {
@@ -500,7 +503,79 @@ function reportDeclarations(computed, report) {
 
 /** An element's own part of the description (its styles, variants, events and attributes), which depends only on
  * it and its ancestors: computed once and reused until one of them changes (`HostElement.version`). */
+/** `element`'s own part. The rows of a list compute alike: a part is worked out once per `Cascade.partKey`, parent
+ * style and inherited text, and each element gets its own name, metadata and events on it. One whose rules read its
+ * descendants (`:has()`), or the focus (`:focus-within`) while something in its document has it, is worked out every
+ * time: the key holds neither. */
 function ownPart(element, parentComputed, inheritedText, ctx) {
+  const deps = ctx.cascade.sheet.depends(element);
+  const active = element.ownerDocument?.activeElement;
+  const focused = !!active && active !== element.ownerDocument.body;
+  if (deps.has || (deps.focusWithin && focused) || !ctx.cascade.pass) {
+    const part = computePart(element, parentComputed, inheritedText, ctx);
+    const own = ownOf(element);
+    part.meta = own.meta;
+    if (own.events.length) part.extra.events = own.events;
+    return part;
+  }
+  const parts = (ctx.cascade.parts ??= new Map());
+  const key = `${ctx.cascade.partKey(element)}|${parentComputed ? objectId(parentComputed.values) : ""}|${inheritedText ? objectId(inheritedText) : ""}`;
+  let shared = parts.get(key);
+  if (!shared) {
+    // ponytail: dropped whole past a bound, as the matched rules are (`Cascade.matching`).
+    if (parts.size > 20000) parts.clear();
+    parts.set(key, (shared = computePart(element, parentComputed, inheritedText, ctx)));
+  }
+  const extra = { ...shared.extra };
+  // Groups are named after their elements: this element's own, and its ancestors' as many steps up.
+  if (extra.group) extra.group = groupName(element);
+  if (extra.group_hover) {
+    extra.group_hover = extra.group_hover.map((entry, i) => {
+      let group = element;
+      for (let n = 0; n < shared.groupsUp[i]; n++) group = group.parentNode;
+      return { ...entry, group: groupName(group) };
+    });
+  }
+  const own = ownOf(element);
+  if (own.events.length) extra.events = own.events;
+  // `computed.element` is the first element computed alike, which is read only for what the key holds (`hidden`).
+  return {
+    ...shared,
+    extra,
+    meta: own.meta,
+    reports: shared.reports.length ? shared.reports.map(([kind, property, value, source, , note]) => [kind, property, value, source, label(element), note]) : shared.reports,
+  };
+}
+
+/** What of `element` is its own whatever it computes alike with, in one look at its props: its tag, classes and
+ * attributes (`meta`) and the DOM events it handles (a form's submit button handles a click, with or without a
+ * handler of its own). */
+function ownOf(element) {
+  const props = element.props;
+  const attrs = {};
+  let handled = 0;
+  for (const name in props) {
+    const value = props[name];
+    if (typeof value === "function") {
+      handled |= EVENT_BIT[name] ?? 0;
+      continue;
+    }
+    if (ATTR_SKIP.has(name) || value === undefined || value === null || typeof value === "object") continue;
+    // As React writes them: `aria-*`/`data-*` keep "true"/"false", a boolean attribute is present or absent.
+    const keeps = name.startsWith("aria-") || name.startsWith("data-");
+    if (value === false && !keeps) continue;
+    const attr = name === "htmlFor" ? "for" : name === "tabIndex" ? "tabindex" : name;
+    attrs[attr] = typeof value === "boolean" ? (keeps ? String(value) : "") : String(value);
+  }
+  const events = [];
+  if (handled) for (let i = 0; i < EVENT_NAMES.length; i++) if (handled & (1 << i)) events.push(EVENT_NAMES[i]);
+  if (!(handled & EVENT_BIT.onClick) && submits(element)) events.push("click");
+  // The classes are split only when read (tests and selectors over the description): an element computed alike
+  // with another needs no split of its own.
+  return { meta: { tag: element.tagName, get classes() { return element.classList; }, attrs }, events };
+}
+
+function computePart(element, parentComputed, inheritedText, ctx) {
   const where = label(element);
   // What the element's rules match, kept across its computes below (`Cascade.matching`).
   const memo = {};
@@ -521,6 +596,8 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
   const reports = styled.reports.map(([kind, property, value, source, note]) => [kind, property, value, source, where, note]);
   const report = (kind, property, value, source, note) => reports.push([kind, property, value, source ?? "(user agent)", where, note]);
   const extra = { ...styled.extra };
+  // How far up each `group_hover` entry's group is, for an element computed alike to name its own (`ownPart`).
+  const groupsUp = [];
   // Hover groups: an element whose hover a rule reads (`group/row`) names a group, and a descendant those rules style
   // (`group-hover/row:opacity-100`) carries what it looks like while each such ancestor is under the pointer. The engine
   // draws both from its hitboxes (`group`, `group_hover`), so moving the pointer runs no script and describes nothing.
@@ -534,18 +611,22 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
     extra.track_hover = true;
   }
   if (ctx.cascade.sheet.readsAncestor(element, "hover")) {
-    for (let group = element.parentNode; group?.state; group = group.parentNode) {
+    for (let group = element.parentNode, up = 1; group?.state; group = group.parentNode, up++) {
       if (!ctx.cascade.sheet.tracks(group, "hover")) continue;
       const was = group.state.hover;
       group.state.hover = true;
       let variant;
-      try { variant = ctx.cascade.compute(element, parentComputed); } finally { group.state.hover = was; }
+      // The group's state is not what the signatures of this pass saw: matched without the memo.
+      const pass = ctx.cascade.pass;
+      ctx.cascade.pass = null;
+      try { variant = ctx.cascade.compute(element, parentComputed); } finally { group.state.hover = was; ctx.cascade.pass = pass; }
       const vTokens = {};
       const vStyle = encode({ ...boxStyle(variant, () => {}), ...textStyle(variant, textWanted(variant, ctx.measure), inheritedText) }, vTokens);
       const changed = diff(style, vStyle);
       if (!Object.keys(changed).length) continue;
       const changedTokens = Object.fromEntries(Object.entries(vTokens).filter(([k]) => k in changed));
       (extra.group_hover ??= []).push({ group: groupName(group), style: changed, ...(Object.keys(changedTokens).length ? { tokens: changedTokens } : {}) });
+      groupsUp.push(up);
     }
   }
   // Digits drawn at one width (`tabular-nums`, which the engine cannot draw): the text's width is not the engine's.
@@ -563,11 +644,7 @@ function ownPart(element, parentComputed, inheritedText, ctx) {
   if (computed.values["pointer-events"] !== "none" && parentComputed?.values["pointer-events"] === "none") extra.blocks_pointer = true;
   // A box that lets pointer events through (`pointer-events-none`: a toast stack): the wheel goes through it as well.
   if (computed.values["pointer-events"] === "none") extra.pointer_none = true;
-  const events = Object.entries(EVENTS).filter(([, props]) => props.some((p) => typeof element.props[p] === "function")).map(([name]) => name);
-  // A form's submit button submits it on a click, with or without a handler of its own.
-  if (!events.includes("click") && submits(element)) events.push("click");
-  if (events.length) extra.events = events;
-  return { computed, style, tokens, extra, meta: meta(element), reports, childText, where, shift };
+  return { computed, style, tokens, extra, reports, childText, shift, groupsUp };
 }
 
 /** The interaction variants an element may have, and the states each assumes on it. */
@@ -695,9 +772,9 @@ function describeElement(element, parentComputed, inheritedText, ctx, anc = 0, f
 
 /** The node for `element` from its own part (`entry.part`) and its children's descriptions. */
 function describeNode(element, entry, ctx, anc, flags) {
-  const { computed, tokens, extra, reports, childText, where } = entry.part;
+  const { computed, tokens, extra, reports, childText } = entry.part;
   for (const args of reports) ctx.add(...args);
-  const report = (kind, property, value, source, note) => ctx.add(kind, property, value, source ?? "(user agent)", where, note);
+  const report = (kind, property, value, source, note) => ctx.add(kind, property, value, source ?? "(user agent)", label(element), note);
   const style = { ...entry.part.style };
   if (entry.part.shift) laidOutShift(element, style, entry.part.shift);
   const node = { kind: "div", id: element.id, style, tokens, meta: entry.part.meta, ...extra };
@@ -946,19 +1023,6 @@ function ownBaseline(values, measure, described) {
 const applyTransform =(text, transform) => (transform === "uppercase" ? text.toUpperCase() : transform === "lowercase" ? text.toLowerCase() : transform === "capitalize" ? text.replace(/\b\p{L}/gu, (c) => c.toUpperCase()) : text);
 
 const ATTR_SKIP = new Set(["children", "style", "className", "key", "ref", "dangerouslySetInnerHTML"]);
-/** Tag, classes and attributes as the page would have them: for tests, devtools and selectors over the description. */
-function meta(element) {
-  const attrs = {};
-  for (const [name, value] of Object.entries(element.props)) {
-    if (ATTR_SKIP.has(name) || typeof value === "function" || value === undefined || value === null || typeof value === "object") continue;
-    // As React writes them: `aria-*`/`data-*` keep "true"/"false", a boolean attribute is present or absent.
-    const keeps = name.startsWith("aria-") || name.startsWith("data-");
-    if (value === false && !keeps) continue;
-    const attr = name === "htmlFor" ? "for" : name === "tabIndex" ? "tabindex" : name;
-    attrs[attr] = typeof value === "boolean" ? (keeps ? String(value) : "") : String(value);
-  }
-  return { tag: element.tagName, classes: element.classList, attrs };
-}
 
 const SVG_ATTR = (name) => (name === "className" ? "class" : /^(viewBox|preserveAspectRatio|gradientUnits|gradientTransform|patternUnits|xmlns)$/.test(name) ? name : name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`));
 const escapeAttr = (value) => String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -1010,7 +1074,12 @@ export function describe(document, perch, sheet, kept = {}, names = null) {
   // <html> and <body> carry no state of their own here: computed once per look.
   kept.top ??= cascade.compute(document.body, cascade.compute(document.documentElement, null));
   const tops = document.body.children;
-  const trees = tops.map((child, i) => describeElement(child, kept.top, ENGINE_ROOT_TEXT, ctx, 0, i === 0, i === tops.length - 1, i));
+  // Within one pass the tree holds still: what selectors see of each element is worked out once (`signature`).
+  cascade.pass = {};
+  let trees;
+  try {
+    trees = tops.map((child, i) => describeElement(child, kept.top, ENGINE_ROOT_TEXT, ctx, 0, i === 0, i === tops.length - 1, i));
+  } finally { cascade.pass = null; }
   if (names?.length) {
     const nodes = new Map();
     // Names are given afresh each pass (a kept node may hold the last pass's).

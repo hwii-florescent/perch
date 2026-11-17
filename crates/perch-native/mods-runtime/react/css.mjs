@@ -536,8 +536,13 @@ export class StyleSheet {
     this.trackedStates = new Set();
     this.dependsCache = new Map();
     this.candidateCache = new Map();
+    /** Every attribute name a selector reads, on any element (`describe.mjs` keys a shared part on their values). */
+    this.selectorAttrs = new Set();
+    /** The attribute names a rule's subject compound needs (`StyleSheet.depends`). */
+    this.subjectAttrs = new Set();
     const add = (entry, steps) => {
       const subject = steps[steps.length - 1].compound;
+      for (const attr of subject.attrs) this.subjectAttrs.add(attr.name);
       const key = subject.classes.length ? `.${subject.classes[0]}` : subject.tag && subject.tag !== "*" ? subject.tag : "*";
       if (!this.index.has(key)) this.index.set(key, []);
       this.index.get(key).push(entry);
@@ -552,6 +557,7 @@ export class StyleSheet {
             throw error;
           }
           const states = statesOf(steps);
+          collectAttrs(steps, this.selectorAttrs);
           ancestorStateClasses(steps, this.trackedStates);
           const pseudo = steps[steps.length - 1].compound.pseudoElement;
           const entry = { steps, media, layer, origin, order: order++, specificity: specificity(steps), decls, states, pseudo, own: ownOnly(steps), assumed: readsAssumed(steps), above: classesAbove(steps), source: origin === 0 ? `ua:${steps[steps.length - 1].compound.tag ?? "*"}` : sourceName(part, steps) };
@@ -566,10 +572,19 @@ export class StyleSheet {
 
   /** Rules that may match `element` (by its classes, its tag, and the universal ones), or its `pseudo` box
    * (`before`, `after`). */
-  candidates(element, pseudo = null) {
-    const key = `${element.tagName} ${element.className}|${pseudo ?? ""}`;
+  candidates(element, pseudo = null, live = null) {
+    const key = `${element.tagName} ${element.className}|${pseudo ?? ""}|${live ?? ""}`;
     const known = this.candidateCache.get(key);
     if (known) return known;
+    if (live !== null) {
+      // Those that read descendants (`:has()`) or the focused element (`:focus-within`), or the others.
+      const out = this.candidates(element, pseudo).filter((rule) => {
+        const d = (rule.reads ??= reads(rule.steps));
+        return (d.has || d.focusWithin) === live;
+      });
+      this.candidateCache.set(key, out);
+      return out;
+    }
     const out = [];
     const seen = new Set();
     const classes = new Set(element.classList);
@@ -585,17 +600,31 @@ export class StyleSheet {
    * style: `anc`, an ancestor's attributes or state; `pos`, whether it is its parent's first or last child; `nth`, its
    * index; `ancPos`, an ancestor's position. The description's cache keys on exactly these (`describe.mjs`). */
   depends(element) {
-    const key = `${element.tagName} ${element.className}`;
+    // Asked for several times per element in a describe pass: kept on it until it changes (`HostElement.version`).
+    const kept = element.dependsIn;
+    if (kept && kept.sheet === this && kept.version === element.version) return kept.deps;
+    const deps = this.dependsOf(element);
+    if (element.version !== undefined) element.dependsIn = { sheet: this, version: element.version, deps };
+    return deps;
+  }
+
+  dependsOf(element) {
+    // A rule whose subject needs an attribute the element lacks (`... > [data-none]`) cannot match it: what it reads
+    // does not count. The attributes such rules need are part of the key.
+    const present = (name) => element.getAttribute?.(name) != null;
+    let key = `${element.tagName} ${element.className}`;
+    for (const name of this.subjectAttrs) if (present(name)) key += ` [${name}]`;
     let deps = this.dependsCache.get(key);
     if (deps) return deps;
-    deps = { anc: false, pos: false, nth: false, ancPos: false };
+    deps = { anc: false, pos: false, nth: false, ancPos: false, has: false, focusWithin: false };
     const seen = new Set();
     const read = (list) => {
       for (const rule of list ?? []) {
         if (seen.has(rule)) continue;
+        if (!rule.steps[rule.steps.length - 1].compound.attrs.every((attr) => present(attr.name))) continue;
         seen.add(rule);
         const d = (rule.reads ??= reads(rule.steps));
-        deps.anc ||= d.anc; deps.pos ||= d.pos; deps.nth ||= d.nth; deps.ancPos ||= d.ancPos;
+        deps.anc ||= d.anc; deps.pos ||= d.pos; deps.nth ||= d.nth; deps.ancPos ||= d.ancPos; deps.has ||= d.has; deps.focusWithin ||= d.focusWithin;
       }
     };
     for (const cls of element.classList) read(this.index.get(`.${cls}`));
@@ -667,7 +696,15 @@ function ownOnly(steps) {
 }
 /** What a selector reads beyond its subject's own attributes and state (`StyleSheet.depends`); `:has()` reads
  * descendants, which touch their watcher (`HostElement.touchWatchers`). */
-function reads(steps, subjectLevel = true, out = { anc: false, pos: false, nth: false, ancPos: false }) {
+/** The attribute names `steps` read, in any compound and any pseudo-class's list. */
+function collectAttrs(steps, into) {
+  for (const { compound } of steps) {
+    for (const attr of compound.attrs) into.add(attr.name);
+    for (const pseudo of compound.pseudos) for (const inner of pseudo.list ?? []) collectAttrs(inner, into);
+  }
+}
+
+function reads(steps, subjectLevel = true, out = { anc: false, pos: false, nth: false, ancPos: false, has: false, focusWithin: false }) {
   steps.forEach((step, i) => {
     const subject = subjectLevel && i === steps.length - 1;
     if (!subject) out.anc = true;
@@ -677,6 +714,8 @@ function reads(steps, subjectLevel = true, out = { anc: false, pos: false, nth: 
         else out.ancPos = true;
         if (pseudo.name === "nth-child" && subject) out.nth = true;
       }
+      if (pseudo.name === "has") out.has = true;
+      if (pseudo.name === "focus-within") out.focusWithin = true;
       if (pseudo.list && pseudo.name !== "has") for (const inner of pseudo.list) reads(inner, subject, out);
     }
   });
@@ -699,6 +738,9 @@ export function inlineDeclarations(style) {
   }
   return out;
 }
+
+/** The attribute a prop is written as, where the two names differ (`HostElement.getAttribute`). */
+const ATTR_OF_PROP = { className: "class", htmlFor: "for", tabIndex: "tabindex" };
 
 /** SVG presentation attributes that size an `<svg>` (below every author rule). */
 function presentational(element) {
@@ -734,6 +776,13 @@ export class Cascade {
     this.media = new Map();
     // For each tag, class list, pseudo-element and assumed state: the rules reading only those that match (`own`).
     this.ownMatches = new Map();
+    /** Matched rules by what selectors can see of an element and its ancestors (`signature`), kept across passes: a
+     * tree mounted again (the sidebar after its settings changed elsewhere) matches nothing again. Only while a
+     * describe pass has set `pass`. */
+    this.pass = null;
+    this.matched = new Map();
+    this.signatures = new Map();
+    this.nextSignature = 0;
   }
 
   mediaHolds(rule) {
@@ -751,6 +800,67 @@ export class Cascade {
   /** Rules matching `element`; `assume` is the set of interaction states assumed on the element itself
    * (`"*"`: any, for finding variant rules). Ancestors use their real state. */
   matching(element, assume, pseudo = null, memo = null) {
+    if (!this.pass) return this.match(element, assume, pseudo, memo);
+    const key = `${this.signature(element)}|${pseudo ?? ""}|${assume === "*" ? "*" : [...assume].sort().join(",")}`;
+    let rules = this.matched.get(key);
+    if (!rules) {
+      // ponytail: dropped whole past a bound (new session ids and titles add signatures); a finer eviction if it churns.
+      if (this.matched.size > 20000) { this.matched.clear(); this.signatures.clear(); }
+      this.matched.set(key, (rules = this.match(element, assume, pseudo, memo, false)));
+    }
+    // `:has()` reads descendants and `:focus-within` the focused element, neither of which the signature holds: those
+    // rules are matched every time.
+    const live = this.match(element, assume, pseudo, memo, true);
+    return live.length ? [...rules, ...live] : rules;
+  }
+
+  /** A number for what a selector can read of `element` and its ancestors (tag, classes, id, the attributes some
+   * selector reads, state, position among its siblings, being the root): equal numbers match the same rules. Worked
+   * out once per element per describe pass. */
+  signature(element) {
+    if (!element) return -1;
+    const kept = element.signatureIn;
+    if (kept && kept.pass === this.pass) return kept.id;
+    const parent = element.parentElement;
+    // Its place among its siblings, and its ancestors' places, only when a rule that may match it reads them: the rows
+    // of a list then share their signatures, and their rules are matched once.
+    const deps = this.sheet.depends(element);
+    const place = (n) => {
+      let kids = n.parentElement.kidsIn;
+      if (!kids || kids.pass !== this.pass) n.parentElement.kidsIn = kids = { pass: this.pass, list: n.parentElement.children };
+      return `${kids.list.indexOf(n)}/${kids.list.length}.`;
+    };
+    let position = deps.pos && parent ? place(element) : "";
+    if (deps.ancPos) for (let n = parent; n?.parentElement; n = n.parentElement) position += place(n);
+    // The attributes some selector reads, found from the element's own props (a handful) rather than by asking for
+    // each such name (dozens): `getAttribute` reads exactly these props.
+    let attrs = "";
+    for (const prop in element.props ?? {}) {
+      const name = ATTR_OF_PROP[prop] ?? prop;
+      if (!this.sheet.selectorAttrs.has(name)) continue;
+      const value = element.getAttribute(name);
+      if (value !== null) attrs += `${name}=${value}\u0001`;
+    }
+    const s = element.state;
+    const props = element.props ?? {};
+    const own = `${this.signature(parent)}\u0000${element.tagName} ${element.className}#${element.getAttribute?.("id") ?? ""}[${attrs}]` +
+      `${+!!s?.hover}${+!!s?.focus}${+!!s?.active}${+!!s?.pointerFocus}${+!!props.disabled}${+!!props.checked}${+!!element.isDocumentRoot}@${position}`;
+    let id = this.signatures.get(own);
+    if (id === undefined) this.signatures.set(own, (id = this.nextSignature++));
+    element.signatureIn = { pass: this.pass, id };
+    return id;
+  }
+
+  /** Everything of `element` its own style is computed from, its parent's style aside (`signature`, presentational
+   * attributes, inline style, `hidden`): elements with equal keys under one parent style compute alike. */
+  partKey(element) {
+    const attrs = presentational(element);
+    const inline = inlineDeclarations(element.inlineStyle ?? element.props?.style);
+    return `${this.signature(element)}|${attrs.length ? JSON.stringify(attrs) : ""}|${inline.length ? JSON.stringify(inline) : ""}|${+!!element.hidden}`;
+  }
+
+  /** `matching` without the memo; with `live` true only the rules that read descendants or focus, false the others. */
+  match(element, assume, pseudo = null, memo = null, live = null) {
     const state = (el, name, isSubject) => {
       if (name === "disabled") return !!el.props?.disabled && ["button", "input", "select", "textarea", "fieldset"].includes(el.tagName);
       if (name === "enabled") return !el.props?.disabled && ["button", "input", "select", "textarea"].includes(el.tagName);
@@ -766,8 +876,8 @@ export class Cascade {
       return !!el.state?.[name];
     };
     const options = { state, pseudo };
-    const candidates = this.sheet.candidates(element, pseudo);
-    const key = `${element.tagName} ${element.className}|${pseudo ?? ""}|${assume === "*" ? "*" : [...assume].sort().join(",")}`;
+    const candidates = live === null ? this.sheet.candidates(element, pseudo) : this.sheet.candidates(element, pseudo, live);
+    const key = `${element.tagName} ${element.className}|${pseudo ?? ""}|${live ?? ""}|${assume === "*" ? "*" : [...assume].sort().join(",")}`;
     let own = this.ownMatches.get(key);
     if (!own) {
       own = new Set(candidates.filter((rule) => rule.own && this.mediaHolds(rule) && matchesComplex(element, rule.steps, options)));

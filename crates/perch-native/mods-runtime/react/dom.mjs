@@ -132,12 +132,7 @@ export class HostElement extends Target {
     if (name === "id") return props.id != null ? String(props.id) : null;
     if (name === "style") return null;
     const key = name === "for" ? "htmlFor" : name === "tabindex" ? "tabIndex" : name;
-    let value = props[key];
-    if (value === undefined && !name.includes("-")) {
-      // React's camelCase spelling of plain attributes (`viewBox`, `strokeWidth`).
-      const camel = name.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-      value = props[camel];
-    }
+    const value = props[key];
     if (value === undefined || value === null || typeof value === "function") return null;
     if (typeof value === "boolean") {
       // `aria-*` and `data-*` keep "true"/"false"; a boolean DOM attribute is present or absent.

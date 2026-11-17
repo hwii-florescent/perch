@@ -452,6 +452,11 @@ declare module "perch" {
   export function scale(): number;
   /** A number that moves whenever anything this module answers may have changed (not a read: it re-renders nothing). */
   export function revision(): number;
+  /** Every published part's revision, by part name. */
+  export function revisions(): Record<string, number>;
+  /** The parts this mod's calls read since it last asked, which the asking forgets: a screen reads a snapshot again
+   * only when one of the parts that snapshot read has moved (`revisions`). */
+  export function takeReads(): string[];
   /** The theme on screen, as its 18 tokens. */
   export function theme(): ThemeTokens;
   export function themeName(): string;
