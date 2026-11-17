@@ -321,7 +321,7 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     // The drawer's width is the app root's `--tools-width` (its card reads it): set it there, not on the drawer inside.
     await page.locator('[style*="--tools-width"]').first().evaluate((element: HTMLElement) => element.style.setProperty("--tools-width", "760px"));
     // Wide: the changes list is a rail beside the diff (never folded), and the diff gets most of the pane.
-    await expect(page.getByTestId("git-status").getByRole("list", { name: "Changed paths" })).toBeVisible();
+    await expect(page.getByTestId("git-status").getByRole("tree", { name: "Changed paths" })).toBeVisible();
     await expect(page.getByTestId("git-diff-file-select")).toBeVisible();
     const wideDiff = await page.getByTestId("git-diff").boundingBox();
     const wideReview = await review.boundingBox();

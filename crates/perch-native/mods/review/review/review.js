@@ -68,6 +68,39 @@ function splitPath(path) {
     const cut = path.lastIndexOf("/") + 1;
     return [path.slice(0, cut), path.slice(cut)];
 }
+/** The changed paths as a tree, folders before files, each sorted by name. A folder in `collapsed` hides its
+ * contents, unless a filter is typed: then every folder holding a match stays open. */
+function treeRows(entries, collapsed, query) {
+    const needle = query.trim().toLowerCase();
+    const root = { dirs: new Map(), files: [] };
+    for (const entry of entries) {
+        if (needle && !entry.path.toLowerCase().includes(needle))
+            continue;
+        let node = root;
+        for (const part of entry.path.split("/").slice(0, -1)) {
+            let next = node.dirs.get(part);
+            if (!next)
+                node.dirs.set(part, (next = { dirs: new Map(), files: [] }));
+            node = next;
+        }
+        node.files.push(entry);
+    }
+    const rows = [];
+    const walk = (node, prefix, depth) => {
+        for (const [name, child] of [...node.dirs].sort(([a], [b]) => a.localeCompare(b))) {
+            const key = `${prefix}${name}/`;
+            const open = needle !== "" || !collapsed.has(key);
+            rows.push({ kind: "dir", key, depth, name, open });
+            if (open)
+                walk(child, key, depth + 1);
+        }
+        const named = node.files.map((entry) => ({ entry, name: entry.path.slice(entry.path.lastIndexOf("/") + 1) }));
+        for (const { entry, name } of named.sort((a, b) => a.name.localeCompare(b.name)))
+            rows.push({ kind: "file", key: entry.path, depth, name, entry });
+    };
+    walk(root, "", 0);
+    return rows;
+}
 /** A path with its directory dimmed and its name plain; the directory gives way first when the row is narrow. */
 function PathLabel({ path, className }) {
     const [dir, name] = splitPath(path);
@@ -235,6 +268,8 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
     const [commitMessage, setCommitMessage] = useResourceState(`review:${workspaceId}:commitMessage`, "");
     const [changesOpen, setChangesOpen] = useResourceState(`review:${workspaceId}:changesOpen`, true);
     const [railOpen, setRailOpen] = useResourceState(`review:${workspaceId}:railOpen`, true);
+    const [collapsedDirs, setCollapsedDirs] = useResourceState(`review:${workspaceId}:collapsedDirs`, new Set());
+    const [fileFilter, setFileFilter] = useState("");
     const [diffLayout, setDiffLayout] = useResourceState(`review:${workspaceId}:diffLayout`, "auto");
     // Whether the host's diff can show a change side by side (the native client's can).
     const canChooseLayout = DiffView.splitLayout === true;
@@ -367,6 +402,32 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
     }, [selectedSessionId, sessions]);
     const changedFiles = status?.entries ?? [];
     const diffFiles = diff?.files ?? [];
+    // Added and removed lines per path, from the diffs shown for this comparison: a diff of one file adds that file's
+    // counts to the ones already known, so choosing a file does not blank the others.
+    const countCache = useRef({ key: "", counts: new Map() });
+    const lineCounts = useMemo(() => {
+        const key = diff ? targetKey(diff.target) : "";
+        if (diff && countCache.current.key !== key)
+            countCache.current = { key, counts: new Map() };
+        for (const file of diff?.files ?? []) {
+            let added = 0;
+            let removed = 0;
+            for (const hunk of file.hunks)
+                for (const line of hunk.lines) {
+                    if (line.kind === "addition")
+                        added += 1;
+                    else if (line.kind === "deletion")
+                        removed += 1;
+                }
+            countCache.current.counts.set(filePath(file), { added, removed });
+        }
+        return new Map(countCache.current.counts);
+    }, [diff]);
+    const treeShown = useMemo(() => treeRows(changedFiles, collapsedDirs, fileFilter), [changedFiles, collapsedDirs, fileFilter]);
+    function toggleDir(key) {
+        setCollapsedDirs((current) => { const next = new Set(current); if (!next.delete(key))
+            next.add(key); return next; });
+    }
     const unresolvedCount = comments.filter((comment) => comment.status === "unresolved").length;
     const inlineCommentIds = useMemo(() => new Set(comments.filter((comment) => diffContainsCommentLine(comment, diff)).map((comment) => comment.id)), [comments, diff]);
     const unplacedComments = comments.filter((comment) => !inlineCommentIds.has(comment.id));
@@ -600,6 +661,206 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
             ]
         }, comment.id));
     }
+    const rail = railOpen ? (_jsxs("aside", {
+        className: "flex min-h-0 w-[17rem] min-w-[13rem] shrink-0 flex-col [border-left:1px_solid_var(--git-border)]",
+        style: narrow ? { width: "100%", minWidth: 0, flex: "0 0 auto", borderLeft: "none", borderBottom: "1px solid var(--git-border)" } : undefined,
+        "data-testid": "git-status",
+        children: [
+            _jsxs("div", {
+                className: "flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.35rem]",
+                children: [
+                    _jsxs("button", {
+                        type: "button",
+                        className: "flex min-w-0 items-center gap-[0.35rem] text-left text-fg [background:none]",
+                        style: narrow ? undefined : { pointerEvents: "none" },
+                        "aria-expanded": changesOpen,
+                        onClick: () => setChangesOpen(!changesOpen),
+                        children: [
+                            _jsx("span", {
+                                className: "text-[0.6rem] text-subtext-0",
+                                style: narrow ? undefined : { display: "none" },
+                                "aria-hidden": "true",
+                                children: changesOpen ? "▾" : "▸"
+                            }),
+                            _jsx("strong", { children: changedFiles.length ? `${changedFiles.length} changed path${changedFiles.length === 1 ? "" : "s"}` : "No changes" })
+                        ]
+                    }),
+                    _jsxs("label", {
+                        className: "inline-flex items-center gap-[0.3rem] text-[0.68rem] whitespace-nowrap text-subtext-0",
+                        children: [
+                            _jsx("input", {
+                                type: "checkbox",
+                                checked: changedFiles.length > 0 && selectedCount === changedFiles.length,
+                                onChange: (event) => selectAllPaths(event.target.checked),
+                                "aria-label": "Select all changed paths"
+                            }),
+                            "All"
+                        ]
+                    })
+                ]
+            }),
+            _jsxs("div", {
+                className: "flex min-h-0 flex-1 flex-col",
+                style: narrow && !changesOpen ? { display: "none" } : undefined,
+                "data-open": changesOpen,
+                children: [
+                    statusState === "loading" && _jsx("div", {
+                        className: STATUS_NOTE,
+                        role: "status",
+                        children: "Reading Git status\u2026"
+                    }),
+                    statusState === "error" && _jsx("div", {
+                        className: cn(STATUS_NOTE, "text-red"),
+                        role: "alert",
+                        children: statusError || "Git status is unavailable."
+                    }),
+                    changedFiles.length > 0 && (_jsx("div", {
+                        className: "px-[0.5rem] pb-[0.35rem]",
+                        children: _jsx("input", {
+                            className: `${TB_INPUT} w-full`,
+                            "aria-label": "Filter changed files",
+                            value: fileFilter,
+                            onChange: (event) => setFileFilter(event.target.value),
+                            placeholder: "Filter files\u2026"
+                        })
+                    })),
+                    _jsxs("div", {
+                        className: "flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]",
+                        style: narrow ? { maxHeight: "8.5rem", flex: "none" } : undefined,
+                        role: "tree",
+                        "aria-label": "Changed paths",
+                        children: [
+                            treeShown.map((row) => row.kind === "dir" ? (_jsxs("button", {
+                                type: "button",
+                                className: "flex min-w-0 items-center gap-[0.35rem] rounded-ui py-[3px] pr-3 text-left text-subtext-0 [background:none] hover:bg-surface-1",
+                                style: { paddingLeft: `${0.55 + row.depth * 0.8}rem` },
+                                role: "treeitem",
+                                "aria-expanded": row.open,
+                                onClick: () => toggleDir(row.key),
+                                children: [
+                                    _jsx("span", {
+                                        className: "w-[0.7rem] shrink-0 text-[0.6rem]",
+                                        "aria-hidden": "true",
+                                        children: row.open ? "▾" : "▸"
+                                    }),
+                                    _jsx("span", {
+                                        className: "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap",
+                                        children: row.name
+                                    })
+                                ]
+                            }, `dir:${row.key}`)) : (_jsxs("div", {
+                                className: "flex min-w-0 items-center gap-[0.3rem]",
+                                role: "treeitem",
+                                children: [
+                                    _jsx("input", {
+                                        className: "shrink-0",
+                                        type: "checkbox",
+                                        checked: selectedPaths.has(row.entry.path),
+                                        onChange: () => selectPath(row.entry.path),
+                                        "aria-label": `Select ${row.entry.path}`
+                                    }),
+                                    _jsxs("button", {
+                                        type: "button",
+                                        className: `${PATH_BUTTON} ${activeFile === row.entry.path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`,
+                                        style: { paddingLeft: `${0.1 + row.depth * 0.8}rem` },
+                                        onClick: () => { setActiveFile(activeFile === row.entry.path ? undefined : row.entry.path); setSelection(null); },
+                                        title: row.entry.originalPath ? `${row.entry.originalPath} → ${row.entry.path}` : row.entry.path,
+                                        children: [
+                                            _jsx(FileIcon, { name: row.name }),
+                                            _jsx("span", {
+                                                className: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
+                                                children: row.name
+                                            }),
+                                            lineCounts.has(row.entry.path) && (_jsxs("span", {
+                                                className: "shrink-0 whitespace-nowrap text-[0.66rem] [font-family:var(--font-mono)]",
+                                                children: [
+                                                    (lineCounts.get(row.entry.path)?.added ?? 0) > 0 && _jsxs("span", {
+                                                        className: "text-green",
+                                                        children: [
+                                                            "+",
+                                                            lineCounts.get(row.entry.path)?.added
+                                                        ]
+                                                    }),
+                                                    (lineCounts.get(row.entry.path)?.removed ?? 0) > 0 && _jsxs("span", {
+                                                        className: "ml-[0.3rem] text-red",
+                                                        children: [
+                                                            "\u2212",
+                                                            lineCounts.get(row.entry.path)?.removed
+                                                        ]
+                                                    })
+                                                ]
+                                            })),
+                                            _jsx(GitMarker, { decoration: { entry: row.entry } })
+                                        ]
+                                    })
+                                ]
+                            }, `file:${row.key}`))),
+                            statusState !== "loading" && changedFiles.length === 0 && _jsx("div", {
+                                className: STATUS_NOTE,
+                                children: "Working tree is clean."
+                            }),
+                            changedFiles.length > 0 && treeShown.length === 0 && _jsx("div", {
+                                className: STATUS_NOTE,
+                                children: "No changed file matches."
+                            })
+                        ]
+                    }),
+                    _jsxs("div", {
+                        className: "flex flex-col gap-[0.35rem] p-[0.5rem] [border-top:1px_solid_var(--git-border)]",
+                        children: [
+                            _jsxs("div", {
+                                className: "flex flex-wrap items-center gap-[0.3rem]",
+                                children: [
+                                    _jsx("button", {
+                                        type: "button",
+                                        className: `${BTN_DEFAULT} min-w-fit flex-1`,
+                                        disabled: selectedCount === 0,
+                                        onClick: () => actions.stage([...selectedPaths]),
+                                        children: "Stage selected"
+                                    }),
+                                    _jsx("button", {
+                                        type: "button",
+                                        className: `${BTN_DEFAULT} min-w-fit flex-1`,
+                                        disabled: selectedCount === 0,
+                                        onClick: () => actions.unstage([...selectedPaths]),
+                                        children: "Unstage"
+                                    }),
+                                    _jsx("button", {
+                                        type: "button",
+                                        className: `${BTN_DANGER} min-w-fit flex-1`,
+                                        "data-testid": "git-discard-preview",
+                                        disabled: selectedCount === 0,
+                                        onClick: () => requestDiscard("worktree"),
+                                        children: "Discard selected"
+                                    })
+                                ]
+                            }),
+                            _jsxs("div", {
+                                className: "flex flex-col gap-[0.3rem]",
+                                style: narrow ? { flexDirection: "row" } : undefined,
+                                children: [
+                                    _jsx("input", {
+                                        className: `${TB_INPUT} min-w-0 flex-1`,
+                                        "aria-label": "Commit staged changes",
+                                        value: commitMessage,
+                                        onChange: (event) => setCommitMessage(event.target.value),
+                                        placeholder: "Describe the change"
+                                    }),
+                                    _jsx("button", {
+                                        type: "button",
+                                        className: BTN_PRIMARY,
+                                        disabled: stagedCount === 0 || !commitMessage.trim(),
+                                        onClick: requestCommitPreview,
+                                        children: "Preview commit"
+                                    })
+                                ]
+                            })
+                        ]
+                    })
+                ]
+            })
+        ]
+    })) : null;
     const optionsChanged = !includeUntracked || ignoreWhitespace || wrapLines || diffLayout !== "auto" || contextLines !== 3;
     return (_jsxs("section", {
         ref: rootRef,
@@ -668,154 +929,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                 className: "flex min-h-0 min-w-0 flex-1 overflow-hidden",
                 style: narrow ? { flexDirection: "column", overflow: "auto" } : undefined,
                 children: [
-                    railOpen && _jsxs("aside", {
-                        className: "flex min-h-0 w-[15rem] min-w-[12rem] shrink-0 flex-col [border-right:1px_solid_var(--git-border)]",
-                        style: narrow ? { width: "100%", minWidth: 0, flex: "0 0 auto", borderRight: "none", borderBottom: "1px solid var(--git-border)" } : undefined,
-                        "data-testid": "git-status",
-                        children: [
-                            _jsxs("div", {
-                                className: "flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.35rem]",
-                                children: [
-                                    _jsxs("button", {
-                                        type: "button",
-                                        className: "flex min-w-0 items-center gap-[0.35rem] text-left text-fg [background:none]",
-                                        style: narrow ? undefined : { pointerEvents: "none" },
-                                        "aria-expanded": changesOpen,
-                                        onClick: () => setChangesOpen(!changesOpen),
-                                        children: [
-                                            _jsx("span", {
-                                                className: "text-[0.6rem] text-subtext-0",
-                                                style: narrow ? undefined : { display: "none" },
-                                                "aria-hidden": "true",
-                                                children: changesOpen ? "▾" : "▸"
-                                            }),
-                                            _jsx("strong", { children: changedFiles.length ? `${changedFiles.length} changed path${changedFiles.length === 1 ? "" : "s"}` : "No changes" })
-                                        ]
-                                    }),
-                                    _jsxs("label", {
-                                        className: "inline-flex items-center gap-[0.3rem] text-[0.68rem] whitespace-nowrap text-subtext-0",
-                                        children: [
-                                            _jsx("input", {
-                                                type: "checkbox",
-                                                checked: changedFiles.length > 0 && selectedCount === changedFiles.length,
-                                                onChange: (event) => selectAllPaths(event.target.checked),
-                                                "aria-label": "Select all changed paths"
-                                            }),
-                                            "All"
-                                        ]
-                                    })
-                                ]
-                            }),
-                            _jsxs("div", {
-                                className: "flex min-h-0 flex-1 flex-col",
-                                style: narrow && !changesOpen ? { display: "none" } : undefined,
-                                "data-open": changesOpen,
-                                children: [
-                                    statusState === "loading" && _jsx("div", {
-                                        className: STATUS_NOTE,
-                                        role: "status",
-                                        children: "Reading Git status\u2026"
-                                    }),
-                                    statusState === "error" && _jsx("div", {
-                                        className: cn(STATUS_NOTE, "text-red"),
-                                        role: "alert",
-                                        children: statusError || "Git status is unavailable."
-                                    }),
-                                    _jsxs("div", {
-                                        className: "flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]",
-                                        style: narrow ? { maxHeight: "8.5rem", flex: "none" } : undefined,
-                                        role: "list",
-                                        "aria-label": "Changed paths",
-                                        children: [
-                                            changedFiles.map((entry) => (_jsxs("div", {
-                                                className: "flex min-w-0 items-center gap-[0.3rem]",
-                                                role: "listitem",
-                                                children: [
-                                                    _jsx("input", {
-                                                        className: "shrink-0",
-                                                        type: "checkbox",
-                                                        checked: selectedPaths.has(entry.path),
-                                                        onChange: () => selectPath(entry.path),
-                                                        "aria-label": `Select ${entry.path}`
-                                                    }),
-                                                    _jsxs("button", {
-                                                        type: "button",
-                                                        className: `${PATH_BUTTON} ${activeFile === entry.path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`,
-                                                        onClick: () => { setActiveFile(activeFile === entry.path ? undefined : entry.path); setSelection(null); },
-                                                        title: entry.originalPath ? `${entry.originalPath} → ${entry.path}` : entry.path,
-                                                        children: [
-                                                            _jsx(FileIcon, { name: entry.path.split("/").at(-1) ?? entry.path }),
-                                                            _jsx(PathLabel, {
-                                                                path: entry.path,
-                                                                className: "flex-1"
-                                                            }),
-                                                            _jsx(GitMarker, { decoration: { entry } })
-                                                        ]
-                                                    })
-                                                ]
-                                            }, entry.path))),
-                                            statusState !== "loading" && changedFiles.length === 0 && _jsx("div", {
-                                                className: STATUS_NOTE,
-                                                children: "Working tree is clean."
-                                            })
-                                        ]
-                                    }),
-                                    _jsxs("div", {
-                                        className: "flex flex-col gap-[0.35rem] p-[0.5rem] [border-top:1px_solid_var(--git-border)]",
-                                        children: [
-                                            _jsxs("div", {
-                                                className: "flex flex-wrap items-center gap-[0.3rem]",
-                                                children: [
-                                                    _jsx("button", {
-                                                        type: "button",
-                                                        className: `${BTN_DEFAULT} min-w-fit flex-1`,
-                                                        disabled: selectedCount === 0,
-                                                        onClick: () => actions.stage([...selectedPaths]),
-                                                        children: "Stage selected"
-                                                    }),
-                                                    _jsx("button", {
-                                                        type: "button",
-                                                        className: `${BTN_DEFAULT} min-w-fit flex-1`,
-                                                        disabled: selectedCount === 0,
-                                                        onClick: () => actions.unstage([...selectedPaths]),
-                                                        children: "Unstage"
-                                                    }),
-                                                    _jsx("button", {
-                                                        type: "button",
-                                                        className: `${BTN_DANGER} min-w-fit flex-1`,
-                                                        "data-testid": "git-discard-preview",
-                                                        disabled: selectedCount === 0,
-                                                        onClick: () => requestDiscard("worktree"),
-                                                        children: "Discard selected"
-                                                    })
-                                                ]
-                                            }),
-                                            _jsxs("div", {
-                                                className: "flex flex-col gap-[0.3rem]",
-                                                style: narrow ? { flexDirection: "row" } : undefined,
-                                                children: [
-                                                    _jsx("input", {
-                                                        className: `${TB_INPUT} min-w-0 flex-1`,
-                                                        "aria-label": "Commit staged changes",
-                                                        value: commitMessage,
-                                                        onChange: (event) => setCommitMessage(event.target.value),
-                                                        placeholder: "Describe the change"
-                                                    }),
-                                                    _jsx("button", {
-                                                        type: "button",
-                                                        className: BTN_PRIMARY,
-                                                        disabled: stagedCount === 0 || !commitMessage.trim(),
-                                                        onClick: requestCommitPreview,
-                                                        children: "Preview commit"
-                                                    })
-                                                ]
-                                            })
-                                        ]
-                                    })
-                                ]
-                            })
-                        ]
-                    }),
+                    narrow && rail,
                     _jsxs("div", {
                         className: "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
                         style: narrow ? { minHeight: "18rem", flex: "auto" } : undefined,
@@ -1244,7 +1358,8 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                 ]
                             })
                         ]
-                    })
+                    }),
+                    !narrow && rail
                 ]
             }),
             (localActionError || actionError) && _jsxs("div", {

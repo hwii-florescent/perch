@@ -263,7 +263,7 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
     expect(list?.getAttribute("data-open")).toBe("false");
     expect(fold?.getAttribute("aria-expanded")).toBe("false");
 
-    const file = document.querySelector<HTMLButtonElement>('[data-testid="git-status"] [role="listitem"] button:not([aria-expanded])');
+    const file = document.querySelector<HTMLButtonElement>('[data-testid="git-status"] [role="treeitem"] button:not([aria-expanded])');
     await act(async () => file?.click());
     expect(actionSet.loadDiff).toHaveBeenLastCalledWith(expect.anything(), "src/main.ts", expect.anything());
     await act(async () => file?.click());

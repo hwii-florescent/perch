@@ -21,6 +21,7 @@ import {
   type GitDiffSnapshot,
   type GitDiffTarget,
   type GitPreviewReceipt,
+  type GitStatusEntry,
   type GitStatusSnapshot,
   type ReviewBatchDelivery,
   type ReviewBatchPreview,
@@ -131,6 +132,46 @@ function filePathForSide(file: GitDiffFile, side: ReviewSide): string {
 function splitPath(path: string): [string, string] {
   const cut = path.lastIndexOf("/") + 1;
   return [path.slice(0, cut), path.slice(cut)];
+}
+
+/** One line of the changed-files tree: a folder, or a file with its status entry. */
+type TreeRow =
+  | { kind: "dir"; key: string; depth: number; name: string; open: boolean }
+  | { kind: "file"; key: string; depth: number; name: string; entry: GitStatusEntry };
+
+interface DirNode {
+  dirs: Map<string, DirNode>;
+  files: GitStatusEntry[];
+}
+
+/** The changed paths as a tree, folders before files, each sorted by name. A folder in `collapsed` hides its
+ * contents, unless a filter is typed: then every folder holding a match stays open. */
+function treeRows(entries: GitStatusEntry[], collapsed: Set<string>, query: string): TreeRow[] {
+  const needle = query.trim().toLowerCase();
+  const root: DirNode = { dirs: new Map(), files: [] };
+  for (const entry of entries) {
+    if (needle && !entry.path.toLowerCase().includes(needle)) continue;
+    let node = root;
+    for (const part of entry.path.split("/").slice(0, -1)) {
+      let next = node.dirs.get(part);
+      if (!next) node.dirs.set(part, (next = { dirs: new Map(), files: [] }));
+      node = next;
+    }
+    node.files.push(entry);
+  }
+  const rows: TreeRow[] = [];
+  const walk = (node: DirNode, prefix: string, depth: number) => {
+    for (const [name, child] of [...node.dirs].sort(([a], [b]) => a.localeCompare(b))) {
+      const key = `${prefix}${name}/`;
+      const open = needle !== "" || !collapsed.has(key);
+      rows.push({ kind: "dir", key, depth, name, open });
+      if (open) walk(child, key, depth + 1);
+    }
+    const named = node.files.map((entry) => ({ entry, name: entry.path.slice(entry.path.lastIndexOf("/") + 1) }));
+    for (const { entry, name } of named.sort((a, b) => a.name.localeCompare(b.name))) rows.push({ kind: "file", key: entry.path, depth, name, entry });
+  };
+  walk(root, "", 0);
+  return rows;
 }
 
 /** A path with its directory dimmed and its name plain; the directory gives way first when the row is narrow. */
@@ -297,6 +338,8 @@ export function WorkspaceGitReview({
   const [commitMessage, setCommitMessage] = useResourceState(`review:${workspaceId}:commitMessage`, "");
   const [changesOpen, setChangesOpen] = useResourceState(`review:${workspaceId}:changesOpen`, true);
   const [railOpen, setRailOpen] = useResourceState(`review:${workspaceId}:railOpen`, true);
+  const [collapsedDirs, setCollapsedDirs] = useResourceState<Set<string>>(`review:${workspaceId}:collapsedDirs`, new Set());
+  const [fileFilter, setFileFilter] = useState("");
   const [diffLayout, setDiffLayout] = useResourceState<"auto" | "unified" | "split">(`review:${workspaceId}:diffLayout`, "auto");
   // Whether the host's diff can show a change side by side (the native client's can).
   const canChooseLayout = (DiffView as { splitLayout?: boolean }).splitLayout === true;
@@ -434,6 +477,24 @@ export function WorkspaceGitReview({
 
   const changedFiles = status?.entries ?? [];
   const diffFiles = diff?.files ?? [];
+  // Added and removed lines per path, from the diffs shown for this comparison: a diff of one file adds that file's
+  // counts to the ones already known, so choosing a file does not blank the others.
+  const countCache = useRef({ key: "", counts: new Map<string, { added: number; removed: number }>() });
+  const lineCounts = useMemo(() => {
+    const key = diff ? targetKey(diff.target) : "";
+    if (diff && countCache.current.key !== key) countCache.current = { key, counts: new Map() };
+    for (const file of diff?.files ?? []) {
+      let added = 0;
+      let removed = 0;
+      for (const hunk of file.hunks) for (const line of hunk.lines) { if (line.kind === "addition") added += 1; else if (line.kind === "deletion") removed += 1; }
+      countCache.current.counts.set(filePath(file), { added, removed });
+    }
+    return new Map(countCache.current.counts);
+  }, [diff]);
+  const treeShown = useMemo(() => treeRows(changedFiles, collapsedDirs, fileFilter), [changedFiles, collapsedDirs, fileFilter]);
+  function toggleDir(key: string) {
+    setCollapsedDirs((current) => { const next = new Set(current); if (!next.delete(key)) next.add(key); return next; });
+  }
   const unresolvedCount = comments.filter((comment) => comment.status === "unresolved").length;
   const inlineCommentIds = useMemo(
     () => new Set(comments.filter((comment) => diffContainsCommentLine(comment, diff)).map((comment) => comment.id)),
@@ -636,6 +697,99 @@ export function WorkspaceGitReview({
     );
   }
 
+  const rail = railOpen ? (
+    <aside className="flex min-h-0 w-[17rem] min-w-[13rem] shrink-0 flex-col [border-left:1px_solid_var(--git-border)]" style={narrow ? { width: "100%", minWidth: 0, flex: "0 0 auto", borderLeft: "none", borderBottom: "1px solid var(--git-border)" } : undefined} data-testid="git-status">
+      <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.35rem]">
+        <button
+          type="button"
+          className="flex min-w-0 items-center gap-[0.35rem] text-left text-fg [background:none]" style={narrow ? undefined : { pointerEvents: "none" }}
+          aria-expanded={changesOpen}
+          onClick={() => setChangesOpen(!changesOpen)}
+        >
+          <span className="text-[0.6rem] text-subtext-0" style={narrow ? undefined : { display: "none" }} aria-hidden="true">{changesOpen ? "▾" : "▸"}</span>
+          <strong>{changedFiles.length ? `${changedFiles.length} changed path${changedFiles.length === 1 ? "" : "s"}` : "No changes"}</strong>
+        </button>
+        <label className="inline-flex items-center gap-[0.3rem] text-[0.68rem] whitespace-nowrap text-subtext-0">
+          <input
+            type="checkbox"
+            checked={changedFiles.length > 0 && selectedCount === changedFiles.length}
+            onChange={(event) => selectAllPaths(event.target.checked)}
+            aria-label="Select all changed paths"
+          />
+          All
+        </label>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col" style={narrow && !changesOpen ? { display: "none" } : undefined} data-open={changesOpen}>
+        {statusState === "loading" && <div className={STATUS_NOTE} role="status">Reading Git status…</div>}
+        {statusState === "error" && <div className={cn(STATUS_NOTE, "text-red")} role="alert">{statusError || "Git status is unavailable."}</div>}
+        {changedFiles.length > 0 && (
+          <div className="px-[0.5rem] pb-[0.35rem]">
+            <input className={`${TB_INPUT} w-full`} aria-label="Filter changed files" value={fileFilter} onChange={(event) => setFileFilter(event.target.value)} placeholder="Filter files…" />
+          </div>
+        )}
+
+        <div className="flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]" style={narrow ? { maxHeight: "8.5rem", flex: "none" } : undefined} role="tree" aria-label="Changed paths">
+          {treeShown.map((row) => row.kind === "dir" ? (
+            <button
+              type="button"
+              key={`dir:${row.key}`}
+              className="flex min-w-0 items-center gap-[0.35rem] rounded-ui py-[3px] pr-3 text-left text-subtext-0 [background:none] hover:bg-surface-1"
+              style={{ paddingLeft: `${0.55 + row.depth * 0.8}rem` }}
+              role="treeitem"
+              aria-expanded={row.open}
+              onClick={() => toggleDir(row.key)}
+            >
+              <span className="w-[0.7rem] shrink-0 text-[0.6rem]" aria-hidden="true">{row.open ? "▾" : "▸"}</span>
+              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{row.name}</span>
+            </button>
+          ) : (
+            <div className="flex min-w-0 items-center gap-[0.3rem]" key={`file:${row.key}`} role="treeitem">
+              <input
+                className="shrink-0"
+                type="checkbox"
+                checked={selectedPaths.has(row.entry.path)}
+                onChange={() => selectPath(row.entry.path)}
+                aria-label={`Select ${row.entry.path}`}
+              />
+              <button
+                type="button"
+                className={`${PATH_BUTTON} ${activeFile === row.entry.path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`}
+                style={{ paddingLeft: `${0.1 + row.depth * 0.8}rem` }}
+                onClick={() => { setActiveFile(activeFile === row.entry.path ? undefined : row.entry.path); setSelection(null); }}
+                title={row.entry.originalPath ? `${row.entry.originalPath} → ${row.entry.path}` : row.entry.path}
+              >
+                <FileIcon name={row.name} />
+                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{row.name}</span>
+                {lineCounts.has(row.entry.path) && (
+                  <span className="shrink-0 whitespace-nowrap text-[0.66rem] [font-family:var(--font-mono)]">
+                    {(lineCounts.get(row.entry.path)?.added ?? 0) > 0 && <span className="text-green">+{lineCounts.get(row.entry.path)?.added}</span>}
+                    {(lineCounts.get(row.entry.path)?.removed ?? 0) > 0 && <span className="ml-[0.3rem] text-red">−{lineCounts.get(row.entry.path)?.removed}</span>}
+                  </span>
+                )}
+                <GitMarker decoration={{ entry: row.entry }} />
+              </button>
+            </div>
+          ))}
+          {statusState !== "loading" && changedFiles.length === 0 && <div className={STATUS_NOTE}>Working tree is clean.</div>}
+          {changedFiles.length > 0 && treeShown.length === 0 && <div className={STATUS_NOTE}>No changed file matches.</div>}
+        </div>
+
+        <div className="flex flex-col gap-[0.35rem] p-[0.5rem] [border-top:1px_solid_var(--git-border)]">
+          <div className="flex flex-wrap items-center gap-[0.3rem]">
+            <button type="button" className={`${BTN_DEFAULT} min-w-fit flex-1`} disabled={selectedCount === 0} onClick={() => actions.stage([...selectedPaths])}>Stage selected</button>
+            <button type="button" className={`${BTN_DEFAULT} min-w-fit flex-1`} disabled={selectedCount === 0} onClick={() => actions.unstage([...selectedPaths])}>Unstage</button>
+            <button type="button" className={`${BTN_DANGER} min-w-fit flex-1`} data-testid="git-discard-preview" disabled={selectedCount === 0} onClick={() => requestDiscard("worktree")}>Discard selected</button>
+          </div>
+          <div className="flex flex-col gap-[0.3rem]" style={narrow ? { flexDirection: "row" } : undefined}>
+            <input className={`${TB_INPUT} min-w-0 flex-1`} aria-label="Commit staged changes" value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} placeholder="Describe the change" />
+            <button type="button" className={BTN_PRIMARY} disabled={stagedCount === 0 || !commitMessage.trim()} onClick={requestCommitPreview}>Preview commit</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+  ) : null;
+
   const optionsChanged = !includeUntracked || ignoreWhitespace || wrapLines || diffLayout !== "auto" || contextLines !== 3;
   return (
     <section ref={rootRef} className="workspace-git" data-testid="workspace-git-review" aria-label="Git and review">
@@ -654,71 +808,7 @@ export function WorkspaceGitReview({
       </header>
 
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" style={narrow ? { flexDirection: "column", overflow: "auto" } : undefined}>
-        {/* Wide: a rail beside the diff. Narrow: a list above it that folds away, so the code keeps the height. */}
-        {railOpen && <aside className="flex min-h-0 w-[15rem] min-w-[12rem] shrink-0 flex-col [border-right:1px_solid_var(--git-border)]" style={narrow ? { width: "100%", minWidth: 0, flex: "0 0 auto", borderRight: "none", borderBottom: "1px solid var(--git-border)" } : undefined} data-testid="git-status">
-          <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.35rem]">
-            <button
-              type="button"
-              className="flex min-w-0 items-center gap-[0.35rem] text-left text-fg [background:none]" style={narrow ? undefined : { pointerEvents: "none" }}
-              aria-expanded={changesOpen}
-              onClick={() => setChangesOpen(!changesOpen)}
-            >
-              <span className="text-[0.6rem] text-subtext-0" style={narrow ? undefined : { display: "none" }} aria-hidden="true">{changesOpen ? "▾" : "▸"}</span>
-              <strong>{changedFiles.length ? `${changedFiles.length} changed path${changedFiles.length === 1 ? "" : "s"}` : "No changes"}</strong>
-            </button>
-            <label className="inline-flex items-center gap-[0.3rem] text-[0.68rem] whitespace-nowrap text-subtext-0">
-              <input
-                type="checkbox"
-                checked={changedFiles.length > 0 && selectedCount === changedFiles.length}
-                onChange={(event) => selectAllPaths(event.target.checked)}
-                aria-label="Select all changed paths"
-              />
-              All
-            </label>
-          </div>
-
-          <div className="flex min-h-0 flex-1 flex-col" style={narrow && !changesOpen ? { display: "none" } : undefined} data-open={changesOpen}>
-            {statusState === "loading" && <div className={STATUS_NOTE} role="status">Reading Git status…</div>}
-            {statusState === "error" && <div className={cn(STATUS_NOTE, "text-red")} role="alert">{statusError || "Git status is unavailable."}</div>}
-
-            <div className="flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]" style={narrow ? { maxHeight: "8.5rem", flex: "none" } : undefined} role="list" aria-label="Changed paths">
-              {changedFiles.map((entry) => (
-                <div className="flex min-w-0 items-center gap-[0.3rem]" key={entry.path} role="listitem">
-                  <input
-                    className="shrink-0"
-                    type="checkbox"
-                    checked={selectedPaths.has(entry.path)}
-                    onChange={() => selectPath(entry.path)}
-                    aria-label={`Select ${entry.path}`}
-                  />
-                  <button
-                    type="button"
-                    className={`${PATH_BUTTON} ${activeFile === entry.path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`}
-                    onClick={() => { setActiveFile(activeFile === entry.path ? undefined : entry.path); setSelection(null); }}
-                    title={entry.originalPath ? `${entry.originalPath} → ${entry.path}` : entry.path}
-                  >
-                    <FileIcon name={entry.path.split("/").at(-1) ?? entry.path} />
-                    <PathLabel path={entry.path} className="flex-1" />
-                    <GitMarker decoration={{ entry }} />
-                  </button>
-                </div>
-              ))}
-              {statusState !== "loading" && changedFiles.length === 0 && <div className={STATUS_NOTE}>Working tree is clean.</div>}
-            </div>
-
-            <div className="flex flex-col gap-[0.35rem] p-[0.5rem] [border-top:1px_solid_var(--git-border)]">
-              <div className="flex flex-wrap items-center gap-[0.3rem]">
-                <button type="button" className={`${BTN_DEFAULT} min-w-fit flex-1`} disabled={selectedCount === 0} onClick={() => actions.stage([...selectedPaths])}>Stage selected</button>
-                <button type="button" className={`${BTN_DEFAULT} min-w-fit flex-1`} disabled={selectedCount === 0} onClick={() => actions.unstage([...selectedPaths])}>Unstage</button>
-                <button type="button" className={`${BTN_DANGER} min-w-fit flex-1`} data-testid="git-discard-preview" disabled={selectedCount === 0} onClick={() => requestDiscard("worktree")}>Discard selected</button>
-              </div>
-              <div className="flex flex-col gap-[0.3rem]" style={narrow ? { flexDirection: "row" } : undefined}>
-                <input className={`${TB_INPUT} min-w-0 flex-1`} aria-label="Commit staged changes" value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} placeholder="Describe the change" />
-                <button type="button" className={BTN_PRIMARY} disabled={stagedCount === 0 || !commitMessage.trim()} onClick={requestCommitPreview}>Preview commit</button>
-              </div>
-            </div>
-          </div>
-        </aside>}
+        {narrow && rail}
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" style={narrow ? { minHeight: "18rem", flex: "auto" } : undefined}>
           <div className="flex shrink-0 flex-wrap items-center gap-x-[0.7rem] gap-y-[0.3rem] px-[0.7rem] py-[0.4rem]">
@@ -860,6 +950,7 @@ export function WorkspaceGitReview({
             {batchSending && (!batchDelivery || batchDelivery.packetId !== batchPreview?.packetId) && <div className={BANNER_INFO} role="status">Sending review packet… waiting for server confirmation.</div>}
           </section>
         </div>
+        {!narrow && rail}
       </div>
 
       {(localActionError || actionError) && <div className="absolute right-[0.8rem] bottom-[0.8rem] z-[5] flex max-w-[min(30rem,calc(100%-1.6rem))] items-center gap-2 rounded-ui bg-panel-bg px-[0.65rem] py-[0.55rem] text-red shadow-[0_8px_24px_rgba(0,0,0,0.35)]" role="alert">{localActionError || actionError}<button type="button" className="[border:0] bg-transparent text-inherit" aria-label="Dismiss" onClick={() => setLocalActionError(null)}>×</button></div>}
