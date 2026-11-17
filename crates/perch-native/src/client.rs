@@ -1323,6 +1323,8 @@ pub enum Update {
     },
     /// A session finished or needs you and the person should hear it.
     Alert(Heard),
+    /// The terminal host stopped answering or answers again; the window says so.
+    Health(crate::sidebar::Health),
     /// A message for the window's file store (`files::store`): an `fs.*` reply or `fs.changed`.
     Files(Box<ServerMessage>),
     /// A review delivery for the window's Git store (`git::store`), broadcast with no request.
@@ -1595,6 +1597,11 @@ async fn live(
                 }
                 for alert in state.take_alerts() {
                     if updates.unbounded_send(Update::Alert(alert)).is_err() {
+                        return Ok(());
+                    }
+                }
+                if let Some(health) = state.take_health() {
+                    if updates.unbounded_send(Update::Health(health)).is_err() {
                         return Ok(());
                     }
                 }

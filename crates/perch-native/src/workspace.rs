@@ -163,6 +163,9 @@ impl<T: Clone + PartialEq> Settle<T> {
     }
 }
 
+/// The session id the terminal host's health notification carries (the web's `daemon:health`).
+const DAEMON_HEALTH: &str = "daemon:health";
+
 /// The most notifications kept for a screen to show; the oldest go first.
 const MAX_NOTIFICATIONS: usize = 20;
 
@@ -4173,6 +4176,50 @@ impl Workspace {
             file: None,
             toast: crate::sidebar::Toast::App,
             body,
+        };
+        self.notify(heard, Some(notice), cx);
+    }
+
+    /// The terminal host stopped answering, or answers again (`daemon.health`), worded and timed as
+    /// the web's toast. One at a time: the news replaces the last, so a recovery clears the alarm.
+    /// Terminals keep running either way.
+    pub fn daemon_health(&mut self, health: &crate::sidebar::Health, cx: &mut Context<Self>) {
+        self.notifications
+            .retain(|n| n.heard.session_id != DAEMON_HEALTH);
+        let (title, body, level, timeout) = if health.healthy {
+            (
+                "Terminal host is responding again".to_string(),
+                None,
+                "info",
+                None,
+            )
+        } else {
+            let problem = health
+                .problem
+                .as_deref()
+                .unwrap_or("No answer to a health check");
+            (
+                "Terminal host is not responding".to_string(),
+                Some(format!(
+                    "{problem}. Terminals were left running; nothing was restarted."
+                )),
+                "error",
+                Some(60_000),
+            )
+        };
+        let heard = Heard {
+            alert: Alert::Usage,
+            session_id: DAEMON_HEALTH.into(),
+            title,
+            sound: false,
+            file: None,
+            toast: crate::sidebar::Toast::App,
+            body,
+        };
+        let notice = Notice {
+            level: Some(level.into()),
+            timeout,
+            ..Notice::default()
         };
         self.notify(heard, Some(notice), cx);
     }
