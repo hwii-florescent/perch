@@ -1530,6 +1530,34 @@ fn sub_sessions_open_beside_their_lead() {
     println!("workspace_render: sub-session tabs ok");
 }
 
+/// Showing any member of a family first opens the whole family in the sidebar's order: a
+/// sub-session picked on a fresh window brings its lead and its siblings; the lead then changes
+/// nothing.
+fn a_sub_session_shown_first_opens_its_family() {
+    let terminal = |parent: Option<&str>, created: u64| match parent {
+        Some(p) => json!({"cliProviderId": "terminal", "parentSessionId": p, "createdAt": created}),
+        None => json!({"cliProviderId": "terminal", "createdAt": created}),
+    };
+    let mut h = Harness::new(model(&[
+        ("k2", terminal(Some("lead"), 3)),
+        ("lead", terminal(None, 1)),
+        ("k3", terminal(Some("lead"), 4)),
+        ("k1", terminal(Some("lead"), 2)),
+        ("loose", terminal(None, 5)),
+    ]));
+    h.open("k2");
+    let family = ["lead", "k1", "k2", "k3"];
+    assert_eq!(h.ws(|ws| ws.tabs().strip().to_vec()), family);
+    assert_eq!(
+        h.ws(|ws| ws.tabs().active().map(str::to_string)),
+        Some("k2".into()),
+        "the one picked keeps the keyboard"
+    );
+    h.open("lead");
+    assert_eq!(h.ws(|ws| ws.tabs().strip().to_vec()), family);
+    println!("workspace_render: family opens from a sub-session ok");
+}
+
 /// The sub-sessions of a lead open in the order the workspace's strip (and the sidebar's family)
 /// lists them, whatever order the core's list comes in, and a sub-session of another workspace (a
 /// Quickchat chat) never joins the lead's tabs.
@@ -1760,6 +1788,7 @@ fn main() {
     a_deleted_session_closes_its_tab_whenever_the_core_says_so();
     sub_sessions_open_beside_their_lead();
     sub_session_tabs_follow_the_strip_order();
+    a_sub_session_shown_first_opens_its_family();
     the_pane_menu_opens_on_right_click();
     a_peek_is_a_terminal_over_the_window();
     tabs_out_of_sight_are_parked_beyond_twelve();
