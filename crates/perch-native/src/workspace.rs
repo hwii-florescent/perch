@@ -2308,9 +2308,10 @@ impl Workspace {
         });
     }
 
-    /// Every sub-session of a lead with a tab here has a tab too, as the web's strip lists every
-    /// session of the workspace: opened behind the lead's family when the core lists it, without
-    /// taking the keyboard. It goes as any tab does, when the core deletes the session.
+    /// A lead's whole family has tabs here once any member does, as the web's strip lists every
+    /// session of the workspace: the lead and each sub-session open behind the family as the core
+    /// lists it, without taking the keyboard. It goes as any tab does, when the core deletes the
+    /// session.
     fn open_sub_sessions(&mut self, cx: &mut Context<Self>) {
         let sidebar = self.sidebar.read(cx);
         let store = &sidebar.model().store;
@@ -2321,7 +2322,41 @@ impl Workspace {
                 .find(|s| s.id == id)
                 .and_then(|s| s.parent_session_id.clone())
         };
-        let mut opened = Vec::new();
+        // A session the sidebar does not list (a plain terminal, a hidden worktree's) opens as
+        // the core lists it.
+        let to_open = |session: &perch_core::protocol::SessionSummary| {
+            sidebar
+                .session_to_open(&session.id)
+                .unwrap_or_else(|| OpenSession {
+                    host_id: session.host_id.clone(),
+                    session_id: session.id.clone(),
+                    title: session.title.clone(),
+                    provider_id: session.cli_provider_id.clone(),
+                    blank: session.cli_provider_id.is_none() && !session.cli_started,
+                    core_url: sidebar.model().core_url.clone(),
+                })
+        };
+        let mut opened: Vec<(String, (String, OpenSession))> = Vec::new();
+        let away = |id: &str| store.deleted.iter().any(|d| d == id) || self.put_away.contains(id);
+        // A sub-session on screen brings its lead, which the family then follows.
+        for tab in self.tabs.strip() {
+            let Some(lead) = parent_of(tab)
+                .and_then(|id| store.sessions.iter().find(|s| s.id == id))
+                .filter(|lead| {
+                    store.sessions.iter().any(|s| {
+                        s.id == *tab && navigation::same_workspace(lead, s)
+                    })
+                })
+            else {
+                continue;
+            };
+            if !self.tabs.contains(&lead.id)
+                && !away(&lead.id)
+                && !opened.iter().any(|(id, _)| *id == lead.id)
+            {
+                opened.push((lead.id.clone(), (lead.id.clone(), to_open(lead))));
+            }
+        }
         // Each lead's sub-sessions in its workspace strip's order (the sidebar lists them in it),
         // and only those of the lead's own workspace: a Quickchat or another project's session
         // never joins the family.
@@ -2347,26 +2382,10 @@ impl Workspace {
         for (_, session) in kids {
             let lead = session.parent_session_id.as_deref().unwrap_or_default();
             let here = |id: &str| self.tabs.contains(id) || opened.iter().any(|(o, _)| o == id);
-            if !here(lead)
-                || here(&session.id)
-                || store.deleted.contains(&session.id)
-                || self.put_away.contains(&session.id)
-            {
+            if !here(lead) || here(&session.id) || away(&session.id) {
                 continue;
             }
-            // A session the sidebar does not list (a plain terminal, a hidden worktree's) opens as
-            // the core lists it.
-            let open = sidebar
-                .session_to_open(&session.id)
-                .unwrap_or_else(|| OpenSession {
-                    host_id: session.host_id.clone(),
-                    session_id: session.id.clone(),
-                    title: session.title.clone(),
-                    provider_id: session.cli_provider_id.clone(),
-                    blank: session.cli_provider_id.is_none() && !session.cli_started,
-                    core_url: sidebar.model().core_url.clone(),
-                });
-            opened.push((session.id.clone(), (lead.to_string(), open)));
+            opened.push((session.id.clone(), (lead.to_string(), to_open(session))));
         }
         if opened.is_empty() {
             return;
