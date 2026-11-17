@@ -9,6 +9,8 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 //! transient UI (an open confirmation, a busy flag of a request this copy is awaiting) is the copy's own.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn, DiffView, FileIcon, GitMarker, newId, Select, useResourceState, } from "@perch/sdk";
+/** The review's narrow layout applies at or under this width (the web's `@container(max-width:700px)`). */
+const NARROW_WIDTH = 700;
 const EYEBROW = "text-accent text-[0.63rem] font-bold tracking-[0.09em] uppercase";
 const CONNECTION = "rounded-[999px] bg-surface-1 px-[0.42rem] py-[0.18rem] text-[0.7rem] whitespace-nowrap";
 const CONNECTION_READY = "text-green";
@@ -232,6 +234,21 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
     const [editingBody, setEditingBody] = useResourceState(`review:${workspaceId}:editingBody`, "");
     const [commitMessage, setCommitMessage] = useResourceState(`review:${workspaceId}:commitMessage`, "");
     const [changesOpen, setChangesOpen] = useResourceState(`review:${workspaceId}:changesOpen`, true);
+    const [railOpen, setRailOpen] = useResourceState(`review:${workspaceId}:railOpen`, true);
+    // The runtime matches `@container` against the window, not this screen's box, so the narrow layout is decided
+    // here from the box itself. The engine reports no resizes (`ResizeObserver` never fires): the box is read on a short timer.
+    const rootRef = useRef(null);
+    const [narrow, setNarrow] = useState(false);
+    useEffect(() => {
+        const read = () => {
+            const width = rootRef.current?.getBoundingClientRect().width ?? 0;
+            if (width > 0)
+                setNarrow(width <= NARROW_WIDTH);
+        };
+        read();
+        const timer = setInterval(read, 250);
+        return () => clearInterval(timer);
+    }, []);
     const [optionsOpen, setOptionsOpen] = useState(false);
     const [confirmAction, setConfirmAction] = useState(null);
     const [localActionError, setLocalActionError] = useState(null);
@@ -582,6 +599,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
     }
     const optionsChanged = !includeUntracked || ignoreWhitespace || wrapLines || contextLines !== 3;
     return (_jsxs("section", {
+        ref: rootRef,
         className: "workspace-git",
         "data-testid": "workspace-git-review",
         "aria-label": "Git and review",
@@ -628,6 +646,15 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                     _jsx("button", {
                         type: "button",
                         className: BTN_DEFAULT,
+                        "data-testid": "git-rail-toggle",
+                        "aria-pressed": railOpen,
+                        title: railOpen ? "Hide the changed files to give the diff the room" : "Show the changed files",
+                        onClick: () => setRailOpen(!railOpen),
+                        children: railOpen ? "Hide files" : "Show files"
+                    }),
+                    _jsx("button", {
+                        type: "button",
+                        className: BTN_DEFAULT,
                         "data-testid": "git-refresh",
                         onClick: () => { actions.refreshStatus(); actions.listComments(); },
                         children: "Refresh"
@@ -635,10 +662,12 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                 ]
             }),
             _jsxs("div", {
-                className: `flex min-h-0 min-w-0 flex-1 overflow-hidden [@container(max-width:700px)]:flex-col [@container(max-width:700px)]:overflow-auto`,
+                className: "flex min-h-0 min-w-0 flex-1 overflow-hidden",
+                style: narrow ? { flexDirection: "column", overflow: "auto" } : undefined,
                 children: [
-                    _jsxs("aside", {
-                        className: `flex min-h-0 w-[15rem] min-w-[12rem] shrink-0 flex-col [border-right:1px_solid_var(--git-border)] [@container(max-width:700px)]:w-full [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:flex-[0_0_auto] [@container(max-width:700px)]:border-r-0 [@container(max-width:700px)]:[border-bottom:1px_solid_var(--git-border)]`,
+                    railOpen && _jsxs("aside", {
+                        className: "flex min-h-0 w-[15rem] min-w-[12rem] shrink-0 flex-col [border-right:1px_solid_var(--git-border)]",
+                        style: narrow ? { width: "100%", minWidth: 0, flex: "0 0 auto", borderRight: "none", borderBottom: "1px solid var(--git-border)" } : undefined,
                         "data-testid": "git-status",
                         children: [
                             _jsxs("div", {
@@ -646,12 +675,14 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                 children: [
                                     _jsxs("button", {
                                         type: "button",
-                                        className: "flex min-w-0 items-center gap-[0.35rem] text-left text-fg [background:none] [@container(min-width:701px)]:pointer-events-none",
+                                        className: "flex min-w-0 items-center gap-[0.35rem] text-left text-fg [background:none]",
+                                        style: narrow ? undefined : { pointerEvents: "none" },
                                         "aria-expanded": changesOpen,
                                         onClick: () => setChangesOpen(!changesOpen),
                                         children: [
                                             _jsx("span", {
-                                                className: "text-[0.6rem] text-subtext-0 [@container(min-width:701px)]:hidden",
+                                                className: "text-[0.6rem] text-subtext-0",
+                                                style: narrow ? undefined : { display: "none" },
                                                 "aria-hidden": "true",
                                                 children: changesOpen ? "▾" : "▸"
                                             }),
@@ -673,7 +704,8 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                 ]
                             }),
                             _jsxs("div", {
-                                className: `flex min-h-0 flex-1 flex-col [@container(max-width:700px)]:data-[open=false]:hidden`,
+                                className: "flex min-h-0 flex-1 flex-col",
+                                style: narrow && !changesOpen ? { display: "none" } : undefined,
                                 "data-open": changesOpen,
                                 children: [
                                     statusState === "loading" && _jsx("div", {
@@ -687,7 +719,8 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                         children: statusError || "Git status is unavailable."
                                     }),
                                     _jsxs("div", {
-                                        className: `flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem] [@container(max-width:700px)]:max-h-[8.5rem] [@container(max-width:700px)]:flex-none`,
+                                        className: "flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]",
+                                        style: narrow ? { maxHeight: "8.5rem", flex: "none" } : undefined,
                                         role: "list",
                                         "aria-label": "Changed paths",
                                         children: [
@@ -755,7 +788,8 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                                 ]
                                             }),
                                             _jsxs("div", {
-                                                className: `flex flex-col gap-[0.3rem] [@container(max-width:700px)]:flex-row`,
+                                                className: "flex flex-col gap-[0.3rem]",
+                                                style: narrow ? { flexDirection: "row" } : undefined,
                                                 children: [
                                                     _jsx("input", {
                                                         className: `${TB_INPUT} min-w-0 flex-1`,
@@ -780,7 +814,8 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                         ]
                     }),
                     _jsxs("div", {
-                        className: `flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden [@container(max-width:700px)]:min-h-[18rem] [@container(max-width:700px)]:flex-auto`,
+                        className: "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+                        style: narrow ? { minHeight: "18rem", flex: "auto" } : undefined,
                         children: [
                             _jsxs("div", {
                                 className: "flex shrink-0 flex-wrap items-center gap-x-[0.7rem] gap-y-[0.3rem] px-[0.7rem] py-[0.4rem]",
@@ -1094,7 +1129,8 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                         ]
                                     })),
                                     unresolvedCount > 0 && (_jsxs("div", {
-                                        className: `flex items-end gap-[0.55rem] px-[0.7rem] pb-[0.55rem] [@container(max-width:700px)]:flex-col [@container(max-width:700px)]:items-stretch`,
+                                        className: "flex items-end gap-[0.55rem] px-[0.7rem] pb-[0.55rem]",
+                                        style: narrow ? { flexDirection: "column", alignItems: "stretch" } : undefined,
                                         children: [
                                             _jsxs("label", {
                                                 className: `${TB_FIELD} flex-1`,

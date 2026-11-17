@@ -1,6 +1,6 @@
-//! `DiffView`: the review's diff drawn natively, as `review.tsx` draws its rows (header per file, header per hunk,
-//! one row per line with both numbers, the marker and the code, kind tints, the hover `＋`, the selection, comment
-//! threads under their lines), on `gpui::list`: only rows on screen (and a margin) are laid out, each row's height
+//! `DiffView`: the review's diff drawn natively, as `review.tsx` draws its rows (header per file, header per
+//! hunk, one row per line, kind tints, the hover `＋`, the selection, comment threads under their lines), on
+//! `gpui::list`: only rows on screen (and a margin) are laid out, each row's height
 //! is measured once and cached, and a frame costs the same for 500 lines as for 20,000.
 //!
 //! The diff and its comments are the host store's ([`DiffView::set_data`]); the screen sends only view state
@@ -8,6 +8,10 @@
 //! header of the file at the top stays pinned there (CSS `sticky top-0`), pushed up by the next file's header; hunk
 //! headers do not pin (the web's only stick to the left). Unwrapped, every line shares one width (the widest) and
 //! one horizontal offset; wrapped, lines break at the view's width and the list measures them.
+//!
+//! A line is drawn compactly: one number (the old line's for a deletion, else the new line's) and a colour bar on
+//! the edge in place of a second number and a `+`/`−` column. A view at least [`SPLIT_WIDTH`] wide draws each change
+//! as the old side beside the new side (`Row::Pair`); narrower, one line per row.
 //!
 //! Keyboard: Up/Down move a row cursor over selectable lines, Enter or Space select (Shift extends), Tab leaves.
 //! (The web makes every row a tab stop; 20,000 natively would be worse.)
@@ -17,12 +21,12 @@ use crate::git::store::DiffSnapshot;
 use crate::mods::theme::Theme;
 use gpui::{
     div, list, prelude::*, px, AnyElement, App, Bounds, Context, EventEmitter, FocusHandle,
-    Focusable, Hsla, KeyDownEvent, ListAlignment, ListState, MouseButton, Pixels, Rgba,
+    Focusable, Hsla, KeyDownEvent, ListAlignment, ListOffset, ListState, MouseButton, Pixels, Rgba,
     ScrollWheelEvent, SharedString, Window,
 };
 use gpui_base::input::{InputEvent, Textarea, TextareaState};
 use perch_core::review::{ReviewComment, ReviewSide, ReviewStatus};
-use perch_core::source_control::{DiffFileStatus, DiffLineKind};
+use perch_core::source_control::{DiffFile, DiffFileStatus, DiffLine, DiffLineKind};
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -32,8 +36,10 @@ const CODE_SIZE: f32 = 0.75 * REM;
 const LINE_HEIGHT: f32 = CODE_SIZE * 1.5;
 /// The web's `ui-monospace`: CoreText's monospaced system face (SF Mono), as the file editor draws.
 const MONO: &str = ".AppleSystemUIFontMonospaced";
-/// Under this width the gutters narrow (`@container(max-width:700px)`).
-const NARROW: f32 = 700.;
+/// A view this wide or wider shows the old and new side of a change side by side.
+const SPLIT_WIDTH: f32 = 1000.;
+/// The change bar on a line's edge.
+const BAR: f32 = 3.;
 
 /// What the screen decides: which file, wrap, the selected lines and the comment being edited.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -166,6 +172,8 @@ struct Tints {
     hover_change: Hsla,
     hover_context: Hsla,
     selected: Hsla,
+    /// The side of a split change that has no line.
+    empty: Hsla,
 }
 
 impl Tints {
@@ -177,6 +185,7 @@ impl Tints {
             hover_change: alpha(&t("accent"), 15.),
             hover_context: alpha(&t("accent"), 12.),
             selected: alpha(&t("accent"), 12.),
+            empty: alpha(&t("surface-1"), 45.),
         }
     }
 }
@@ -198,6 +207,8 @@ pub struct DiffView {
     offset_x: f32,
     /// The view's width at the last paint.
     width: Rc<Cell<f32>>,
+    /// The rows pair the two sides of a change (the view is at least [`SPLIT_WIDTH`] wide).
+    split: bool,
     /// The keyboard's row (an index into rows), drawn with a ring while the view has focus.
     cursor: Option<usize>,
     /// The cursor's ring shows: the keyboard moved it (the web's `:focus-visible`), not a click.
@@ -233,6 +244,7 @@ impl DiffView {
             tints: Tints::of(theme),
             offset_x: 0.,
             width: Rc::new(Cell::new(0.)),
+            split: false,
             cursor: None,
             keyed: false,
             edit: None,
@@ -313,7 +325,7 @@ impl DiffView {
     fn rebuild(&mut self, to_top: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.builds += 1;
         let rows = match &self.diff {
-            Some(diff) => rows::build(diff, &self.comments, self.props.path.as_deref()),
+            Some(diff) => rows::build(diff, &self.comments, self.props.path.as_deref(), self.split),
             None => Rows::default(),
         };
         let mut file_row = Vec::with_capacity(rows.rows.len());
@@ -330,8 +342,24 @@ impl DiffView {
             counts[kind] += 1;
         }
         let top = self.list.logical_scroll_top();
+        // A change of layout moves every row: the file at the top stays at the top.
+        let top_file = (self.rows.split != rows.split)
+            .then(
+                || match self.rows.rows.get(*self.file_row.get(top.item_ix)?)? {
+                    Row::File { file } => Some(*file),
+                    _ => None,
+                },
+            )
+            .flatten();
         self.list.reset(rows.rows.len());
-        if !to_top && top.item_ix < rows.rows.len() {
+        if let Some(header) =
+            top_file.and_then(|f| rows.rows.iter().position(|r| *r == Row::File { file: f }))
+        {
+            self.list.scroll_to(ListOffset {
+                item_ix: header,
+                offset_in_item: px(0.),
+            });
+        } else if !to_top && top.item_ix < rows.rows.len() {
             self.list.scroll_to(top);
         }
         self.rows = Rc::new(rows);
@@ -365,25 +393,48 @@ impl DiffView {
         cx.notify();
     }
 
-    fn line_at(&self, row: usize) -> Option<(String, ReviewSide, u32)> {
+    /// The line a click or key on `row` means. For a pair, `right` picks a half (a context line is the same line in
+    /// both); none picks the new side's line, else the old side's.
+    fn line_at(&self, row: usize, right: Option<bool>) -> Option<(String, ReviewSide, u32)> {
         let diff = self.diff.as_deref()?;
-        match self.rows.rows.get(row)? {
+        let (file, hunk, line) = match self.rows.rows.get(row)? {
             Row::Line {
+                file, hunk, line, ..
+            } => (*file, *hunk, *line),
+            Row::Pair {
                 file,
-                side,
-                number: Some(number),
-                ..
-            } => Some((
-                file_path_for_side(&diff.files[*file], *side).to_string(),
-                *side,
-                *number,
-            )),
-            _ => None,
-        }
+                hunk,
+                left,
+                right: new,
+            } => {
+                // A click names its half and an empty half is nothing; a key takes whichever side has a line.
+                let picked = match right {
+                    Some(false) => *left,
+                    Some(true) => *new,
+                    None => new.or(*left),
+                };
+                (*file, *hunk, picked?)
+            }
+            _ => return None,
+        };
+        let file = &diff.files[file];
+        let line = &file.hunks[hunk].lines[line];
+        let side = rows::line_side(line);
+        Some((
+            file_path_for_side(file, side).to_string(),
+            side,
+            rows::line_number(line, side)?,
+        ))
     }
 
-    fn select_row(&mut self, row: usize, extend: bool, cx: &mut Context<Self>) {
-        if let Some((path, side, line)) = self.line_at(row) {
+    fn select_row(
+        &mut self,
+        row: usize,
+        right: Option<bool>,
+        extend: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some((path, side, line)) = self.line_at(row, right) {
             self.cursor = Some(row);
             cx.emit(DiffEvent::SelectLine {
                 path,
@@ -407,7 +458,7 @@ impl DiffView {
             if at >= count {
                 return;
             }
-            if self.line_at(at).is_some() {
+            if self.line_at(at, None).is_some() {
                 break;
             }
         }
@@ -430,7 +481,7 @@ impl DiffView {
             "down" => self.move_cursor(true, cx),
             "up" => self.move_cursor(false, cx),
             "enter" | "space" => match self.cursor {
-                Some(row) => self.select_row(row, shift, cx),
+                Some(row) => self.select_row(row, None, shift, cx),
                 None => return,
             },
             _ => return,
@@ -451,7 +502,7 @@ impl DiffView {
         if dx == px(0.) {
             return;
         }
-        let max = (self.content_width() - self.width.get()).max(0.);
+        let max = (self.content_width() - self.visible_width()).max(0.);
         let next = (self.offset_x - f32::from(dx)).clamp(0., max);
         if next != self.offset_x {
             self.offset_x = next;
@@ -463,19 +514,26 @@ impl DiffView {
         let _ = window;
     }
 
+    /// The number column's width, for the largest number the diff shows, and the change bar's.
     fn gutters(&self) -> (f32, f32) {
-        if self.width.get() > 0. && self.width.get() <= NARROW {
-            (2.1 * REM, 0.8 * REM)
+        let digits = self.rows.max_number.to_string().len().max(2) as f32;
+        (digits * CODE_SIZE * 0.6 + 0.9 * REM, BAR)
+    }
+
+    /// The width a line's cell shows: the view's, or half of it for each side of a split change.
+    fn visible_width(&self) -> f32 {
+        if self.rows.split {
+            self.width.get() / 2.
         } else {
-            (2.5 * REM, 0.9 * REM)
+            self.width.get()
         }
     }
 
-    /// The shared width of unwrapped lines: both numbers, the marker and the widest code.
+    /// The shared width of unwrapped lines: the bar, the number and the widest code.
     fn content_width(&self) -> f32 {
-        let (number, marker) = self.gutters();
+        let (number, bar) = self.gutters();
         // ponytail: SF Mono's advance is 0.6 em; a measured advance would replace this if the mono face changes.
-        2. * number + marker + self.rows.widest as f32 * CODE_SIZE * 0.6
+        number + bar + self.rows.widest as f32 * CODE_SIZE * 0.6
     }
 }
 
@@ -520,20 +578,12 @@ struct Frame {
     edit: Option<(String, gpui::Entity<TextareaState>)>,
 }
 
-/// The web lines up a line's cells on their baselines; an empty number cell (an added line has no
-/// old number, a removed one no new number) has no text, so its bottom edge stands in for its
-/// baseline, and the line grows by that much above its text: the line height less the text's
-/// baseline in it. In the web's mono face (`ui-monospace`, SF Mono) at 12 px on an 18 px line that
-/// is 4.47 px. ponytail: a constant taken from the web for that face at that size, the only one the
-/// review draws. Upgrade: measure it from the face's ascent if the code size becomes a setting.
-const EMPTY_CELL_DROP: f32 = 4.47;
-
 /// The row kinds the parity probe names, as an index: file header, hunk header, line, thread, other.
 fn probe_kind(row: &Row) -> usize {
     match row {
         Row::File { .. } => 0,
         Row::Hunk { .. } => 1,
-        Row::Line { .. } => 2,
+        Row::Line { .. } | Row::Pair { .. } => 2,
         Row::Thread { .. } => 3,
         Row::Binary { .. } => 4,
     }
@@ -576,7 +626,7 @@ impl Frame {
                 c.accent,
                 self.row(ix),
             ),
-            Row::Line { .. } => {
+            Row::Line { .. } | Row::Pair { .. } => {
                 let line = self.row(ix);
                 let tint = self.line_tint(ix);
                 let Some(Row::Thread { comments, .. }) = rows.get(ix + 1) else {
@@ -727,18 +777,18 @@ impl Frame {
                 )
                 .into_any_element(),
             Row::Line {
-                file,
-                hunk,
-                line,
-                side,
-                number,
+                file, hunk, line, ..
             } => self.line_row(
                 ix,
                 &diff.files[*file],
                 &diff.files[*file].hunks[*hunk].lines[*line],
-                *side,
-                *number,
             ),
+            Row::Pair {
+                file,
+                hunk,
+                left,
+                right,
+            } => self.pair_row(ix, &diff.files[*file], *hunk, *left, *right),
             Row::Thread { comments, .. } => self.thread(ix, comments),
         }
     }
@@ -771,15 +821,75 @@ impl Frame {
         }
     }
 
-    fn line_row(
+    fn line_row(&self, ix: usize, file: &DiffFile, line: &DiffLine) -> AnyElement {
+        self.cell(
+            ix,
+            None,
+            file,
+            line,
+            self.focused && self.cursor == Some(ix),
+        )
+    }
+
+    /// A split change: the old side's line beside the new side's, an empty half where a side has no line.
+    fn pair_row(
         &self,
         ix: usize,
-        file: &perch_core::source_control::DiffFile,
-        line: &perch_core::source_control::DiffLine,
-        side: ReviewSide,
-        number: Option<u32>,
+        file: &DiffFile,
+        hunk: usize,
+        left: Option<usize>,
+        right: Option<usize>,
+    ) -> AnyElement {
+        let lines = &file.hunks[hunk].lines;
+        let half = |side: bool, line: Option<usize>| match line {
+            Some(line) => self.cell(ix, Some(side), file, &lines[line], false),
+            None => div()
+                .flex_1()
+                .min_w_0()
+                .bg(self.tints.empty)
+                .into_any_element(),
+        };
+        let ring = self.focused && self.cursor == Some(ix);
+        div()
+            .relative()
+            .w_full()
+            .flex()
+            .child(half(false, left))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .border_l_1()
+                    .border_color(self.colors.surface1)
+                    .child(half(true, right)),
+            )
+            // The keyboard's ring is drawn over the row, so it never changes the row's height.
+            .when(ring, |d| {
+                d.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .border_1()
+                        .border_color(self.colors.accent),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// One side of a line: the change bar, the number and the code, with the kind's tint, the hover `＋` and the
+    /// selection. `half` is which side of a split change it is (none: the whole row).
+    fn cell(
+        &self,
+        ix: usize,
+        half: Option<bool>,
+        file: &DiffFile,
+        line: &DiffLine,
+        ring: bool,
     ) -> AnyElement {
         let (c, t) = (self.colors, self.tints);
+        let side = rows::line_side(line);
+        let number = rows::line_number(line, side);
         let path = file_path_for_side(file, side).to_string();
         let selected = number.is_some_and(|n| {
             self.props
@@ -787,31 +897,12 @@ impl Frame {
                 .as_ref()
                 .is_some_and(|s| s.path == path && s.side == side && s.start <= n && n <= s.end)
         });
-        let (bg, hover) = match line.kind {
-            DiffLineKind::Addition => (Some(t.addition), t.hover_change),
-            DiffLineKind::Deletion => (Some(t.deletion), t.hover_change),
-            DiffLineKind::Context => (selected.then_some(t.selected), t.hover_context),
+        let (bg, hover, bar) = match line.kind {
+            DiffLineKind::Addition => (Some(t.addition), t.hover_change, Some(c.green)),
+            DiffLineKind::Deletion => (Some(t.deletion), t.hover_change, Some(c.red)),
+            DiffLineKind::Context => (selected.then_some(t.selected), t.hover_context, None),
         };
-        let (marker, tone) = match line.kind {
-            DiffLineKind::Addition => ("+", c.green),
-            DiffLineKind::Deletion => ("−", c.red),
-            DiffLineKind::Context => (" ", c.subtext),
-        };
-        let (number_w, marker_w) = self.gutters;
-        let gutter = |n: Option<u32>| {
-            div()
-                .w(px(number_w))
-                .flex_shrink_0()
-                .min_h(px(LINE_HEIGHT))
-                .pr(px(0.35 * REM))
-                .flex()
-                .justify_end()
-                .text_color(c.overlay)
-                .child(
-                    n.map(|n| SharedString::from(n.to_string()))
-                        .unwrap_or_default(),
-                )
-        };
+        let (number_w, bar_w) = self.gutters;
         let text: SharedString = if line.content.is_empty() {
             " ".into()
         } else {
@@ -820,12 +911,11 @@ impl Frame {
         let wrap = self.props.wrap;
         let code = div().flex_1().min_w_0().child(text);
         let code = if wrap { code } else { code.whitespace_nowrap() };
-        let ring = self.focused && self.cursor == Some(ix);
         let view = self.view.clone();
         let plus = number.map(|n| {
             let (view, path) = (self.view.clone(), path.clone());
             div()
-                .id(("git-comment-add", ix))
+                .id(("git-comment-add", ix * 2 + usize::from(half == Some(true))))
                 .absolute()
                 .top(px(0.1 * REM))
                 .left(px(0.1 * REM + if wrap { 0. } else { self.offset_x }))
@@ -866,35 +956,40 @@ impl Frame {
                 d.w(px(self.content_width)).ml(px(-self.offset_x))
             })
             .when(wrap, |d| d.w_full())
-            .child(gutter(line.old_line))
-            .child(gutter(line.new_line))
             .child(
                 div()
-                    .w(px(marker_w))
+                    .w(px(bar_w))
                     .flex_shrink_0()
+                    .self_stretch()
+                    .min_h(px(LINE_HEIGHT))
+                    .when_some(bar, |d, bar| d.bg(bar)),
+            )
+            .child(
+                div()
+                    .w(px(number_w))
+                    .flex_shrink_0()
+                    .pr(px(0.5 * REM))
                     .flex()
-                    .justify_center()
-                    .text_color(tone)
-                    .child(marker),
+                    .justify_end()
+                    .text_color(c.overlay)
+                    .child(
+                        number
+                            .map(|n| SharedString::from(n.to_string()))
+                            .unwrap_or_default(),
+                    ),
             )
             .child(code);
-        let drop = if line.old_line.is_none() || line.new_line.is_none() {
-            EMPTY_CELL_DROP
-        } else {
-            0.
-        };
         div()
-            .id(("git-diff-line", ix))
+            .id(("git-diff-line", ix * 2 + usize::from(half == Some(true))))
             .group("git-line")
             .relative()
-            .w_full()
-            .pt(px(drop))
+            .when(half.is_none(), |d| d.w_full())
+            .when(half.is_some(), |d| d.flex_1().min_w_0())
             .overflow_hidden()
             .when_some(bg, |d, bg| d.bg(bg))
             .hover(move |s| s.bg(hover))
             .child(inner)
             .children(plus)
-            // The keyboard's ring is drawn over the row, so it never changes the row's height.
             .when(ring, |d| {
                 d.child(div().absolute().inset_0().border_1().border_color(c.accent))
             })
@@ -903,7 +998,7 @@ impl Frame {
                 view.update(cx, |view, cx| {
                     window.focus(&view.focus, cx);
                     view.keyed = false;
-                    view.select_row(ix, extend, cx);
+                    view.select_row(ix, half, extend, cx);
                 })
                 .ok();
             })
@@ -911,19 +1006,10 @@ impl Frame {
     }
 
     fn thread(&self, ix: usize, comments: &[usize]) -> AnyElement {
-        // The web's `ml-[6.1rem]` (5.2rem narrow), at most 42rem wide and never past the view's edge, in the
-        // line's mono text at its 1.5 line height.
-        let narrow = self.view_width > 0. && self.view_width <= NARROW;
-        let (left, room) = if narrow {
-            (5.2 * REM, 5.6 * REM)
-        } else {
-            (6.1 * REM, 6.9 * REM)
-        };
-        let widest = if narrow {
-            self.view_width - room
-        } else {
-            (42. * REM).min(self.view_width - room)
-        };
+        // Under the code, at the most 42rem wide and never past the view's edge, in the line's mono text at its 1.5
+        // line height. A pair's thread spans the row, from the code of the left half.
+        let left = self.gutters.0 + self.gutters.1;
+        let widest = (42. * REM).min(self.view_width - left - 0.8 * REM);
         div()
             .id(("git-line-comments", ix))
             .mt(px(0.2 * REM))
@@ -1090,6 +1176,12 @@ impl Frame {
 
 impl Render for DiffView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The width is last paint's; a view that grew or shrank across the split width rebuilds its rows once.
+        let split = self.width.get() >= SPLIT_WIDTH;
+        if split != self.split {
+            self.split = split;
+            self.rebuild(false, window, cx);
+        }
         let frame = Frame {
             ordinal: self.ordinal.clone(),
             view: cx.entity().downgrade(),

@@ -25,6 +25,15 @@ pub enum Row {
         side: ReviewSide,
         number: Option<u32>,
     },
+    /// Split layout: the old side and the new side of one change side by side. `left` and `right` are lines of
+    /// hunk `hunk` (`None` where one side has no line). A context line is on both sides, as the same line; it is
+    /// the new side's line (a selection or comment on either half is the new line's).
+    Pair {
+        file: usize,
+        hunk: usize,
+        left: Option<usize>,
+        right: Option<usize>,
+    },
     /// The comments (indexes into the comment list) on the line just above.
     Thread {
         file: usize,
@@ -36,11 +45,15 @@ pub enum Row {
     Binary { file: usize },
 }
 
-/// The diff's rows and the widest line in characters (the shared width of unwrapped lines).
+/// The diff's rows, the widest line in characters (the shared width of unwrapped lines) and the largest line
+/// number (the number column's width).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Rows {
     pub rows: Vec<Row>,
     pub widest: usize,
+    pub max_number: u32,
+    /// Built as [`Row::Pair`]s rather than one [`Row::Line`] per line.
+    pub split: bool,
 }
 
 /// `review.tsx` `filePath`: the new path, else the old one.
@@ -119,13 +132,22 @@ pub fn comment_matches_diff(comment: &ReviewComment, diff: &DiffSnapshot) -> boo
     source_revision(diff, &comment.path, comment.side) == Some(comment.base_revision.as_str())
 }
 
-/// The rows of `diff` (only file `path` when given) with `comments` placed under their lines.
-pub fn build(diff: &DiffSnapshot, comments: &[ReviewComment], path: Option<&str>) -> Rows {
+/// The rows of `diff` (only file `path` when given) with `comments` placed under their lines; `split` pairs the
+/// old and new side of each change instead of listing every line once.
+pub fn build(
+    diff: &DiffSnapshot,
+    comments: &[ReviewComment],
+    path: Option<&str>,
+    split: bool,
+) -> Rows {
     let placeable: Vec<usize> = (0..comments.len())
         .filter(|&i| comment_matches_diff(&comments[i], diff))
         .collect();
     let shown = path.filter(|p| diff.files.iter().any(|f| file_path(f) == *p));
-    let mut out = Rows::default();
+    let mut out = Rows {
+        split,
+        ..Rows::default()
+    };
     for (fi, file) in diff.files.iter().enumerate() {
         if shown.is_some_and(|p| file_path(file) != p) {
             continue;
@@ -135,39 +157,103 @@ pub fn build(diff: &DiffSnapshot, comments: &[ReviewComment], path: Option<&str>
             out.rows.push(Row::Binary { file: fi });
             continue;
         }
+        // The comments on `line`, which `side` of the file it is on.
+        let on = |line: &DiffLine| -> Vec<usize> {
+            let side = line_side(line);
+            let Some(number) = line_number(line, side) else {
+                return vec![];
+            };
+            let line_path = file_path_for_side(file, side);
+            placeable
+                .iter()
+                .copied()
+                .filter(|&i| {
+                    let c = &comments[i];
+                    c.path == line_path
+                        && c.side == side
+                        && c.range.start <= number
+                        && number <= c.range.end
+                })
+                .collect()
+        };
         for (hi, hunk) in file.hunks.iter().enumerate() {
             out.rows.push(Row::Hunk { file: fi, hunk: hi });
-            for (li, line) in hunk.lines.iter().enumerate() {
-                let side = line_side(line);
-                let number = line_number(line, side);
+            for line in &hunk.lines {
                 out.widest = out.widest.max(line.content.chars().count());
-                out.rows.push(Row::Line {
-                    file: fi,
-                    hunk: hi,
-                    line: li,
-                    side,
-                    number,
-                });
-                let Some(number) = number else { continue };
-                let line_path = file_path_for_side(file, side);
-                let on_line: Vec<usize> = placeable
-                    .iter()
-                    .copied()
-                    .filter(|&i| {
-                        let c = &comments[i];
-                        c.path == line_path
-                            && c.side == side
-                            && c.range.start <= number
-                            && number <= c.range.end
-                    })
-                    .collect();
-                if !on_line.is_empty() {
-                    out.rows.push(Row::Thread {
+                out.max_number = out
+                    .max_number
+                    .max(line.old_line.unwrap_or(0))
+                    .max(line.new_line.unwrap_or(0));
+            }
+            let lines = &hunk.lines;
+            if !split {
+                for (li, line) in lines.iter().enumerate() {
+                    let side = line_side(line);
+                    let number = line_number(line, side);
+                    out.rows.push(Row::Line {
                         file: fi,
+                        hunk: hi,
+                        line: li,
                         side,
                         number,
-                        comments: on_line,
                     });
+                    let on_line = on(line);
+                    if let (Some(number), false) = (number, on_line.is_empty()) {
+                        out.rows.push(Row::Thread {
+                            file: fi,
+                            side,
+                            number,
+                            comments: on_line,
+                        });
+                    }
+                }
+                continue;
+            }
+            // Split: a run of deletions and the additions after it sit side by side, line for line.
+            let mut li = 0;
+            while li < lines.len() {
+                let (deleted, added) = if lines[li].kind == DiffLineKind::Context {
+                    li += 1;
+                    (li - 1..li, li - 1..li)
+                } else {
+                    let first = li;
+                    while li < lines.len() && lines[li].kind == DiffLineKind::Deletion {
+                        li += 1;
+                    }
+                    let middle = li;
+                    while li < lines.len() && lines[li].kind == DiffLineKind::Addition {
+                        li += 1;
+                    }
+                    (first..middle, middle..li)
+                };
+                for k in 0..deleted.len().max(added.len()) {
+                    let left = (k < deleted.len()).then(|| deleted.start + k);
+                    let right = (k < added.len()).then(|| added.start + k);
+                    out.rows.push(Row::Pair {
+                        file: fi,
+                        hunk: hi,
+                        left,
+                        right,
+                    });
+                    // Both halves' comments sit under the pair once; a context line's are the new line's.
+                    let mut on_pair: Vec<usize> = Vec::new();
+                    for &line in [left, right].iter().flatten() {
+                        for i in on(&lines[line]) {
+                            if !on_pair.contains(&i) {
+                                on_pair.push(i);
+                            }
+                        }
+                    }
+                    let anchor = right.or(left).map(|l| &lines[l]);
+                    let number = anchor.and_then(|l| line_number(l, line_side(l)));
+                    if let (Some(number), false) = (number, on_pair.is_empty()) {
+                        out.rows.push(Row::Thread {
+                            file: fi,
+                            side: anchor.map_or(ReviewSide::New, line_side),
+                            number,
+                            comments: on_pair,
+                        });
+                    }
                 }
             }
         }
@@ -269,6 +355,7 @@ mod tests {
             &diff(vec![file("a.rs", false), file("b.rs", false)]),
             &[],
             None,
+            false,
         )
         .rows;
         assert_eq!(rows.len(), 2 * (1 + 1 + 3));
@@ -299,14 +386,20 @@ mod tests {
 
     #[test]
     fn binary_file_is_one_note_row() {
-        let rows = build(&diff(vec![file("img.png", true)]), &[], None).rows;
+        let rows = build(&diff(vec![file("img.png", true)]), &[], None, false).rows;
         assert_eq!(rows, vec![Row::File { file: 0 }, Row::Binary { file: 0 }]);
     }
 
     #[test]
     fn thread_rows_follow_every_line_in_range() {
         let d = diff(vec![file("a.rs", false)]);
-        let rows = build(&d, &[comment("c", "a.rs", ReviewSide::New, 1, 2)], None).rows;
+        let rows = build(
+            &d,
+            &[comment("c", "a.rs", ReviewSide::New, 1, 2)],
+            None,
+            false,
+        )
+        .rows;
         let threads: Vec<_> = rows
             .iter()
             .filter(|r| matches!(r, Row::Thread { .. }))
@@ -335,18 +428,18 @@ mod tests {
         moved.anchor.base_revision = "older".into();
         let mut drifted = comment("d", "a.rs", ReviewSide::New, 1, 1);
         drifted.anchor.range = LineRange { start: 2, end: 2 };
-        let rows = build(&d, &[stale, staged, moved, drifted], None).rows;
+        let rows = build(&d, &[stale, staged, moved, drifted], None, false).rows;
         assert!(rows.iter().all(|r| !matches!(r, Row::Thread { .. })));
     }
 
     #[test]
     fn path_filter_keeps_one_file() {
         let d = diff(vec![file("a.rs", false), file("b.rs", false)]);
-        let rows = build(&d, &[], Some("b.rs")).rows;
+        let rows = build(&d, &[], Some("b.rs"), false).rows;
         assert_eq!(rows[0], Row::File { file: 1 });
         assert_eq!(rows.len(), 5);
         assert_eq!(
-            build(&d, &[], Some("gone.rs")).rows.len(),
+            build(&d, &[], Some("gone.rs"), false).rows.len(),
             10,
             "an unknown path shows every file"
         );
@@ -356,6 +449,65 @@ mod tests {
     fn widest_line_counts_characters() {
         let mut f = file("a.rs", false);
         f.hunks[0].lines[0].content = "ééé".repeat(20);
-        assert_eq!(build(&diff(vec![f]), &[], None).widest, 60);
+        assert_eq!(build(&diff(vec![f]), &[], None, false).widest, 60);
+    }
+
+    #[test]
+    fn split_pairs_a_deletion_with_the_addition_after_it() {
+        let rows = build(&diff(vec![file("a.rs", false)]), &[], None, true);
+        assert_eq!(rows.max_number, 2);
+        assert_eq!(
+            rows.rows[2..],
+            [
+                Row::Pair {
+                    file: 0,
+                    hunk: 0,
+                    left: Some(0),
+                    right: Some(0)
+                },
+                Row::Pair {
+                    file: 0,
+                    hunk: 0,
+                    left: Some(1),
+                    right: Some(2)
+                },
+            ],
+            "the context line is on both sides; the deletion sits beside the addition"
+        );
+    }
+
+    #[test]
+    fn split_leaves_the_other_side_empty_and_keeps_one_thread_per_pair() {
+        let mut f = file("a.rs", false);
+        f.hunks[0]
+            .lines
+            .push(line(DiffLineKind::Addition, None, Some(3), "extra();"));
+        let d = diff(vec![f]);
+        let comments = [
+            comment("old", "a.rs", ReviewSide::Old, 2, 2),
+            comment("new", "a.rs", ReviewSide::New, 2, 3),
+        ];
+        let rows = build(&d, &comments, None, true).rows;
+        assert_eq!(
+            rows[3],
+            Row::Pair {
+                file: 0,
+                hunk: 0,
+                left: Some(1),
+                right: Some(2)
+            }
+        );
+        assert!(matches!(&rows[4], Row::Thread { comments, .. } if comments == &[0, 1]));
+        assert_eq!(
+            rows[5],
+            Row::Pair {
+                file: 0,
+                hunk: 0,
+                left: None,
+                right: Some(3)
+            },
+            "an addition with no deletion has an empty old side"
+        );
+        assert!(matches!(&rows[6], Row::Thread { comments, .. } if comments == &[1]));
     }
 }

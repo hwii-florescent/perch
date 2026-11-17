@@ -27,7 +27,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-const WIDTH: f32 = 1280.;
+const WIDTH: f32 = 960.;
+/// Wide enough for each change to show its old side beside its new side.
+const SPLIT: f32 = 1280.;
 const HEIGHT: f32 = 800.;
 
 fn synthetic(lines: usize) -> DiffSnapshot {
@@ -205,6 +207,23 @@ impl Rig {
             .detach();
         });
         (rig, opened)
+    }
+
+    /// Saves the window's frame as a PNG when `PERCH_DIFF_SHOTS` names a folder.
+    fn shot(&mut self, name: &str) {
+        let Some(dir) = std::env::var_os("PERCH_DIFF_SHOTS") else {
+            return;
+        };
+        let image = self
+            .cx
+            .update_window(self.window.into(), |_, window: &mut Window, cx| {
+                let _ = window.draw(cx);
+                window.render_to_image().expect("offscreen render")
+            })
+            .unwrap();
+        image
+            .save(std::path::Path::new(&dir).join(format!("{name}.png")))
+            .unwrap();
     }
 
     fn view(&mut self) -> Entity<DiffView> {
@@ -602,6 +621,76 @@ fn interactions(cx: HeadlessAppContext) -> HeadlessAppContext {
     rig.close()
 }
 
+/// A view wide enough shows each change as the old side beside the new side, and a click on either half names that
+/// half's line; narrowing it again returns to one line per row.
+fn split_layout(cx: HeadlessAppContext) -> HeadlessAppContext {
+    let diff = synthetic(500);
+    let path = diff.files[0].new_path.clone().unwrap();
+    let (mut rig, _) = Rig::open_sized(cx, diff, vec![], DiffProps::default(), SPLIT);
+    // The first draw measures the view; the rows are rebuilt as pairs for the next.
+    rig.draw();
+    let rows = rig.rows();
+    assert!(
+        rows.iter().all(|r| !matches!(r, Row::Line { .. })),
+        "a wide view has no one-sided line rows"
+    );
+    let pair = first_row(&rows, |r| {
+        matches!(
+            r,
+            Row::Pair {
+                left: Some(_),
+                right: Some(_),
+                ..
+            }
+        )
+    });
+    let Row::Pair { left, right, .. } = rows[pair] else {
+        unreachable!()
+    };
+    assert_ne!(
+        left, right,
+        "the first change pairs a deletion with an addition"
+    );
+    rig.shot("split");
+    let bounds = rig.row_bounds(pair);
+    let (quarter, three) = (bounds.size.width / 4., bounds.size.width * 3. / 4.);
+    rig.events.borrow_mut().clear();
+    rig.click(
+        point(bounds.origin.x + quarter, bounds.center().y),
+        Modifiers::default(),
+    );
+    assert!(
+        matches!(
+            rig.events.borrow().last(),
+            Some(DiffEvent::SelectLine { side: ReviewSide::Old, path: p, .. }) if *p == path
+        ),
+        "the left half is the deleted line: {:?}",
+        rig.events.borrow()
+    );
+    rig.click(
+        point(bounds.origin.x + three, bounds.center().y),
+        Modifiers::default(),
+    );
+    assert!(
+        matches!(
+            rig.events.borrow().last(),
+            Some(DiffEvent::SelectLine {
+                side: ReviewSide::New,
+                ..
+            })
+        ),
+        "the right half is the added line"
+    );
+    rig.close()
+}
+
+/// The compact unified layout, saved when `PERCH_DIFF_SHOTS` is set.
+fn unified_shot(cx: HeadlessAppContext) -> HeadlessAppContext {
+    let (mut rig, _) = Rig::open_sized(cx, synthetic(500), vec![], DiffProps::default(), 520.);
+    rig.shot("unified");
+    rig.close()
+}
+
 fn main() {
     let strict = std::env::var("PERCH_BUDGET_STRICT").is_ok_and(|v| v == "1");
     let report = std::env::var("PERCH_DIFF_REPORT").is_ok_and(|v| v == "1");
@@ -613,6 +702,8 @@ fn main() {
     } else {
         cx = timings(cx, slack, report);
     }
-    let _ = interactions(cx);
+    let cx = interactions(cx);
+    let cx = split_layout(cx);
+    let _ = unified_shot(cx);
     println!("diff_element: ok");
 }
