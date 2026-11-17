@@ -164,6 +164,13 @@ Read module `//!` headers for local details, not a duplicate directory catalogue
 Local persistent launches require perchd. Daemon failure is visible, not an
 in-process fallback or permission to launch a duplicate. Core distinguishes
 Alive / Exited / Unknown; Unknown cannot authorize restart or cleanup.
+A panic in perchd fails one request (or drops one session's screen), never
+the daemon: locks do not poison, requests wait at most 5 s for a lock and then
+answer "busy", input is written by a per-session thread outside any lock, and
+every panic is logged with a backtrace to `daemon.log`. A watchdog logs any
+lock held over 10 s with its holder; Health reports those as `stuck`, and the
+core announces a host that is stuck or misses a 10 s health check as
+`daemon.health` (shown in the app). Nothing is restarted over it.
 Boot/reconnect attaches to surviving execution, preserving dimensions; it does
 not restart a conversation. Idle hibernation is off unless
 `PERCH_HIBERNATE_AFTER_SECS` is set; explicit wake is a new launch.
