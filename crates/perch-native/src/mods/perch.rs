@@ -259,7 +259,13 @@ impl Perch {
     /// when what they read changes.
     pub fn register(&self, host: &ModHost) {
         let perch = self.clone();
-        host.register_module(move |id| perch.module(id));
+        self.register_with(host, move |id| perch.module(id));
+    }
+
+    /// [`Perch::register`] with `module` as the `perch` module a mod is given (a test's `module(id)` with a
+    /// function of its own), and the same companion modules beside it.
+    pub fn register_with(&self, host: &ModHost, module: impl Fn(&str) -> HostModule + 'static) {
+        host.register_module(module);
         self.0.hosts.borrow_mut().push(host.clone());
         // `perch-markdown` (the `markdown` engine): a Markdown file's rendered preview.
         crate::files::markdown::register(host);
