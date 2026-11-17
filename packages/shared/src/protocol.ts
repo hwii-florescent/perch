@@ -2210,6 +2210,15 @@ export interface UsageAlertMessage {
   body: string;
 }
 
+/** The terminal host (perchd) stopped answering or reports stuck locks,
+ * and later recovered (capability `daemon.health.v1`). Also sent to a client
+ * that connects while it lasts. Terminals are never restarted over it. */
+export interface DaemonHealthMessage {
+  type: "daemon.health";
+  healthy: boolean;
+  problem?: string;
+}
+
 /** Reply to `usage.redeemReset`: `reset`, `nothingToReset`, `noCredit`,
  * `alreadyRedeemed`, else `error` with an optional explanation. */
 export interface UsageRedeemResultMessage {
@@ -3864,6 +3873,7 @@ export type ServerMessage =
   | FsBrowseResultMessage
   | UsageResultMessage
   | UsageAlertMessage
+  | DaemonHealthMessage
   | UsageRedeemResultMessage
   | FsTreeResultMessage
   | FsSearchResultMessage

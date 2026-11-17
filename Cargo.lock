@@ -5403,6 +5403,7 @@ dependencies = [
  "base64 0.22.1",
  "ghostty-sys",
  "libc",
+ "parking_lot",
  "portable-pty",
  "serde",
  "serde_json",

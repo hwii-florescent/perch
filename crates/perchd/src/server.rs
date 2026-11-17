@@ -9,18 +9,27 @@
 //! read, an attach reads the requested range back from the file, and the page
 //! cache keeps the hot tail in memory. Metadata sits next to it, so a daemon
 //! restart (or a reboot) reloads every session as exited-but-replayable.
+//!
+//! A failure stays local. Locks are parking_lot's and never poison; requests
+//! take them with a bound ([`LOCK_WAIT`]) and answer "busy" naming the holder;
+//! each request, and each session's output and exit thread, runs under
+//! `catch_unwind`; PTY input is written by a per-session thread, never under
+//! a lock. The watchdog logs a lock held past [`STUCK_AFTER`], and Health
+//! reports it, without ever stopping anything.
 
 use crate::proto::{self, *};
 use crate::screen::{clamp_dimension, Screen};
+use parking_lot::{Mutex, MutexGuard};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// A session's log is trimmed to its newest half once it passes this size.
@@ -33,6 +42,159 @@ const MAX_QUEUED: usize = 16 * 1024 * 1024;
 const CHUNK: usize = 64 * 1024;
 /// Exited sessions' history is deleted this long after its last write.
 const RETENTION: Duration = Duration::from_secs(7 * 24 * 3600);
+/// A request waits this long for a lock, then answers that perchd is busy.
+/// Well under the client's own call timeout.
+const LOCK_WAIT: Duration = Duration::from_secs(5);
+/// A lock held this long is reported by Health and logged by the watchdog.
+const STUCK_AFTER: Duration = Duration::from_secs(10);
+
+/// A mutex that remembers what holds it, so a lock that stays held can be
+/// named (operation, thread, how long) instead of silently wedging requests.
+/// parking_lot never poisons: a panic while holding one releases it.
+struct Tracked<T> {
+    value: Mutex<T>,
+    holder: Mutex<Option<Holder>>,
+}
+
+#[derive(Clone)]
+struct Holder {
+    op: &'static str,
+    thread: std::thread::Thread,
+    since: Instant,
+}
+
+impl std::fmt::Display for Holder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} on thread {} ({:?}) for {:.1}s",
+            self.op,
+            self.thread.name().unwrap_or("unnamed"),
+            self.thread.id(),
+            self.since.elapsed().as_secs_f64()
+        )
+    }
+}
+
+struct Held<'a, T> {
+    guard: MutexGuard<'a, T>,
+    holder: &'a Mutex<Option<Holder>>,
+}
+
+impl<T> std::ops::Deref for Held<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.guard
+    }
+}
+
+impl<T> std::ops::DerefMut for Held<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.guard
+    }
+}
+
+impl<T> Drop for Held<'_, T> {
+    fn drop(&mut self) {
+        *self.holder.lock() = None;
+    }
+}
+
+impl<T> Tracked<T> {
+    fn new(value: T) -> Self {
+        Self {
+            value: Mutex::new(value),
+            holder: Mutex::new(None),
+        }
+    }
+
+    /// For the daemon's own threads, which have no one to answer "busy" to.
+    fn lock(&self, op: &'static str) -> Held<'_, T> {
+        self.hold(self.value.lock(), op)
+    }
+
+    /// For requests: wait at most `wait`, then say what holds the lock.
+    fn lock_within(&self, op: &'static str, wait: Duration) -> Result<Held<'_, T>, String> {
+        match self.value.try_lock_for(wait) {
+            Some(guard) => Ok(self.hold(guard, op)),
+            None => Err(match self.holder.lock().as_ref() {
+                Some(holder) => format!("perchd is busy: {holder}"),
+                None => "perchd is busy".into(),
+            }),
+        }
+    }
+
+    fn hold<'a>(&'a self, guard: MutexGuard<'a, T>, op: &'static str) -> Held<'a, T> {
+        *self.holder.lock() = Some(Holder {
+            op,
+            thread: std::thread::current(),
+            since: Instant::now(),
+        });
+        Held {
+            guard,
+            holder: &self.holder,
+        }
+    }
+
+    fn held_too_long(&self) -> Option<Holder> {
+        self.holder
+            .lock()
+            .clone()
+            .filter(|holder| holder.since.elapsed() >= STUCK_AFTER)
+    }
+}
+
+/// Every lock held past [`STUCK_AFTER`], named by what holds it.
+fn stuck_locks(state: &State, sessions: &[Arc<Session>]) -> Vec<String> {
+    let map = state
+        .sessions
+        .held_too_long()
+        .map(|holder| format!("session map: {holder}"));
+    map.into_iter()
+        .chain(sessions.iter().filter_map(|s| {
+            s.inner
+                .held_too_long()
+                .map(|holder| format!("session {}: {holder}", s.id))
+        }))
+        .collect()
+}
+
+/// Start a named thread. A thread that cannot start is logged, never a panic
+/// that takes the caller (the accept loop, a create) down with it.
+fn spawn_named(name: String, f: impl FnOnce() + Send + 'static) -> bool {
+    match std::thread::Builder::new().name(name.clone()).spawn(f) {
+        Ok(_) => true,
+        Err(error) => {
+            eprintln!("perchd: could not start thread {name}: {error}");
+            false
+        }
+    }
+}
+
+/// Log every panic with its thread, location and backtrace to stderr (the
+/// daemon log), so the cause of a failure is never lost.
+fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let thread = std::thread::current();
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "non-string panic payload".into());
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_default();
+        eprintln!(
+            "perchd: panic at unix ms {} on thread {} ({:?}) at {location}: {payload}\n{}",
+            now_ms(),
+            thread.name().unwrap_or("unnamed"),
+            thread.id(),
+            std::backtrace::Backtrace::force_capture()
+        );
+    }));
+}
 
 pub struct Config {
     pub dir: PathBuf,
@@ -88,9 +250,10 @@ pub fn run(cfg: Config) -> io::Result<()> {
         std::process::id().to_string(),
     )?;
 
+    install_panic_hook();
     let state = Arc::new(State {
         dir: cfg.dir.clone(),
-        sessions: Mutex::new(load_sessions(&cfg.dir)),
+        sessions: Tracked::new(load_sessions(&cfg.dir)),
         conns: AtomicUsize::new(0),
         next_conn: AtomicU64::new(1),
         last_activity: Mutex::new(Instant::now()),
@@ -99,33 +262,79 @@ pub fn run(cfg: Config) -> io::Result<()> {
     if let Some(idle) = cfg.idle_exit {
         let state = state.clone();
         let sock = sock.clone();
-        std::thread::spawn(move || loop {
+        spawn_named("perchd-idle".into(), move || loop {
             std::thread::sleep(Duration::from_millis(500));
-            // Keep the map locked through exit: a create must never slip
-            // between the idle check and daemon shutdown, abandoning a PTY.
-            let sessions = state.sessions.lock().unwrap();
-            let alive = sessions.values().any(|s| {
-                let session = info(s);
-                session.alive
-                    || session.cleanup.stopping
-                    || (session.pid.is_some() && !session.cleanup.group_stopped)
-            });
-            if !alive
-                && state.conns.load(Ordering::SeqCst) == 0
-                && state.last_activity.lock().unwrap().elapsed() >= idle
-            {
-                let _ = fs::remove_file(&sock);
-                std::process::exit(0);
-            }
+            // A panic here skips one check; it never ends the thread.
+            let _ = catch_unwind(AssertUnwindSafe(|| idle_check(&state, &sock, idle)));
         });
+    }
+    {
+        let state = state.clone();
+        spawn_named("perchd-watchdog".into(), move || watchdog(&state));
     }
 
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
         let state = state.clone();
-        std::thread::spawn(move || serve_conn(state, stream));
+        let conn = state.next_conn.fetch_add(1, Ordering::SeqCst);
+        spawn_named(format!("perchd-conn-{conn}"), move || {
+            serve_conn(state, stream, conn)
+        });
     }
     Ok(())
+}
+
+/// Exit once nothing runs and nobody is connected. Anything uncertain (a
+/// lock that cannot be had, a session that cannot be read) is not idle.
+fn idle_check(state: &State, sock: &Path, idle: Duration) {
+    // Keep the map locked through exit: a create must never slip between the
+    // idle check and daemon shutdown, abandoning a PTY.
+    let Ok(sessions) = state.sessions.lock_within("idle check", LOCK_WAIT) else {
+        return;
+    };
+    let busy = sessions.values().any(|s| occupied(s).unwrap_or(true));
+    if !busy
+        && state.conns.load(Ordering::SeqCst) == 0
+        && state.last_activity.lock().elapsed() >= idle
+    {
+        let _ = fs::remove_file(sock);
+        std::process::exit(0);
+    }
+}
+
+/// Logs each lock held past [`STUCK_AFTER`] once, naming its holder. Health
+/// reports the same list, which is how a core learns the daemon is wedged.
+/// It never stops, kills or restarts anything.
+fn watchdog(state: &State) {
+    let mut logged: HashMap<String, Instant> = HashMap::new();
+    loop {
+        std::thread::sleep(Duration::from_secs(2));
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let sessions: Vec<Arc<Session>> = state
+                .sessions
+                .lock_within("watchdog", Duration::from_millis(500))
+                .map(|map| map.values().cloned().collect())
+                .unwrap_or_default();
+            let mut current = HashMap::new();
+            for (what, lock) in std::iter::once(("session map".to_string(), None)).chain(
+                sessions
+                    .iter()
+                    .map(|s| (format!("session {}", s.id), Some(s))),
+            ) {
+                let holder = match lock {
+                    None => state.sessions.held_too_long(),
+                    Some(s) => s.inner.held_too_long(),
+                };
+                if let Some(holder) = holder {
+                    if logged.get(&what) != Some(&holder.since) {
+                        eprintln!("perchd watchdog: {what} lock stuck: {holder}");
+                    }
+                    current.insert(what, holder.since);
+                }
+            }
+            logged = current;
+        }));
+    }
 }
 
 fn lock_dir(dir: &Path) -> io::Result<File> {
@@ -148,7 +357,7 @@ fn lock_dir(dir: &Path) -> io::Result<File> {
 
 struct State {
     dir: PathBuf,
-    sessions: Mutex<HashMap<String, Arc<Session>>>,
+    sessions: Tracked<HashMap<String, Arc<Session>>>,
     conns: AtomicUsize,
     next_conn: AtomicU64,
     last_activity: Mutex<Instant>,
@@ -156,10 +365,17 @@ struct State {
 
 impl State {
     fn touch(&self) {
-        *self.last_activity.lock().unwrap() = Instant::now();
+        *self.last_activity.lock() = Instant::now();
     }
-    fn get(&self, id: &str) -> Option<Arc<Session>> {
-        self.sessions.lock().unwrap().get(id).cloned()
+    fn get(&self, id: &str) -> Result<Option<Arc<Session>>, String> {
+        Ok(self
+            .sessions
+            .lock_within("lookup", LOCK_WAIT)?
+            .get(id)
+            .cloned())
+    }
+    fn session(&self, id: &str) -> Result<Arc<Session>, String> {
+        self.get(id)?.ok_or_else(|| ERR_NOT_FOUND.to_string())
     }
 }
 
@@ -171,8 +387,10 @@ struct Session {
     pid: Option<u32>,
     /// Cleanup pins the unreaped leader so its pid/pgid cannot be reused.
     reap: Mutex<()>,
-    inner: Mutex<Inner>,
-    writer: Mutex<Option<Box<dyn Write + Send>>>,
+    inner: Tracked<Inner>,
+    /// Input goes to the session's own writer thread, so a program that does
+    /// not read its input never blocks a lock (or its own output) on a write.
+    writer: Mutex<Option<mpsc::SyncSender<Vec<u8>>>>,
     master: Mutex<Option<Box<dyn MasterPty + Send>>>,
 }
 
@@ -352,7 +570,7 @@ fn load_sessions(dir: &Path) -> HashMap<String, Arc<Session>> {
             created_ms: meta.created_ms,
             pid: None,
             reap: Mutex::new(()),
-            inner: Mutex::new(Inner {
+            inner: Tracked::new(Inner {
                 seq: meta.seq.unwrap_or(0).max(meta.log_start + len),
                 log_start: meta.log_start,
                 log: None,
@@ -379,24 +597,23 @@ fn load_sessions(dir: &Path) -> HashMap<String, Arc<Session>> {
     out
 }
 
-fn serve_conn(state: Arc<State>, stream: UnixStream) {
+fn serve_conn(state: Arc<State>, stream: UnixStream, conn: u64) {
+    let (Ok(socket), Ok(mut write_half)) = (stream.try_clone(), stream.try_clone()) else {
+        return;
+    };
     state.conns.fetch_add(1, Ordering::SeqCst);
     state.touch();
-    let conn = state.next_conn.fetch_add(1, Ordering::SeqCst);
     let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(2048);
     let outbox = Outbox {
         tx,
         queued: Arc::new(AtomicUsize::new(0)),
-        socket: Arc::new(stream.try_clone().unwrap()),
+        socket: Arc::new(socket),
     };
 
     let writer_queue = outbox.queued.clone();
-    let mut write_half = match stream.try_clone() {
-        Ok(s) => s,
-        Err(_) => return,
-    };
     let _ = write_half.set_write_timeout(Some(Duration::from_secs(10)));
-    let writer = std::thread::spawn(move || {
+    let (writer_done_tx, writer_done) = mpsc::channel::<()>();
+    spawn_named(format!("perchd-conn-{conn}-out"), move || {
         for bytes in rx {
             let len = bytes.len();
             if write_half.write_all(&bytes).is_err() {
@@ -405,24 +622,39 @@ fn serve_conn(state: Arc<State>, stream: UnixStream) {
             writer_queue.fetch_sub(len, Ordering::SeqCst);
         }
         let _ = write_half.shutdown(std::net::Shutdown::Both);
+        drop(writer_done_tx);
     });
 
     let mut read_half = io::BufReader::new(stream);
     while let Ok(Some(frame)) = proto::read_frame(&mut read_half) {
         match frame {
+            // Input has no reply: a failure is logged and the input dropped.
             Frame::Data { id, bytes, .. } => {
-                if let Some(s) = state.get(&id) {
-                    let mut inner = s.inner.lock().unwrap();
-                    if !inner.cleanup.stopping {
-                        retain(&state.dir, &s, &mut inner);
-                        if let Some(w) = s.writer.lock().unwrap().as_mut() {
-                            let _ = w.write_all(&bytes).and_then(|_| w.flush());
-                        }
-                    }
+                let sent = catch_unwind(AssertUnwindSafe(|| input(&state, &id, bytes)));
+                match sent {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => eprintln!("perchd: input for {id} dropped: {error}"),
+                    Err(_) => eprintln!("perchd: input for {id} dropped: it panicked"),
                 }
             }
             Frame::Json(json) => match serde_json::from_slice::<ClientMsg>(&json) {
-                Ok(msg) => handle(&state, conn, &outbox, msg),
+                Ok(msg) => {
+                    let rid = msg.rid;
+                    // One failing request fails alone: the connection, its
+                    // other requests and every session carry on.
+                    if catch_unwind(AssertUnwindSafe(|| handle(&state, conn, &outbox, msg)))
+                        .is_err()
+                    {
+                        outbox.msg(&ServerMsg::Reply {
+                            rid,
+                            error: Some(
+                                "perchd: the request failed with an internal error (see daemon.log)"
+                                    .into(),
+                            ),
+                            data: Default::default(),
+                        });
+                    }
+                }
                 Err(e) => outbox.msg(&ServerMsg::Reply {
                     rid: 0,
                     error: Some(format!("bad request: {e}")),
@@ -432,50 +664,130 @@ fn serve_conn(state: Arc<State>, stream: UnixStream) {
         }
     }
 
-    for s in state.sessions.lock().unwrap().values() {
-        s.inner.lock().unwrap().subscribers.remove(&conn);
+    let sessions: Vec<Arc<Session>> = state
+        .sessions
+        .lock_within("disconnect", LOCK_WAIT)
+        .map(|map| map.values().cloned().collect())
+        .unwrap_or_default();
+    for s in sessions {
+        // A session that stays locked keeps a subscriber whose sends fail
+        // harmlessly on the closed socket.
+        if let Ok(mut inner) = s.inner.lock_within("disconnect", LOCK_WAIT) {
+            inner.subscribers.remove(&conn);
+        }
     }
     let _ = outbox.socket.shutdown(std::net::Shutdown::Both);
     drop(outbox);
-    let _ = writer.join();
+    let _ = writer_done.recv();
     state.conns.fetch_sub(1, Ordering::SeqCst);
     state.touch();
 }
 
+/// Queue input for the session's writer thread. The session lock is only
+/// held to check and record state, never across the write.
+fn input(state: &State, id: &str, bytes: Vec<u8>) -> Result<(), String> {
+    let Some(s) = state.get(id)? else {
+        return Ok(());
+    };
+    let writer = {
+        let mut inner = s.inner.lock_within("input", LOCK_WAIT)?;
+        if inner.cleanup.stopping {
+            return Ok(());
+        }
+        retain(&state.dir, &s, &mut inner);
+        s.writer.lock().clone()
+    };
+    // ponytail: a program that stops reading its input fills this queue and
+    // then blocks this connection's reader (no lock held); a per-connection
+    // input queue would isolate it if that is ever seen.
+    if let Some(writer) = writer {
+        let _ = writer.send(bytes);
+    }
+    Ok(())
+}
+
+/// The session's input thread: owns the PTY writer and performs every
+/// (possibly blocking) write outside any lock.
+fn spawn_input_writer(id: &str, mut w: Box<dyn Write + Send>) -> mpsc::SyncSender<Vec<u8>> {
+    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(1024);
+    spawn_named(format!("perchd-in-{id}"), move || {
+        for bytes in rx {
+            if w.write_all(&bytes).and_then(|_| w.flush()).is_err() {
+                break;
+            }
+        }
+    });
+    tx
+}
+
 fn handle(state: &Arc<State>, conn: u64, out: &Outbox, msg: ClientMsg) {
     let rid = msg.rid;
-    let reply = |result: Result<serde_json::Value, String>| {
-        let (data, error) = match result {
-            Ok(v) => (v, None),
-            Err(e) => (serde_json::Value::Null, Some(e)),
-        };
-        out.msg(&ServerMsg::Reply { rid, error, data });
+    if let Request::Attach { id, since } = msg.req {
+        // `attach` writes its own reply so replay frames can follow it under
+        // the session lock.
+        match state.session(&id) {
+            Ok(s) => attach(state, &s, conn, out, rid, since),
+            Err(error) => reply(out, rid, Err(error)),
+        }
+        return;
+    }
+    reply(out, rid, respond(state, conn, msg.req));
+}
+
+fn reply(out: &Outbox, rid: u64, result: Result<serde_json::Value, String>) {
+    let (data, error) = match result {
+        Ok(v) => (v, None),
+        Err(e) => (serde_json::Value::Null, Some(e)),
     };
-    let not_found = || Err(ERR_NOT_FOUND.to_string());
-    match msg.req {
-        Request::Hello { .. } => reply(Ok(serde_json::json!({ "version": PROTOCOL_VERSION }))),
+    out.msg(&ServerMsg::Reply { rid, error, data });
+}
+
+fn respond(state: &Arc<State>, conn: u64, req: Request) -> Result<serde_json::Value, String> {
+    let null = || Ok(serde_json::Value::Null);
+    let json =
+        |value: Result<serde_json::Value, serde_json::Error>| value.map_err(|e| e.to_string());
+    match req {
+        Request::Hello { .. } => Ok(serde_json::json!({ "version": PROTOCOL_VERSION })),
         Request::Health { permissions } => {
-            let sessions = state.sessions.lock().unwrap();
-            let alive = sessions
+            let sessions: Vec<Arc<Session>> = state
+                .sessions
+                .lock_within("health", LOCK_WAIT)?
                 .values()
-                .filter(|s| s.inner.lock().unwrap().alive)
+                .cloned()
+                .collect();
+            // Health must answer even with one session wedged: a session
+            // whose lock cannot be had soon is reported, and counted as alive
+            // (unknown is never exit).
+            let alive = sessions
+                .iter()
+                .filter(|s| {
+                    s.inner
+                        .lock_within("health", Duration::from_millis(200))
+                        .map_or(true, |inner| inner.alive)
+                })
                 .count();
-            let count = sessions.len();
-            drop(sessions); // native preflight must never hold up terminal mutations
-            reply(Ok(serde_json::to_value(Health {
+            json(serde_json::to_value(Health {
                 version: PROTOCOL_VERSION,
                 pid: std::process::id(),
-                sessions: count,
+                sessions: sessions.len(),
                 alive,
                 capabilities: vec![RELEASED_CLEANUP_CAPABILITY.into()],
                 permissions: permissions.then(crate::permissions::snapshot),
-            })
-            .unwrap()))
+                stuck: stuck_locks(state, &sessions),
+            }))
         }
         Request::List => {
-            let sessions = state.sessions.lock().unwrap();
-            let list: Vec<SessionInfo> = sessions.values().map(|s| info(s)).collect();
-            reply(Ok(serde_json::to_value(list).unwrap()))
+            let sessions: Vec<Arc<Session>> = state
+                .sessions
+                .lock_within("list", LOCK_WAIT)?
+                .values()
+                .cloned()
+                .collect();
+            let list = sessions
+                .iter()
+                .map(|s| info(s))
+                .collect::<Result<Vec<SessionInfo>, String>>()?;
+            json(serde_json::to_value(list))
         }
         Request::Create {
             id,
@@ -485,136 +797,115 @@ fn handle(state: &Arc<State>, conn: u64, out: &Outbox, msg: ClientMsg) {
             cols,
             rows,
             cleanup_owner,
-        } => reply(create(state, id, argv, cwd, env, cols, rows, cleanup_owner)),
+        } => create(state, id, argv, cwd, env, cols, rows, cleanup_owner),
         Request::Release {
             id,
             incarnation,
             revision,
             owner,
             reason,
-        } => {
-            reply(
-                release(state, &id, &incarnation, revision, &owner, &reason)
-                    .map(|_| serde_json::Value::Null),
-            );
-        }
+        } => release(state, &id, &incarnation, revision, &owner, &reason).and_then(|_| null()),
         Request::Cleanup {
             id,
             incarnation,
             revision,
-        } => {
-            reply(cleanup(state, &id, &incarnation, revision).map(|_| serde_json::Value::Null));
-        }
-        Request::Attach { id, since } => match state.get(&id) {
-            // `attach` writes its own reply so replay frames can follow it
-            // under the session lock.
-            Some(s) => attach(state, &s, conn, out, rid, since),
-            None => reply(not_found()),
-        },
+        } => cleanup(state, &id, &incarnation, revision).and_then(|_| null()),
+        Request::Attach { .. } => unreachable!("handled by `handle`"),
         Request::Detach { id } => {
-            if let Some(s) = state.get(&id) {
-                s.inner.lock().unwrap().subscribers.remove(&conn);
+            if let Some(s) = state.get(&id)? {
+                s.inner
+                    .lock_within("detach", LOCK_WAIT)?
+                    .subscribers
+                    .remove(&conn);
             }
-            reply(Ok(serde_json::Value::Null))
+            null()
         }
-        Request::Resize { id, cols, rows } => match state.get(&id) {
-            Some(s) => {
-                let (cols, rows) = (clamp_dimension(cols), clamp_dimension(rows));
-                let mut inner = s.inner.lock().unwrap();
-                if inner.cleanup.stopping {
-                    reply(Err("cleanup in progress".into()));
-                    return;
-                }
-                retain(&state.dir, &s, &mut inner);
-                let size = PtySize {
-                    rows,
-                    cols,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                };
-                if let Some(m) = s.master.lock().unwrap().as_ref() {
-                    let _ = m.resize(size);
-                }
-                inner.cols = cols;
-                inner.rows = rows;
-                if let Some(screen) = inner.screen.as_mut() {
-                    screen.set_size(cols, rows);
-                }
-                reply(Ok(serde_json::Value::Null))
+        Request::Resize { id, cols, rows } => {
+            let s = state.session(&id)?;
+            let (cols, rows) = (clamp_dimension(cols), clamp_dimension(rows));
+            let mut inner = s.inner.lock_within("resize", LOCK_WAIT)?;
+            if inner.cleanup.stopping {
+                return Err("cleanup in progress".into());
             }
-            None => reply(not_found()),
-        },
-        Request::Kill { id, signal } => match state.get(&id) {
-            Some(s) => {
-                let _reap = s.reap.lock().unwrap();
-                let inner = s.inner.lock().unwrap();
-                if inner.cleanup.stopping {
-                    reply(Err("cleanup in progress".into()));
-                } else if inner.alive {
-                    reply(
-                        s.pid
-                            .ok_or_else(|| "unknown process identity".into())
-                            .and_then(|pid| signal_group(pid, signal))
-                            .map(|_| serde_json::Value::Null),
-                    );
-                } else {
-                    reply(Ok(serde_json::Value::Null));
-                }
+            retain(&state.dir, &s, &mut inner);
+            let size = PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            };
+            if let Some(m) = s.master.lock().as_ref() {
+                let _ = m.resize(size);
             }
-            None => reply(not_found()),
-        },
+            inner.cols = cols;
+            inner.rows = rows;
+            if let Some(screen) = inner.screen.as_mut() {
+                screen.set_size(cols, rows);
+            }
+            null()
+        }
+        Request::Kill { id, signal } => {
+            let s = state.session(&id)?;
+            let _reap = s
+                .reap
+                .try_lock_for(LOCK_WAIT)
+                .ok_or("perchd is busy: the session is being reaped or cleaned up")?;
+            let inner = s.inner.lock_within("kill", LOCK_WAIT)?;
+            if inner.cleanup.stopping {
+                Err("cleanup in progress".into())
+            } else if inner.alive {
+                s.pid
+                    .ok_or_else(|| "unknown process identity".into())
+                    .and_then(|pid| signal_group(pid, signal))
+                    .and_then(|_| null())
+            } else {
+                null()
+            }
+        }
         Request::Remove { id } => {
-            let mut sessions = state.sessions.lock().unwrap();
+            let mut sessions = state.sessions.lock_within("remove", LOCK_WAIT)?;
             match sessions.get(&id) {
-                Some(s)
-                    if {
-                        let session = info(s);
-                        session.alive
-                            || session.cleanup.stopping
-                            || (session.pid.is_some() && !session.cleanup.group_stopped)
-                    } =>
-                {
-                    reply(Err("alive, stopping or process group unconfirmed".into()))
+                Some(s) if occupied(s)? => {
+                    Err("alive, stopping or process group unconfirmed".into())
                 }
                 Some(_) => {
                     sessions.remove(&id);
                     let _ = fs::remove_file(log_path(&state.dir, &id));
                     let _ = fs::remove_file(meta_path(&state.dir, &id));
-                    reply(Ok(serde_json::Value::Null))
+                    null()
                 }
-                None => reply(not_found()),
+                None => Err(ERR_NOT_FOUND.into()),
             }
         }
-        Request::Snapshot { id } => match state.get(&id) {
-            Some(s) => {
-                let inner = s.inner.lock().unwrap();
-                let Some(screen) = inner.screen.as_ref() else {
-                    reply(Err("screen unavailable".into()));
-                    return;
-                };
-                let (cursor_row, cursor_col) = screen.cursor_position();
-                reply(Ok(serde_json::to_value(Snapshot {
-                    text: screen.contents(),
-                    title: screen.title(),
-                    cursor_row,
-                    cursor_col,
-                    alternate_screen: screen.alternate_screen(),
-                })
-                .unwrap()))
+        Request::Snapshot { id } => {
+            let s = state.session(&id)?;
+            #[cfg(test)]
+            if id == tests::PANIC_ID {
+                let _held = s.inner.lock("snapshot");
+                panic!("a request that panics holding its session lock");
             }
-            None => reply(not_found()),
-        },
+            let inner = s.inner.lock_within("snapshot", LOCK_WAIT)?;
+            let screen = inner.screen.as_ref().ok_or("screen unavailable")?;
+            let (cursor_row, cursor_col) = screen.cursor_position();
+            json(serde_json::to_value(Snapshot {
+                text: screen.contents(),
+                title: screen.title(),
+                cursor_row,
+                cursor_col,
+                alternate_screen: screen.alternate_screen(),
+            }))
+        }
     }
 }
 
-fn info(s: &Session) -> SessionInfo {
-    let mut inner = s.inner.lock().unwrap();
+fn info(s: &Session) -> Result<SessionInfo, String> {
+    let mut inner = s.inner.lock_within("info", LOCK_WAIT)?;
     if !inner.alive && !inner.cleanup.group_stopped && s.pid.is_some_and(group_absent) {
         // A surviving child may have exited since the leader was reaped.
         // Absence is safe to observe; this never permits signalling a stale pid.
         inner.cleanup.group_stopped = true;
     }
-    SessionInfo {
+    Ok(SessionInfo {
         id: s.id.clone(),
         pid: s.pid,
         alive: inner.alive,
@@ -627,7 +918,16 @@ fn info(s: &Session) -> SessionInfo {
         created_ms: s.created_ms,
         history_error: inner.history_error.clone(),
         cleanup: inner.cleanup.clone(),
-    }
+    })
+}
+
+/// Running, being stopped, or with a process group not yet confirmed gone:
+/// such a session must not be replaced, removed or idled away.
+fn occupied(s: &Session) -> Result<bool, String> {
+    let session = info(s)?;
+    Ok(session.alive
+        || session.cleanup.stopping
+        || (session.pid.is_some() && !session.cleanup.group_stopped))
 }
 
 /// Visibility, silence, client disconnect and a dead owner never release a runtime.
@@ -651,8 +951,8 @@ fn release(
     if reason.is_empty() || reason.len() > 512 {
         return Err("invalid release reason".into());
     }
-    let s = state.get(id).ok_or(ERR_NOT_FOUND)?;
-    let mut inner = s.inner.lock().unwrap();
+    let s = state.session(id)?;
+    let mut inner = s.inner.lock_within("release", LOCK_WAIT)?;
     if inner.cleanup.incarnation != incarnation
         || inner.cleanup.revision != revision
         || inner.cleanup.owner.as_deref() != Some(owner)
@@ -754,11 +1054,13 @@ fn group_live(pid: u32, check_descendants: bool) -> Result<bool, String> {
 }
 
 fn cleanup(state: &State, id: &str, incarnation: &str, revision: u64) -> Result<(), String> {
-    let s = state.get(id).ok_or(ERR_NOT_FOUND)?;
-    let reap = s.reap.lock().unwrap();
+    let s = state.session(id)?;
+    let reap = s
+        .reap
+        .try_lock_for(LOCK_WAIT)
+        .ok_or("perchd is busy: the session is being reaped or cleaned up")?;
     let pid = s.pid.ok_or("unknown process identity")?;
-    {
-        let mut inner = s.inner.lock().unwrap();
+    let unchanged = |inner: &Inner| {
         if !inner.alive
             || inner.cleanup.incarnation != incarnation
             || inner.cleanup.revision != revision
@@ -766,9 +1068,17 @@ fn cleanup(state: &State, id: &str, incarnation: &str, revision: u64) -> Result<
             || inner.cleanup.stopping
             || !inner.subscribers.is_empty()
         {
-            return Err("cleanup preview is stale or runtime is protected".into());
+            return Err("cleanup preview is stale or runtime is protected".to_string());
         }
-        group_live(pid, true)?;
+        Ok(())
+    };
+    unchanged(&*s.inner.lock_within("cleanup", LOCK_WAIT)?)?;
+    // The process table scan runs outside the session lock; the state is
+    // checked again before the reservation is taken.
+    group_live(pid, true)?;
+    {
+        let mut inner = s.inner.lock_within("cleanup", LOCK_WAIT)?;
+        unchanged(&inner)?;
         // This per-session reservation excludes attach/input/recreate, without
         // blocking health, output or operations on unrelated sessions.
         inner.cleanup.stopping = true;
@@ -791,7 +1101,7 @@ fn cleanup(state: &State, id: &str, incarnation: &str, revision: u64) -> Result<
     let result = result.and_then(|()| {
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
-            let inner = s.inner.lock().unwrap();
+            let inner = s.inner.lock_within("cleanup", LOCK_WAIT)?;
             if !inner.alive && group_absent(pid) {
                 return Ok(());
             }
@@ -802,7 +1112,8 @@ fn cleanup(state: &State, id: &str, incarnation: &str, revision: u64) -> Result<
             std::thread::sleep(Duration::from_millis(10));
         }
     });
-    let mut inner = s.inner.lock().unwrap();
+    // The reservation must always be lifted, so this waits as long as it takes.
+    let mut inner = s.inner.lock("cleanup");
     inner.cleanup.stopping = false;
     inner.cleanup.group_stopped = result.is_ok();
     if result.is_err() {
@@ -847,13 +1158,9 @@ fn create(
     }
     // The whole create runs under the map lock, so two creates for one id
     // cannot both spawn.
-    let mut sessions = state.sessions.lock().unwrap();
+    let mut sessions = state.sessions.lock_within("create", LOCK_WAIT)?;
     if let Some(existing) = sessions.get(&id) {
-        let session = info(existing);
-        if session.alive
-            || session.cleanup.stopping
-            || (session.pid.is_some() && !session.cleanup.group_stopped)
-        {
+        if occupied(existing)? {
             return Err(ERR_EXISTS.into());
         }
     }
@@ -886,7 +1193,7 @@ fn create(
         .mode(0o600)
         .open(log_path(&state.dir, &id))
         .map_err(|e| format!("history log: {e}; no process started"))?;
-    let mut child = pair
+    let child = pair
         .slave
         .spawn_command(cmd)
         .map_err(|e| format!("spawn: {e}"))?;
@@ -898,7 +1205,7 @@ fn create(
         created_ms: now_ms(),
         pid: child.process_id(),
         reap: Mutex::new(()),
-        inner: Mutex::new(Inner {
+        inner: Tracked::new(Inner {
             seq: 0,
             log_start: 0,
             log: Some(log),
@@ -919,10 +1226,10 @@ fn create(
             },
             subscribers: HashMap::new(),
         }),
-        writer: Mutex::new(Some(writer)),
+        writer: Mutex::new(Some(spawn_input_writer(&id, writer))),
         master: Mutex::new(Some(pair.master)),
     });
-    write_meta(&state.dir, &session, &session.inner.lock().unwrap());
+    write_meta(&state.dir, &session, &session.inner.lock("create"));
     sessions.insert(id, session.clone());
     drop(sessions);
     state.touch();
@@ -931,82 +1238,115 @@ fn create(
     {
         let session = session.clone();
         let dir = state.dir.clone();
-        std::thread::spawn(move || {
-            pump_output(&dir, &session, reader);
+        spawn_named(format!("perchd-out-{}", session.id), move || {
+            let mut reader = reader;
+            // A panic while handling output (the screen, most likely) must
+            // not stop the output: the program would block on a full PTY.
+            // The panic hook has logged it; the screen is dropped, since its
+            // state is unknown, and reading goes on.
+            for _ in 0..100 {
+                match catch_unwind(AssertUnwindSafe(|| {
+                    pump_output(&dir, &session, &mut *reader)
+                })) {
+                    Ok(()) => break,
+                    Err(_) => {
+                        eprintln!(
+                            "perchd: {}: output handling panicked; continuing without a screen",
+                            session.id
+                        );
+                        session.inner.lock("output").screen = None;
+                    }
+                }
+            }
             let _ = done_tx.send(());
         });
     }
     {
         let session = session.clone();
         let state = state.clone();
-        std::thread::spawn(move || {
-            // Observe exit without reaping first. Cleanup can pin this exact
-            // leader while signalling its group, even if it exits before a child.
-            if let Some(pid) = session.pid {
-                loop {
-                    let mut status = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
-                    // SAFETY: valid child id and writable siginfo; WNOWAIT retains its pid.
-                    let result = unsafe {
-                        libc::waitid(
-                            libc::P_PID,
-                            pid as libc::id_t,
-                            status.as_mut_ptr(),
-                            libc::WEXITED | libc::WNOWAIT,
-                        )
-                    };
-                    if result == 0
-                        || io::Error::last_os_error().kind() != io::ErrorKind::Interrupted
-                    {
-                        break;
-                    }
-                }
+        spawn_named(format!("perchd-wait-{}", session.id), move || {
+            let id = session.id.clone();
+            // If this panics the session is never marked exited: unknown is
+            // not exit, so it stays protected rather than being cleaned up.
+            let waited = catch_unwind(AssertUnwindSafe(|| {
+                wait_for_exit(&state, &session, child, done_rx)
+            }));
+            if waited.is_err() {
+                eprintln!("perchd: {id}: exit tracking panicked; the session stays marked alive");
             }
-            let _reap = session.reap.lock().unwrap();
-            let code = child.wait().map(|s| s.exit_code() as i32).unwrap_or(-1);
-            let group_stopped = session.pid.is_some_and(group_absent);
-            // Let the reader drain what the process wrote before it exited, so
-            // Exit reaches subscribers after the last output byte. A grandchild
-            // holding the PTY open must not keep the session alive, hence the
-            // bound.
-            let _ = done_rx.recv_timeout(Duration::from_millis(1000));
-            let mut inner = session.inner.lock().unwrap();
-            inner.alive = false;
-            inner.exit_code = Some(code);
-            inner.cleanup.group_stopped = group_stopped;
-            if let Some(log) = inner.log.as_mut() {
-                let _ = log.flush();
-            }
-            write_meta(&state.dir, &session, &inner);
-            for out in inner.subscribers.values() {
-                out.msg(&ServerMsg::Exit {
-                    id: session.id.clone(),
-                    code,
-                });
-            }
-            inner.subscribers.clear();
-            drop(inner);
-            *session.writer.lock().unwrap() = None;
-            *session.master.lock().unwrap() = None; // closes the PTY
-            state.touch();
         });
     }
     Ok(serde_json::to_value(Created { pid: session.pid }).unwrap())
 }
 
-fn pump_output(dir: &Path, s: &Session, mut reader: Box<dyn Read + Send>) {
+fn wait_for_exit(
+    state: &State,
+    session: &Session,
+    mut child: Box<dyn portable_pty::Child + Send + Sync>,
+    done_rx: mpsc::Receiver<()>,
+) {
+    // Observe exit without reaping first. Cleanup can pin this exact
+    // leader while signalling its group, even if it exits before a child.
+    if let Some(pid) = session.pid {
+        loop {
+            let mut status = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+            // SAFETY: valid child id and writable siginfo; WNOWAIT retains its pid.
+            let result = unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    pid as libc::id_t,
+                    status.as_mut_ptr(),
+                    libc::WEXITED | libc::WNOWAIT,
+                )
+            };
+            if result == 0 || io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                break;
+            }
+        }
+    }
+    let _reap = session.reap.lock();
+    let code = child.wait().map(|s| s.exit_code() as i32).unwrap_or(-1);
+    let group_stopped = session.pid.is_some_and(group_absent);
+    // Let the reader drain what the process wrote before it exited, so
+    // Exit reaches subscribers after the last output byte. A grandchild
+    // holding the PTY open must not keep the session alive, hence the
+    // bound.
+    let _ = done_rx.recv_timeout(Duration::from_millis(1000));
+    let mut inner = session.inner.lock("exit");
+    inner.alive = false;
+    inner.exit_code = Some(code);
+    inner.cleanup.group_stopped = group_stopped;
+    if let Some(log) = inner.log.as_mut() {
+        let _ = log.flush();
+    }
+    write_meta(&state.dir, session, &inner);
+    for out in inner.subscribers.values() {
+        out.msg(&ServerMsg::Exit {
+            id: session.id.clone(),
+            code,
+        });
+    }
+    inner.subscribers.clear();
+    drop(inner);
+    *session.writer.lock() = None;
+    *session.master.lock() = None; // closes the PTY
+    state.touch();
+}
+
+fn pump_output(dir: &Path, s: &Session, reader: &mut dyn Read) {
     let mut buf = vec![0u8; CHUNK];
     loop {
         let n = match reader.read(&mut buf) {
             // Nothing writes to the log after EOF; an exited session must not
             // hold its fd (replay reads the log by path).
             Ok(0) | Err(_) => {
-                s.inner.lock().unwrap().log = None;
+                s.inner.lock("output").log = None;
                 return;
             }
             Ok(n) => n,
         };
         let bytes = &buf[..n];
-        let mut inner = s.inner.lock().unwrap();
+        let mut inner = s.inner.lock("output");
         let seq = inner.seq;
         inner.seq += n as u64;
         let retrying = inner.log.is_none();
@@ -1122,7 +1462,10 @@ fn read_range(path: &Path, log_start: u64, from: u64, to: u64) -> Vec<u8> {
 }
 
 fn attach(state: &State, s: &Session, conn: u64, out: &Outbox, rid: u64, since: Option<u64>) {
-    let mut inner = s.inner.lock().unwrap();
+    let mut inner = match s.inner.lock_within("attach", LOCK_WAIT) {
+        Ok(inner) => inner,
+        Err(error) => return reply(out, rid, Err(error)),
+    };
     if inner.cleanup.stopping {
         out.msg(&ServerMsg::Reply {
             rid,
@@ -1234,7 +1577,7 @@ mod tests {
         fs::create_dir_all(dir.join("history")).unwrap();
         State {
             dir,
-            sessions: Mutex::new(HashMap::new()),
+            sessions: Tracked::new(HashMap::new()),
             conns: AtomicUsize::new(0),
             next_conn: AtomicU64::new(1),
             last_activity: Mutex::new(Instant::now()),
@@ -1263,7 +1606,7 @@ mod tests {
             None,
         );
         assert!(result.unwrap_err().contains("no process started"));
-        assert!(state.sessions.lock().unwrap().is_empty());
+        assert!(state.sessions.lock("test").is_empty());
         assert!(!marker.exists());
         fs::remove_dir_all(&state.dir).unwrap();
     }
@@ -1282,7 +1625,7 @@ mod tests {
             reap: Mutex::new(()),
             writer: Mutex::new(None),
             master: Mutex::new(None),
-            inner: Mutex::new(Inner {
+            inner: Tracked::new(Inner {
                 seq: 0,
                 log_start: 0,
                 // A real failing write, portable to macOS without /dev/full.
@@ -1297,12 +1640,8 @@ mod tests {
                 subscribers: HashMap::new(),
             }),
         };
-        pump_output(
-            &state.dir,
-            &session,
-            Box::new(io::Cursor::new(b"still running")),
-        );
-        let inner = session.inner.lock().unwrap();
+        pump_output(&state.dir, &session, &mut io::Cursor::new(b"still running"));
+        let inner = session.inner.lock("test");
         assert!(inner.alive);
         assert_eq!(inner.seq, 13);
         assert_eq!(inner.log_start, 13);
@@ -1322,14 +1661,10 @@ mod tests {
         // reinterpret old bytes under a new offset.
         fs::write(&path, b"stale bytes").unwrap();
         let restored = load_sessions(&state.dir);
-        assert_eq!(restored["shell"].inner.lock().unwrap().seq, 13);
+        assert_eq!(restored["shell"].inner.lock("test").seq, 13);
         // The next actual output retries storage after a user repairs/free space.
-        pump_output(
-            &state.dir,
-            &session,
-            Box::new(io::Cursor::new(b"after repair")),
-        );
-        let inner = session.inner.lock().unwrap();
+        pump_output(&state.dir, &session, &mut io::Cursor::new(b"after repair"));
+        let inner = session.inner.lock("test");
         assert_eq!(inner.log_start, 13);
         assert_eq!(fs::read(&path).unwrap(), b"after repair");
         assert!(
@@ -1338,7 +1673,7 @@ mod tests {
         );
         drop(inner);
         let restored = load_sessions(&state.dir);
-        assert_eq!(restored["shell"].inner.lock().unwrap().seq, 25);
+        assert_eq!(restored["shell"].inner.lock("test").seq, 25);
         fs::remove_dir_all(&state.dir).unwrap();
     }
 
@@ -1356,10 +1691,10 @@ mod tests {
             None,
         )
         .unwrap();
-        let session = state.get("shell").unwrap();
+        let session = state.session("shell").unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            let inner = session.inner.lock().unwrap();
+            let inner = session.inner.lock("test");
             if !inner.alive {
                 assert_eq!((inner.cols, inner.rows), (MAX_DIMENSION, MAX_DIMENSION));
                 assert!(inner.screen.is_some());
@@ -1388,7 +1723,7 @@ mod tests {
             reap: Mutex::new(()),
             writer: Mutex::new(None),
             master: Mutex::new(None),
-            inner: Mutex::new(Inner {
+            inner: Tracked::new(Inner {
                 seq: 0,
                 log_start: 0,
                 log: Some(File::create(&path).unwrap()),
@@ -1404,15 +1739,10 @@ mod tests {
         });
         state
             .sessions
-            .lock()
-            .unwrap()
+            .lock("test")
             .insert("shell".into(), session.clone());
-        pump_output(
-            &state.dir,
-            &session,
-            Box::new(io::Cursor::new(b"still running")),
-        );
-        assert_eq!(session.inner.lock().unwrap().seq, 13);
+        pump_output(&state.dir, &session, &mut io::Cursor::new(b"still running"));
+        assert_eq!(session.inner.lock("test").seq, 13);
 
         let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(64);
         let (socket, _peer) = UnixStream::pair().unwrap();
@@ -1462,10 +1792,143 @@ mod tests {
         assert_eq!(error(&replies[2]), None, "attach");
         assert_eq!(error(&replies[3]), None, "list: the map is not poisoned");
         assert_eq!(replayed, b"still running");
-        let inner = session.inner.lock().unwrap();
+        let inner = session.inner.lock("test");
         assert_eq!((inner.cols, inner.rows), (MAX_DIMENSION, 1));
         assert!(inner.subscribers.contains_key(&1));
         drop(inner);
+        fs::remove_dir_all(&state.dir).unwrap();
+    }
+
+    pub(super) const PANIC_ID: &str = "panics-in-snapshot";
+
+    /// A live session with a screen and a history log, registered in `state`.
+    fn live_session(state: &State, id: &str) -> Arc<Session> {
+        let session = Arc::new(Session {
+            id: id.into(),
+            argv: vec![],
+            cwd: None,
+            pid: None,
+            created_ms: now_ms(),
+            reap: Mutex::new(()),
+            writer: Mutex::new(None),
+            master: Mutex::new(None),
+            inner: Tracked::new(Inner {
+                seq: 0,
+                log_start: 0,
+                log: Some(File::create(log_path(&state.dir, id)).unwrap()),
+                history_error: None,
+                screen: Screen::new(80, 24),
+                cols: 80,
+                rows: 24,
+                alive: true,
+                exit_code: None,
+                cleanup: CleanupState::default(),
+                subscribers: HashMap::new(),
+            }),
+        });
+        state
+            .sessions
+            .lock("test")
+            .insert(id.into(), session.clone());
+        session
+    }
+
+    /// A client talking to `serve_conn` over a socket pair, as a core does.
+    fn connect(state: &Arc<State>) -> crate::client::Client {
+        let (ours, theirs) = UnixStream::pair().unwrap();
+        let state = state.clone();
+        std::thread::spawn(move || serve_conn(state, theirs, 7));
+        crate::client::Client::from_transport(ours.try_clone().unwrap(), ours)
+    }
+
+    #[test]
+    fn a_panic_holding_a_session_lock_fails_one_request_not_the_daemon() {
+        let state = Arc::new(fixture("panic"));
+        let shell = live_session(&state, "shell");
+        pump_output(&state.dir, &shell, &mut io::Cursor::new(b"still here"));
+        live_session(&state, PANIC_ID);
+        let client = connect(&state);
+
+        // The request panics while holding its session's lock (and its
+        // thread panics again on another session's lock, as the idle thread
+        // did): it fails alone, with an answer.
+        let error = client.snapshot(PANIC_ID).unwrap_err().to_string();
+        assert!(error.contains("internal error"), "{error}");
+        std::thread::spawn({
+            let (state, shell) = (state.clone(), shell.clone());
+            move || {
+                let _map = state.sessions.lock("test");
+                let _held = shell.inner.lock("test");
+                let _reap = shell.reap.lock();
+                panic!("an internal thread panics holding the map and a session's locks");
+            }
+        })
+        .join()
+        .unwrap_err();
+
+        // Every later request still works, on the same connection, for the
+        // panicked session and the others alike.
+        let health = client.health().unwrap();
+        assert_eq!((health.sessions, health.alive), (2, 2));
+        assert!(health.stuck.is_empty(), "{:?}", health.stuck);
+        assert_eq!(client.list().unwrap().len(), 2);
+        assert!(client
+            .snapshot("shell")
+            .unwrap()
+            .text
+            .contains("still here"));
+        client.resize(PANIC_ID, 100, 30).unwrap();
+        assert_eq!(
+            state.session(PANIC_ID).unwrap().inner.lock("test").cols,
+            100
+        );
+        fs::remove_dir_all(&state.dir).unwrap();
+    }
+
+    #[test]
+    fn a_lock_held_too_long_answers_busy_and_health_names_it() {
+        let state = Arc::new(fixture("stuck"));
+        let shell = live_session(&state, "shell");
+        live_session(&state, "other");
+        let (holding, held) = mpsc::channel();
+        let (release, released) = mpsc::channel::<()>();
+        let holder = std::thread::Builder::new()
+            .name("stuck-holder".into())
+            .spawn({
+                let shell = shell.clone();
+                move || {
+                    let _inner = shell.inner.lock("a wedged write");
+                    // As if it had been held past the threshold already.
+                    shell.inner.holder.lock().as_mut().unwrap().since -= STUCK_AFTER;
+                    holding.send(()).unwrap();
+                    let _ = released.recv();
+                }
+            })
+            .unwrap();
+        held.recv().unwrap();
+        let client = connect(&state);
+
+        // Health answers at once and names what holds the lock; the session
+        // it cannot read counts as alive.
+        let started = Instant::now();
+        let health = client.health().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(health.alive, 2);
+        assert_eq!(health.stuck.len(), 1, "{:?}", health.stuck);
+        assert!(health.stuck[0].contains("session shell: a wedged write on thread stuck-holder"));
+
+        // A request on the wedged session waits a bounded time and says why;
+        // the other session is unaffected.
+        let started = Instant::now();
+        let error = client.snapshot("shell").unwrap_err().to_string();
+        assert!(started.elapsed() >= LOCK_WAIT && started.elapsed() < LOCK_WAIT * 2);
+        assert!(error.contains("perchd is busy: a wedged write"), "{error}");
+        assert!(client.snapshot("other").is_ok());
+
+        release.send(()).unwrap();
+        holder.join().unwrap();
+        assert!(client.snapshot("shell").is_ok());
+        assert!(client.health().unwrap().stuck.is_empty());
         fs::remove_dir_all(&state.dir).unwrap();
     }
 

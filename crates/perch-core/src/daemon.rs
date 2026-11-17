@@ -93,6 +93,39 @@ pub fn client() -> anyhow::Result<Client> {
     Ok(client)
 }
 
+/// The last problem [`health_problem`] found, for clients that connect
+/// while it lasts. `None` while the daemon is healthy.
+static PROBLEM: Mutex<Option<String>> = Mutex::new(None);
+
+/// What is wrong with the running daemon, as this core sees it: a health
+/// check it did not answer, or locks it reports stuck. `None` when it is
+/// healthy, and when this core holds no connection (a daemon that is not
+/// running is started on demand, which is not a fault). Blocks for at most
+/// the client's call timeout. Never starts, stops or restarts anything.
+pub fn health_problem() -> Option<String> {
+    let client = CLIENT
+        .try_lock()
+        .ok()?
+        .as_ref()
+        .filter(|c| !c.is_closed())?
+        .clone();
+    match client.health() {
+        Ok(health) if health.stuck.is_empty() => None,
+        Ok(health) => Some(format!("stuck: {}", health.stuck.join("; "))),
+        // A connection that closed meanwhile is reconnected on next use.
+        Err(_) if client.is_closed() => None,
+        Err(error) => Some(error.to_string()),
+    }
+}
+
+pub fn set_problem(problem: Option<String>) {
+    *PROBLEM.lock().unwrap_or_else(|e| e.into_inner()) = problem;
+}
+
+pub fn last_problem() -> Option<String> {
+    PROBLEM.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
 #[cfg(not(test))]
 fn connect() -> anyhow::Result<Client> {
     let dir = dir();
