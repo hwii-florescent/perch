@@ -903,6 +903,9 @@ declare module "@perch/sdk" {
     /** One file of the diff; every file when absent or not in the diff. */
     path?: string;
     wrap: boolean;
+    /** How a change is laid out: by the view's width (`auto`, the default), one line per row, or the old side beside
+     * the new. Only a diff with a `splitLayout` property of `true` (the native client's) honours it. */
+    layout?: "auto" | "unified" | "split";
     selection: { path: string; side: ReviewSide; start: number; end: number } | null;
     /** The comment being edited in its thread, and the field's text. */
     editingCommentId: string | null;

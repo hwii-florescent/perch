@@ -30,6 +30,8 @@ import {
   type WorkspaceGitReviewActions,
 } from "@perch/sdk";
 
+/** The narrow layout applies at or under this width of the review itself. */
+const NARROW_WIDTH = 700;
 const EYEBROW = "text-accent text-[0.63rem] font-bold tracking-[0.09em] uppercase";
 const CONNECTION = "rounded-[999px] bg-surface-1 px-[0.42rem] py-[0.18rem] text-[0.7rem] whitespace-nowrap";
 const CONNECTION_READY = "text-green";
@@ -294,6 +296,23 @@ export function WorkspaceGitReview({
   const [editingBody, setEditingBody] = useResourceState(`review:${workspaceId}:editingBody`, "");
   const [commitMessage, setCommitMessage] = useResourceState(`review:${workspaceId}:commitMessage`, "");
   const [changesOpen, setChangesOpen] = useResourceState(`review:${workspaceId}:changesOpen`, true);
+  const [railOpen, setRailOpen] = useResourceState(`review:${workspaceId}:railOpen`, true);
+  const [diffLayout, setDiffLayout] = useResourceState<"auto" | "unified" | "split">(`review:${workspaceId}:diffLayout`, "auto");
+  // Whether the host's diff can show a change side by side (the native client's can).
+  const canChooseLayout = (DiffView as { splitLayout?: boolean }).splitLayout === true;
+  // The narrow layout goes by the review's own width. A container query would do on the web, but the native
+  // runtime matches those against the window, and its `ResizeObserver` never fires, so the box is read on a timer.
+  const rootRef = useRef<HTMLElement | null>(null);
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const read = () => {
+      const width = rootRef.current?.getBoundingClientRect().width ?? 0;
+      if (width > 0) setNarrow(width <= NARROW_WIDTH);
+    };
+    read();
+    const timer = setInterval(read, 250);
+    return () => clearInterval(timer);
+  }, []);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [localActionError, setLocalActionError] = useState<string | null>(null);
@@ -617,9 +636,9 @@ export function WorkspaceGitReview({
     );
   }
 
-  const optionsChanged = !includeUntracked || ignoreWhitespace || wrapLines || contextLines !== 3;
+  const optionsChanged = !includeUntracked || ignoreWhitespace || wrapLines || diffLayout !== "auto" || contextLines !== 3;
   return (
-    <section className="workspace-git" data-testid="workspace-git-review" aria-label="Git and review">
+    <section ref={rootRef} className="workspace-git" data-testid="workspace-git-review" aria-label="Git and review">
       <header className="flex shrink-0 items-center gap-2 px-[0.7rem] py-[0.4rem]" title={`${workspaceName || "Workspace"} · ${workspaceId}`}>
         <div className="flex min-w-0 flex-1 items-center gap-2" title={status?.upstream ? `tracks ${status.upstream}` : status ? "No upstream configured" : undefined}>
           <strong className="min-w-0 overflow-hidden text-[0.8rem] text-ellipsis whitespace-nowrap">{status ? status.branch || "Detached HEAD" : workspaceName || "Changes"}</strong>
@@ -630,20 +649,21 @@ export function WorkspaceGitReview({
         <span className={cn(CONNECTION, statusState === "ready" ? CONNECTION_READY : statusState === "error" ? CONNECTION_ERROR : CONNECTION_IDLE)} role="status">
           {statusState === "loading" ? "Updating…" : statusState === "error" ? "Status unavailable" : status?.dirty ? "Dirty" : "Clean"}
         </span>
+        <button type="button" className={BTN_DEFAULT} data-testid="git-rail-toggle" aria-pressed={railOpen} title={railOpen ? "Hide the changed files to give the diff the room" : "Show the changed files"} onClick={() => setRailOpen(!railOpen)}>{railOpen ? "Hide files" : "Show files"}</button>
         <button type="button" className={BTN_DEFAULT} data-testid="git-refresh" onClick={() => { actions.refreshStatus(); actions.listComments(); }}>Refresh</button>
       </header>
 
-      <div className={`flex min-h-0 min-w-0 flex-1 overflow-hidden [@container(max-width:700px)]:flex-col [@container(max-width:700px)]:overflow-auto`}>
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" style={narrow ? { flexDirection: "column", overflow: "auto" } : undefined}>
         {/* Wide: a rail beside the diff. Narrow: a list above it that folds away, so the code keeps the height. */}
-        <aside className={`flex min-h-0 w-[15rem] min-w-[12rem] shrink-0 flex-col [border-right:1px_solid_var(--git-border)] [@container(max-width:700px)]:w-full [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:flex-[0_0_auto] [@container(max-width:700px)]:border-r-0 [@container(max-width:700px)]:[border-bottom:1px_solid_var(--git-border)]`} data-testid="git-status">
+        {railOpen && <aside className="flex min-h-0 w-[15rem] min-w-[12rem] shrink-0 flex-col [border-right:1px_solid_var(--git-border)]" style={narrow ? { width: "100%", minWidth: 0, flex: "0 0 auto", borderRight: "none", borderBottom: "1px solid var(--git-border)" } : undefined} data-testid="git-status">
           <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.35rem]">
             <button
               type="button"
-              className="flex min-w-0 items-center gap-[0.35rem] text-left text-fg [background:none] [@container(min-width:701px)]:pointer-events-none"
+              className="flex min-w-0 items-center gap-[0.35rem] text-left text-fg [background:none]" style={narrow ? undefined : { pointerEvents: "none" }}
               aria-expanded={changesOpen}
               onClick={() => setChangesOpen(!changesOpen)}
             >
-              <span className="text-[0.6rem] text-subtext-0 [@container(min-width:701px)]:hidden" aria-hidden="true">{changesOpen ? "▾" : "▸"}</span>
+              <span className="text-[0.6rem] text-subtext-0" style={narrow ? undefined : { display: "none" }} aria-hidden="true">{changesOpen ? "▾" : "▸"}</span>
               <strong>{changedFiles.length ? `${changedFiles.length} changed path${changedFiles.length === 1 ? "" : "s"}` : "No changes"}</strong>
             </button>
             <label className="inline-flex items-center gap-[0.3rem] text-[0.68rem] whitespace-nowrap text-subtext-0">
@@ -657,11 +677,11 @@ export function WorkspaceGitReview({
             </label>
           </div>
 
-          <div className={`flex min-h-0 flex-1 flex-col [@container(max-width:700px)]:data-[open=false]:hidden`} data-open={changesOpen}>
+          <div className="flex min-h-0 flex-1 flex-col" style={narrow && !changesOpen ? { display: "none" } : undefined} data-open={changesOpen}>
             {statusState === "loading" && <div className={STATUS_NOTE} role="status">Reading Git status…</div>}
             {statusState === "error" && <div className={cn(STATUS_NOTE, "text-red")} role="alert">{statusError || "Git status is unavailable."}</div>}
 
-            <div className={`flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem] [@container(max-width:700px)]:max-h-[8.5rem] [@container(max-width:700px)]:flex-none`} role="list" aria-label="Changed paths">
+            <div className="flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]" style={narrow ? { maxHeight: "8.5rem", flex: "none" } : undefined} role="list" aria-label="Changed paths">
               {changedFiles.map((entry) => (
                 <div className="flex min-w-0 items-center gap-[0.3rem]" key={entry.path} role="listitem">
                   <input
@@ -692,15 +712,15 @@ export function WorkspaceGitReview({
                 <button type="button" className={`${BTN_DEFAULT} min-w-fit flex-1`} disabled={selectedCount === 0} onClick={() => actions.unstage([...selectedPaths])}>Unstage</button>
                 <button type="button" className={`${BTN_DANGER} min-w-fit flex-1`} data-testid="git-discard-preview" disabled={selectedCount === 0} onClick={() => requestDiscard("worktree")}>Discard selected</button>
               </div>
-              <div className={`flex flex-col gap-[0.3rem] [@container(max-width:700px)]:flex-row`}>
+              <div className="flex flex-col gap-[0.3rem]" style={narrow ? { flexDirection: "row" } : undefined}>
                 <input className={`${TB_INPUT} min-w-0 flex-1`} aria-label="Commit staged changes" value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} placeholder="Describe the change" />
                 <button type="button" className={BTN_PRIMARY} disabled={stagedCount === 0 || !commitMessage.trim()} onClick={requestCommitPreview}>Preview commit</button>
               </div>
             </div>
           </div>
-        </aside>
+        </aside>}
 
-        <div className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden [@container(max-width:700px)]:min-h-[18rem] [@container(max-width:700px)]:flex-auto`}>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" style={narrow ? { minHeight: "18rem", flex: "auto" } : undefined}>
           <div className="flex shrink-0 flex-wrap items-center gap-x-[0.7rem] gap-y-[0.3rem] px-[0.7rem] py-[0.4rem]">
             <label className={TB_FIELD}>
               <span>Compare</span>
@@ -749,6 +769,7 @@ export function WorkspaceGitReview({
             <div className="flex shrink-0 flex-wrap items-center gap-x-[0.9rem] gap-y-[0.3rem] px-[0.7rem] pb-[0.4rem]">
               <label className={TB_CHECK}><input type="checkbox" checked={includeUntracked} onChange={(event) => setIncludeUntracked(event.target.checked)} /> Untracked</label>
               <label className={TB_CHECK}><input type="checkbox" checked={wrapLines} onChange={(event) => setWrapLines(event.target.checked)} /> Wrap lines</label>
+              {canChooseLayout && <label className={TB_FIELD}><span>Layout</span><Select className={`${TB_INPUT} w-[6rem]`} testId="git-diff-layout" ariaLabel="Diff layout" value={diffLayout} onChange={(value) => setDiffLayout(value as "auto" | "unified" | "split")} options={[{ value: "auto", label: "Auto" }, { value: "unified", label: "Unified" }, { value: "split", label: "Split" }]} /></label>}
               <label className={TB_CHECK}><input type="checkbox" checked={ignoreWhitespace} onChange={(event) => setIgnoreWhitespace(event.target.checked)} /> Ignore whitespace</label>
               <label className={TB_FIELD}><span>Context</span><Select className={`${TB_INPUT} w-[6rem]`} ariaLabel="Context" value={String(contextLines)} onChange={(value) => setContextLines(Number(value))} options={[{ value: "0", label: "0 lines" }, { value: "3", label: "3 lines" }, { value: "8", label: "8 lines" }]} /></label>
             </div>
@@ -788,6 +809,7 @@ export function WorkspaceGitReview({
                   workspaceId={workspaceId}
                   path={selectedFile}
                   wrap={wrapLines}
+                  layout={diffLayout}
                   selection={selection}
                   editingCommentId={editingCommentId}
                   editingBody={editingBody}
@@ -822,7 +844,7 @@ export function WorkspaceGitReview({
               </div>
             )}
             {unresolvedCount > 0 && (
-              <div className={`flex items-end gap-[0.55rem] px-[0.7rem] pb-[0.55rem] [@container(max-width:700px)]:flex-col [@container(max-width:700px)]:items-stretch`}>
+              <div className="flex items-end gap-[0.55rem] px-[0.7rem] pb-[0.55rem]" style={narrow ? { flexDirection: "column", alignItems: "stretch" } : undefined}>
                 <label className={`${TB_FIELD} flex-1`}><span>Send to agent session</span><Select ariaLabel="Send to agent session" className={`${TB_INPUT} min-w-0 flex-1`} value={selectedSessionId ?? ""} onChange={(value) => setSelectedSessionId(value || undefined)} options={[{ value: "", label: "Choose a session" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title}${session.agent ? ` · ${session.agent}` : ""}` }))]} /></label>
                 <label className={`${TB_FIELD} flex-[2]`}><span>Request</span><input className={`${TB_INPUT} min-w-0 flex-1`} value={reviewInstruction} onChange={(event) => setReviewInstruction(event.target.value)} /></label>
               </div>

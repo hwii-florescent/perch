@@ -10,7 +10,7 @@
 //! ([`Diffs::set_data`]) and each view picks up its workspace's latest values when it is drawn (a pointer compare
 //! when nothing moved). The theme is picked up the same way.
 
-use super::element::{DiffEvent, DiffProps, DiffView, Editing, Selection};
+use super::element::{DiffEvent, DiffProps, DiffView, Editing, Layout, Selection};
 use crate::git::store::DiffSnapshot;
 use crate::mods::ModHost;
 use gpui::{
@@ -25,7 +25,7 @@ use std::rc::Rc;
 const DECLARATIONS: &str =
     "export function open(key: string, options: { workspaceId: string }): void;
 export function setProps(key: string, props: {
-  path?: string | null; wrap?: boolean; canAsk?: boolean;
+  path?: string | null; wrap?: boolean; layout?: string; canAsk?: boolean;
   selection?: { path: string; side: string; start: number; end: number } | null;
   editingCommentId?: string | null; editingBody?: string;
 }): void;
@@ -330,6 +330,11 @@ fn props_of(props: &HostValue) -> Result<DiffProps, HostError> {
     Ok(DiffProps {
         path: text("path").map(str::to_string),
         wrap: flag("wrap"),
+        layout: match text("layout") {
+            Some("unified") => Layout::Unified,
+            Some("split") => Layout::Split,
+            _ => Layout::Auto,
+        },
         selection,
         editing: text("editingCommentId").map(|id| Editing {
             comment: id.to_string(),

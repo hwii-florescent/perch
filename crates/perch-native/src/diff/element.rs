@@ -11,7 +11,7 @@
 //!
 //! A line is drawn compactly: one number (the old line's for a deletion, else the new line's) and a colour bar on
 //! the edge in place of a second number and a `+`/`−` column. A view at least [`SPLIT_WIDTH`] wide draws each change
-//! as the old side beside the new side (`Row::Pair`); narrower, one line per row.
+//! as the old side beside the new side (`Row::Pair`); narrower, one line per row (`Layout` overrides either way).
 //!
 //! Keyboard: Up/Down move a row cursor over selectable lines, Enter or Space select (Shift extends), Tab leaves.
 //! (The web makes every row a tab stop; 20,000 natively would be worse.)
@@ -41,11 +41,21 @@ const SPLIT_WIDTH: f32 = 1000.;
 /// The change bar on a line's edge.
 const BAR: f32 = 3.;
 
-/// What the screen decides: which file, wrap, the selected lines and the comment being edited.
+/// How a change is laid out: by the view's width, or always one line per row, or always side by side.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Layout {
+    #[default]
+    Auto,
+    Unified,
+    Split,
+}
+
+/// What the screen decides: which file, wrap, layout, the selected lines and the comment being edited.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DiffProps {
     pub path: Option<String>,
     pub wrap: bool,
+    pub layout: Layout,
     pub selection: Option<Selection>,
     pub editing: Option<Editing>,
     /// Whether to offer Ask agent on file headers (the host offers it).
@@ -1176,10 +1186,16 @@ impl Frame {
 
 impl Render for DiffView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // The width is last paint's; a view that grew or shrank across the split width rebuilds its rows once.
-        let split = self.width.get() >= SPLIT_WIDTH;
+        // Auto goes by last paint's width; a view that grew or shrank across the split width, or a changed layout
+        // choice, rebuilds its rows once.
+        let split = match self.props.layout {
+            Layout::Auto => self.width.get() >= SPLIT_WIDTH,
+            Layout::Unified => false,
+            Layout::Split => true,
+        };
         if split != self.split {
             self.split = split;
+            self.offset_x = 0.;
             self.rebuild(false, window, cx);
         }
         let frame = Frame {

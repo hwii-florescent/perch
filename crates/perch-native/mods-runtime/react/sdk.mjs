@@ -553,7 +553,7 @@ export function DiffView(props) {
     opened.current = key;
   }
   perch.diff.setProps(key, {
-    path: props.path ?? null, wrap: !!props.wrap, canAsk: !!props.onAskAgent, selection: props.selection ?? null,
+    path: props.path ?? null, wrap: !!props.wrap, layout: props.layout ?? "auto", canAsk: !!props.onAskAgent, selection: props.selection ?? null,
     editingCommentId: props.editingCommentId ?? null, editingBody: props.editingBody ?? "",
   });
   const comments = useHostSnapshot((p) => p.gitReview(workspaceId)).comments ?? [];
@@ -579,6 +579,8 @@ export function DiffView(props) {
   }, [seq, key]);
   return createElement("div", { "data-perch-engine": "diff", "data-perch-key": key, "data-testid": "git-diff", className: props.className ?? "min-h-0 flex-1" });
 }
+/** The native diff can lay a change out side by side (`layout`); a screen asks this before offering the choice. */
+DiffView.splitLayout = true;
 /** The file pane's media viewer (`fileAsset.mjs`), drawn through this copy's host. */
 export function FileAsset(props) { return createElement(NativeFileAsset, { ...props, perch: host() }); }
 

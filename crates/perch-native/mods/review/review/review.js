@@ -9,7 +9,7 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 //! transient UI (an open confirmation, a busy flag of a request this copy is awaiting) is the copy's own.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn, DiffView, FileIcon, GitMarker, newId, Select, useResourceState, } from "@perch/sdk";
-/** The review's narrow layout applies at or under this width (the web's `@container(max-width:700px)`). */
+/** The narrow layout applies at or under this width of the review itself. */
 const NARROW_WIDTH = 700;
 const EYEBROW = "text-accent text-[0.63rem] font-bold tracking-[0.09em] uppercase";
 const CONNECTION = "rounded-[999px] bg-surface-1 px-[0.42rem] py-[0.18rem] text-[0.7rem] whitespace-nowrap";
@@ -235,8 +235,11 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
     const [commitMessage, setCommitMessage] = useResourceState(`review:${workspaceId}:commitMessage`, "");
     const [changesOpen, setChangesOpen] = useResourceState(`review:${workspaceId}:changesOpen`, true);
     const [railOpen, setRailOpen] = useResourceState(`review:${workspaceId}:railOpen`, true);
-    // The runtime matches `@container` against the window, not this screen's box, so the narrow layout is decided
-    // here from the box itself. The engine reports no resizes (`ResizeObserver` never fires): the box is read on a short timer.
+    const [diffLayout, setDiffLayout] = useResourceState(`review:${workspaceId}:diffLayout`, "auto");
+    // Whether the host's diff can show a change side by side (the native client's can).
+    const canChooseLayout = DiffView.splitLayout === true;
+    // The narrow layout goes by the review's own width. A container query would do on the web, but the native
+    // runtime matches those against the window, and its `ResizeObserver` never fires, so the box is read on a timer.
     const rootRef = useRef(null);
     const [narrow, setNarrow] = useState(false);
     useEffect(() => {
@@ -597,7 +600,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
             ]
         }, comment.id));
     }
-    const optionsChanged = !includeUntracked || ignoreWhitespace || wrapLines || contextLines !== 3;
+    const optionsChanged = !includeUntracked || ignoreWhitespace || wrapLines || diffLayout !== "auto" || contextLines !== 3;
     return (_jsxs("section", {
         ref: rootRef,
         className: "workspace-git",
@@ -951,6 +954,22 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                             " Wrap lines"
                                         ]
                                     }),
+                                    canChooseLayout && _jsxs("label", {
+                                        className: TB_FIELD,
+                                        children: [
+                                            _jsx("span", { children: "Layout" }),
+                                            _jsx(Select, {
+                                                className: `${TB_INPUT} w-[6rem]`,
+                                                testId: "git-diff-layout",
+                                                ariaLabel: "Diff layout",
+                                                value: diffLayout,
+                                                onChange: (value) => setDiffLayout(value),
+                                                options: [
+                                                    { value: "auto", label: "Auto" }, { value: "unified", label: "Unified" }, { value: "split", label: "Split" }
+                                                ]
+                                            })
+                                        ]
+                                    }),
                                     _jsxs("label", {
                                         className: TB_CHECK,
                                         children: [
@@ -1017,6 +1036,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                             workspaceId: workspaceId,
                                             path: selectedFile,
                                             wrap: wrapLines,
+                                            layout: diffLayout,
                                             selection: selection,
                                             editingCommentId: editingCommentId,
                                             editingBody: editingBody,

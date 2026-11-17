@@ -18,7 +18,7 @@ use perch_core::review::{
 use perch_core::source_control::{
     DiffFile, DiffFileStatus, DiffHunk, DiffLine, DiffLineKind, DiffTarget,
 };
-use perch_native::diff::element::{DiffEvent, DiffProps, DiffView, Editing, Selection};
+use perch_native::diff::element::{DiffEvent, DiffProps, DiffView, Editing, Layout, Selection};
 use perch_native::diff::rows::Row;
 use perch_native::git::store::DiffSnapshot;
 use perch_native::mods::theme;
@@ -652,6 +652,22 @@ fn split_layout(cx: HeadlessAppContext) -> HeadlessAppContext {
         "the first change pairs a deletion with an addition"
     );
     rig.shot("split");
+    // The choice overrides the width, both ways.
+    rig.set_props(DiffProps {
+        layout: Layout::Unified,
+        ..DiffProps::default()
+    });
+    rig.draw();
+    assert!(
+        rig.rows().iter().all(|r| !matches!(r, Row::Pair { .. })),
+        "Unified keeps one line per row in a wide view"
+    );
+    rig.set_props(DiffProps::default());
+    rig.draw();
+    assert!(
+        rig.rows().iter().any(|r| matches!(r, Row::Pair { .. })),
+        "Auto splits a wide view again"
+    );
     let bounds = rig.row_bounds(pair);
     let (quarter, three) = (bounds.size.width / 4., bounds.size.width * 3. / 4.);
     rig.events.borrow_mut().clear();
