@@ -371,7 +371,15 @@ function buildGpui(node, kit, handle, files, overlay, unseen, color, text, rowIt
     const lineHeight = lineHeightPx(text);
     if (lineHeight) line = line.h(lineHeight);
     if (!node.value && color) line = line.text_color(halfAlpha(color));
-    if (shown) el = el.child(line.child(node.input_type === "password" && node.value ? "•".repeat([...shown].length) : shown));
+    const masked = node.input_type === "password" && node.value ? "•".repeat([...shown].length) : shown;
+    if (node.caret) {
+      // The caret of a focused field: a bar blinking natively (a cycle a second, as a browser's), where the text ends;
+      // a placeholder follows it.
+      const bar = kit.div().w(1).h(lineHeight ?? 16).flex_none().bg(color ?? "#ffffff").loop("opacity", { from: 1, to: 0, period: 1060, easing: "linear" });
+      line = line.flex().flex_row().items_center();
+      line = node.value ? line.child(masked).child(bar) : shown ? line.child(bar).child(shown) : line.child(bar);
+      el = el.child(line);
+    } else if (shown) el = el.child(line.child(masked));
     // Its width when its content sizes it (`field_w`), as an empty line: a stretched or narrower field is unaffected.
     if (node.field_w) el = el.child(kit.div().w(node.field_w).h(0));
     // A one-line field taller than its line (`h-full`, `h-7`) centres it, as a browser does.

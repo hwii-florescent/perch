@@ -117,3 +117,28 @@ test("a form submits as a browser's does: its submit button clicked, or Enter in
     handle.unmount();
   }
 });
+
+test("a focused text field carries a caret; an unfocused one, a check box and a read-only one do not", async () => {
+  const { runtime } = await loadSidebar();
+  const { createElement: h, useRef, useEffect } = await import("react");
+  function Fields() {
+    const ref = useRef(null);
+    useEffect(() => { ref.current.focus(); }, []);
+    return h("div", null,
+      h("input", { ref, id: "a", value: "x", onChange() {} }),
+      h("input", { id: "b", value: "y", onChange() {} }),
+      h("input", { id: "c", value: "z", readOnly: true }),
+      h("input", { id: "d", type: "checkbox" }));
+  }
+  const perch = { isMac: true, render() {}, error: (e) => { throw e; } };
+  const handle = runtime.mount(perch, Fields, { container: { width: 200, height: 80 } });
+  try {
+    await new Promise((r) => setTimeout(r, 20));
+    const inputs = [];
+    const walk = (n) => { if (n.kind === "input") inputs.push(n); (n.children ?? []).forEach(walk); };
+    walk(handle.description.root);
+    assert.deepEqual(inputs.map((n) => !!n.caret), [true, false, false, false]);
+  } finally {
+    handle.unmount();
+  }
+});

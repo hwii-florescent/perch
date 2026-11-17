@@ -398,12 +398,16 @@ export class HostDocument extends Target {
     element.state.focus = true;
     element.state.pointerFocus = false;
     touchChain(element);
+    // What `:focus` and a field's caret show changed: described again, though nothing was committed (a field the
+    // source focuses itself, in an effect).
+    this.restyled();
     // The engine moves the keyboard onto the screen when the source focuses one of its elements.
     this.perch?.focused?.(element);
   }
   blur(element) {
     element.state.focus = false;
     touchChain(element);
+    this.restyled();
     if (this.activeElement === element) this.activeElement = this.body;
   }
   querySelectorAll(selector) { return queryBy(this.documentElement, selector); }
