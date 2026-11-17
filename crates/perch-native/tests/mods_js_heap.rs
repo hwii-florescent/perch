@@ -163,6 +163,21 @@ fn main() {
             frame(cx, FRAME);
         }
     };
+    // A copy started afresh still names why its last one stopped; it is running again when its
+    // script view is not stopped and nothing threw.
+    let afresh = |cx: &mut HeadlessAppContext, id: &str| {
+        cx.update_window(window.into(), |_, _, cx| {
+            workspace.read(cx).screen_view(id).is_some_and(|view| {
+                let view = view.read(cx);
+                view.load_error().is_none()
+                    && view.render_error(cx).is_none()
+                    && view
+                        .script_view(cx)
+                        .is_some_and(|script| !script.read(cx).was_stopped())
+            })
+        })
+        .unwrap_or(false)
+    };
     let error = |cx: &mut HeadlessAppContext, id: &str| {
         cx.update_window(window.into(), |_, _, cx| {
             workspace.read(cx).screen_error(id, cx)
@@ -231,18 +246,15 @@ fn main() {
         // start that is itself stopped (a slow debug build) tries again an interval later.
         for _ in 0..RESTARTS {
             frame(&mut cx, RESTART);
-            if ["sidebar", "tabs"]
-                .iter()
-                .all(|id| error(&mut cx, id).is_none())
-            {
+            if ["sidebar", "tabs"].iter().all(|id| afresh(&mut cx, id)) {
                 break;
             }
         }
         for id in ["sidebar", "tabs"] {
-            assert_eq!(
-                error(&mut cx, id),
-                None,
-                "{id} starts afresh after its renders were stopped"
+            assert!(
+                afresh(&mut cx, id),
+                "{id} starts afresh after its renders were stopped: {:?}",
+                error(&mut cx, id)
             );
         }
         rounds.push(heap(&mut cx, true));
@@ -289,7 +301,7 @@ fn main() {
     }
     let _ = std::fs::remove_dir_all(&scratch);
     let (first, last) = (readings[0].2, readings.last().unwrap().2);
-    assert_eq!(error(&mut cx, "sidebar"), None, "the sidebar stays loaded");
+    assert!(afresh(&mut cx, "sidebar"), "the sidebar stays loaded");
     // A machine fast enough to fit Settings in the budget tests nothing here.
     assert!(
         stopped * 2 >= STOPS,

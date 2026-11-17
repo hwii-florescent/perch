@@ -941,7 +941,7 @@ pub struct ModView {
     load_error: Option<String>,
     /// When the copy last started afresh after a call into it was stopped half-way.
     restarted: Option<Instant>,
-    /// Why that call was stopped: still reported (`error`) until the fresh copy has drawn.
+    /// Why that call was stopped: still reported (`error`) by the fresh copy, until the mod's files change.
     stopped: Option<String>,
     /// The script view whose stops this copy follows ([`Self::watch_stops`]), and the subscription doing it.
     watching: Option<(gpui::EntityId, gpui::Subscription)>,
@@ -980,16 +980,12 @@ impl ModView {
         error
     }
 
-    /// The load error, else the render error, else why a call was stopped before the copy started afresh, until
-    /// the fresh copy has drawn.
+    /// The load error, else the render error, else why a call was stopped before the copy started afresh.
     pub fn error(&self, cx: &App) -> Option<String> {
-        let drawn = self
-            .script_view(cx)
-            .is_some_and(|view| view.read(cx).snapshot().is_some());
         self.load_error
             .clone()
             .or_else(|| self.render_error(cx))
-            .or_else(|| self.stopped.clone().filter(|_| !drawn))
+            .or_else(|| self.stopped.clone())
     }
 
     /// The shell's view of the mod, for tests and tools that read its description.

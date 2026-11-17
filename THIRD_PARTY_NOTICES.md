@@ -323,8 +323,12 @@ it from its upstreams. Each copy keeps its upstream licence file and herdr's
     without calling the script.
   - `vendor/gpui-kit/crates/shell/src/engine/quickjs/sandbox.rs`,
     `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
-    `vendor/gpui-kit/crates/shell/src/view.rs`: an event, timer or task that the time budget
-    stops says so over its view, as a failed render does, instead of only being logged.
+    `vendor/gpui-kit/crates/shell/src/view.rs`: an event, timer, task or render that the time
+    budget stops says so over its view, as a failed render does, instead of only being logged.
+  - `vendor/gpui-kit/crates/shell/src/metrics.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/scheduler.rs`: `script_time`, all time the
+    main thread spent running script, each entry counted once.
   - `vendor/gpui-kit/crates/shell/src/spec.rs`, `vendor/gpui-kit/crates/shell/src/snapshot.rs`,
     `vendor/gpui-kit/crates/shell/src/runtime.rs`,
     `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
