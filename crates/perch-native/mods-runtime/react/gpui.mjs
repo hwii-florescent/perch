@@ -374,6 +374,8 @@ function buildGpui(node, kit, handle, files, overlay, unseen, color, text, rowIt
     if (shown) el = el.child(line.child(node.input_type === "password" && node.value ? "•".repeat([...shown].length) : shown));
     // Its width when its content sizes it (`field_w`), as an empty line: a stretched or narrower field is unaffected.
     if (node.field_w) el = el.child(kit.div().w(node.field_w).h(0));
+    // A one-line field taller than its line (`h-full`, `h-7`) centres it, as a browser does.
+    if (node.input_type !== "textarea") el = el.flex().flex_col().justify_center();
   }
   const line = text.whitespace === "nowrap" ? lineHeightPx(text) : null;
   const row = node.style.display === "flex" && !String(node.style.flex_direction ?? "row").startsWith("col");

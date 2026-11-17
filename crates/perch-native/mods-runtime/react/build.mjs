@@ -149,6 +149,10 @@ export async function cssTable(css) {
         names.forEach(layerRank);
         if (node.nodes) walk(node, media, layerRank(names[0] ?? `anonymous-${layers.length}`));
       } else if (name === "media") walk(node, [...media, node.params], layer);
+      // ponytail: a container query (`@min-[461px]:`, the browser toolbar's) is matched against the window's width,
+      // not its container's, so a toolbar in a narrow split keeps the wide look; matching the screen's own box needs
+      // the cascade to know it.
+      else if (name === "container") walk(node, [...media, node.params.replace(/^(?!not\b)[a-z_-][\w-]*\s+(?=\(|not\b)/i, "")], layer);
       else if (name === "supports") { if (supports(node.params)) walk(node, media, layer); else skip("@supports evaluated false"); }
       else if (name === "property") {
         const def = {};

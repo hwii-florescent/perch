@@ -632,10 +632,19 @@ export function copyFor(cx, screen) {
       // New file is the file menu's name prompt for the workspace it names; with none, it is refused with the reason,
       // as the launcher's is.
       // It outlives what opened it (the launcher closes as it opens the prompt): it closes with its answer.
+      // So its answer is not tied to this copy: not kept in `openOverlays` (cleared when the opener closes) and not
+      // dropped by `answer` once the opener's copy has closed.
       if (kind === "new-file" && props.workspaceId) {
-        const prompt = this.openOverlay("file-menu", { ...props, initialStage: "newFile" });
-        openOverlays.delete(prompt);
-        return prompt;
+        const { screen: name, props: toScreen, result } = OVERLAY_SCREENS["file-menu"];
+        const p = { ...props, initialStage: "newFile" };
+        const fail = (error) => dismiss(kind, p, error?.message ?? String(error));
+        const settled = (fn) => (value) => { if (!copy.closed) copy.enter(); fn(value); };
+        try {
+          perch.openScreen(name, toScreen(p)).then(settled((r) => result(p, r)), settled(fail));
+        } catch (error) {
+          fail(error);
+        }
+        return id;
       }
       if (kind === "new-file") {
         perch.run("file.open", {}).catch((error) => console.error(`react-runtime: ${error?.message ?? error}`));

@@ -1012,6 +1012,9 @@ impl Perch {
             .any(|(own, _, _)| *own == id)
             || TYPED.iter().any(|(typed, _)| *typed == id)
             || all_shortcuts().any(|s| s.id == id && s.scope != Scope::Leader)
+            // The browser toolbar's page commands (`browser.addressChange`, `browser.back`, …): the
+            // window's `browser_command` takes every `browser.*`; they are not listed for the palette.
+            || id.starts_with("browser.")
     }
 
     /// Runs one of the commands this module owns (the navigation's view). `None`: not one of them.
@@ -3246,8 +3249,8 @@ mod tests {
         let perch = Perch::new();
         let ids = stock_mod_commands();
         assert!(ids.contains("tab.select") && ids.contains("workspace.git"));
-        // The browser toolbar's `browser.*` go through the window's own `host.command`, not `run`,
-        // so they are handled but not listed; `terminal.*` is taken by prefix.
+        // The browser toolbar's `browser.*` are known by prefix and handled but not listed;
+        // `terminal.*` is taken by prefix.
         let missing: Vec<&String> = ids
             .iter()
             .filter(|id| {
