@@ -42,6 +42,9 @@ const VIEW: &str = "view";
 const WINDOW: &str = "window";
 const THEME: &str = "theme";
 const KEYS: &str = "keys";
+/// The workspaces' names, folders and Git presence, and whether the core is connected: what the
+/// files screen reads of the store, so a store change elsewhere does not read its files again.
+const WORKSPACES: &str = "workspaces";
 
 /// The sidebar's view settings, by the web's names (`perch.sidebar.*` in its localStorage).
 #[derive(Clone, Debug, PartialEq)]
@@ -193,6 +196,28 @@ struct Data {
     props: HashMap<String, Value>,
     /// Each workspace's files as the window's store last published them (`FileStore::snapshot`).
     files: HashMap<String, Value>,
+}
+
+/// The connection, and each workspace's id, name, folder, computer and Git presence.
+type FilesFacts<'a> = (bool, Vec<(&'a str, &'a str, &'a str, &'a str, bool)>);
+
+/// What the files screen reads of the model (`workspace_files`, `media_file`).
+fn files_facts(model: &Model) -> FilesFacts<'_> {
+    let store = &model.store;
+    let workspaces = store
+        .workspaces
+        .iter()
+        .map(|w| {
+            (
+                w.id.as_str(),
+                w.name.as_str(),
+                w.path.as_str(),
+                w.host_id.as_str(),
+                w.branch.is_some(),
+            )
+        })
+        .collect();
+    (model.connected, workspaces)
 }
 
 /// Where window commands run.
@@ -372,6 +397,12 @@ impl Perch {
     /// Publishes the core's facts. Call [`Self::flush`] after.
     pub fn set_model(&self, model: Model) {
         let mut data = self.0.data.borrow_mut();
+        // The same facts again (the window hands its model on with each change of its own)
+        // publish nothing: the files screen would read every workspace's files again.
+        if Arc::ptr_eq(&data.model.store, &model.store) && data.model == model {
+            return;
+        }
+        let files_moved = files_facts(&data.model) != files_facts(&model);
         let keys_changed =
             data.model.keybindings != model.keybindings || data.model.keys_file != model.keys_file;
         // A theme the core now names replaces one chosen here.
@@ -382,6 +413,9 @@ impl Perch {
         data.model = model;
         drop(data);
         self.bump(STORE);
+        if files_moved {
+            self.bump(WORKSPACES);
+        }
         if theme_changed {
             self.bump(THEME);
         }
@@ -434,25 +468,46 @@ impl Perch {
 
     /// `useWorkspaceFiles(workspaceId, {git})`'s data: the workspace, the connection, the
     /// store's snapshot of its files and its Git marks (none until the window keeps Git).
-    fn workspace_files(&self, workspace_id: &str) -> Value {
+    /// Converted straight from the stored snapshot: cloning it first copied every open
+    /// document's text once more on each read.
+    fn workspace_files(&self, workspace_id: &str) -> HostValue {
         let store = self.store();
         let data = self.0.data.borrow();
         let workspace = store.workspaces.iter().find(|w| w.id == workspace_id);
-        let mut files = data.files.get(workspace_id).cloned().unwrap_or_else(
-            || json!({ "trees": {}, "documents": {}, "previews": {}, "search": null, "wrap": false }),
+        let empty = || json!({ "trees": {}, "documents": {}, "previews": {}, "search": null, "wrap": false });
+        let HostValue::Object(mut files) = data
+            .files
+            .get(workspace_id)
+            .map_or_else(|| to_host(&empty()), to_host)
+        else {
+            return HostValue::Null;
+        };
+        let added = [
+            (
+                "workspace",
+                workspace.map_or(
+                    Value::Null,
+                    |w| json!({ "id": w.id, "name": w.name, "path": w.path, "hostId": w.host_id }),
+                ),
+            ),
+            ("connected", json!(data.model.connected)),
+            (
+                "git",
+                json!({
+                    "isGit": workspace.is_some_and(|w| w.branch.is_some()),
+                    "ready": false,
+                    "statusState": "idle",
+                    "decorations": [],
+                }),
+            ),
+        ];
+        files.retain(|(key, _)| !added.iter().any(|(name, _)| key == name));
+        files.extend(
+            added
+                .iter()
+                .map(|(name, value)| (name.to_string(), to_host(value))),
         );
-        files["workspace"] = workspace.map_or(
-            Value::Null,
-            |w| json!({ "id": w.id, "name": w.name, "path": w.path, "hostId": w.host_id }),
-        );
-        files["connected"] = json!(data.model.connected);
-        files["git"] = json!({
-            "isGit": workspace.is_some_and(|w| w.branch.is_some()),
-            "ready": false,
-            "statusState": "idle",
-            "decorations": [],
-        });
-        files
+        HostValue::Object(files)
     }
 
     /// `FileAsset`'s view of one file: the workspace's folder on this computer (`root`, null for
@@ -483,15 +538,15 @@ impl Perch {
         module
             .function("mediaFile", move |args| {
                 let (workspace_id, path) = (args.string(0)?, args.string(1)?);
-                media.read(&media_id, STORE);
+                media.read(&media_id, WORKSPACES);
                 media.read(&media_id, &format!("files:{workspace_id}"));
                 Ok(to_host(&media.media_file(workspace_id, path)))
             })
             .function("workspaceFiles", move |args| {
                 let workspace_id = args.string(0)?.to_string();
-                reader.read(&id, STORE);
+                reader.read(&id, WORKSPACES);
                 reader.read(&id, &format!("files:{workspace_id}"));
-                Ok(to_host(&reader.workspace_files(&workspace_id)))
+                Ok(reader.workspace_files(&workspace_id))
             })
             .function("filesDo", move |args| {
                 let action = args.string(0)?.to_string();
@@ -2674,6 +2729,51 @@ mod tests {
         ] {
             assert!(notice_from(&bad).is_err(), "{bad} is refused");
         }
+    }
+
+    #[test]
+    fn the_files_screen_reads_again_only_when_its_workspaces_move() {
+        let perch = Perch::new();
+        let workspace = |name: &str| {
+            serde_json::from_value(json!({
+                "id": "w", "projectId": "p", "hostId": "local", "path": "/w", "name": name, "dirty": false,
+                "state": "active", "createdAt": 0, "updatedAt": 0,
+            }))
+            .unwrap()
+        };
+        let model = |revision: u64, name: &str| crate::sidebar::Model {
+            store: Arc::new(crate::sidebar::navigation::Store {
+                revision,
+                workspaces: vec![workspace(name)],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let revision = |part: &str| perch.0.revisions.borrow().get(part).copied().unwrap_or(0);
+        let first = model(1, "w");
+        perch.set_model(first.clone());
+        let (store, workspaces) = (revision(STORE), revision(WORKSPACES));
+        perch.set_model(first);
+        assert_eq!(
+            revision(STORE),
+            store,
+            "the same model again publishes nothing"
+        );
+        perch.set_model(model(2, "w"));
+        assert_eq!(revision(STORE), store + 1);
+        assert_eq!(revision(WORKSPACES), workspaces, "a store change elsewhere");
+        perch.set_model(model(3, "renamed"));
+        assert_eq!(revision(WORKSPACES), workspaces + 1, "a workspace renamed");
+
+        perch.set_files("w", json!({"documents": {"a.md": {"text": "hello"}}}));
+        let files = from_host(&perch.workspace_files("w"));
+        assert_eq!(files["documents"]["a.md"]["text"], "hello");
+        assert_eq!(files["workspace"]["name"], "renamed");
+        assert_eq!(files["git"]["isGit"], false);
+        assert_eq!(
+            from_host(&perch.workspace_files("none"))["trees"],
+            json!({})
+        );
     }
 
     #[test]
