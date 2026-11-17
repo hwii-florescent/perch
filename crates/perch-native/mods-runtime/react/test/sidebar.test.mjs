@@ -3,14 +3,14 @@
 //! same text, colours (value and theme token), font size, weight and line height and opacity; and its events work.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fixture, lineHeightPx, mountSidebar, namedInstances, opacity, THEMES, tree } from "./support.mjs";
+import { fixture, lineHeightPx, mountSidebar, namedInstances, opacity, THEMES, tree, NEEDS_REFERENCES } from "./support.mjs";
 
 const COLOUR_KEYS = { backgroundColor: "bg", borderTopColor: "border_t", borderRightColor: "border_r", borderBottomColor: "border_b", borderLeftColor: "border_l" };
 const round = (n) => Math.round(n * 100) / 100;
 
 for (const { id: state } of fixture.states) {
   for (const theme of THEMES) {
-    test(`sidebar ${state} ${theme} matches the web reference`, async () => {
+    test(`sidebar ${state} ${theme} matches the web reference`, NEEDS_REFERENCES, async () => {
       const { ref, handle } = await mountSidebar(state, theme);
       try {
         assert.deepEqual(handle.errors, []);
@@ -62,7 +62,7 @@ function find(handle, name, key) {
   return hit.el;
 }
 
-test("a project header click folds the project, and again unfolds it", async () => {
+test("a project header click folds the project, and again unfolds it", NEEDS_REFERENCES, async () => {
   const { handle, perch } = await mountSidebar("by-project", "dark");
   try {
     assert.ok(find(handle, "project-workspaces", "p-perch"));
@@ -79,7 +79,7 @@ test("a project header click folds the project, and again unfolds it", async () 
   }
 });
 
-test("a lead's chevron folds its sub-sessions, keeps the fold per viewer and unfolds them again", async () => {
+test("a lead's chevron folds its sub-sessions, keeps the fold per viewer and unfolds them again", NEEDS_REFERENCES, async () => {
   const { handle, perch } = await mountSidebar("family-unfolded", "dark");
   try {
     const rows = () => namedInstances(tree(handle.description)).instances.filter((i) => i.def.name === "session-row").map((i) => i.key);
@@ -98,7 +98,7 @@ test("a lead's chevron folds its sub-sessions, keeps the fold per viewer and unf
   }
 });
 
-test("a folded lead shows the state of the sub-sessions it hides", async () => {
+test("a folded lead shows the state of the sub-sessions it hides", NEEDS_REFERENCES, async () => {
   const { handle } = await mountSidebar("family-folded", "dark");
   try {
     const rollup = find(handle, "session-rollup", "s-fam-lead");
@@ -108,7 +108,7 @@ test("a folded lead shows the state of the sub-sessions it hides", async () => {
   }
 });
 
-test("a session row's menu button opens the host's session menu for that row, below the button", async () => {
+test("a session row's menu button opens the host's session menu for that row, below the button", NEEDS_REFERENCES, async () => {
   const { handle, perch } = await mountSidebar("family-open-child", "dark");
   try {
     const button = find(handle, "session-menu-button", "s-fam-kid-1");
@@ -124,7 +124,7 @@ test("a session row's menu button opens the host's session menu for that row, be
   }
 });
 
-test("a session row click opens the session through the host", async () => {
+test("a session row click opens the session through the host", NEEDS_REFERENCES, async () => {
   const { handle, perch } = await mountSidebar("by-project", "dark");
   try {
     handle.click(find(handle, "session-button", "s-perch-3").node.id);
@@ -134,7 +134,7 @@ test("a session row click opens the session through the host", async () => {
   }
 });
 
-test("hovering a project header reveals its row actions through a hover group the engine draws", async () => {
+test("hovering a project header reveals its row actions through a hover group the engine draws", NEEDS_REFERENCES, async () => {
   const { handle } = await mountSidebar("by-project", "dark");
   try {
     const header = find(handle, "project-header", "p-api");
@@ -156,7 +156,7 @@ test("hovering a project header reveals its row actions through a hover group th
   }
 });
 
-test("a button's own hover colour is an engine hover style, with its token", async () => {
+test("a button's own hover colour is an engine hover style, with its token", NEEDS_REFERENCES, async () => {
   const { handle } = await mountSidebar("by-project", "dark");
   try {
     const add = find(handle, "add-project-button");
@@ -167,7 +167,7 @@ test("a button's own hover colour is an engine hover style, with its token", asy
   }
 });
 
-test("the organize menu opens in the overlay layer and switches the view", async () => {
+test("the organize menu opens in the overlay layer and switches the view", NEEDS_REFERENCES, async () => {
   const { handle, perch } = await mountSidebar("by-project", "dark");
   try {
     handle.click(find(handle, "organize-button").node.id);
@@ -186,7 +186,7 @@ test("the organize menu opens in the overlay layer and switches the view", async
   }
 });
 
-test("a session row's drag is the web's: it slides with the forwarded pointer and moves the row once, on release", async () => {
+test("a session row's drag is the web's: it slides with the forwarded pointer and moves the row once, on release", NEEDS_REFERENCES, async () => {
   const { handle, perch } = await mountSidebar("by-project", "dark");
   const navigation = { ...perch.navigation(), reorderable: true };
   perch.navigation = () => navigation;

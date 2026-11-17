@@ -4,16 +4,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { registerHooks } from "node:module";
-import { loadSidebar, repo } from "./support.mjs";
+import { stubHostModules, loadSidebar, repo } from "./support.mjs";
 
-// The host module `settings-props.js` reaches through `host.js` exists only inside the window's engine; nothing here calls it.
-registerHooks({
-  resolve(specifier, context, next) {
-    if (specifier === "perch" || specifier === "perch-react" || specifier === "perch-engine" || specifier === "perch-editor" || specifier === "perch-media") return { url: `data:text/javascript,export const Icon=0,bounds=0,forgetBounds=0,probing=0,textWidth=0,Engine=0,focus=0,focused=0,release=0`, shortCircuit: true, format: "module" };
-    return next(specifier, context);
-  },
-});
+stubHostModules();
 
 const web = (file) => fs.readFileSync(path.join(repo, "packages/web/src", file), "utf8");
 
