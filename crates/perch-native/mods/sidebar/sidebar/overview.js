@@ -45,6 +45,9 @@ function readOrganize() {
 /** The tree's order: the core's (manual, with drag and favourites) or by what needs you (no drag). */
 const SORT_KEY = "perch.sidebar.sort";
 const SHOW_TERMINALS_KEY = "perch.sidebar.showTerminals";
+/** Sent on `window` by a host that keeps these settings itself (the native window) when they change elsewhere: the
+ * sidebar reads them again rather than being mounted again. The web never sends it. */
+export const SIDEBAR_SETTINGS_EVENT = "perch:sidebar-settings";
 export function WorkspaceOverview({ compact = false, onNavigate }) {
     const [showTerminals, setShowTerminals] = useState(() => readFlag(SHOW_TERMINALS_KEY, "1"));
     const [organize, setOrganize] = useState(readOrganize);
@@ -71,6 +74,17 @@ export function WorkspaceOverview({ compact = false, onNavigate }) {
     // Folded projects hide their workspaces and sessions (per viewer).
     const [collapsed, setCollapsed] = useState(() => readIds(COLLAPSED_KEY));
     const [foldedSessions, setFoldedSessions] = useState(() => readIds(FOLDED_SESSIONS_KEY));
+    useEffect(() => {
+        const reread = () => {
+            setShowTerminals(readFlag(SHOW_TERMINALS_KEY, "1"));
+            setOrganize(readOrganize());
+            setAttentionSort(readFlag(SORT_KEY, "attention"));
+            setCollapsed(readIds(COLLAPSED_KEY));
+            setFoldedSessions(readIds(FOLDED_SESSIONS_KEY));
+        };
+        window.addEventListener(SIDEBAR_SETTINGS_EVENT, reread);
+        return () => window.removeEventListener(SIDEBAR_SETTINGS_EVENT, reread);
+    }, []);
     const idToggler = (key, set) => (id) => set((current) => {
         const next = toggledId(current, id);
         saveFlag(key, JSON.stringify(next));
