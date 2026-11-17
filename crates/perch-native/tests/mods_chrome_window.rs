@@ -351,6 +351,9 @@ fn main() {
     );
     rig.click("tab:alpha");
     rig.click("tab-close:alpha");
+    // Alpha is an agent attached to nothing: the close guard asks first, as the web's does.
+    assert_eq!(rig.ws(|ws, _, _| ws.screens_open()), ["confirm"]);
+    rig.click("confirm-extra");
     assert_eq!(rig.strip(), ["bravo"], "tab.close ran");
     assert_eq!(rig.keys("tab"), ["bravo"]);
 

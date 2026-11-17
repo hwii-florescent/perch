@@ -500,6 +500,9 @@ fn session_menu(rig: &mut Rig) {
     })
     .unwrap();
     rig.draw();
+    // Bravo's terminal is attached to nothing: the close guard asks first, and Keep running puts
+    // the tab away.
+    rig.click("confirm-extra");
     assert_eq!(rig.tabs().0, strings(&["alpha"]), "bravo's tab is put away");
     rig.right_click("session-button:charlie");
     rig.click("tab-menu-show-beside");
