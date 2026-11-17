@@ -1458,6 +1458,8 @@ pub struct ShellRuntime {
     app_modules: AppModules,
     dependency_store: GitDependencyStore,
     next_application_generation: Cell<u64>,
+    /// PERCH: the heap's size after the last collection between frames (`collect_between_frames`).
+    collected: Cell<usize>,
     /// Held so the context stays alive, and so the module loader can be scoped
     /// to an application directory when one is loaded.
     js_runtime: JitRuntime,
@@ -1768,6 +1770,7 @@ impl ShellRuntime {
             app_modules,
             dependency_store,
             next_application_generation: Cell::new(1),
+            collected: Cell::new(0),
             js_runtime,
         });
 
@@ -2105,6 +2108,24 @@ impl ShellRuntime {
         }
         let usage = self.js_runtime.memory_usage();
         (usage.memory_used_size, usage.obj_count)
+    }
+
+    /// PERCH: collects the script heap between frames once it has grown by half since the last
+    /// time, and moves QuickJS's own trigger past that, so a collection (tens of milliseconds on a
+    /// heap of 50 MB) lands here rather than inside a render, whose time budget it used up: the
+    /// sidebar's render was cut on unfolding all its sessions. Call it when no script runs.
+    /// ponytail: a whole collection at once; an incremental one would need the engine's GC.
+    pub fn collect_between_frames(&self) {
+        let used = self.js_runtime.memory_usage().malloc_size.max(0) as usize;
+        let last = self.collected.get();
+        if last != 0 && used < last + last / 2 {
+            return;
+        }
+        self.js_runtime.run_gc();
+        let after = self.js_runtime.memory_usage().malloc_size.max(0) as usize;
+        self.collected.set(after);
+        // QuickJS collects when the heap passes this; between frames comes first, at half.
+        self.js_runtime.set_gc_threshold(after * 2);
     }
 
     /// This runtime's retained state.

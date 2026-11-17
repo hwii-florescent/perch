@@ -620,6 +620,18 @@ fn start_host(
         engines,
         diffs,
     });
+    // The script heap is collected here, between frames, before QuickJS would mid-render.
+    cx.spawn(async move |cx| loop {
+        cx.background_executor().timer(POLL).await;
+        let alive = cx.update(|cx| {
+            cx.try_global::<WindowMods>()
+                .map(|mods| mods.host.collect_between_frames())
+        });
+        if alive.is_none() {
+            break;
+        }
+    })
+    .detach();
     // `PERCH_JS_HEAP_LOG=<seconds>`: the mods' script heap on stderr that often, as it stands (no
     // collection forced), so a growing app tells its QuickJS heap from the rest of its memory.
     let every = std::env::var("PERCH_JS_HEAP_LOG")
@@ -771,6 +783,11 @@ impl ModHost {
     /// The mods' script heap: bytes in use and objects, after a full collection with `collect`.
     pub fn js_heap(&self, collect: bool) -> (i64, i64) {
         self.0.runtime.js_heap(collect)
+    }
+
+    /// Collects the script heap if it has grown, when no script runs (`collect_between_frames`).
+    pub fn collect_between_frames(&self) {
+        self.0.runtime.collect_between_frames()
     }
 
     /// Adds a host module mods may import, built for each mod (by id) as it loads. Modules

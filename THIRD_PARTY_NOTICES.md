@@ -329,6 +329,9 @@ it from its upstreams. Each copy keeps its upstream licence file and herdr's
     `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
     `vendor/gpui-kit/crates/shell/src/engine/quickjs/scheduler.rs`: `script_time`, all time the
     main thread spent running script, each entry counted once.
+  - `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs`: `collect_between_frames`, a
+    collection of the script heap between frames once it has grown by half, with QuickJS's own
+    trigger moved past it, so a collection does not use up a render's time budget.
   - `vendor/gpui-kit/crates/shell/src/spec.rs`, `vendor/gpui-kit/crates/shell/src/snapshot.rs`,
     `vendor/gpui-kit/crates/shell/src/runtime.rs`,
     `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
