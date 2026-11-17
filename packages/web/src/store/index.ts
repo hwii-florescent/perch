@@ -2571,6 +2571,16 @@ export function handleServerMessage(msg: ServerMessage): void {
       }
       break;
     }
+    case "daemon.health": {
+      // Shown in the app, never acted on: terminals keep running.
+      const id = "daemon:health";
+      const toasts = usePerchStore.getState().toasts.filter((toast) => toast.sessionId !== id);
+      const toast = msg.healthy
+        ? { id: newId(), sessionId: id, title: "Terminal host is responding again", kind: "usage" as const, level: "info" as const }
+        : { id: newId(), sessionId: id, title: "Terminal host is not responding", body: `${msg.problem ?? "No answer to a health check"}. Terminals were left running; nothing was restarted.`, kind: "usage" as const, level: "error" as const, timeout: 60_000 };
+      usePerchStore.setState({ toasts: [...toasts, toast] });
+      break;
+    }
     case "fs.browse.result": {
       const resolve = pendingBrowses.get(msg.requestId);
       if (resolve) {

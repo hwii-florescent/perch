@@ -289,6 +289,11 @@ pub struct Health {
     pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<crate::permissions::PermissionSnapshot>,
+    /// Locks held longer than the daemon's stuck threshold, each naming what
+    /// holds it. Empty when healthy, and from daemons that predate it. A
+    /// session whose lock could not be taken counts as alive.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stuck: Vec<String>,
 }
 
 #[cfg(test)]
