@@ -233,6 +233,14 @@ pub const SCREENS: &[Screen] = &[
         width: 0.,
         height: 0.,
     },
+    // The review (`stock:review`): a workspace's Git status, diff and comments, by `workspaceId`: in the drawer's
+    // Git tab (`review#drawer`) and in each review tab's pane (`review#<tab id>`).
+    Screen {
+        id: "review",
+        place: Place::InFlow,
+        width: 0.,
+        height: 0.,
+    },
     Screen {
         id: "memory",
         place: MODAL,

@@ -5,9 +5,10 @@
 //! commented, the prepared packet and its send operation id, a send in flight) is kept by the host under the
 //! workspace's key (`useResourceState`), so every copy of this screen for one workspace shares it. Only
 //! transient UI (an open confirmation, a busy flag of a request this copy is awaiting) is the copy's own.
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   cn,
+  DiffView,
   FileIcon,
   GitMarker,
   newId,
@@ -34,20 +35,6 @@ const CONNECTION = "rounded-[999px] bg-surface-1 px-[0.42rem] py-[0.18rem] text-
 const CONNECTION_READY = "text-green";
 const CONNECTION_ERROR = "text-red";
 const CONNECTION_IDLE = "text-subtext-0";
-// The gutter (two line numbers and the +/- marker) is the only fixed width; the line's "+" floats over it on hover, so
-// the code gets everything else. `ml-*` of a comment thread below must equal this gutter's width.
-const DIFF_LINE_BASE = `group/line relative grid grid-cols-[2.5rem_2.5rem_0.9rem_minmax(0,1fr)] items-baseline text-fg [font-family:var(--font-mono)] text-[0.75rem] leading-[1.5] [@container(max-width:700px)]:grid-cols-[2.1rem_2.1rem_0.8rem_minmax(0,1fr)]`;
-// Unwrapped, a line is as wide as its text and the diff scrolls sideways; wrapped, it breaks at the pane's width.
-const DIFF_LINE = `${DIFF_LINE_BASE} min-w-max whitespace-pre`;
-const DIFF_LINE_WRAPPED = `${DIFF_LINE_BASE} whitespace-pre-wrap [overflow-wrap:anywhere]`;
-// A selected addition/deletion keeps its green/red tint (the legacy rule order); hover tints accent.
-const DIFF_LINE_KIND: Record<string, string> = {
-  addition: "bg-[color-mix(in_srgb,var(--green)_9%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_15%,transparent)]",
-  deletion: "bg-[color-mix(in_srgb,var(--red)_9%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_15%,transparent)]",
-};
-const DIFF_LINE_CONTEXT = "hover:bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]";
-const DIFF_LINE_SELECTED = "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]";
-const LINE_MARKER_TONE: Record<string, string> = { addition: "text-green", deletion: "text-red" };
 const BRANCH_DETAIL = "block overflow-hidden text-[0.7rem] text-ellipsis whitespace-nowrap text-subtext-0";
 const PATH_BUTTON = "workspace-git__path-button flex min-w-0 flex-1 items-center justify-between gap-[0.4rem] rounded-ui px-3 py-[3px] text-left text-fg [background:none] hover:bg-surface-1";
 const PATH_BUTTON_IDLE = "";
@@ -85,7 +72,6 @@ const BANNER_INFO = `${BOXED_NOTE} text-accent`;
 const BANNER_WARNING = `${BOXED_NOTE} text-yellow`;
 const TURN_SUMMARY = "m-0 px-[0.7rem] py-[0.4rem] text-[0.72rem] text-[color:var(--git-muted)]";
 const STATUS_NOTE = "px-[0.7rem] py-[0.55rem] text-[0.7rem] text-subtext-0";
-const LINE_COMMENT_BUTTON = "absolute top-[0.1rem] left-[0.1rem] grid size-[1.2rem] place-items-center rounded-[999px] bg-panel-bg text-[0.8rem] leading-none text-accent opacity-0 group-hover/line:opacity-90 hover:opacity-100! focus-visible:opacity-100 [@media(hover:none)]:opacity-60";
 
 export interface WorkspaceGitReviewProps {
   workspaceId: string;
@@ -225,14 +211,6 @@ function diffContainsCommentLine(comment: ReviewComment, diff: GitDiffSnapshot |
       return number !== undefined && number >= comment.range.start && number <= comment.range.end;
     }));
   });
-}
-
-function isCommentOnLine(comment: ReviewComment, path: string, side: ReviewSide, line: number, diff: GitDiffSnapshot | null): boolean {
-  return commentMatchesDiff(comment, diff)
-    && comment.path === path
-    && comment.side === side
-    && line >= comment.range.start
-    && line <= comment.range.end;
 }
 
 function targetLabel(target: GitDiffTarget): string {
@@ -464,7 +442,6 @@ export function WorkspaceGitReview({
 
   const selectedCount = selectedPaths.size;
   const selectedFile = activeFile && diffFiles.some((file) => filePath(file) === activeFile) ? activeFile : undefined;
-  const displayedFiles = selectedFile ? diffFiles.filter((file) => filePath(file) === selectedFile) : diffFiles;
 
   function chooseTarget(value: string) {
     if (value === "compare") {
@@ -506,10 +483,7 @@ export function WorkspaceGitReview({
     setSelectedPaths(checked ? new Set(changedFiles.map((entry) => entry.path)) : new Set());
   }
 
-  function selectLine(path: string, line: GitDiffLine, shiftKey: boolean) {
-    const number = lineNumber(line, lineSide(line));
-    if (number === undefined) return;
-    const side = lineSide(line);
+  function selectLine(path: string, side: ReviewSide, number: number, shiftKey: boolean) {
     if (shiftKey && anchor && anchor.path === path && anchor.side === side) {
       setSelection({ path, side, start: Math.min(anchor.line, number), end: Math.max(anchor.line, number) });
     } else {
@@ -517,13 +491,6 @@ export function WorkspaceGitReview({
       setSelection({ path, side, start: number, end: number });
     }
     setLocalActionError(null);
-  }
-
-  function onLineKeyDown(event: KeyboardEvent<HTMLDivElement>, path: string, line: GitDiffLine) {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      selectLine(path, line, event.shiftKey);
-    }
   }
 
   function startComment() {
@@ -647,16 +614,6 @@ export function WorkspaceGitReview({
           </div>
         )}
       </article>
-    );
-  }
-
-  function renderCommentThread(path: string, side: ReviewSide, line: number) {
-    const lineComments = comments.filter((comment) => isCommentOnLine(comment, path, side, line, diff));
-    if (lineComments.length === 0) return null;
-    return (
-      <div className="workspace-git__line-comment-thread col-[1/-1] mt-[0.2rem] mr-[0.7rem] mb-[0.35rem] ml-[6.1rem] [@container(max-width:700px)]:ml-[5.2rem]" data-testid="git-line-comments">
-        {lineComments.map((comment) => renderCommentCard(comment, true))}
-      </div>
     );
   }
 
@@ -820,60 +777,32 @@ export function WorkspaceGitReview({
             </p>
           )}
 
-          <div className={`workspace-git__diff min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain`} data-testid="git-diff">
-            {diffState === "loading" || diffFiles.length === 0 ? <EmptyDiffState state={diffState} error={diffError} /> : (
+          {/* The diff scrolls itself; the truncation note sits above it and the comment composer below, always in view. */}
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {diffState === "loading" || diffFiles.length === 0 ? (
+              <div className="workspace-git__diff min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain" data-testid="git-diff"><EmptyDiffState state={diffState} error={diffError} /></div>
+            ) : (
               <>
-                {diff?.truncated && <div className={BANNER_WARNING} role="status">This diff is truncated. Narrow the path or comparison before commenting.</div>}
-                {/* One shared width: the widest line of any file. Per-file widths let scrolling run on past a short file's rows. */}
-                <div className={wrapLines ? "" : "min-w-max"}>
-                {displayedFiles.map((file) => {
-                  const displayPath = filePath(file);
-                  return (
-                    <article key={displayPath}>
-                      <header className="sticky top-0 left-0 z-[2] flex w-[100cqi] items-center justify-between gap-3 bg-[color-mix(in_srgb,var(--surface-1)_70%,var(--panel-bg))] px-[0.7rem] py-[0.3rem]">
-                        <span className="min-w-0 flex-1 [font-family:var(--font-mono)] text-[0.75rem]" title={displayPath}><PathLabel path={displayPath} /></span>
-                        <span className="shrink-0 text-[0.68rem] text-subtext-0 capitalize">{file.status}{file.isBinary ? " · binary" : ""}</span>
-                        {onAskAgent && <button type="button" className={`${BTN_QUIET} shrink-0`} disabled={file.isBinary || diffState !== "ready"} aria-label="Ask agent about diff…" title="Ask agent about this diff" onClick={() => askAboutDiff(file)}>Ask agent</button>}
-                      </header>
-                      {file.isBinary ? <div className={EMPTY}>Binary content is not rendered. Status and path remain available for review.</div> : file.hunks.map((hunk, hunkIndex) => (
-                        <section key={`${displayPath}:${hunkIndex}`}>
-                          <div className="sticky left-0 w-[100cqi] bg-[color-mix(in_srgb,var(--accent)_8%,var(--panel-bg))] px-[0.7rem] py-[2px] text-accent [font-family:var(--font-mono)] text-[0.68rem]">{hunk.header || `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`}</div>
-                          {hunk.lines.map((line, lineIndex) => {
-                            const side = lineSide(line);
-                            const path = filePathForSide(file, side);
-                            const number = lineNumber(line, side);
-                            const selected = number !== undefined && selection?.path === path && selection.side === side && number >= selection.start && number <= selection.end;
-                            return (
-                              <div
-                                className={`${wrapLines ? DIFF_LINE_WRAPPED : DIFF_LINE} ${DIFF_LINE_KIND[line.kind] ?? `${DIFF_LINE_CONTEXT}${selected ? ` ${DIFF_LINE_SELECTED}` : ""}`}`}
-                                data-testid="git-diff-line"
-                                data-path={path}
-                                data-side={side}
-                                data-old-line={line.oldLine ?? ""}
-                                data-new-line={line.newLine ?? ""}
-                                key={`${path}:${hunkIndex}:${lineIndex}`}
-                                role="button"
-                                tabIndex={number === undefined ? -1 : 0}
-                                onClick={(event) => selectLine(path, line, event.shiftKey)}
-                                onKeyDown={(event) => onLineKeyDown(event, path, line)}
-                              >
-                                <span className="min-h-[1.5em] pr-[0.35rem] text-right text-overlay-0 select-none" aria-label={`Old line ${line.oldLine ?? "none"}`}>{line.oldLine ?? ""}</span>
-                                <span className="min-h-[1.5em] pr-[0.35rem] text-right text-overlay-0 select-none" aria-label={`New line ${line.newLine ?? "none"}`}>{line.newLine ?? ""}</span>
-                                <span className={`text-center select-none ${LINE_MARKER_TONE[line.kind] ?? "text-subtext-0"}`} aria-hidden="true">{statusSymbol(line.kind)}</span>
-                                <code className="min-w-0 overflow-visible text-inherit [font:inherit]">{line.content || " "}</code>
-                                {number !== undefined && <button type="button" className={LINE_COMMENT_BUTTON} data-testid="git-comment-add" aria-label={`Comment on ${path} line ${number}`} onClick={(event) => { event.stopPropagation(); selectLine(path, line, false); startComment(); }}>＋</button>}
-                                {number !== undefined && renderCommentThread(path, side, number)}
-                              </div>
-                            );
-                          })}
-                        </section>
-                      ))}
-                    </article>
-                  );
-                })}
-                </div>
+                {diff?.truncated && <div className={`${BANNER_WARNING} shrink-0`} role="status">This diff is truncated. Narrow the path or comparison before commenting.</div>}
+                <DiffView
+                  workspaceId={workspaceId}
+                  path={selectedFile}
+                  wrap={wrapLines}
+                  selection={selection}
+                  editingCommentId={editingCommentId}
+                  editingBody={editingBody}
+                  onSelectLine={selectLine}
+                  onAddComment={(path, side, line) => { selectLine(path, side, line, false); startComment(); }}
+                  onAskAgent={onAskAgent ? (path) => { const file = diffFiles.find((candidate) => filePath(candidate) === path); if (file) askAboutDiff(file); } : undefined}
+                  onEditComment={beginEdit}
+                  onEditBody={setEditingBody}
+                  onSaveEdit={saveEdit}
+                  onCancelEdit={() => setEditingCommentId(null)}
+                  onResolve={(comment) => actions.resolveComment(comment.id, comment.status !== "resolved", comment.version)}
+                  onDelete={(comment) => actions.deleteComment(comment.id, comment.version)}
+                />
                 {selection && (
-                  <div className="workspace-git__comment-composer m-[0.7rem] min-w-0 rounded-ui bg-surface-0 p-[0.65rem]" data-testid="git-comment-composer">
+                  <div className="workspace-git__comment-composer m-[0.7rem] min-w-0 shrink-0 rounded-ui bg-surface-0 p-[0.65rem]" data-testid="git-comment-composer">
                     <div className="mb-[0.4rem] flex justify-between gap-2"><strong>Comment on {selection.path}</strong><span className="text-[0.68rem] text-subtext-0">{selection.side} lines {selection.start}–{selection.end}</span></div>
                     <textarea className={COMMENT_FIELD} data-testid="git-comment-body" value={commentBody} onChange={(event) => setCommentBody(event.target.value)} placeholder="Leave a focused note for the agent…" aria-label="New review comment" />
                     <div className={`${COMMENT_ACTIONS} mt-[0.4rem]`}>{onAskAgent && <button type="button" className={CA_BTN} onClick={() => { const file = diffFiles.find((candidate) => filePathForSide(candidate, selection.side) === selection.path); if (file) askAboutDiff(file, selection); }}>Ask agent about lines…</button>}<button type="button" className={CA_BTN} disabled={!commentBody.trim()} onClick={submitComment}>Add comment</button><button type="button" className={CA_BTN} onClick={() => { setSelection(null); setAnchor(null); }}>Cancel</button></div>

@@ -1,0 +1,5 @@
+{
+  "name": "Review",
+  "description": "The web app's stock review (Git status, diff, line comments and the review packet), unchanged, drawn natively through the React runtime; the diff is Perch's native diff view.",
+  "runtime": "react"
+}

@@ -277,6 +277,21 @@ path = "tests/workspace_offline_window.rs"
 harness = false
 
 [[test]]
+name = "diff_element"
+path = "tests/diff_element.rs"
+harness = false
+
+[[test]]
+name = "diff_engine_window"
+path = "tests/diff_engine_window.rs"
+harness = false
+
+[[test]]
+name = "git_store_window"
+path = "tests/git_store_window.rs"
+harness = false
+
+[[test]]
 name = "files_media"
 path = "tests/files_media.rs"
 harness = false

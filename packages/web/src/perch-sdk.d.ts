@@ -23,7 +23,8 @@ declare module "@perch/sdk" {
    * the start screen, the editor menu, the terminal's find bar, the slash popover (`SlashPopover`), Split with
    * session and the phone-size notice (their props types); 1.10 the phone's own screens (`stock:mobile-*`), the shell
    * toolbar, the agent terminal's controls, the dock's tab and group actions and the browser toolbar (their props
-   * types), and `glassClass`, `tapButtonClass`, `GearIcon`, `PlusIcon`, `EllipsisIcon`.
+   * types), and `glassClass`, `tapButtonClass`, `GearIcon`, `PlusIcon`, `EllipsisIcon`; 1.11 `Submenu`; 1.12 the
+   * review's diff (`DiffView`).
    */
   export const version: string;
 
@@ -895,6 +896,35 @@ declare module "@perch/sdk" {
   }
   /** A React hook: workspace `workspaceId`'s review. */
   export function useGitReview(workspaceId: string): GitReview;
+  /** 1.12: `DiffView`'s props. The diff and its comments are the review's (`useGitReview`), read by `workspaceId`;
+   * the props are view state, and what the person does comes back through the callbacks. */
+  export interface DiffViewProps {
+    workspaceId: string;
+    /** One file of the diff; every file when absent or not in the diff. */
+    path?: string;
+    wrap: boolean;
+    selection: { path: string; side: ReviewSide; start: number; end: number } | null;
+    /** The comment being edited in its thread, and the field's text. */
+    editingCommentId: string | null;
+    editingBody: string;
+    /** A line was clicked or chosen with Enter/Space; `extend` with Shift. */
+    onSelectLine(path: string, side: ReviewSide, line: number, extend: boolean): void;
+    /** A line's `＋`. */
+    onAddComment(path: string, side: ReviewSide, line: number): void;
+    /** A file header's Ask agent; the button is shown only when this is given. */
+    onAskAgent?(path: string): void;
+    onEditComment(comment: ReviewComment): void;
+    onEditBody(text: string): void;
+    onSaveEdit(comment: ReviewComment): void;
+    onCancelEdit(): void;
+    /** Resolve, or Reopen a resolved comment. */
+    onResolve(comment: ReviewComment): void;
+    onDelete(comment: ReviewComment): void;
+    className?: string;
+  }
+  /** 1.12: the review's diff, its own scroll surface (`git-diff`): a header per file and hunk, a row per line with
+   * the `＋` and the selection, the comment threads under their lines. The native client draws it natively. */
+  export function DiffView(props: DiffViewProps): ReactElement;
 
   /** One session's terminal (an agent, a sub-session or a shell) as this page knows it. */
   export interface TerminalRecord {

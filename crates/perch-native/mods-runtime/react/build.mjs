@@ -66,6 +66,7 @@ export const SCREENS = [
   "files",
   "browser",
   "browser-toolbar",
+  "review",
   "context-bridge",
 ];
 /** Screens with no stock source of their own, drawn by hand from other stock screens (`ALSO`): the Settings page's frame

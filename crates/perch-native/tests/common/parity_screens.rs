@@ -1082,20 +1082,23 @@ export default screen("tabs", Hidden, { container: { position: "relative", width
     .unwrap();
 
     let host = ModHost::new(dir.clone()).expect("the mod host starts");
-    // Every React screen's host imports `perch-editor`, as the window lends it.
-    // The editor engine draws in its slots (`perch-engine`), as in the window.
+    // Every React screen's host imports `perch-editor` and `perch-diff`, as the window lends them.
+    // The engines draw in their slots (`perch-engine`), as in the window.
     let editors = perch_native::editor::Editors::default();
     editors.register(&host);
-    host.engines().register("editor", editors);
-    perch_native::files::media::register(&host, std::rc::Rc::new(|_: &gpui::App| None));
+    let diffs = perch_native::diff::host::Diffs::default();
+    diffs.register(&host);
+    host.engines().register("editor", editors.clone());
+    host.engines().register("diff", diffs.clone());
     let perch = Perch::new();
     publish(&perch, fixture, state);
     let pressed: std::rc::Rc<std::cell::RefCell<Option<Value>>> = Default::default();
     {
-        let (perch, pressed) = (perch.clone(), pressed.clone());
-        host.register_module(move |id| {
+        let (lent, pressed) = (perch.clone(), pressed.clone());
+        // `Perch::register`'s modules, with a `perch` whose `run` notes the drag the strip begins.
+        perch.register_with(&host, move |id| {
             let pressed = pressed.clone();
-            perch.module(id).async_function("run", move |args| {
+            lent.module(id).async_function("run", move |args| {
                 if args.string(0)? == "tab.beginDrag" {
                     *pressed.borrow_mut() = args.get(1).map(from_host);
                 }
@@ -1226,16 +1229,40 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
     let user = capture.mods.map_or(empty, Path::to_path_buf);
     seed_storage(&user, drawn, fixture, capture.state);
     let host = ModHost::new(user).expect("the mod host starts");
-    // Every React screen's host imports `perch-editor`, as the window lends it.
-    // The editor engine draws in its slots (`perch-engine`), as in the window.
+    // Every React screen's host imports `perch-editor` and `perch-diff`, as the window lends them.
+    // The engines draw in their slots (`perch-engine`), as in the window.
     let editors = perch_native::editor::Editors::default();
     editors.register(&host);
-    host.engines().register("editor", editors);
+    let diffs = perch_native::diff::host::Diffs::default();
+    diffs.register(&host);
+    host.engines().register("editor", editors.clone());
+    host.engines().register("diff", diffs.clone());
     assert!(host.find(drawn).is_some(), "a mod draws screen {drawn}");
     let perch = Perch::new();
     perch.register(&host);
     publish(&perch, fixture, capture.state);
     match screen_id {
+        "review" => {
+            // The workspace's review as the window's Git store publishes it: the screen's
+            // `useGitReview` and the diff view by workspace. The window's mods are a global while
+            // the review is drawn (the diff view takes the theme on screen from them).
+            let props = fixture
+                .props(capture.state)
+                .expect("a review state has props");
+            let workspace = props["workspaceId"].as_str().expect("a workspace");
+            let review = review_from(&props["review"]);
+            perch.set_git_review(workspace, &review);
+            cx.update(|cx| {
+                cx.set_global(perch_native::mods::WindowMods {
+                    host: host.clone(),
+                    perch: perch.clone(),
+                    editors: editors.clone(),
+                    engines: host.engines().clone(),
+                    diffs: diffs.clone(),
+                });
+                diffs.set_data(workspace, review.diff.clone(), review.comments.clone(), cx);
+            });
+        }
         "folder-browser" => perch.set_asker(fixture_browser(fixture, capture.state)),
         "instructions" => perch.set_asker(fixture_answers(fixture, capture.state)),
         "worktree" => perch.set_asker(fixture_worktree(fixture, capture.state)),
@@ -1411,10 +1438,41 @@ pub fn capture(cx: &mut HeadlessAppContext, capture: &ScreenCapture) -> Shot {
     cx.update_window(handle, |_, window, _| window.remove_window())
         .unwrap();
     cx.run_until_parked();
+    if screen_id == "review" {
+        cx.update(|cx| cx.remove_global::<perch_native::mods::WindowMods>());
+    }
     Shot {
         png,
         json: json_path,
         report,
+    }
+}
+
+/// A fixture's `WorkspaceGitReviewState` as the window's Git store keeps it.
+fn review_from(value: &Value) -> perch_native::git::store::WorkspaceReview {
+    use perch_native::git::store::LoadState;
+    let state = |v: &Value| match v.as_str() {
+        Some("loading") => LoadState::Loading,
+        Some("ready") => LoadState::Ready,
+        Some("error") => LoadState::Error,
+        _ => LoadState::Idle,
+    };
+    perch_native::git::store::WorkspaceReview {
+        status: Some(value["status"].clone()).filter(|v| !v.is_null()),
+        status_state: state(&value["statusState"]),
+        diff: serde_json::from_value(value["diff"].clone())
+            .ok()
+            .map(std::rc::Rc::new),
+        diff_state: state(&value["diffState"]),
+        comments: std::rc::Rc::new(
+            serde_json::from_value(value["comments"].clone()).expect("the fixture's comments"),
+        ),
+        refs: value["refs"].as_array().cloned().unwrap_or_default(),
+        action_state: state(&value["actionState"]),
+        revision: 1,
+        diff_revision: 1,
+        comments_revision: 1,
+        ..Default::default()
     }
 }
 

@@ -505,6 +505,80 @@ export const TabMenu = () => null;
 export const TabDragLayer = () => null;
 export const NewFilePrompt = overlay("new-file");
 
+// ---- review (`stock:review`) --------------------------------------------------------------------------------------
+
+/** The actions of `useGitReview`, each run on the window's Git store (`gitDo`). Previews, packets and deliveries
+ * resolve with the store's value; the rest are fire-and-forget, as the web's. */
+const GIT_ACTIONS = ["refreshStatus", "selectAgentSession", "loadDiff", "stage", "unstage", "discardPreview", "discard",
+  "commitPreview", "commit", "listComments", "listRefs", "createComment", "updateComment", "resolveComment",
+  "deleteComment", "previewBatch", "sendBatch"];
+const ANSWERED = new Set(["discardPreview", "commitPreview", "previewBatch", "sendBatch"]);
+function gitActions(workspaceId) {
+  const actions = {};
+  for (const name of GIT_ACTIONS) {
+    actions[name] = (...args) => {
+      const done = host().gitDo(name, workspaceId, ...args);
+      if (ANSWERED.has(name)) return done.then((value) => value ?? null, () => null);
+      done.catch?.((error) => console.error(`perch: ${name}: ${error?.message ?? error}`));
+      return null;
+    };
+  }
+  return actions;
+}
+
+/** A workspace's review as the window's Git store keeps it (`@perch/sdk` `useGitReview`). Ask agent is absent: the
+ * native client offers Context Bridge only from a terminal. */
+export function useGitReview(workspaceId) {
+  const review = useHostSnapshot((perch) => perch.gitReview(workspaceId));
+  const actions = useMemo(() => gitActions(workspaceId), [workspaceId]);
+  return useMemo(() => ({
+    ready: review.ready, workspaceName: review.workspaceName ?? undefined, startSnapshot: review.startSnapshot ?? undefined,
+    lastAgentTurn: review.lastAgentTurn ?? undefined, agentSessionId: review.agentSessionId,
+    status: review.status ?? undefined, statusState: review.statusState, statusError: review.statusError,
+    actionError: review.actionError, diff: review.diff ?? undefined, diffState: review.diffState, diffError: review.diffError,
+    comments: review.comments ?? [], refs: review.refs ?? [], batchDelivery: review.batchDelivery ?? undefined,
+    sessions: review.sessions ?? [], currentRevision: review.currentRevision ?? undefined, actions, askAgent: undefined,
+  }), [review, actions]);
+}
+
+/** The review's diff, drawn natively (the `diff` engine): the diff and comments come from the window's Git store by
+ * `workspaceId`; the props are view state, and what the person does comes back through the callbacks. */
+export function DiffView(props) {
+  const { workspaceId } = props;
+  const key = `diff:${workspaceId}`;
+  const perch = host();
+  const opened = useRef(null);
+  if (opened.current !== key) {
+    perch.diff.open(key, { workspaceId });
+    opened.current = key;
+  }
+  perch.diff.setProps(key, {
+    path: props.path ?? null, wrap: !!props.wrap, canAsk: !!props.onAskAgent, selection: props.selection ?? null,
+    editingCommentId: props.editingCommentId ?? null, editingBody: props.editingBody ?? "",
+  });
+  const comments = useHostSnapshot((p) => p.gitReview(workspaceId)).comments ?? [];
+  const seq = useSyncExternalStore(subscribe, () => perch.diff.seq(key));
+  const latest = useRef(props);
+  latest.current = props;
+  useEffect(() => {
+    const p = latest.current;
+    const comment = (id) => comments.find((c) => c.id === id);
+    for (const event of perch.diff.events(key)) {
+      switch (event.type) {
+        case "selectLine": p.onSelectLine?.(event.path, event.side, event.line, event.extend); break;
+        case "addComment": p.onAddComment?.(event.path, event.side, event.line); break;
+        case "askAgent": p.onAskAgent?.(event.path); break;
+        case "editComment": { const c = comment(event.commentId); if (c) p.onEditComment?.(c); break; }
+        case "editBody": p.onEditBody?.(event.text); break;
+        case "saveEdit": { const c = comment(event.commentId); if (c) p.onSaveEdit?.(c); break; }
+        case "cancelEdit": p.onCancelEdit?.(); break;
+        case "resolve": { const c = comment(event.commentId); if (c) p.onResolve?.(c); break; }
+        case "delete": { const c = comment(event.commentId); if (c) p.onDelete?.(c); break; }
+      }
+    }
+  }, [seq, key]);
+  return createElement("div", { "data-perch-engine": "diff", "data-perch-key": key, "data-testid": "git-diff", className: props.className ?? "min-h-0 flex-1" });
+}
 /** The file pane's media viewer (`fileAsset.mjs`), drawn through this copy's host. */
 export function FileAsset(props) { return createElement(NativeFileAsset, { ...props, perch: host() }); }
 

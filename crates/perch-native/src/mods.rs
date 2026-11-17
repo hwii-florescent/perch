@@ -156,6 +156,16 @@ pub const STOCK: &[(&str, &str)] = &[
         "instructions/instructions/main.js",
         include_str!("../mods/instructions/instructions/main.js"),
     ),
+    ("review/main.js", include_str!("../mods/review/main.js")),
+    ("review/mod.json", include_str!("../mods/review/mod.json")),
+    (
+        "review/review/main.js",
+        include_str!("../mods/review/review/main.js"),
+    ),
+    (
+        "review/review/review.js",
+        include_str!("../mods/review/review/review.js"),
+    ),
     ("memory/main.js", include_str!("../mods/memory/main.js")),
     ("memory/mod.json", include_str!("../mods/memory/mod.json")),
     (
@@ -539,6 +549,8 @@ pub struct WindowMods {
     pub editors: crate::editor::Editors,
     /// The engine kinds screens place by key (`perch-engine`), `editor` among them.
     pub engines: engines::Engines,
+    /// The review diffs screens place (`perch-diff`), by key.
+    pub diffs: crate::diff::host::Diffs,
 }
 
 impl gpui::Global for WindowMods {}
@@ -592,16 +604,21 @@ fn start_host(
     let perch = perch::Perch::new();
     perch.register(&host);
     perch.attach(workspace, window, cx);
+    crate::git::install(workspace, cx);
     let editors = crate::editor::Editors::default();
     editors.register(&host);
     let engines = host.engines().clone();
     engines.register("editor", editors.clone());
+    let diffs = crate::diff::host::Diffs::default();
+    diffs.register(&host);
+    engines.register("diff", diffs.clone());
     engines.register("browser", crate::browser::slot::Engine);
     cx.set_global(WindowMods {
         host,
         perch,
         editors,
         engines,
+        diffs,
     });
     // `PERCH_JS_HEAP_LOG=<seconds>`: the mods' script heap on stderr that often, as it stands (no
     // collection forced), so a growing app tells its QuickJS heap from the rest of its memory.

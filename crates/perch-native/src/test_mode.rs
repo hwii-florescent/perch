@@ -306,14 +306,7 @@ async fn split(direction: Direction, window: WindowHandle<Workspace>, cx: &mut A
     started && until(cx, |cx| shown(window, cx).len() > before).await
 }
 
-// The openers for files, review and browser steps. Each feature fills in its own function; until
-// then the step is reported as missing and the run fails, so a measurement never passes by
-// silently skipping the state it was asked for.
-
-fn missing(step: &str) -> bool {
-    eprintln!("perch-native-test: the {step} step is not in this build");
-    false
-}
+// The openers for files, review and browser steps, each its feature's.
 
 /// `files <workspace id>`: that workspace's files are shown.
 async fn show_files(workspace: &str, window: WindowHandle<Workspace>, cx: &mut AsyncApp) -> bool {
@@ -359,13 +352,101 @@ async fn open_file(
         .await
 }
 
-/// `review <workspace id>`: the workspace's review is open with its diff drawn.
-async fn open_review(
-    _workspace: &str,
-    _window: WindowHandle<Workspace>,
-    _cx: &mut AsyncApp,
-) -> bool {
-    missing("review")
+/// `review <workspace id>`: the workspace's review is open in a tab with its status and diff loaded. Done
+/// when both are in the window's Git store and the screen has not failed; once the screen has
+/// rendered (the window drew), also when a diff with files has its rows in the native diff view.
+async fn open_review(workspace: &str, window: WindowHandle<Workspace>, cx: &mut AsyncApp) -> bool {
+    use perch_native::git::store::LoadState;
+    let offered = until(cx, |cx| {
+        window
+            .read_with(cx, |ws, cx| {
+                let model = ws.sidebar().read(cx).model();
+                perch_native::git::can_take(model.connected, &model.store, workspace)
+            })
+            .unwrap_or(false)
+    })
+    .await;
+    let opened = offered
+        && window
+            .update(cx, |ws, _, cx| ws.open_review(workspace, cx))
+            .is_ok();
+    if !opened {
+        return false;
+    }
+    // The review asks for its status and diff when it first renders, which needs a frame; a hidden
+    // window, or any window while the display sleeps, gets none. The step asks for the same (the
+    // working tree, as the review opens) through the window's Git store, so the review's data is
+    // in memory either way; its diff view is made, and checked, once the screen has rendered.
+    cx.update(|cx| {
+        if let Some(git) = perch_native::git::host(cx) {
+            git.run(
+                workspace,
+                |s, ready, out| s.refresh_status(workspace, ready, out),
+                cx,
+            );
+            git.run(
+                workspace,
+                |s, ready, out| {
+                    let target = perch_core::source_control::DiffTarget::WorkingTree;
+                    s.load_diff(workspace, target, None, true, false, 3, ready, out)
+                },
+                cx,
+            );
+        }
+    });
+    let key = format!("diff:{workspace}");
+    let drawn = until(cx, |cx| {
+        let failed = window
+            .update(cx, |ws, _, cx| {
+                ws.screen_error(
+                    &format!(
+                        "review#{}",
+                        perch_native::workspace::review_tab_id(workspace)
+                    ),
+                    cx,
+                )
+            })
+            .ok()
+            .flatten();
+        if let Some(error) = failed {
+            eprintln!("perch-native-test: the review screen failed: {error}");
+            return false;
+        }
+        cx.update(|cx| {
+            let Some(git) = perch_native::git::host(cx) else {
+                return false;
+            };
+            let review = git.review(workspace);
+            if review.status_state != LoadState::Ready || review.diff_state != LoadState::Ready {
+                return false;
+            }
+            let files = review.diff.as_ref().map_or(0, |d| d.files.len());
+            let view = cx
+                .try_global::<perch_native::mods::WindowMods>()
+                .and_then(|mods| mods.diffs.view(&key));
+            view.is_none_or(|view| files == 0 || view.read(cx).rows().rows.len() > files)
+        })
+    })
+    .await;
+    if !drawn {
+        // Which part never came: the store's loads, or the diff view the screen places.
+        cx.update(|cx| {
+            let review = perch_native::git::host(cx).map(|git| git.review(workspace));
+            let view = cx
+                .try_global::<perch_native::mods::WindowMods>()
+                .and_then(|mods| mods.diffs.view(&key))
+                .map(|view| view.read(cx).rows().rows.len());
+            eprintln!(
+                "perch-native-test: review: status {:?}, diff {:?} ({:?}), diff view rows {view:?}",
+                review.as_ref().map(|r| r.status_state),
+                review.as_ref().map(|r| r.diff_state),
+                review
+                    .as_ref()
+                    .and_then(|r| r.diff_error.clone().or(r.status_error.clone())),
+            );
+        });
+    }
+    drawn
 }
 
 /// `browser <url>`: a browser pane shows the page.

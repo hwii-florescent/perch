@@ -127,6 +127,14 @@ fn main() {
                     );
                     continue;
                 }
+                if let Update::Review(message) = update {
+                    cx.update(|cx| {
+                        if let Some(git) = perch_native::git::host(cx) {
+                            git.on_delivery(&message, cx);
+                        }
+                    });
+                    continue;
+                }
                 if let Update::Files(message) = update {
                     workspace.update(cx, |workspace, cx| workspace.on_files_message(&message, cx));
                     continue;

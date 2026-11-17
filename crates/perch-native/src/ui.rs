@@ -118,7 +118,7 @@ impl Sidebar {
                 ));
             }
             // Heard, not seen: the app plays it. Files are the window's, not the sidebar's.
-            Update::Alert(_) | Update::Files(_) => {}
+            Update::Alert(_) | Update::Files(_) | Update::Review(_) => {}
         }
         cx.notify();
     }

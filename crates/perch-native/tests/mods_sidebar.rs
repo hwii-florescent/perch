@@ -153,8 +153,9 @@ fn main() {
     let state = "by-project";
     let data = fixture.data(state);
     let host = ModHost::new(scratch.join("native-mods")).expect("the mod host starts");
-    // Every React screen's host imports `perch-editor`, as the window lends it.
+    // Every React screen's host imports `perch-editor` and `perch-diff`, as the window lends them.
     perch_native::editor::Editors::default().register(&host);
+    perch_native::diff::host::Diffs::default().register(&host);
     let perch = Perch::new();
     perch.register(&host);
     let workspace_window = cx

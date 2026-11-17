@@ -7,6 +7,17 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-16 — The review's comment composer stays below the diff (owner, SDK 1.12)
+
+Owner, for the review on both the web and the native client:
+
+- The diff is its own scroll surface (`DiffView`, `@perch/sdk` 1.12). The comment composer is pinned
+  below it and stays in view once lines are selected; it no longer scrolls with the diff after the
+  last file. The truncation note sits above the diff.
+- Test ids stay: `git-diff` (the diff's scroll surface), `git-comment-composer`, `git-comment-body`.
+- The native client draws `DiffView` natively from the window's Git store; the screen source is the
+  same on both.
+
 ## 2026-11-16 — Preview is only for formatted documents (owner)
 
 A file's Preview shows only for a format that renders, in both apps from the same stock Files screen: Markdown keeps
