@@ -527,6 +527,8 @@ fn deadline(budgets: Budgets) -> impl FnMut() -> bool + 'static {
             Some(ScopePhase::Event | ScopePhase::Task) => budgets.event,
             None => budgets.detached,
         };
+        #[cfg(feature = "render-test-support")]
+        let budget = crate::probe::budget().unwrap_or(budget);
 
         let cut = started.elapsed() > budget;
         if cut {
