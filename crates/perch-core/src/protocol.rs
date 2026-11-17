@@ -2944,6 +2944,17 @@ pub enum ServerMessage {
         spend: Option<crate::usage::spend::SpendSummary>,
     },
 
+    /// The terminal host (perchd) stopped answering, or reports locks held
+    /// too long; then again once it recovers. Sent to a client that connects
+    /// while it lasts. The core never restarts the host over it: terminals
+    /// keep running. Capability `daemon.health.v1`.
+    #[serde(rename = "daemon.health", rename_all = "camelCase")]
+    DaemonHealth {
+        healthy: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        problem: Option<String>,
+    },
+
     /// A usage threshold event (`usage/alerts.rs`), broadcast once to every
     /// client. `kind` is `limit`, `reset` or `budget`. Capability `usage.alert.v1`.
     #[serde(rename = "usage.alert", rename_all = "camelCase")]
