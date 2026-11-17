@@ -4,6 +4,9 @@
 //! - Settings opened again and again under a script budget so small its first draw is stopped
 //!   part-way (as a slow frame is), each time closed and the window changed after: the copies so
 //!   stopped are let go, not kept with their whole tree;
+//! - the sidebar's and the tab strip's renders stopped part-way again and again, in two rounds:
+//!   each starts afresh once the restart interval has passed, with no error left, and the second
+//!   round keeps nothing the first did not;
 //! - a simulated minute of sessions changing status, frame by frame.
 //!
 //! The QuickJS heap is compared after a full collection. Offscreen, no core.
@@ -92,6 +95,15 @@ const STOPS: usize = 16;
 const STOP_BOUND: i64 = 400;
 /// A budget Settings' first draw does not fit in, though loading its module does.
 const STOP_BUDGET: Duration = Duration::from_millis(20);
+/// A budget the sidebar's render does not fit in.
+const CUT_BUDGET: Duration = Duration::from_millis(1);
+/// Longer than a stopped copy waits before it starts afresh again (`RESTART_EVERY` in `mods.rs`).
+const RESTART: Duration = Duration::from_secs(6);
+const RESTARTS: usize = 10;
+/// What a round of stopped renders may keep. ponytail: each fresh start still keeps about 8 MB
+/// (40,000 objects, data not code) whose holder is not found yet; React's scheduler wedged by a cut
+/// kept 19 MB a round. Tighten to `BOUND` once the holder is found.
+const ROUND_BOUND: i64 = 10 * 1024 * 1024;
 
 fn main() {
     let seconds: u64 = std::env::var("PERCH_JS_HEAP_SECONDS")
@@ -194,6 +206,61 @@ fn main() {
     println!(
         "{stopped} of {STOPS} Settings loads stopped: js heap {:.2} MB ({} objects) after the second, {:.2} MB ({} objects) after the last",
         mb(first_stop.0), first_stop.1, mb(last_stop.0), last_stop.1
+    );
+
+    // The sidebar's and the tab strip's renders stopped part-way, again and again, in two rounds:
+    // each copy so stopped starts afresh (at most once per restart interval), so neither stays
+    // stopped, and the second round keeps nothing the first had not (the first fresh start's own
+    // caches aside).
+    let mut render_cuts = 0;
+    let mut rounds = vec![];
+    for _ in 0..2 {
+        for _ in 0..STOPS / 2 {
+            gpui_shell::probe::set_budget(Some(CUT_BUDGET));
+            show_terminals(&mut cx, false);
+            show_terminals(&mut cx, true);
+            gpui_shell::probe::set_budget(None);
+            for id in ["sidebar", "tabs"] {
+                render_cuts += error(&mut cx, id).is_some() as usize;
+            }
+            for _ in 0..10 {
+                frame(&mut cx, FRAME);
+            }
+        }
+        // Past the restart interval, every copy stopped meanwhile has started afresh. A fresh
+        // start that is itself stopped (a slow debug build) tries again an interval later.
+        for _ in 0..RESTARTS {
+            frame(&mut cx, RESTART);
+            if ["sidebar", "tabs"]
+                .iter()
+                .all(|id| error(&mut cx, id).is_none())
+            {
+                break;
+            }
+        }
+        for id in ["sidebar", "tabs"] {
+            assert_eq!(
+                error(&mut cx, id),
+                None,
+                "{id} starts afresh after its renders were stopped"
+            );
+        }
+        rounds.push(heap(&mut cx, true));
+    }
+    let (first_round, second_round) = (rounds[0], rounds[1]);
+    println!(
+        "{render_cuts} sidebar/tab strip draws left stopped: js heap {:.2} MB ({} objects) after the first round, {:.2} MB ({} objects) after the second",
+        mb(first_round.0), first_round.1, mb(second_round.0), second_round.1
+    );
+    assert!(
+        render_cuts > 0,
+        "no sidebar or tab strip render was stopped"
+    );
+    assert!(
+        second_round.0 - first_round.0 <= ROUND_BOUND,
+        "stopped renders kept {:.2} MB ({} objects) over a round",
+        mb(second_round.0 - first_round.0),
+        second_round.1 - first_round.1
     );
 
     let mut readings = vec![(0, heap(&mut cx, false), heap(&mut cx, true))];

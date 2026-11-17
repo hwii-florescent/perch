@@ -68,8 +68,8 @@ pub struct ScriptView {
     /// every frame: a broken render is exactly as frame-coupled as a working one
     /// if the failure re-triggers the build.
     error: Option<String>,
-    /// PERCH: why an event, timer or task of this view's script was stopped before it finished (it ran past its
-    /// time budget). What it was doing is half done, so this stays shown until the view is replaced.
+    /// PERCH: why a call into this view's script (a render, an event, a timer, a task) was stopped before it
+    /// finished (it ran past its time budget). What it was doing is half done, so this stays shown until the view is replaced.
     stopped: Option<String>,
     /// Whose authority this view's script runs under.
     ///
@@ -192,7 +192,7 @@ impl ScriptView {
         self.error.as_deref().or(self.stopped.as_deref())
     }
 
-    /// PERCH: whether a call into this view's script (an event, a timer, a task) was stopped before it finished.
+    /// PERCH: whether a call into this view's script (a render, an event, a timer, a task) was stopped before it finished.
     pub fn was_stopped(&self) -> bool {
         self.stopped.is_some()
     }
@@ -256,6 +256,8 @@ impl ScriptView {
         let entity = cx.entity();
 
         let previous = self.current.clone();
+        // A stopped render another view left untaken is not this build's.
+        let _ = crate::engine::quickjs::sandbox::take_render_cut();
         match runtime.build_reusing(&object, Some(entity), policy, previous, window, cx) {
             // PERCH: the script said nothing changed (`unchanged()`): the live snapshot stands.
             Ok(None) if self.current.is_some() => self.error = None,
@@ -282,7 +284,14 @@ impl ScriptView {
                 self.previous = self.current.replace(snapshot);
                 self.error = None;
             }
-            Err(error) => self.error = Some(error.to_string()),
+            Err(error) => {
+                self.error = Some(error.to_string());
+                // PERCH: a render stopped past its time budget left the script half way (a React commit cut
+                // short), as a stopped event does: the view counts as stopped, so its host starts it afresh.
+                if let Some(why) = crate::engine::quickjs::sandbox::take_render_cut() {
+                    self.stopped(why, cx);
+                }
+            }
         }
     }
 }

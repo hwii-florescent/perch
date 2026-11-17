@@ -496,6 +496,23 @@ pub(super) fn take_cut() -> Option<String> {
     CUT.with(|last| last.borrow_mut().take())
 }
 
+thread_local! {
+    /// PERCH: why the deadline stopped a render, until the view whose build it stopped takes it.
+    static RENDER_CUT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// PERCH: a render the deadline stopped keeps why, for its view's build (`take_render_cut`).
+pub(super) fn keep_render_cut() {
+    if let Some(why) = take_cut() {
+        RENDER_CUT.with(|cut| *cut.borrow_mut() = Some(why));
+    }
+}
+
+/// PERCH: why the deadline stopped the render that just failed, if it did.
+pub(crate) fn take_render_cut() -> Option<String> {
+    RENDER_CUT.with(|cut| cut.borrow_mut().take())
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ExecutionWindow {
     Scoped(u64),

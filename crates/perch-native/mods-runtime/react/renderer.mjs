@@ -9,6 +9,7 @@
 //! cascade reads for group variants, and `flush()` runs pending effects. An event is a discrete update: React
 //! commits it before `dispatch` returns.
 import Reconciler from "react-reconciler";
+import { unstable_recoverFromCut } from "scheduler";
 import { ConcurrentRoot, DefaultEventPriority, DiscreteEventPriority, NoEventPriority } from "react-reconciler/constants";
 import { createElement } from "react";
 import { HostElement, HostText, fromMarkup, installGlobals, isTextField, submits } from "./dom.mjs";
@@ -138,6 +139,8 @@ let generation = 0;
  * screens mount them again. */
 function fresh() {
   if (!reconciler.isAlreadyRendering()) return;
+  // The cut may have stopped the scheduler's loop as well (`perch-scheduler-cut` in `build.mjs`).
+  unstable_recoverFromCut?.();
   reconciler = Reconciler(hostConfig);
   generation += 1;
   currentPriority = NoEventPriority;

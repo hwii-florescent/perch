@@ -546,18 +546,23 @@ impl Screens {
     }
 
     /// Why screen `id` is not drawn as its mod means: the mod would not load, its last render threw, or a call into
-    /// it was stopped past its time budget. A floating screen when open, else every in-flow copy of it (`files`,
+    /// it was stopped past its time budget. Its floating copy when open and every in-flow copy of it (`files`,
     /// `files#drawer`, `files#<tab id>`), each error after its key.
     pub fn error(&self, id: &str, cx: &App) -> Option<String> {
-        if let Some(open) = self.floating.iter().find(|f| f.id == id) {
-            return open.view.as_ref()?.read(cx).error(cx);
-        }
-        let mut errors: Vec<String> = self
+        let floating = self
+            .floating
+            .iter()
+            .filter(|f| f.id == id)
+            .filter_map(|f| Some((id.to_string(), f.view.as_ref()?)));
+        let inflow = self
             .inflow
             .iter()
             .filter(|(key, _)| {
                 *key == id || key.strip_prefix(id).is_some_and(|k| k.starts_with('#'))
             })
+            .map(|(key, view)| (key.clone(), view));
+        let mut errors: Vec<String> = floating
+            .chain(inflow)
             .filter_map(|(key, view)| Some(format!("{key:?}: {}", view.read(cx).error(cx)?)))
             .collect();
         errors.sort();

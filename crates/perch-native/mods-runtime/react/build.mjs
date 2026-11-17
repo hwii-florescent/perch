@@ -189,6 +189,14 @@ async function bundleRuntime(table) {
     plugins: [
       // `react` is the runtime's own (`react.mjs`, React with measured effects), except inside that file.
       { name: "perch-react", enforce: "pre", resolveId: (source, importer) => (source === "react" && importer !== path.join(here, "react.mjs") ? path.join(here, "react.mjs") : null) },
+      // React's scheduler keeps its loop's state in flags its `finally` blocks reset, and a call the engine cuts past
+      // its time budget runs no `finally`: one cut inside its loop left it believing it was still running, so it never
+      // ran again and every task queued after (each holding a tree) stayed for good. `unstable_recoverFromCut` puts
+      // it right; the renderer calls it when it replaces a React left mid-render (`fresh`).
+      {
+        name: "perch-scheduler-cut",
+        transform: (code, id) => (/scheduler[\\/]cjs[\\/]scheduler\.(production|development)\.js$/.test(id) ? `${code}\n${SCHEDULER_RECOVERY}` : null),
+      },
       { name: "perch-virtual", resolveId: (source) => (source in virtual ? `\0${source}` : null), load: (source) => (source.startsWith("\0virtual:") ? `export default ${JSON.stringify(virtual[source.slice(1)])};` : null) },
     ],
     build: {
@@ -203,6 +211,21 @@ async function bundleRuntime(table) {
   if (!chunk) throw new Error("the runtime build produced no entry chunk");
   return chunk.code;
 }
+
+/** Appended to React's scheduler (`perch-scheduler-cut`): clears what a cut left set in its loop and starts the loop
+ * again when work is queued. Only for a caller outside the scheduler's own tasks. */
+const SCHEDULER_RECOVERY = `exports.unstable_recoverFromCut = function () {
+  if (!isPerformingWork && !isMessageLoopRunning) return;
+  isPerformingWork = false;
+  currentTask = null;
+  isHostCallbackScheduled = false;
+  isMessageLoopRunning = false;
+  if (peek(taskQueue) !== null) {
+    isHostCallbackScheduled = true;
+    isMessageLoopRunning = true;
+    schedulePerformWorkUntilDeadline();
+  }
+};`;
 
 /** Bare specifier -> the file the engine resolves it to, and the namespace of `runtime.mjs` it re-exports. */
 export const MODULES = [

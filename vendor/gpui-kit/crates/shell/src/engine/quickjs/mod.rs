@@ -5196,7 +5196,7 @@ impl ShellRuntime {
             };
             self.active_context.set(outer);
             produced
-        });
+        }));
         match result {
             Ok(value) => Ok(value),
             Err(error) => {
@@ -5204,17 +5204,18 @@ impl ShellRuntime {
                     .borrow_mut()
                     .truncate(pending_checkpoint);
                 // PERCH: a call the deadline stopped outside a render (an event, a timer, a task) would otherwise
-                // only be logged: its view says so. A stopped render is the build's own error already.
-                if let Some(why) = sandbox::take_cut() {
-                    if !matches!(
-                        scope::current_phase(),
-                        Some(ScopePhase::Render | ScopePhase::Layout)
-                    ) {
-                        if let Some(view) = scope::current_view() {
-                            scope::with_current_app(|cx| {
-                                view.update(cx, |view, cx| view.stopped(why, cx))
-                            });
-                        }
+                // only be logged: its view says so. A stopped render leaves its reason for the view's build
+                // (`ScriptView::rebuild`, `take_render_cut`), which is the view being updated now.
+                if matches!(
+                    scope::current_phase(),
+                    Some(ScopePhase::Render | ScopePhase::Layout)
+                ) {
+                    sandbox::keep_render_cut();
+                } else if let Some(why) = sandbox::take_cut() {
+                    if let Some(view) = scope::current_view() {
+                        scope::with_current_app(|cx| {
+                            view.update(cx, |view, cx| view.stopped(why, cx))
+                        });
                     }
                 }
                 Err(error)

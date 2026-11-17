@@ -941,7 +941,7 @@ pub struct ModView {
     load_error: Option<String>,
     /// When the copy last started afresh after a call into it was stopped half-way.
     restarted: Option<Instant>,
-    /// Why that call was stopped: still reported (`error`) by the fresh copy, until the mod's files change.
+    /// Why that call was stopped: still reported (`error`) until the fresh copy has drawn.
     stopped: Option<String>,
     /// The script view whose stops this copy follows ([`Self::watch_stops`]), and the subscription doing it.
     watching: Option<(gpui::EntityId, gpui::Subscription)>,
@@ -980,12 +980,16 @@ impl ModView {
         error
     }
 
-    /// The load error, else the render error, else why a call was stopped before the copy started afresh.
+    /// The load error, else the render error, else why a call was stopped before the copy started afresh, until
+    /// the fresh copy has drawn.
     pub fn error(&self, cx: &App) -> Option<String> {
+        let drawn = self
+            .script_view(cx)
+            .is_some_and(|view| view.read(cx).snapshot().is_some());
         self.load_error
             .clone()
             .or_else(|| self.render_error(cx))
-            .or_else(|| self.stopped.clone())
+            .or_else(|| self.stopped.clone().filter(|_| !drawn))
     }
 
     /// The shell's view of the mod, for tests and tools that read its description.
@@ -1006,7 +1010,7 @@ impl ModView {
         if !stopped
             || self
                 .restarted
-                .is_some_and(|at| at.elapsed() < RESTART_EVERY)
+                .is_some_and(|at| cx.background_executor().now() < at + RESTART_EVERY)
         {
             return false;
         }
@@ -1015,7 +1019,8 @@ impl ModView {
             self.key
         );
         self.stopped = self.render_error(cx);
-        self.restarted = Some(Instant::now());
+        // The executor's clock, which the retry's timer runs on (a test's clock is not the wall's).
+        self.restarted = Some(cx.background_executor().now());
         true
     }
 
@@ -1038,9 +1043,10 @@ impl ModView {
             if !view.read(cx).was_stopped() {
                 return;
             }
+            let now = cx.background_executor().now();
             let wait = this
                 .restarted
-                .map(|at| RESTART_EVERY.saturating_sub(at.elapsed()))
+                .map(|at| (at + RESTART_EVERY).saturating_duration_since(now))
                 .unwrap_or_default();
             if wait.is_zero() {
                 this.check(window, cx);
