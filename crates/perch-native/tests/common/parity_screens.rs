@@ -1082,7 +1082,8 @@ export default screen("tabs", Hidden, { container: { position: "relative", width
     .unwrap();
 
     let host = ModHost::new(dir.clone()).expect("the mod host starts");
-    // Every React screen's host imports `perch-editor`, `perch-diff` and `perch-media`, as the window lends them.
+    // Every React screen's host imports `perch-editor`, `perch-diff`, `perch-media` and `perch-markdown`, as the window
+    // lends them.
     // The engines draw in their slots (`perch-engine`), as in the window.
     let editors = perch_native::editor::Editors::default();
     editors.register(&host);
@@ -1091,6 +1092,8 @@ export default screen("tabs", Hidden, { container: { position: "relative", width
     host.engines().register("editor", editors.clone());
     host.engines().register("diff", diffs.clone());
     perch_native::files::media::register(&host, std::rc::Rc::new(|_: &gpui::App| None));
+    // This host lends `perch` itself (below), so the modules `Perch::register` adds come here too.
+    perch_native::files::markdown::register(&host);
     let perch = Perch::new();
     publish(&perch, fixture, state);
     let pressed: std::rc::Rc<std::cell::RefCell<Option<Value>>> = Default::default();
