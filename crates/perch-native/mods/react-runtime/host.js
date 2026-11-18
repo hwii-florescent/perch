@@ -208,13 +208,26 @@ function clearTimeout(id) {
   TIMERS.all.delete(id);
   try { timer.handle.cancel(); } catch { /* its copy is gone, and the timer with it */ }
 }
+// `setInterval` is the engine's `cx.timer.every`, in the same table, so `clearInterval` is `clearTimeout`.
+function setInterval(fn, ms = 0, ...args) {
+  const copy = COPIES.has(globalThis[RUNNING]) ? globalThis[RUNNING] : heir(null);
+  if (!copy) throw new Error("react-runtime: setInterval with no screen running");
+  const id = TIMERS.next++;
+  const handle = copy.cx.timer.every(Math.max(1, Number(ms) || 0), (task) => {
+    copy.enter();
+    fn(...args);
+    task.notify();
+  });
+  TIMERS.all.set(id, { copy, handle });
+  return id;
+}
 // React's scheduler runs its work loop on `setImmediate` when there is one (it reads it once, when the runtime loads),
 // else on a 0 ms timer, and holds that the loop runs until the turn it asked for comes. A timer is a copy's and ends
 // with it (and the engine ends every timer set during a screen's final call, where unmounting arms the loop), so the
 // folder's scheduler would wait forever for the copies after it. A promise job is no one's: it runs before the call
 // that queued it returns.
 const setImmediate = (fn, ...args) => { Promise.resolve().then(() => fn(...args)); };
-for (const [name, value] of Object.entries({ setTimeout, clearTimeout, setImmediate })) {
+for (const [name, value] of Object.entries({ setTimeout, clearTimeout, setInterval, clearInterval: clearTimeout, setImmediate })) {
   Object.defineProperty(globalThis, name, { value, configurable: true, writable: true, enumerable: false });
 }
 // `globalThis.perch`: the running copy's host (a script reading it while this file loads gets the platform's facts).

@@ -5,7 +5,6 @@ import { claimViewer } from "./viewer";
 import { installRelayTransport } from "./relay/transport";
 import { trackVisibleViewport } from "./visibleViewport";
 import { installContextMenuGuard } from "./contextMenuGuard";
-import "./openRequest";
 
 // Opened from a relay link: send the app's data routes through the sealed tunnel.
 // Before anything can make a request; a no-op on the LAN and the desktop app.
@@ -45,8 +44,10 @@ document.addEventListener("contextmenu", (event) => {
 // The window's viewer id is settled first: the stores read their per-viewer storage as they load.
 await claimViewer();
 // App first, and its whole module graph with it (the store connects as it loads): a store
-// loaded ahead of the modules that watch it would deliver its first messages unheard.
-const [{ default: App }] = await Promise.all([import("./App"), import("./styles/index.css")]);
+// loaded ahead of the modules that watch it would deliver its first messages unheard. Nor can
+// anything that imports the store load above, before the relay transport is installed: the store
+// opens the socket as it loads, and a relay phone's would go to the relay's own origin.
+const [{ default: App }] = await Promise.all([import("./App"), import("./openRequest"), import("./styles/index.css")]);
 // `@perch/sdk` loads with App (App.tsx imports it), so it shares App's chunk: a separate dynamic import here split
 // it from the components it re-exports, which import it back through the stock sources (a circular chunk).
 const { usePerchStore } = await import("./store");

@@ -116,8 +116,10 @@ try {
   // The shell can render while disconnected: require the actual data socket too.
   const inApp = async () => {
     await phone.waitForFunction(() => window.usePerchStore?.getState().connected === true, undefined, { timeout: 30_000 });
-    await phone.getByText("Files", { exact: true }).first().waitFor({ timeout: 30_000 });
+    // The panes' shell: the header is a package's once the phone turns phone screens from packages on.
+    await phone.getByTestId("mobile-pane-shell").waitFor({ timeout: 30_000 });
   };
+  const shotOnFail = (name) => (error) => phone.screenshot({ path: `/tmp/perch-relay-${name}.png` }).then(() => { throw error; });
   await inApp().catch(async (error) => {
     await phone.screenshot({ path: "/tmp/perch-relay-failed.png" });
     throw new Error(`the phone never reached the app (/tmp/perch-relay-failed.png): ${error.message}\n${logs.core}\n${logs.relay}`);
@@ -257,7 +259,7 @@ try {
         .catch(() => { throw new Error(`no readable error after the relay dropped mid-fetch (cut ${relayCut.cut} time(s))`); });
       assert.equal(relayCut.cut, 1, "the relay must have been cut once, mid-fetch");
       assert.equal(await phone.evaluate(() => document.documentElement.dataset.esmProof), expected, "the last good revision must stay while the new one cannot load");
-      await inApp();
+      await inApp().catch(shotOnFail("after-cut"));
       await phone.waitForFunction((proof) => document.documentElement.dataset.esmProof === proof, proof, { timeout: 60_000 })
         .catch(() => { throw new Error("the new revision never loaded once the phone was back through the relay"); });
       await phone.waitForFunction(() => !document.querySelector('[data-testid="mod-error"]'), undefined, { timeout: 15_000 });
@@ -323,7 +325,7 @@ try {
   }
   // Its data routes went through the sealed tunnel, not the relay's HTTP.
   const direct = seen.filter((url) => /\/(pair|ws|workspace-file|upload|clipboard-image|mods\/package|mods\/data|mods\/exec|mods\/fs|terminal\/read)(\?|$)/.test(new URL(url).pathname));
-  assert.deepEqual(direct, [], "data routes must not be fetched from the relay directly");
+  assert.deepEqual(direct, [], `data routes must not be fetched from the relay directly (core ${corePort}, relay ${relayPort})`);
   assert(seen.some((url) => url.includes("/r/")), "the phone never opened the relay socket");
   // The address bar no longer holds the key or the code.
   assert(!phone.url().includes("pair=") && !phone.url().includes("r="), phone.url());
@@ -339,8 +341,8 @@ try {
   await desktop.locator('[data-testid="persistent-agent-terminal"][data-controlling="true"]').waitFor({ timeout: 30_000 });
   await phone.reload();
   await inApp();
-  await phone.getByText("New session").first().click();
-  await phone.locator('[data-testid^="workspace-session-"]:not([data-testid*="close"])').first().click();
+  await phone.getByTestId("mobile-switch").click();
+  await phone.getByTestId("mobile-switcher").locator('[data-testid^="workspace-session-"]:not([data-testid*="close"])').first().click();
   const phoneTerminal = phone.locator('[data-testid="persistent-agent-terminal"][data-writable="true"][data-controlling="true"]');
   await phoneTerminal.waitFor({ timeout: 30_000 });
   // A tap must focus the terminal's input, or a phone never opens its keyboard.

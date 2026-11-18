@@ -260,6 +260,13 @@ export function useDevicesProps() {
     return () => clearTimeout(timer);
   }, [pairing]);
   const take = (answer) => { if (answer && Array.isArray(answer.devices)) setListed(answer); };
+  // The core pushes the new list when a phone pairs, but this window hears only answers to its own questions: while
+  // the code shows, ask again so the device appears when it pairs.
+  useEffect(() => {
+    if (!pairing) return undefined;
+    const timer = setInterval(() => { ask("device.list").then(take); }, 2000);
+    return () => clearInterval(timer);
+  }, [pairing]);
   return {
     settings, isMobile: false, phone, devices: listed?.devices ?? [], pairing,
     actions: {

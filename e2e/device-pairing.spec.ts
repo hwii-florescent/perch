@@ -28,12 +28,15 @@ import { addProject, startFromPanel } from "./projects";
 import { holdRow } from "./workspaceTools";
 import { execSync, spawn, type ChildProcess } from "node:child_process";
 
+// The core finds the agent in the foreground by its program, and `sh` is never an identity
+// (`agent_runtime.rs`, `process_snapshot`): a provider launched as `/bin/sh -c` reads as "back at the
+// shell" at the first process snapshot. A script run by `node` is named by the script (`phonebot`).
 const AGENT_SCRIPT = [
-  "printf 'phonebot ready\\n'",
-  "while IFS= read -r line; do",
-  "  printf 'phonebot_reply %s\\n' \"$line\"",
-  "  if [ \"$line\" = probe-query ]; then printf '\\033[6n'; fi",
-  "done",
+  "process.stdout.write('phonebot ready\\n');",
+  "require('readline').createInterface({ input: process.stdin }).on('line', (line) => {",
+  "  process.stdout.write('phonebot_reply ' + line + '\\n');",
+  "  if (line === 'probe-query') process.stdout.write('\\x1b[6n');",
+  "});",
 ].join("\n");
 
 function git(args: string, cwd: string): void {
@@ -95,12 +98,13 @@ test("a phone pairs over the network, drives the session, and loses access when 
   git('commit -q -m "initial"', repo);
   fs.writeFileSync(path.join(repo, "src", "main.txt"), "PHONE_SEES_THIS\n");
   fs.writeFileSync(path.join(fixture, "hosts.json"), JSON.stringify({ hosts: [] }));
+  fs.writeFileSync(path.join(fixture, "phonebot"), AGENT_SCRIPT);
   fs.writeFileSync(path.join(fixture, "providers.json"), JSON.stringify({
     version: 1,
     providers: [{
       id: "phonebot",
       display_name: "Phonebot",
-      launch: { executable: "/bin/sh", prefix_args: ["-c", AGENT_SCRIPT], prompt: "stdin", suffix_args: [], resume: "Unsupported" },
+      launch: { executable: process.execPath, prefix_args: [path.join(fixture, "phonebot")], prompt: "stdin", suffix_args: [], resume: "Unsupported" },
       supported_modes: ["cli"],
       resumability: "persistentProcess",
       capabilities: ["interactiveTerminal"],

@@ -213,6 +213,11 @@ path = "tests/workspace_phone_hold.rs"
 harness = false
 
 [[test]]
+name = "phone_pairing_window"
+path = "tests/phone_pairing_window.rs"
+harness = false
+
+[[test]]
 name = "context_bridge_window"
 path = "tests/context_bridge_window.rs"
 harness = false

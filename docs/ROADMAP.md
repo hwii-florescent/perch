@@ -593,13 +593,15 @@ Decided 2026-11-12 ([decision](DECISIONS.md)); not the "native UI mode" above, w
 packaged. Measured 2026-11-12 with one terminal shown: 44 MB (58 MB with its headless core) against an
 estimated 231 MB for the Tauri app, whose idle figure of 146 MB was the only one measured directly.
 
+- **Phone pairing is built:** Settings > Devices turns on phone access, pairs a phone and revokes it, against a headless core
+  (`tests/phone_pairing_window.rs`); a phone reaches that core on the LAN, Tailscale or the relay as before.
 - **Built:** sidebar by project and by status, tabs, splits, agent launch (local; a launch on another
   computer is not opened automatically), attention states, terminal settings, remote computers, command
   palette, `keys.json`, and a terminal on Ghostty's engine with the person's profile, selection, search,
   links, IME, OSC 52, kitty keyboard and graphics, input ownership and shared typing.
 - **Still Tauri-only** (reached with "Open in Perch"): files and the editor, changes and review, browser
   panes, the chat view, Projects home, memory and instructions, usage, mods and stock screens, every
-  setting that is not a terminal setting, notifications, pairing a phone, updates.
+  setting that is not a terminal setting, notifications, updates.
 - **Before it can replace Tauri on macOS:** a pass by a person on a lit screen (drawing cost, IME, focus,
   the hand-off end to end); packaging, signing and the release workflow with Zig; layout restore; tab
   drag, tab menu and closed-tab history; the terminal rows still open in the [parity checklist](../plans/261113-0037-native-terminal-fixes-and-mod-engine/terminal-parity-checklist.md); then the
