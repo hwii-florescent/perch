@@ -370,6 +370,7 @@ export function WorkspaceGitReview({
   // The file the tree last asked this copy's diff to scroll to (each copy scrolls on its own).
   const [reveal, setReveal] = useState<{ path: string; seq: number } | null>(null);
   function revealFile(path: string) {
+    setNarrowView("diff");
     // A one-file diff of another file would not hold it: show every file again, then scroll to it.
     if (activeFile && activeFile !== path) setActiveFile(undefined);
     setReveal((previous) => ({ path, seq: (previous?.seq ?? 0) + 1 }));
@@ -381,6 +382,9 @@ export function WorkspaceGitReview({
   // runtime matches those against the window, and its `ResizeObserver` never fires, so the box is read on a timer.
   const rootRef = useRef<HTMLElement | null>(null);
   const [narrow, setNarrow] = useState(false);
+  // Narrow, the review shows the changes list or the diff, never one scroll box inside another.
+  const [narrowView, setNarrowView] = useState<"files" | "diff">("diff");
+  const [notesOpen, setNotesOpen] = useResourceState(`review:${workspaceId}:notesOpen`, true);
   useEffect(() => {
     const read = () => {
       const width = rootRef.current?.getBoundingClientRect().width ?? 0;
@@ -534,6 +538,9 @@ export function WorkspaceGitReview({
     [comments, diff],
   );
   const unplacedComments = comments.filter((comment) => !inlineCommentIds.has(comment.id));
+  const hasNotes = unresolvedCount > 0 || unplacedComments.length > 0 || Boolean(batchPreview) || batchSending;
+  // A packet being prepared or sent always shows.
+  const notesShown = hasNotes && (notesOpen || Boolean(batchPreview) || batchSending);
   const stagedCount = changedFiles.filter((entry) => entry.staged).length;
   function askAboutDiff(file: GitDiffFile, range?: LineSelection | null) {
     if (!diff || !onAskAgent) return;
@@ -730,8 +737,10 @@ export function WorkspaceGitReview({
     );
   }
 
-  const rail = railOpen ? (
-    <aside className="flex min-h-0 w-[17rem] min-w-[13rem] shrink-0 flex-col [border-left:1px_solid_var(--git-border)]" style={narrow ? { width: "100%", minWidth: 0, flex: "0 0 auto", borderLeft: "none", borderBottom: "1px solid var(--git-border)" } : undefined} data-testid="git-status">
+  const showRail = narrow ? narrowView === "files" : railOpen;
+  const showDiff = !narrow || narrowView === "diff";
+  const rail = showRail ? (
+    <aside className="flex min-h-0 w-[17rem] min-w-[13rem] shrink-0 flex-col [border-left:1px_solid_var(--git-border)]" style={narrow ? { width: "100%", minWidth: 0, flex: "1 1 auto", borderLeft: "none" } : undefined} data-testid="git-status">
       <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.35rem]">
         <button
           type="button"
@@ -762,7 +771,7 @@ export function WorkspaceGitReview({
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]" style={narrow ? { height: treeShown.length ? `${Math.min(treeShown.length * 1.5, 16)}rem` : undefined, flex: "none" } : undefined} role="tree" aria-label="Changed paths">
+        <div className="flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]" role="tree" aria-label="Changed paths">
           {treeShown.map((row) => row.kind === "dir" ? (
             <button
               type="button"
@@ -836,14 +845,16 @@ export function WorkspaceGitReview({
         <span className={cn(CONNECTION, statusState === "ready" ? CONNECTION_READY : statusState === "error" ? CONNECTION_ERROR : CONNECTION_IDLE)} role="status">
           {statusState === "loading" ? "Updating…" : statusState === "error" ? "Status unavailable" : status?.dirty ? "Dirty" : "Clean"}
         </span>
-        <IconButton icon="files" label={railOpen ? "Hide files" : "Show files"} testId="git-rail-toggle" pressed={railOpen} onClick={() => setRailOpen(!railOpen)} />
+        {narrow
+          ? <IconButton icon="files" label={showRail ? "Show diff" : "Show files"} testId="git-rail-toggle" pressed={showRail} onClick={() => setNarrowView(showRail ? "diff" : "files")} />
+          : <IconButton icon="files" label={railOpen ? "Hide files" : "Show files"} testId="git-rail-toggle" pressed={railOpen} onClick={() => setRailOpen(!railOpen)} />}
         <IconButton icon="refresh" label="Refresh" testId="git-refresh" onClick={() => { actions.refreshStatus(); actions.listComments(); }} />
       </header>
 
-      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" style={narrow ? { flexDirection: "column", overflow: "auto" } : undefined}>
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" style={narrow ? { flexDirection: "column" } : undefined}>
         {narrow && rail}
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" style={narrow ? { minHeight: "18rem", flex: "auto" } : undefined}>
+        {showDiff && <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <div className="flex shrink-0 flex-wrap items-center gap-x-[0.4rem] gap-y-[0.3rem] px-[0.7rem] py-[0.4rem]">
             <label className={TB_FIELD} title="Compare">
               <Select className={TB_INPUT} testId="git-diff-target" ariaLabel="Compare" value={compareOpen ? "compare" : target.kind === "compare" ? (preset ?? "compare") : target.kind} onChange={chooseTarget}
@@ -952,8 +963,10 @@ export function WorkspaceGitReview({
             )}
           </div>
 
-          <section className="max-h-[40%] shrink-0 overflow-y-auto [border-top:1px_solid_var(--git-border)]" data-testid="git-review-panel">
-            <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.35rem]"><strong title="Comments stay attached to their path and core-derived anchor. Stale or orphaned anchors require an explicit correction before sending.">{unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"}</strong><button type="button" className={BTN_DEFAULT} disabled={!unresolvedCount || batchBusy} onClick={requestBatchPreview} data-testid="git-review-preview">{batchBusy ? "Preparing…" : "Preview packet"}</button></div>
+          {/* One line until there are notes; with notes it can fold away, so the diff stays the column's one scroller. */}
+          <section className={cn("shrink-0 [border-top:1px_solid_var(--git-border)]", notesShown && "max-h-[40%] overflow-y-auto")} data-testid="git-review-panel">
+            <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.35rem]"><button type="button" className="flex min-w-0 items-center gap-[0.35rem] text-left text-fg [background:none] disabled:cursor-default" aria-expanded={hasNotes ? notesShown : undefined} disabled={!hasNotes} onClick={() => setNotesOpen(!notesOpen)}>{hasNotes && <span className="text-[0.6rem] text-subtext-0" aria-hidden="true">{notesShown ? "▾" : "▸"}</span>}<strong title="Comments stay attached to their path and core-derived anchor. Stale or orphaned anchors require an explicit correction before sending.">{unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"}</strong></button><button type="button" className={BTN_DEFAULT} disabled={!unresolvedCount || batchBusy} onClick={requestBatchPreview} data-testid="git-review-preview">{batchBusy ? "Preparing…" : "Preview packet"}</button></div>
+            {notesShown && <>
             {unplacedComments.length > 0 && (
               <div className="mx-[0.7rem] mb-[0.55rem] rounded-ui bg-[color-mix(in_srgb,var(--surface-1)_42%,transparent)] p-2" data-testid="git-review-list">
                 <div className="flex items-center justify-between gap-2"><span className={EYEBROW}>Other review notes</span><strong>{unplacedComments.length}</strong></div>
@@ -976,8 +989,9 @@ export function WorkspaceGitReview({
                 : "Waiting for the agent to receive the review packet…"}
             </div>}
             {batchSending && (!batchDelivery || batchDelivery.packetId !== batchPreview?.packetId) && <div className={BANNER_INFO} role="status">Sending review packet… waiting for server confirmation.</div>}
+            </>}
           </section>
-        </div>
+        </div>}
         {!narrow && rail}
       </div>
 

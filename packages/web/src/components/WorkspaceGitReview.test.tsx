@@ -274,6 +274,29 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
     expect(actionSet.loadDiff).not.toHaveBeenCalledWith(expect.anything(), "src/main.ts", expect.anything());
   });
 
+  it("keeps one vertical scroller per column: no notes is one line, and narrow shows the files or the diff", async () => {
+    await render(props(actions()));
+    expect(document.querySelector('[data-testid="git-review-panel"]')?.className).not.toContain("overflow-y-auto");
+
+    // Narrow: the review is 500 px wide.
+    const measure = vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({ width: 500, height: 600, x: 0, y: 0, top: 0, left: 0, right: 500, bottom: 600, toJSON: () => ({}) } as DOMRect);
+    Element.prototype.scrollIntoView = () => {};
+    try {
+      await replaceView(props(actions()));
+      expect(document.querySelector('[data-testid="git-status"]')).toBeNull();
+      expect(document.querySelector('[data-testid="git-diff"]')).not.toBeNull();
+      await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="git-rail-toggle"]')?.click());
+      expect(document.querySelector('[data-testid="git-status"]')).not.toBeNull();
+      expect(document.querySelector('[data-testid="git-diff"]')).toBeNull();
+      const file = document.querySelector<HTMLButtonElement>('[data-testid="git-status"] [role="treeitem"] button:not([aria-expanded])');
+      await act(async () => file?.click());
+      expect(document.querySelector('[data-testid="git-status"]')).toBeNull();
+      expect(document.querySelector('[data-testid="git-diff"]')).not.toBeNull();
+    } finally {
+      measure.mockRestore();
+    }
+  });
+
   it("wraps long diff lines at the pane instead of scrolling sideways when asked", async () => {
     await render(props(actions()));
     const line = () => document.querySelector<HTMLElement>('[data-testid="git-diff-line"]');

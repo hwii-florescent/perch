@@ -315,6 +315,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
     // The file the tree last asked this copy's diff to scroll to (each copy scrolls on its own).
     const [reveal, setReveal] = useState(null);
     function revealFile(path) {
+        setNarrowView("diff");
         // A one-file diff of another file would not hold it: show every file again, then scroll to it.
         if (activeFile && activeFile !== path)
             setActiveFile(undefined);
@@ -327,6 +328,9 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
     // runtime matches those against the window, and its `ResizeObserver` never fires, so the box is read on a timer.
     const rootRef = useRef(null);
     const [narrow, setNarrow] = useState(false);
+    // Narrow, the review shows the changes list or the diff, never one scroll box inside another.
+    const [narrowView, setNarrowView] = useState("diff");
+    const [notesOpen, setNotesOpen] = useResourceState(`review:${workspaceId}:notesOpen`, true);
     useEffect(() => {
         const read = () => {
             const width = rootRef.current?.getBoundingClientRect().width ?? 0;
@@ -480,6 +484,9 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
     const unresolvedCount = comments.filter((comment) => comment.status === "unresolved").length;
     const inlineCommentIds = useMemo(() => new Set(comments.filter((comment) => diffContainsCommentLine(comment, diff)).map((comment) => comment.id)), [comments, diff]);
     const unplacedComments = comments.filter((comment) => !inlineCommentIds.has(comment.id));
+    const hasNotes = unresolvedCount > 0 || unplacedComments.length > 0 || Boolean(batchPreview) || batchSending;
+    // A packet being prepared or sent always shows.
+    const notesShown = hasNotes && (notesOpen || Boolean(batchPreview) || batchSending);
     const stagedCount = changedFiles.filter((entry) => entry.staged).length;
     function askAboutDiff(file, range) {
         if (!diff || !onAskAgent)
@@ -710,9 +717,11 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
             ]
         }, comment.id));
     }
-    const rail = railOpen ? (_jsxs("aside", {
+    const showRail = narrow ? narrowView === "files" : railOpen;
+    const showDiff = !narrow || narrowView === "diff";
+    const rail = showRail ? (_jsxs("aside", {
         className: "flex min-h-0 w-[17rem] min-w-[13rem] shrink-0 flex-col [border-left:1px_solid_var(--git-border)]",
-        style: narrow ? { width: "100%", minWidth: 0, flex: "0 0 auto", borderLeft: "none", borderBottom: "1px solid var(--git-border)" } : undefined,
+        style: narrow ? { width: "100%", minWidth: 0, flex: "1 1 auto", borderLeft: "none" } : undefined,
         "data-testid": "git-status",
         children: [
             _jsxs("div", {
@@ -775,7 +784,6 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                     })),
                     _jsxs("div", {
                         className: "flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]",
-                        style: narrow ? { height: treeShown.length ? `${Math.min(treeShown.length * 1.5, 16)}rem` : undefined, flex: "none" } : undefined,
                         role: "tree",
                         "aria-label": "Changed paths",
                         children: [
@@ -959,13 +967,21 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                         role: "status",
                         children: statusState === "loading" ? "Updating…" : statusState === "error" ? "Status unavailable" : status?.dirty ? "Dirty" : "Clean"
                     }),
-                    _jsx(IconButton, {
-                        icon: "files",
-                        label: railOpen ? "Hide files" : "Show files",
-                        testId: "git-rail-toggle",
-                        pressed: railOpen,
-                        onClick: () => setRailOpen(!railOpen)
-                    }),
+                    narrow
+                        ? _jsx(IconButton, {
+                            icon: "files",
+                            label: showRail ? "Show diff" : "Show files",
+                            testId: "git-rail-toggle",
+                            pressed: showRail,
+                            onClick: () => setNarrowView(showRail ? "diff" : "files")
+                        })
+                        : _jsx(IconButton, {
+                            icon: "files",
+                            label: railOpen ? "Hide files" : "Show files",
+                            testId: "git-rail-toggle",
+                            pressed: railOpen,
+                            onClick: () => setRailOpen(!railOpen)
+                        }),
                     _jsx(IconButton, {
                         icon: "refresh",
                         label: "Refresh",
@@ -976,12 +992,11 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
             }),
             _jsxs("div", {
                 className: "flex min-h-0 min-w-0 flex-1 overflow-hidden",
-                style: narrow ? { flexDirection: "column", overflow: "auto" } : undefined,
+                style: narrow ? { flexDirection: "column" } : undefined,
                 children: [
                     narrow && rail,
-                    _jsxs("div", {
+                    showDiff && _jsxs("div", {
                         className: "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
-                        style: narrow ? { minHeight: "18rem", flex: "auto" } : undefined,
                         children: [
                             _jsxs("div", {
                                 className: "flex shrink-0 flex-wrap items-center gap-x-[0.4rem] gap-y-[0.3rem] px-[0.7rem] py-[0.4rem]",
@@ -1231,15 +1246,29 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                         }))] }))
                             }),
                             _jsxs("section", {
-                                className: "max-h-[40%] shrink-0 overflow-y-auto [border-top:1px_solid_var(--git-border)]",
+                                className: cn("shrink-0 [border-top:1px_solid_var(--git-border)]", notesShown && "max-h-[40%] overflow-y-auto"),
                                 "data-testid": "git-review-panel",
                                 children: [
                                     _jsxs("div", {
                                         className: "flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.35rem]",
                                         children: [
-                                            _jsx("strong", {
-                                                title: "Comments stay attached to their path and core-derived anchor. Stale or orphaned anchors require an explicit correction before sending.",
-                                                children: unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"
+                                            _jsxs("button", {
+                                                type: "button",
+                                                className: "flex min-w-0 items-center gap-[0.35rem] text-left text-fg [background:none] disabled:cursor-default",
+                                                "aria-expanded": hasNotes ? notesShown : undefined,
+                                                disabled: !hasNotes,
+                                                onClick: () => setNotesOpen(!notesOpen),
+                                                children: [
+                                                    hasNotes && _jsx("span", {
+                                                        className: "text-[0.6rem] text-subtext-0",
+                                                        "aria-hidden": "true",
+                                                        children: notesShown ? "▾" : "▸"
+                                                    }),
+                                                    _jsx("strong", {
+                                                        title: "Comments stay attached to their path and core-derived anchor. Stale or orphaned anchors require an explicit correction before sending.",
+                                                        children: unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"
+                                                    })
+                                                ]
                                             }),
                                             _jsx("button", {
                                                 type: "button",
@@ -1251,120 +1280,116 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                             })
                                         ]
                                     }),
-                                    unplacedComments.length > 0 && (_jsxs("div", {
-                                        className: "mx-[0.7rem] mb-[0.55rem] rounded-ui bg-[color-mix(in_srgb,var(--surface-1)_42%,transparent)] p-2",
-                                        "data-testid": "git-review-list",
-                                        children: [
-                                            _jsxs("div", {
-                                                className: "flex items-center justify-between gap-2",
+                                    notesShown && _jsxs(_Fragment, { children: [unplacedComments.length > 0 && (_jsxs("div", {
+                                                className: "mx-[0.7rem] mb-[0.55rem] rounded-ui bg-[color-mix(in_srgb,var(--surface-1)_42%,transparent)] p-2",
+                                                "data-testid": "git-review-list",
                                                 children: [
-                                                    _jsx("span", {
-                                                        className: EYEBROW,
-                                                        children: "Other review notes"
-                                                    }),
-                                                    _jsx("strong", { children: unplacedComments.length })
-                                                ]
-                                            }),
-                                            _jsx("p", {
-                                                className: `${SUMMARY} pt-[0.2rem] pb-[0.25rem]`,
-                                                children: "These notes are kept with their server anchor and are not placed on the current diff."
-                                            }),
-                                            unplacedComments.map((comment) => renderCommentCard(comment, false))
-                                        ]
-                                    })),
-                                    unresolvedCount > 0 && (_jsxs("div", {
-                                        className: "flex items-end gap-[0.55rem] px-[0.7rem] pb-[0.55rem]",
-                                        style: narrow ? { flexDirection: "column", alignItems: "stretch" } : undefined,
-                                        children: [
-                                            _jsxs("label", {
-                                                className: `${TB_FIELD} flex-1`,
-                                                children: [
-                                                    _jsx("span", { children: "Send to agent session" }),
-                                                    _jsx(Select, {
-                                                        ariaLabel: "Send to agent session",
-                                                        className: `${TB_INPUT} min-w-0 flex-1`,
-                                                        value: selectedSessionId ?? "",
-                                                        onChange: (value) => setSelectedSessionId(value || undefined),
-                                                        options: [
-                                                            { value: "", label: "Choose a session" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title}${session.agent ? ` · ${session.agent}` : ""}` }))
-                                                        ]
-                                                    })
-                                                ]
-                                            }),
-                                            _jsxs("label", {
-                                                className: `${TB_FIELD} flex-[2]`,
-                                                children: [
-                                                    _jsx("span", { children: "Request" }),
-                                                    _jsx("input", {
-                                                        className: `${TB_INPUT} min-w-0 flex-1`,
-                                                        value: reviewInstruction,
-                                                        onChange: (event) => setReviewInstruction(event.target.value)
-                                                    })
-                                                ]
-                                            })
-                                        ]
-                                    })),
-                                    batchPreview && (_jsxs("div", {
-                                        className: "mx-[0.7rem] mb-[0.7rem] rounded-ui bg-surface-0 p-[0.55rem]",
-                                        "data-testid": "git-review-packet",
-                                        children: [
-                                            _jsxs("div", {
-                                                className: "flex flex-wrap items-center gap-[0.55rem]",
-                                                children: [
-                                                    _jsx("strong", { children: "Packet ready" }),
-                                                    _jsxs("span", {
-                                                        className: "text-[0.7rem] text-subtext-0",
+                                                    _jsxs("div", {
+                                                        className: "flex items-center justify-between gap-2",
                                                         children: [
-                                                            batchPreview.comments.length,
-                                                            " anchored note",
-                                                            batchPreview.comments.length === 1 ? "" : "s"
+                                                            _jsx("span", {
+                                                                className: EYEBROW,
+                                                                children: "Other review notes"
+                                                            }),
+                                                            _jsx("strong", { children: unplacedComments.length })
                                                         ]
                                                     }),
-                                                    _jsx("code", {
-                                                        className: "ml-auto text-[0.62rem] text-subtext-0",
-                                                        children: batchPreview.packetId
-                                                    })
-                                                ]
-                                            }),
-                                            _jsx("pre", {
-                                                className: "my-[0.45rem] max-h-[8rem] overflow-auto border p-[0.45rem] text-[0.68rem] text-fg whitespace-pre-wrap [font-family:var(--font-mono)]",
-                                                children: batchPreview.markdown
-                                            }),
-                                            _jsxs("div", {
-                                                className: COMMENT_ACTIONS,
-                                                children: [
-                                                    _jsx("button", {
-                                                        type: "button",
-                                                        className: CA_BTN,
-                                                        onClick: sendBatch,
-                                                        disabled: batchSending,
-                                                        "data-testid": "git-review-send",
-                                                        children: batchSending ? "Sending…" : "Send one packet"
+                                                    _jsx("p", {
+                                                        className: `${SUMMARY} pt-[0.2rem] pb-[0.25rem]`,
+                                                        children: "These notes are kept with their server anchor and are not placed on the current diff."
                                                     }),
-                                                    _jsx("button", {
-                                                        type: "button",
-                                                        className: CA_BTN,
-                                                        onClick: () => setBatchPreview(null),
-                                                        disabled: batchSending,
-                                                        children: "Close preview"
+                                                    unplacedComments.map((comment) => renderCommentCard(comment, false))
+                                                ]
+                                            })), unresolvedCount > 0 && (_jsxs("div", {
+                                                className: "flex items-end gap-[0.55rem] px-[0.7rem] pb-[0.55rem]",
+                                                style: narrow ? { flexDirection: "column", alignItems: "stretch" } : undefined,
+                                                children: [
+                                                    _jsxs("label", {
+                                                        className: `${TB_FIELD} flex-1`,
+                                                        children: [
+                                                            _jsx("span", { children: "Send to agent session" }),
+                                                            _jsx(Select, {
+                                                                ariaLabel: "Send to agent session",
+                                                                className: `${TB_INPUT} min-w-0 flex-1`,
+                                                                value: selectedSessionId ?? "",
+                                                                onChange: (value) => setSelectedSessionId(value || undefined),
+                                                                options: [
+                                                                    { value: "", label: "Choose a session" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title}${session.agent ? ` · ${session.agent}` : ""}` }))
+                                                                ]
+                                                            })
+                                                        ]
+                                                    }),
+                                                    _jsxs("label", {
+                                                        className: `${TB_FIELD} flex-[2]`,
+                                                        children: [
+                                                            _jsx("span", { children: "Request" }),
+                                                            _jsx("input", {
+                                                                className: `${TB_INPUT} min-w-0 flex-1`,
+                                                                value: reviewInstruction,
+                                                                onChange: (event) => setReviewInstruction(event.target.value)
+                                                            })
+                                                        ]
                                                     })
                                                 ]
-                                            })
-                                        ]
-                                    })),
-                                    batchDelivery && batchDelivery.packetId === batchPreview?.packetId && _jsx("div", {
-                                        className: BANNER_INFO,
-                                        role: "status",
-                                        "data-testid": "git-review-delivery",
-                                        children: batchDelivery.delivery === "delivered" ? "Agent received the review packet."
-                                            : batchDelivery.delivery === "unconfirmed" ? "Delivery could not be confirmed. Check the agent conversation before starting another review."
-                                                : "Waiting for the agent to receive the review packet…"
-                                    }),
-                                    batchSending && (!batchDelivery || batchDelivery.packetId !== batchPreview?.packetId) && _jsx("div", {
-                                        className: BANNER_INFO,
-                                        role: "status",
-                                        children: "Sending review packet\u2026 waiting for server confirmation."
-                                    })
+                                            })), batchPreview && (_jsxs("div", {
+                                                className: "mx-[0.7rem] mb-[0.7rem] rounded-ui bg-surface-0 p-[0.55rem]",
+                                                "data-testid": "git-review-packet",
+                                                children: [
+                                                    _jsxs("div", {
+                                                        className: "flex flex-wrap items-center gap-[0.55rem]",
+                                                        children: [
+                                                            _jsx("strong", { children: "Packet ready" }),
+                                                            _jsxs("span", {
+                                                                className: "text-[0.7rem] text-subtext-0",
+                                                                children: [
+                                                                    batchPreview.comments.length,
+                                                                    " anchored note",
+                                                                    batchPreview.comments.length === 1 ? "" : "s"
+                                                                ]
+                                                            }),
+                                                            _jsx("code", {
+                                                                className: "ml-auto text-[0.62rem] text-subtext-0",
+                                                                children: batchPreview.packetId
+                                                            })
+                                                        ]
+                                                    }),
+                                                    _jsx("pre", {
+                                                        className: "my-[0.45rem] max-h-[8rem] overflow-auto border p-[0.45rem] text-[0.68rem] text-fg whitespace-pre-wrap [font-family:var(--font-mono)]",
+                                                        children: batchPreview.markdown
+                                                    }),
+                                                    _jsxs("div", {
+                                                        className: COMMENT_ACTIONS,
+                                                        children: [
+                                                            _jsx("button", {
+                                                                type: "button",
+                                                                className: CA_BTN,
+                                                                onClick: sendBatch,
+                                                                disabled: batchSending,
+                                                                "data-testid": "git-review-send",
+                                                                children: batchSending ? "Sending…" : "Send one packet"
+                                                            }),
+                                                            _jsx("button", {
+                                                                type: "button",
+                                                                className: CA_BTN,
+                                                                onClick: () => setBatchPreview(null),
+                                                                disabled: batchSending,
+                                                                children: "Close preview"
+                                                            })
+                                                        ]
+                                                    })
+                                                ]
+                                            })), batchDelivery && batchDelivery.packetId === batchPreview?.packetId && _jsx("div", {
+                                                className: BANNER_INFO,
+                                                role: "status",
+                                                "data-testid": "git-review-delivery",
+                                                children: batchDelivery.delivery === "delivered" ? "Agent received the review packet."
+                                                    : batchDelivery.delivery === "unconfirmed" ? "Delivery could not be confirmed. Check the agent conversation before starting another review."
+                                                        : "Waiting for the agent to receive the review packet…"
+                                            }), batchSending && (!batchDelivery || batchDelivery.packetId !== batchPreview?.packetId) && _jsx("div", {
+                                                className: BANNER_INFO,
+                                                role: "status",
+                                                children: "Sending review packet\u2026 waiting for server confirmation."
+                                            })] })
                                 ]
                             })
                         ]
