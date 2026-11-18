@@ -65,7 +65,9 @@ impl Default for SidebarSettings {
     fn default() -> Self {
         Self {
             organize: "project".into(),
-            sort_by_attention: true,
+            // Off, as the web's (`readFlag` is false when unset): on, the order moves by itself
+            // whenever an agent's state changes.
+            sort_by_attention: false,
             show_terminals: false,
             collapsed_projects: Vec::new(),
             folded_sessions: Vec::new(),
@@ -74,6 +76,22 @@ impl Default for SidebarSettings {
 }
 
 impl SidebarSettings {
+    /// Reads `file` as [`Self::to_json`] wrote it; a missing or broken file, or a field of the
+    /// wrong type, gives the defaults for what it could not read.
+    pub fn read(file: &std::path::Path) -> Self {
+        let mut settings = Self::default();
+        let kept: Value = std::fs::read(file)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        if let Some(object) = kept.as_object() {
+            for (key, value) in object {
+                let _ = settings.patch(&json!({ key: value }));
+            }
+        }
+        settings
+    }
+
     fn to_json(&self) -> Value {
         json!({
             "organize": self.organize,
@@ -252,6 +270,9 @@ struct Shared {
     held_clock: std::cell::Cell<Option<f64>>,
     attached: RefCell<Option<Attached>>,
     flush_queued: Cell<bool>,
+    /// Where the sidebar's view settings are kept on this device, as the web keeps them in
+    /// localStorage; without it they last as long as the window.
+    sidebar_file: RefCell<Option<std::path::PathBuf>>,
     /// Per copy key, how many times a copy under it was loaded: a reload is a new one, which
     /// holds nothing its predecessor held.
     loads: RefCell<HashMap<String, u64>>,
@@ -282,6 +303,7 @@ impl Perch {
             held_clock: std::cell::Cell::default(),
             attached: RefCell::default(),
             flush_queued: Cell::new(false),
+            sidebar_file: RefCell::default(),
             loads: RefCell::default(),
         }))
     }
@@ -803,6 +825,13 @@ impl Perch {
         self.0.data.borrow().sidebar.clone()
     }
 
+    /// Keeps the sidebar's view settings in `file` from now on, starting from what it holds.
+    pub fn keep_sidebar_in(&self, file: std::path::PathBuf) {
+        let kept = SidebarSettings::read(&file);
+        *self.0.sidebar_file.borrow_mut() = Some(file);
+        self.set_sidebar(kept);
+    }
+
     /// Shows theme `name` (the default when unknown) until the core names another. Call
     /// [`Self::flush`] after.
     pub fn set_theme(&self, name: &str) {
@@ -893,6 +922,14 @@ impl Perch {
     }
 
     fn bump(&self, part: &str) {
+        if part == SIDEBAR {
+            if let Some(file) = self.0.sidebar_file.borrow().as_ref() {
+                // A per-viewer convenience, as the web's localStorage: a failed write keeps the
+                // settings for this run.
+                let json = self.0.data.borrow().sidebar.to_json();
+                let _ = std::fs::write(file, json.to_string());
+            }
+        }
         self.0.revision.set(self.0.revision.get() + 1);
         *self
             .0
@@ -3286,6 +3323,38 @@ mod tests {
             !perch.known("leader.navigator"),
             "a leader follow-up is a key, not a command"
         );
+    }
+
+    #[test]
+    fn sidebar_settings_default_to_the_web_s_and_outlast_the_window() {
+        // Off by default: sorted by attention, the workspaces move whenever an agent's state does.
+        assert!(!SidebarSettings::default().sort_by_attention);
+        let dir = std::env::temp_dir().join(format!("perch-sidebar-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join(".sidebar.json");
+        let _ = std::fs::remove_file(&file);
+        let perch = Perch::new();
+        perch.keep_sidebar_in(file.clone());
+        assert_eq!(perch.sidebar(), SidebarSettings::default());
+        perch
+            .run_own("project.fold", &json!({"id": "p-1"}))
+            .unwrap()
+            .unwrap();
+        perch
+            .run_own("sidebar.organize", &json!({"organize": "list"}))
+            .unwrap()
+            .unwrap();
+        let again = SidebarSettings::read(&file);
+        assert_eq!(again.collapsed_projects, ["p-1"]);
+        assert_eq!(again.organize, "list");
+        // A broken file, or one wrong field, gives the defaults for what it could not read.
+        std::fs::write(&file, "{\"organize\": 3, \"sortByAttention\": true").unwrap();
+        assert_eq!(SidebarSettings::read(&file), SidebarSettings::default());
+        std::fs::write(&file, r#"{"organize": 3, "sortByAttention": true}"#).unwrap();
+        let partial = SidebarSettings::read(&file);
+        assert!(partial.sort_by_attention);
+        assert_eq!(partial.organize, "project");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

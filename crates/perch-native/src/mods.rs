@@ -602,6 +602,7 @@ fn start_host(
         }
     };
     let perch = perch::Perch::new();
+    perch.keep_sidebar_in(host.user_dir().join(".sidebar.json"));
     perch.register(&host);
     perch.attach(workspace, window, cx);
     crate::git::install(workspace, cx);
