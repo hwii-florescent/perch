@@ -332,6 +332,9 @@ export function copyFor(cx, screen) {
   }
   let rendering = false;
   let handle = null;
+  // A refresh that was cut past its time budget may have kept new snapshots without telling the listeners (the strip's
+  // slide among them, whose styles would then stay after the drag): the next refresh tells them.
+  let untold = false;
 
   // The strip's tabs slide while the window drags one of them (`perch.tabSlide()`, the offsets of the web's
   // `slideOffsets`), with the inline styles the web's `createSlide` sets, all put back when the drag ends however it
@@ -752,7 +755,8 @@ export function copyFor(cx, screen) {
     /** Reads every snapshot again; returns whether one changed. With `tell`, keeps the new values and tells the
      * subscribers; without, only looks. */
     refresh(tell) {
-      let changed = false;
+      let changed = untold;
+      if (tell) untold = true;
       for (const [key, entry] of watched) {
         entry.pending.push(...editors.events(key));
         if (!entry.pending.length) continue;
@@ -786,6 +790,7 @@ export function copyFor(cx, screen) {
         if (tell) diffSeqs.set(key, n);
       }
       if (changed && tell) for (const listener of [...listeners]) listener();
+      if (tell) untold = false;
       return changed;
     },
     /** Whether the window's sidebar settings changed since this copy last read or wrote them. */
