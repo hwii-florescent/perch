@@ -25,7 +25,7 @@ const TB_INPUT = "min-w-0 max-w-full rounded-ui bg-surface-1 px-[0.4rem] py-[0.3
 /** Line icons (24-unit grid, `|` between the strokes of one icon), drawn in `currentColor`. */
 const ICONS = {
     refresh: "M21 12a9 9 0 1 1-3-6.7L21 8|M21 3v5h-5",
-    files: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z|M15 3v18",
+    files: "M3 6.75A2.25 2.25 0 0 1 5.25 4.5h3.9l2.1 2.25h7.5A2.25 2.25 0 0 1 21 9v8.25a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 17.25z",
     untracked: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z|M14 2v6h6|M12 18v-6|M9 15h6",
     wrap: "M3 6h18|M3 12h15a3 3 0 1 1 0 6h-4|M16 16l-2 2 2 2|M3 18h7",
     whitespace: "M22 17v1c0 .5-.5 1-1 1H3c-.5 0-1-.5-1-1v-1",
@@ -38,8 +38,8 @@ const ICONS = {
 const ICON_BTN = "inline-flex shrink-0 items-center justify-center rounded-ui p-[0.35rem] disabled:cursor-not-allowed! disabled:opacity-[0.45] [&:hover:not(:disabled)]:bg-surface-1";
 const ICON_TONE = {
     default: "bg-transparent text-subtext-0 [&:hover:not(:disabled)]:text-fg",
-    on: "bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] text-accent",
-    primary: "bg-accent text-panel-bg",
+    on: "bg-transparent text-accent",
+    primary: "bg-transparent text-accent",
     danger: "bg-transparent text-red",
 };
 /** A button that is only an icon: its name is the `label` (the accessible name and the tooltip). `pressed` makes it a
@@ -767,7 +767,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                     })),
                     _jsxs("div", {
                         className: "flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]",
-                        style: narrow ? { maxHeight: "8.5rem", flex: "none" } : undefined,
+                        style: narrow ? { maxHeight: "16rem", flex: "none" } : undefined,
                         role: "tree",
                         "aria-label": "Changed paths",
                         children: [
