@@ -3557,11 +3557,13 @@ impl Workspace {
                 cx.notify();
             }
             "tabs.next" | "tab.next" => {
-                self.tabs.step(1);
+                let shown = self.drawn_strip(cx);
+                self.tabs.step(1, &shown);
                 self.after_change(cx);
             }
             "tabs.prev" | "tab.prev" => {
-                self.tabs.step(-1);
+                let shown = self.drawn_strip(cx);
+                self.tabs.step(-1, &shown);
                 self.after_change(cx);
             }
             "tabs.last" => self.select(None, cx)?,
@@ -3787,7 +3789,8 @@ impl Workspace {
 
     /// The tab at `index` (1 is first), or the last one.
     fn select(&mut self, index: Option<usize>, cx: &mut Context<Self>) -> Result<(), String> {
-        if !self.tabs.jump(index) {
+        let shown = self.drawn_strip(cx);
+        if !self.tabs.jump(index, &shown) {
             return Err("There are no tabs.".into());
         }
         self.after_change(cx);

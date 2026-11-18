@@ -389,31 +389,31 @@ impl Tabs {
         self.zoomed = false;
     }
 
-    /// The tab at `index` (1 is first), or the last when there are fewer, as the web jumps;
-    /// `None` is the last (`tabs.last`).
-    pub fn jump(&mut self, index: Option<usize>) -> bool {
+    /// The tab at `index` (1 is first) of `shown` (the strip as drawn: a hidden tab is not
+    /// counted), or the last when there are fewer, as the web jumps; `None` is the last (`tabs.last`).
+    pub fn jump(&mut self, index: Option<usize>, shown: &[String]) -> bool {
         let id = match index {
             Some(0) => None,
-            Some(n) => self.strip.get(n.min(self.strip.len()).wrapping_sub(1)),
-            None => self.strip.last(),
+            Some(n) => shown.get(n.min(shown.len()).wrapping_sub(1)),
+            None => shown.last(),
         };
         let id = id.cloned();
         id.is_some_and(|id| self.show(&id))
     }
 
-    /// The next (`1`) or previous (`-1`) tab, wrapping.
-    pub fn step(&mut self, by: isize) {
-        let len = self.strip.len() as isize;
+    /// The next (`1`) or previous (`-1`) tab of `shown` (the strip as drawn), wrapping.
+    pub fn step(&mut self, by: isize, shown: &[String]) {
+        let len = shown.len() as isize;
         if len == 0 {
             return;
         }
         let at = self
             .active
             .as_ref()
-            .and_then(|a| self.strip.iter().position(|t| t == a))
+            .and_then(|a| shown.iter().position(|t| t == a))
             .map_or(-1, |at| at as isize);
         let to = (at + by).rem_euclid(len) as usize;
-        let id = self.strip[to].clone();
+        let id = shown[to].clone();
         self.show(&id);
     }
 
@@ -1181,18 +1181,28 @@ mod tests {
     #[test]
     fn selecting_by_number_and_stepping_wrap() {
         let mut t = tabs(&["a", "b", "c"]);
-        assert!(t.jump(Some(1)));
+        let all = t.strip().to_vec();
+        assert!(t.jump(Some(1), &all));
         assert_eq!(t.active(), Some("a"));
-        assert!(!t.jump(Some(0)));
+        assert!(!t.jump(Some(0), &all));
         assert_eq!(t.active(), Some("a"));
-        assert!(t.jump(Some(4)), "past the end is the last");
+        assert!(t.jump(Some(4), &all), "past the end is the last");
         assert_eq!(t.active(), Some("c"));
-        assert!(t.jump(Some(1)));
-        assert!(t.jump(None));
+        assert!(t.jump(Some(1), &all));
+        assert!(t.jump(None, &all));
         assert_eq!(t.active(), Some("c"));
-        t.step(1);
+        t.step(1, &all);
         assert_eq!(t.active(), Some("a"));
-        t.step(-1);
+        t.step(-1, &all);
+        assert_eq!(t.active(), Some("c"));
+        // A tab the strip does not draw (a terminal's file while another session is shown) is
+        // neither counted nor stepped onto, as the web's.
+        let shown: Vec<String> = ["a", "c"].map(String::from).to_vec();
+        t.step(1, &shown);
+        assert_eq!(t.active(), Some("a"));
+        t.step(1, &shown);
+        assert_eq!(t.active(), Some("c"), "b is skipped");
+        assert!(t.jump(Some(2), &shown));
         assert_eq!(t.active(), Some("c"));
     }
 
