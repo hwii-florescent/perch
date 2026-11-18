@@ -1,8 +1,10 @@
 //! Perch native client: one window onto a running perch-core.
 //!
 //! Finds the core a headless run published in `core.json` (`PERCHD_DIR`, else `~/.perch/daemon`)
-//! and looks again after it restarts. `PERCH_NATIVE_TEST=1` opens the window without focus and
-//! sets it up from a script (`test_mode.rs`).
+//! and looks again after it restarts. Installed as the Perch app (`perch.app`, with `perch-core`
+//! beside it in `Contents/MacOS`), it starts that core when none is running, as the Tauri app ran
+//! its own. `PERCH_NATIVE_TEST=1` opens the window without focus and sets it up from a script
+//! (`test_mode.rs`).
 
 use futures::StreamExt;
 use gpui::{
@@ -24,6 +26,9 @@ fn main() {
             std::process::exit(2);
         }
     };
+    if test.is_none() {
+        start_bundled_core();
+    }
     let (command_tx, command_rx) = futures::channel::mpsc::unbounded();
     let (update_tx, mut update_rx) = futures::channel::mpsc::unbounded();
     // GPUI owns the main thread; the core connection runs on its own runtime.
@@ -173,6 +178,57 @@ fn announce(
     }
 }
 
+/// The Tauri app's port, kept so the core's address (and what the phone and the web keyed by it)
+/// stays the same when the native app takes over.
+const APP_PORT: &str = "47788";
+
+/// The `perch-core` shipped beside `exe` (`perch.app/Contents/MacOS/`), if there is one.
+fn bundled_core(exe: &std::path::Path) -> Option<std::path::PathBuf> {
+    Some(exe.parent()?.join("perch-core")).filter(|core| core.is_file())
+}
+
+/// Starts the `perch-core` shipped beside this executable when no core is running. It runs in its
+/// own process group, as the terminal daemon does, so closing the window leaves the phone and the
+/// terminals served; the next launch finds it through `core.json`. A development build has no
+/// `perch-core` beside it and starts nothing.
+/// ponytail: a core started here outlives the app; stop it with the app once there is a Quit.
+fn start_bundled_core() {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+    let dir = perchd::server::default_dir();
+    if perchd::agent_cli::read_core_file(&dir).is_ok() {
+        return;
+    }
+    let Some(core) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| bundled_core(&exe))
+    else {
+        return;
+    };
+    let log = std::fs::create_dir_all(&dir).and_then(|_| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("core.log"))
+    });
+    let mut start = Command::new(&core);
+    // A launch from a Perch terminal must not hand that terminal's identity to the core.
+    for name in ["PERCH_SESSION", "PERCH_TOKEN", "PERCH_SHELL"] {
+        start.env_remove(name);
+    }
+    if std::env::var_os("PERCH_PORT").is_none() {
+        start.env("PERCH_PORT", APP_PORT);
+    }
+    start
+        .process_group(0)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(log.map_or_else(|_| Stdio::null(), Stdio::from));
+    if let Err(error) = start.spawn() {
+        eprintln!("perch-native: could not start {}: {error}", core.display());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,6 +262,22 @@ mod tests {
             },
         );
         (played.get(), shown.take())
+    }
+
+    #[test]
+    fn only_a_core_shipped_beside_the_app_is_started() {
+        let dir = std::env::temp_dir().join(format!("perch-bundle-{}", std::process::id()));
+        let macos = dir.join("perch.app/Contents/MacOS");
+        std::fs::create_dir_all(&macos).unwrap();
+        let exe = macos.join("perch-native");
+        assert_eq!(
+            bundled_core(&exe),
+            None,
+            "a development build starts nothing"
+        );
+        std::fs::write(macos.join("perch-core"), "").unwrap();
+        assert_eq!(bundled_core(&exe), Some(macos.join("perch-core")));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     fn note(title: &str, body: &str, id: &str) -> Vec<(String, String, String)> {
