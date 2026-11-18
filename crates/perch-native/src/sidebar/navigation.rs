@@ -54,6 +54,8 @@ pub struct Store {
     pub sessions: Vec<SessionSummary>,
     /// Per computer, the core's order of project ids and session ids.
     pub order: HashMap<String, (Vec<String>, Vec<String>)>,
+    /// Each local workspace's shared tabs as the core last sent them (`workspace.tabs`).
+    pub shared_tabs: HashMap<String, perch_core::shared_tabs::SharedTabs>,
     pub needs_events: Vec<AttentionEvent>,
     /// The session the window told the core it shows.
     pub viewing: Option<String>,

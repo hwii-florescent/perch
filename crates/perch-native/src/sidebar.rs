@@ -17,6 +17,7 @@ pub mod navigation;
 
 use crate::settings::TerminalSettings;
 use perch_core::agent_fleet::TERMINAL_PROVIDER;
+use perch_core::shared_tabs::SharedTabs;
 use perch_core::protocol::{
     AttentionEvent, ProjectSummary, ServerMessage, SessionStatus, SessionSummary, SshHostEntry,
     WorkspaceState, WorkspaceSummary, WorktreeJob,
@@ -328,6 +329,8 @@ pub struct State {
     listed: bool,
     /// Per computer, the core's order of project ids and session ids.
     order: HashMap<String, (Vec<String>, Vec<String>)>,
+    /// Each local workspace's shared tabs as the core last sent them (`workspace.tabs`).
+    shared_tabs: HashMap<String, SharedTabs>,
     needs: HashSet<String>,
     needs_events: Vec<AttentionEvent>,
     providers: HashMap<String, Vec<Provider>>,
@@ -468,6 +471,8 @@ impl State {
         self.agent_lists.clear();
         // A change seen against a list from before the drop would be a guess.
         self.listed = false;
+        // The core sends every workspace's shared tabs again on connect.
+        self.shared_tabs.clear();
         self.revision += 1;
     }
 
@@ -698,6 +703,23 @@ impl State {
             } => {
                 self.order
                     .insert(host_id.clone(), (projects.clone(), sessions.clone()));
+            }
+            ServerMessage::WorkspaceTabs {
+                workspace_id,
+                revision,
+                strip,
+                sets,
+                ..
+            } => {
+                self.shared_tabs.insert(
+                    workspace_id.clone(),
+                    SharedTabs {
+                        workspace_id: workspace_id.clone(),
+                        revision: *revision,
+                        strip: strip.clone(),
+                        sets: sets.clone(),
+                    },
+                );
             }
             ServerMessage::AttentionSnapshot { events } => {
                 self.needs = needing(events);
@@ -966,6 +988,7 @@ impl State {
             workspaces: self.workspaces.clone(),
             sessions: self.sessions.clone(),
             order: self.order.clone(),
+            shared_tabs: self.shared_tabs.clone(),
             needs_events: self.needs_events.clone(),
             viewing: self.viewing.clone(),
             held: self.held.clone(),

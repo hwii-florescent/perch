@@ -256,6 +256,21 @@ pub fn set(
         if local.as_deref() != Some("local") {
             anyhow::bail!("workspace is not present on the local host");
         }
+        // A session id only marks a session's place; one that has ended goes.
+        let mut strip = strip.clone();
+        strip.retain(|id| {
+            id.contains('\n')
+                || tx
+                    .query_row(
+                        "SELECT 1 FROM sessions WHERE id = ?1 AND archived = 0",
+                        params![id],
+                        |_| Ok(()),
+                    )
+                    .optional()
+                    .is_ok_and(|row| row.is_some())
+        });
+        // A set left with a member that went is dropped with it.
+        let (strip, sets) = clean(workspace_id, &strip, &sets);
         let current = read(&tx, workspace_id)?;
         if base_revision.is_some_and(|base| base != current.revision) {
             return Ok(Written::Conflict(current));
@@ -286,6 +301,7 @@ mod tests {
         let (_, workspace) = db
             .create_project("local", "/tmp/demo", Some("demo"), None)
             .unwrap();
+        db.create_session("s1", "/tmp/demo").unwrap();
         (db, workspace.id)
     }
 
@@ -363,6 +379,7 @@ mod tests {
         let file = format!("{w}\na.rs");
         let strip = [
             "s1",
+            "ended-session",
             &file,
             "s1",
             &format!("{w}\n\0mod\nnotes:1"),
