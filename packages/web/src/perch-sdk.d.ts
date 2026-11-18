@@ -915,8 +915,8 @@ declare module "@perch/sdk" {
     /** The new comment's text. With `onSubmitComment`, the comment's field opens under the selection's last line
      * while lines are selected (`git-comment-composer`, `git-comment-body`). */
     commentBody?: string;
-    /** The add button's words; "Add comment" by default. */
-    commentLabel?: string;
+    /** Where the comment goes (the session chosen in the review header), shown beside the add button. */
+    commentTarget?: string;
     onCommentBody?(text: string): void;
     onSubmitComment?(): void;
     onCancelComment?(): void;

@@ -558,7 +558,7 @@ export function DiffView(props) {
     path: props.path ?? null, wrap: !!props.wrap, layout: props.layout ?? "auto", canAsk: !!props.onAskAgent, selection: props.selection ?? null,
     editingCommentId: props.editingCommentId ?? null, editingBody: props.editingBody ?? "", reveal: props.reveal ?? null,
     collapsed: props.collapsed ?? [], viewed: props.onToggleViewed ? (props.viewed ?? []) : null,
-    composer: props.selection && props.onSubmitComment ? { body: props.commentBody ?? "", label: props.commentLabel ?? "Add comment", canAsk: !!props.onAskLines } : null,
+    composer: props.selection && props.onSubmitComment ? { body: props.commentBody ?? "", target: props.commentTarget ?? null, canAsk: !!props.onAskLines } : null,
   });
   const comments = useHostSnapshot((p) => p.gitReview(workspaceId)).comments ?? [];
   const seq = useSyncExternalStore(subscribe, () => perch.diff.seq(key));

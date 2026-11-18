@@ -936,7 +936,7 @@ fn inline_composer(cx: HeadlessAppContext) -> HeadlessAppContext {
     };
     rig.set_props(props(Some(Composer {
         body: String::new(),
-        label: "Add comment".into(),
+        target: Some("Target session".into()),
         can_ask: false,
     })));
     let open = rig.row_bounds(line);

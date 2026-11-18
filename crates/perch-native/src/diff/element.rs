@@ -85,8 +85,8 @@ pub struct DiffProps {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Composer {
     pub body: String,
-    /// The add button's words (the screen names where the comment goes).
-    pub label: String,
+    /// Where the comment goes (the session chosen in the review header), shown beside the add button.
+    pub target: Option<String>,
     /// Offer Ask agent about the selected lines.
     pub can_ask: bool,
 }
@@ -1628,6 +1628,18 @@ impl Frame {
                     .items_center()
                     .justify_end()
                     .gap(px(0.3 * REM))
+                    .when_some(composer.target.clone(), |d, target| {
+                        d.child(
+                            div()
+                                .min_w_0()
+                                .mr_auto()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .text_size(px(0.66 * REM))
+                                .text_color(c.subtext)
+                                .child(format!("→ {target}")),
+                        )
+                    })
                     .when(composer.can_ask, |d| {
                         d.child(action(
                             "Ask agent about lines…".into(),
@@ -1637,7 +1649,7 @@ impl Frame {
                         ))
                     })
                     .child(action(
-                        composer.label.clone().into(),
+                        "Add comment".into(),
                         "git-comment-submit",
                         !empty,
                         DiffEvent::SubmitComment,

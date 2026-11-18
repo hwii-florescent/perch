@@ -15915,7 +15915,7 @@ function dp(n) {
     reveal: n.reveal ?? null,
     collapsed: n.collapsed ?? [],
     viewed: n.onToggleViewed ? n.viewed ?? [] : null,
-    composer: n.selection && n.onSubmitComment ? { body: n.commentBody ?? "", label: n.commentLabel ?? "Add comment", canAsk: !!n.onAskLines } : null
+    composer: n.selection && n.onSubmitComment ? { body: n.commentBody ?? "", target: n.commentTarget ?? null, canAsk: !!n.onAskLines } : null
   });
   const u = Ht((p) => p.gitReview(a)).comments ?? [], m = X.useSyncExternalStore(np, () => o.diff.seq(r)), f = X.useRef(n);
   return f.current = n, Lt(() => {

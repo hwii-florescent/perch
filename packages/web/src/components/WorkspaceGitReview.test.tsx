@@ -312,7 +312,7 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
     // The session chosen in the header is where the comment goes.
     expect(document.querySelector('header [data-testid="git-review-session"]')).not.toBeNull();
     const add = [...composer!.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Add"));
-    expect(add?.textContent).toBe("Add to review → Target session");
+    expect(composer?.querySelector('[data-testid="git-comment-target"]')?.textContent).toBe("→ Target session");
     await act(async () => add?.click());
     expect(actionSet.createComment).toHaveBeenCalledWith({ path: "src/main.ts", side: "new", start: 1, end: 1, body: "Rename this" });
     expect(document.querySelector('[data-testid="git-comment-composer"]')).toBeNull();

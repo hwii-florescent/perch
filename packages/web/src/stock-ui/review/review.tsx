@@ -991,7 +991,7 @@ export function WorkspaceGitReview({
                   onSelectLine={selectLine}
                   onAddComment={(path, side, line) => { selectLine(path, side, line, false); startComment(); }}
                   commentBody={commentBody}
-                  commentLabel={targetSession ? `Add to review → ${targetSession.title}` : "Add comment"}
+                  commentTarget={targetSession?.title}
                   onCommentBody={setCommentBody}
                   onSubmitComment={submitComment}
                   onCancelComment={() => { setSelection(null); setAnchor(null); }}

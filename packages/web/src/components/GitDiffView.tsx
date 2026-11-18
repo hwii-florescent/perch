@@ -141,8 +141,9 @@ export function DiffView(props: Sdk.DiffViewProps) {
           aria-label="New review comment"
         />
         <div className={`${COMMENT_ACTIONS} mt-[0.4rem]`}>
+          {props.commentTarget && <span className="mr-auto min-w-0 overflow-hidden text-[0.66rem] text-ellipsis whitespace-nowrap text-subtext-0" data-testid="git-comment-target">→ {props.commentTarget}</span>}
           {props.onAskLines && <button type="button" className={CA_BTN} onClick={() => props.onAskLines?.()}>Ask agent about lines…</button>}
-          <button type="button" className={CA_BTN} disabled={!props.commentBody?.trim()} onClick={() => props.onSubmitComment?.()}>{props.commentLabel ?? "Add comment"}</button>
+          <button type="button" className={CA_BTN} disabled={!props.commentBody?.trim()} onClick={() => props.onSubmitComment?.()}>Add comment</button>
           <button type="button" className={CA_BTN} onClick={() => props.onCancelComment?.()}>Cancel</button>
         </div>
       </div>

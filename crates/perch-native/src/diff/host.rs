@@ -30,7 +30,7 @@ export function setProps(key: string, props: {
   selection?: { path: string; side: string; start: number; end: number } | null;
   editingCommentId?: string | null; editingBody?: string;
   reveal?: { path: string; seq: number } | null;
-  composer?: { body: string; label: string; canAsk?: boolean } | null;
+  composer?: { body: string; target?: string | null; canAsk?: boolean } | null;
   collapsed?: string[]; viewed?: string[] | null;
 }): void;
 export function events(key: string): Array<{ type: string; [field: string]: unknown }>;
@@ -391,11 +391,10 @@ fn props_of(props: &HostValue) -> Result<DiffProps, HostError> {
                     .and_then(HostValue::as_str)
                     .unwrap_or("")
                     .to_string(),
-                label: c
-                    .get("label")
+                target: c
+                    .get("target")
                     .and_then(HostValue::as_str)
-                    .unwrap_or("Add comment")
-                    .to_string(),
+                    .map(str::to_string),
                 can_ask: c
                     .get("canAsk")
                     .and_then(HostValue::as_bool)
