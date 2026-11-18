@@ -5,7 +5,7 @@
 //! (`perch.navigation(options)`, `perch.hosts()`, ...), which must return the same object until the data changes.
 //! Menus and dialogs Perch draws itself (session menu, new session menu, confirm, select, folder browser,
 //! instructions, memory) open through `perch.openOverlay(kind, props)`; their callbacks are plain functions.
-import { createElement, Fragment, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createElement, Fragment, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { cn } from "../../../../packages/web/src/lib/cn.ts";
 import { beginSlideDrag } from "../../../../packages/web/src/slideDrag.ts";
 import { formatCombo } from "../../../../packages/web/src/keyCombo.ts";
@@ -542,10 +542,12 @@ export function useGitReview(workspaceId) {
 }
 
 /** The review's diff, drawn natively (the `diff` engine): the diff and comments come from the window's Git store by
- * `workspaceId`; the props are view state, and what the person does comes back through the callbacks. */
+ * `workspaceId`; the props are view state, and what the person does comes back through the callbacks. Each copy of
+ * the screen (the drawer's Git and a review tab of one workspace) has a view of its own, so each scrolls, measures
+ * and hears events on its own; the data stays the workspace's. */
 export function DiffView(props) {
   const { workspaceId } = props;
-  const key = `diff:${workspaceId}`;
+  const key = `diff:${workspaceId}:${useId()}`;
   const perch = host();
   const opened = useRef(null);
   if (opened.current !== key) {

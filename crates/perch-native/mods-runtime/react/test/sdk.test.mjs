@@ -116,3 +116,27 @@ test("a create's agent starts once its workspace is listed, and never once the w
   held();
   assert.deepEqual([late.started, closed.started], [[], []]);
 });
+
+test("two copies of one workspace's review each get a diff view of their own", async () => {
+  const { runtime } = await loadSidebar();
+  const { createElement: h } = await import("react");
+  const sdk = await import("@perch/sdk");
+  const opened = [];
+  const review = { comments: [] };
+  const perch = {
+    isMac: true, render() {}, error: (e) => { throw e; }, subscribe: () => () => {},
+    gitReview: () => review,
+    diff: { open: (key, options) => opened.push([key, options.workspaceId]), setProps() {}, events: () => [], seq: () => 0 },
+  };
+  globalThis.perch = perch;
+  const props = { workspaceId: "w", wrap: false, selection: null, editingCommentId: null, editingBody: "" };
+  const Two = () => h("div", null, h(sdk.DiffView, props), h(sdk.DiffView, props));
+  const handle = runtime.mount(perch, Two, { container: { width: 400, height: 400 } });
+  try {
+    assert.equal(opened.length, 2);
+    assert.ok(opened.every(([key, ws]) => key.startsWith("diff:w:") && ws === "w"), JSON.stringify(opened));
+    assert.notEqual(opened[0][0], opened[1][0], "each copy has its own key");
+  } finally {
+    handle.unmount();
+  }
+});

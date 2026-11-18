@@ -15903,7 +15903,7 @@ function kx(n) {
   }), [a, r]);
 }
 function dp(n) {
-  const { workspaceId: a } = n, r = `diff:${a}`, s = bt(), o = X.useRef(null);
+  const { workspaceId: a } = n, r = `diff:${a}:${X.useId()}`, s = bt(), o = X.useRef(null);
   o.current !== r && (s.diff.open(r, { workspaceId: a }), o.current = r), s.diff.setProps(r, {
     path: n.path ?? null,
     wrap: !!n.wrap,
