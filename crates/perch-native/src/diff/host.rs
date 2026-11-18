@@ -106,6 +106,17 @@ impl Diffs {
         self.0.borrow().docs.get(key).map(|d| d.view.clone())
     }
 
+    /// Every open view of workspace `workspace_id` (one per copy of the screen), for Rust callers (tests).
+    pub fn views_of(&self, workspace_id: &str) -> Vec<Entity<DiffView>> {
+        self.0
+            .borrow()
+            .docs
+            .values()
+            .filter(|d| d.workspace_id == workspace_id)
+            .map(|d| d.view.clone())
+            .collect()
+    }
+
     /// The events queued for `key` since the last call, oldest first.
     pub fn drain(&self, key: &str) -> Vec<HostValue> {
         self.0
