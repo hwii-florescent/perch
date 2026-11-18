@@ -113,6 +113,16 @@ if [ -d "$APP" ] && [ "${PERCH_ALLOW_IDENTITY_CHANGE:-}" != 1 ]; then
 fi
 
 quit_app
+# The core serves the web build of the bundle it started from, so a new install restarts it (the
+# window starts the new one). Terminals live in perchd and survive; phones reconnect. `--quit` above
+# leaves the core running, so the phone stays reachable with the window closed.
+core_pids() { pgrep -fx "$APP/Contents/MacOS/perch-core" || true; }
+if [ -n "$(core_pids)" ]; then
+  echo "Restarting the core…"
+  kill $(core_pids) 2>/dev/null || true
+  i=0; while [ -n "$(core_pids)" ] && [ "$i" -lt 10 ]; do sleep 0.5; i=$((i + 1)); done
+  [ -z "$(core_pids)" ] || kill -9 $(core_pids) 2>/dev/null || true
+fi
 
 # Move old bundles aside, never overwrite in place: a daemon may still run from one.
 keep="$HOME/.perch/replaced-apps/$(date +%Y%m%d-%H%M%S)"
