@@ -10,6 +10,8 @@
 //! This holds ids and shapes only. The window keeps what each id means (its terminal) and draws
 //! [`Tabs::visible`].
 
+use serde::{Deserialize, Serialize};
+
 /// Most panes a split set holds.
 pub const MAX_SPLIT: usize = 4;
 
@@ -20,7 +22,7 @@ pub const MIN_PANE_PX: f32 = 54.0;
 const MAX_PLACES: usize = 50;
 
 /// Panes side by side (`Row`) or stacked (`Col`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dir {
     Row,
     Col,
@@ -70,7 +72,7 @@ impl Side {
 }
 
 /// A pane (a tab's id) or a row or column of nodes with size fractions summing to 1.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Node {
     Pane(String),
     Split {
@@ -95,6 +97,20 @@ impl Node {
 
     fn has(&self, id: &str) -> bool {
         self.leaves().contains(&id)
+    }
+
+    /// Whether a split read back from disk is one this module could have made: every row or
+    /// column has two or more children and a size for each.
+    fn well_formed(&self) -> bool {
+        match self {
+            Node::Pane(_) => true,
+            Node::Split { kids, sizes, .. } => {
+                kids.len() >= 2
+                    && kids.len() == sizes.len()
+                    && sizes.iter().all(|s| s.is_finite() && *s > 0.0)
+                    && kids.iter().all(Node::well_formed)
+            }
+        }
     }
 
     /// `self` without pane `id`: a split left with one child becomes that child, and a child of
@@ -238,14 +254,17 @@ pub fn layout(node: &Node, rect: Rect, out: &mut Vec<(String, Rect)>) {
     }
 }
 
-/// The tabs, the split sets, and which tab has the keyboard.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// The tabs, the split sets, and which tab has the keyboard. Kept on this device per workspace
+/// (zoom aside), as the web keeps its strip order and split sets in `localStorage`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Tabs {
     strip: Vec<String>,
     /// Each a split of two or more tabs; a tab is in at most one.
     sets: Vec<Node>,
     active: Option<String>,
     /// The focused pane fills the area (`panes.zoom`).
+    #[serde(skip)]
     zoomed: bool,
     /// Preview tabs (a file opened by a single click, drawn in italics): the next previewed
     /// file of the same workspace takes its place until it is kept.
@@ -291,23 +310,65 @@ impl Tabs {
         }
     }
 
-    /// Add a tab after `after`'s family (the tabs right after it whose id `family` accepts),
-    /// leaving the keyboard where it is. One already open stays where it is.
-    pub fn add_after(&mut self, id: &str, after: &str, family: impl Fn(&str) -> bool) {
-        if self.contains(id) {
-            return;
+    /// Whether tab `id` is a session's: every other tab (a file, review or page) names its
+    /// workspace and a line break in its id, and a session id never holds one.
+    pub fn is_session(id: &str) -> bool {
+        !id.contains('\n')
+    }
+
+    /// The workspace's sessions are `live`, in its strip's order (the core's), as the web derives
+    /// its strip from the core's list (`workspaceTabs`): each one not `away` (closed here without
+    /// ending) has a tab, the session tabs take `live`'s order in their own slots and every other
+    /// tab keeps its slot. A session tab `live` does not hold leaves when `left` says so (the
+    /// caller knows whether the core's list says it is gone). Returns the session tabs that left.
+    pub fn sync_sessions(
+        &mut self,
+        live: &[String],
+        left: impl Fn(&str) -> bool,
+        away: impl Fn(&str) -> bool,
+    ) -> Vec<String> {
+        let gone: Vec<String> = self
+            .strip
+            .iter()
+            .filter(|id| Self::is_session(id) && !live.contains(id) && left(id))
+            .cloned()
+            .collect();
+        for id in &gone {
+            self.close(id);
         }
-        let at = match self.strip.iter().position(|tab| tab == after) {
-            Some(lead) => {
-                lead + 1
-                    + self.strip[lead + 1..]
-                        .iter()
-                        .take_while(|tab| family(tab))
-                        .count()
+        for id in live.iter().filter(|id| !away(id)) {
+            self.append(id);
+        }
+        self.follow(live);
+        gone
+    }
+
+    /// `self` as read back from disk, made consistent: one tab per id, previews and the active
+    /// tab among the tabs, and only splits of tabs in the strip that this module could have made
+    /// (a tab in one set at most, no more than [`MAX_SPLIT`] panes).
+    pub fn restored(mut self) -> Self {
+        let mut seen = std::collections::HashSet::new();
+        self.strip.retain(|id| seen.insert(id.clone()));
+        let strip = self.strip.clone();
+        self.previews.retain(|id| strip.contains(id));
+        let mut placed = std::collections::HashSet::new();
+        self.sets.retain(|set| {
+            let leaves = set.leaves();
+            let fits = matches!(set, Node::Split { .. })
+                && set.well_formed()
+                && leaves.len() <= MAX_SPLIT
+                && leaves.iter().all(|id| strip.iter().any(|t| t == id))
+                && leaves.iter().all(|id| !placed.contains(*id));
+            if fits {
+                placed.extend(leaves.iter().map(|id| id.to_string()));
             }
-            None => self.strip.len(),
-        };
-        self.strip.insert(at, id.into());
+            fits
+        });
+        if self.active.as_ref().is_some_and(|a| !strip.contains(a)) {
+            self.active = None;
+        }
+        self.zoomed = false;
+        self
     }
 
     /// Give a tab the keyboard. Leaving a zoomed pane for another tab un-zooms.
@@ -328,31 +389,31 @@ impl Tabs {
         self.zoomed = false;
     }
 
-    /// The tab at `index` (1 is first), or the last when there are fewer, as the web jumps;
-    /// `None` is the last (`tabs.last`).
-    pub fn jump(&mut self, index: Option<usize>) -> bool {
+    /// The tab at `index` (1 is first) of `shown` (the strip as drawn: a hidden tab is not
+    /// counted), or the last when there are fewer, as the web jumps; `None` is the last (`tabs.last`).
+    pub fn jump(&mut self, index: Option<usize>, shown: &[String]) -> bool {
         let id = match index {
             Some(0) => None,
-            Some(n) => self.strip.get(n.min(self.strip.len()).wrapping_sub(1)),
-            None => self.strip.last(),
+            Some(n) => shown.get(n.min(shown.len()).wrapping_sub(1)),
+            None => shown.last(),
         };
         let id = id.cloned();
         id.is_some_and(|id| self.show(&id))
     }
 
-    /// The next (`1`) or previous (`-1`) tab, wrapping.
-    pub fn step(&mut self, by: isize) {
-        let len = self.strip.len() as isize;
+    /// The next (`1`) or previous (`-1`) tab of `shown` (the strip as drawn), wrapping.
+    pub fn step(&mut self, by: isize, shown: &[String]) {
+        let len = shown.len() as isize;
         if len == 0 {
             return;
         }
         let at = self
             .active
             .as_ref()
-            .and_then(|a| self.strip.iter().position(|t| t == a))
+            .and_then(|a| shown.iter().position(|t| t == a))
             .map_or(-1, |at| at as isize);
         let to = (at + by).rem_euclid(len) as usize;
-        let id = self.strip[to].clone();
+        let id = shown[to].clone();
         self.show(&id);
     }
 
@@ -1120,18 +1181,28 @@ mod tests {
     #[test]
     fn selecting_by_number_and_stepping_wrap() {
         let mut t = tabs(&["a", "b", "c"]);
-        assert!(t.jump(Some(1)));
+        let all = t.strip().to_vec();
+        assert!(t.jump(Some(1), &all));
         assert_eq!(t.active(), Some("a"));
-        assert!(!t.jump(Some(0)));
+        assert!(!t.jump(Some(0), &all));
         assert_eq!(t.active(), Some("a"));
-        assert!(t.jump(Some(4)), "past the end is the last");
+        assert!(t.jump(Some(4), &all), "past the end is the last");
         assert_eq!(t.active(), Some("c"));
-        assert!(t.jump(Some(1)));
-        assert!(t.jump(None));
+        assert!(t.jump(Some(1), &all));
+        assert!(t.jump(None, &all));
         assert_eq!(t.active(), Some("c"));
-        t.step(1);
+        t.step(1, &all);
         assert_eq!(t.active(), Some("a"));
-        t.step(-1);
+        t.step(-1, &all);
+        assert_eq!(t.active(), Some("c"));
+        // A tab the strip does not draw (a terminal's file while another session is shown) is
+        // neither counted nor stepped onto, as the web's.
+        let shown: Vec<String> = ["a", "c"].map(String::from).to_vec();
+        t.step(1, &shown);
+        assert_eq!(t.active(), Some("a"));
+        t.step(1, &shown);
+        assert_eq!(t.active(), Some("c"), "b is skipped");
+        assert!(t.jump(Some(2), &shown));
         assert_eq!(t.active(), Some("c"));
     }
 
@@ -1304,5 +1375,69 @@ mod tests {
         assert_eq!(Side::parse("below"), Some(Side::Down));
         assert_eq!(Side::parse("right"), Some(Side::Right));
         assert_eq!(Side::parse("diagonal"), None);
+    }
+
+    fn ids(list: &[&str]) -> Vec<String> {
+        list.iter().map(|id| id.to_string()).collect()
+    }
+
+    #[test]
+    fn the_core_s_sessions_fill_the_strip_around_files_and_splits() {
+        let mut t = Tabs::default();
+        assert!(t
+            .sync_sessions(&ids(&["a1", "a2", "t1"]), |_| true, |_| false)
+            .is_empty());
+        assert_eq!(t.strip(), ["a1", "a2", "t1"]);
+        assert_eq!(t.active(), None, "nothing takes the keyboard");
+
+        t.open("w\na.rs");
+        t.show("a2");
+        assert!(t.split("w\na.rs", Side::Right));
+        // The core reorders, lists a new session and stops listing t1; one closed here stays out.
+        let gone = t.sync_sessions(&ids(&["a2", "a1", "a3", "a4"]), |_| true, |id| id == "a4");
+        assert_eq!(gone, ["t1"]);
+        assert_eq!(t.strip(), ["a2", "a1", "w\na.rs", "a3"]);
+        assert_eq!(t.active(), Some("w\na.rs"));
+        assert!(t.in_split("a2") && t.in_split("w\na.rs"));
+
+        // A tab the caller does not know to be gone stays.
+        assert!(t.sync_sessions(&[], |_| false, |_| false).is_empty());
+        assert_eq!(t.strip().len(), 4);
+    }
+
+    #[test]
+    fn a_strip_read_back_keeps_what_it_can_make_sense_of() {
+        let mut t = tabs(&[
+            "s1",
+            "w\x00review",
+            "w\na.rs",
+            "w\x00browser\nhttps://perch.dev",
+        ]);
+        t.show("s1");
+        assert!(t.join("s1", "w\na.rs"));
+        assert!(t.open_preview("w\nb.rs", |_| false).is_none());
+        let text = serde_json::to_string(&t).unwrap();
+        let back: Tabs = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.clone().restored(), t);
+
+        // A set naming a tab that is not there, a lone pane, a pane in two sets, an active tab
+        // gone: each is dropped, the rest kept.
+        let broken = serde_json::json!({
+            "strip": ["a", "b", "c", "a"],
+            "sets": [
+                {"Split": {"dir": "Row", "kids": [{"Pane": "a"}, {"Pane": "x"}], "sizes": [0.5, 0.5]}},
+                {"Pane": "a"},
+                {"Split": {"dir": "Col", "kids": [{"Pane": "a"}, {"Pane": "b"}], "sizes": [0.5]}},
+                {"Split": {"dir": "Col", "kids": [{"Pane": "a"}, {"Pane": "b"}], "sizes": [0.5, 0.5]}},
+                {"Split": {"dir": "Row", "kids": [{"Pane": "b"}, {"Pane": "c"}], "sizes": [0.5, 0.5]}}
+            ],
+            "active": "gone",
+            "previews": ["c", "gone"]
+        });
+        let t: Tabs = serde_json::from_value::<Tabs>(broken).unwrap().restored();
+        assert_eq!(t.strip(), ["a", "b", "c"]);
+        assert_eq!(t.active(), None);
+        assert_eq!(t.previews(), ["c"]);
+        assert!(t.in_split("a") && t.in_split("b") && !t.in_split("c"));
     }
 }

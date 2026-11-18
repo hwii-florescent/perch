@@ -80,7 +80,11 @@ pub struct Chrome {
     last: Option<Tools>,
     sidebar_width: Option<f32>,
     tools_width: Option<f32>,
-    /// The regular file tabs of the strip (`workspace\npath`), opened again after a restart.
+    /// Every workspace's strip as the window keeps it (`Workspace::keep_tabs`), opened again after
+    /// a restart.
+    tabs: Value,
+    /// The regular file tabs an older build kept (`workspace\npath`), read once in place of
+    /// `tabs`.
     files: Vec<String>,
     /// The file these are kept in; without it they last as long as the window.
     file: Option<PathBuf>,
@@ -105,6 +109,7 @@ impl Chrome {
             last: tools,
             sidebar_width: width("sidebarWidth"),
             tools_width: width("toolsWidth"),
+            tabs: kept["tabs"].clone(),
             files: kept["files"]
                 .as_array()
                 .into_iter()
@@ -170,15 +175,20 @@ impl Chrome {
         self.tools_width = px.map(f32::round);
     }
 
-    /// The regular file tabs kept from the last run.
+    /// The regular file tabs an older build kept.
     pub fn files(&self) -> &[String] {
         &self.files
     }
 
-    /// Keeps the strip's regular file tabs (written only when they changed).
-    pub fn set_files(&mut self, files: Vec<String>) {
-        if self.files != files {
-            self.files = files;
+    /// The strips kept from the last run; null when there were none.
+    pub fn tabs(&self) -> &Value {
+        &self.tabs
+    }
+
+    /// Keeps the strips (written only when they changed).
+    pub fn set_tabs(&mut self, tabs: Value) {
+        if self.tabs != tabs {
+            self.tabs = tabs;
             self.keep();
         }
     }
@@ -197,8 +207,8 @@ impl Chrome {
         if let Some(width) = self.tools_width {
             kept["toolsWidth"] = json!(width);
         }
-        if !self.files.is_empty() {
-            kept["files"] = json!(self.files);
+        if !self.tabs.is_null() {
+            kept["tabs"] = self.tabs.clone();
         }
         if let Some(dir) = file.parent() {
             let _ = std::fs::create_dir_all(dir);

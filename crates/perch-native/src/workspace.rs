@@ -9,6 +9,12 @@
 //! following its shell, ready for when its tab is shown again.
 //!
 //! The layout is this window's alone, as the web's is per viewer: it is not sent to the core.
+//! Each workspace has its own strip. Its sessions come from the core's list, as the web derives
+//! them (`workspaceTabs`): every session of the workspace has a tab, in the core's order, and a
+//! terminal is attached only when its tab is shown. Its other tabs (files, review, pages), their
+//! places among the sessions, its splits and its active tab are kept on this device in the
+//! window's state file and come back after a relaunch. The drawer's Files and Git follow the
+//! focused terminal's folder once its shell leaves the workspace's (`terminal_scope_id`).
 //! Splitting starts a new terminal session on this computer and shows it beside the focused one.
 //! Closing a tab ends its session, as the web does (`closeGuard.ts`): the core is asked to delete
 //! it over the terminal's own connection, and the tab goes only when the core says it is deleted.
@@ -87,13 +93,14 @@ const END_WAIT: Duration = Duration::from_secs(5);
 const REATTACH_FIRST: Duration = Duration::from_millis(250);
 const REATTACH_LAST: Duration = Duration::from_secs(5);
 
-/// Where each workspace's last shown session is kept: beside the core's database, as `native-mods/` is.
-fn last_tabs_file() -> std::path::PathBuf {
-    crate::mods::user_dir().with_file_name("native-last-tabs.json")
-}
-
-fn load_last_tabs() -> HashMap<String, String> {
-    std::fs::read(last_tabs_file())
+/// Where an older build kept each workspace's last shown session, beside `native-mods/`: read once,
+/// when the window's state has no strips yet, as their active tabs.
+fn old_last_tabs(state_file: &std::path::Path) -> HashMap<String, String> {
+    let file = state_file
+        .parent()
+        .unwrap_or(state_file)
+        .with_file_name("native-last-tabs.json");
+    std::fs::read(file)
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
@@ -212,9 +219,6 @@ pub struct Workspace {
     tabs: Tabs,
     /// The workspace `tabs` and `history` belong to; empty before any is shown.
     tabs_of: String,
-    /// The session each workspace last showed, kept across launches (`last_tabs_file`): what opening a workspace
-    /// that has no tab yet shows.
-    last_tabs: HashMap<String, String>,
     /// The strips and histories of the other workspaces, each as it was left.
     parked: HashMap<String, (Tabs, History)>,
     panes: HashMap<String, Pane>,
@@ -223,6 +227,9 @@ pub struct Workspace {
     /// Sessions whose tab the person closed here without ending them: not opened again with their
     /// lead until they are picked.
     put_away: HashSet<String>,
+    /// Sessions the core said ended whose tab went: not opened again while the core's list still
+    /// holds them (it drops them a moment later, or keeps one whose shell exited).
+    ended: HashSet<String>,
     /// The zoom every terminal in the window is at.
     zoom: Zoom,
     /// Counts the changes of what is on screen, for [`Pane::seen`].
@@ -348,8 +355,7 @@ impl Workspace {
         // The sidebar's own changes (hiding it, a count, a session's state) redraw the window.
         let observed = cx.observe(&sidebar, |this, sidebar, cx| {
             this.close_deleted(cx);
-            this.open_sub_sessions(cx);
-            this.follow_order(cx);
+            this.sync_strips(cx);
             let connected = sidebar.read(cx).model().connected;
             this.files_connected(connected, cx);
             this.refresh_bridge(cx);
@@ -362,11 +368,11 @@ impl Workspace {
             locate: None,
             tabs: Tabs::default(),
             tabs_of: String::new(),
-            last_tabs: load_last_tabs(),
             parked: HashMap::new(),
             panes: HashMap::new(),
             pending_split: None,
             put_away: HashSet::new(),
+            ended: HashSet::new(),
             zoom: Zoom::default(),
             tick: 0,
             viewport_height: 0.0,
@@ -421,19 +427,46 @@ impl Workspace {
         self
     }
 
-    /// Keeps the drawer's tab and the column widths in `file`, on this device.
+    /// Keeps the drawer's tab, the column widths and every workspace's strip in `file`, on this
+    /// device. A file from before strips were kept gives its regular file tabs and each
+    /// workspace's last shown session instead.
     pub fn with_window_state(mut self, file: std::path::PathBuf) -> Self {
-        self.chrome = Chrome::kept_in(file);
+        self.chrome = Chrome::kept_in(file.clone());
+        let kept = self.chrome.tabs().clone();
+        if let Some(strips) = kept["strips"].as_object() {
+            for (workspace, tabs) in strips {
+                let Ok(tabs) = serde_json::from_value::<Tabs>(tabs.clone()) else {
+                    continue;
+                };
+                if !workspace.is_empty() {
+                    self.parked
+                        .insert(workspace.clone(), (tabs.restored(), History::default()));
+                }
+            }
+            self.put_away = kept["putAway"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|id| id.as_str().map(str::to_string))
+                .collect();
+            return self;
+        }
         for id in self.chrome.files().to_vec() {
             let workspace = id.split_once('\n').map_or("", |(w, _)| w).to_string();
             self.parked.entry(workspace).or_default().0.append(&id);
+        }
+        for (workspace, id) in old_last_tabs(&file) {
+            let tabs = &mut self.parked.entry(workspace).or_default().0;
+            tabs.append(&id);
+            tabs.show(&id);
         }
         self
     }
 
     /// Show workspace `key`'s strip and history: the one on screen is put aside as it is (its
-    /// active tab too) and the workspace's own comes back, empty when it never had one.
-    fn enter_workspace(&mut self, key: &str) {
+    /// active tab too) and the workspace's own comes back, with every session the core lists for
+    /// it.
+    fn enter_workspace(&mut self, key: &str, cx: &mut Context<Self>) {
         if self.tabs_of == key {
             return;
         }
@@ -446,37 +479,37 @@ impl Workspace {
             self.parked.insert(away, left);
         }
         (self.tabs, self.history) = self.parked.remove(key).unwrap_or_default();
+        self.sync_strips(cx);
     }
 
-    /// The workspace tab `id` belongs to: a file, review or browser tab names it in its id, a
+    /// The workspace tab `id` belongs to: the strip it is in; else a file, review or browser tab
+    /// names its workspace, or a Files scope filed under one (a terminal's folder), in its id; a
     /// session is in the one the core records (an older record, the one at its folder). Empty when
     /// the session is unknown.
     fn tab_workspace(&self, id: &str, cx: &App) -> String {
-        if let Some((workspace, _)) = id.split_once('\n') {
-            return workspace.to_string();
-        }
         let store = &self.sidebar.read(cx).model().store;
-        let Some(session) = store.sessions.iter().find(|s| s.id == id) else {
-            return String::new();
-        };
-        match &session.workspace_id {
-            Some(w) => w.clone(),
-            None => store
-                .workspaces
-                .iter()
-                .find(|w| navigation::in_workspace(session, w))
-                .map_or_else(
-                    || format!("{}:{}", session.host_id, session.cwd),
-                    |w| w.id.clone(),
-                ),
+        if let Some((scope, _)) = id.split_once('\n') {
+            if self.tabs.contains(id) && !self.tabs_of.is_empty() {
+                return self.tabs_of.clone();
+            }
+            if let Some((home, _)) = self.parked.iter().find(|(_, (t, _))| t.contains(id)) {
+                return home.clone();
+            }
+            return navigation::scope_workspace(store, scope).unwrap_or_else(|| scope.to_string());
         }
+        store
+            .sessions
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| navigation::workspace_key(store, s))
+            .unwrap_or_default()
     }
 
     /// Put the strip of tab `id`'s workspace on screen before the tab is opened or shown.
-    fn enter_for(&mut self, id: &str, cx: &App) {
+    fn enter_for(&mut self, id: &str, cx: &mut Context<Self>) {
         let workspace = self.tab_workspace(id, cx);
         if !workspace.is_empty() {
-            self.enter_workspace(&workspace);
+            self.enter_workspace(&workspace, cx);
         }
     }
 
@@ -488,6 +521,7 @@ impl Workspace {
     /// Take tab `id` out of every workspace's strip: a session the core deleted goes from
     /// wherever it was open.
     fn close_everywhere(&mut self, id: &str) {
+        self.ended.insert(id.to_string());
         self.tabs.close(id);
         for (tabs, _) in self.parked.values_mut() {
             tabs.close(id);
@@ -517,6 +551,29 @@ impl Workspace {
 
     pub fn tabs(&self) -> &Tabs {
         &self.tabs
+    }
+
+    /// The strip's tabs as drawn, the web's rule (`workspaceTabs`): a file of a terminal's folder
+    /// (its tab keyed by that terminal's `term:` scope) is left out while another session of the
+    /// workspace is on screen and its terminal is still open.
+    pub fn drawn_strip(&self, cx: &App) -> Vec<String> {
+        let store = &self.sidebar.read(cx).model().store;
+        let active = self.tabs.active().filter(|id| Tabs::is_session(id));
+        let hidden = |id: &str| {
+            let Some(terminal) = id
+                .strip_prefix("term:")
+                .and_then(|rest| rest.split(':').next())
+            else {
+                return false;
+            };
+            active.is_some_and(|a| a != terminal) && store.sessions.iter().any(|s| s.id == terminal)
+        };
+        self.tabs
+            .strip()
+            .iter()
+            .filter(|id| !hidden(id))
+            .cloned()
+            .collect()
     }
 
     /// The terminal of the tab with the keyboard, if one was attached.
@@ -723,7 +780,8 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let id = format!("{workspace_id}\n{path}");
-        self.enter_workspace(workspace_id);
+        let home = self.tab_workspace(&id, cx);
+        self.enter_workspace(&home, cx);
         if preview {
             self.tabs.open_preview(&id, |other| {
                 file_tab(other).is_some_and(|(w, _)| w == workspace_id)
@@ -747,7 +805,7 @@ impl Workspace {
     /// editor in each file tab on screen.
     fn files_wanted(&self, want: &mut impl FnMut(&'static str, String, Value), cx: &App) {
         if self.chrome.tools() == Some(shell::Tools::Files) {
-            let shown = self.shown_workspace(cx);
+            let shown = self.drawer_scope(cx);
             if let Some(workspace_id) = shown.or_else(|| self.explorer_workspace.clone()) {
                 want(
                     "files",
@@ -2070,7 +2128,11 @@ impl Workspace {
 
     /// The pane for session `event` names, made (its terminal attached) when there is none.
     fn ensure_pane(&mut self, event: &OpenSession, cx: &mut Context<Self>) {
-        if self.panes.contains_key(&event.session_id) {
+        if let Some(pane) = self.panes.get_mut(&event.session_id) {
+            // A pane the strip made before the session was opened takes how it is opened now.
+            if pane.parked && pane.view.is_none() {
+                pane.open = event.clone();
+            }
             return;
         }
         let view = self.attach(event, cx);
@@ -2093,13 +2155,16 @@ impl Workspace {
     fn on_open(&mut self, event: &OpenSession, cx: &mut Context<Self>) {
         let id = event.session_id.clone();
         self.put_away.remove(&id);
+        self.ended.remove(&id);
         self.enter_for(&id, cx);
         let side = self
             .pending_split
             .take()
             .filter(|(_, at)| at.elapsed() < SPLIT_WAIT)
             .filter(|_| self.sidebar.read(cx).launched() == Some(id.as_str()))
-            .filter(|_| !self.tabs.contains(&id))
+            // The new session may already have its tab (the core listed it first): it is placed by
+            // the split all the same, once.
+            .filter(|_| !self.tabs.in_split(&id))
             .map(|(side, _)| side);
         self.ensure_pane(event, cx);
         match side {
@@ -2110,10 +2175,9 @@ impl Workspace {
             }
             None => self.tabs.open(&id),
         }
-        self.open_sub_sessions(cx);
-        self.follow_order(cx);
+        self.sync_strips(cx);
         self.keep_in_bounds(cx);
-        self.note_shown(cx);
+        self.note_shown();
         cx.notify();
     }
 
@@ -2262,27 +2326,84 @@ impl Workspace {
         self.after_change(cx);
     }
 
-    /// Every strip's sessions in the order the sidebar lists them (`workspaceTabs`): oldest
-    /// first, then the core's chat order, each sub-session after its lead. Files keep their slots.
-    fn follow_order(&mut self, cx: &mut Context<Self>) {
-        let sidebar = self.sidebar.read(cx);
-        let store = &sidebar.model().store;
-        let strips =
-            std::iter::once(&mut self.tabs).chain(self.parked.values_mut().map(|(t, _)| t));
-        for tabs in strips {
-            let mut done: HashSet<String> = HashSet::new();
-            for id in tabs.strip().to_vec() {
-                if done.contains(&id) {
-                    continue;
-                }
-                let Some(session) = store.sessions.iter().find(|s| s.id == id) else {
-                    continue;
-                };
-                let order = navigation::shown_strip_of_workspace(store, session);
-                tabs.follow(&order);
-                done.extend(order);
+    /// Every strip holds its workspace's sessions as the core lists them (`workspaceTabs`):
+    /// oldest first, then the core's chat order, in their own slots; files keep theirs. A session
+    /// closed here without ending it stays out, and one the core no longer lists leaves once its
+    /// list has been read. A session gets a parked pane, which attaches only when its tab is shown.
+    fn sync_strips(&mut self, cx: &mut Context<Self>) {
+        let store = self.sidebar.read(cx).model().store.clone();
+        let known = store.connected && store.listed;
+        if known {
+            let listed = |id: &String| store.sessions.iter().any(|s| s.id == *id);
+            self.put_away.retain(listed);
+            self.ended.retain(listed);
+        }
+        let (put_away, ended) = (&self.put_away, &self.ended);
+        let away = |id: &str| {
+            store.deleted.iter().any(|d| d == id) || put_away.contains(id) || ended.contains(id)
+        };
+        // A session the core lists elsewhere moved; one it does not list is gone, unless it has a
+        // terminal here: a session just launched is opened before the core's list holds it.
+        let panes = &self.panes;
+        let left = |id: &str| {
+            known && (store.sessions.iter().any(|s| s.id == id) || !panes.contains_key(id))
+        };
+        let mut gone = Vec::new();
+        let strips = std::iter::once((&self.tabs_of, &mut self.tabs))
+            .chain(self.parked.iter_mut().map(|(key, (tabs, _))| (key, tabs)));
+        for (key, tabs) in strips {
+            if key.is_empty() {
+                continue;
+            }
+            let live = navigation::sessions_of_workspace(&store, key);
+            gone.extend(tabs.sync_sessions(&live, left, away));
+        }
+        for id in gone {
+            if !self.every_tabs().any(|tabs| tabs.contains(&id)) {
+                self.panes.remove(&id);
             }
         }
+        let missing: Vec<String> = self
+            .every_tabs()
+            .flat_map(|tabs| tabs.strip())
+            .filter(|id| Tabs::is_session(id) && !self.panes.contains_key(*id))
+            .cloned()
+            .collect();
+        for id in missing {
+            if let Some(open) = self.open_for(&id, cx) {
+                self.panes.insert(
+                    id,
+                    Pane {
+                        open,
+                        view: None,
+                        settle: Settle::default(),
+                        retry: None,
+                        attempts: 0,
+                        closing: None,
+                        seen: 0,
+                        parked: true,
+                    },
+                );
+            }
+        }
+    }
+
+    /// How session `id` opens: as the sidebar would open it, else (a session it does not list: a
+    /// plain terminal, a hidden worktree's) as the core lists it.
+    fn open_for(&self, id: &str, cx: &App) -> Option<OpenSession> {
+        let sidebar = self.sidebar.read(cx);
+        if let Some(open) = sidebar.session_to_open(id) {
+            return Some(open);
+        }
+        let session = sidebar.model().store.sessions.iter().find(|s| s.id == id)?;
+        Some(OpenSession {
+            host_id: session.host_id.clone(),
+            session_id: session.id.clone(),
+            title: session.title.clone(),
+            provider_id: session.cli_provider_id.clone(),
+            blank: session.cli_provider_id.is_none() && !session.cli_started,
+            core_url: sidebar.model().core_url.clone(),
+        })
     }
 
     /// The strip's sessions, in its order.
@@ -2327,110 +2448,6 @@ impl Workspace {
             let sessions = navigation::write_scope(&core, &after, Some(&live));
             sidebar.set_order(host, None, Some(sessions), cx);
         });
-    }
-
-    /// A lead's whole family has tabs here once any member does, as the web's strip lists every
-    /// session of the workspace: the lead and each sub-session open behind the family as the core
-    /// lists it, without taking the keyboard. It goes as any tab does, when the core deletes the
-    /// session.
-    fn open_sub_sessions(&mut self, cx: &mut Context<Self>) {
-        let sidebar = self.sidebar.read(cx);
-        let store = &sidebar.model().store;
-        let parent_of = |id: &str| {
-            store
-                .sessions
-                .iter()
-                .find(|s| s.id == id)
-                .and_then(|s| s.parent_session_id.clone())
-        };
-        // A session the sidebar does not list (a plain terminal, a hidden worktree's) opens as
-        // the core lists it.
-        let to_open = |session: &perch_core::protocol::SessionSummary| {
-            sidebar
-                .session_to_open(&session.id)
-                .unwrap_or_else(|| OpenSession {
-                    host_id: session.host_id.clone(),
-                    session_id: session.id.clone(),
-                    title: session.title.clone(),
-                    provider_id: session.cli_provider_id.clone(),
-                    blank: session.cli_provider_id.is_none() && !session.cli_started,
-                    core_url: sidebar.model().core_url.clone(),
-                })
-        };
-        let mut opened: Vec<(String, (String, OpenSession))> = Vec::new();
-        let away = |id: &str| store.deleted.iter().any(|d| d == id) || self.put_away.contains(id);
-        // A sub-session on screen brings its lead, which the family then follows.
-        for tab in self.tabs.strip() {
-            let Some(lead) = parent_of(tab)
-                .and_then(|id| store.sessions.iter().find(|s| s.id == id))
-                .filter(|lead| {
-                    store
-                        .sessions
-                        .iter()
-                        .any(|s| s.id == *tab && navigation::same_workspace(lead, s))
-                })
-            else {
-                continue;
-            };
-            if !self.tabs.contains(&lead.id)
-                && !away(&lead.id)
-                && !opened.iter().any(|(id, _)| *id == lead.id)
-            {
-                opened.push((lead.id.clone(), (lead.id.clone(), to_open(lead))));
-            }
-        }
-        // Each lead's sub-sessions in its workspace strip's order (the sidebar lists them in it),
-        // and only those of the lead's own workspace: a Quickchat or another project's session
-        // never joins the family.
-        let mut strips: HashMap<&str, Vec<String>> = HashMap::new();
-        let mut kids = Vec::new();
-        for session in &store.sessions {
-            let Some(lead_id) = session.parent_session_id.as_deref() else {
-                continue;
-            };
-            let Some(lead) = store.sessions.iter().find(|s| s.id == lead_id) else {
-                continue;
-            };
-            if !navigation::same_workspace(lead, session) {
-                continue;
-            }
-            let strip = strips
-                .entry(lead_id)
-                .or_insert_with(|| navigation::strip_of_workspace(store, lead));
-            let at = strip.iter().position(|id| *id == session.id);
-            kids.push((at, session));
-        }
-        kids.sort_by_key(|(at, _)| *at);
-        for (_, session) in kids {
-            let lead = session.parent_session_id.as_deref().unwrap_or_default();
-            let here = |id: &str| self.tabs.contains(id) || opened.iter().any(|(o, _)| o == id);
-            if !here(lead) || here(&session.id) || away(&session.id) {
-                continue;
-            }
-            opened.push((session.id.clone(), (lead.to_string(), to_open(session))));
-        }
-        if opened.is_empty() {
-            return;
-        }
-        let family: Vec<_> = opened
-            .iter()
-            .map(|(id, (lead, _))| (id.clone(), lead.clone()))
-            .chain(
-                self.tabs
-                    .strip()
-                    .iter()
-                    .filter_map(|id| Some((id.clone(), parent_of(id)?))),
-            )
-            .collect();
-        for (id, (lead, open)) in opened {
-            self.ensure_pane(&open, cx);
-            self.tabs.add_after(&id, &lead, |tab| {
-                family
-                    .iter()
-                    .any(|(kid, parent)| kid == tab && *parent == lead)
-            });
-        }
-        cx.notify();
     }
 
     /// The connection of a terminal dropped. The shell is not known to have ended, so the screen
@@ -2486,7 +2503,7 @@ impl Workspace {
     fn after_change(&mut self, cx: &mut Context<Self>) {
         self.quickchat_start = false;
         self.keep_in_bounds(cx);
-        self.note_shown(cx);
+        self.note_shown();
         let target = self.tabs.active().and_then(|id| {
             let open = &self.panes.get(id)?.open;
             Some((
@@ -2502,37 +2519,11 @@ impl Workspace {
         cx.notify();
     }
 
-    /// The shown session is its workspace's last, for the next launch.
-    fn remember_shown(&mut self, cx: &App) {
-        let Some(id) = self.tabs.active().map(str::to_string) else {
-            return;
-        };
-        if id.contains('\n') {
-            return;
-        }
-        let workspace = self.tab_workspace(&id, cx);
-        if workspace.is_empty() || self.last_tabs.get(&workspace) == Some(&id) {
-            return;
-        }
-        self.last_tabs.insert(workspace, id);
-        // ponytail: written on each change of the shown session (a few bytes); a failed write only
-        // loses the next launch's choice.
-        let file = last_tabs_file();
-        if let Some(folder) = file.parent() {
-            let _ = std::fs::create_dir_all(folder);
-        }
-        let _ = std::fs::write(
-            file,
-            serde_json::to_vec(&self.last_tabs).unwrap_or_default(),
-        );
-    }
-
     /// The shown tab is a visit for Back and Forward.
-    fn note_shown(&mut self, cx: &App) {
+    fn note_shown(&mut self) {
         if let Some(id) = self.tabs.active() {
             self.history.record(id);
         }
-        self.remember_shown(cx);
     }
 
     /// Give the keyboard to the pane the person clicked.
@@ -3092,41 +3083,19 @@ impl Workspace {
                 // Its strip comes back as it was left. What it showed last is shown again, else
                 // its newest session, else the workspace's start page.
                 let on_screen = self.tabs_of == id;
-                self.enter_workspace(&id);
+                self.enter_workspace(&id, cx);
                 let store = self.sidebar.read(cx).model().store.clone();
                 let is_session = |tab: &String| store.sessions.iter().any(|s| s.id == *tab);
-                // The window opens no tab of a workspace until it is shown, so after a launch its strip is
-                // empty: the session it last showed (kept across launches), else the core's newest it can open,
-                // stands in, as the web's `navigateToWorkspace` does.
+                // The strip holds every session of the workspace; its last one the sidebar can
+                // open stands in, as the web's `navigateToWorkspace` does.
                 let sidebar = self.sidebar.read(cx);
-                let openable = |tab: &str| sidebar.session_to_open(tab).is_some();
-                let saved_or_newest = || {
-                    let workspace = store.workspaces.iter().find(|w| w.id == id)?;
-                    let mine = |s: &&perch_core::protocol::SessionSummary| {
-                        crate::sidebar::navigation::in_workspace(s, workspace) && openable(&s.id)
-                    };
-                    let saved = self
-                        .last_tabs
-                        .get(&id)
-                        .and_then(|tab| store.sessions.iter().filter(mine).find(|s| s.id == *tab));
-                    saved
-                        .or_else(|| {
-                            store
-                                .sessions
-                                .iter()
-                                .filter(mine)
-                                .max_by_key(|s| s.created_at)
-                        })
-                        .map(|s| s.id.clone())
-                };
                 let newest = || {
                     self.tabs
                         .strip()
                         .iter()
                         .rev()
-                        .find(|tab| is_session(tab))
+                        .find(|tab| is_session(tab) && sidebar.session_to_open(tab).is_some())
                         .cloned()
-                        .or_else(saved_or_newest)
                 };
                 // A workspace already on screen shows its newest session; one switched to shows
                 // what it showed when it was left.
@@ -3298,7 +3267,7 @@ impl Workspace {
                         perch.unfocus_workspace();
                         perch.flush(cx);
                     }
-                    self.enter_workspace("");
+                    self.enter_workspace("", cx);
                     self.tabs.hide();
                     self.root_focus.focus(window, cx);
                     self.after_change(cx);
@@ -3316,7 +3285,7 @@ impl Workspace {
                 if let Some(workspace) =
                     screens::mods(cx).and_then(|(_, perch)| perch.shown_place().1)
                 {
-                    self.enter_workspace(&workspace);
+                    self.enter_workspace(&workspace, cx);
                 }
                 self.tabs.hide();
                 // The terminal that had the keyboard is off screen: the window takes it, so keys
@@ -3609,11 +3578,13 @@ impl Workspace {
                 cx.notify();
             }
             "tabs.next" | "tab.next" => {
-                self.tabs.step(1);
+                let shown = self.drawn_strip(cx);
+                self.tabs.step(1, &shown);
                 self.after_change(cx);
             }
             "tabs.prev" | "tab.prev" => {
-                self.tabs.step(-1);
+                let shown = self.drawn_strip(cx);
+                self.tabs.step(-1, &shown);
                 self.after_change(cx);
             }
             "tabs.last" => self.select(None, cx)?,
@@ -3839,7 +3810,8 @@ impl Workspace {
 
     /// The tab at `index` (1 is first), or the last one.
     fn select(&mut self, index: Option<usize>, cx: &mut Context<Self>) -> Result<(), String> {
-        if !self.tabs.jump(index) {
+        let shown = self.drawn_strip(cx);
+        if !self.tabs.jump(index, &shown) {
             return Err("There are no tabs.".into());
         }
         self.after_change(cx);
@@ -4376,29 +4348,35 @@ impl Workspace {
             self.park_peek(cx);
             return Ok(());
         }
-        if self.tabs.contains(id) {
-            return Err("That session is open in a tab; terminal.show goes to it.".into());
+        if self.tabs.shown().iter().any(|tab| tab == id) {
+            return Err("That session is on screen; terminal.show goes to it.".into());
         }
-        let open = self
-            .sidebar
-            .read(cx)
-            .session_to_open(id)
-            .ok_or("That session is gone.")?;
+        // A session whose tab is out of sight peeks through its own pane.
+        let open = match self.panes.get(id) {
+            Some(pane) => pane.open.clone(),
+            None => self
+                .sidebar
+                .read(cx)
+                .session_to_open(id)
+                .ok_or("That session is gone.")?,
+        };
         self.park_peek(cx);
-        let view = self.attach(&open, cx);
-        self.panes.insert(
-            id.to_string(),
-            Pane {
-                open,
-                view,
-                settle: Settle::default(),
-                retry: None,
-                attempts: 0,
-                closing: None,
-                seen: 0,
-                parked: false,
-            },
-        );
+        let view = match self.panes.get(id).and_then(|pane| pane.view.clone()) {
+            Some(view) => Some(view),
+            None => self.attach(&open, cx),
+        };
+        let pane = self.panes.entry(id.to_string()).or_insert_with(|| Pane {
+            open,
+            view: None,
+            settle: Settle::default(),
+            retry: None,
+            attempts: 0,
+            closing: None,
+            seen: 0,
+            parked: false,
+        });
+        pane.view = view;
+        pane.parked = false;
         self.peek = Some(id.to_string());
         cx.notify();
         Ok(())
@@ -4410,8 +4388,15 @@ impl Workspace {
         let Some(id) = self.peek.take() else {
             return false;
         };
-        if !self.tabs.contains(&id) {
+        // A tab on screen keeps its terminal; one out of sight lets go until it is shown.
+        if !self.every_tabs().any(|tabs| tabs.contains(&id)) {
             self.panes.remove(&id);
+        } else if !self.tabs.shown().contains(&id) {
+            if let Some(pane) = self.panes.get_mut(&id) {
+                pane.view = None;
+                pane.retry = None;
+                pane.parked = true;
+            }
         }
         cx.notify();
         true
@@ -4783,21 +4768,19 @@ fn program_in(argv: &Value, task: Option<&str>) -> Result<String, String> {
 /// A file tab's workspace and path: its id is the web's `fileTabKey`, `<workspace id>\n<path>`
 /// (a session id never holds a line break).
 impl Workspace {
-    /// The strip's regular file tabs go to the window's state file; an untouched preview, a
-    /// review or a page does not.
-    fn keep_file_tabs(&mut self) {
-        let files = self
-            .every_tabs()
-            .flat_map(|tabs| {
-                tabs.strip().iter().filter(|id| {
-                    file_tab(id)
-                        .is_some_and(|(_, path)| !path.is_empty() && !path.starts_with('\0'))
-                        && !tabs.is_preview(id)
-                })
-            })
-            .cloned()
+    /// Every workspace's strip (its tabs in order, sessions among them for their places, its
+    /// splits, previews and active tab) and the sessions closed here without ending go to the
+    /// window's state file, as the web keeps its file tabs, tab order and split sets.
+    fn keep_tabs(&mut self) {
+        let strips: serde_json::Map<String, Value> = std::iter::once((&self.tabs_of, &self.tabs))
+            .chain(self.parked.iter().map(|(key, (tabs, _))| (key, tabs)))
+            .filter(|(key, tabs)| !key.is_empty() && **tabs != Tabs::default())
+            .map(|(key, tabs)| (key.clone(), serde_json::to_value(tabs).unwrap_or_default()))
             .collect();
-        self.chrome.set_files(files);
+        let mut put_away: Vec<&String> = self.put_away.iter().collect();
+        put_away.sort();
+        self.chrome
+            .set_tabs(json!({ "strips": strips, "putAway": put_away }));
     }
 }
 
@@ -4881,7 +4864,9 @@ impl Workspace {
 impl gpui::Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_editors(window, cx);
-        self.keep_file_tabs();
+        // ponytail: serialises every strip on each frame (a few hundred bytes each) to see whether
+        // it changed; a dirty flag set by each strip change would skip it.
+        self.keep_tabs();
         self.viewport_height = f32::from(window.viewport_size().height);
         if window.focused(cx).is_none() {
             self.root_focus.focus(window, cx);

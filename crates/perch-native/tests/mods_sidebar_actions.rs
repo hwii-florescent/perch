@@ -361,7 +361,11 @@ fn row_drag(rig: &mut Rig, elsewhere: AnyWindowHandle) {
             .update(cx, |s, cx| s.apply(Update::Model(fresh), cx))
     });
     assert!(in_place(rig), "the core's order is what stays");
-    assert_eq!(rig.tabs().0, strings(&["alpha"]), "the release is no click");
+    assert_eq!(
+        rig.tabs().2.as_deref(),
+        Some("alpha"),
+        "the release is no click"
+    );
     let ended = rig.forwarded();
     rig.moved(charlie, true);
     rig.moved(bravo, false);
@@ -456,13 +460,13 @@ fn session_menu(rig: &mut Rig) {
     assert_eq!(
         rig.tabs(),
         (
-            strings(&["alpha"]),
+            strings(&["alpha", "bravo", "charlie"]),
             strings(&["alpha"]),
             Some("alpha".into())
         )
     );
 
-    // Rename tab renames bravo's session, which still has no tab.
+    // Rename tab renames bravo's session, which is not shown.
     rig.right_click("session-button:bravo");
     rig.asked();
     rig.click("tab-menu-item:tab-menu-rename");
@@ -473,7 +477,7 @@ fn session_menu(rig: &mut Rig) {
         matches!(c, Command::Rename { session_id, title } if session_id == "bravo" && title == "Bravo two")
     });
     assert!(renamed, "bravo is renamed");
-    assert_eq!(rig.tabs().0, strings(&["alpha"]), "and gets no tab");
+    assert_eq!(rig.tabs().2.as_deref(), Some("alpha"), "and is not shown");
 
     // Show beside alpha: bravo's tab opens with alpha beside it (the web's `joinSplit` puts the
     // other tab after the menu's), and bravo has the keyboard.
@@ -484,7 +488,7 @@ fn session_menu(rig: &mut Rig) {
     assert_eq!(
         rig.tabs(),
         (
-            strings(&["alpha", "bravo"]),
+            strings(&["alpha", "bravo", "charlie"]),
             strings(&["bravo", "alpha"]),
             Some("bravo".into())
         )
@@ -494,7 +498,7 @@ fn session_menu(rig: &mut Rig) {
     })
     .unwrap();
 
-    // Neither with a tab: charlie's menu shows bravo beside it, both tabs opened.
+    // Bravo put away: charlie's menu shows bravo beside it, and its tab opens again.
     rig.ws(|ws, window, cx| {
         ws.run_command("tabs.close", Some(&json!({"id": "bravo"})), window, cx)
     })
@@ -503,7 +507,11 @@ fn session_menu(rig: &mut Rig) {
     // Bravo's terminal is attached to nothing: the close guard asks first, and Keep running puts
     // the tab away.
     rig.click("confirm-extra");
-    assert_eq!(rig.tabs().0, strings(&["alpha"]), "bravo's tab is put away");
+    assert_eq!(
+        rig.tabs().0,
+        strings(&["alpha", "charlie"]),
+        "bravo's tab is put away"
+    );
     rig.right_click("session-button:charlie");
     rig.click("tab-menu-show-beside");
     rig.click("tab-menu-beside-item:tab-split-with-bravo");
@@ -747,7 +755,8 @@ fn main() {
         })
     });
     rig.draw();
-    assert_eq!(rig.tabs().0, strings(&["alpha"]));
+    // Every session of alpha's workspace has a tab.
+    assert_eq!(rig.tabs().0, strings(&["alpha", "bravo", "charlie"]));
 
     // Manual order, as the Move rows need (sorting by attention is a view, with no Move).
     let perch = rig.cx.update(|cx| cx.global::<WindowMods>().perch.clone());

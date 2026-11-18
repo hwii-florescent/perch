@@ -949,6 +949,7 @@ impl State {
         navigation::Store {
             revision: self.revision,
             connected: self.connected,
+            listed: self.listed,
             hostname: server.as_ref().map(|s| s.0.clone()),
             platform: server.as_ref().map(|s| s.1.clone()),
             is_ssh: server.map(|s| s.2),
