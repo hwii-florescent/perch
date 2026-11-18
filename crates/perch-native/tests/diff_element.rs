@@ -323,6 +323,24 @@ impl Rig {
         self.draw();
     }
 
+    fn set_data(&mut self, diff: DiffSnapshot) {
+        let view = self.view();
+        self.cx
+            .update_window(self.window.into(), |_, window: &mut Window, cx| {
+                view.update(cx, |v, cx| {
+                    v.set_data(Some(Rc::new(diff)), Rc::default(), window, cx)
+                })
+            })
+            .unwrap();
+        self.draw();
+    }
+
+    fn top(&mut self) -> gpui::ListOffset {
+        let view = self.view();
+        self.cx
+            .update(|cx| view.read(cx).list_state().logical_scroll_top())
+    }
+
     fn close(mut self) -> HeadlessAppContext {
         self.cx
             .update_window(self.window.into(), |_, window: &mut Window, _| {
@@ -700,6 +718,46 @@ fn split_layout(cx: HeadlessAppContext) -> HeadlessAppContext {
     rig.close()
 }
 
+/// A new snapshot of the same comparison (what a stage, a refresh or any action brings) keeps the reader's place,
+/// by file: rows added above it in an earlier file do not move them. Another comparison starts at the top.
+fn keeps_place(cx: HeadlessAppContext) -> HeadlessAppContext {
+    let (mut rig, _) = Rig::open(cx, synthetic(1_000), vec![], DiffProps::default());
+    let rows = rig.rows();
+    let header = rows
+        .iter()
+        .position(|r| *r == Row::File { file: 2 })
+        .unwrap();
+    let view = rig.view();
+    rig.cx.update(|cx| {
+        view.read(cx).list_state().scroll_to(gpui::ListOffset {
+            item_ix: header + 30,
+            offset_in_item: px(4.),
+        })
+    });
+    rig.draw();
+    // The same comparison again, with file 0 cut to one hunk: file 2's rows move up, the reader stays on them.
+    let mut next = synthetic(1_000);
+    next.files[0].hunks.truncate(1);
+    rig.set_data(next.clone());
+    let rows = rig.rows();
+    let moved = rows
+        .iter()
+        .position(|r| *r == Row::File { file: 2 })
+        .unwrap();
+    assert!(moved < header, "file 2 starts earlier in the new rows");
+    let top = rig.top();
+    assert_eq!(
+        (top.item_ix, top.offset_in_item),
+        (moved + 30, px(4.)),
+        "the reader stays 30 rows into file 2"
+    );
+    // Another comparison of the same files starts at the top.
+    next.target = DiffTarget::Staged;
+    rig.set_data(next);
+    assert_eq!(rig.top().item_ix, 0, "a new comparison starts at the top");
+    rig.close()
+}
+
 /// The compact unified layout, saved when `PERCH_DIFF_SHOTS` is set.
 fn unified_shot(cx: HeadlessAppContext) -> HeadlessAppContext {
     let (mut rig, _) = Rig::open_sized(cx, synthetic(500), vec![], DiffProps::default(), 520.);
@@ -720,6 +778,7 @@ fn main() {
     }
     let cx = interactions(cx);
     let cx = split_layout(cx);
+    let cx = keeps_place(cx);
     let _ = unified_shot(cx);
     println!("diff_element: ok");
 }

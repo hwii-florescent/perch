@@ -201,6 +201,13 @@ impl Tints {
     }
 }
 
+/// The reader's place by file: kept across a rebuild of the rows.
+struct Anchor {
+    path: String,
+    rows_in: usize,
+    offset_in_item: Pixels,
+}
+
 pub struct DiffView {
     focus: FocusHandle,
     list: ListState,
@@ -214,8 +221,9 @@ pub struct DiffView {
     props: DiffProps,
     colors: Colors,
     tints: Tints,
-    /// Horizontal offset of each file's unwrapped lines, by file index (a file not here is at 0).
-    offsets: Rc<HashMap<usize, f32>>,
+    /// Horizontal offset of each file's unwrapped lines, by file path (a file not here is at 0), so a new snapshot
+    /// of the same comparison keeps each file where the reader left it.
+    offsets: Rc<HashMap<String, f32>>,
     /// The view's width at the last paint.
     width: Rc<Cell<f32>>,
     /// The rows pair the two sides of a change (the view is at least [`SPLIT_WIDTH`] wide).
@@ -304,10 +312,33 @@ impl DiffView {
         if same_diff && Rc::ptr_eq(&self.comments, &comments) {
             return;
         }
-        let new_file = !same_diff;
+        // A new snapshot of the same comparison (after a stage, a refresh or any action) keeps the reader's place;
+        // another comparison starts at the top.
+        let same_comparison = match (&self.diff, &diff) {
+            (Some(a), Some(b)) => a.target == b.target,
+            (None, None) => true,
+            _ => false,
+        };
+        let anchor = self.top_anchor();
         self.diff = diff;
         self.comments = comments;
-        self.rebuild(new_file, window, cx);
+        self.rebuild(anchor.filter(|_| same_comparison), window, cx);
+    }
+
+    /// Where the reader is, by file rather than row: the top row's file path, how many rows into that file it is,
+    /// and how far into that row.
+    fn top_anchor(&self) -> Option<Anchor> {
+        let diff = self.diff.as_deref()?;
+        let top = self.list.logical_scroll_top();
+        let header = *self.file_row.get(top.item_ix)?;
+        let Row::File { file } = self.rows.rows.get(header)? else {
+            return None;
+        };
+        Some(Anchor {
+            path: file_path(diff.files.get(*file)?).to_string(),
+            rows_in: top.item_ix - header,
+            offset_in_item: top.offset_in_item,
+        })
     }
 
     pub fn set_props(&mut self, props: DiffProps, window: &mut Window, cx: &mut Context<Self>) {
@@ -317,8 +348,11 @@ impl DiffView {
         let old = std::mem::replace(&mut self.props, props);
         let editing_changed = old.editing.as_ref().map(|e| &e.comment)
             != self.props.editing.as_ref().map(|e| &e.comment);
-        if old.path != self.props.path || editing_changed {
-            self.rebuild(old.path != self.props.path, window, cx);
+        if old.path != self.props.path {
+            self.rebuild(None, window, cx);
+        } else if editing_changed {
+            let anchor = self.top_anchor();
+            self.rebuild(anchor, window, cx);
         } else if old.wrap != self.props.wrap {
             self.offsets = Rc::default();
             self.list.remeasure();
@@ -333,9 +367,11 @@ impl DiffView {
         cx.notify();
     }
 
-    fn rebuild(&mut self, to_top: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// Rebuilds the rows. With `anchor` the reader stays where they were (that file, that many rows into it); without
+    /// one the list and every file's sideways offset go back to the start.
+    fn rebuild(&mut self, anchor: Option<Anchor>, window: &mut Window, cx: &mut Context<Self>) {
         self.builds += 1;
-        if to_top {
+        if anchor.is_none() {
             self.offsets = Rc::default();
         }
         let rows = match &self.diff {
@@ -356,25 +392,44 @@ impl DiffView {
             counts[kind] += 1;
         }
         let top = self.list.logical_scroll_top();
-        // A change of layout moves every row: the file at the top stays at the top.
-        let top_file = (self.rows.split != rows.split)
-            .then(
-                || match self.rows.rows.get(*self.file_row.get(top.item_ix)?)? {
-                    Row::File { file } => Some(*file),
-                    _ => None,
-                },
-            )
-            .flatten();
         self.list.reset(rows.rows.len());
-        if let Some(header) =
-            top_file.and_then(|f| rows.rows.iter().position(|r| *r == Row::File { file: f }))
-        {
-            self.list.scroll_to(ListOffset {
-                item_ix: header,
-                offset_in_item: px(0.),
+        if let Some(anchor) = anchor {
+            // A change of layout moves every row of a file: its header goes to the top.
+            let layout_changed = self.rows.split != rows.split;
+            let place = self.diff.as_deref().and_then(|diff| {
+                let header = rows.rows.iter().position(|r| {
+                    matches!(r, Row::File { file } if file_path(&diff.files[*file]) == anchor.path)
+                })?;
+                let len = rows.rows[header + 1..]
+                    .iter()
+                    .position(|r| matches!(r, Row::File { .. }))
+                    .map_or(rows.rows.len() - header, |n| n + 1);
+                Some(if layout_changed {
+                    ListOffset {
+                        item_ix: header,
+                        offset_in_item: px(0.),
+                    }
+                } else if anchor.rows_in < len {
+                    ListOffset {
+                        item_ix: header + anchor.rows_in,
+                        offset_in_item: anchor.offset_in_item,
+                    }
+                } else {
+                    ListOffset {
+                        item_ix: header + len - 1,
+                        offset_in_item: px(0.),
+                    }
+                })
             });
-        } else if !to_top && top.item_ix < rows.rows.len() {
-            self.list.scroll_to(top);
+            match place {
+                Some(place) => self.list.scroll_to(place),
+                // The file left the diff: stay at the same row, as near as the new rows allow.
+                None if !rows.rows.is_empty() => self.list.scroll_to(ListOffset {
+                    item_ix: top.item_ix.min(rows.rows.len() - 1),
+                    offset_in_item: px(0.),
+                }),
+                None => {}
+            }
         }
         self.rows = Rc::new(rows);
         self.file_row = Rc::new(file_row);
@@ -523,11 +578,19 @@ impl DiffView {
         if dx == px(0.) {
             return;
         }
+        let Some(path) = self
+            .diff
+            .as_deref()
+            .and_then(|d| d.files.get(file))
+            .map(|f| file_path(f).to_string())
+        else {
+            return;
+        };
         let max = (self.content_width(file) - self.visible_width()).max(0.);
-        let offset = self.offsets.get(&file).copied().unwrap_or(0.);
+        let offset = self.offsets.get(&path).copied().unwrap_or(0.);
         let next = (offset - f32::from(dx)).clamp(0., max);
         if next != offset {
-            Rc::make_mut(&mut self.offsets).insert(file, next);
+            Rc::make_mut(&mut self.offsets).insert(path, next);
             cx.notify();
         }
         if event.modifiers.shift {
@@ -590,7 +653,7 @@ struct Frame {
     props: Rc<DiffProps>,
     colors: Colors,
     tints: Tints,
-    offsets: Rc<HashMap<usize, f32>>,
+    offsets: Rc<HashMap<String, f32>>,
     gutters: (f32, f32),
     /// The view's width at the last paint (the web's `100cqi`).
     view_width: f32,
@@ -952,7 +1015,7 @@ impl Frame {
         };
         let wrap = self.props.wrap;
         let file_ix = self.rows.rows[ix].file();
-        let offset_x = self.offsets.get(&file_ix).copied().unwrap_or(0.);
+        let offset_x = self.offsets.get(file_path(file)).copied().unwrap_or(0.);
         let content_width = self.content_width(file_ix);
         let code = div().flex_1().min_w_0().child(text);
         let code = if wrap { code } else { code.whitespace_nowrap() };
@@ -997,9 +1060,7 @@ impl Frame {
             .text_size(px(CODE_SIZE))
             .line_height(px(LINE_HEIGHT))
             .text_color(c.text)
-            .when(!wrap, |d| {
-                d.w(px(content_width)).ml(px(-offset_x))
-            })
+            .when(!wrap, |d| d.w(px(content_width)).ml(px(-offset_x)))
             .when(wrap, |d| d.w_full())
             .child(
                 div()
@@ -1230,8 +1291,9 @@ impl Render for DiffView {
         };
         if split != self.split {
             self.split = split;
+            let anchor = self.top_anchor();
+            self.rebuild(anchor, window, cx);
             self.offsets = Rc::default();
-            self.rebuild(false, window, cx);
         }
         let frame = Frame {
             ordinal: self.ordinal.clone(),
