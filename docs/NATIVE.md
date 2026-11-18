@@ -63,9 +63,18 @@ file gives defaults.
 | `.sidebar.json` | sidebar view settings: organize, sort by attention (off by default), show terminals, folded rows |
 | `keys.json` | chosen keys (`keymap.rs`) |
 
+## The installed app
+
+Since 2026-11-18 the native client is `/Applications/perch.app` (owner), built by
+`scripts/reinstall-desktop-native.sh`: the window, `perch-core`, the `perch` CLI and the web build in one
+bundle with the Tauri app's identifier and signing identity (grants are kept). The window starts the
+bundled core when `core.json` names none that is running, on port 47788; the core outlives the window
+and serves the phone and terminals. Replaced bundles are kept in `~/.perch/replaced-apps/`.
+`scripts/reinstall-desktop.sh` still builds the Tauri app.
+
 ## Not yet the same as the Tauri app
 
-- The native client attaches only to a headless core (`core.json`); signing in to the Tauri app's core
-  needs an owner decision (see the native plan's `next-steps.md`).
+- No agent Chat view (agents show as terminals), no `perch://` link handling, no permissions page.
+- The install script does not deploy the relay (the phone's web app); the mobile plan covers it.
 - Remaining differences and visual gate failures: `plans/261113-0037-native-terminal-fixes-and-mod-engine/next-steps.md`
   and `node e2e/native-parity/compare.mjs`.

@@ -40,8 +40,8 @@ shells, real agent CLIs
   choices in its tab, as the web's `startCli` does. Closing a tab ends its session as the web does
   (`session.delete`, the tab going only when the core confirms; `warnCloseAgent` asks first).
   Chrome (sidebar, tabs, files, Git, review, settings) is the web's stock screens run on a native
-  React runtime; Files, the editor, diffs and the browser are native engines under them. It is not
-  in default builds. Agent rules: `crates/perch-native/AGENTS.md`.
+  React runtime; Files, the editor, diffs and the browser are native engines under them. It is the
+  installed perch.app since 2026-11-18 and starts its bundled headless core ([NATIVE](NATIVE.md)). Agent rules: `crates/perch-native/AGENTS.md`.
 - **Web** renders WS-driven state and owns view-local presentation. Do not
   confuse focus/layout with runtime authority.
 - **Stock screens** (`packages/web/src/stock-ui/<id>/`) are presentation only and
