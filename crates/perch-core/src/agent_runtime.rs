@@ -3363,6 +3363,58 @@ mod tests {
             .unwrap();
     }
 
+    /// A view that reopens (a phone reload) claims only what nobody holds: while the laptop holds both
+    /// leases, it keeps them and the PTY keeps the laptop's size. Only an explicit take over moves them.
+    #[test]
+    fn a_reopened_view_never_takes_a_live_views_leases_automatically() {
+        let adapter = adapter();
+        let key = key();
+        let (laptop, phone) = (client("laptop"), client("phone"));
+        adapter
+            .attach_cli(
+                AgentRegistration {
+                    key: key.clone(),
+                    provider_id: "fixture".to_string(),
+                    provider_session_id: Some("provider-session".to_string()),
+                    resumable: true,
+                    now_ms: 1,
+                },
+                "/tmp",
+                laptop.clone(),
+                132,
+                40,
+                Arc::new(|_, _| {}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+        let input = adapter
+            .acquire_control(&key, ControlChannel::Input, laptop.clone(), 2)
+            .unwrap();
+        let resize = adapter
+            .acquire_control(&key, ControlChannel::Resize, laptop.clone(), 2)
+            .unwrap();
+        for channel in [ControlChannel::Input, ControlChannel::Resize] {
+            assert_eq!(
+                adapter
+                    .acquire_control_if_unowned(&key, channel, phone.clone(), 3)
+                    .unwrap(),
+                None,
+                "an automatic claim must not take {channel:?} from a live view"
+            );
+        }
+        let snapshot = adapter.snapshot(&key).unwrap();
+        assert_eq!(snapshot.input_owner.unwrap().generation, input.generation);
+        assert_eq!(snapshot.resize_owner.unwrap().generation, resize.generation);
+        assert_eq!(adapter.terminals.size(&terminal_key(&key)), Some((132, 40)));
+        // Taking over is explicit; the old owner's size lease is stale from then on.
+        let taken = adapter
+            .acquire_control(&key, ControlChannel::Resize, phone.clone(), 4)
+            .unwrap();
+        adapter.resize(&key, &taken, 80, 76, 5).unwrap();
+        assert!(adapter.resize(&key, &resize, 132, 40, 6).is_err());
+        assert_eq!(adapter.terminals.size(&terminal_key(&key)), Some((80, 76)));
+    }
+
     #[test]
     fn lease_generation_is_enforced_by_runtime_terminal() {
         let adapter = adapter();
