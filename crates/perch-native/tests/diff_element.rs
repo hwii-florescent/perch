@@ -861,6 +861,27 @@ fn one_axis_and_hbars(cx: HeadlessAppContext) -> HeadlessAppContext {
         dragged < before && dragged > 0.,
         "dragging the thumb scrolls the file ({before} to {dragged})"
     );
+
+    // Wrapped, nothing scrolls sideways: a mostly sideways gesture goes to the list instead of doing nothing.
+    let cx = rig.close();
+    let (mut rig, _) = Rig::open_sized(
+        cx,
+        synthetic(500),
+        vec![],
+        DiffProps {
+            wrap: true,
+            ..DiffProps::default()
+        },
+        NARROW,
+    );
+    let top = rig.top();
+    rig.wheel_at(middle, point(-6., -1.), TouchPhase::Started);
+    rig.wheel_at(middle, point(-1., -6.), TouchPhase::Moved);
+    rig.wheel_at(middle, point(-1., -6.), TouchPhase::Moved);
+    assert!(
+        rig.top().item_ix > top.item_ix,
+        "a wrapped file passes a sideways gesture to the list"
+    );
     rig.close()
 }
 
