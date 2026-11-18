@@ -351,6 +351,9 @@ fn main() {
     );
     run("attributes", || attributes(bg, fg));
     run("wide_and_emoji", || wide_and_emoji(bg));
+    run("background_bands_match_their_rows", || {
+        background_bands_match_their_rows(bg)
+    });
     run("resize_authority", resize_authority);
     run("narrow_panes_shrink_the_font", narrow_panes_shrink_the_font);
     run("input_and_scrolling", input_and_scrolling);
@@ -1506,6 +1509,74 @@ fn attributes(bg: [u8; 3], fg: [u8; 3]) {
 }
 
 /// CJK, emoji and a combining mark take their cells and are drawn, with fallback fonts.
+/// A row's background fills exactly its cells, top to bottom edge, over the same rows as its
+/// glyphs: padded SGR rows, an erase to the end of the line, and a wide character. Rows printed at
+/// a width the terminal is later narrowed to wrap their overflow (background included) onto the
+/// next row, as xterm.js's reflow does for written cells; that is the grid, not the painting.
+fn background_bands_match_their_rows(bg: [u8; 3]) {
+    let green = rgb(u32::from(Theme::default().ansi[2].0) << 16
+        | u32::from(Theme::default().ansi[2].1) << 8
+        | u32::from(Theme::default().ansi[2].2));
+    let mut h = Harness::open(900., 420.);
+    h.attach(
+        40,
+        8,
+        &format!(
+            "\x1b[42m{:<30}\x1b[0m\r\n\x1b[42m{:<30}\x1b[0m\r\n\
+             \x1b[42m 3 erased\x1b[K\x1b[0m\r\n\x1b[42m\u{4e16}\x1b[0mz",
+            " 1 +fn x", " 2 +    y"
+        ),
+    );
+    let shot = h.draw();
+    let inset = 1.5 / shot.scale;
+    let edges = |col: usize, row: usize| {
+        let (x, y) = shot.cell_origin(col, row);
+        let x = x + shot.cell.0 / 2.0;
+        [shot.at(x, y + inset), shot.at(x, y + shot.cell.1 - inset)]
+    };
+    for row in 0..3 {
+        // The band covers the row's whole height at its first, middle and last column (the
+        // erase runs to the edge of the grid), and stops there: the next row starts clean.
+        for col in [0, 15, 29] {
+            for edge in edges(col, row) {
+                assert!(near(edge, green), "row {row} col {col} band edge {edge:?}");
+            }
+        }
+        if row < 2 {
+            assert!(
+                near(shot.center(30, row), bg),
+                "row {row} stops at its 30 cells"
+            );
+        } else {
+            assert!(
+                near(shot.center(39, row), green),
+                "the erase reaches the last column"
+            );
+        }
+        // The row's glyphs sit inside its band.
+        assert!(
+            shot.count(1, row, 1, |p| differs(p, green)) > 4,
+            "ink on row {row}"
+        );
+    }
+    // A wide character's background covers both of its cells, and only those.
+    for col in [0, 1] {
+        for edge in edges(col, 3) {
+            assert!(near(edge, green), "wide cell {col} band {edge:?}");
+        }
+    }
+    assert!(
+        !near(shot.center(2, 3), green),
+        "the cell after the wide one"
+    );
+
+    // Narrowed to 20 columns, the 30-cell rows wrap their last 10 green cells onto a row of
+    // their own, which is the pattern of a diff drawn before its pane got narrower.
+    h.output("\x1b[8;8;20t");
+    let shot = h.draw();
+    assert!(near(shot.center(5, 1), green) && near(shot.center(12, 1), bg));
+}
+
 fn wide_and_emoji(bg: [u8; 3]) {
     let mut h = Harness::open(900., 420.);
     h.attach(100, 24, "\u{4e16}\u{754c}ab\r\n\u{1f600}x\r\ne\u{301}z");
