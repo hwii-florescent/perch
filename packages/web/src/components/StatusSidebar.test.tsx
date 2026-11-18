@@ -6,7 +6,7 @@ import type { AttentionEvent, SessionSummary } from "@perch/shared";
 
 vi.mock("../ws", () => ({ socket: { send: vi.fn(), connect: vi.fn(), onMessage: vi.fn(() => () => {}), onConnectionChange: vi.fn(() => () => {}) } }));
 vi.mock("./NewSessionPopover", () => ({ NewSessionPopover: () => null }));
-vi.mock("../keybinds", () => ({ useNestShortcutHints: () => [] }));
+vi.mock("../keybinds", () => ({ useNestShortcutHints: () => [], shortcutLabel: () => null }));
 vi.mock("../closeGuard", () => ({ requestCloseSession: vi.fn() }));
 const { usePerchStore } = await import("../store");
 const { useAttention } = await import("../attention");

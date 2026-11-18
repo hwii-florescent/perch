@@ -24,7 +24,7 @@ declare module "@perch/sdk" {
    * session and the phone-size notice (their props types); 1.10 the phone's own screens (`stock:mobile-*`), the shell
    * toolbar, the agent terminal's controls, the dock's tab and group actions and the browser toolbar (their props
    * types), and `glassClass`, `tapButtonClass`, `GearIcon`, `PlusIcon`, `EllipsisIcon`; 1.11 `Submenu`; 1.12 the
-   * review's diff (`DiffView`).
+   * review's diff (`DiffView`); 1.13 `tip`.
    */
   export const version: string;
 
@@ -1181,6 +1181,8 @@ declare module "@perch/sdk" {
   export function assetKind(mediaType: string | undefined): "image" | "video" | "audio" | "pdf" | "archive" | undefined;
   /** The key a person has bound to a command (`editor.save`), as Perch shows it; null when none. */
   export function shortcutLabel(command: string): string | null;
+  /** `label` with the key bound to `command` after it (`"Save (⌘S)"`), for a button's `title`; `label` alone when none is. */
+  export function tip(label: string, command: string): string;
 
   // -------------------------------------------------------------------------------------------------------------
   // 1.5: the native chat. The transcript is the core's projection of the CLI's own history (Rust `native_ui`); the

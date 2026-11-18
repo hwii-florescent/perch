@@ -20,7 +20,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 //! `@perch/sdk` and files beside it (docs/MOD-SDK.md). The strip's markers (`data-testid="tab-bar"`,
 //! `data-tab-entry`, `.tab-bar__tab--active`) are what the tab drag and focus code look for.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AgentIcon, beginTabDrag, cn, NewFilePrompt, NewSessionMenu, PageIcon, runCommand, segmentClass, Slot, startSession, TabDragLayer, TabMenu, tabStateClass, openBrowserTab, openFileTab, useNewTabRequest, useWorkspaceTabs, } from "@perch/sdk";
+import { AgentIcon, beginTabDrag, cn, NewFilePrompt, NewSessionMenu, PageIcon, runCommand, segmentClass, Slot, startSession, TabDragLayer, TabMenu, tabStateClass, tip, openBrowserTab, openFileTab, useNewTabRequest, useWorkspaceTabs, } from "@perch/sdk";
 import { BrowserIcon, FileIcon, ReviewIcon, TabCloseIcon } from "./icons.js";
 // Every tab sits in a wrapper that reserves room for its x (pr-[1.6rem]).
 // Operational text uses subtext-0: on surface-0 and panel-bg it contrasts at least as much as
@@ -151,7 +151,7 @@ export default function TabBar() {
                     type: "button",
                     className: closeButton(state),
                     "data-testid": `tab-close-${tab.id}`,
-                    title: "Close session",
+                    title: tip("Close session", "tabs.close"),
                     "aria-label": `Close ${tab.label}`,
                     onClick: () => runCommand("tab.close", { id: tab.id }),
                     children: _jsx(TabCloseIcon, {})
@@ -178,7 +178,7 @@ export default function TabBar() {
                 type: "button",
                 className: cn(segmentClass(), `w-7 shrink-0 justify-center text-[0.8rem] leading-none ${FOCUS}`, TAB_SHAPE(tabShape)),
                 "data-testid": "tab-new",
-                title: "New session in this workspace",
+                title: tip("New session in this workspace", "tabs.new"),
                 "aria-label": "New session in this workspace",
                 onClick: handleNewClick,
                 children: _jsx("svg", {

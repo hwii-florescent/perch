@@ -11,7 +11,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 //! This file is the source of a package: `scripts/export-stock-ui.mjs` turns it into the plain JS the
 //! app runs and `perch mod clone stock:pane-header` copies. It may import only `react`, `react-dom`,
 //! `@perch/sdk` and files beside it (docs/MOD-SDK.md).
-import { agentStateColor, AgentIcon, cn, ghostButton, runCommand, Slot, usePaneLook, useWorkspaceTabs } from "@perch/sdk";
+import { agentStateColor, AgentIcon, cn, ghostButton, runCommand, Slot, tip, usePaneLook, useWorkspaceTabs } from "@perch/sdk";
 const STATE_WORD = { blocked: "Waiting for you", working: "Working", done: "Done", idle: "Idle", unknown: "" };
 function Controls({ tab }) {
     return (_jsxs("span", {
@@ -39,7 +39,7 @@ function Controls({ tab }) {
             _jsx("button", {
                 type: "button",
                 className: cn(ghostButton, "flex size-6 items-center justify-center p-0 text-subtext-0 hover:text-fg"),
-                title: "Close this tab",
+                title: tip("Close this tab", "tabs.close"),
                 "aria-label": `Close ${tab.label}`,
                 "data-testid": `tile-close-${tab.id}`,
                 onClick: () => runCommand("pane.close", { id: tab.id }),

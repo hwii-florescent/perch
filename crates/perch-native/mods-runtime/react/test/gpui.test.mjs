@@ -2,7 +2,7 @@
 //! handlers the chains carry run the source's own handlers.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fixture, mountSidebar, namedInstances, THEMES, tree, NEEDS_REFERENCES } from "./support.mjs";
+import { fixture, loadSidebar, mountSidebar, namedInstances, THEMES, tree, NEEDS_REFERENCES } from "./support.mjs";
 import { breakLines, describeToGpui, scrollGutters, shrinkWrapBases, snapColumns, snapRows, toGpui } from "../gpui.mjs";
 
 /** A gpui-kit stand-in that records each call, and keeps the handlers. */
@@ -114,7 +114,7 @@ test("an icon takes its button's hover colour while the pointer is over it", NEE
     assert.ok(button?.hover?.text_color, "the organize button changes its text colour on hover");
     const { kit, handlers } = recordingKit();
     const record = byId(runtime.describeToGpui(handle.description, kit, handle, files)).get("organize-button");
-    const group = record.styles.find(([name]) => name === "group")?.[1];
+    const group = (record.styles ?? []).find(([name]) => name === "group")?.[1];
     assert.ok(group, "the button is a hover group");
     assert.ok(!handlers.has("organize-button:on_hover"), "the pointer is not reported to the script");
     // Each icon is drawn twice: in its colour at rest, and in the hover colour shown while the group is hovered.
@@ -444,4 +444,44 @@ test("drawing again keeps unchanged subtrees and draws what drawing from scratch
   } finally {
     handle.unmount();
   }
+});
+
+/** Every element record in a built tree. */
+const records = (el) => (typeof el === "string" ? [] : [el.record, ...el.record.children.flatMap(records)]);
+const tipOf = (record) => (record.styles ?? []).find(([name]) => name === "tooltip")?.[1];
+
+test("a title, or the aria-label of an icon-only button, is the node's tooltip and gives it an id", async () => {
+  const { runtime } = await loadSidebar();
+  const { createElement: h } = await import("react");
+  const icon = h("svg", { width: 8, height: 8, viewBox: "0 0 8 8" }, h("path", { d: "M0 0h8" }));
+  function Probe() {
+    return h("div", null,
+      h("button", { type: "button", title: "Close" }, "x"),
+      h("button", { type: "button", "aria-label": "Refresh" }, icon),
+      h("button", { type: "button", "aria-label": "Reload" }, "Reload"),
+      h("span", null, "no tip"));
+  }
+  const perch = { isMac: true, render() {}, error: (e) => { throw e; } };
+  const handle = runtime.mount(perch, Probe, { container: { width: 200, height: 100 } });
+  try {
+    await new Promise((r) => setTimeout(r, 0));
+    const { kit } = recordingKit();
+    const tipped = records(describeToGpui(handle.description, kit, handle, files)).filter(tipOf);
+    assert.deepEqual(tipped.map(tipOf).sort(), ["Close", "Refresh"], "a button with its own text and a plain span get none");
+    for (const record of tipped) assert.ok(record.id, `the tooltip of ${tipOf(record)} needs an element with an id`);
+  } finally {
+    handle.unmount();
+  }
+});
+
+test("a node whose title changed is drawn again, and the nodes around it that did not change are kept", () => {
+  const tipped = (title) => ({ kind: "div", id: 1, style: {}, children: [], meta: { tag: "button", attrs: { title } } });
+  const sibling = { kind: "div", id: 2, style: {}, children: [] };
+  const page = (title) => ({ root: { kind: "div", id: 0, style: {}, children: [tipped(title), sibling] }, overlays: [] });
+  const { kit, commit, state } = retainingKit();
+  const handle = {};
+  const draw = (description) => { const out = records(describeToGpui(description, kit, handle, files, 2)).map(tipOf).filter(Boolean); commit(); return out; };
+  assert.deepEqual(draw(page("Zoom 110%")), ["Zoom 110%"]);
+  assert.deepEqual(draw(page("Zoom 120%")), ["Zoom 120%"]);
+  assert.ok(state.reused > 0, "the unchanged sibling is kept");
 });

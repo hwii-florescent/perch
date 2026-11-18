@@ -11,7 +11,7 @@
 import { memo, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactElement } from "react";
 import {
   beginReorderDrag, buttonClass, cn, ConfirmDialog, Dialog, FolderBrowser, ghostButton, InstructionsDialog, MemoryDialog, nestSessions, NewSessionMenu,
-  pickFolder, rowActionClass, runCommand, segmentClass, Select, SessionDot, SessionMenu, startSession, useAddProject, useAddProjectRequest, useHosts, useNavigation,
+  pickFolder, rowActionClass, runCommand, segmentClass, Select, SessionDot, SessionMenu, startSession, tip, useAddProject, useAddProjectRequest, useHosts, useNavigation,
   WorktreeMenu, type ProjectInfo, type SessionInfo, type StatusSection, type WorkspaceInfo,
 } from "@perch/sdk";
 import { Chevron, CheckoutIcon, EllipsisIcon, FolderMark, NewChatIcon, OrganizeIcon, PlusIcon } from "./icons";
@@ -712,7 +712,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
               type="button"
               className={cn("my-[3px] cursor-pointer self-center rounded-ui bg-transparent px-2 py-[0.15rem] text-[0.68rem] font-medium text-accent [border:0] [font-family:inherit] hover:bg-surface-1 [@media(max-width:700px)]:min-h-[2.75rem]", FOCUS)}
               data-testid="workspace-needs-you"
-              title="Open the next chat that needs you"
+              title={tip("Open the next chat that needs you", "global.needsYou")}
               onClick={() => { runCommand("global.needsYou"); onNavigate?.(); }}
             >
               {nav.needsYou} need{nav.needsYou === 1 ? "s" : ""} you

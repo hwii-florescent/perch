@@ -9,7 +9,7 @@
 //! This file is the source of a package: `scripts/export-stock-ui.mjs` turns it into the plain JS the
 //! app runs and `perch mod clone stock:pane-header` copies. It may import only `react`, `react-dom`,
 //! `@perch/sdk` and files beside it (docs/MOD-SDK.md).
-import { agentStateColor, AgentIcon, cn, ghostButton, runCommand, Slot, usePaneLook, useWorkspaceTabs, type AgentState, type TabInfo } from "@perch/sdk";
+import { agentStateColor, AgentIcon, cn, ghostButton, runCommand, Slot, tip, usePaneLook, useWorkspaceTabs, type AgentState, type TabInfo } from "@perch/sdk";
 
 const STATE_WORD: Record<AgentState, string> = { blocked: "Waiting for you", working: "Working", done: "Done", idle: "Idle", unknown: "" };
 
@@ -19,7 +19,7 @@ function Controls({ tab }: { tab: TabInfo }) {
       <button type="button" className={cn(ghostButton, "flex size-6 items-center justify-center p-0 text-subtext-0 hover:text-fg")} title="Show this tab full size — leave the split" aria-label={`Exit split for ${tab.label}`} data-testid={`tile-expand-${tab.id}`} onClick={() => runCommand("pane.unsplit", { id: tab.id })}>
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>
       </button>
-      <button type="button" className={cn(ghostButton, "flex size-6 items-center justify-center p-0 text-subtext-0 hover:text-fg")} title="Close this tab" aria-label={`Close ${tab.label}`} data-testid={`tile-close-${tab.id}`} onClick={() => runCommand("pane.close", { id: tab.id })}>
+      <button type="button" className={cn(ghostButton, "flex size-6 items-center justify-center p-0 text-subtext-0 hover:text-fg")} title={tip("Close this tab", "tabs.close")} aria-label={`Close ${tab.label}`} data-testid={`tile-close-${tab.id}`} onClick={() => runCommand("pane.close", { id: tab.id })}>
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8" /></svg>
       </button>
     </span>

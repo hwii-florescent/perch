@@ -19,7 +19,7 @@ import {
   GitMarker,
   ghostButton as GHOST_BUTTON,
   MarkdownPreview,
-  shortcutLabel,
+  tip,
   useWorkspaceFiles,
   useZoom,
   type CodeEditorHandle,
@@ -657,7 +657,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
                   <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", wrap && "text-fg")} onClick={() => setWrap(!wrap)} title="Toggle word wrap">Wrap</button>
                   {isHtml && <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", previewOpen && "text-fg")} onClick={() => { setPreviewOpen((value) => !value); if (!preview || preview.state === "error") requestPreview(selectedPath); }}>Preview</button>}
                   <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]")} onClick={handleReload} disabled={document.state === "saving" || document.bufferState === "saving"} title="Reload from disk">Reload</button>
-                  <button type="button" className={cn(GHOST_BUTTON, "workspace-files__save px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", canSave && "text-fg")} onClick={() => saveFile(selectedPath)} disabled={!canSave} title={shortcutLabel("editor.save") ? `Save (${shortcutLabel("editor.save")})` : "Save"}>
+                  <button type="button" className={cn(GHOST_BUTTON, "workspace-files__save px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", canSave && "text-fg")} onClick={() => saveFile(selectedPath)} disabled={!canSave} title={tip("Save", "editor.save")}>
                     {document.state === "saving" ? "Saving…" : "Save"}
                   </button>
                 </div>
@@ -708,7 +708,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
                   {document.error && document.state !== "conflict" && <span className="overflow-hidden text-ellipsis text-red" role="alert">{document.error}</span>}
                   {document.metadata?.readonly && <span>Read-only</span>}
                 </span>
-                <button type="button" className={cn(GHOST_BUTTON, "shrink-0 px-[0.3rem]")} onClick={() => editorRef.current?.openGoto()} title={shortcutLabel("editor.gotoLine") ? `Go to line (${shortcutLabel("editor.gotoLine")})` : "Go to line"}>Ln {caret.line}, Col {caret.col}</button>
+                <button type="button" className={cn(GHOST_BUTTON, "shrink-0 px-[0.3rem]")} onClick={() => editorRef.current?.openGoto()} title={tip("Go to line", "editor.gotoLine")}>Ln {caret.line}, Col {caret.col}</button>
               </div>
             </>
           )}

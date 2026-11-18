@@ -53,6 +53,7 @@ export default function PhoneSize({ generation, pending, onThisTab, onAllTabs })
                         type: "button",
                         className: cn(iconButton, "text-[1rem]"),
                         "aria-label": "Keep phone size and hide this",
+                        title: "Keep phone size and hide this",
                         onClick: () => setFoldedGeneration(generation),
                         children: "\u00D7"
                     })

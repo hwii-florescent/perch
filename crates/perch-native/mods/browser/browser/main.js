@@ -64,6 +64,7 @@ export default function Browser({ workspaceId }) {
                                 className: cn(ghostButton, "px-1 py-1 text-[0.75rem]"),
                                 "data-testid": "drawer-browser-page-close",
                                 "aria-label": `Close ${pageLabel(page.url, page.title)}`,
+                                title: `Close ${pageLabel(page.url, page.title)}`,
                                 onClick: () => { browser.close(page.id); setFocusPage(pages.filter((other) => other.id !== page.id).at(-1)?.id ?? null); },
                                 children: "\u00D7"
                             })

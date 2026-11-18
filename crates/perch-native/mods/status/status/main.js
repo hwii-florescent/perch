@@ -9,7 +9,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 //! This file is the source of a package: `scripts/export-stock-ui.mjs` turns it into the plain JS
 //! the app runs and `perch mod clone stock:status` copies. It may import only `react`, `react-dom`,
 //! `@perch/sdk` and files beside it (docs/MOD-SDK.md).
-import { cn, ghostButton, isMac, keyLabel, resetZoom, Slot, usePlanUsage, useStatusLine, useZoom } from "@perch/sdk";
+import { cn, ghostButton, resetZoom, Slot, tip, usePlanUsage, useStatusLine, useZoom } from "@perch/sdk";
 import { formatTokens, UsageSummary } from "./usage.js";
 export default function StatusBar() {
     const line = useStatusLine();
@@ -92,7 +92,7 @@ export default function StatusBar() {
                             type: "button",
                             "data-testid": "zoom-indicator",
                             className: cn(ghostButton, "px-1 tabular-nums text-fg"),
-                            title: `Zoom ${Math.round(zoom * 100)}%. Click to reset (${keyLabel(isMac ? "cmd+0" : "ctrl+0")})`,
+                            title: tip(`Zoom ${Math.round(zoom * 100)}%. Click to reset`, "view.zoomReset"),
                             onClick: resetZoom,
                             children: [
                                 Math.round(zoom * 100),

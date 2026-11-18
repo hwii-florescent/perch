@@ -197,14 +197,14 @@ The command fails when any copy of the current revision failed.
 - The core keeps the last 256 reports and 16 open questions. Past that it drops
   the oldest. A screen's reports go when it disconnects.
 
-## API reference (1.12)
+## API reference (1.13)
 
 The full signatures and field docs are in `perch-sdk.d.ts`; this lists what each
 export is for.
 
 ### `version: string`
 
-This page's SDK version, as semver (`"1.12.0"`). 1.1 added `assetUrl`,
+This page's SDK version, as semver (`"1.13.0"`). 1.1 added `assetUrl`,
 `useInstance` and `useInstanceState`; 1.2 the status bar, tab strip and pane
 header surface; 1.3 navigation (the sidebar); 1.4 resources (the Git review,
 `useResourceState`, and the terminal, layout and focus queries); 1.5 files, the
@@ -222,7 +222,7 @@ pin or this device's order changes (`terminal.pin`, `terminal.order`), so a copy
 screens' props, with no export added: the header gets `onOpenTools`, the switcher `chatMode`, `onChatMode` and `onOpenSettings`, the
 panes `session` (`content` is now the drawer's tool), and the files screen is always given its `explorer`; 1.11
 adds `Submenu`, a menu row that opens a list of choices beside the menu (hover, click or keyboard). 1.12 adds
-the review's diff (`DiffView`).
+the review's diff (`DiffView`). 1.13 adds `tip(label, command)`.
 
 ### `useKeybindings(): KeybindEntry[]`
 
@@ -423,7 +423,7 @@ for actions.
   swap, a reload and the phone; a screen never writes a file itself.
   `askAgent(source)` opens Context Bridge's preview and explicit send.
 - `CodeEditor`, `FileAsset` (images, media, PDF), `MarkdownPreview`,
-  `FileEntryMenu`, `Chevron`, `assetKind`, `shortcutLabel`: the editor and
+  `FileEntryMenu`, `Chevron`, `assetKind`, `shortcutLabel`, `tip`: the editor and
   viewers are Perch's engines; place them, do not rebuild them.
 - `useNativeChat({ sessionId, providerId, terminalProviderId, … })`: one native
   chat as Perch keeps it: the transcript, the draft and its operation id, the

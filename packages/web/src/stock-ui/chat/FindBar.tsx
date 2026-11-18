@@ -15,9 +15,9 @@ export function FindBar({ query, onQuery, count, index, onStep, onClose }: {
         else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
       }} />
     <span className="text-subtext-0" aria-live="polite" data-testid="native-cli-find-count">{query.trim() ? (count ? `${index + 1} of ${count}` : "No matches") : ""}</span>
-    <button type="button" aria-label="Previous match" disabled={!count} onClick={() => onStep(-1)}>↑</button>
-    <button type="button" aria-label="Next match" disabled={!count} onClick={() => onStep(1)}>↓</button>
-    <button type="button" aria-label="Close find" onClick={onClose}>×</button>
+    <button type="button" aria-label="Previous match" title="Previous match" disabled={!count} onClick={() => onStep(-1)}>↑</button>
+    <button type="button" aria-label="Next match" title="Next match" disabled={!count} onClick={() => onStep(1)}>↓</button>
+    <button type="button" aria-label="Close find" title="Close find" onClick={onClose}>×</button>
   </div>;
 }
 

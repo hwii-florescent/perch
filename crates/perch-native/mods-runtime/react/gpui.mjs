@@ -13,7 +13,8 @@
 //! Ids: a node the parity table names has that name (`name` or `name:key`; a name for an element's own text is a box
 //! around the text); another node that needs an id for its handlers or interaction styles gets `~`, its host id and its
 //! `data-testid` (`~n12:workspace-organize-status`);
-//! the rest get none. Display-none nodes are left out; a named node that is invisible or fully transparent (a
+//! the rest get none. A node with a `title` (or an icon-only button with an `aria-label`) gets that text as its
+//! hover tooltip, so it also gets an id. Display-none nodes are left out; a named node that is invisible or fully transparent (a
 //! hover-only button at rest) keeps no name, as the page does not count it shown.
 //!
 //! Vertical lengths on device pixels: GPUI rounds every length to a device pixel, so fractional CSS lengths stacked in
@@ -98,11 +99,22 @@ function pressTarget(handle, id, event) {
 
 /** The engine id of a node: its parity name, else (when the engine needs one, for events and interaction styles)
  * `~`, the host element's id and its `data-testid` if any, which tests that read named elements leave out. */
-function engineId(node, events, overlay) {
+function engineId(node, events, overlay, tip) {
   if (node.name) return node.name;
-  if (!(events.size || node.hover || node.focus || node.active || (node.track_hover && layoutGroups.has(node.group)) || overlay)) return null;
+  if (!(events.size || node.hover || node.focus || node.active || (node.track_hover && layoutGroups.has(node.group)) || overlay || tip)) return null;
   const testId = node.meta?.attrs["data-testid"];
   return testId ? `~${node.id}:${testId}` : `~${node.id}`;
+}
+
+/** Whether text is drawn in `node` or under it. */
+const holdsText = (node) => (node.children ?? []).some((c) => (c.kind === "text" ? String(c.text ?? "").trim() !== "" : holdsText(c)));
+
+/** The hover tooltip of `node`, as the browser shows it: its `title`, else the `aria-label` of an icon-only button
+ * (a button with no text under it); "" for none. The engine's tooltip needs an element with an id (`engineId`). */
+function tooltipText(node) {
+  const attrs = node.meta?.attrs;
+  if (!attrs) return "";
+  return attrs.title || (node.meta.tag === "button" && attrs["aria-label"] && !holdsText(node) ? attrs["aria-label"] : "");
 }
 
 /** Whether `node` holds text of its own, or text with a space in a column inside it, that the row it is in could
@@ -228,8 +240,11 @@ function buildGpui(node, kit, handle, files, overlay, unseen, color, text, rowIt
       .child(layer().group_hover(over, (s) => s.invisible()).child(files.icon(`~icon-${node.id}`, node.markup, color)))
       .child(layer().invisible().group_hover(over, (s) => s.visible()).child(files.icon(`~icon-${node.id}-hover`, node.markup, hovered)));
   } else if (node.markup) el = el.child(files.icon(`~icon-${node.id}`, node.markup, node.kind === "svg" ? color : ""));
-  const id = engineId(node, events, !!region);
+  // A node that is not shown (see `unseen`) has no tooltip, as it has no name.
+  const tip = unseen ? "" : tooltipText(node);
+  const id = engineId(node, events, !!region, !!tip);
   if (id) el = el.id(id);
+  if (tip) el = el.tooltip(tip);
   // Its laid-out box is kept for the source, which measured it (`HostDocument.measure`).
   if (node.measure) el = el.measure(node.measure);
   // More parity names for the same element (two of the page's selectors find it).

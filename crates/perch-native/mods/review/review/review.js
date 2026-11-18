@@ -1372,6 +1372,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                         type: "button",
                         className: "[border:0] bg-transparent text-inherit",
                         "aria-label": "Dismiss",
+                        title: "Dismiss",
                         onClick: () => setLocalActionError(null),
                         children: "\u00D7"
                     })
