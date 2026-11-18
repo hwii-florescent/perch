@@ -3,8 +3,8 @@
 //! A screen marks a box `data-perch-engine="diff" data-perch-key="<key>"` and drives the view by that key:
 //! `open(key, {workspaceId})` makes (or keeps) it, `setProps(key, props)` sends the view state (`DiffProps` by the
 //! SDK's names) and `events(key)` drains what the person did (`selectLine`, `addComment`, `askAgent`, `editComment`,
-//! `editBody`, `saveEdit`, `cancelEdit`, `commentBody`, `submitComment`, `cancelComment`, `askLines`, `resolve`,
-//! `delete`; comments by id). Queuing an event re-renders the mod
+//! `editBody`, `saveEdit`, `cancelEdit`, `commentBody`, `submitComment`, `cancelComment`, `askLines`,
+//! `toggleCollapsed`, `toggleViewed`, `resolve`, `delete`; comments by id). Queuing an event re-renders the mod
 //! that opened the key, as `perch-editor` does.
 //!
 //! The diff and comments never cross into script: the window's Git store publishes them per workspace
@@ -31,6 +31,7 @@ export function setProps(key: string, props: {
   editingCommentId?: string | null; editingBody?: string;
   reveal?: { path: string; seq: number } | null;
   composer?: { body: string; label: string; canAsk?: boolean } | null;
+  collapsed?: string[]; viewed?: string[] | null;
 }): void;
 export function events(key: string): Array<{ type: string; [field: string]: unknown }>;
 export function seq(key: string): number;
@@ -309,6 +310,19 @@ fn side_of(word: &str) -> Result<ReviewSide, HostError> {
     }
 }
 
+/// A list of paths, or `None` when the value is not an array.
+fn paths(value: Option<&HostValue>) -> Option<Vec<String>> {
+    match value {
+        Some(HostValue::Array(items)) => Some(
+            items
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
 /// `DiffProps` from the SDK's props; a missing field is its default.
 fn props_of(props: &HostValue) -> Result<DiffProps, HostError> {
     let text = |k: &str| props.get(k).and_then(HostValue::as_str);
@@ -357,6 +371,8 @@ fn props_of(props: &HostValue) -> Result<DiffProps, HostError> {
             }
             _ => None,
         },
+        collapsed: paths(props.get("collapsed")).unwrap_or_default(),
+        viewed: paths(props.get("viewed")),
         composer: match props.get("composer") {
             Some(c @ HostValue::Object(_)) => Some(Composer {
                 body: c
@@ -402,6 +418,10 @@ fn event_value(event: &DiffEvent) -> HostValue {
             ("line", n(*line)),
         ],
         DiffEvent::AskAgent { path } => vec![("type", s("askAgent")), ("path", s(path))],
+        DiffEvent::ToggleCollapsed { path } => {
+            vec![("type", s("toggleCollapsed")), ("path", s(path))]
+        }
+        DiffEvent::ToggleViewed { path } => vec![("type", s("toggleViewed")), ("path", s(path))],
         DiffEvent::EditComment { comment } => {
             vec![("type", s("editComment")), ("commentId", s(comment))]
         }

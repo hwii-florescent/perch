@@ -922,6 +922,12 @@ declare module "@perch/sdk" {
     onCancelComment?(): void;
     /** Ask agent about the selected lines; offered when given. */
     onAskLines?(): void;
+    /** Files folded to their header; pressing a header's path asks to fold or unfold it. */
+    collapsed?: string[];
+    onToggleCollapsed?(path: string): void;
+    /** Files marked viewed; with `onToggleViewed` each file header has a Viewed box. */
+    viewed?: string[];
+    onToggleViewed?(path: string): void;
     /** A line was clicked or chosen with Enter/Space; `extend` with Shift. */
     onSelectLine(path: string, side: ReviewSide, line: number, extend: boolean): void;
     /** A line's `＋`. */

@@ -557,6 +557,7 @@ export function DiffView(props) {
   perch.diff.setProps(key, {
     path: props.path ?? null, wrap: !!props.wrap, layout: props.layout ?? "auto", canAsk: !!props.onAskAgent, selection: props.selection ?? null,
     editingCommentId: props.editingCommentId ?? null, editingBody: props.editingBody ?? "", reveal: props.reveal ?? null,
+    collapsed: props.collapsed ?? [], viewed: props.onToggleViewed ? (props.viewed ?? []) : null,
     composer: props.selection && props.onSubmitComment ? { body: props.commentBody ?? "", label: props.commentLabel ?? "Add comment", canAsk: !!props.onAskLines } : null,
   });
   const comments = useHostSnapshot((p) => p.gitReview(workspaceId)).comments ?? [];
@@ -571,6 +572,8 @@ export function DiffView(props) {
         case "selectLine": p.onSelectLine?.(event.path, event.side, event.line, event.extend); break;
         case "addComment": p.onAddComment?.(event.path, event.side, event.line); break;
         case "askAgent": p.onAskAgent?.(event.path); break;
+        case "toggleCollapsed": p.onToggleCollapsed?.(event.path); break;
+        case "toggleViewed": p.onToggleViewed?.(event.path); break;
         case "editComment": { const c = comment(event.commentId); if (c) p.onEditComment?.(c); break; }
         case "editBody": p.onEditBody?.(event.text); break;
         case "saveEdit": { const c = comment(event.commentId); if (c) p.onSaveEdit?.(c); break; }

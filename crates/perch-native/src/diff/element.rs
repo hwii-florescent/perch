@@ -76,6 +76,10 @@ pub struct DiffProps {
     pub reveal: Option<(String, u64)>,
     /// The new comment's field, drawn under the selection's last line while lines are selected.
     pub composer: Option<Composer>,
+    /// Files folded to their header.
+    pub collapsed: Vec<String>,
+    /// Files marked viewed; `None` offers no Viewed box.
+    pub viewed: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -116,6 +120,13 @@ pub enum DiffEvent {
         line: u32,
     },
     AskAgent {
+        path: String,
+    },
+    /// A file's header was pressed: fold or unfold it.
+    ToggleCollapsed {
+        path: String,
+    },
+    ToggleViewed {
         path: String,
     },
     EditComment {
@@ -566,7 +577,7 @@ impl DiffView {
             != self.props.editing.as_ref().map(|e| &e.comment);
         if old.path != self.props.path {
             self.rebuild(None, window, cx);
-        } else if editing_changed {
+        } else if editing_changed || old.collapsed != self.props.collapsed {
             let anchor = self.top_anchor();
             self.rebuild(anchor, window, cx);
         } else if old.wrap != self.props.wrap {
@@ -598,10 +609,20 @@ impl DiffView {
         if anchor.is_none() {
             self.offsets = Rc::default();
         }
-        let rows = match &self.diff {
+        let mut rows = match &self.diff {
             Some(diff) => rows::build(diff, &self.comments, self.props.path.as_deref(), self.split),
             None => Rows::default(),
         };
+        // A folded file keeps only its header.
+        if let (Some(diff), false) = (&self.diff, self.props.collapsed.is_empty()) {
+            let folded: Vec<bool> = diff
+                .files
+                .iter()
+                .map(|f| self.props.collapsed.iter().any(|p| p == file_path(f)))
+                .collect();
+            rows.rows
+                .retain(|r| matches!(r, Row::File { .. }) || !folded[r.file()]);
+        }
         let mut file_row = Vec::with_capacity(rows.rows.len());
         let mut ordinal = Vec::with_capacity(rows.rows.len());
         let mut counts = [0usize; 5];
@@ -1126,7 +1147,43 @@ impl Frame {
             capitalized(status_label(&f.status)),
             if f.is_binary { " · binary" } else { "" }
         );
+        let folded = self.props.collapsed.iter().any(|p| *p == path);
+        let viewed = self
+            .props
+            .viewed
+            .as_ref()
+            .map(|v| v.iter().any(|p| *p == path));
         let view = self.view.clone();
+        let viewed_box = viewed.map(|on| {
+            let (view, path) = (view.clone(), path.clone());
+            div()
+                .id(("git-file-viewed", file))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .gap(px(0.3 * REM))
+                .rounded(px(8.))
+                .px(px(6.))
+                .py(px(0.2 * REM))
+                .text_size(px(0.68 * REM))
+                .text_color(if on { c.accent } else { c.subtext })
+                .hover(|s| s.bg(c.surface1))
+                .child(if on { "☑" } else { "☐" })
+                .child("Viewed")
+                .on_click(move |_, _, cx| {
+                    let path = path.clone();
+                    view.update(cx, |_, cx| cx.emit(DiffEvent::ToggleViewed { path }))
+                        .ok();
+                })
+        });
+        let toggle = {
+            let (view, path) = (view.clone(), path.clone());
+            move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
+                let path = path.clone();
+                view.update(cx, |_, cx| cx.emit(DiffEvent::ToggleCollapsed { path }))
+                    .ok();
+            }
+        };
         let ask = self.props.can_ask.then(|| {
             let disabled = f.is_binary;
             div()
@@ -1158,14 +1215,26 @@ impl Frame {
             .px(px(0.7 * REM))
             .py(px(0.3 * REM))
             .child(
+                // The chevron and the path fold the file (the pinned header too).
                 div()
+                    .id(("git-file-fold", file))
                     .flex()
                     .flex_1()
                     .min_w_0()
+                    .items_center()
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .font_family(MONO)
                     .text_size(px(CODE_SIZE))
+                    .on_click(toggle)
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .w(px(0.9 * REM))
+                            .text_size(px(0.6 * REM))
+                            .text_color(c.subtext)
+                            .child(if folded { "▸" } else { "▾" }),
+                    )
                     .child(
                         div()
                             .min_w_0()
@@ -1188,6 +1257,7 @@ impl Frame {
                     .text_color(c.subtext)
                     .child(status),
             )
+            .children(viewed_box)
             .children(ask)
             .into_any_element()
     }
@@ -1841,7 +1911,14 @@ impl Render for DiffView {
                     .mode(gpui_base::ScrollbarMode::Always),
             )
             .children(pinned.map(|(_, header, push)| {
-                div().absolute().top(push).left_0().right_0().child(header)
+                // What the pinned header covers is not pressed through it.
+                div()
+                    .absolute()
+                    .top(push)
+                    .left_0()
+                    .right_0()
+                    .occlude()
+                    .child(header)
             }))
             // Each file's sideways scrollbar, laid out after the list has laid out this frame's rows.
             .child(

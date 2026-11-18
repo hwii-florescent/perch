@@ -151,15 +151,21 @@ export function DiffView(props: Sdk.DiffViewProps) {
 
   function file(file: GitDiffFile) {
     const displayPath = filePath(file);
+    const folded = props.collapsed?.includes(displayPath) ?? false;
+    const viewed = props.viewed?.includes(displayPath) ?? false;
     return (
       <article key={displayPath} data-file-path={displayPath}>
         <header className="sticky top-0 left-0 z-[2] flex w-[100cqi] items-center justify-between gap-3 bg-[color-mix(in_srgb,var(--surface-1)_70%,var(--panel-bg))] px-[0.7rem] py-[0.3rem]">
-          <span className="min-w-0 flex-1 [font-family:var(--font-mono)] text-[0.75rem]" title={displayPath}><PathLabel path={displayPath} /></span>
+          <button type="button" className="flex min-w-0 flex-1 items-center gap-[0.3rem] text-left text-fg [background:none] [font-family:var(--font-mono)] text-[0.75rem]" title={displayPath} aria-expanded={!folded} data-testid="git-file-fold" disabled={!props.onToggleCollapsed} onClick={() => props.onToggleCollapsed?.(displayPath)}>
+            <span className="w-[0.9rem] shrink-0 text-[0.6rem] text-subtext-0" aria-hidden="true">{folded ? "▸" : "▾"}</span>
+            <PathLabel path={displayPath} />
+          </button>
           <span className="shrink-0 text-[0.68rem] text-subtext-0 capitalize">{file.status}{file.isBinary ? " · binary" : ""}</span>
+          {props.onToggleViewed && <label className={`inline-flex shrink-0 items-center gap-[0.3rem] text-[0.68rem] ${viewed ? "text-accent" : "text-subtext-0"}`}><input type="checkbox" data-testid="git-file-viewed" checked={viewed} onChange={() => props.onToggleViewed?.(displayPath)} />Viewed</label>}
           {props.onAskAgent && <button type="button" className={`${BTN_QUIET} shrink-0`} disabled={file.isBinary || state.diffState !== "ready"} aria-label="Ask agent about diff…" title="Ask agent about this diff" onClick={() => props.onAskAgent?.(displayPath)}>Ask agent</button>}
         </header>
         {/* Each file scrolls sideways on its own, with its own scrollbar (as GitHub's Files changed). */}
-        {file.isBinary ? <div className={EMPTY}>Binary content is not rendered. Status and path remain available for review.</div> : <div className={wrap ? "" : "overflow-x-auto overscroll-x-contain"} data-testid="git-diff-file-body"><div className={wrap ? "" : "min-w-max"}>{file.hunks.map((hunk, hunkIndex) => (
+        {folded ? null : file.isBinary ? <div className={EMPTY}>Binary content is not rendered. Status and path remain available for review.</div> : <div className={wrap ? "" : "overflow-x-auto overscroll-x-contain"} data-testid="git-diff-file-body"><div className={wrap ? "" : "min-w-max"}>{file.hunks.map((hunk, hunkIndex) => (
           <section key={`${displayPath}:${hunkIndex}`}>
             <div className="sticky left-0 w-[100cqi] bg-[color-mix(in_srgb,var(--accent)_8%,var(--panel-bg))] px-[0.7rem] py-[2px] text-accent [font-family:var(--font-mono)] text-[0.68rem]">{hunk.header || `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`}</div>
             {hunk.lines.map((line, lineIndex) => {

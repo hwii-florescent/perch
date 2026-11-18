@@ -106,6 +106,23 @@ function filePathForSide(file, side) {
         return file.oldPath ?? file.newPath ?? "(unknown file)";
     return file.newPath ?? file.oldPath ?? "(unknown file)";
 }
+/** What a file's diff says, as a short hash: a file marked viewed stays viewed only while this is unchanged (GitHub
+ * clears Viewed when the file changes). */
+export function fileSignature(file) {
+    let hash = 0x811c9dc5;
+    const add = (text) => {
+        for (let i = 0; i < text.length; i += 1)
+            hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193);
+        hash = Math.imul(hash ^ 10, 0x01000193);
+    };
+    add(`${file.status}:${file.oldPath ?? ""}:${file.newPath ?? ""}`);
+    for (const hunk of file.hunks) {
+        add(hunk.header);
+        for (const line of hunk.lines)
+            add(`${line.kind[0]}${line.content}`);
+    }
+    return (hash >>> 0).toString(36);
+}
 function splitPath(path) {
     const cut = path.lastIndexOf("/") + 1;
     return [path.slice(0, cut), path.slice(cut)];
@@ -312,6 +329,9 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
     const [railOpen, setRailOpen] = useResourceState(`review:${workspaceId}:railOpen`, true);
     const [collapsedDirs, setCollapsedDirs] = useResourceState(`review:${workspaceId}:collapsedDirs`, new Set());
     const [fileFilter, setFileFilter] = useState("");
+    const [collapsedFiles, setCollapsedFiles] = useResourceState(`review:${workspaceId}:collapsedFiles`, new Set());
+    // Path to the file's signature when it was marked viewed.
+    const [viewedFiles, setViewedFiles] = useResourceState(`review:${workspaceId}:viewedFiles`, {});
     // The file the tree last asked this copy's diff to scroll to (each copy scrolls on its own).
     const [reveal, setReveal] = useState(null);
     function revealFile(path) {
@@ -476,6 +496,27 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
         }
         return new Map(countCache.current.counts);
     }, [diff]);
+    const signatures = useMemo(() => new Map(diffFiles.map((file) => [filePath(file), fileSignature(file)])), [diffFiles]);
+    const viewedPaths = useMemo(() => [...signatures].filter(([path, signature]) => viewedFiles[path] === signature).map(([path]) => path), [signatures, viewedFiles]);
+    function toggleCollapsed(path) {
+        setCollapsedFiles((current) => { const next = new Set(current); if (!next.delete(path))
+            next.add(path); return next; });
+    }
+    /** Marking a file viewed folds it; unmarking unfolds it. */
+    function toggleViewed(path) {
+        const signature = signatures.get(path);
+        if (!signature)
+            return;
+        const on = viewedFiles[path] !== signature;
+        setViewedFiles((current) => { const next = { ...current }; if (on)
+            next[path] = signature;
+        else
+            delete next[path]; return next; });
+        setCollapsedFiles((current) => { const next = new Set(current); if (on)
+            next.add(path);
+        else
+            next.delete(path); return next; });
+    }
     const treeShown = useMemo(() => treeRows(changedFiles, collapsedDirs, fileFilter), [changedFiles, collapsedDirs, fileFilter]);
     function toggleDir(key) {
         setCollapsedDirs((current) => { const next = new Set(current); if (!next.delete(key))
@@ -1084,6 +1125,16 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                                 label: "Clear base",
                                                 onClick: () => { setCompareBase(""); setCompareHead(""); setCompareOpen(false); setTarget({ kind: "workingTree" }); }
                                             })] })),
+                                    diffFiles.length > 0 && _jsxs("span", {
+                                        className: "shrink-0 text-[0.68rem] text-subtext-0",
+                                        "data-testid": "git-viewed-count",
+                                        children: [
+                                            viewedPaths.length,
+                                            "/",
+                                            diffFiles.length,
+                                            " viewed"
+                                        ]
+                                    }),
                                     _jsxs("div", {
                                         className: "flex shrink-0 items-center gap-[0.15rem]",
                                         children: [
@@ -1179,6 +1230,12 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                             editingCommentId: editingCommentId,
                                             editingBody: editingBody,
                                             reveal: reveal,
+                                            collapsed: [
+                                                ...collapsedFiles
+                                            ],
+                                            onToggleCollapsed: toggleCollapsed,
+                                            viewed: viewedPaths,
+                                            onToggleViewed: toggleViewed,
                                             onSelectLine: selectLine,
                                             onAddComment: (path, side, line) => { selectLine(path, side, line, false); startComment(); },
                                             commentBody: commentBody,

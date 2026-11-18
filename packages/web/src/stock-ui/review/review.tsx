@@ -156,6 +156,22 @@ function filePathForSide(file: GitDiffFile, side: ReviewSide): string {
   return file.newPath ?? file.oldPath ?? "(unknown file)";
 }
 
+/** What a file's diff says, as a short hash: a file marked viewed stays viewed only while this is unchanged (GitHub
+ * clears Viewed when the file changes). */
+export function fileSignature(file: GitDiffFile): string {
+  let hash = 0x811c9dc5;
+  const add = (text: string) => {
+    for (let i = 0; i < text.length; i += 1) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193);
+    hash = Math.imul(hash ^ 10, 0x01000193);
+  };
+  add(`${file.status}:${file.oldPath ?? ""}:${file.newPath ?? ""}`);
+  for (const hunk of file.hunks) {
+    add(hunk.header);
+    for (const line of hunk.lines) add(`${line.kind[0]}${line.content}`);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 function splitPath(path: string): [string, string] {
   const cut = path.lastIndexOf("/") + 1;
   return [path.slice(0, cut), path.slice(cut)];
@@ -367,6 +383,9 @@ export function WorkspaceGitReview({
   const [railOpen, setRailOpen] = useResourceState(`review:${workspaceId}:railOpen`, true);
   const [collapsedDirs, setCollapsedDirs] = useResourceState<Set<string>>(`review:${workspaceId}:collapsedDirs`, new Set());
   const [fileFilter, setFileFilter] = useState("");
+  const [collapsedFiles, setCollapsedFiles] = useResourceState<Set<string>>(`review:${workspaceId}:collapsedFiles`, new Set());
+  // Path to the file's signature when it was marked viewed.
+  const [viewedFiles, setViewedFiles] = useResourceState<Record<string, string>>(`review:${workspaceId}:viewedFiles`, {});
   // The file the tree last asked this copy's diff to scroll to (each copy scrolls on its own).
   const [reveal, setReveal] = useState<{ path: string; seq: number } | null>(null);
   function revealFile(path: string) {
@@ -528,6 +547,19 @@ export function WorkspaceGitReview({
     }
     return new Map(countCache.current.counts);
   }, [diff]);
+  const signatures = useMemo(() => new Map(diffFiles.map((file) => [filePath(file), fileSignature(file)])), [diffFiles]);
+  const viewedPaths = useMemo(() => [...signatures].filter(([path, signature]) => viewedFiles[path] === signature).map(([path]) => path), [signatures, viewedFiles]);
+  function toggleCollapsed(path: string) {
+    setCollapsedFiles((current) => { const next = new Set(current); if (!next.delete(path)) next.add(path); return next; });
+  }
+  /** Marking a file viewed folds it; unmarking unfolds it. */
+  function toggleViewed(path: string) {
+    const signature = signatures.get(path);
+    if (!signature) return;
+    const on = viewedFiles[path] !== signature;
+    setViewedFiles((current) => { const next = { ...current }; if (on) next[path] = signature; else delete next[path]; return next; });
+    setCollapsedFiles((current) => { const next = new Set(current); if (on) next.add(path); else next.delete(path); return next; });
+  }
   const treeShown = useMemo(() => treeRows(changedFiles, collapsedDirs, fileFilter), [changedFiles, collapsedDirs, fileFilter]);
   function toggleDir(key: string) {
     setCollapsedDirs((current) => { const next = new Set(current); if (!next.delete(key)) next.add(key); return next; });
@@ -894,6 +926,7 @@ export function WorkspaceGitReview({
                 <IconButton icon="clear" label="Clear base" onClick={() => { setCompareBase(""); setCompareHead(""); setCompareOpen(false); setTarget({ kind: "workingTree" }); }} />
               </>
             )}
+            {diffFiles.length > 0 && <span className="shrink-0 text-[0.68rem] text-subtext-0" data-testid="git-viewed-count">{viewedPaths.length}/{diffFiles.length} viewed</span>}
             <div className="flex shrink-0 items-center gap-[0.15rem]">
               <IconButton icon="untracked" label="Untracked files" pressed={includeUntracked} onClick={() => setIncludeUntracked(!includeUntracked)} />
               <IconButton icon="wrap" label="Wrap lines" pressed={wrapLines} onClick={() => setWrapLines(!wrapLines)} />
@@ -943,6 +976,10 @@ export function WorkspaceGitReview({
                   editingCommentId={editingCommentId}
                   editingBody={editingBody}
                   reveal={reveal}
+                  collapsed={[...collapsedFiles]}
+                  onToggleCollapsed={toggleCollapsed}
+                  viewed={viewedPaths}
+                  onToggleViewed={toggleViewed}
                   onSelectLine={selectLine}
                   onAddComment={(path, side, line) => { selectLine(path, side, line, false); startComment(); }}
                   commentBody={commentBody}

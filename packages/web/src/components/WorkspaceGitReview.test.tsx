@@ -315,6 +315,27 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
     expect(document.querySelector('[data-testid="git-comment-composer"]')).toBeNull();
   });
 
+  it("folds a file from its header, and marking it viewed folds it until its diff changes", async () => {
+    const actionSet = actions();
+    await render(props(actionSet));
+    const lines = () => document.querySelectorAll('[data-testid="git-diff-line"]').length;
+    const count = () => document.querySelector('[data-testid="git-viewed-count"]')?.textContent;
+    expect(lines()).toBe(1);
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="git-file-fold"]')?.click());
+    expect(lines()).toBe(0);
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="git-file-fold"]')?.click());
+    expect(lines()).toBe(1);
+
+    await act(async () => document.querySelector<HTMLInputElement>('[data-testid="git-file-viewed"]')?.click());
+    expect(count()).toBe("1/1 viewed");
+    expect(lines()).toBe(0);
+    // The same file with another change is no longer viewed.
+    const changed: GitDiffSnapshot = { ...diff, files: [{ ...diff.files[0]!, hunks: [{ ...diff.files[0]!.hunks[0]!, lines: [{ kind: "addition", content: "newer anchor", newLine: 1 }] }] }] };
+    await render({ ...props(actionSet), diff: changed });
+    expect(count()).toBe("0/1 viewed");
+    expect(document.querySelector<HTMLInputElement>('[data-testid="git-file-viewed"]')?.checked).toBe(false);
+  });
+
   it("wraps long diff lines at the pane instead of scrolling sideways when asked", async () => {
     await render(props(actions()));
     const line = () => document.querySelector<HTMLElement>('[data-testid="git-diff-line"]');

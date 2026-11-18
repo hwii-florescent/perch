@@ -335,9 +335,10 @@ impl Rig {
         if !shown
             .is_some_and(|b| viewport.contains(&b.origin) && viewport.contains(&b.bottom_right()))
         {
+            // A few rows above it are shown too, so the pinned file header does not cover it.
             self.cx.update(|cx| {
                 view.read(cx).list_state().scroll_to(gpui::ListOffset {
-                    item_ix: ix,
+                    item_ix: ix.saturating_sub(3),
                     offset_in_item: px(0.),
                 })
             });
@@ -969,6 +970,63 @@ fn inline_composer(cx: HeadlessAppContext) -> HeadlessAppContext {
     rig.close()
 }
 
+/// A folded file keeps only its header; pressing a header's path asks to fold it, its Viewed box to mark it.
+fn folds_and_viewed(cx: HeadlessAppContext) -> HeadlessAppContext {
+    let diff = synthetic(1_000);
+    let (first, second) = (
+        diff.files[0].new_path.clone().unwrap(),
+        diff.files[1].new_path.clone().unwrap(),
+    );
+    let (mut rig, _) = Rig::open(
+        cx,
+        diff,
+        vec![],
+        DiffProps {
+            viewed: Some(vec![]),
+            ..DiffProps::default()
+        },
+    );
+    let all = rig.rows().len();
+    rig.set_props(DiffProps {
+        viewed: Some(vec![first.clone()]),
+        collapsed: vec![first.clone()],
+        ..DiffProps::default()
+    });
+    let rows = rig.rows();
+    assert_eq!(rows[0], Row::File { file: 0 });
+    assert_eq!(
+        rows[1],
+        Row::File { file: 1 },
+        "file 0 is folded to its header"
+    );
+    assert!(rows.len() < all);
+    rig.events.borrow_mut().clear();
+    let header = rig.row_bounds(1);
+    rig.click(
+        header.origin + point(px(20.), header.size.height / 2.),
+        Modifiers::default(),
+    );
+    assert_eq!(
+        rig.events.borrow().as_slice(),
+        &[DiffEvent::ToggleCollapsed {
+            path: second.clone()
+        }],
+        "the path folds"
+    );
+    rig.events.borrow_mut().clear();
+    // The Viewed box sits at the header's right end.
+    rig.click(
+        point(header.right() - px(40.), header.center().y),
+        Modifiers::default(),
+    );
+    assert_eq!(
+        rig.events.borrow().as_slice(),
+        &[DiffEvent::ToggleViewed { path: second }],
+        "the box marks the file viewed"
+    );
+    rig.close()
+}
+
 /// The compact unified layout, saved when `PERCH_DIFF_SHOTS` is set.
 fn unified_shot(cx: HeadlessAppContext) -> HeadlessAppContext {
     let (mut rig, _) = Rig::open_sized(cx, synthetic(500), vec![], DiffProps::default(), 520.);
@@ -994,6 +1052,7 @@ fn main() {
     let cx = vertical_bar(cx);
     let cx = reveals_a_file(cx);
     let cx = inline_composer(cx);
+    let cx = folds_and_viewed(cx);
     let _ = unified_shot(cx);
     println!("diff_element: ok");
 }
