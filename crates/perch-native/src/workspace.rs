@@ -1669,10 +1669,13 @@ impl Workspace {
         }
         match drag.drop {
             Drop::Strip(Some(slot)) => {
-                let before = self.strip_sessions(cx);
-                let index = drag.landing(slot, self.tabs.strip()).unwrap_or(slot + 1);
-                self.tabs.move_tab(&drag.id, index);
-                self.save_strip(before, cx);
+                // The neighbour the slot was beside is gone: nothing is moved, as `slot` counts
+                // only the tabs the strip drew.
+                if let Some(index) = drag.landing(slot, self.tabs.strip()) {
+                    let before = self.strip_sessions(cx);
+                    self.tabs.move_tab(&drag.id, index);
+                    self.save_strip(before, cx);
+                }
             }
             Drop::Pane {
                 target,
