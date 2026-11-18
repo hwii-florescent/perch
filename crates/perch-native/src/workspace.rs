@@ -1507,7 +1507,15 @@ impl Workspace {
             "x": f32::from(at.x),
             "y": f32::from(at.y),
         });
-        cx.notify();
+        // A move reaches only the mod following the press; its end also ends the window's
+        // follow of the pointer, which it draws.
+        if let Some((_, perch)) = screens::mods(cx) {
+            perch.set_drag(self.tab_slide(), self.pointer.clone());
+            perch.flush(cx);
+        }
+        if phase != "move" {
+            cx.notify();
+        }
         true
     }
 
@@ -1528,6 +1536,7 @@ impl Workspace {
         if !drag.moved(at) {
             return;
         }
+        let was_on_strip = matches!(drag.drop, Drop::Strip(_));
         let boxes = self.drop_boxes.borrow();
         let on_strip = boxes.strip.is_some_and(|b| b.contains(&at))
             && drag.spans.iter().any(|s| s.id == drag.id);
@@ -1551,11 +1560,20 @@ impl Workspace {
             }
         };
         let props = drag.props();
+        let crossed = was_on_strip != matches!(drag.drop, Drop::Strip(_));
         drop(boxes);
+        // Each move re-renders only the strip (`tabSlide`) and the ghost (its props), in one
+        // flush: the window's own part, which most screens read, moves only when the tab leaves
+        // or comes back to the strip (`draggingId`), and the window itself draws nothing new.
+        if let Some((_, perch)) = screens::mods(cx) {
+            perch.set_drag(self.tab_slide(), self.pointer.clone());
+        }
         if !self.screens.update("tab-drag", props.clone(), cx) {
             self.screens.open("tab-drag", props, None, None, cx);
+            cx.notify();
+        } else if crossed {
+            cx.notify();
         }
-        cx.notify();
     }
 
     /// The press on a tab ends: let go (`apply`), the drop it was over is made; Escape, the
@@ -1574,7 +1592,8 @@ impl Workspace {
         match drag.drop {
             Drop::Strip(Some(slot)) => {
                 let before = self.strip_sessions(cx);
-                self.tabs.move_tab(&drag.id, slot + 1);
+                let index = drag.landing(slot, self.tabs.strip()).unwrap_or(slot + 1);
+                self.tabs.move_tab(&drag.id, index);
                 self.save_strip(before, cx);
             }
             Drop::Pane {
@@ -3232,6 +3251,8 @@ impl Workspace {
                 }
                 self.follow = Some(token);
                 self.forward_pointer("move", point(px(x as f32), px(y as f32)), cx);
+                // The window follows the pointer from its next draw.
+                cx.notify();
             }
             "tab.menu" => {
                 let id = text("id")

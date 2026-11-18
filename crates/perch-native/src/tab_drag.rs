@@ -89,6 +89,29 @@ impl TabDrag {
         (to != from).then_some(to)
     }
 
+    /// Where in `strip` (the window's tabs now, 1 is first, as `Tabs::move_tab` takes it) a drop
+    /// on `slot` puts the tab: beside the tab the strip showed there when the press began, so a
+    /// tab the strip did not lay out, or one that opened or moved since, does not shift it.
+    /// `None` when the tab or that neighbour is gone from `strip`.
+    pub fn landing(&self, slot: usize, strip: &[String]) -> Option<usize> {
+        let others: Vec<&str> = self
+            .spans
+            .iter()
+            .map(|s| s.id.as_str())
+            .filter(|id| *id != self.id)
+            .collect();
+        let rest: Vec<&String> = strip.iter().filter(|id| **id != self.id).collect();
+        if rest.len() == strip.len() {
+            return None;
+        }
+        let at = |id: &str| rest.iter().position(|r| *r == id);
+        let index = match slot.checked_sub(1) {
+            None => at(others.first()?)?,
+            Some(before) => at(others.get(before)?)? + 1,
+        };
+        Some(index + 1)
+    }
+
     /// What the strip draws while this is a drag (`tabSlide()`): over the strip the tabs slide
     /// aside for the slot under the pointer and the dragged one follows it; off it they rest.
     /// Null while it is still a press.
@@ -302,6 +325,26 @@ mod tests {
         let drag = TabDrag::new("c".into(), "C".into(), at(0., 0.), spans());
         assert_eq!(drag.slot(0.), Some(0));
         assert_eq!(slot_index(&spans(), 1, 44.), 0, "before a's center");
+    }
+
+    #[test]
+    fn a_drop_lands_beside_the_tab_the_strip_showed_there() {
+        let strip = |ids: &[&str]| ids.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let drag = TabDrag::new("c".into(), "C".into(), at(0., 0.), spans());
+        assert_eq!(drag.landing(0, &strip(&["a", "b", "c"])), Some(1));
+        assert_eq!(drag.landing(1, &strip(&["a", "b", "c"])), Some(2));
+        // A tab the strip did not lay out (`x`) stays before a, where it was: c goes before a.
+        assert_eq!(drag.landing(0, &strip(&["x", "a", "b", "c"])), Some(2));
+        // The strip changed since the press (b moved first): c still lands after a.
+        assert_eq!(drag.landing(1, &strip(&["b", "a", "c"])), Some(3));
+        let drag = TabDrag::new("a".into(), "A".into(), at(0., 0.), spans());
+        assert_eq!(
+            drag.landing(2, &strip(&["a", "b", "c", "y"])),
+            Some(3),
+            "after c"
+        );
+        assert_eq!(drag.landing(2, &strip(&["a", "b"])), None, "c is gone");
+        assert_eq!(drag.landing(1, &strip(&["b", "c"])), None, "a is gone");
     }
 
     #[test]
