@@ -3,14 +3,15 @@
 //! A screen marks a box `data-perch-engine="diff" data-perch-key="<key>"` and drives the view by that key:
 //! `open(key, {workspaceId})` makes (or keeps) it, `setProps(key, props)` sends the view state (`DiffProps` by the
 //! SDK's names) and `events(key)` drains what the person did (`selectLine`, `addComment`, `askAgent`, `editComment`,
-//! `editBody`, `saveEdit`, `cancelEdit`, `resolve`, `delete`; comments by id). Queuing an event re-renders the mod
+//! `editBody`, `saveEdit`, `cancelEdit`, `commentBody`, `submitComment`, `cancelComment`, `askLines`, `resolve`,
+//! `delete`; comments by id). Queuing an event re-renders the mod
 //! that opened the key, as `perch-editor` does.
 //!
 //! The diff and comments never cross into script: the window's Git store publishes them per workspace
 //! ([`Diffs::set_data`]) and each view picks up its workspace's latest values when it is drawn (a pointer compare
 //! when nothing moved). The theme is picked up the same way.
 
-use super::element::{DiffEvent, DiffProps, DiffView, Editing, Layout, Selection};
+use super::element::{Composer, DiffEvent, DiffProps, DiffView, Editing, Layout, Selection};
 use crate::git::store::DiffSnapshot;
 use crate::mods::ModHost;
 use gpui::{
@@ -29,6 +30,7 @@ export function setProps(key: string, props: {
   selection?: { path: string; side: string; start: number; end: number } | null;
   editingCommentId?: string | null; editingBody?: string;
   reveal?: { path: string; seq: number } | null;
+  composer?: { body: string; label: string; canAsk?: boolean } | null;
 }): void;
 export function events(key: string): Array<{ type: string; [field: string]: unknown }>;
 export function seq(key: string): number;
@@ -160,9 +162,13 @@ impl Diffs {
                 return;
             };
             // The latest body is all a screen needs.
-            if event.get("type").and_then(HostValue::as_str) == Some("editBody") {
+            let kind = event
+                .get("type")
+                .and_then(HostValue::as_str)
+                .map(str::to_string);
+            if let Some(kind @ ("editBody" | "commentBody")) = kind.as_deref() {
                 doc.events
-                    .retain(|e| e.get("type").and_then(HostValue::as_str) != Some("editBody"));
+                    .retain(|e| e.get("type").and_then(HostValue::as_str) != Some(kind));
             }
             doc.events.push(event);
             doc.seq += 1;
@@ -351,6 +357,25 @@ fn props_of(props: &HostValue) -> Result<DiffProps, HostError> {
             }
             _ => None,
         },
+        composer: match props.get("composer") {
+            Some(c @ HostValue::Object(_)) => Some(Composer {
+                body: c
+                    .get("body")
+                    .and_then(HostValue::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                label: c
+                    .get("label")
+                    .and_then(HostValue::as_str)
+                    .unwrap_or("Add comment")
+                    .to_string(),
+                can_ask: c
+                    .get("canAsk")
+                    .and_then(HostValue::as_bool)
+                    .unwrap_or(false),
+            }),
+            _ => None,
+        },
     })
 }
 
@@ -383,6 +408,10 @@ fn event_value(event: &DiffEvent) -> HostValue {
         DiffEvent::EditBody { text } => vec![("type", s("editBody")), ("text", s(text))],
         DiffEvent::SaveEdit { comment } => vec![("type", s("saveEdit")), ("commentId", s(comment))],
         DiffEvent::CancelEdit => vec![("type", s("cancelEdit"))],
+        DiffEvent::CommentBody { text } => vec![("type", s("commentBody")), ("text", s(text))],
+        DiffEvent::SubmitComment => vec![("type", s("submitComment"))],
+        DiffEvent::CancelComment => vec![("type", s("cancelComment"))],
+        DiffEvent::AskLines => vec![("type", s("askLines"))],
         DiffEvent::Resolve { comment, resolved } => vec![
             ("type", s("resolve")),
             ("commentId", s(comment)),

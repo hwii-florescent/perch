@@ -912,6 +912,16 @@ declare module "@perch/sdk" {
     editingBody: string;
     /** Scrolls to this file's header; a new `seq` asks again for the same file. */
     reveal?: { path: string; seq: number } | null;
+    /** The new comment's text. With `onSubmitComment`, the comment's field opens under the selection's last line
+     * while lines are selected (`git-comment-composer`, `git-comment-body`). */
+    commentBody?: string;
+    /** The add button's words; "Add comment" by default. */
+    commentLabel?: string;
+    onCommentBody?(text: string): void;
+    onSubmitComment?(): void;
+    onCancelComment?(): void;
+    /** Ask agent about the selected lines; offered when given. */
+    onAskLines?(): void;
     /** A line was clicked or chosen with Enter/Space; `extend` with Shift. */
     onSelectLine(path: string, side: ReviewSide, line: number, extend: boolean): void;
     /** A line's `＋`. */

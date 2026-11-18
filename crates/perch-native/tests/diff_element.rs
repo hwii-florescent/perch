@@ -18,7 +18,9 @@ use perch_core::review::{
 use perch_core::source_control::{
     DiffFile, DiffFileStatus, DiffHunk, DiffLine, DiffLineKind, DiffTarget,
 };
-use perch_native::diff::element::{DiffEvent, DiffProps, DiffView, Editing, Layout, Selection};
+use perch_native::diff::element::{
+    Composer, DiffEvent, DiffProps, DiffView, Editing, Layout, Selection,
+};
 use perch_native::diff::rows::Row;
 use perch_native::git::store::DiffSnapshot;
 use perch_native::mods::theme;
@@ -903,6 +905,70 @@ fn reveals_a_file(cx: HeadlessAppContext) -> HeadlessAppContext {
     rig.close()
 }
 
+/// With lines selected, the new comment's field opens under the selection's last line, inside the list; what is
+/// typed there reaches the screen, and closing it gives the row its height back.
+fn inline_composer(cx: HeadlessAppContext) -> HeadlessAppContext {
+    let diff = synthetic(500);
+    let path = diff.files[0].new_path.clone().unwrap();
+    let (mut rig, _) = Rig::open(cx, diff, vec![], DiffProps::default());
+    let rows = rig.rows();
+    let line = first_row(
+        &rows,
+        |r| matches!(r, Row::Line { number: Some(_), side: ReviewSide::New, line, .. } if *line >= 16),
+    );
+    let Row::Line {
+        number: Some(n), ..
+    } = rows[line]
+    else {
+        unreachable!()
+    };
+    let plain = rig.row_bounds(line).size.height;
+    let props = |composer: Option<Composer>| DiffProps {
+        selection: Some(Selection {
+            path: path.clone(),
+            side: ReviewSide::New,
+            start: n - 2,
+            end: n,
+        }),
+        composer,
+        ..DiffProps::default()
+    };
+    rig.set_props(props(Some(Composer {
+        body: String::new(),
+        label: "Add comment".into(),
+        can_ask: false,
+    })));
+    let open = rig.row_bounds(line);
+    assert!(
+        open.size.height > plain * 3.,
+        "the field opens under the selection's last line ({} vs {})",
+        open.size.height,
+        plain
+    );
+    // The field sits below the line: a press there focuses it, and a key reaches the screen.
+    let mut field = open;
+    field.origin.y += plain * 3.5;
+    field.size.height = plain;
+    rig.click(field.center(), Modifiers::default());
+    rig.events.borrow_mut().clear();
+    rig.key("y");
+    assert!(
+        rig.events
+            .borrow()
+            .iter()
+            .any(|e| matches!(e, DiffEvent::CommentBody { text } if text.contains('y'))),
+        "typing in the composer reaches the screen: {:?}",
+        rig.events.borrow()
+    );
+    rig.set_props(props(None));
+    assert_eq!(
+        rig.row_bounds(line).size.height,
+        plain,
+        "closed, the row is a line again"
+    );
+    rig.close()
+}
+
 /// The compact unified layout, saved when `PERCH_DIFF_SHOTS` is set.
 fn unified_shot(cx: HeadlessAppContext) -> HeadlessAppContext {
     let (mut rig, _) = Rig::open_sized(cx, synthetic(500), vec![], DiffProps::default(), 520.);
@@ -927,6 +993,7 @@ fn main() {
     let cx = one_axis_and_hbars(cx);
     let cx = vertical_bar(cx);
     let cx = reveals_a_file(cx);
+    let cx = inline_composer(cx);
     let _ = unified_shot(cx);
     println!("diff_element: ok");
 }

@@ -1181,6 +1181,13 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                             reveal: reveal,
                                             onSelectLine: selectLine,
                                             onAddComment: (path, side, line) => { selectLine(path, side, line, false); startComment(); },
+                                            commentBody: commentBody,
+                                            onCommentBody: setCommentBody,
+                                            onSubmitComment: submitComment,
+                                            onCancelComment: () => { setSelection(null); setAnchor(null); },
+                                            onAskLines: onAskAgent ? () => { if (!selection)
+                                                return; const file = diffFiles.find((candidate) => filePathForSide(candidate, selection.side) === selection.path); if (file)
+                                                askAboutDiff(file, selection); } : undefined,
                                             onAskAgent: onAskAgent ? (path) => { const file = diffFiles.find((candidate) => filePath(candidate) === path); if (file)
                                                 askAboutDiff(file); } : undefined,
                                             onEditComment: beginEdit,
@@ -1189,61 +1196,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                             onCancelEdit: () => setEditingCommentId(null),
                                             onResolve: (comment) => actions.resolveComment(comment.id, comment.status !== "resolved", comment.version),
                                             onDelete: (comment) => actions.deleteComment(comment.id, comment.version)
-                                        }), selection && (_jsxs("div", {
-                                            className: "workspace-git__comment-composer m-[0.7rem] min-w-0 shrink-0 rounded-ui bg-surface-0 p-[0.65rem]",
-                                            "data-testid": "git-comment-composer",
-                                            children: [
-                                                _jsxs("div", {
-                                                    className: "mb-[0.4rem] flex justify-between gap-2",
-                                                    children: [
-                                                        _jsxs("strong", { children: ["Comment on ", selection.path] }),
-                                                        _jsxs("span", {
-                                                            className: "text-[0.68rem] text-subtext-0",
-                                                            children: [
-                                                                selection.side,
-                                                                " lines ",
-                                                                selection.start,
-                                                                "\u2013",
-                                                                selection.end
-                                                            ]
-                                                        })
-                                                    ]
-                                                }),
-                                                _jsx("textarea", {
-                                                    className: COMMENT_FIELD,
-                                                    "data-testid": "git-comment-body",
-                                                    value: commentBody,
-                                                    onChange: (event) => setCommentBody(event.target.value),
-                                                    placeholder: "Leave a focused note for the agent\u2026",
-                                                    "aria-label": "New review comment"
-                                                }),
-                                                _jsxs("div", {
-                                                    className: `${COMMENT_ACTIONS} mt-[0.4rem]`,
-                                                    children: [
-                                                        onAskAgent && _jsx("button", {
-                                                            type: "button",
-                                                            className: CA_BTN,
-                                                            onClick: () => { const file = diffFiles.find((candidate) => filePathForSide(candidate, selection.side) === selection.path); if (file)
-                                                                askAboutDiff(file, selection); },
-                                                            children: "Ask agent about lines\u2026"
-                                                        }),
-                                                        _jsx("button", {
-                                                            type: "button",
-                                                            className: CA_BTN,
-                                                            disabled: !commentBody.trim(),
-                                                            onClick: submitComment,
-                                                            children: "Add comment"
-                                                        }),
-                                                        _jsx("button", {
-                                                            type: "button",
-                                                            className: CA_BTN,
-                                                            onClick: () => { setSelection(null); setAnchor(null); },
-                                                            children: "Cancel"
-                                                        })
-                                                    ]
-                                                })
-                                            ]
-                                        }))] }))
+                                        })] }))
                             }),
                             _jsxs("section", {
                                 className: cn("shrink-0 [border-top:1px_solid_var(--git-border)]", notesShown && "max-h-[40%] overflow-y-auto"),

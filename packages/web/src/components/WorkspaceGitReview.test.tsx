@@ -297,6 +297,24 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
     }
   });
 
+  it("opens the comment composer inside the diff, under the selected line", async () => {
+    const actionSet = actions();
+    await render(props(actionSet));
+    await act(async () => document.querySelector<HTMLElement>('[data-testid="git-diff-line"]')?.click());
+    const composer = document.querySelector('[data-testid="git-diff"] [data-testid="git-comment-composer"]');
+    expect(composer).not.toBeNull();
+    expect(composer?.previousElementSibling?.getAttribute("data-testid")).toBe("git-diff-line");
+    const body = document.querySelector<HTMLTextAreaElement>('[data-testid="git-comment-body"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(body, "Rename this");
+      body.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const add = [...composer!.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Add"));
+    await act(async () => add?.click());
+    expect(actionSet.createComment).toHaveBeenCalledWith({ path: "src/main.ts", side: "new", start: 1, end: 1, body: "Rename this" });
+    expect(document.querySelector('[data-testid="git-comment-composer"]')).toBeNull();
+  });
+
   it("wraps long diff lines at the pane instead of scrolling sideways when asked", async () => {
     await render(props(actions()));
     const line = () => document.querySelector<HTMLElement>('[data-testid="git-diff-line"]');

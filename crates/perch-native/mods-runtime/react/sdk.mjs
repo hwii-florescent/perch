@@ -557,6 +557,7 @@ export function DiffView(props) {
   perch.diff.setProps(key, {
     path: props.path ?? null, wrap: !!props.wrap, layout: props.layout ?? "auto", canAsk: !!props.onAskAgent, selection: props.selection ?? null,
     editingCommentId: props.editingCommentId ?? null, editingBody: props.editingBody ?? "", reveal: props.reveal ?? null,
+    composer: props.selection && props.onSubmitComment ? { body: props.commentBody ?? "", label: props.commentLabel ?? "Add comment", canAsk: !!props.onAskLines } : null,
   });
   const comments = useHostSnapshot((p) => p.gitReview(workspaceId)).comments ?? [];
   const seq = useSyncExternalStore(subscribe, () => perch.diff.seq(key));
@@ -574,6 +575,10 @@ export function DiffView(props) {
         case "editBody": p.onEditBody?.(event.text); break;
         case "saveEdit": { const c = comment(event.commentId); if (c) p.onSaveEdit?.(c); break; }
         case "cancelEdit": p.onCancelEdit?.(); break;
+        case "commentBody": p.onCommentBody?.(event.text); break;
+        case "submitComment": p.onSubmitComment?.(); break;
+        case "cancelComment": p.onCancelComment?.(); break;
+        case "askLines": p.onAskLines?.(); break;
         case "resolve": { const c = comment(event.commentId); if (c) p.onResolve?.(c); break; }
         case "delete": { const c = comment(event.commentId); if (c) p.onDelete?.(c); break; }
       }

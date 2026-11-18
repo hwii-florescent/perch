@@ -926,7 +926,8 @@ export function WorkspaceGitReview({
             </p>
           )}
 
-          {/* The diff scrolls itself; the truncation note sits above it and the comment composer below, always in view. */}
+          {/* The diff scrolls itself; the truncation note sits above it. The comment composer opens inside the diff,
+              under the selected line. */}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             {diffState === "loading" || diffFiles.length === 0 ? (
               <div className="workspace-git__diff min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain" data-testid="git-diff"><EmptyDiffState state={diffState} error={diffError} /></div>
@@ -944,6 +945,11 @@ export function WorkspaceGitReview({
                   reveal={reveal}
                   onSelectLine={selectLine}
                   onAddComment={(path, side, line) => { selectLine(path, side, line, false); startComment(); }}
+                  commentBody={commentBody}
+                  onCommentBody={setCommentBody}
+                  onSubmitComment={submitComment}
+                  onCancelComment={() => { setSelection(null); setAnchor(null); }}
+                  onAskLines={onAskAgent ? () => { if (!selection) return; const file = diffFiles.find((candidate) => filePathForSide(candidate, selection.side) === selection.path); if (file) askAboutDiff(file, selection); } : undefined}
                   onAskAgent={onAskAgent ? (path) => { const file = diffFiles.find((candidate) => filePath(candidate) === path); if (file) askAboutDiff(file); } : undefined}
                   onEditComment={beginEdit}
                   onEditBody={setEditingBody}
@@ -952,13 +958,6 @@ export function WorkspaceGitReview({
                   onResolve={(comment) => actions.resolveComment(comment.id, comment.status !== "resolved", comment.version)}
                   onDelete={(comment) => actions.deleteComment(comment.id, comment.version)}
                 />
-                {selection && (
-                  <div className="workspace-git__comment-composer m-[0.7rem] min-w-0 shrink-0 rounded-ui bg-surface-0 p-[0.65rem]" data-testid="git-comment-composer">
-                    <div className="mb-[0.4rem] flex justify-between gap-2"><strong>Comment on {selection.path}</strong><span className="text-[0.68rem] text-subtext-0">{selection.side} lines {selection.start}–{selection.end}</span></div>
-                    <textarea className={COMMENT_FIELD} data-testid="git-comment-body" value={commentBody} onChange={(event) => setCommentBody(event.target.value)} placeholder="Leave a focused note for the agent…" aria-label="New review comment" />
-                    <div className={`${COMMENT_ACTIONS} mt-[0.4rem]`}>{onAskAgent && <button type="button" className={CA_BTN} onClick={() => { const file = diffFiles.find((candidate) => filePathForSide(candidate, selection.side) === selection.path); if (file) askAboutDiff(file, selection); }}>Ask agent about lines…</button>}<button type="button" className={CA_BTN} disabled={!commentBody.trim()} onClick={submitComment}>Add comment</button><button type="button" className={CA_BTN} onClick={() => { setSelection(null); setAnchor(null); }}>Cancel</button></div>
-                  </div>
-                )}
               </>
             )}
           </div>

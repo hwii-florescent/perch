@@ -1,5 +1,6 @@
 //! `DiffView`: the review's diff drawn natively, as `review.tsx` draws its rows (header per file, header per
-//! hunk, one row per line, kind tints, the hover `＋`, the selection, comment threads under their lines), on
+//! hunk, one row per line, kind tints, the hover `＋`, the selection, comment threads under their lines and the new
+//! comment's field under the selection's last line), on
 //! `gpui::list`: only rows on screen (and a margin) are laid out, each row's height
 //! is measured once and cached, and a frame costs the same for 500 lines as for 20,000.
 //!
@@ -73,6 +74,17 @@ pub struct DiffProps {
     pub can_ask: bool,
     /// Scroll to this file's header; a new number asks again for the same file.
     pub reveal: Option<(String, u64)>,
+    /// The new comment's field, drawn under the selection's last line while lines are selected.
+    pub composer: Option<Composer>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Composer {
+    pub body: String,
+    /// The add button's words (the screen names where the comment goes).
+    pub label: String,
+    /// Offer Ask agent about the selected lines.
+    pub can_ask: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -116,6 +128,14 @@ pub enum DiffEvent {
         comment: String,
     },
     CancelEdit,
+    /// The new comment's text changed.
+    CommentBody {
+        text: String,
+    },
+    SubmitComment,
+    CancelComment,
+    /// Ask agent about the selected lines.
+    AskLines,
     Resolve {
         comment: String,
         resolved: bool,
@@ -311,6 +331,11 @@ pub struct DiffView {
     hdrag: Option<HDrag>,
     /// A file asked for by `reveal` that the rows do not hold yet (its diff is on its way).
     reveal: Option<String>,
+    /// The new comment's field while the composer is open, and the row it is drawn under.
+    compose: Option<gpui::Entity<TextareaState>>,
+    compose_row: Option<usize>,
+    /// The next composer to open takes the keyboard (it was opened with a line's `＋`).
+    focus_compose: bool,
     /// Counts row builds (tests read it: a scroll must build none).
     pub builds: u64,
 }
@@ -347,6 +372,9 @@ impl DiffView {
             hbars: Rc::default(),
             hdrag: None,
             reveal: None,
+            compose: None,
+            compose_row: None,
+            focus_compose: false,
             builds: 0,
         }
     }
@@ -414,6 +442,82 @@ impl DiffView {
         self.rebuild(anchor.filter(|_| same_comparison), window, cx);
     }
 
+    /// Opens, keeps or closes the new comment's field as the props say, and moves it under the selection's last line;
+    /// the rows it leaves and joins are measured again.
+    fn sync_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(composer) = self.props.composer.clone() else {
+            self.compose = None;
+            if let Some(row) = self.compose_row.take() {
+                self.list.remeasure_items(row..row + 1);
+            }
+            return;
+        };
+        let field = match &self.compose {
+            Some(field) => {
+                if field.read(cx).value().as_ref() != composer.body {
+                    field.update(cx, |f, cx| f.set_value(composer.body.clone(), window, cx));
+                }
+                field.clone()
+            }
+            None => {
+                let field = cx.new(|cx| {
+                    let mut state = TextareaState::new(window, cx).auto_grow(3, 12);
+                    state.set_value(composer.body.clone(), window, cx);
+                    state
+                });
+                cx.subscribe(&field, |_, field, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        let text = field.read(cx).value().to_string();
+                        cx.emit(DiffEvent::CommentBody { text });
+                    }
+                })
+                .detach();
+                self.compose = Some(field.clone());
+                field
+            }
+        };
+        if std::mem::take(&mut self.focus_compose) {
+            let handle = field.read(cx).focus_handle(cx);
+            window.focus(&handle, cx);
+        }
+        let row = self.selection_end_row();
+        if row != self.compose_row {
+            for r in [self.compose_row, row].into_iter().flatten() {
+                self.list.remeasure_items(r..r + 1);
+            }
+            self.compose_row = row;
+        }
+    }
+
+    /// The row of the selection's last line (where the composer goes).
+    fn selection_end_row(&self) -> Option<usize> {
+        let diff = self.diff.as_deref()?;
+        let sel = self.props.selection.as_ref()?;
+        let on = |file: usize, hunk: usize, line: usize| {
+            let f = &diff.files[file];
+            let l = &f.hunks[hunk].lines[line];
+            let side = rows::line_side(l);
+            side == sel.side
+                && rows::line_number(l, side) == Some(sel.end)
+                && file_path_for_side(f, side) == sel.path
+        };
+        self.rows.rows.iter().position(|r| match *r {
+            Row::Line {
+                file, hunk, line, ..
+            } => on(file, hunk, line),
+            Row::Pair {
+                file,
+                hunk,
+                left,
+                right,
+            } => [left, right]
+                .into_iter()
+                .flatten()
+                .any(|line| on(file, hunk, line)),
+            _ => false,
+        })
+    }
+
     /// Scrolls to the file `reveal` asked for, once the rows hold it.
     fn apply_reveal(&mut self) {
         let Some(diff) = self.diff.as_deref() else {
@@ -470,6 +574,13 @@ impl DiffView {
             self.list.remeasure();
         }
         self.apply_reveal();
+        self.sync_composer(window, cx);
+        // A field that grew or shrank with its text changes its row's height.
+        if old.composer.as_ref().map(|c| &c.body) != self.props.composer.as_ref().map(|c| &c.body) {
+            if let Some(row) = self.compose_row {
+                self.list.remeasure_items(row..row + 1);
+            }
+        }
         // The edit field follows the screen's body (another copy of the screen may have typed it).
         if let (Some(editing), Some((id, field))) = (&self.props.editing, &self.edit) {
             if *id == editing.comment && field.read(cx).value().as_ref() != editing.body {
@@ -550,6 +661,8 @@ impl DiffView {
         if self.cursor.is_some_and(|c| c >= self.rows.rows.len()) {
             self.cursor = None;
         }
+        self.compose_row = None;
+        self.sync_composer(window, cx);
         self.apply_reveal();
         self.edit = match &self.props.editing {
             Some(editing) => Some(match self.edit.take() {
@@ -818,6 +931,8 @@ struct Frame {
     cursor: Option<usize>,
     focused: bool,
     edit: Option<(String, gpui::Entity<TextareaState>)>,
+    /// The new comment's field and the row it is drawn under.
+    compose: Option<(usize, gpui::Entity<TextareaState>)>,
 }
 
 /// The row kinds the parity probe names, as an index: file header, hunk header, line, thread, other.
@@ -954,25 +1069,44 @@ impl Frame {
             Row::Line { .. } | Row::Pair { .. } => {
                 let line = self.row(ix);
                 let tint = self.line_tint(ix);
-                let Some(Row::Thread { comments, .. }) = rows.get(ix + 1) else {
-                    return probed(name("git-diff-line", ix), tint, c.text, line);
+                let thread = match rows.get(ix + 1) {
+                    Some(Row::Thread { comments, .. }) => Some(probed(
+                        name("git-line-comments", ix + 1),
+                        None,
+                        c.text,
+                        self.thread(ix + 1, comments),
+                    )),
+                    _ => None,
                 };
-                let thread = probed(
-                    name("git-line-comments", ix + 1),
-                    None,
-                    c.text,
-                    self.thread(ix + 1, comments),
-                );
-                // The line's tint runs behind its thread too, as the web's grid does.
-                let both = div()
-                    .flex()
-                    .flex_col()
-                    .w_full()
-                    .when_some(tint, |d, tint| d.bg(tint))
-                    .child(line)
-                    .child(thread)
-                    .into_any_element();
-                probed(name("git-diff-line", ix), tint, c.text, both)
+                let composer = self
+                    .compose
+                    .as_ref()
+                    .filter(|(row, _)| *row == ix)
+                    .map(|(_, field)| self.composer(field));
+                let line = match thread {
+                    // The line's tint runs behind its thread too, as the web's grid does.
+                    Some(thread) => div()
+                        .flex()
+                        .flex_col()
+                        .w_full()
+                        .when_some(tint, |d, tint| d.bg(tint))
+                        .child(line)
+                        .child(thread)
+                        .into_any_element(),
+                    None => line,
+                };
+                let line = probed(name("git-diff-line", ix), tint, c.text, line);
+                // The new comment's field opens under the line (and its thread), as GitHub's does.
+                match composer {
+                    Some(composer) => div()
+                        .flex()
+                        .flex_col()
+                        .w_full()
+                        .child(line)
+                        .child(composer)
+                        .into_any_element(),
+                    None => line,
+                }
             }
             Row::Binary { .. } => self.row(ix),
         }
@@ -1264,6 +1398,7 @@ impl Frame {
                     let path = path.clone();
                     view.update(cx, |view, cx| {
                         view.cursor = Some(ix);
+                        view.focus_compose = true;
                         cx.emit(DiffEvent::AddComment {
                             path,
                             side,
@@ -1348,6 +1483,113 @@ impl Frame {
             .line_height(gpui::relative(1.5))
             .children(comments.iter().map(|&i| self.card(&self.comments[i])))
             .into_any_element()
+    }
+
+    /// The new comment's field under the selection's last line: the field, Ask agent about lines, add and cancel.
+    fn composer(&self, field: &gpui::Entity<TextareaState>) -> AnyElement {
+        let c = self.colors;
+        let Some(composer) = self.props.composer.as_ref() else {
+            return div().into_any_element();
+        };
+        let selection = self.props.selection.as_ref();
+        let range = selection.map_or(String::new(), |s| {
+            if s.start == s.end {
+                format!("{} line {}", s.side.label(), s.start)
+            } else {
+                format!("{} lines {}–{}", s.side.label(), s.start, s.end)
+            }
+        });
+        let empty = composer.body.trim().is_empty();
+        let action = |label: SharedString, key: &'static str, enabled: bool, event: DiffEvent| {
+            let view = self.view.clone();
+            div()
+                .id(key)
+                .rounded(px(8.))
+                .px(px(8.))
+                .py(px(0.3 * REM))
+                .text_size(px(0.66 * REM))
+                .text_color(c.accent)
+                .when(!enabled, |d| d.opacity(0.45))
+                .when(enabled, |d| {
+                    d.hover(|s| s.bg(c.surface1)).on_click(move |_, _, cx| {
+                        let event = event.clone();
+                        view.update(cx, |_, cx| cx.emit(event)).ok();
+                    })
+                })
+                .child(label)
+        };
+        let left = self.gutters.0 + self.gutters.1;
+        let widest = (42. * REM).min(self.view_width - left - 0.8 * REM);
+        let body = div()
+            .id("git-comment-composer")
+            .mt(px(0.2 * REM))
+            .mr(px(0.7 * REM))
+            .mb(px(0.45 * REM))
+            .ml(px(left))
+            .when(self.view_width > 0., |d| d.max_w(px(widest.max(0.))))
+            .rounded(px(8.))
+            .bg(c.surface0)
+            .p(px(0.65 * REM))
+            .text_color(c.text)
+            .child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .gap(px(0.5 * REM))
+                    .mb(px(0.4 * REM))
+                    .text_size(px(0.68 * REM))
+                    .text_color(c.subtext)
+                    .child(
+                        selection
+                            .map(|s| format!("Comment on {}", s.path))
+                            .unwrap_or_default(),
+                    )
+                    .child(range),
+            )
+            .child(
+                div()
+                    .id("git-comment-body")
+                    .min_h(px(3.2 * REM))
+                    .rounded(px(8.))
+                    .bg(c.surface1)
+                    .p(px(0.4 * REM))
+                    .child(Textarea::new(field)),
+            )
+            .child(
+                div()
+                    .mt(px(0.4 * REM))
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(0.3 * REM))
+                    .when(composer.can_ask, |d| {
+                        d.child(action(
+                            "Ask agent about lines…".into(),
+                            "git-comment-ask",
+                            true,
+                            DiffEvent::AskLines,
+                        ))
+                    })
+                    .child(action(
+                        composer.label.clone().into(),
+                        "git-comment-submit",
+                        !empty,
+                        DiffEvent::SubmitComment,
+                    ))
+                    .child(action(
+                        "Cancel".into(),
+                        "git-comment-cancel-new",
+                        true,
+                        DiffEvent::CancelComment,
+                    )),
+            )
+            .into_any_element();
+        probed(
+            "git-comment-composer".into(),
+            Some(c.surface0),
+            c.text,
+            body,
+        )
     }
 
     fn card(&self, comment: &ReviewComment) -> AnyElement {
@@ -1530,6 +1772,7 @@ impl Render for DiffView {
             cursor: self.cursor.filter(|_| self.keyed),
             focused: self.focus.is_focused(window),
             edit: self.edit.clone(),
+            compose: self.compose_row.zip(self.compose.clone()),
         };
         // The pinned header: the file of the row at the top, pushed up by the next file's header when it arrives.
         let top = self.list.logical_scroll_top();
