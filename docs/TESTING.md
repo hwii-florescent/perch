@@ -79,8 +79,9 @@ PERCH_E2E_WEBKIT=1 npx playwright test --project=webkit <spec>
 - Known base failures (not regressions, same on a clean checkout): `federation.spec.ts` E2,
   `settings.spec.ts` D3, `sidebar.spec.ts` 2d, `wave2.spec.ts` X1, `remote-git.spec.ts` RG2 and
   `remote-workspace.spec.ts` RW4, `workspace-recovery.spec.ts` (its core's sidebar opens By status,
-  so the project tree it looks for is absent) and `device-pairing.spec.ts` (the resize check; its
-  earlier "working" check also races the process snapshot). Also, on a clean `8a02934` with the
+  so the project tree it looks for is absent) and `device-pairing.spec.ts` (the resize check:
+  after the phone reloads, its new connection takes both leases from the laptop and resizes the PTY; the
+  "working" check passes now that its fixture agent is a `node` script, since the core never takes `sh` for an agent). Also, on a clean `8a02934` with the
   2026-11-08 working-tree snapshot (Chromium, 2026-11-09): `workspace-tabs.spec.ts` W2 (leader `_`
   splits nothing: W1's sessions are Quickchat chats with no workspace) and `responsive.spec.ts` R9
   (the held row's `row-menu` never opens) fail alone and in the suite; `pane-splitting.spec.ts` P1
