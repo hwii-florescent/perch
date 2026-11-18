@@ -355,7 +355,13 @@ impl Workspace {
         // The sidebar's own changes (hiding it, a count, a session's state) redraw the window.
         let observed = cx.observe(&sidebar, |this, sidebar, cx| {
             this.close_deleted(cx);
+            // A strip change that moves the keyboard (the core listed the active session under
+            // another workspace) shows the next tab as a click would: its terminal attaches.
+            let was = this.tabs.active().map(str::to_string);
             this.sync_strips(cx);
+            if was.is_some() && this.tabs.active() != was.as_deref() {
+                this.after_change(cx);
+            }
             let connected = sidebar.read(cx).model().connected;
             this.files_connected(connected, cx);
             this.refresh_bridge(cx);

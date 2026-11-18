@@ -23,11 +23,11 @@ fn message(value: Value) -> ServerMessage {
 
 /// Projects `p` (checkout `w1`: alpha, bravo), `q` (`w2`: delta) and Quickchat (`w3`: chat).
 fn state() -> State {
-    state_with(None)
+    state_with(|_| {})
 }
 
-/// `state`, with alpha's shell in folder `alpha_cwd` when given.
-fn state_with(alpha_cwd: Option<&str>) -> State {
+/// `state`, with `edit` applied to each session as the core lists it.
+fn state_with(edit: impl Fn(&mut Value)) -> State {
     let project = |id: &str, path: &str| {
         json!({"id": id, "hostId": "local", "name": id, "path": path,
             "favorite": false, "createdAt": 0, "updatedAt": 0})
@@ -67,9 +67,7 @@ fn state_with(alpha_cwd: Option<&str>) -> State {
         let mut session = json!({"id": id, "title": id, "cwd": cwd, "createdAt": i,
             "status": "idle", "hostId": "local", "projectId": project, "workspaceId": workspace,
             "cliProviderId": "claude"});
-        if let (true, Some(folder)) = (*id == "alpha", alpha_cwd) {
-            session["currentCwd"] = json!(folder);
-        }
+        edit(&mut session);
         session
     })
     .collect();
@@ -298,7 +296,12 @@ fn main() {
             })
             .unwrap()
     };
-    core_says(&mut cx, state_with(Some("/away")));
+    let away = |s: &mut Value| {
+        if s["id"] == "alpha" {
+            s["currentCwd"] = json!("/away");
+        }
+    };
+    core_says(&mut cx, state_with(away));
     window
         .update(&mut cx, |ws, window, cx| {
             ws.run_command("tab.select", Some(&json!({"id": "alpha"})), window, cx)
@@ -328,7 +331,7 @@ fn main() {
         "still w1's strip: {strip:?}"
     );
     // The core says the terminal ended and was deleted.
-    let mut ended = state_with(Some("/away"));
+    let mut ended = state_with(away);
     ended.apply(&message(
         json!({"type": "session.deleted", "sessionId": "alpha"}),
     ));
@@ -436,6 +439,77 @@ fn main() {
     assert_eq!(again, strip, "the strip comes back from strips");
     assert_eq!(active.as_deref(), Some("bravo"), "not the old file's tab");
 
+    moved_active_session_shows_the_next(&mut cx, &scratch.join("moved.json"));
     let _ = std::fs::remove_dir_all(&scratch);
     println!("workspace_tabs_window: ok");
+}
+
+/// The core lists the active session under another workspace: it leaves the strip, and the tab
+/// shown in its place has its terminal, as if clicked, not a blank pane.
+fn moved_active_session_shows_the_next(cx: &mut HeadlessAppContext, kept: &std::path::Path) {
+    let settle = |cx: &mut HeadlessAppContext| {
+        for _ in 0..3 {
+            cx.advance_clock(POLL);
+            cx.run_until_parked();
+        }
+    };
+    let model = state().model();
+    let kept = kept.to_path_buf();
+    let window = cx
+        .open_window(size(px(1000.), px(900.)), |_, cx| {
+            cx.new(|cx| {
+                Workspace::new(model, None, cx)
+                    .with_core(|| Err(anyhow::anyhow!("no core in this test")))
+                    .with_window_state(kept)
+            })
+        })
+        .unwrap();
+    settle(cx);
+    window
+        .update(cx, |ws, _, cx| {
+            ws.sidebar().update(cx, |s, cx| {
+                s.open("local".into(), "alpha".into(), Some("claude".into()), cx)
+            })
+        })
+        .unwrap();
+    settle(cx);
+    let (strip, bravo_view) = window
+        .update(cx, |ws, _, _| {
+            (ws.tabs().strip().to_vec(), ws.view("bravo").is_some())
+        })
+        .unwrap();
+    assert_eq!(strip, strings(&["alpha", "bravo"]));
+    assert!(!bravo_view, "bravo waits, parked, until shown");
+    let model = state_with(|s| {
+        if s["id"] == "alpha" {
+            s["workspaceId"] = json!("w2");
+            s["projectId"] = json!("q");
+            s["cwd"] = json!("/other");
+        }
+    })
+    .model();
+    window
+        .update(cx, |ws, _, cx| {
+            ws.sidebar().update(cx, |s, cx| {
+                s.apply(perch_native::client::Update::Model(model), cx)
+            })
+        })
+        .unwrap();
+    settle(cx);
+    let (strip, active, bravo_view) = window
+        .update(cx, |ws, _, _| {
+            (
+                ws.tabs().strip().to_vec(),
+                ws.tabs().active().map(str::to_string),
+                ws.view("bravo").is_some(),
+            )
+        })
+        .unwrap();
+    assert_eq!(strip, strings(&["bravo"]), "alpha moved to w2");
+    assert_eq!(active.as_deref(), Some("bravo"));
+    assert!(bravo_view, "the tab shown in its place has its terminal");
+    window
+        .update(cx, |_, window, _| window.remove_window())
+        .unwrap();
+    cx.run_until_parked();
 }
