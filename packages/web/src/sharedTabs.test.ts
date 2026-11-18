@@ -17,7 +17,7 @@ import { usePerchStore } from "./store";
 import { useFileTabs } from "./fileTabs";
 import { useSplitSets } from "./splitSets";
 import { workspaceTabs } from "./workspaceTabs";
-import { mergeTabs, shareable } from "./sharedTabs";
+import { mergeTabs, outgoing, shareable } from "./sharedTabs";
 
 const session = (id: string, createdAt: number) => ({ id, title: id, cwd: "/p", createdAt, status: "idle", workspaceId: "w1" }) as SessionSummary;
 const workspace = { id: "w1", projectId: "p", hostId: "local", path: "/p", name: "w1", dirty: false, state: "active" as const, createdAt: 1, updatedAt: 1 };
@@ -83,6 +83,13 @@ describe("shared tabs", () => {
     const shared = (id: string) => shareable("w1", id);
     // First state of a connection: the core wins, the mod tab keeps its place.
     expect(mergeTabs({ strip: ["a", fileX], sets: [] }, local, remote, shared).strip).toEqual(["a", "w1\n\0mod\nnotes:1", fileY]);
+  });
+
+  it("never drops a session another device shows and this one hides", () => {
+    const base = { strip: ["a", "hidden", fileX], sets: [] };
+    const local = { strip: ["a", fileX, fileY], sets: [] };
+    expect(mergeTabs(base, local, base, () => true).strip).toEqual(["a", "hidden", fileX, fileY]);
+    expect(outgoing(local, base, () => true).strip).toEqual(["a", "hidden", fileX, fileY]);
   });
 
   it("takes this device's order when it moved tabs, and the core's additions after their neighbour", () => {

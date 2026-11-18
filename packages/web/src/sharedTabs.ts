@@ -48,10 +48,28 @@ export function tabOf(workspaceId: string, id: string): FileTab | undefined {
 
 const json = (value: unknown) => JSON.stringify(value);
 
+const isSession = (id: string) => !id.includes("\n");
+
+/** `next` with `id` inserted after the tab it follows in `from` (else first). */
+function insertAfter(next: string[], from: string[], id: string): void {
+  const at = from.indexOf(id);
+  const before = from.slice(0, at).reverse().find((other) => next.includes(other));
+  next.splice(before === undefined ? 0 : next.indexOf(before) + 1, 0, id);
+}
+
 /** `state` as the core keeps it: shared ids only, sets made only of them. */
 export function project(state: TabState, shared: (id: string) => boolean): TabState {
   const strip = state.strip.filter(shared);
   return { strip, sets: state.sets.filter((set) => set.ids.every((id) => strip.includes(id))) };
+}
+
+/** What this device writes: its shared tabs, and the sessions of `base` it does not show where
+ * they were. A session's tab comes and goes with the session (the core drops an ended one),
+ * never with a device's view of it. */
+export function outgoing(local: TabState, base: TabState, shared: (id: string) => boolean): TabState {
+  const mine = project(local, shared);
+  for (const id of base.strip) if (isSession(id) && !mine.strip.includes(id)) insertAfter(mine.strip, base.strip, id);
+  return mine;
 }
 
 /**
@@ -63,17 +81,14 @@ export function project(state: TabState, shared: (id: string) => boolean): TabSt
  */
 export function mergeTabs(base: TabState, local: TabState, remote: TabState, shared: (id: string) => boolean): TabState {
   const inBase = new Set(base.strip);
-  const localRemoved = new Set(base.strip.filter((id) => !local.strip.includes(id)));
+  // A session missing here is one this device does not show, not one closed (see `outgoing`).
+  const localRemoved = new Set(base.strip.filter((id) => !isSession(id) && !local.strip.includes(id)));
   const remoteRemoved = new Set(base.strip.filter((id) => !remote.strip.includes(id)));
   const keep = (id: string) => !localRemoved.has(id) && !remoteRemoved.has(id);
   const reordered = json(local.strip.filter((id) => inBase.has(id))) !== json(base.strip.filter((id) => local.strip.includes(id)));
   const [primary, secondary] = reordered ? [local.strip, remote.strip] : [remote.strip, local.strip];
   const strip = primary.filter(keep);
-  secondary.forEach((id, at) => {
-    if (inBase.has(id) || strip.includes(id) || !keep(id)) return;
-    const before = secondary.slice(0, at).reverse().find((other) => strip.includes(other));
-    strip.splice(before === undefined ? 0 : strip.indexOf(before) + 1, 0, id);
-  });
+  for (const id of secondary) if (!inBase.has(id) && !strip.includes(id) && keep(id)) insertAfter(strip, secondary, id);
   const ownSets = project(local, shared).sets;
   const changed = json(ownSets) !== json(base.sets);
   const candidates = changed ? local.sets : [...remote.sets, ...local.sets.filter((set) => !ownSets.includes(set))];
@@ -161,7 +176,8 @@ function mirror(workspaceId: string): void {
   if (!local) return;
   const base = bases.get(workspaceId);
   if (!base && latest.has(workspaceId)) return reconcile(workspaceId);
-  const mine = project(local, (id) => shareable(workspaceId, id));
+  const shared = (id: string) => shareable(workspaceId, id);
+  const mine = base ? outgoing(local, base, shared) : project(local, shared);
   if (base && json(mine) === json({ strip: base.strip, sets: base.sets })) return;
   const baseRevision = base?.revision ?? 0;
   const body = json({ baseRevision, ...mine });
