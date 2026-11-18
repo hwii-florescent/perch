@@ -7,7 +7,9 @@
 //! ([`DiffProps`]) and hears what the person did as [`DiffEvent`]s, so no line ever crosses into script. The file
 //! header of the file at the top stays pinned there (CSS `sticky top-0`), pushed up by the next file's header; hunk
 //! headers do not pin (the web's only stick to the left). Unwrapped, the lines of one file share one width (that
-//! file's widest) and one horizontal offset, and each file scrolls sideways on its own; wrapped, lines break at the view's width and the list measures them.
+//! file's widest) and one horizontal offset, and each file scrolls sideways on its own, with a scrollbar of its own at
+//! the bottom of its part of the view; wrapped, lines break at the view's width and the list measures them. A wheel or
+//! trackpad gesture moves one axis only, the one its first step mostly moved.
 //!
 //! A line is drawn compactly: one number (the old line's for a deletion, else the new line's) and a colour bar on
 //! the edge in place of a second number and a `+`/`−` column. A view at least [`SPLIT_WIDTH`] wide draws each change
@@ -20,16 +22,18 @@ use super::rows::{self, file_path, file_path_for_side, Row, Rows};
 use crate::git::store::DiffSnapshot;
 use crate::mods::theme::Theme;
 use gpui::{
-    div, list, prelude::*, px, AnyElement, App, Bounds, Context, EventEmitter, FocusHandle,
-    Focusable, Hsla, KeyDownEvent, ListAlignment, ListOffset, ListState, MouseButton, Pixels, Rgba,
-    ScrollWheelEvent, SharedString, Window,
+    div, fill, list, point, prelude::*, px, size, AnyElement, App, Axis, Bounds, Context,
+    DispatchPhase, EventEmitter, FocusHandle, Focusable, Hitbox, HitboxBehavior, Hsla,
+    KeyDownEvent, ListAlignment, ListOffset, ListState, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Rgba, ScrollWheelEvent, SharedString, TouchPhase, Window,
 };
 use gpui_base::input::{InputEvent, Textarea, TextareaState};
 use perch_core::review::{ReviewComment, ReviewSide, ReviewStatus};
 use perch_core::source_control::{DiffFile, DiffFileStatus, DiffLine, DiffLineKind};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 /// The web's root font size: `rem` in `review.tsx` is 16 px.
 const REM: f32 = 16.;
@@ -41,6 +45,12 @@ const MONO: &str = ".AppleSystemUIFontMonospaced";
 const SPLIT_WIDTH: f32 = 1000.;
 /// The change bar on a line's edge.
 const BAR: f32 = 3.;
+/// A file's sideways scrollbar: its height, and the room left at the right for the vertical one.
+const HBAR: f32 = 8.;
+const HBAR_RIGHT: f32 = 14.;
+/// A wheel step this long after the last one starts a new gesture, which latches its own axis (a mouse wheel and a
+/// trackpad's momentum report no start).
+const LATCH_GAP: Duration = Duration::from_millis(200);
 
 /// How a change is laid out: by the view's width, or always one line per row, or always side by side.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -201,6 +211,26 @@ impl Tints {
     }
 }
 
+/// A file's sideways scrollbar as last painted, in window coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HBar {
+    pub path: String,
+    pub track: Bounds<Pixels>,
+    pub thumb: Bounds<Pixels>,
+    /// The file's largest offset: the thumb at the track's right end.
+    pub max: f32,
+}
+
+/// A sideways scrollbar being dragged: the file, the pointer's x at the press, the offset then, and offset per
+/// pixel of pointer travel.
+struct HDrag {
+    path: String,
+    x: f32,
+    offset: f32,
+    scale: f32,
+    max: f32,
+}
+
 /// The reader's place by file: kept across a rebuild of the rows.
 struct Anchor {
     path: String,
@@ -236,6 +266,11 @@ pub struct DiffView {
     edit: Option<(String, gpui::Entity<TextareaState>)>,
     /// The file whose header was pinned at the last draw.
     pinned: Option<usize>,
+    /// The axis the wheel gesture under way moves (only that one), and when its last step came.
+    latch: Option<(Axis, Instant)>,
+    /// The sideways scrollbars at the last paint, one per file on screen that is wider than the view.
+    hbars: Rc<RefCell<Vec<HBar>>>,
+    hdrag: Option<HDrag>,
     /// Counts row builds (tests read it: a scroll must build none).
     pub builds: u64,
 }
@@ -268,6 +303,9 @@ impl DiffView {
             keyed: false,
             edit: None,
             pinned: None,
+            latch: None,
+            hbars: Rc::default(),
+            hdrag: None,
             builds: 0,
         }
     }
@@ -288,6 +326,16 @@ impl DiffView {
 
     pub fn list_state(&self) -> &ListState {
         &self.list
+    }
+
+    /// How far file `path`'s unwrapped lines are scrolled sideways.
+    pub fn offset(&self, path: &str) -> f32 {
+        self.offsets.get(path).copied().unwrap_or(0.)
+    }
+
+    /// The sideways scrollbars as last painted.
+    pub fn hbars(&self) -> Vec<HBar> {
+        self.hbars.borrow().clone()
     }
 
     pub fn set_theme(&mut self, theme: &Theme, cx: &mut Context<Self>) {
@@ -558,24 +606,35 @@ impl DiffView {
         cx.stop_propagation();
     }
 
-    /// A wheel step over a row of `file`: sideways, it moves that file's lines only.
-    fn on_wheel(
-        &mut self,
-        file: usize,
-        event: &ScrollWheelEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.props.wrap {
+    /// A wheel step over a row of `file`. A gesture moves one axis only, the one it mostly moved in its first step:
+    /// down the list, or sideways through that file's lines (Shift turns a mouse wheel sideways).
+    fn on_wheel(&mut self, file: usize, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        let delta = event.delta.pixel_delta(px(LINE_HEIGHT));
+        let (dx, dy) = if event.modifiers.shift && delta.x == px(0.) {
+            (f32::from(delta.y), 0.)
+        } else {
+            (f32::from(delta.x), f32::from(delta.y))
+        };
+        if event.touch_phase == TouchPhase::Started {
+            self.latch = None;
+        }
+        if dx == 0. && dy == 0. {
             return;
         }
-        let delta = event.delta.pixel_delta(px(LINE_HEIGHT));
-        let dx = if event.modifiers.shift && delta.x == px(0.) {
-            delta.y
-        } else {
-            delta.x
+        let now = Instant::now();
+        let axis = match self.latch {
+            Some((axis, at)) if now.duration_since(at) < LATCH_GAP => axis,
+            _ if dx.abs() > dy.abs() => Axis::Horizontal,
+            _ => Axis::Vertical,
         };
-        if dx == px(0.) {
+        self.latch = Some((axis, now));
+        if axis == Axis::Vertical {
+            // The list scrolls; the sideways part of the step is dropped.
+            return;
+        }
+        // Sideways: the list must not take the vertical part.
+        cx.stop_propagation();
+        if self.props.wrap || dx == 0. {
             return;
         }
         let Some(path) = self
@@ -587,16 +646,49 @@ impl DiffView {
             return;
         };
         let max = (self.content_width(file) - self.visible_width()).max(0.);
-        let offset = self.offsets.get(&path).copied().unwrap_or(0.);
-        let next = (offset - f32::from(dx)).clamp(0., max);
-        if next != offset {
+        self.set_offset(path, self.offset_of(file) - dx, max, cx);
+    }
+
+    fn offset_of(&self, file: usize) -> f32 {
+        self.diff
+            .as_deref()
+            .and_then(|d| d.files.get(file))
+            .map_or(0., |f| self.offset(file_path(f)))
+    }
+
+    fn set_offset(&mut self, path: String, offset: f32, max: f32, cx: &mut Context<Self>) {
+        let next = offset.clamp(0., max);
+        if self.offsets.get(&path).copied().unwrap_or(0.) != next {
             Rc::make_mut(&mut self.offsets).insert(path, next);
             cx.notify();
         }
-        if event.modifiers.shift {
-            cx.stop_propagation();
+    }
+
+    /// A press on a file's sideways scrollbar: on the thumb it starts a drag; on the track the thumb's middle jumps
+    /// there first.
+    fn press_hbar(&mut self, bar: &HBar, x: f32, cx: &mut Context<Self>) {
+        let room = f32::from(bar.track.size.width - bar.thumb.size.width).max(1.);
+        let scale = bar.max / room;
+        let mut offset = self.offset(&bar.path);
+        if !(f32::from(bar.thumb.left())..=f32::from(bar.thumb.right())).contains(&x) {
+            let left = x - f32::from(bar.track.left()) - f32::from(bar.thumb.size.width) / 2.;
+            offset = (left * scale).clamp(0., bar.max);
+            self.set_offset(bar.path.clone(), offset, bar.max, cx);
         }
-        let _ = window;
+        self.hdrag = Some(HDrag {
+            path: bar.path.clone(),
+            x,
+            offset,
+            scale,
+            max: bar.max,
+        });
+    }
+
+    fn drag_hbar(&mut self, x: f32, cx: &mut Context<Self>) {
+        if let Some(d) = &self.hdrag {
+            let (path, offset, max) = (d.path.clone(), d.offset + (x - d.x) * d.scale, d.max);
+            self.set_offset(path, offset, max, cx);
+        }
     }
 
     /// The number column's width, for the largest number the diff shows, and the change bar's.
@@ -686,6 +778,67 @@ fn probed(name: String, background: Option<Hsla>, text: Hsla, element: AnyElemen
 }
 
 impl Frame {
+    /// The sideways scrollbars for the rows the list laid out in `viewport`: one per file on screen wider than the
+    /// view, at the bottom of that file's part of the view (the view's bottom while the file runs past it).
+    fn hbars(&self, list: &ListState, viewport: Bounds<Pixels>) -> Vec<HBar> {
+        let Some(diff) = self.diff.as_deref() else {
+            return vec![];
+        };
+        if self.props.wrap {
+            return vec![];
+        }
+        let visible = if self.rows.split {
+            self.view_width / 2.
+        } else {
+            self.view_width
+        };
+        // Each file's run of laid-out rows: (file, top, bottom).
+        let mut spans: Vec<(usize, Pixels, Pixels)> = vec![];
+        for ix in list.logical_scroll_top().item_ix..self.rows.rows.len() {
+            let Some(b) = list.bounds_for_item(ix) else {
+                break;
+            };
+            if b.top() >= viewport.bottom() {
+                break;
+            }
+            let file = self.rows.rows[ix].file();
+            match spans.last_mut() {
+                Some(span) if span.0 == file => span.2 = b.bottom(),
+                _ => spans.push((file, b.top(), b.bottom())),
+            }
+        }
+        let width = viewport.size.width - px(HBAR_RIGHT);
+        spans
+            .into_iter()
+            .filter_map(|(file, top, bottom)| {
+                let content = self.content_width(file);
+                let max = content - visible;
+                let (top, bottom) = (top.max(viewport.top()), bottom.min(viewport.bottom()));
+                if max <= 0. || bottom - top < px(3. * HBAR) || width <= px(0.) {
+                    return None;
+                }
+                let path = file_path(diff.files.get(file)?).to_string();
+                let offset = self.offsets.get(&path).copied().unwrap_or(0.);
+                let track = Bounds::new(
+                    point(viewport.left(), bottom - px(HBAR)),
+                    size(width, px(HBAR)),
+                );
+                let thumb_w = (width * (visible / content)).max(px(24.)).min(width);
+                let thumb_x = (width - thumb_w) * (offset / max).clamp(0., 1.);
+                let thumb = Bounds::new(
+                    point(track.left() + thumb_x, track.top()),
+                    size(thumb_w, px(HBAR)),
+                );
+                Some(HBar {
+                    path,
+                    track,
+                    thumb,
+                    max,
+                })
+            })
+            .collect()
+    }
+
     /// The shared width of `file`'s unwrapped lines: the bar, the number and its widest code.
     fn content_width(&self, file: usize) -> f32 {
         let (number, bar) = self.gutters;
@@ -700,7 +853,8 @@ impl Frame {
         div()
             .w_full()
             .on_scroll_wheel(move |event, window, cx| {
-                view.update(cx, |view, cx| view.on_wheel(file, event, window, cx))
+                let _ = window;
+                view.update(cx, |view, cx| view.on_wheel(file, event, cx))
                     .ok();
             })
             .child(self.drawn_row(ix))
@@ -1341,6 +1495,19 @@ impl Render for DiffView {
         self.pinned = pinned.as_ref().map(|(file, _, _)| *file);
         let rows = frame.clone();
         let width = self.width.clone();
+        let (bars_list, bars_frame, painted) =
+            (self.list.clone(), frame.clone(), self.hbars.clone());
+        let bar_view = cx.entity().downgrade();
+        let (track_color, thumb_color) = (
+            Hsla {
+                a: 0.35,
+                ..self.colors.surface1
+            },
+            Hsla {
+                a: 0.8,
+                ..self.colors.overlay
+            },
+        );
         div()
             .id("git-diff")
             .key_context("DiffView")
@@ -1361,5 +1528,61 @@ impl Render for DiffView {
             .children(pinned.map(|(_, header, push)| {
                 div().absolute().top(push).left_0().right_0().child(header)
             }))
+            // Each file's sideways scrollbar, laid out after the list has laid out this frame's rows.
+            .child(
+                gpui::canvas(
+                    move |_, window, _| {
+                        let bars = bars_frame.hbars(&bars_list, bars_list.viewport_bounds());
+                        let hitboxes: Vec<Hitbox> = bars
+                            .iter()
+                            .map(|bar| window.insert_hitbox(bar.track, HitboxBehavior::BlockMouse))
+                            .collect();
+                        *painted.borrow_mut() = bars.clone();
+                        (bars, hitboxes)
+                    },
+                    move |_, (bars, hitboxes): (Vec<HBar>, Vec<Hitbox>), window, _| {
+                        for bar in &bars {
+                            window.paint_quad(fill(bar.track, track_color));
+                            window.paint_quad(
+                                fill(bar.thumb, thumb_color).corner_radii(px(HBAR / 2.)),
+                            );
+                        }
+                        let view = bar_view.clone();
+                        window.on_mouse_event(move |e: &MouseDownEvent, phase, window, cx| {
+                            if phase != DispatchPhase::Bubble || e.button != MouseButton::Left {
+                                return;
+                            }
+                            if let Some(bar) = bars
+                                .iter()
+                                .zip(&hitboxes)
+                                .find(|(_, h)| h.is_hovered(window))
+                                .map(|(b, _)| b)
+                            {
+                                cx.stop_propagation();
+                                let x = f32::from(e.position.x);
+                                view.update(cx, |view, cx| view.press_hbar(bar, x, cx)).ok();
+                            }
+                        });
+                        let view = bar_view.clone();
+                        window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
+                            if phase != DispatchPhase::Bubble
+                                || e.pressed_button != Some(MouseButton::Left)
+                            {
+                                return;
+                            }
+                            let x = f32::from(e.position.x);
+                            view.update(cx, |view, cx| view.drag_hbar(x, cx)).ok();
+                        });
+                        let view = bar_view.clone();
+                        window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
+                            if phase == DispatchPhase::Bubble {
+                                view.update(cx, |view, _| view.hdrag = None).ok();
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .size_full(),
+            )
     }
 }

@@ -9,8 +9,8 @@
 
 use gpui::{
     point, px, size, AppContext as _, Entity, HeadlessAppContext, Keystroke, Modifiers,
-    MouseButton, MouseDownEvent, MouseUpEvent, Pixels, PlatformInput, Point, ScrollDelta,
-    ScrollWheelEvent, TouchPhase, Window, WindowHandle,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput, Point,
+    ScrollDelta, ScrollWheelEvent, TouchPhase, Window, WindowHandle,
 };
 use perch_core::review::{
     AnchorConfidence, LineRange, ReviewAnchor, ReviewComment, ReviewSide, ReviewStatus,
@@ -255,6 +255,44 @@ impl Rig {
             delta: ScrollDelta::Lines(point(delta.x, delta.y)),
             modifiers,
             touch_phase: TouchPhase::Moved,
+        }));
+    }
+
+    /// One wheel step at `at`, in lines, as the step of a gesture in `phase`.
+    fn wheel_at(&mut self, at: Point<Pixels>, delta: Point<f32>, phase: TouchPhase) {
+        self.input(PlatformInput::ScrollWheel(ScrollWheelEvent {
+            position: at,
+            delta: ScrollDelta::Lines(point(delta.x, delta.y)),
+            modifiers: Modifiers::default(),
+            touch_phase: phase,
+        }));
+    }
+
+    /// A move to `from`, a press there, a drag to `to` and a release there.
+    fn drag(&mut self, from: Point<Pixels>, to: Point<Pixels>) {
+        // The pointer arrives first, as a real one does: what it is over is known before the press.
+        self.input(PlatformInput::MouseMove(MouseMoveEvent {
+            position: from,
+            pressed_button: None,
+            modifiers: Modifiers::default(),
+        }));
+        self.input(PlatformInput::MouseDown(MouseDownEvent {
+            button: MouseButton::Left,
+            position: from,
+            modifiers: Modifiers::default(),
+            click_count: 1,
+            first_mouse: false,
+        }));
+        self.input(PlatformInput::MouseMove(MouseMoveEvent {
+            position: to,
+            pressed_button: Some(MouseButton::Left),
+            modifiers: Modifiers::default(),
+        }));
+        self.input(PlatformInput::MouseUp(MouseUpEvent {
+            button: MouseButton::Left,
+            position: to,
+            modifiers: Modifiers::default(),
+            click_count: 1,
         }));
     }
 
@@ -758,6 +796,71 @@ fn keeps_place(cx: HeadlessAppContext) -> HeadlessAppContext {
     rig.close()
 }
 
+/// A wheel gesture moves one axis: a mostly sideways one scrolls only that file's lines, a mostly vertical one only
+/// the list. Each file wider than the view shows a sideways scrollbar at the bottom of its part of the view, and
+/// dragging its thumb scrolls that file.
+fn one_axis_and_hbars(cx: HeadlessAppContext) -> HeadlessAppContext {
+    const NARROW: f32 = 320.;
+    let diff = synthetic(500);
+    let path = diff.files[0].new_path.clone().unwrap();
+    let (mut rig, _) = Rig::open_sized(cx, diff, vec![], DiffProps::default(), NARROW);
+    let view = rig.view();
+    let offset = |rig: &mut Rig| {
+        let path = path.clone();
+        rig.cx.update(|cx| view.read(cx).offset(&path))
+    };
+    let middle = point(px(NARROW / 2.), px(HEIGHT / 2.));
+    let top = rig.top();
+    rig.wheel_at(middle, point(-6., -1.), TouchPhase::Started);
+    rig.wheel_at(middle, point(-6., -2.), TouchPhase::Moved);
+    assert!(
+        offset(&mut rig) > 0.,
+        "a mostly sideways gesture scrolls the file"
+    );
+    let after = rig.top();
+    assert_eq!(
+        (after.item_ix, after.offset_in_item),
+        (top.item_ix, top.offset_in_item),
+        "and does not move the list"
+    );
+    let sideways = offset(&mut rig);
+    rig.wheel_at(middle, point(-1., -6.), TouchPhase::Started);
+    rig.wheel_at(middle, point(-2., -6.), TouchPhase::Moved);
+    assert!(
+        rig.top().item_ix > top.item_ix,
+        "a mostly vertical gesture scrolls the list"
+    );
+    assert_eq!(
+        offset(&mut rig),
+        sideways,
+        "and leaves the file where it was"
+    );
+
+    // File 0 runs past the view's bottom: its bar sits there, the thumb where the offset is.
+    let bars = rig.cx.update(|cx| view.read(cx).hbars());
+    let bar = bars
+        .iter()
+        .find(|b| b.path == path)
+        .expect("file 0 has a sideways bar");
+    assert_eq!(bar.track.bottom(), px(HEIGHT), "at the view's bottom");
+    assert!(
+        bar.thumb.left() > bar.track.left(),
+        "the thumb shows the offset"
+    );
+    let before = offset(&mut rig);
+    let (from, to) = (
+        bar.thumb.center(),
+        bar.thumb.center() - point(px(40.), px(0.)),
+    );
+    rig.drag(from, to);
+    let dragged = offset(&mut rig);
+    assert!(
+        dragged < before && dragged > 0.,
+        "dragging the thumb scrolls the file ({before} to {dragged})"
+    );
+    rig.close()
+}
+
 /// The compact unified layout, saved when `PERCH_DIFF_SHOTS` is set.
 fn unified_shot(cx: HeadlessAppContext) -> HeadlessAppContext {
     let (mut rig, _) = Rig::open_sized(cx, synthetic(500), vec![], DiffProps::default(), 520.);
@@ -779,6 +882,7 @@ fn main() {
     let cx = interactions(cx);
     let cx = split_layout(cx);
     let cx = keeps_place(cx);
+    let cx = one_axis_and_hbars(cx);
     let _ = unified_shot(cx);
     println!("diff_element: ok");
 }
