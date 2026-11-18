@@ -786,33 +786,19 @@ impl Workspace {
         !edited.is_empty()
     }
 
-    /// The drawer's body for a tab this window does not draw: a word and the hand-off to Perch.
-    fn handoff_body(
-        &self,
-        tab: shell::Tools,
-        open: impl IntoElement,
-        tokens: Tokens,
-    ) -> AnyElement {
+    /// The drawer's body with no project in focus: Files, Git and Browser belong to a project.
+    fn empty_tools_body(&self, tokens: Tokens) -> AnyElement {
         div()
             .flex_1()
             .min_h_0()
             .flex()
-            .flex_col()
             .items_center()
             .justify_center()
-            .gap_3()
             .px_6()
-            .child(
-                div()
-                    .text_size(px(12.))
-                    .text_color(tokens.subtext)
-                    .text_center()
-                    .child(format!(
-                        "{} for this workspace opens in the Perch app for now.",
-                        tab.label()
-                    )),
-            )
-            .child(open)
+            .text_size(px(12.))
+            .text_color(tokens.subtext)
+            .text_center()
+            .child("Open a project to see its files, changes and browser.")
             .into_any_element()
     }
 
@@ -5078,29 +5064,6 @@ impl gpui::Render for Workspace {
                     })
                 })
             });
-            // The Files, Git and Browser screens are the Perch app's for now.
-            let open = {
-                let this = this.clone();
-                div()
-                    .id("workspace-tools-handoff")
-                    .flex()
-                    .items_center()
-                    .h(px(28.))
-                    .px(px(12.8))
-                    .rounded(px(8.))
-                    .cursor_pointer()
-                    .text_size(px(12.))
-                    .text_color(tokens.text)
-                    .bg(tokens.surface_0)
-                    .hover(move |style| style.bg(tokens.surface_1))
-                    .child("Open in Perch")
-                    .on_click(move |_, _, cx| {
-                        this.update(cx, |this, cx| {
-                            let result = this.hand_off(tab.place());
-                            this.finish(result, cx);
-                        })
-                    })
-            };
             shell::card(tokens)
                 .id("tools-card")
                 .flex_none()
@@ -5129,9 +5092,9 @@ impl gpui::Render for Workspace {
                             .into_any_element(),
                         (shell::Tools::Git, _) => match self.drawer_review() {
                             Some(review) => review,
-                            None => self.handoff_body(tab, open, tokens),
+                            None => self.empty_tools_body(tokens),
                         },
-                        _ => self.handoff_body(tab, open, tokens),
+                        _ => self.empty_tools_body(tokens),
                     })
                 })
                 .child(shell::round_corners(tokens.backdrop))

@@ -5,7 +5,6 @@
 //! them in `localStorage` (`perch.workspaceTools`, `perch.layout.sidebarWidth`,
 //! `perch.layout.toolsWidth`). `Workspace` draws the frame from it.
 
-use crate::handoff::Place;
 use crate::mods::theme::Theme;
 use gpui::{
     canvas, div, point, prelude::*, px, rgb, App, CursorStyle, Div, FontWeight, IntoElement,
@@ -60,15 +59,6 @@ impl Tools {
             Tools::Files => "Files",
             Tools::Git => "Git",
             Tools::Browser => "Browser",
-        }
-    }
-
-    /// Where the Perch app opens for this tab.
-    pub fn place(self) -> Place {
-        match self {
-            Tools::Files => Place::Files,
-            Tools::Git => Place::Changes,
-            Tools::Browser => Place::Browser,
         }
     }
 
