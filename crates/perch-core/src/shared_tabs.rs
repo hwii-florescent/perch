@@ -300,9 +300,13 @@ mod tests {
         let review = format!("{w}\n\0review");
         // The desktop opens a file and a review beside its session, and splits them.
         let set = json!({"ids": [file, review], "sizes": [0.5, 0.5], "dir": "row"});
-        let Ok(Written::Changed(first)) =
-            set_tabs(&db, &w, Some(0), &["s1", &file, &review], &[set.clone()])
-        else {
+        let Ok(Written::Changed(first)) = set_tabs(
+            &db,
+            &w,
+            Some(0),
+            &["s1", &file, &review],
+            std::slice::from_ref(&set),
+        ) else {
             panic!("first write stores")
         };
         assert_eq!(first.revision, 1);
@@ -362,7 +366,7 @@ mod tests {
             &file,
             "s1",
             &format!("{w}\n\0mod\nnotes:1"),
-            &format!("term:x\nb.rs"),
+            "term:x\nb.rs",
             "other-workspace\nc.rs",
         ];
         let sets = [
