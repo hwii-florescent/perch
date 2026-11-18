@@ -5,7 +5,7 @@
 //! (`perch.navigation(options)`, `perch.hosts()`, ...), which must return the same object until the data changes.
 //! Menus and dialogs Perch draws itself (session menu, new session menu, confirm, select, folder browser,
 //! instructions, memory) open through `perch.openOverlay(kind, props)`; their callbacks are plain functions.
-import { createElement, Fragment, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createElement, Fragment, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { cn } from "../../../../packages/web/src/lib/cn.ts";
 import { beginSlideDrag } from "../../../../packages/web/src/slideDrag.ts";
 import { formatCombo } from "../../../../packages/web/src/keyCombo.ts";
@@ -547,10 +547,12 @@ export function useGitReview(workspaceId) {
 }
 
 /** The review's diff, drawn natively (the `diff` engine): the diff and comments come from the window's Git store by
- * `workspaceId`; the props are view state, and what the person does comes back through the callbacks. */
+ * `workspaceId`; the props are view state, and what the person does comes back through the callbacks. Each copy of
+ * the screen (the drawer's Git and a review tab of one workspace) has a view of its own, so each scrolls, measures
+ * and hears events on its own; the data stays the workspace's. */
 export function DiffView(props) {
   const { workspaceId } = props;
-  const key = `diff:${workspaceId}`;
+  const key = `diff:${workspaceId}:${useId()}`;
   const perch = host();
   const opened = useRef(null);
   if (opened.current !== key) {
@@ -559,7 +561,9 @@ export function DiffView(props) {
   }
   perch.diff.setProps(key, {
     path: props.path ?? null, wrap: !!props.wrap, layout: props.layout ?? "auto", canAsk: !!props.onAskAgent, selection: props.selection ?? null,
-    editingCommentId: props.editingCommentId ?? null, editingBody: props.editingBody ?? "",
+    editingCommentId: props.editingCommentId ?? null, editingBody: props.editingBody ?? "", reveal: props.reveal ?? null,
+    collapsed: props.collapsed ?? [], viewed: props.onToggleViewed ? (props.viewed ?? []) : null,
+    composer: props.selection && props.onSubmitComment ? { body: props.commentBody ?? "", target: props.commentTarget ?? null, canAsk: !!props.onAskLines } : null,
   });
   const comments = useHostSnapshot((p) => p.gitReview(workspaceId)).comments ?? [];
   const seq = useSyncExternalStore(subscribe, () => perch.diff.seq(key));
@@ -573,10 +577,16 @@ export function DiffView(props) {
         case "selectLine": p.onSelectLine?.(event.path, event.side, event.line, event.extend); break;
         case "addComment": p.onAddComment?.(event.path, event.side, event.line); break;
         case "askAgent": p.onAskAgent?.(event.path); break;
+        case "toggleCollapsed": p.onToggleCollapsed?.(event.path); break;
+        case "toggleViewed": p.onToggleViewed?.(event.path); break;
         case "editComment": { const c = comment(event.commentId); if (c) p.onEditComment?.(c); break; }
         case "editBody": p.onEditBody?.(event.text); break;
         case "saveEdit": { const c = comment(event.commentId); if (c) p.onSaveEdit?.(c); break; }
         case "cancelEdit": p.onCancelEdit?.(); break;
+        case "commentBody": p.onCommentBody?.(event.text); break;
+        case "submitComment": p.onSubmitComment?.(); break;
+        case "cancelComment": p.onCancelComment?.(); break;
+        case "askLines": p.onAskLines?.(); break;
         case "resolve": { const c = comment(event.commentId); if (c) p.onResolve?.(c); break; }
         case "delete": { const c = comment(event.commentId); if (c) p.onDelete?.(c); break; }
       }

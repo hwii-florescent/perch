@@ -225,7 +225,7 @@ describe("review state the host keeps for the workspace", () => {
 });
 
 describe("WorkspaceGitReview interaction truthfulness", () => {
-  it("selects one file while keeping horizontal scrolling at the diff surface", async () => {
+  it("selects one file; the diff scrolls down and each file sideways on its own", async () => {
     const actionSet = actions();
     const twoFileDiff: GitDiffSnapshot = {
       ...diff,
@@ -242,7 +242,9 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
     await chooseDropdown(picker, "src/other.ts");
 
     const editor = document.querySelector('[data-testid="git-diff"]');
-    expect(editor?.className).toContain("overflow-auto");
+    expect(editor?.className).toContain("overflow-y-auto");
+    expect(editor?.className).toContain("overflow-x-hidden");
+    expect(editor?.querySelector('[data-testid="git-diff-file-body"]')?.className).toContain("overflow-x-auto");
     expect(editor?.querySelectorAll("article")).toHaveLength(1);
     expect(editor?.textContent).toContain("src/other.ts");
     expect(editor?.textContent).not.toContain("src/main.ts");
@@ -252,7 +254,9 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
     expect(line?.querySelector("code")?.className).not.toContain("overflow-x-auto");
   });
 
-  it("folds the changes list away and clicking the open file again shows every file", async () => {
+  it("folds the changes list away; a file in the tree scrolls the diff to it and keeps every file", async () => {
+    const scrolled: string[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this.getAttribute("data-file-path") ?? ""); };
     const actionSet = actions();
     await render(props(actionSet));
 
@@ -265,9 +269,74 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
 
     const file = document.querySelector<HTMLButtonElement>('[data-testid="git-status"] [role="treeitem"] button:not([aria-expanded])');
     await act(async () => file?.click());
-    expect(actionSet.loadDiff).toHaveBeenLastCalledWith(expect.anything(), "src/main.ts", expect.anything());
     await act(async () => file?.click());
-    expect(actionSet.loadDiff).toHaveBeenLastCalledWith(expect.anything(), undefined, expect.anything());
+    expect(scrolled).toEqual(["src/main.ts", "src/main.ts"]);
+    expect(actionSet.loadDiff).not.toHaveBeenCalledWith(expect.anything(), "src/main.ts", expect.anything());
+  });
+
+  it("keeps one vertical scroller per column: no notes is one line, and narrow shows the files or the diff", async () => {
+    await render(props(actions()));
+    expect(document.querySelector('[data-testid="git-review-panel"]')?.className).not.toContain("overflow-y-auto");
+
+    // Narrow: the review is 500 px wide.
+    const measure = vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({ width: 500, height: 600, x: 0, y: 0, top: 0, left: 0, right: 500, bottom: 600, toJSON: () => ({}) } as DOMRect);
+    Element.prototype.scrollIntoView = () => {};
+    try {
+      await replaceView(props(actions()));
+      expect(document.querySelector('[data-testid="git-status"]')).toBeNull();
+      expect(document.querySelector('[data-testid="git-diff"]')).not.toBeNull();
+      await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="git-rail-toggle"]')?.click());
+      expect(document.querySelector('[data-testid="git-status"]')).not.toBeNull();
+      expect(document.querySelector('[data-testid="git-diff"]')).toBeNull();
+      const file = document.querySelector<HTMLButtonElement>('[data-testid="git-status"] [role="treeitem"] button:not([aria-expanded])');
+      await act(async () => file?.click());
+      expect(document.querySelector('[data-testid="git-status"]')).toBeNull();
+      expect(document.querySelector('[data-testid="git-diff"]')).not.toBeNull();
+    } finally {
+      measure.mockRestore();
+    }
+  });
+
+  it("opens the comment composer inside the diff, under the selected line", async () => {
+    const actionSet = actions();
+    await render(props(actionSet));
+    await act(async () => document.querySelector<HTMLElement>('[data-testid="git-diff-line"]')?.click());
+    const composer = document.querySelector('[data-testid="git-diff"] [data-testid="git-comment-composer"]');
+    expect(composer).not.toBeNull();
+    expect(composer?.previousElementSibling?.getAttribute("data-testid")).toBe("git-diff-line");
+    const body = document.querySelector<HTMLTextAreaElement>('[data-testid="git-comment-body"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(body, "Rename this");
+      body.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    // The session chosen in the header is where the comment goes.
+    expect(document.querySelector('header [data-testid="git-review-session"]')).not.toBeNull();
+    const add = [...composer!.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Add"));
+    expect(composer?.querySelector('[data-testid="git-comment-target"]')?.textContent).toBe("→ Target session");
+    await act(async () => add?.click());
+    expect(actionSet.createComment).toHaveBeenCalledWith({ path: "src/main.ts", side: "new", start: 1, end: 1, body: "Rename this" });
+    expect(document.querySelector('[data-testid="git-comment-composer"]')).toBeNull();
+  });
+
+  it("folds a file from its header, and marking it viewed folds it until its diff changes", async () => {
+    const actionSet = actions();
+    await render(props(actionSet));
+    const lines = () => document.querySelectorAll('[data-testid="git-diff-line"]').length;
+    const count = () => document.querySelector('[data-testid="git-viewed-count"]')?.textContent;
+    expect(lines()).toBe(1);
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="git-file-fold"]')?.click());
+    expect(lines()).toBe(0);
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="git-file-fold"]')?.click());
+    expect(lines()).toBe(1);
+
+    await act(async () => document.querySelector<HTMLInputElement>('[data-testid="git-file-viewed"]')?.click());
+    expect(count()).toBe("1/1 viewed");
+    expect(lines()).toBe(0);
+    // The same file with another change is no longer viewed.
+    const changed: GitDiffSnapshot = { ...diff, files: [{ ...diff.files[0]!, hunks: [{ ...diff.files[0]!.hunks[0]!, lines: [{ kind: "addition", content: "newer anchor", newLine: 1 }] }] }] };
+    await render({ ...props(actionSet), diff: changed });
+    expect(count()).toBe("0/1 viewed");
+    expect(document.querySelector<HTMLInputElement>('[data-testid="git-file-viewed"]')?.checked).toBe(false);
   });
 
   it("wraps long diff lines at the pane instead of scrolling sideways when asked", async () => {
@@ -325,6 +394,8 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
       await Promise.resolve();
     });
     expect(document.querySelector('[data-testid="git-review-packet"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="git-review-send"]')?.textContent).toBe("Send to Target session");
+    expect(actionSet.previewBatch).toHaveBeenCalledWith(expect.objectContaining({ targetSessionId: "session-target" }));
 
     await act(async () => {
       (document.querySelector('[data-testid="git-review-send"]') as HTMLButtonElement).click();

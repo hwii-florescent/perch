@@ -106,6 +106,23 @@ function filePathForSide(file, side) {
         return file.oldPath ?? file.newPath ?? "(unknown file)";
     return file.newPath ?? file.oldPath ?? "(unknown file)";
 }
+/** What a file's diff says, as a short hash: a file marked viewed stays viewed only while this is unchanged (GitHub
+ * clears Viewed when the file changes). */
+export function fileSignature(file) {
+    let hash = 0x811c9dc5;
+    const add = (text) => {
+        for (let i = 0; i < text.length; i += 1)
+            hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193);
+        hash = Math.imul(hash ^ 10, 0x01000193);
+    };
+    add(`${file.status}:${file.oldPath ?? ""}:${file.newPath ?? ""}`);
+    for (const hunk of file.hunks) {
+        add(hunk.header);
+        for (const line of hunk.lines)
+            add(`${line.kind[0]}${line.content}`);
+    }
+    return (hash >>> 0).toString(36);
+}
 function splitPath(path) {
     const cut = path.lastIndexOf("/") + 1;
     return [path.slice(0, cut), path.slice(cut)];
@@ -312,6 +329,18 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
     const [railOpen, setRailOpen] = useResourceState(`review:${workspaceId}:railOpen`, true);
     const [collapsedDirs, setCollapsedDirs] = useResourceState(`review:${workspaceId}:collapsedDirs`, new Set());
     const [fileFilter, setFileFilter] = useState("");
+    const [collapsedFiles, setCollapsedFiles] = useResourceState(`review:${workspaceId}:collapsedFiles`, new Set());
+    // Path to the file's signature when it was marked viewed.
+    const [viewedFiles, setViewedFiles] = useResourceState(`review:${workspaceId}:viewedFiles`, {});
+    // The file the tree last asked this copy's diff to scroll to (each copy scrolls on its own).
+    const [reveal, setReveal] = useState(null);
+    function revealFile(path) {
+        setNarrowView("diff");
+        // A one-file diff of another file would not hold it: show every file again, then scroll to it.
+        if (activeFile && activeFile !== path)
+            setActiveFile(undefined);
+        setReveal((previous) => ({ path, seq: (previous?.seq ?? 0) + 1 }));
+    }
     const [diffLayout, setDiffLayout] = useResourceState(`review:${workspaceId}:diffLayout`, "auto");
     // Whether the host's diff can show a change side by side (the native client's can).
     const canChooseLayout = DiffView.splitLayout === true;
@@ -319,6 +348,9 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
     // runtime matches those against the window, and its `ResizeObserver` never fires, so the box is read on a timer.
     const rootRef = useRef(null);
     const [narrow, setNarrow] = useState(false);
+    // Narrow, the review shows the changes list or the diff, never one scroll box inside another.
+    const [narrowView, setNarrowView] = useState("diff");
+    const [notesOpen, setNotesOpen] = useResourceState(`review:${workspaceId}:notesOpen`, true);
     useEffect(() => {
         const read = () => {
             const width = rootRef.current?.getBoundingClientRect().width ?? 0;
@@ -464,6 +496,27 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
         }
         return new Map(countCache.current.counts);
     }, [diff]);
+    const signatures = useMemo(() => new Map(diffFiles.map((file) => [filePath(file), fileSignature(file)])), [diffFiles]);
+    const viewedPaths = useMemo(() => [...signatures].filter(([path, signature]) => viewedFiles[path] === signature).map(([path]) => path), [signatures, viewedFiles]);
+    function toggleCollapsed(path) {
+        setCollapsedFiles((current) => { const next = new Set(current); if (!next.delete(path))
+            next.add(path); return next; });
+    }
+    /** Marking a file viewed folds it; unmarking unfolds it. */
+    function toggleViewed(path) {
+        const signature = signatures.get(path);
+        if (!signature)
+            return;
+        const on = viewedFiles[path] !== signature;
+        setViewedFiles((current) => { const next = { ...current }; if (on)
+            next[path] = signature;
+        else
+            delete next[path]; return next; });
+        setCollapsedFiles((current) => { const next = new Set(current); if (on)
+            next.add(path);
+        else
+            next.delete(path); return next; });
+    }
     const treeShown = useMemo(() => treeRows(changedFiles, collapsedDirs, fileFilter), [changedFiles, collapsedDirs, fileFilter]);
     function toggleDir(key) {
         setCollapsedDirs((current) => { const next = new Set(current); if (!next.delete(key))
@@ -472,6 +525,10 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
     const unresolvedCount = comments.filter((comment) => comment.status === "unresolved").length;
     const inlineCommentIds = useMemo(() => new Set(comments.filter((comment) => diffContainsCommentLine(comment, diff)).map((comment) => comment.id)), [comments, diff]);
     const unplacedComments = comments.filter((comment) => !inlineCommentIds.has(comment.id));
+    const targetSession = sessions.find((session) => session.id === selectedSessionId);
+    const hasNotes = unresolvedCount > 0 || unplacedComments.length > 0 || Boolean(batchPreview) || batchSending;
+    // A packet being prepared or sent always shows.
+    const notesShown = hasNotes && (notesOpen || Boolean(batchPreview) || batchSending);
     const stagedCount = changedFiles.filter((entry) => entry.staged).length;
     function askAboutDiff(file, range) {
         if (!diff || !onAskAgent)
@@ -702,9 +759,11 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
             ]
         }, comment.id));
     }
-    const rail = railOpen ? (_jsxs("aside", {
+    const showRail = narrow ? narrowView === "files" : railOpen;
+    const showDiff = !narrow || narrowView === "diff";
+    const rail = showRail ? (_jsxs("aside", {
         className: "flex min-h-0 w-[17rem] min-w-[13rem] shrink-0 flex-col [border-left:1px_solid_var(--git-border)]",
-        style: narrow ? { width: "100%", minWidth: 0, flex: "0 0 auto", borderLeft: "none", borderBottom: "1px solid var(--git-border)" } : undefined,
+        style: narrow ? { width: "100%", minWidth: 0, flex: "1 1 auto", borderLeft: "none" } : undefined,
         "data-testid": "git-status",
         children: [
             _jsxs("div", {
@@ -767,7 +826,6 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                     })),
                     _jsxs("div", {
                         className: "flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]",
-                        style: narrow ? { height: treeShown.length ? `${Math.min(treeShown.length * 1.5, 16)}rem` : undefined, flex: "none" } : undefined,
                         role: "tree",
                         "aria-label": "Changed paths",
                         children: [
@@ -802,9 +860,9 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                     }),
                                     _jsxs("button", {
                                         type: "button",
-                                        className: `${PATH_BUTTON} ${activeFile === row.entry.path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`,
+                                        className: `${PATH_BUTTON} ${(activeFile ?? reveal?.path) === row.entry.path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`,
                                         style: { paddingLeft: `${0.1 + row.depth * 0.8}rem` },
-                                        onClick: () => { setActiveFile(activeFile === row.entry.path ? undefined : row.entry.path); setSelection(null); },
+                                        onClick: () => revealFile(row.entry.path),
                                         title: row.entry.originalPath ? `${row.entry.originalPath} → ${row.entry.path}` : row.entry.path,
                                         children: [
                                             _jsx(FileIcon, { name: row.name }),
@@ -946,18 +1004,48 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                             })
                         ]
                     }),
+                    sessions.length > 0 && (
+                    /* Where this review's comments go: the packet is sent to this agent session, only on an explicit Send. */
+                    _jsxs("label", {
+                        className: `${TB_FIELD} min-w-[7rem] shrink`,
+                        title: "Send review comments to this agent session",
+                        children: [
+                            _jsx("span", {
+                                className: "shrink-0",
+                                children: "To"
+                            }),
+                            _jsx(Select, {
+                                ariaLabel: "Send to agent session",
+                                testId: "git-review-session",
+                                className: `${TB_INPUT} min-w-0 max-w-[12rem]`,
+                                value: selectedSessionId ?? "",
+                                onChange: (value) => setSelectedSessionId(value || undefined),
+                                options: [
+                                    { value: "", label: "Choose a session" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title}${session.agent ? ` · ${session.agent}` : ""}` }))
+                                ]
+                            })
+                        ]
+                    })),
                     _jsx("span", {
                         className: cn(CONNECTION, statusState === "ready" ? CONNECTION_READY : statusState === "error" ? CONNECTION_ERROR : CONNECTION_IDLE),
                         role: "status",
                         children: statusState === "loading" ? "Updating…" : statusState === "error" ? "Status unavailable" : status?.dirty ? "Dirty" : "Clean"
                     }),
-                    _jsx(IconButton, {
-                        icon: "files",
-                        label: railOpen ? "Hide files" : "Show files",
-                        testId: "git-rail-toggle",
-                        pressed: railOpen,
-                        onClick: () => setRailOpen(!railOpen)
-                    }),
+                    narrow
+                        ? _jsx(IconButton, {
+                            icon: "files",
+                            label: showRail ? "Show diff" : "Show files",
+                            testId: "git-rail-toggle",
+                            pressed: showRail,
+                            onClick: () => setNarrowView(showRail ? "diff" : "files")
+                        })
+                        : _jsx(IconButton, {
+                            icon: "files",
+                            label: railOpen ? "Hide files" : "Show files",
+                            testId: "git-rail-toggle",
+                            pressed: railOpen,
+                            onClick: () => setRailOpen(!railOpen)
+                        }),
                     _jsx(IconButton, {
                         icon: "refresh",
                         label: "Refresh",
@@ -968,12 +1056,11 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
             }),
             _jsxs("div", {
                 className: "flex min-h-0 min-w-0 flex-1 overflow-hidden",
-                style: narrow ? { flexDirection: "column", overflow: "auto" } : undefined,
+                style: narrow ? { flexDirection: "column" } : undefined,
                 children: [
                     narrow && rail,
-                    _jsxs("div", {
+                    showDiff && _jsxs("div", {
                         className: "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
-                        style: narrow ? { minHeight: "18rem", flex: "auto" } : undefined,
                         children: [
                             _jsxs("div", {
                                 className: "flex shrink-0 flex-wrap items-center gap-x-[0.4rem] gap-y-[0.3rem] px-[0.7rem] py-[0.4rem]",
@@ -999,7 +1086,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                     }),
                                     _jsx("label", {
                                         className: TB_FIELD,
-                                        title: "Session",
+                                        title: "Whose last agent turn the comparison uses",
                                         children: _jsx(Select, {
                                             className: TB_INPUT,
                                             testId: "git-turn-session",
@@ -1061,6 +1148,16 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                                 label: "Clear base",
                                                 onClick: () => { setCompareBase(""); setCompareHead(""); setCompareOpen(false); setTarget({ kind: "workingTree" }); }
                                             })] })),
+                                    diffFiles.length > 0 && _jsxs("span", {
+                                        className: "shrink-0 text-[0.68rem] text-subtext-0",
+                                        "data-testid": "git-viewed-count",
+                                        children: [
+                                            viewedPaths.length,
+                                            "/",
+                                            diffFiles.length,
+                                            " viewed"
+                                        ]
+                                    }),
                                     _jsxs("div", {
                                         className: "flex shrink-0 items-center gap-[0.15rem]",
                                         children: [
@@ -1155,8 +1252,23 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                             selection: selection,
                                             editingCommentId: editingCommentId,
                                             editingBody: editingBody,
+                                            reveal: reveal,
+                                            collapsed: [
+                                                ...collapsedFiles
+                                            ],
+                                            onToggleCollapsed: toggleCollapsed,
+                                            viewed: viewedPaths,
+                                            onToggleViewed: toggleViewed,
                                             onSelectLine: selectLine,
                                             onAddComment: (path, side, line) => { selectLine(path, side, line, false); startComment(); },
+                                            commentBody: commentBody,
+                                            commentTarget: targetSession?.title,
+                                            onCommentBody: setCommentBody,
+                                            onSubmitComment: submitComment,
+                                            onCancelComment: () => { setSelection(null); setAnchor(null); },
+                                            onAskLines: onAskAgent ? () => { if (!selection)
+                                                return; const file = diffFiles.find((candidate) => filePathForSide(candidate, selection.side) === selection.path); if (file)
+                                                askAboutDiff(file, selection); } : undefined,
                                             onAskAgent: onAskAgent ? (path) => { const file = diffFiles.find((candidate) => filePath(candidate) === path); if (file)
                                                 askAboutDiff(file); } : undefined,
                                             onEditComment: beginEdit,
@@ -1165,72 +1277,32 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                             onCancelEdit: () => setEditingCommentId(null),
                                             onResolve: (comment) => actions.resolveComment(comment.id, comment.status !== "resolved", comment.version),
                                             onDelete: (comment) => actions.deleteComment(comment.id, comment.version)
-                                        }), selection && (_jsxs("div", {
-                                            className: "workspace-git__comment-composer m-[0.7rem] min-w-0 shrink-0 rounded-ui bg-surface-0 p-[0.65rem]",
-                                            "data-testid": "git-comment-composer",
-                                            children: [
-                                                _jsxs("div", {
-                                                    className: "mb-[0.4rem] flex justify-between gap-2",
-                                                    children: [
-                                                        _jsxs("strong", { children: ["Comment on ", selection.path] }),
-                                                        _jsxs("span", {
-                                                            className: "text-[0.68rem] text-subtext-0",
-                                                            children: [
-                                                                selection.side,
-                                                                " lines ",
-                                                                selection.start,
-                                                                "\u2013",
-                                                                selection.end
-                                                            ]
-                                                        })
-                                                    ]
-                                                }),
-                                                _jsx("textarea", {
-                                                    className: COMMENT_FIELD,
-                                                    "data-testid": "git-comment-body",
-                                                    value: commentBody,
-                                                    onChange: (event) => setCommentBody(event.target.value),
-                                                    placeholder: "Leave a focused note for the agent\u2026",
-                                                    "aria-label": "New review comment"
-                                                }),
-                                                _jsxs("div", {
-                                                    className: `${COMMENT_ACTIONS} mt-[0.4rem]`,
-                                                    children: [
-                                                        onAskAgent && _jsx("button", {
-                                                            type: "button",
-                                                            className: CA_BTN,
-                                                            onClick: () => { const file = diffFiles.find((candidate) => filePathForSide(candidate, selection.side) === selection.path); if (file)
-                                                                askAboutDiff(file, selection); },
-                                                            children: "Ask agent about lines\u2026"
-                                                        }),
-                                                        _jsx("button", {
-                                                            type: "button",
-                                                            className: CA_BTN,
-                                                            disabled: !commentBody.trim(),
-                                                            onClick: submitComment,
-                                                            children: "Add comment"
-                                                        }),
-                                                        _jsx("button", {
-                                                            type: "button",
-                                                            className: CA_BTN,
-                                                            onClick: () => { setSelection(null); setAnchor(null); },
-                                                            children: "Cancel"
-                                                        })
-                                                    ]
-                                                })
-                                            ]
-                                        }))] }))
+                                        })] }))
                             }),
                             _jsxs("section", {
-                                className: "max-h-[40%] shrink-0 overflow-y-auto [border-top:1px_solid_var(--git-border)]",
+                                className: cn("shrink-0 [border-top:1px_solid_var(--git-border)]", notesShown && "max-h-[40%] overflow-y-auto"),
                                 "data-testid": "git-review-panel",
                                 children: [
                                     _jsxs("div", {
                                         className: "flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.35rem]",
                                         children: [
-                                            _jsx("strong", {
-                                                title: "Comments stay attached to their path and core-derived anchor. Stale or orphaned anchors require an explicit correction before sending.",
-                                                children: unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"
+                                            _jsxs("button", {
+                                                type: "button",
+                                                className: "flex min-w-0 items-center gap-[0.35rem] text-left text-fg [background:none] disabled:cursor-default",
+                                                "aria-expanded": hasNotes ? notesShown : undefined,
+                                                disabled: !hasNotes,
+                                                onClick: () => setNotesOpen(!notesOpen),
+                                                children: [
+                                                    hasNotes && _jsx("span", {
+                                                        className: "text-[0.6rem] text-subtext-0",
+                                                        "aria-hidden": "true",
+                                                        children: notesShown ? "▾" : "▸"
+                                                    }),
+                                                    _jsx("strong", {
+                                                        title: "Comments stay attached to their path and core-derived anchor. Stale or orphaned anchors require an explicit correction before sending.",
+                                                        children: unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"
+                                                    })
+                                                ]
                                             }),
                                             _jsx("button", {
                                                 type: "button",
@@ -1242,120 +1314,99 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                             })
                                         ]
                                     }),
-                                    unplacedComments.length > 0 && (_jsxs("div", {
-                                        className: "mx-[0.7rem] mb-[0.55rem] rounded-ui bg-[color-mix(in_srgb,var(--surface-1)_42%,transparent)] p-2",
-                                        "data-testid": "git-review-list",
-                                        children: [
-                                            _jsxs("div", {
-                                                className: "flex items-center justify-between gap-2",
+                                    notesShown && _jsxs(_Fragment, { children: [unplacedComments.length > 0 && (_jsxs("div", {
+                                                className: "mx-[0.7rem] mb-[0.55rem] rounded-ui bg-[color-mix(in_srgb,var(--surface-1)_42%,transparent)] p-2",
+                                                "data-testid": "git-review-list",
                                                 children: [
-                                                    _jsx("span", {
-                                                        className: EYEBROW,
-                                                        children: "Other review notes"
-                                                    }),
-                                                    _jsx("strong", { children: unplacedComments.length })
-                                                ]
-                                            }),
-                                            _jsx("p", {
-                                                className: `${SUMMARY} pt-[0.2rem] pb-[0.25rem]`,
-                                                children: "These notes are kept with their server anchor and are not placed on the current diff."
-                                            }),
-                                            unplacedComments.map((comment) => renderCommentCard(comment, false))
-                                        ]
-                                    })),
-                                    unresolvedCount > 0 && (_jsxs("div", {
-                                        className: "flex items-end gap-[0.55rem] px-[0.7rem] pb-[0.55rem]",
-                                        style: narrow ? { flexDirection: "column", alignItems: "stretch" } : undefined,
-                                        children: [
-                                            _jsxs("label", {
-                                                className: `${TB_FIELD} flex-1`,
-                                                children: [
-                                                    _jsx("span", { children: "Send to agent session" }),
-                                                    _jsx(Select, {
-                                                        ariaLabel: "Send to agent session",
-                                                        className: `${TB_INPUT} min-w-0 flex-1`,
-                                                        value: selectedSessionId ?? "",
-                                                        onChange: (value) => setSelectedSessionId(value || undefined),
-                                                        options: [
-                                                            { value: "", label: "Choose a session" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title}${session.agent ? ` · ${session.agent}` : ""}` }))
-                                                        ]
-                                                    })
-                                                ]
-                                            }),
-                                            _jsxs("label", {
-                                                className: `${TB_FIELD} flex-[2]`,
-                                                children: [
-                                                    _jsx("span", { children: "Request" }),
-                                                    _jsx("input", {
-                                                        className: `${TB_INPUT} min-w-0 flex-1`,
-                                                        value: reviewInstruction,
-                                                        onChange: (event) => setReviewInstruction(event.target.value)
-                                                    })
-                                                ]
-                                            })
-                                        ]
-                                    })),
-                                    batchPreview && (_jsxs("div", {
-                                        className: "mx-[0.7rem] mb-[0.7rem] rounded-ui bg-surface-0 p-[0.55rem]",
-                                        "data-testid": "git-review-packet",
-                                        children: [
-                                            _jsxs("div", {
-                                                className: "flex flex-wrap items-center gap-[0.55rem]",
-                                                children: [
-                                                    _jsx("strong", { children: "Packet ready" }),
-                                                    _jsxs("span", {
-                                                        className: "text-[0.7rem] text-subtext-0",
+                                                    _jsxs("div", {
+                                                        className: "flex items-center justify-between gap-2",
                                                         children: [
-                                                            batchPreview.comments.length,
-                                                            " anchored note",
-                                                            batchPreview.comments.length === 1 ? "" : "s"
+                                                            _jsx("span", {
+                                                                className: EYEBROW,
+                                                                children: "Other review notes"
+                                                            }),
+                                                            _jsx("strong", { children: unplacedComments.length })
                                                         ]
                                                     }),
-                                                    _jsx("code", {
-                                                        className: "ml-auto text-[0.62rem] text-subtext-0",
-                                                        children: batchPreview.packetId
-                                                    })
-                                                ]
-                                            }),
-                                            _jsx("pre", {
-                                                className: "my-[0.45rem] max-h-[8rem] overflow-auto border p-[0.45rem] text-[0.68rem] text-fg whitespace-pre-wrap [font-family:var(--font-mono)]",
-                                                children: batchPreview.markdown
-                                            }),
-                                            _jsxs("div", {
-                                                className: COMMENT_ACTIONS,
-                                                children: [
-                                                    _jsx("button", {
-                                                        type: "button",
-                                                        className: CA_BTN,
-                                                        onClick: sendBatch,
-                                                        disabled: batchSending,
-                                                        "data-testid": "git-review-send",
-                                                        children: batchSending ? "Sending…" : "Send one packet"
+                                                    _jsx("p", {
+                                                        className: `${SUMMARY} pt-[0.2rem] pb-[0.25rem]`,
+                                                        children: "These notes are kept with their server anchor and are not placed on the current diff."
                                                     }),
-                                                    _jsx("button", {
-                                                        type: "button",
-                                                        className: CA_BTN,
-                                                        onClick: () => setBatchPreview(null),
-                                                        disabled: batchSending,
-                                                        children: "Close preview"
+                                                    unplacedComments.map((comment) => renderCommentCard(comment, false))
+                                                ]
+                                            })), unresolvedCount > 0 && (_jsx("div", {
+                                                className: "flex items-end gap-[0.55rem] px-[0.7rem] pb-[0.55rem]",
+                                                style: narrow ? { flexDirection: "column", alignItems: "stretch" } : undefined,
+                                                children: _jsxs("label", {
+                                                    className: `${TB_FIELD} flex-[2]`,
+                                                    children: [
+                                                        _jsx("span", { children: "Request" }),
+                                                        _jsx("input", {
+                                                            className: `${TB_INPUT} min-w-0 flex-1`,
+                                                            value: reviewInstruction,
+                                                            onChange: (event) => setReviewInstruction(event.target.value)
+                                                        })
+                                                    ]
+                                                })
+                                            })), batchPreview && (_jsxs("div", {
+                                                className: "mx-[0.7rem] mb-[0.7rem] rounded-ui bg-surface-0 p-[0.55rem]",
+                                                "data-testid": "git-review-packet",
+                                                children: [
+                                                    _jsxs("div", {
+                                                        className: "flex flex-wrap items-center gap-[0.55rem]",
+                                                        children: [
+                                                            _jsx("strong", { children: "Packet ready" }),
+                                                            _jsxs("span", {
+                                                                className: "text-[0.7rem] text-subtext-0",
+                                                                children: [
+                                                                    batchPreview.comments.length,
+                                                                    " anchored note",
+                                                                    batchPreview.comments.length === 1 ? "" : "s"
+                                                                ]
+                                                            }),
+                                                            _jsx("code", {
+                                                                className: "ml-auto text-[0.62rem] text-subtext-0",
+                                                                children: batchPreview.packetId
+                                                            })
+                                                        ]
+                                                    }),
+                                                    _jsx("pre", {
+                                                        className: "my-[0.45rem] max-h-[8rem] overflow-auto border p-[0.45rem] text-[0.68rem] text-fg whitespace-pre-wrap [font-family:var(--font-mono)]",
+                                                        children: batchPreview.markdown
+                                                    }),
+                                                    _jsxs("div", {
+                                                        className: COMMENT_ACTIONS,
+                                                        children: [
+                                                            _jsx("button", {
+                                                                type: "button",
+                                                                className: CA_BTN,
+                                                                onClick: sendBatch,
+                                                                disabled: batchSending,
+                                                                "data-testid": "git-review-send",
+                                                                children: batchSending ? "Sending…" : targetSession ? `Send to ${targetSession.title}` : "Send one packet"
+                                                            }),
+                                                            _jsx("button", {
+                                                                type: "button",
+                                                                className: CA_BTN,
+                                                                onClick: () => setBatchPreview(null),
+                                                                disabled: batchSending,
+                                                                children: "Close preview"
+                                                            })
+                                                        ]
                                                     })
                                                 ]
-                                            })
-                                        ]
-                                    })),
-                                    batchDelivery && batchDelivery.packetId === batchPreview?.packetId && _jsx("div", {
-                                        className: BANNER_INFO,
-                                        role: "status",
-                                        "data-testid": "git-review-delivery",
-                                        children: batchDelivery.delivery === "delivered" ? "Agent received the review packet."
-                                            : batchDelivery.delivery === "unconfirmed" ? "Delivery could not be confirmed. Check the agent conversation before starting another review."
-                                                : "Waiting for the agent to receive the review packet…"
-                                    }),
-                                    batchSending && (!batchDelivery || batchDelivery.packetId !== batchPreview?.packetId) && _jsx("div", {
-                                        className: BANNER_INFO,
-                                        role: "status",
-                                        children: "Sending review packet\u2026 waiting for server confirmation."
-                                    })
+                                            })), batchDelivery && batchDelivery.packetId === batchPreview?.packetId && _jsx("div", {
+                                                className: BANNER_INFO,
+                                                role: "status",
+                                                "data-testid": "git-review-delivery",
+                                                children: batchDelivery.delivery === "delivered" ? "Agent received the review packet."
+                                                    : batchDelivery.delivery === "unconfirmed" ? "Delivery could not be confirmed. Check the agent conversation before starting another review."
+                                                        : "Waiting for the agent to receive the review packet…"
+                                            }), batchSending && (!batchDelivery || batchDelivery.packetId !== batchPreview?.packetId) && _jsx("div", {
+                                                className: BANNER_INFO,
+                                                role: "status",
+                                                children: "Sending review packet\u2026 waiting for server confirmation."
+                                            })] })
                                 ]
                             })
                         ]

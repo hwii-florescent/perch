@@ -156,6 +156,22 @@ function filePathForSide(file: GitDiffFile, side: ReviewSide): string {
   return file.newPath ?? file.oldPath ?? "(unknown file)";
 }
 
+/** What a file's diff says, as a short hash: a file marked viewed stays viewed only while this is unchanged (GitHub
+ * clears Viewed when the file changes). */
+export function fileSignature(file: GitDiffFile): string {
+  let hash = 0x811c9dc5;
+  const add = (text: string) => {
+    for (let i = 0; i < text.length; i += 1) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193);
+    hash = Math.imul(hash ^ 10, 0x01000193);
+  };
+  add(`${file.status}:${file.oldPath ?? ""}:${file.newPath ?? ""}`);
+  for (const hunk of file.hunks) {
+    add(hunk.header);
+    for (const line of hunk.lines) add(`${line.kind[0]}${line.content}`);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 function splitPath(path: string): [string, string] {
   const cut = path.lastIndexOf("/") + 1;
   return [path.slice(0, cut), path.slice(cut)];
@@ -367,6 +383,17 @@ export function WorkspaceGitReview({
   const [railOpen, setRailOpen] = useResourceState(`review:${workspaceId}:railOpen`, true);
   const [collapsedDirs, setCollapsedDirs] = useResourceState<Set<string>>(`review:${workspaceId}:collapsedDirs`, new Set());
   const [fileFilter, setFileFilter] = useState("");
+  const [collapsedFiles, setCollapsedFiles] = useResourceState<Set<string>>(`review:${workspaceId}:collapsedFiles`, new Set());
+  // Path to the file's signature when it was marked viewed.
+  const [viewedFiles, setViewedFiles] = useResourceState<Record<string, string>>(`review:${workspaceId}:viewedFiles`, {});
+  // The file the tree last asked this copy's diff to scroll to (each copy scrolls on its own).
+  const [reveal, setReveal] = useState<{ path: string; seq: number } | null>(null);
+  function revealFile(path: string) {
+    setNarrowView("diff");
+    // A one-file diff of another file would not hold it: show every file again, then scroll to it.
+    if (activeFile && activeFile !== path) setActiveFile(undefined);
+    setReveal((previous) => ({ path, seq: (previous?.seq ?? 0) + 1 }));
+  }
   const [diffLayout, setDiffLayout] = useResourceState<"auto" | "unified" | "split">(`review:${workspaceId}:diffLayout`, "auto");
   // Whether the host's diff can show a change side by side (the native client's can).
   const canChooseLayout = (DiffView as { splitLayout?: boolean }).splitLayout === true;
@@ -374,6 +401,9 @@ export function WorkspaceGitReview({
   // runtime matches those against the window, and its `ResizeObserver` never fires, so the box is read on a timer.
   const rootRef = useRef<HTMLElement | null>(null);
   const [narrow, setNarrow] = useState(false);
+  // Narrow, the review shows the changes list or the diff, never one scroll box inside another.
+  const [narrowView, setNarrowView] = useState<"files" | "diff">("diff");
+  const [notesOpen, setNotesOpen] = useResourceState(`review:${workspaceId}:notesOpen`, true);
   useEffect(() => {
     const read = () => {
       const width = rootRef.current?.getBoundingClientRect().width ?? 0;
@@ -517,6 +547,19 @@ export function WorkspaceGitReview({
     }
     return new Map(countCache.current.counts);
   }, [diff]);
+  const signatures = useMemo(() => new Map(diffFiles.map((file) => [filePath(file), fileSignature(file)])), [diffFiles]);
+  const viewedPaths = useMemo(() => [...signatures].filter(([path, signature]) => viewedFiles[path] === signature).map(([path]) => path), [signatures, viewedFiles]);
+  function toggleCollapsed(path: string) {
+    setCollapsedFiles((current) => { const next = new Set(current); if (!next.delete(path)) next.add(path); return next; });
+  }
+  /** Marking a file viewed folds it; unmarking unfolds it. */
+  function toggleViewed(path: string) {
+    const signature = signatures.get(path);
+    if (!signature) return;
+    const on = viewedFiles[path] !== signature;
+    setViewedFiles((current) => { const next = { ...current }; if (on) next[path] = signature; else delete next[path]; return next; });
+    setCollapsedFiles((current) => { const next = new Set(current); if (on) next.add(path); else next.delete(path); return next; });
+  }
   const treeShown = useMemo(() => treeRows(changedFiles, collapsedDirs, fileFilter), [changedFiles, collapsedDirs, fileFilter]);
   function toggleDir(key: string) {
     setCollapsedDirs((current) => { const next = new Set(current); if (!next.delete(key)) next.add(key); return next; });
@@ -527,6 +570,10 @@ export function WorkspaceGitReview({
     [comments, diff],
   );
   const unplacedComments = comments.filter((comment) => !inlineCommentIds.has(comment.id));
+  const targetSession = sessions.find((session) => session.id === selectedSessionId);
+  const hasNotes = unresolvedCount > 0 || unplacedComments.length > 0 || Boolean(batchPreview) || batchSending;
+  // A packet being prepared or sent always shows.
+  const notesShown = hasNotes && (notesOpen || Boolean(batchPreview) || batchSending);
   const stagedCount = changedFiles.filter((entry) => entry.staged).length;
   function askAboutDiff(file: GitDiffFile, range?: LineSelection | null) {
     if (!diff || !onAskAgent) return;
@@ -723,8 +770,10 @@ export function WorkspaceGitReview({
     );
   }
 
-  const rail = railOpen ? (
-    <aside className="flex min-h-0 w-[17rem] min-w-[13rem] shrink-0 flex-col [border-left:1px_solid_var(--git-border)]" style={narrow ? { width: "100%", minWidth: 0, flex: "0 0 auto", borderLeft: "none", borderBottom: "1px solid var(--git-border)" } : undefined} data-testid="git-status">
+  const showRail = narrow ? narrowView === "files" : railOpen;
+  const showDiff = !narrow || narrowView === "diff";
+  const rail = showRail ? (
+    <aside className="flex min-h-0 w-[17rem] min-w-[13rem] shrink-0 flex-col [border-left:1px_solid_var(--git-border)]" style={narrow ? { width: "100%", minWidth: 0, flex: "1 1 auto", borderLeft: "none" } : undefined} data-testid="git-status">
       <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.35rem]">
         <button
           type="button"
@@ -755,7 +804,7 @@ export function WorkspaceGitReview({
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]" style={narrow ? { height: treeShown.length ? `${Math.min(treeShown.length * 1.5, 16)}rem` : undefined, flex: "none" } : undefined} role="tree" aria-label="Changed paths">
+        <div className="flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]" role="tree" aria-label="Changed paths">
           {treeShown.map((row) => row.kind === "dir" ? (
             <button
               type="button"
@@ -780,9 +829,9 @@ export function WorkspaceGitReview({
               />
               <button
                 type="button"
-                className={`${PATH_BUTTON} ${activeFile === row.entry.path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`}
+                className={`${PATH_BUTTON} ${(activeFile ?? reveal?.path) === row.entry.path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`}
                 style={{ paddingLeft: `${0.1 + row.depth * 0.8}rem` }}
-                onClick={() => { setActiveFile(activeFile === row.entry.path ? undefined : row.entry.path); setSelection(null); }}
+                onClick={() => revealFile(row.entry.path)}
                 title={row.entry.originalPath ? `${row.entry.originalPath} → ${row.entry.path}` : row.entry.path}
               >
                 <FileIcon name={row.name} />
@@ -826,17 +875,26 @@ export function WorkspaceGitReview({
           {(status?.ahead ?? 0) > 0 && <span className="shrink-0 text-[0.68rem] text-green" title={`${status?.ahead} ahead`}>↑{status?.ahead}</span>}
           {(status?.behind ?? 0) > 0 && <span className="shrink-0 text-[0.68rem] text-yellow" title={`${status?.behind} behind`}>↓{status?.behind}</span>}
         </div>
+        {sessions.length > 0 && (
+          /* Where this review's comments go: the packet is sent to this agent session, only on an explicit Send. */
+          <label className={`${TB_FIELD} min-w-[7rem] shrink`} title="Send review comments to this agent session">
+            <span className="shrink-0">To</span>
+            <Select ariaLabel="Send to agent session" testId="git-review-session" className={`${TB_INPUT} min-w-0 max-w-[12rem]`} value={selectedSessionId ?? ""} onChange={(value) => setSelectedSessionId(value || undefined)} options={[{ value: "", label: "Choose a session" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title}${session.agent ? ` · ${session.agent}` : ""}` }))]} />
+          </label>
+        )}
         <span className={cn(CONNECTION, statusState === "ready" ? CONNECTION_READY : statusState === "error" ? CONNECTION_ERROR : CONNECTION_IDLE)} role="status">
           {statusState === "loading" ? "Updating…" : statusState === "error" ? "Status unavailable" : status?.dirty ? "Dirty" : "Clean"}
         </span>
-        <IconButton icon="files" label={railOpen ? "Hide files" : "Show files"} testId="git-rail-toggle" pressed={railOpen} onClick={() => setRailOpen(!railOpen)} />
+        {narrow
+          ? <IconButton icon="files" label={showRail ? "Show diff" : "Show files"} testId="git-rail-toggle" pressed={showRail} onClick={() => setNarrowView(showRail ? "diff" : "files")} />
+          : <IconButton icon="files" label={railOpen ? "Hide files" : "Show files"} testId="git-rail-toggle" pressed={railOpen} onClick={() => setRailOpen(!railOpen)} />}
         <IconButton icon="refresh" label="Refresh" testId="git-refresh" onClick={() => { actions.refreshStatus(); actions.listComments(); }} />
       </header>
 
-      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" style={narrow ? { flexDirection: "column", overflow: "auto" } : undefined}>
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" style={narrow ? { flexDirection: "column" } : undefined}>
         {narrow && rail}
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" style={narrow ? { minHeight: "18rem", flex: "auto" } : undefined}>
+        {showDiff && <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <div className="flex shrink-0 flex-wrap items-center gap-x-[0.4rem] gap-y-[0.3rem] px-[0.7rem] py-[0.4rem]">
             <label className={TB_FIELD} title="Compare">
               <Select className={TB_INPUT} testId="git-diff-target" ariaLabel="Compare" value={compareOpen ? "compare" : target.kind === "compare" ? (preset ?? "compare") : target.kind} onChange={chooseTarget}
@@ -849,7 +907,7 @@ export function WorkspaceGitReview({
                   { value: "compare", label: "Another ref…" },
                 ]} />
             </label>
-            <label className={TB_FIELD} title="Session">
+            <label className={TB_FIELD} title="Whose last agent turn the comparison uses">
               <Select className={TB_INPUT} testId="git-turn-session" ariaLabel="Turn session" value={agentSessionId ?? ""} onChange={(value) => {
                 chooseTarget("workingTree");
                 actions.selectAgentSession(value || undefined);
@@ -876,6 +934,7 @@ export function WorkspaceGitReview({
                 <IconButton icon="clear" label="Clear base" onClick={() => { setCompareBase(""); setCompareHead(""); setCompareOpen(false); setTarget({ kind: "workingTree" }); }} />
               </>
             )}
+            {diffFiles.length > 0 && <span className="shrink-0 text-[0.68rem] text-subtext-0" data-testid="git-viewed-count">{viewedPaths.length}/{diffFiles.length} viewed</span>}
             <div className="flex shrink-0 items-center gap-[0.15rem]">
               <IconButton icon="untracked" label="Untracked files" pressed={includeUntracked} onClick={() => setIncludeUntracked(!includeUntracked)} />
               <IconButton icon="wrap" label="Wrap lines" pressed={wrapLines} onClick={() => setWrapLines(!wrapLines)} />
@@ -908,7 +967,8 @@ export function WorkspaceGitReview({
             </p>
           )}
 
-          {/* The diff scrolls itself; the truncation note sits above it and the comment composer below, always in view. */}
+          {/* The diff scrolls itself; the truncation note sits above it. The comment composer opens inside the diff,
+              under the selected line. */}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             {diffState === "loading" || diffFiles.length === 0 ? (
               <div className="workspace-git__diff min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain" data-testid="git-diff"><EmptyDiffState state={diffState} error={diffError} /></div>
@@ -923,8 +983,19 @@ export function WorkspaceGitReview({
                   selection={selection}
                   editingCommentId={editingCommentId}
                   editingBody={editingBody}
+                  reveal={reveal}
+                  collapsed={[...collapsedFiles]}
+                  onToggleCollapsed={toggleCollapsed}
+                  viewed={viewedPaths}
+                  onToggleViewed={toggleViewed}
                   onSelectLine={selectLine}
                   onAddComment={(path, side, line) => { selectLine(path, side, line, false); startComment(); }}
+                  commentBody={commentBody}
+                  commentTarget={targetSession?.title}
+                  onCommentBody={setCommentBody}
+                  onSubmitComment={submitComment}
+                  onCancelComment={() => { setSelection(null); setAnchor(null); }}
+                  onAskLines={onAskAgent ? () => { if (!selection) return; const file = diffFiles.find((candidate) => filePathForSide(candidate, selection.side) === selection.path); if (file) askAboutDiff(file, selection); } : undefined}
                   onAskAgent={onAskAgent ? (path) => { const file = diffFiles.find((candidate) => filePath(candidate) === path); if (file) askAboutDiff(file); } : undefined}
                   onEditComment={beginEdit}
                   onEditBody={setEditingBody}
@@ -933,19 +1004,14 @@ export function WorkspaceGitReview({
                   onResolve={(comment) => actions.resolveComment(comment.id, comment.status !== "resolved", comment.version)}
                   onDelete={(comment) => actions.deleteComment(comment.id, comment.version)}
                 />
-                {selection && (
-                  <div className="workspace-git__comment-composer m-[0.7rem] min-w-0 shrink-0 rounded-ui bg-surface-0 p-[0.65rem]" data-testid="git-comment-composer">
-                    <div className="mb-[0.4rem] flex justify-between gap-2"><strong>Comment on {selection.path}</strong><span className="text-[0.68rem] text-subtext-0">{selection.side} lines {selection.start}–{selection.end}</span></div>
-                    <textarea className={COMMENT_FIELD} data-testid="git-comment-body" value={commentBody} onChange={(event) => setCommentBody(event.target.value)} placeholder="Leave a focused note for the agent…" aria-label="New review comment" />
-                    <div className={`${COMMENT_ACTIONS} mt-[0.4rem]`}>{onAskAgent && <button type="button" className={CA_BTN} onClick={() => { const file = diffFiles.find((candidate) => filePathForSide(candidate, selection.side) === selection.path); if (file) askAboutDiff(file, selection); }}>Ask agent about lines…</button>}<button type="button" className={CA_BTN} disabled={!commentBody.trim()} onClick={submitComment}>Add comment</button><button type="button" className={CA_BTN} onClick={() => { setSelection(null); setAnchor(null); }}>Cancel</button></div>
-                  </div>
-                )}
               </>
             )}
           </div>
 
-          <section className="max-h-[40%] shrink-0 overflow-y-auto [border-top:1px_solid_var(--git-border)]" data-testid="git-review-panel">
-            <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.35rem]"><strong title="Comments stay attached to their path and core-derived anchor. Stale or orphaned anchors require an explicit correction before sending.">{unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"}</strong><button type="button" className={BTN_DEFAULT} disabled={!unresolvedCount || batchBusy} onClick={requestBatchPreview} data-testid="git-review-preview">{batchBusy ? "Preparing…" : "Preview packet"}</button></div>
+          {/* One line until there are notes; with notes it can fold away, so the diff stays the column's one scroller. */}
+          <section className={cn("shrink-0 [border-top:1px_solid_var(--git-border)]", notesShown && "max-h-[40%] overflow-y-auto")} data-testid="git-review-panel">
+            <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.35rem]"><button type="button" className="flex min-w-0 items-center gap-[0.35rem] text-left text-fg [background:none] disabled:cursor-default" aria-expanded={hasNotes ? notesShown : undefined} disabled={!hasNotes} onClick={() => setNotesOpen(!notesOpen)}>{hasNotes && <span className="text-[0.6rem] text-subtext-0" aria-hidden="true">{notesShown ? "▾" : "▸"}</span>}<strong title="Comments stay attached to their path and core-derived anchor. Stale or orphaned anchors require an explicit correction before sending.">{unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"}</strong></button><button type="button" className={BTN_DEFAULT} disabled={!unresolvedCount || batchBusy} onClick={requestBatchPreview} data-testid="git-review-preview">{batchBusy ? "Preparing…" : "Preview packet"}</button></div>
+            {notesShown && <>
             {unplacedComments.length > 0 && (
               <div className="mx-[0.7rem] mb-[0.55rem] rounded-ui bg-[color-mix(in_srgb,var(--surface-1)_42%,transparent)] p-2" data-testid="git-review-list">
                 <div className="flex items-center justify-between gap-2"><span className={EYEBROW}>Other review notes</span><strong>{unplacedComments.length}</strong></div>
@@ -955,12 +1021,11 @@ export function WorkspaceGitReview({
             )}
             {unresolvedCount > 0 && (
               <div className="flex items-end gap-[0.55rem] px-[0.7rem] pb-[0.55rem]" style={narrow ? { flexDirection: "column", alignItems: "stretch" } : undefined}>
-                <label className={`${TB_FIELD} flex-1`}><span>Send to agent session</span><Select ariaLabel="Send to agent session" className={`${TB_INPUT} min-w-0 flex-1`} value={selectedSessionId ?? ""} onChange={(value) => setSelectedSessionId(value || undefined)} options={[{ value: "", label: "Choose a session" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title}${session.agent ? ` · ${session.agent}` : ""}` }))]} /></label>
                 <label className={`${TB_FIELD} flex-[2]`}><span>Request</span><input className={`${TB_INPUT} min-w-0 flex-1`} value={reviewInstruction} onChange={(event) => setReviewInstruction(event.target.value)} /></label>
               </div>
             )}
             {batchPreview && (
-              <div className="mx-[0.7rem] mb-[0.7rem] rounded-ui bg-surface-0 p-[0.55rem]" data-testid="git-review-packet"><div className="flex flex-wrap items-center gap-[0.55rem]"><strong>Packet ready</strong><span className="text-[0.7rem] text-subtext-0">{batchPreview.comments.length} anchored note{batchPreview.comments.length === 1 ? "" : "s"}</span><code className="ml-auto text-[0.62rem] text-subtext-0">{batchPreview.packetId}</code></div><pre className="my-[0.45rem] max-h-[8rem] overflow-auto border p-[0.45rem] text-[0.68rem] text-fg whitespace-pre-wrap [font-family:var(--font-mono)]">{batchPreview.markdown}</pre><div className={COMMENT_ACTIONS}><button type="button" className={CA_BTN} onClick={sendBatch} disabled={batchSending} data-testid="git-review-send">{batchSending ? "Sending…" : "Send one packet"}</button><button type="button" className={CA_BTN} onClick={() => setBatchPreview(null)} disabled={batchSending}>Close preview</button></div></div>
+              <div className="mx-[0.7rem] mb-[0.7rem] rounded-ui bg-surface-0 p-[0.55rem]" data-testid="git-review-packet"><div className="flex flex-wrap items-center gap-[0.55rem]"><strong>Packet ready</strong><span className="text-[0.7rem] text-subtext-0">{batchPreview.comments.length} anchored note{batchPreview.comments.length === 1 ? "" : "s"}</span><code className="ml-auto text-[0.62rem] text-subtext-0">{batchPreview.packetId}</code></div><pre className="my-[0.45rem] max-h-[8rem] overflow-auto border p-[0.45rem] text-[0.68rem] text-fg whitespace-pre-wrap [font-family:var(--font-mono)]">{batchPreview.markdown}</pre><div className={COMMENT_ACTIONS}><button type="button" className={CA_BTN} onClick={sendBatch} disabled={batchSending} data-testid="git-review-send">{batchSending ? "Sending…" : targetSession ? `Send to ${targetSession.title}` : "Send one packet"}</button><button type="button" className={CA_BTN} onClick={() => setBatchPreview(null)} disabled={batchSending}>Close preview</button></div></div>
             )}
             {batchDelivery && batchDelivery.packetId === batchPreview?.packetId && <div className={BANNER_INFO} role="status" data-testid="git-review-delivery">
               {batchDelivery.delivery === "delivered" ? "Agent received the review packet."
@@ -968,8 +1033,9 @@ export function WorkspaceGitReview({
                 : "Waiting for the agent to receive the review packet…"}
             </div>}
             {batchSending && (!batchDelivery || batchDelivery.packetId !== batchPreview?.packetId) && <div className={BANNER_INFO} role="status">Sending review packet… waiting for server confirmation.</div>}
+            </>}
           </section>
-        </div>
+        </div>}
         {!narrow && rail}
       </div>
 

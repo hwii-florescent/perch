@@ -240,7 +240,6 @@ fn scenario(rig: &mut Rig) {
         .unwrap();
     let diffs =
         h.cx.update(|cx| cx.global::<perch_native::mods::WindowMods>().diffs.clone());
-    let key = format!("diff:{id}");
     let screen = format!("review#{tab}");
     h.wait("the review tab's diff drawn natively", |h| {
         let (shown, error) = h
@@ -255,8 +254,9 @@ fn scenario(rig: &mut Rig) {
         assert!(error.is_none(), "the review screen runs: {error:?}");
         shown
             && diffs
-                .view(&key)
-                .is_some_and(|view| h.cx.update(|cx| view.read(cx).rows().rows.len()) > 2)
+                .views_of(&id)
+                .iter()
+                .any(|view| h.cx.update(|cx| view.read(cx).rows().rows.len()) > 2)
     });
     println!("ok: the review opens as a tab, runs natively and its diff is the native view");
 

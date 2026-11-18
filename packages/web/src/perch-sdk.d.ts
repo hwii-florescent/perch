@@ -910,6 +910,24 @@ declare module "@perch/sdk" {
     /** The comment being edited in its thread, and the field's text. */
     editingCommentId: string | null;
     editingBody: string;
+    /** Scrolls to this file's header; a new `seq` asks again for the same file. */
+    reveal?: { path: string; seq: number } | null;
+    /** The new comment's text. With `onSubmitComment`, the comment's field opens under the selection's last line
+     * while lines are selected (`git-comment-composer`, `git-comment-body`). */
+    commentBody?: string;
+    /** Where the comment goes (the session chosen in the review header), shown beside the add button. */
+    commentTarget?: string;
+    onCommentBody?(text: string): void;
+    onSubmitComment?(): void;
+    onCancelComment?(): void;
+    /** Ask agent about the selected lines; offered when given. */
+    onAskLines?(): void;
+    /** Files folded to their header; pressing a header's path asks to fold or unfold it. */
+    collapsed?: string[];
+    onToggleCollapsed?(path: string): void;
+    /** Files marked viewed; with `onToggleViewed` each file header has a Viewed box. */
+    viewed?: string[];
+    onToggleViewed?(path: string): void;
     /** A line was clicked or chosen with Enter/Space; `extend` with Shift. */
     onSelectLine(path: string, side: ReviewSide, line: number, extend: boolean): void;
     /** A line's `＋`. */

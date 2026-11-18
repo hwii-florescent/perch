@@ -9,8 +9,8 @@
 
 use gpui::{
     point, px, size, AppContext as _, Entity, HeadlessAppContext, Keystroke, Modifiers,
-    MouseButton, MouseDownEvent, MouseUpEvent, Pixels, PlatformInput, Point, ScrollDelta,
-    ScrollWheelEvent, TouchPhase, Window, WindowHandle,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput, Point,
+    ScrollDelta, ScrollWheelEvent, TouchPhase, Window, WindowHandle,
 };
 use perch_core::review::{
     AnchorConfidence, LineRange, ReviewAnchor, ReviewComment, ReviewSide, ReviewStatus,
@@ -18,7 +18,9 @@ use perch_core::review::{
 use perch_core::source_control::{
     DiffFile, DiffFileStatus, DiffHunk, DiffLine, DiffLineKind, DiffTarget,
 };
-use perch_native::diff::element::{DiffEvent, DiffProps, DiffView, Editing, Layout, Selection};
+use perch_native::diff::element::{
+    Composer, DiffEvent, DiffProps, DiffView, Editing, Layout, Selection,
+};
 use perch_native::diff::rows::Row;
 use perch_native::git::store::DiffSnapshot;
 use perch_native::mods::theme;
@@ -258,6 +260,44 @@ impl Rig {
         }));
     }
 
+    /// One wheel step at `at`, in lines, as the step of a gesture in `phase`.
+    fn wheel_at(&mut self, at: Point<Pixels>, delta: Point<f32>, phase: TouchPhase) {
+        self.input(PlatformInput::ScrollWheel(ScrollWheelEvent {
+            position: at,
+            delta: ScrollDelta::Lines(point(delta.x, delta.y)),
+            modifiers: Modifiers::default(),
+            touch_phase: phase,
+        }));
+    }
+
+    /// A move to `from`, a press there, a drag to `to` and a release there.
+    fn drag(&mut self, from: Point<Pixels>, to: Point<Pixels>) {
+        // The pointer arrives first, as a real one does: what it is over is known before the press.
+        self.input(PlatformInput::MouseMove(MouseMoveEvent {
+            position: from,
+            pressed_button: None,
+            modifiers: Modifiers::default(),
+        }));
+        self.input(PlatformInput::MouseDown(MouseDownEvent {
+            button: MouseButton::Left,
+            position: from,
+            modifiers: Modifiers::default(),
+            click_count: 1,
+            first_mouse: false,
+        }));
+        self.input(PlatformInput::MouseMove(MouseMoveEvent {
+            position: to,
+            pressed_button: Some(MouseButton::Left),
+            modifiers: Modifiers::default(),
+        }));
+        self.input(PlatformInput::MouseUp(MouseUpEvent {
+            button: MouseButton::Left,
+            position: to,
+            modifiers: Modifiers::default(),
+            click_count: 1,
+        }));
+    }
+
     fn click(&mut self, at: Point<Pixels>, modifiers: Modifiers) {
         self.input(PlatformInput::MouseDown(MouseDownEvent {
             button: MouseButton::Left,
@@ -295,9 +335,10 @@ impl Rig {
         if !shown
             .is_some_and(|b| viewport.contains(&b.origin) && viewport.contains(&b.bottom_right()))
         {
+            // A few rows above it are shown too, so the pinned file header does not cover it.
             self.cx.update(|cx| {
                 view.read(cx).list_state().scroll_to(gpui::ListOffset {
-                    item_ix: ix,
+                    item_ix: ix.saturating_sub(3),
                     offset_in_item: px(0.),
                 })
             });
@@ -321,6 +362,24 @@ impl Rig {
             })
             .unwrap();
         self.draw();
+    }
+
+    fn set_data(&mut self, diff: DiffSnapshot) {
+        let view = self.view();
+        self.cx
+            .update_window(self.window.into(), |_, window: &mut Window, cx| {
+                view.update(cx, |v, cx| {
+                    v.set_data(Some(Rc::new(diff)), Rc::default(), window, cx)
+                })
+            })
+            .unwrap();
+        self.draw();
+    }
+
+    fn top(&mut self) -> gpui::ListOffset {
+        let view = self.view();
+        self.cx
+            .update(|cx| view.read(cx).list_state().logical_scroll_top())
     }
 
     fn close(mut self) -> HeadlessAppContext {
@@ -700,6 +759,274 @@ fn split_layout(cx: HeadlessAppContext) -> HeadlessAppContext {
     rig.close()
 }
 
+/// A new snapshot of the same comparison (what a stage, a refresh or any action brings) keeps the reader's place,
+/// by file: rows added above it in an earlier file do not move them. Another comparison starts at the top.
+fn keeps_place(cx: HeadlessAppContext) -> HeadlessAppContext {
+    let (mut rig, _) = Rig::open(cx, synthetic(1_000), vec![], DiffProps::default());
+    let rows = rig.rows();
+    let header = rows
+        .iter()
+        .position(|r| *r == Row::File { file: 2 })
+        .unwrap();
+    let view = rig.view();
+    rig.cx.update(|cx| {
+        view.read(cx).list_state().scroll_to(gpui::ListOffset {
+            item_ix: header + 30,
+            offset_in_item: px(4.),
+        })
+    });
+    rig.draw();
+    // The same comparison again, with file 0 cut to one hunk: file 2's rows move up, the reader stays on them.
+    let mut next = synthetic(1_000);
+    next.files[0].hunks.truncate(1);
+    rig.set_data(next.clone());
+    let rows = rig.rows();
+    let moved = rows
+        .iter()
+        .position(|r| *r == Row::File { file: 2 })
+        .unwrap();
+    assert!(moved < header, "file 2 starts earlier in the new rows");
+    let top = rig.top();
+    assert_eq!(
+        (top.item_ix, top.offset_in_item),
+        (moved + 30, px(4.)),
+        "the reader stays 30 rows into file 2"
+    );
+    // Another comparison of the same files starts at the top.
+    next.target = DiffTarget::Staged;
+    rig.set_data(next);
+    assert_eq!(rig.top().item_ix, 0, "a new comparison starts at the top");
+    rig.close()
+}
+
+/// A wheel gesture moves one axis: a mostly sideways one scrolls only that file's lines, a mostly vertical one only
+/// the list. Each file wider than the view shows a sideways scrollbar at the bottom of its part of the view, and
+/// dragging its thumb scrolls that file.
+fn one_axis_and_hbars(cx: HeadlessAppContext) -> HeadlessAppContext {
+    const NARROW: f32 = 320.;
+    let diff = synthetic(500);
+    let path = diff.files[0].new_path.clone().unwrap();
+    let (mut rig, _) = Rig::open_sized(cx, diff, vec![], DiffProps::default(), NARROW);
+    let view = rig.view();
+    let offset = |rig: &mut Rig| {
+        let path = path.clone();
+        rig.cx.update(|cx| view.read(cx).offset(&path))
+    };
+    let middle = point(px(NARROW / 2.), px(HEIGHT / 2.));
+    let top = rig.top();
+    rig.wheel_at(middle, point(-6., -1.), TouchPhase::Started);
+    rig.wheel_at(middle, point(-6., -2.), TouchPhase::Moved);
+    assert!(
+        offset(&mut rig) > 0.,
+        "a mostly sideways gesture scrolls the file"
+    );
+    let after = rig.top();
+    assert_eq!(
+        (after.item_ix, after.offset_in_item),
+        (top.item_ix, top.offset_in_item),
+        "and does not move the list"
+    );
+    let sideways = offset(&mut rig);
+    rig.wheel_at(middle, point(-1., -6.), TouchPhase::Started);
+    rig.wheel_at(middle, point(-2., -6.), TouchPhase::Moved);
+    assert!(
+        rig.top().item_ix > top.item_ix,
+        "a mostly vertical gesture scrolls the list"
+    );
+    assert_eq!(
+        offset(&mut rig),
+        sideways,
+        "and leaves the file where it was"
+    );
+
+    // File 0 runs past the view's bottom: its bar sits there, the thumb where the offset is.
+    let bars = rig.cx.update(|cx| view.read(cx).hbars());
+    let bar = bars
+        .iter()
+        .find(|b| b.path == path)
+        .expect("file 0 has a sideways bar");
+    assert_eq!(bar.track.bottom(), px(HEIGHT), "at the view's bottom");
+    assert!(
+        bar.thumb.left() > bar.track.left(),
+        "the thumb shows the offset"
+    );
+    let before = offset(&mut rig);
+    let (from, to) = (
+        bar.thumb.center(),
+        bar.thumb.center() - point(px(40.), px(0.)),
+    );
+    rig.drag(from, to);
+    let dragged = offset(&mut rig);
+    assert!(
+        dragged < before && dragged > 0.,
+        "dragging the thumb scrolls the file ({before} to {dragged})"
+    );
+    rig.close()
+}
+
+/// The diff has a vertical scrollbar: dragging its thumb down the right edge scrolls the list.
+fn vertical_bar(cx: HeadlessAppContext) -> HeadlessAppContext {
+    let (mut rig, _) = Rig::open(cx, synthetic(5_000), vec![], DiffProps::default());
+    let edge = px(WIDTH - 6.);
+    rig.drag(point(edge, px(12.)), point(edge, px(HEIGHT / 2.)));
+    let top = rig.top().item_ix;
+    assert!(
+        top > 1_000,
+        "dragging the thumb halfway scrolls far down ({top})"
+    );
+    rig.close()
+}
+
+/// `reveal` scrolls to a file's header, and asks again with a new number.
+fn reveals_a_file(cx: HeadlessAppContext) -> HeadlessAppContext {
+    let diff = synthetic(1_000);
+    let path = diff.files[3].new_path.clone().unwrap();
+    let (mut rig, _) = Rig::open(cx, diff, vec![], DiffProps::default());
+    let header = rig
+        .rows()
+        .iter()
+        .position(|r| *r == Row::File { file: 3 })
+        .unwrap();
+    rig.set_props(DiffProps {
+        reveal: Some((path.clone(), 1)),
+        ..DiffProps::default()
+    });
+    assert_eq!(rig.top().item_ix, header, "the file's header is at the top");
+    rig.wheel(point(0., 10.), Modifiers::default());
+    assert!(rig.top().item_ix < header, "scrolled away");
+    rig.set_props(DiffProps {
+        reveal: Some((path, 2)),
+        ..DiffProps::default()
+    });
+    assert_eq!(
+        rig.top().item_ix,
+        header,
+        "asked again, it scrolls there again"
+    );
+    rig.close()
+}
+
+/// With lines selected, the new comment's field opens under the selection's last line, inside the list; what is
+/// typed there reaches the screen, and closing it gives the row its height back.
+fn inline_composer(cx: HeadlessAppContext) -> HeadlessAppContext {
+    let diff = synthetic(500);
+    let path = diff.files[0].new_path.clone().unwrap();
+    let (mut rig, _) = Rig::open(cx, diff, vec![], DiffProps::default());
+    let rows = rig.rows();
+    let line = first_row(
+        &rows,
+        |r| matches!(r, Row::Line { number: Some(_), side: ReviewSide::New, line, .. } if *line >= 16),
+    );
+    let Row::Line {
+        number: Some(n), ..
+    } = rows[line]
+    else {
+        unreachable!()
+    };
+    let plain = rig.row_bounds(line).size.height;
+    let props = |composer: Option<Composer>| DiffProps {
+        selection: Some(Selection {
+            path: path.clone(),
+            side: ReviewSide::New,
+            start: n - 2,
+            end: n,
+        }),
+        composer,
+        ..DiffProps::default()
+    };
+    rig.set_props(props(Some(Composer {
+        body: String::new(),
+        target: Some("Target session".into()),
+        can_ask: false,
+    })));
+    let open = rig.row_bounds(line);
+    assert!(
+        open.size.height > plain * 3.,
+        "the field opens under the selection's last line ({} vs {})",
+        open.size.height,
+        plain
+    );
+    // The field sits below the line: a press there focuses it, and a key reaches the screen.
+    let mut field = open;
+    field.origin.y += plain * 3.5;
+    field.size.height = plain;
+    rig.click(field.center(), Modifiers::default());
+    rig.events.borrow_mut().clear();
+    rig.key("y");
+    assert!(
+        rig.events
+            .borrow()
+            .iter()
+            .any(|e| matches!(e, DiffEvent::CommentBody { text } if text.contains('y'))),
+        "typing in the composer reaches the screen: {:?}",
+        rig.events.borrow()
+    );
+    rig.set_props(props(None));
+    assert_eq!(
+        rig.row_bounds(line).size.height,
+        plain,
+        "closed, the row is a line again"
+    );
+    rig.close()
+}
+
+/// A folded file keeps only its header; pressing a header's path asks to fold it, its Viewed box to mark it.
+fn folds_and_viewed(cx: HeadlessAppContext) -> HeadlessAppContext {
+    let diff = synthetic(1_000);
+    let (first, second) = (
+        diff.files[0].new_path.clone().unwrap(),
+        diff.files[1].new_path.clone().unwrap(),
+    );
+    let (mut rig, _) = Rig::open(
+        cx,
+        diff,
+        vec![],
+        DiffProps {
+            viewed: Some(vec![]),
+            ..DiffProps::default()
+        },
+    );
+    let all = rig.rows().len();
+    rig.set_props(DiffProps {
+        viewed: Some(vec![first.clone()]),
+        collapsed: vec![first.clone()],
+        ..DiffProps::default()
+    });
+    let rows = rig.rows();
+    assert_eq!(rows[0], Row::File { file: 0 });
+    assert_eq!(
+        rows[1],
+        Row::File { file: 1 },
+        "file 0 is folded to its header"
+    );
+    assert!(rows.len() < all);
+    rig.events.borrow_mut().clear();
+    let header = rig.row_bounds(1);
+    rig.click(
+        header.origin + point(px(20.), header.size.height / 2.),
+        Modifiers::default(),
+    );
+    assert_eq!(
+        rig.events.borrow().as_slice(),
+        &[DiffEvent::ToggleCollapsed {
+            path: second.clone()
+        }],
+        "the path folds"
+    );
+    rig.events.borrow_mut().clear();
+    // The Viewed box sits at the header's right end.
+    rig.click(
+        point(header.right() - px(40.), header.center().y),
+        Modifiers::default(),
+    );
+    assert_eq!(
+        rig.events.borrow().as_slice(),
+        &[DiffEvent::ToggleViewed { path: second }],
+        "the box marks the file viewed"
+    );
+    rig.close()
+}
+
 /// The compact unified layout, saved when `PERCH_DIFF_SHOTS` is set.
 fn unified_shot(cx: HeadlessAppContext) -> HeadlessAppContext {
     let (mut rig, _) = Rig::open_sized(cx, synthetic(500), vec![], DiffProps::default(), 520.);
@@ -720,6 +1047,12 @@ fn main() {
     }
     let cx = interactions(cx);
     let cx = split_layout(cx);
+    let cx = keeps_place(cx);
+    let cx = one_axis_and_hbars(cx);
+    let cx = vertical_bar(cx);
+    let cx = reveals_a_file(cx);
+    let cx = inline_composer(cx);
+    let cx = folds_and_viewed(cx);
     let _ = unified_shot(cx);
     println!("diff_element: ok");
 }

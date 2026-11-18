@@ -394,7 +394,6 @@ async fn open_review(workspace: &str, window: WindowHandle<Workspace>, cx: &mut 
             );
         }
     });
-    let key = format!("diff:{workspace}");
     let drawn = until(cx, |cx| {
         let failed = window
             .update(cx, |ws, _, cx| {
@@ -423,7 +422,7 @@ async fn open_review(workspace: &str, window: WindowHandle<Workspace>, cx: &mut 
             let files = review.diff.as_ref().map_or(0, |d| d.files.len());
             let view = cx
                 .try_global::<perch_native::mods::WindowMods>()
-                .and_then(|mods| mods.diffs.view(&key));
+                .and_then(|mods| mods.diffs.views_of(workspace).into_iter().next());
             view.is_none_or(|view| files == 0 || view.read(cx).rows().rows.len() > files)
         })
     })
@@ -434,7 +433,7 @@ async fn open_review(workspace: &str, window: WindowHandle<Workspace>, cx: &mut 
             let review = perch_native::git::host(cx).map(|git| git.review(workspace));
             let view = cx
                 .try_global::<perch_native::mods::WindowMods>()
-                .and_then(|mods| mods.diffs.view(&key))
+                .and_then(|mods| mods.diffs.views_of(workspace).into_iter().next())
                 .map(|view| view.read(cx).rows().rows.len());
             eprintln!(
                 "perch-native-test: review: status {:?}, diff {:?} ({:?}), diff view rows {view:?}",
