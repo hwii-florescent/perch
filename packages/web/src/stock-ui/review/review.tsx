@@ -570,6 +570,7 @@ export function WorkspaceGitReview({
     [comments, diff],
   );
   const unplacedComments = comments.filter((comment) => !inlineCommentIds.has(comment.id));
+  const targetSession = sessions.find((session) => session.id === selectedSessionId);
   const hasNotes = unresolvedCount > 0 || unplacedComments.length > 0 || Boolean(batchPreview) || batchSending;
   // A packet being prepared or sent always shows.
   const notesShown = hasNotes && (notesOpen || Boolean(batchPreview) || batchSending);
@@ -874,6 +875,13 @@ export function WorkspaceGitReview({
           {(status?.ahead ?? 0) > 0 && <span className="shrink-0 text-[0.68rem] text-green" title={`${status?.ahead} ahead`}>↑{status?.ahead}</span>}
           {(status?.behind ?? 0) > 0 && <span className="shrink-0 text-[0.68rem] text-yellow" title={`${status?.behind} behind`}>↓{status?.behind}</span>}
         </div>
+        {sessions.length > 0 && (
+          /* Where this review's comments go: the packet is sent to this agent session, only on an explicit Send. */
+          <label className={`${TB_FIELD} min-w-[7rem] shrink`} title="Send review comments to this agent session">
+            <span className="shrink-0">To</span>
+            <Select ariaLabel="Send to agent session" testId="git-review-session" className={`${TB_INPUT} min-w-0 max-w-[12rem]`} value={selectedSessionId ?? ""} onChange={(value) => setSelectedSessionId(value || undefined)} options={[{ value: "", label: "Choose a session" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title}${session.agent ? ` · ${session.agent}` : ""}` }))]} />
+          </label>
+        )}
         <span className={cn(CONNECTION, statusState === "ready" ? CONNECTION_READY : statusState === "error" ? CONNECTION_ERROR : CONNECTION_IDLE)} role="status">
           {statusState === "loading" ? "Updating…" : statusState === "error" ? "Status unavailable" : status?.dirty ? "Dirty" : "Clean"}
         </span>
@@ -899,7 +907,7 @@ export function WorkspaceGitReview({
                   { value: "compare", label: "Another ref…" },
                 ]} />
             </label>
-            <label className={TB_FIELD} title="Session">
+            <label className={TB_FIELD} title="Whose last agent turn the comparison uses">
               <Select className={TB_INPUT} testId="git-turn-session" ariaLabel="Turn session" value={agentSessionId ?? ""} onChange={(value) => {
                 chooseTarget("workingTree");
                 actions.selectAgentSession(value || undefined);
@@ -983,6 +991,7 @@ export function WorkspaceGitReview({
                   onSelectLine={selectLine}
                   onAddComment={(path, side, line) => { selectLine(path, side, line, false); startComment(); }}
                   commentBody={commentBody}
+                  commentLabel={targetSession ? `Add to review → ${targetSession.title}` : "Add comment"}
                   onCommentBody={setCommentBody}
                   onSubmitComment={submitComment}
                   onCancelComment={() => { setSelection(null); setAnchor(null); }}
@@ -1012,12 +1021,11 @@ export function WorkspaceGitReview({
             )}
             {unresolvedCount > 0 && (
               <div className="flex items-end gap-[0.55rem] px-[0.7rem] pb-[0.55rem]" style={narrow ? { flexDirection: "column", alignItems: "stretch" } : undefined}>
-                <label className={`${TB_FIELD} flex-1`}><span>Send to agent session</span><Select ariaLabel="Send to agent session" className={`${TB_INPUT} min-w-0 flex-1`} value={selectedSessionId ?? ""} onChange={(value) => setSelectedSessionId(value || undefined)} options={[{ value: "", label: "Choose a session" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title}${session.agent ? ` · ${session.agent}` : ""}` }))]} /></label>
                 <label className={`${TB_FIELD} flex-[2]`}><span>Request</span><input className={`${TB_INPUT} min-w-0 flex-1`} value={reviewInstruction} onChange={(event) => setReviewInstruction(event.target.value)} /></label>
               </div>
             )}
             {batchPreview && (
-              <div className="mx-[0.7rem] mb-[0.7rem] rounded-ui bg-surface-0 p-[0.55rem]" data-testid="git-review-packet"><div className="flex flex-wrap items-center gap-[0.55rem]"><strong>Packet ready</strong><span className="text-[0.7rem] text-subtext-0">{batchPreview.comments.length} anchored note{batchPreview.comments.length === 1 ? "" : "s"}</span><code className="ml-auto text-[0.62rem] text-subtext-0">{batchPreview.packetId}</code></div><pre className="my-[0.45rem] max-h-[8rem] overflow-auto border p-[0.45rem] text-[0.68rem] text-fg whitespace-pre-wrap [font-family:var(--font-mono)]">{batchPreview.markdown}</pre><div className={COMMENT_ACTIONS}><button type="button" className={CA_BTN} onClick={sendBatch} disabled={batchSending} data-testid="git-review-send">{batchSending ? "Sending…" : "Send one packet"}</button><button type="button" className={CA_BTN} onClick={() => setBatchPreview(null)} disabled={batchSending}>Close preview</button></div></div>
+              <div className="mx-[0.7rem] mb-[0.7rem] rounded-ui bg-surface-0 p-[0.55rem]" data-testid="git-review-packet"><div className="flex flex-wrap items-center gap-[0.55rem]"><strong>Packet ready</strong><span className="text-[0.7rem] text-subtext-0">{batchPreview.comments.length} anchored note{batchPreview.comments.length === 1 ? "" : "s"}</span><code className="ml-auto text-[0.62rem] text-subtext-0">{batchPreview.packetId}</code></div><pre className="my-[0.45rem] max-h-[8rem] overflow-auto border p-[0.45rem] text-[0.68rem] text-fg whitespace-pre-wrap [font-family:var(--font-mono)]">{batchPreview.markdown}</pre><div className={COMMENT_ACTIONS}><button type="button" className={CA_BTN} onClick={sendBatch} disabled={batchSending} data-testid="git-review-send">{batchSending ? "Sending…" : targetSession ? `Send to ${targetSession.title}` : "Send one packet"}</button><button type="button" className={CA_BTN} onClick={() => setBatchPreview(null)} disabled={batchSending}>Close preview</button></div></div>
             )}
             {batchDelivery && batchDelivery.packetId === batchPreview?.packetId && <div className={BANNER_INFO} role="status" data-testid="git-review-delivery">
               {batchDelivery.delivery === "delivered" ? "Agent received the review packet."

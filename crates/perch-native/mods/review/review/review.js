@@ -525,6 +525,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
     const unresolvedCount = comments.filter((comment) => comment.status === "unresolved").length;
     const inlineCommentIds = useMemo(() => new Set(comments.filter((comment) => diffContainsCommentLine(comment, diff)).map((comment) => comment.id)), [comments, diff]);
     const unplacedComments = comments.filter((comment) => !inlineCommentIds.has(comment.id));
+    const targetSession = sessions.find((session) => session.id === selectedSessionId);
     const hasNotes = unresolvedCount > 0 || unplacedComments.length > 0 || Boolean(batchPreview) || batchSending;
     // A packet being prepared or sent always shows.
     const notesShown = hasNotes && (notesOpen || Boolean(batchPreview) || batchSending);
@@ -1003,6 +1004,28 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                             })
                         ]
                     }),
+                    sessions.length > 0 && (
+                    /* Where this review's comments go: the packet is sent to this agent session, only on an explicit Send. */
+                    _jsxs("label", {
+                        className: `${TB_FIELD} min-w-[7rem] shrink`,
+                        title: "Send review comments to this agent session",
+                        children: [
+                            _jsx("span", {
+                                className: "shrink-0",
+                                children: "To"
+                            }),
+                            _jsx(Select, {
+                                ariaLabel: "Send to agent session",
+                                testId: "git-review-session",
+                                className: `${TB_INPUT} min-w-0 max-w-[12rem]`,
+                                value: selectedSessionId ?? "",
+                                onChange: (value) => setSelectedSessionId(value || undefined),
+                                options: [
+                                    { value: "", label: "Choose a session" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title}${session.agent ? ` · ${session.agent}` : ""}` }))
+                                ]
+                            })
+                        ]
+                    })),
                     _jsx("span", {
                         className: cn(CONNECTION, statusState === "ready" ? CONNECTION_READY : statusState === "error" ? CONNECTION_ERROR : CONNECTION_IDLE),
                         role: "status",
@@ -1063,7 +1086,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                     }),
                                     _jsx("label", {
                                         className: TB_FIELD,
-                                        title: "Session",
+                                        title: "Whose last agent turn the comparison uses",
                                         children: _jsx(Select, {
                                             className: TB_INPUT,
                                             testId: "git-turn-session",
@@ -1239,6 +1262,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                             onSelectLine: selectLine,
                                             onAddComment: (path, side, line) => { selectLine(path, side, line, false); startComment(); },
                                             commentBody: commentBody,
+                                            commentLabel: targetSession ? `Add to review → ${targetSession.title}` : "Add comment",
                                             onCommentBody: setCommentBody,
                                             onSubmitComment: submitComment,
                                             onCancelComment: () => { setSelection(null); setAnchor(null); },
@@ -1310,37 +1334,20 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                                     }),
                                                     unplacedComments.map((comment) => renderCommentCard(comment, false))
                                                 ]
-                                            })), unresolvedCount > 0 && (_jsxs("div", {
+                                            })), unresolvedCount > 0 && (_jsx("div", {
                                                 className: "flex items-end gap-[0.55rem] px-[0.7rem] pb-[0.55rem]",
                                                 style: narrow ? { flexDirection: "column", alignItems: "stretch" } : undefined,
-                                                children: [
-                                                    _jsxs("label", {
-                                                        className: `${TB_FIELD} flex-1`,
-                                                        children: [
-                                                            _jsx("span", { children: "Send to agent session" }),
-                                                            _jsx(Select, {
-                                                                ariaLabel: "Send to agent session",
-                                                                className: `${TB_INPUT} min-w-0 flex-1`,
-                                                                value: selectedSessionId ?? "",
-                                                                onChange: (value) => setSelectedSessionId(value || undefined),
-                                                                options: [
-                                                                    { value: "", label: "Choose a session" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title}${session.agent ? ` · ${session.agent}` : ""}` }))
-                                                                ]
-                                                            })
-                                                        ]
-                                                    }),
-                                                    _jsxs("label", {
-                                                        className: `${TB_FIELD} flex-[2]`,
-                                                        children: [
-                                                            _jsx("span", { children: "Request" }),
-                                                            _jsx("input", {
-                                                                className: `${TB_INPUT} min-w-0 flex-1`,
-                                                                value: reviewInstruction,
-                                                                onChange: (event) => setReviewInstruction(event.target.value)
-                                                            })
-                                                        ]
-                                                    })
-                                                ]
+                                                children: _jsxs("label", {
+                                                    className: `${TB_FIELD} flex-[2]`,
+                                                    children: [
+                                                        _jsx("span", { children: "Request" }),
+                                                        _jsx("input", {
+                                                            className: `${TB_INPUT} min-w-0 flex-1`,
+                                                            value: reviewInstruction,
+                                                            onChange: (event) => setReviewInstruction(event.target.value)
+                                                        })
+                                                    ]
+                                                })
                                             })), batchPreview && (_jsxs("div", {
                                                 className: "mx-[0.7rem] mb-[0.7rem] rounded-ui bg-surface-0 p-[0.55rem]",
                                                 "data-testid": "git-review-packet",
@@ -1376,7 +1383,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                                                 onClick: sendBatch,
                                                                 disabled: batchSending,
                                                                 "data-testid": "git-review-send",
-                                                                children: batchSending ? "Sending…" : "Send one packet"
+                                                                children: batchSending ? "Sending…" : targetSession ? `Send to ${targetSession.title}` : "Send one packet"
                                                             }),
                                                             _jsx("button", {
                                                                 type: "button",

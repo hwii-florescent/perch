@@ -309,7 +309,10 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(body, "Rename this");
       body.dispatchEvent(new Event("input", { bubbles: true }));
     });
+    // The session chosen in the header is where the comment goes.
+    expect(document.querySelector('header [data-testid="git-review-session"]')).not.toBeNull();
     const add = [...composer!.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Add"));
+    expect(add?.textContent).toBe("Add to review → Target session");
     await act(async () => add?.click());
     expect(actionSet.createComment).toHaveBeenCalledWith({ path: "src/main.ts", side: "new", start: 1, end: 1, body: "Rename this" });
     expect(document.querySelector('[data-testid="git-comment-composer"]')).toBeNull();
@@ -391,6 +394,8 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
       await Promise.resolve();
     });
     expect(document.querySelector('[data-testid="git-review-packet"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="git-review-send"]')?.textContent).toBe("Send to Target session");
+    expect(actionSet.previewBatch).toHaveBeenCalledWith(expect.objectContaining({ targetSessionId: "session-target" }));
 
     await act(async () => {
       (document.querySelector('[data-testid="git-review-send"]') as HTMLButtonElement).click();
