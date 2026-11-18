@@ -8368,11 +8368,10 @@ const mm = ["accent", "panel-bg", "surface-0", "surface-1", "surface-dim", "over
   // A check box or radio button is WebKit's 12 px control with its margins (the reference's memory switch: 12 x 12,
   // 2 px from the label's edge, its row 18 px high).
   ['input[type="checkbox"], input[type="radio"]', { width: "12px", height: "12px", margin: "3px 2px", padding: "0", "border-width": "0", "box-sizing": "border-box", "border-radius": "3px" }],
-  // A ticked one is the app's accent with a mark, as the web's `accent-color: var(--accent)` draws it (the plain box
+  // A ticked one is the app's accent with a mark (`describe.mjs`), as the web's `accent-color: var(--accent)` draws it (the plain box
   // gave no sign it was ticked). A radio button is round.
   ['input[type="checkbox"]:checked, input[type="radio"]:checked', { "background-color": "var(--accent)", color: "var(--panel-bg)" }],
   ['input[type="radio"]', { "border-radius": "6px" }],
-  ['input[type="checkbox"]:checked::before, input[type="radio"]:checked::before', { content: '"✓"', display: "block", width: "12px", "text-align": "center", "font-size": "10px", "font-weight": "700", "line-height": "12px" }],
   ["svg", { overflow: "hidden" }],
   ["[hidden]", { display: "none" }]
 ], df = {
@@ -9893,7 +9892,7 @@ function mb(n, a, r, s, o) {
       y.h = O * Nl(k, r.measure) + N(k["padding-top"]) + N(k["padding-bottom"]) + E("top") + E("bottom");
     }
     const { before: h, after: _ } = cb(n, u, v, r);
-    return (h || _) && (b.children = [h, _].filter(Boolean)), b;
+    return h || _ ? b.children = [h, _].filter(Boolean) : b.checked && /^(checkbox|radio)$/.test(b.input_type) && (b.children = [{ kind: "div", style: { w: 12, text_size: 10, font_weight: 700, text_align: "center", line_height: "12px" }, tokens: {}, children: [{ kind: "text", text: "✓" }] }]), b;
   }
   if (S === "img") {
     b.kind = "image", b.src = n.props.src ?? null;

@@ -821,6 +821,9 @@ function describeNode(element, entry, ctx, anc, flags) {
     // A check box drawn by the page (`appearance: none`) draws its marks with its pseudo-elements (a switch's knob).
     const { before, after } = pseudoBoxes(element, computed, childText, ctx);
     if (before || after) node.children = [before, after].filter(Boolean);
+    // A ticked check box or radio button the page left plain shows a mark in its accent fill (`css.mjs`), put here as
+    // a box of its own: a `::before` rule for it would be matched for every box, ticked or not.
+    else if (node.checked && /^(checkbox|radio)$/.test(node.input_type)) node.children = [{ kind: "div", style: { w: 12, text_size: 10, font_weight: 700, text_align: "center", line_height: "12px" }, tokens: {}, children: [{ kind: "text", text: "\u2713" }] }];
     return node;
   }
   if (tag === "img") {
