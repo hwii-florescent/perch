@@ -7,7 +7,8 @@
  *   unsaved draft refuses its last close, and the tab comes back;
  * - the strip order, the split sets and the resource order are saved as this
  *   viewer's presentation of the workspace (`viewer.presentation.set`);
- * - a viewer gets its saved tabs, order, splits and selection back (see below).
+ * - a viewer gets its saved tabs, order, splits and selection back (see below);
+ *   where the core shares the workspace's tabs (`sharedTabs.ts`) only the selection.
  *
  * A viewer is one window (`viewer.ts`), and its local tab state is keyed to it too. On the
  * first sync of a page load its saved presentation is restored over whatever the local
@@ -27,6 +28,7 @@ import { useSplitSets, type SplitSet } from "./splitSets";
 import { saveTabOrder, storedTabOrder, TAB_ORDER_EVENT } from "./tabOrder";
 import { tabOrderKey, workspaceTabs } from "./workspaceTabs";
 import { registerSurfaceRequest, retireSurfaceRequest } from "./requestOwnership";
+import { sharesTabs } from "./sharedTabs";
 
 const LAYOUT_VERSION = 1;
 const MIRROR_DELAY_MS = 400;
@@ -247,6 +249,8 @@ async function hydrate(workspaceId: string, presentation: ViewerPresentation): P
     resourceIds.set(fileTabKey(tab), id);
     return [tab];
   });
+  // The core shares this workspace's tabs (`sharedTabs.ts`): only the selection is this viewer's.
+  if (sharesTabs(workspaceId)) return true;
   const have = new Set(useFileTabs.getState().tabs.map(fileTabKey));
   const missing = tabs.filter((tab) => !have.has(fileTabKey(tab)));
   if (missing.length) useFileTabs.setState((state) => ({ tabs: [...state.tabs, ...missing] }));

@@ -30,6 +30,7 @@ import { MAC_DESKTOP, StockWindow, useWindowChrome, useWindowWidths } from "./co
 import { isRelayMode } from "./relay/transport";
 import { setPhoneMods } from "./phoneMods";
 import "./surfaceSync";
+import "./sharedTabs";
 import "./workspaceCleanup";
 // `@perch/sdk`, before anything renders a package (stock screens, clones, other mods); see main.tsx.
 import "./sdk";
