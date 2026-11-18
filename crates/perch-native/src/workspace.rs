@@ -239,6 +239,9 @@ pub struct Workspace {
     /// The session whose terminal is over the window for a moment (`terminal.peek`), with no tab
     /// of its own unless it is kept.
     peek: Option<String>,
+    /// The peeked tab's terminal was attached before the peek (a warm tab out of sight), so
+    /// putting the peek away keeps it.
+    peek_was_warm: bool,
     /// The leader chord was pressed; dropped when its time is up.
     leader: Option<Task<()>>,
     /// Resize mode is armed (the leader's `r`); each of its keys arms it afresh, and it is
@@ -383,6 +386,7 @@ impl Workspace {
             tick: 0,
             viewport_height: 0.0,
             peek: None,
+            peek_was_warm: false,
             leader: None,
             resizing: None,
             history: History::default(),
@@ -4384,6 +4388,7 @@ impl Workspace {
                 .ok_or("That session is gone.")?,
         };
         self.park_peek(cx);
+        self.peek_was_warm = self.panes.get(id).is_some_and(|pane| pane.view.is_some());
         let view = match self.panes.get(id).and_then(|pane| pane.view.clone()) {
             Some(view) => Some(view),
             None => self.attach(&open, cx),
@@ -4411,10 +4416,11 @@ impl Workspace {
         let Some(id) = self.peek.take() else {
             return false;
         };
-        // A tab on screen keeps its terminal; one out of sight lets go until it is shown.
+        // A tab on screen keeps its terminal, as does one out of sight that was warm before the
+        // peek; any other lets go until it is shown.
         if !self.every_tabs().any(|tabs| tabs.contains(&id)) {
             self.panes.remove(&id);
-        } else if !self.tabs.shown().contains(&id) {
+        } else if !self.tabs.shown().contains(&id) && !self.peek_was_warm {
             if let Some(pane) = self.panes.get_mut(&id) {
                 pane.view = None;
                 pane.retry = None;
