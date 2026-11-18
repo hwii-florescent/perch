@@ -1147,12 +1147,8 @@ impl Frame {
             capitalized(status_label(&f.status)),
             if f.is_binary { " · binary" } else { "" }
         );
-        let folded = self.props.collapsed.iter().any(|p| *p == path);
-        let viewed = self
-            .props
-            .viewed
-            .as_ref()
-            .map(|v| v.iter().any(|p| *p == path));
+        let folded = self.props.collapsed.contains(&path);
+        let viewed = self.props.viewed.as_ref().map(|v| v.contains(&path));
         let view = self.view.clone();
         let viewed_box = viewed.map(|on| {
             let (view, path) = (view.clone(), path.clone());
