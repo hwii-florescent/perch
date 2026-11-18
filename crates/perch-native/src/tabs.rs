@@ -4,13 +4,15 @@
 //! strip lists the tabs in order, and a split set shows several tabs side by side: a row or column
 //! of panes, nested to any depth, at most [`MAX_SPLIT`] panes. A pane is a tab, so closing a pane
 //! closes its tab. A session shows in one place at a time because a tab is named by its session.
-//! Like the web's, this is per viewer: it is never sent to the core, so no other client reads it
-//! and the layout the web stores for a session (`session.layout.set`) is never written.
+//! The strip and its splits are shared through the core (`workspace.tabs`, see [`Shared`] and
+//! [`merge`]); which tab has the keyboard, zoom and previews stay on this device. The layout the web
+//! stores for a session (`session.layout.set`) is never written.
 //!
 //! This holds ids and shapes only. The window keeps what each id means (its terminal) and draws
 //! [`Tabs::visible`].
 
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 /// Most panes a split set holds.
 pub const MAX_SPLIT: usize = 4;
@@ -228,6 +230,219 @@ pub struct Rect {
     pub h: f32,
 }
 
+impl Node {
+    /// As the web's `SplitNode`: a tab id, or `{dir, kids, sizes}`.
+    fn to_web(&self) -> Value {
+        match self {
+            Node::Pane(id) => json!(id),
+            Node::Split { dir, kids, sizes } => json!({
+                "dir": if *dir == Dir::Row { "row" } else { "col" },
+                "kids": kids.iter().map(Node::to_web).collect::<Vec<_>>(),
+                "sizes": sizes,
+            }),
+        }
+    }
+
+    fn from_web(value: &Value) -> Option<Node> {
+        if let Some(id) = value.as_str() {
+            return Some(Node::Pane(id.into()));
+        }
+        let kids: Option<Vec<Node>> = value["kids"]
+            .as_array()?
+            .iter()
+            .map(Node::from_web)
+            .collect();
+        let sizes: Option<Vec<f32>> = value["sizes"]
+            .as_array()?
+            .iter()
+            .map(|s| s.as_f64().map(|s| s as f32))
+            .collect();
+        Some(Node::Split {
+            dir: if value["dir"] == "col" {
+                Dir::Col
+            } else {
+                Dir::Row
+            },
+            kids: kids?,
+            sizes: sizes?,
+        })
+    }
+
+    /// As the web's `SplitSet`: flat (`ids`, `sizes`, `dir`) for one row or column of panes, else
+    /// with the nested `tree`.
+    pub fn to_set(&self) -> Value {
+        let ids = self.leaves();
+        match self {
+            Node::Split { dir, kids, sizes } if kids.iter().all(|k| matches!(k, Node::Pane(_))) => {
+                json!({ "ids": ids, "sizes": sizes, "dir": if *dir == Dir::Row { "row" } else { "col" } })
+            }
+            _ => json!({ "ids": ids, "sizes": equal(ids.len()), "tree": self.to_web() }),
+        }
+    }
+
+    /// A web `SplitSet` as a split, as the web's `treeOf` reads it.
+    pub fn from_set(set: &Value) -> Option<Node> {
+        if !set["tree"].is_null() {
+            return Node::from_web(&set["tree"]);
+        }
+        let ids: Vec<Node> = set["ids"]
+            .as_array()?
+            .iter()
+            .map(|id| id.as_str().map(|id| Node::Pane(id.into())))
+            .collect::<Option<_>>()?;
+        let sizes: Vec<f32> = set["sizes"]
+            .as_array()
+            .map(|s| {
+                s.iter()
+                    .filter_map(Value::as_f64)
+                    .map(|s| s as f32)
+                    .collect()
+            })
+            .filter(|s: &Vec<f32>| s.len() == ids.len())
+            .unwrap_or_else(|| equal(ids.len()));
+        Some(Node::Split {
+            dir: if set["dir"] == "col" {
+                Dir::Col
+            } else {
+                Dir::Row
+            },
+            kids: ids,
+            sizes,
+        })
+    }
+}
+
+/// A strip as the core shares it between devices (`workspace.tabs`): tab ids in order and split
+/// sets in the web's `SplitSet` shape.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Shared {
+    pub strip: Vec<String>,
+    pub sets: Vec<Value>,
+}
+
+/// Whether tab `id` of workspace `workspace` is shown on other devices, as the core decides
+/// (`shared_tabs::shareable`): a session, or a file, review or page of the workspace itself.
+pub fn shareable(workspace: &str, id: &str) -> bool {
+    perch_core::shared_tabs::shareable(workspace, id)
+}
+
+/// `next` with `id` after the tab it follows in `from` (else first).
+fn insert_after(next: &mut Vec<String>, from: &[String], id: &str) {
+    let at = from.iter().position(|f| f == id).unwrap_or(0);
+    let before = from[..at].iter().rev().find(|f| next.contains(f));
+    let to = before.map_or(0, |b| next.iter().position(|n| n == b).unwrap_or(0) + 1);
+    next.insert(to, id.to_string());
+}
+
+/// `state` as the core keeps it: shared ids only, sets made only of them.
+pub fn project(state: &Shared, keep: impl Fn(&str) -> bool) -> Shared {
+    let strip: Vec<String> = state.strip.iter().filter(|id| keep(id)).cloned().collect();
+    let sets = state
+        .sets
+        .iter()
+        .filter(|set| set_ids(set).iter().all(|id| strip.contains(id)))
+        .cloned()
+        .collect();
+    Shared { strip, sets }
+}
+
+fn set_ids(set: &Value) -> Vec<String> {
+    set["ids"]
+        .as_array()
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|id| id.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// What this device writes: its shared tabs, and the sessions of `base` it does not show where
+/// they were (a session's tab comes and goes with the session, never with a device's view).
+/// The web's `outgoing`.
+pub fn outgoing(local: &Shared, base: &Shared, keep: impl Fn(&str) -> bool) -> Shared {
+    let mut mine = project(local, keep);
+    for id in &base.strip {
+        if Tabs::is_session(id) && !mine.strip.contains(id) {
+            insert_after(&mut mine.strip, &base.strip, id);
+        }
+    }
+    mine
+}
+
+/// The web's `mergeTabs`: this device's tabs (`local`) and the core's (`remote`), both changed
+/// since `base`. Removals on either side stay removed (a session is never removed here: one
+/// missing is one this device does not show); additions are kept after the tab they followed.
+/// The order is the core's unless this device reordered what it shares with `base`. The sets are
+/// this device's if it changed its shared ones, else the core's plus its own of unshared tabs.
+pub fn merge(
+    base: &Shared,
+    local: &Shared,
+    remote: &Shared,
+    keep: impl Fn(&str) -> bool,
+) -> Shared {
+    let gone = |side: &Shared, sessions: bool| -> Vec<String> {
+        base.strip
+            .iter()
+            .filter(|id| (sessions || !Tabs::is_session(id)) && !side.strip.contains(id))
+            .cloned()
+            .collect()
+    };
+    let (local_removed, remote_removed) = (gone(local, false), gone(remote, true));
+    let kept = |id: &String| !local_removed.contains(id) && !remote_removed.contains(id);
+    let in_both = |a: &Shared, b: &Shared| -> Vec<String> {
+        a.strip
+            .iter()
+            .filter(|id| b.strip.contains(id))
+            .cloned()
+            .collect()
+    };
+    let reordered = in_both(local, base) != in_both(base, local);
+    let (primary, secondary) = if reordered {
+        (local, remote)
+    } else {
+        (remote, local)
+    };
+    let mut strip: Vec<String> = primary
+        .strip
+        .iter()
+        .filter(|id| kept(id))
+        .cloned()
+        .collect();
+    for id in &secondary.strip {
+        if !base.strip.contains(id) && !strip.contains(id) && kept(id) {
+            insert_after(&mut strip, &secondary.strip, id);
+        }
+    }
+    let own = project(local, &keep).sets;
+    let candidates: Vec<Value> = if own != base.sets {
+        local.sets.clone()
+    } else {
+        remote
+            .sets
+            .iter()
+            .chain(local.sets.iter().filter(|set| !own.contains(set)))
+            .cloned()
+            .collect()
+    };
+    let mut placed: Vec<String> = Vec::new();
+    let sets = candidates
+        .into_iter()
+        .filter(|set| {
+            let ids = set_ids(set);
+            let fits = ids.len() >= 2
+                && ids
+                    .iter()
+                    .all(|id| strip.contains(id) && !placed.contains(id));
+            if fits {
+                placed.extend(ids);
+            }
+            fits
+        })
+        .collect();
+    Shared { strip, sets }
+}
+
 /// Each pane's place in `node` laid out in the unit square.
 pub fn layout(node: &Node, rect: Rect, out: &mut Vec<(String, Rect)>) {
     match node {
@@ -272,6 +487,30 @@ pub struct Tabs {
 }
 
 impl Tabs {
+    /// The strip and its splits as the core shares them.
+    pub fn shared(&self) -> Shared {
+        Shared {
+            strip: self.strip.clone(),
+            sets: self.sets.iter().map(Node::to_set).collect(),
+        }
+    }
+
+    /// Show `next` (merged with the core's): a tab it leaves out closes as a close here would (the
+    /// keyboard moves on), a new one joins, and the order and splits become `next`'s. The keyboard,
+    /// zoom and previews stay this device's.
+    pub fn adopt(&mut self, next: &Shared) {
+        for id in self.strip.clone() {
+            if !next.strip.contains(&id) {
+                self.close(&id);
+            }
+        }
+        self.strip.clone_from(&next.strip);
+        self.sets = next.sets.iter().filter_map(Node::from_set).collect();
+        let zoomed = self.zoomed;
+        *self = std::mem::take(self).restored();
+        self.zoomed = zoomed;
+    }
+
     /// The tab ids in order.
     pub fn strip(&self) -> &[String] {
         &self.strip
@@ -1439,5 +1678,94 @@ mod tests {
         assert_eq!(t.active(), None);
         assert_eq!(t.previews(), ["c"]);
         assert!(t.in_split("a") && t.in_split("b") && !t.in_split("c"));
+    }
+
+    fn shared(strip: &[&str], sets: Vec<Value>) -> Shared {
+        Shared {
+            strip: ids(strip),
+            sets,
+        }
+    }
+
+    #[test]
+    fn merging_with_the_core_keeps_both_sides_changes_as_the_web_does() {
+        let all = |_: &str| true;
+        // Here a review was opened; the other device closed x and opened y.
+        let set = json!({"ids": ["a", "w\nx"], "sizes": [0.5, 0.5], "dir": "row"});
+        let base = shared(&["a", "w\nx", "b"], vec![set.clone()]);
+        let local = shared(&["a", "w\nx", "b", "w\n\0review"], vec![set]);
+        let remote = shared(&["a", "b", "w\ny"], vec![]);
+        assert_eq!(
+            merge(&base, &local, &remote, all),
+            shared(&["a", "b", "w\n\0review", "w\ny"], vec![])
+        );
+        // This device moved a tab: its order, with the other device's addition after its neighbour.
+        let base = shared(&["a", "b", "w\nx"], vec![]);
+        let local = shared(&["w\nx", "a", "b"], vec![]);
+        let remote = shared(&["a", "w\ny", "b", "w\nx"], vec![]);
+        assert_eq!(
+            merge(&base, &local, &remote, all).strip,
+            ids(&["w\nx", "a", "w\ny", "b"])
+        );
+        // A session this device does not show is neither dropped nor written away.
+        let base = shared(&["a", "hidden", "w\nx"], vec![]);
+        let local = shared(&["a", "w\nx", "w\ny"], vec![]);
+        assert_eq!(
+            merge(&base, &local, &base, all).strip,
+            ids(&["a", "hidden", "w\nx", "w\ny"])
+        );
+        assert_eq!(
+            outgoing(&local, &base, all).strip,
+            ids(&["a", "hidden", "w\nx", "w\ny"])
+        );
+        // Before the first state, the core's tabs win and a tab of another scope keeps its place.
+        let keep = |id: &str| shareable("w", id);
+        let local = shared(&["a", "term:a\nz", "w\nx"], vec![]);
+        let remote = shared(&["a", "w\ny"], vec![]);
+        assert_eq!(
+            merge(&project(&local, keep), &local, &remote, keep).strip,
+            ids(&["a", "term:a\nz", "w\ny"])
+        );
+    }
+
+    #[test]
+    fn a_split_reads_as_the_web_s_split_set_and_back() {
+        let flat = split(Dir::Col, &["a", "b"]);
+        assert_eq!(
+            flat.to_set(),
+            json!({"ids": ["a", "b"], "sizes": [0.5, 0.5], "dir": "col"})
+        );
+        let nested = Node::Split {
+            dir: Dir::Row,
+            kids: vec![pane("a"), split(Dir::Col, &["b", "c"])],
+            sizes: vec![0.5, 0.5],
+        };
+        let set = nested.to_set();
+        assert_eq!(set["ids"], json!(["a", "b", "c"]));
+        assert_eq!(set["tree"]["kids"][1]["dir"], "col");
+        for node in [flat, nested] {
+            assert_eq!(Node::from_set(&node.to_set()), Some(node));
+        }
+        // The web's flat set without sizes for each member gets equal ones.
+        assert_eq!(
+            Node::from_set(&json!({"ids": ["a", "b"], "sizes": []})),
+            Some(split(Dir::Row, &["a", "b"]))
+        );
+    }
+
+    #[test]
+    fn adopting_the_core_s_tabs_keeps_the_keyboard_unless_its_tab_went() {
+        let mut t = tabs(&["a", "w\nx", "w\ny"]);
+        t.show("w\ny");
+        t.adopt(&shared(
+            &["w\ny", "a", "w\nz"],
+            vec![json!({"ids": ["a", "w\nz"], "sizes": [0.5, 0.5]})],
+        ));
+        assert_eq!(t.strip(), ids(&["w\ny", "a", "w\nz"]));
+        assert_eq!(t.active(), Some("w\ny"));
+        assert!(t.in_split("w\nz"));
+        t.adopt(&shared(&["a"], vec![]));
+        assert_eq!(t.active(), Some("a"));
+        assert!(!t.in_split("a"));
     }
 }

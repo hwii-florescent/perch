@@ -17,11 +17,11 @@ pub mod navigation;
 
 use crate::settings::TerminalSettings;
 use perch_core::agent_fleet::TERMINAL_PROVIDER;
-use perch_core::shared_tabs::SharedTabs;
 use perch_core::protocol::{
     AttentionEvent, ProjectSummary, ServerMessage, SessionStatus, SessionSummary, SshHostEntry,
     WorkspaceState, WorkspaceSummary, WorktreeJob,
 };
+use perch_core::shared_tabs::SharedTabs;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;

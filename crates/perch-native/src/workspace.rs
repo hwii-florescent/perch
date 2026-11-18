@@ -8,12 +8,12 @@
 //! out, so it never asks the core for a size, and it keeps the size it last had and keeps
 //! following its shell, ready for when its tab is shown again.
 //!
-//! The layout is this window's alone, as the web's is per viewer: it is not sent to the core.
 //! Each workspace has its own strip. Its sessions come from the core's list, as the web derives
 //! them (`workspaceTabs`): every session of the workspace has a tab, in the core's order, and a
 //! terminal is attached only when its tab is shown. Its other tabs (files, review, pages), their
-//! places among the sessions, its splits and its active tab are kept on this device in the
-//! window's state file and come back after a relaunch. The drawer's Files and Git follow the
+//! places among the sessions and its splits are shared with every device through the core
+//! (`workspace.tabs`, merged by `tabs::merge`); which tab is active stays this window's. The
+//! window's state file keeps them all as a cache, so they come back after a relaunch and offline. The drawer's Files and Git follow the
 //! focused terminal's folder once its shell leaves the workspace's (`terminal_scope_id`).
 //! Splitting starts a new terminal session on this computer and shows it beside the focused one.
 //! Closing a tab ends its session, as the web does (`closeGuard.ts`): the core is asked to delete
@@ -230,6 +230,12 @@ pub struct Workspace {
     /// Sessions the core said ended whose tab went: not opened again while the core's list still
     /// holds them (it drops them a moment later, or keeps one whose shell exited).
     ended: HashSet<String>,
+    /// Per workspace, the core's shared tabs as last merged into its strip (`tabs::merge`).
+    shared_base: HashMap<String, perch_core::shared_tabs::SharedTabs>,
+    /// Per workspace, the last shared tabs written, so a repeat waits for the core's answer.
+    shared_sent: HashMap<String, String>,
+    /// Counts the shared-tab writes, for their request ids.
+    shared_writes: u64,
     /// The zoom every terminal in the window is at.
     zoom: Zoom,
     /// Counts the changes of what is on screen, for [`Pane::seen`].
@@ -382,6 +388,9 @@ impl Workspace {
             pending_split: None,
             put_away: HashSet::new(),
             ended: HashSet::new(),
+            shared_base: HashMap::new(),
+            shared_sent: HashMap::new(),
+            shared_writes: 0,
             zoom: Zoom::default(),
             tick: 0,
             viewport_height: 0.0,
@@ -2359,6 +2368,7 @@ impl Workspace {
     /// list has been read. A session gets a parked pane, which attaches only when its tab is shown.
     fn sync_strips(&mut self, cx: &mut Context<Self>) {
         let store = self.sidebar.read(cx).model().store.clone();
+        self.take_shared_tabs(&store);
         let known = store.connected && store.listed;
         if known {
             let listed = |id: &String| store.sessions.iter().any(|s| s.id == *id);
@@ -4813,6 +4823,97 @@ impl Workspace {
     }
 }
 
+/// Whether the core shares workspace `key`'s tabs: a workspace of this computer, on a core that
+/// keeps them (`workspace.tabs.v1`).
+fn shares_tabs(store: &navigation::Store, key: &str) -> bool {
+    store.connected
+        && store
+            .local_capabilities
+            .iter()
+            .any(|c| c == "workspace.tabs.v1")
+        && store
+            .workspaces
+            .iter()
+            .any(|w| w.id == key && w.host_id == LOCAL)
+}
+
+fn as_shared(tabs: &perch_core::shared_tabs::SharedTabs) -> crate::tabs::Shared {
+    crate::tabs::Shared {
+        strip: tabs.strip.clone(),
+        sets: tabs.sets.clone(),
+    }
+}
+
+impl Workspace {
+    /// Each workspace's tabs as the core shares them (`workspace.tabs`), merged into its strip
+    /// whenever the core has a newer state than the one last merged. Before the first, the
+    /// strip's own shared tabs stand for it, so the core's win. Sessions closed here without
+    /// ending stay out.
+    fn take_shared_tabs(&mut self, store: &navigation::Store) {
+        for (key, remote) in &store.shared_tabs {
+            let seen = self.shared_base.get(key);
+            if seen.is_some_and(|b| b.revision == remote.revision) || !shares_tabs(store, key) {
+                continue;
+            }
+            let keep = |id: &str| crate::tabs::shareable(key, id);
+            let tabs = if self.tabs_of == *key {
+                &mut self.tabs
+            } else {
+                &mut self.parked.entry(key.clone()).or_default().0
+            };
+            let local = tabs.shared();
+            let base = seen.map_or_else(|| crate::tabs::project(&local, keep), as_shared);
+            let mut next = crate::tabs::merge(&base, &local, &as_shared(remote), keep);
+            let (put_away, ended) = (&self.put_away, &self.ended);
+            next.strip.retain(|id| {
+                !Tabs::is_session(id) || !(put_away.contains(id) || ended.contains(id))
+            });
+            tabs.adopt(&next);
+            self.shared_base.insert(key.clone(), remote.clone());
+            self.shared_sent.remove(key);
+        }
+    }
+
+    /// Writes each strip's shared tabs that differ from the core's, against the revision last
+    /// merged (0 for a workspace the core keeps none of yet: how this device's strips get there).
+    fn share_tabs(&mut self, cx: &App) {
+        let store = &self.sidebar.read(cx).model().store;
+        let strips = std::iter::once((&self.tabs_of, &self.tabs))
+            .chain(self.parked.iter().map(|(key, (tabs, _))| (key, tabs)));
+        let mut frames = Vec::new();
+        for (key, tabs) in strips {
+            if key.is_empty() || !shares_tabs(store, key) {
+                continue;
+            }
+            let keep = |id: &str| crate::tabs::shareable(key, id);
+            let base = self.shared_base.get(key);
+            let mine = match base {
+                Some(base) => crate::tabs::outgoing(&tabs.shared(), &as_shared(base), keep),
+                None => crate::tabs::project(&tabs.shared(), keep),
+            };
+            if base.is_some_and(|b| b.strip == mine.strip && b.sets == mine.sets)
+                || (base.is_none()
+                    && (mine.strip.is_empty() || store.shared_tabs.contains_key(key)))
+            {
+                continue;
+            }
+            let revision = base.map_or(0, |b| b.revision);
+            let frame = json!({ "type": "workspace.tabs.set", "workspaceId": key,
+                "baseRevision": revision, "strip": mine.strip, "sets": mine.sets });
+            let body = frame.to_string();
+            if self.shared_sent.get(key) != Some(&body) {
+                frames.push((key.clone(), body, frame));
+            }
+        }
+        for (key, body, mut frame) in frames {
+            self.shared_sent.insert(key, body);
+            self.shared_writes += 1;
+            frame["requestId"] = json!(format!("tabs-{}", self.shared_writes));
+            self.sidebar.read(cx).send(Command::Send(frame));
+        }
+    }
+}
+
 pub fn file_tab(id: &str) -> Option<(&str, &str)> {
     id.split_once('\n')
         .filter(|_| !is_browser_tab(id) && review_tab(id).is_none())
@@ -4896,6 +4997,7 @@ impl gpui::Render for Workspace {
         // ponytail: serialises every strip on each frame (a few hundred bytes each) to see whether
         // it changed; a dirty flag set by each strip change would skip it.
         self.keep_tabs();
+        self.share_tabs(cx);
         self.viewport_height = f32::from(window.viewport_size().height);
         if window.focused(cx).is_none() {
             self.root_focus.focus(window, cx);
