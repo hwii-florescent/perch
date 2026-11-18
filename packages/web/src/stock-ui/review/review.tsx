@@ -755,7 +755,7 @@ export function WorkspaceGitReview({
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]" style={narrow ? { maxHeight: "16rem", flex: "none" } : undefined} role="tree" aria-label="Changed paths">
+        <div className="flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]" style={narrow ? { height: treeShown.length ? `${Math.min(treeShown.length * 1.5, 16)}rem` : undefined, flex: "none" } : undefined} role="tree" aria-label="Changed paths">
           {treeShown.map((row) => row.kind === "dir" ? (
             <button
               type="button"

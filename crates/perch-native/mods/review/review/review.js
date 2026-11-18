@@ -767,7 +767,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                     })),
                     _jsxs("div", {
                         className: "flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]",
-                        style: narrow ? { maxHeight: "16rem", flex: "none" } : undefined,
+                        style: narrow ? { height: treeShown.length ? `${Math.min(treeShown.length * 1.5, 16)}rem` : undefined, flex: "none" } : undefined,
                         role: "tree",
                         "aria-label": "Changed paths",
                         children: [
