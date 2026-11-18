@@ -41,7 +41,10 @@ re-renders; their script stays under 4 ms a move with 20 tabs (`tests/tab_order_
   review and browser tabs of that workspace. Parity source: the web's `workspaceTabs.ts`,
   `store/selectors.ts` `activeWorkspaceSessions`, `tabOrder.ts`, `splitSets.ts`. Opening any session
   shows its workspace's strip, with that session active.
-- **Per viewer:** tabs, splits, drawer tab and widths are this window's, never sent to the core. The
+- **Shared tabs:** a workspace's strip and splits are the core's (`workspace.tabs`): each change is
+  written back, and a change from another device is merged in (`tabs::merge`, as the web's
+  `sharedTabs.ts`). Sessions closed here without ending stay out of this window's strip only.
+- **Per viewer:** the active tab, zoom, previews, drawer tab and widths are this window's. The
   order the sidebar shows (`workspace.order`) is the core's and is changed only by a person's reorder
   (`workspace.order.set`, the whole list from the latest core order).
 - **Closing:** closing a session tab ends the session (as the web's `closeGuard.ts`); a tab only
@@ -58,7 +61,7 @@ file gives defaults.
 
 | File | Holds |
 | --- | --- |
-| `.window.json` | drawer tab, column widths, per-workspace strips: non-session tabs and their order, split sets, active tab, tabs closed without ending |
+| `.window.json` | drawer tab, column widths, per-workspace strips (a cache of the core's shared tabs, for a relaunch and offline): non-session tabs and their order, split sets, active tab, tabs closed without ending |
 | `.browser.json` | browser pages (URL, title, icon) and the drawer's page |
 | `.sidebar.json` | sidebar view settings: organize, sort by attention (off by default), show terminals, folded rows |
 | `keys.json` | chosen keys (`keymap.rs`) |

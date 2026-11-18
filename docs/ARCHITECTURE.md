@@ -33,9 +33,9 @@ shells, real agent CLIs
 - **Native client** (`crates/perch-native`, GPUI) is another view of the same core: it finds a
   running headless core through the `core.json` it writes and speaks the same protocol. Each
   terminal is its own libghostty-vt fed the same bytes as xterm.js (output and the daemon's repaint);
-  there is no cell stream. Tabs, splits and their layout are local to the window: a workspace's
-  strip is its sessions from the core plus file, review and browser tabs kept on this device
-  ([NATIVE](NATIVE.md)). It attaches a session by its saved launch provider, never the one seen
+  there is no cell stream. A workspace's strip is its sessions from the core plus its file, review
+  and browser tabs; the strip and its splits are the core's shared tabs (below), the active tab is
+  the window's ([NATIVE](NATIVE.md)). It attaches a session by its saved launch provider, never the one seen
   running, and never attaches one whose launch provider is unknown. A blank session lists the launch
   choices in its tab, as the web's `startCli` does. Closing a tab ends its session as the web does
   (`session.delete`, the tab going only when the core confirms; `warnCloseAgent` asks first).
@@ -244,7 +244,17 @@ Remote file/diff surfaces use the owning core; layouts stay opaque and are
 stored there, not imported into the hub's local DB.
 Browser tabs exist separately; do not imply they are canonical surface kinds.
 
-Viewer focus/layout are independent across windows. Files/reviews have no
+`shared_tabs.rs` (`workspace.tabs`, capability `workspace.tabs.v1`, local workspaces
+only) keeps one strip per workspace: tab ids (session ids and the web's `fileTabKey`s)
+in order and split sets, written by the web (`sharedTabs.ts`) and native alike and
+broadcast to every connection. A write carries the revision it was made against; a
+stale one is refused to its writer alone, who merges (same rule in `sharedTabs.ts`
+and native `tabs::merge`) and writes again. Session ids only mark places: a client
+never removes one, the core drops ended ones. Mod tabs and terminal-scoped tabs stay
+on their device. A workspace with no row is seeded once from its newest per-viewer
+presentation, which is left as it was.
+
+Viewer focus (the active tab) is independent across windows and devices. Files/reviews have no
 session parent in the resource model, but the current WS client still resumes
 or creates a session on connect. Session-free browsing remains unfinished.
 

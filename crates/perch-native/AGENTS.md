@@ -42,8 +42,8 @@ inside `mods/`.
 - The core owns every fact (sessions, their order, state, cwd). Unknown is shown as unknown,
   never as exited; never relaunch or fall back to local execution on uncertainty
   (root `AGENTS.md`).
-- Per-viewer layout (tabs, splits, drawer tab, widths) is this window's, saved on this device;
-  it is never written to the core.
+- A workspace's tabs and splits are the core's shared tabs (`workspace.tabs`), merged with
+  `tabs::merge`; the active tab, drawer tab and widths are this window's, saved on this device.
 - Ordering that the core stores (`workspace.order.set`) is sent as the full list the person
   produced, from the latest core order, never from a stale local copy.
 - Mods are trusted code but get no more than a web mod (`ModHost::policy_for`).
